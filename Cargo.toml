@@ -1,0 +1,34 @@
+[package]
+name = "sim-engine"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Deterministic Fixed-Point Math
+fixed = { version = "1.28", features = ["serde"] }
+
+# Lightweight Archetypal ECS
+hecs = "0.10"
+
+# Graphics, Windowing & Presentation
+wgpu = "0.20"
+winit = { version = "0.29", features = ["rwh_05"] }
+bytemuck = { version = "1.16", features = ["derive"] }
+pollster = "0.3"
+
+# Render-Side Interpolation Math (NOT used in simulation)
+glam = "0.27"
+
+# Deterministic Hashing
+twox-hash = "1.6"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "sim_benchmark"
+harness = false
