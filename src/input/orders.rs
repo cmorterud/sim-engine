@@ -72,6 +72,14 @@ pub fn right_click_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
     let parts = sort_selection(click.selected, click.units, click.blueprints);
     let mut commands = Vec::new();
 
+    // Attack-move always means attack-move, even with the cursor on a unit.
+    if click.attack_move {
+        if let (Some(ground), false) = (click.ground, parts.mobile.is_empty()) {
+            commands.push(order_command(&parts.mobile, ground, true));
+        }
+        return commands;
+    }
+
     let enemy = nearest_unit(click.units, click.camera, click.team.enemy(), click.cursor);
     if let (Some(target), false) = (enemy, parts.armed.is_empty()) {
         commands.push(SimCommand::Attack { units: parts.armed.clone(), target });
@@ -223,6 +231,51 @@ mod tests {
             ground: Some(world),
             attack_move: false,
         })
+    }
+
+    #[test]
+    fn attack_move_stays_an_attack_move_on_top_of_a_unit() {
+        let db = db();
+        let units = [
+            view(1, Team::Blue, db.id("t1_light_bot"), &db, 2_000.0, 1_950.0),
+            view(2, Team::Red, db.id("t1_light_bot"), &db, 2_000.0, 2_050.0),
+        ];
+        let camera = camera();
+        let world = [2_000.0, 2_050.0];
+        let cursor = camera.world_to_screen([world[0], world[1], 8.0]).unwrap();
+        let orders = right_click_orders(&RightClick {
+            selected: &[SimId(1)],
+            units: &units,
+            wrecks: &[],
+            blueprints: &db,
+            team: Team::Blue,
+            camera: &camera,
+            cursor,
+            ground: Some(world),
+            attack_move: true,
+        });
+        let goal = Vec2Fp::new(Fp::from_num(world[0]), Fp::from_num(world[1]));
+        assert_eq!(orders, [SimCommand::AttackMove { units: vec![SimId(1)], goal }]);
+    }
+
+    #[test]
+    fn attack_move_with_only_structures_selected_orders_nothing() {
+        let db = db();
+        let units = [view(1, Team::Blue, db.id("power_generator"), &db, 2_000.0, 1_950.0)];
+        let camera = camera();
+        let cursor = camera.world_to_screen([2_000.0, 2_050.0, 8.0]).unwrap();
+        let orders = right_click_orders(&RightClick {
+            selected: &[SimId(1)],
+            units: &units,
+            wrecks: &[],
+            blueprints: &db,
+            team: Team::Blue,
+            camera: &camera,
+            cursor,
+            ground: Some([2_000.0, 2_050.0]),
+            attack_move: true,
+        });
+        assert!(orders.is_empty());
     }
 
     #[test]

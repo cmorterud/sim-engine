@@ -24,16 +24,17 @@ Destroy the enemy commander to win. Yours explodes if it dies, and your whole te
 | :--- | :--- |
 | Left-drag or click | Select your units |
 | Right-click | Attack an enemy, assist or repair a friend, reclaim a wreck, move, or set a rally point |
-| Alt + right-click | Attack-move: stop to fire when enemies are in range |
+| F, then left-click | Attack-move: stop to fire when enemies are in range |
+| Alt + right-click | Attack-move, as above |
 | Hold P + right-click | Add patrol points, then release P |
 | Shift + left-click | Queue another copy of the structure being placed |
 | X | Stop |
 | Space | Jump to your commander and select it |
 | Scroll | Zoom, towards the cursor |
 | WASD or arrow keys | Pan |
-| Esc | Cancel placement, or clear the selection |
+| Esc | Cancel placement or attack-move, or clear the selection |
 
-The window title shows the frame rate and tick time. Run with `--help` for the headless and test modes.
+A marker and a line of text confirm each order. A click that shows nothing never reached the game. The window title shows the frame rate and tick time. Run with `--help` for the headless and test modes.
 
 ## Validate
 

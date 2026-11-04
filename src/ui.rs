@@ -4,6 +4,7 @@
 
 use egui::{Align2, Color32, FontId, Pos2, Rect, Rounding, Stroke, Vec2};
 
+use crate::input::feedback::{Marker, MarkerKind, OrderFeedback, LABEL_SECONDS};
 use crate::render::camera::Camera;
 use crate::sim::blueprints::{BlueprintDb, BlueprintId, UnitClass};
 use crate::sim::components::{SimId, Team};
@@ -178,6 +179,96 @@ pub fn match_end_window(ctx: &egui::Context, result: MatchResult, player: Team, 
                 actions.push(UiAction::Restart);
             }
         });
+}
+
+/// A small floating reminder that the next click will attack-move.
+pub fn attack_move_hint(ctx: &egui::Context) {
+    egui::Area::new(egui::Id::new("attack move hint"))
+        .anchor(Align2::CENTER_TOP, Vec2::new(0.0, 36.0))
+        .interactable(false)
+        .show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.label("Attack-move: left-click a destination. Right-click or Esc to cancel.");
+            });
+        });
+}
+
+fn marker_color(kind: MarkerKind) -> Color32 {
+    match kind {
+        MarkerKind::Move => Color32::from_rgb(110, 240, 130),
+        MarkerKind::AttackMove | MarkerKind::Attack => Color32::from_rgb(255, 80, 70),
+        MarkerKind::Support => Color32::from_rgb(100, 180, 255),
+        MarkerKind::Rally => Color32::WHITE,
+        MarkerKind::Patrol => Color32::from_rgb(255, 220, 90),
+        MarkerKind::Build => Color32::from_rgb(120, 240, 220),
+        MarkerKind::Rejected => Color32::from_gray(170),
+    }
+}
+
+/// Draws one marker: a ring that shrinks as it fades. The shapes differ as well as the colors,
+/// so that orders can be told apart without relying on color.
+fn draw_marker(painter: &egui::Painter, center: Pos2, marker: &Marker) {
+    let progress = marker.progress() as f32;
+    let radius = 28.0 - 16.0 * progress;
+    let color = marker_color(marker.kind).gamma_multiply(1.0 - progress);
+    let stroke = Stroke::new(2.5_f32, color);
+    match marker.kind {
+        MarkerKind::Rejected => {
+            painter.circle_stroke(center, radius * 0.6, stroke);
+            let reach = radius * 0.42;
+            painter.line_segment([center - Vec2::splat(reach), center + Vec2::splat(reach)], stroke);
+        }
+        MarkerKind::AttackMove => {
+            // A ring with ticks pointing in, like a gun sight.
+            painter.circle_stroke(center, radius, stroke);
+            for direction in [Vec2::X, -Vec2::X, Vec2::Y, -Vec2::Y] {
+                painter.line_segment([center + direction * radius, center + direction * (radius * 0.55)], stroke);
+            }
+        }
+        MarkerKind::Attack => {
+            painter.circle_stroke(center, radius, stroke);
+            painter.circle_stroke(center, radius * 0.55, stroke);
+        }
+        MarkerKind::Rally | MarkerKind::Patrol => {
+            let corners = [Vec2::new(0.0, -radius), Vec2::new(radius, 0.0), Vec2::new(0.0, radius), Vec2::new(-radius, 0.0)];
+            for index in 0..corners.len() {
+                painter.line_segment([center + corners[index], center + corners[(index + 1) % corners.len()]], stroke);
+            }
+        }
+        MarkerKind::Build => {
+            painter.rect_stroke(Rect::from_center_size(center, Vec2::splat(radius * 1.6)), Rounding::ZERO, stroke);
+        }
+        MarkerKind::Move | MarkerKind::Support => {
+            painter.circle_stroke(center, radius, stroke);
+        }
+    }
+}
+
+/// Shows that clicks were received: markers on the map, and a line of text below the top bar.
+pub fn order_feedback(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapshot, feedback: &OrderFeedback, pixels_per_point: f32) {
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    let raw = |value: i32| f64::from(value) / 4096.0;
+    for marker in feedback.markers() {
+        // A marker on a unit follows it, as long as the player can still see it.
+        let followed = marker.target.and_then(|target| find_unit(snapshot, target));
+        let position = followed.map_or(marker.position, |unit| [raw(unit.x), raw(unit.y), raw(unit.z)]);
+        if let Some(pixels) = camera.world_to_screen(position) {
+            draw_marker(&painter, Pos2::new(pixels[0] as f32 / pixels_per_point, pixels[1] as f32 / pixels_per_point), marker);
+        }
+    }
+    if let Some(label) = feedback.label() {
+        // Stay solid for most of the time, then fade.
+        let remaining = (1.0 - label.age / LABEL_SECONDS) as f32;
+        let color = marker_color(label.kind).gamma_multiply((remaining * 3.0).min(1.0));
+        egui::Area::new(egui::Id::new("order feedback"))
+            .anchor(Align2::CENTER_TOP, Vec2::new(0.0, 72.0))
+            .interactable(false)
+            .show(ctx, |ui| {
+                egui::Frame::popup(ui.style()).multiply_with_opacity((remaining * 3.0).min(1.0)).show(ui, |ui| {
+                    ui.colored_label(color, egui::RichText::new(&label.text).strong());
+                });
+            });
+    }
 }
 
 /// A small floating reminder of the placement in progress.
