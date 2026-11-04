@@ -20,6 +20,8 @@ const DASH_POINTS: f32 = 8.0;
 const GAP_POINTS: f32 = 5.0;
 /// Below this on-screen size, a terrain cell is too small for a placement grid to help.
 const MIN_GRID_CELL_POINTS: f32 = 5.0;
+/// Below this on-screen radius, a selected unit's ground ring is too small to see.
+const MIN_SELECTION_RING_POINTS: f32 = 4.0;
 /// The placement grid reaches this many cells from the cursor in each direction.
 const GRID_REACH_CELLS: i32 = 8;
 
@@ -519,6 +521,33 @@ pub fn order_trails(ctx: &egui::Context, camera: &Camera, legs: &[TrailLeg], pix
         painter.circle_filled(end, 2.5, color);
         if leg.number > 0 {
             painter.text(end + Vec2::new(6.0, -6.0), Align2::LEFT_BOTTOM, leg.number.to_string(), FontId::proportional(14.0), Color32::WHITE.gamma_multiply(leg.opacity));
+        }
+    }
+}
+
+/// Keeps selection visible when units are too small on screen for their ground rings to show.
+/// Units already showing a tactical icon are skipped, since the icon turns green instead.
+pub fn distant_selection_markers(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapshot, selected: &[SimId], pixels_per_point: f32) {
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    let stroke = Stroke::new(1.5_f32, Color32::from_rgb(70, 255, 100));
+    let raw = |value: i32| f64::from(value) / 4096.0;
+    let viewport = ctx.screen_rect().expand(8.0);
+    let icons_showing = camera.altitude() >= ICON_ALTITUDE;
+    for &id in selected {
+        let Some(unit) = find_unit(snapshot, id) else {
+            continue;
+        };
+        if icons_showing && unit.blueprint != u16::MAX {
+            continue;
+        }
+        let world = [raw(unit.x), raw(unit.y), raw(unit.z)];
+        let (Some(center), Some(edge)) = (camera.world_to_screen(world), camera.world_to_screen([world[0] + raw(unit.radius), world[1], world[2]])) else {
+            continue;
+        };
+        let apparent = (edge[0] - center[0]).hypot(edge[1] - center[1]) as f32 / pixels_per_point;
+        let center = Pos2::new(center[0] as f32 / pixels_per_point, center[1] as f32 / pixels_per_point);
+        if apparent < MIN_SELECTION_RING_POINTS && viewport.contains(center) {
+            painter.rect_stroke(Rect::from_center_size(center, Vec2::splat(9.0)), Rounding::ZERO, stroke);
         }
     }
 }

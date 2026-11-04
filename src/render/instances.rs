@@ -19,7 +19,7 @@ const NO_ICON: f32 = 0.0;
 
 const BLUE: [f32; 3] = [0.20, 0.50, 1.00];
 const RED: [f32; 3] = [1.00, 0.27, 0.22];
-const SELECTED: [f32; 3] = [0.55, 1.00, 0.55];
+const SELECTED: [f32; 3] = [0.25, 1.00, 0.35];
 const SHELL: [f32; 3] = [1.00, 0.85, 0.35];
 const OBSTACLE: [f32; 3] = [0.42, 0.40, 0.38];
 const WRECK: [f32; 3] = [0.24, 0.23, 0.22];
@@ -30,6 +30,9 @@ const GHOST_INVALID: [f32; 3] = [0.95, 0.25, 0.20];
 const HEADING_MIN_MOVE_SQUARED: f64 = 400.0 * 400.0;
 /// How quickly a unit turns towards its new heading, per frame.
 const HEADING_BLEND: f32 = 0.2;
+/// How far selection markers sit above the ground, so that gentle slopes do not hide them.
+const SELECTION_LIFT: f64 = 1.5;
+const SELECTION_THICKNESS: f32 = 1.0;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
@@ -185,20 +188,25 @@ pub fn build_unit_instances(
             next_selected += 1;
         }
         let is_selected = selected.get(next_selected) == Some(&unit.id);
-        let mut color = match (is_selected, unit.team) {
-            (true, _) => SELECTED,
-            (false, Team::Blue) => BLUE,
-            (false, Team::Red) => RED,
+        let mut color = match unit.team {
+            Team::Blue => BLUE,
+            Team::Red => RED,
         };
         let look = looks.get(usize::from(unit.blueprint));
-        if !is_selected {
-            if let Some(tint) = look.and_then(|look| look.tint) {
-                color = std::array::from_fn(|channel| color[channel] * 0.7 + tint[channel] * 0.3);
-            }
+        if let Some(tint) = look.and_then(|look| look.tint) {
+            color = std::array::from_fn(|channel| color[channel] * 0.7 + tint[channel] * 0.3);
         }
         let shape = look.map_or(Shape::Cube, |look| look.shape);
         let size = (f64::from(unit.radius) * RAW_TO_WORLD * 2.0) as f32;
         let mut center = interpolate(from, now, alpha);
+        if is_selected {
+            // Selection is shown on the ground, so that the unit keeps its own colors.
+            let radius = f64::from(unit.radius) * RAW_TO_WORLD;
+            let foot = [center[0], center[1], center[2] - radius + SELECTION_LIFT];
+            let (marker, scale) = if unit.is_structure { (Shape::SelectionBox, 1.12) } else { (Shape::SelectionRing, 1.4) };
+            let width = size * scale;
+            out.push(marker, instance(foot, [width, width, SELECTION_THICKNESS], NORTH, SELECTED, NO_ICON, eye));
+        }
         if unit.is_structure {
             // A structure rises from the ground as it is built, and looks unfinished until then.
             let built = f32::from(unit.built_permille) / 1000.0;
@@ -300,12 +308,32 @@ mod tests {
     }
 
     #[test]
-    fn selected_units_change_color() {
+    fn selected_units_keep_their_color_and_get_a_ring_at_their_feet() {
         let current = [unit(1, 0), unit(2, 0), unit(3, 0)];
-        let out = cubes(&current, &current, 0.0, [0.0; 3], &[SimId(2)]);
-        assert_eq!(out[0].color[..3], BLUE);
-        assert_eq!(out[1].color[..3], SELECTED);
-        assert_eq!(out[2].color[..3], BLUE);
+        let mut out = InstanceBatches::default();
+        build_unit_instances(&current, &current, 0.0, [0.0; 3], &[SimId(2)], &[], &mut Headings::new(), &mut out);
+        assert!(out.shape(Shape::Cube).iter().all(|cube| cube.color[..3] == BLUE), "selection must not recolor units");
+        let rings = out.shape(Shape::SelectionRing);
+        assert_eq!(rings.len(), 1, "only the selected unit gets a ring");
+        assert_eq!(rings[0].color[..3], SELECTED);
+        assert_eq!(rings[0].color[3], NO_ICON, "a ring must not collapse into a dot");
+        // The unit is centered at height 0 with radius 1, so its feet are at -1.
+        assert_eq!(translation(&rings[0])[2], -1.0 + SELECTION_LIFT as f32);
+        assert!(rings[0].model_matrix[0][0] > 2.0, "the ring must be wider than the unit");
+    }
+
+    #[test]
+    fn selected_structures_get_a_box_instead_of_a_ring() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let mut generator = unit(1, 0);
+        generator.blueprint = db.id("power_generator").0;
+        generator.is_structure = true;
+        let mut out = InstanceBatches::default();
+        build_unit_instances(&[], &[generator], 0.0, [0.0; 3], &[SimId(1)], &looks, &mut Headings::new(), &mut out);
+        assert_eq!(out.shape(Shape::SelectionBox).len(), 1);
+        assert_eq!(out.shape(Shape::SelectionRing).len(), 0);
+        assert_ne!(out.shape(Shape::Generator)[0].color[..3], SELECTED);
     }
 
     #[test]

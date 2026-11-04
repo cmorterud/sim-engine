@@ -765,6 +765,7 @@ fn run_windowed(seed: u64, options: Options) {
                         let output = egui_context.run(raw_input, |ctx| {
                             ui::placement_grid(ctx, &camera, &grid_lines, f64::from(TERRAIN_CELL_UNITS), pixels_per_point);
                             ui::pending_build_outlines(ctx, &camera, &pending, pixels_per_point);
+                            ui::distant_selection_markers(ctx, &camera, &snapshot, &selected, pixels_per_point);
                             ui::order_trails(ctx, &camera, &trails, pixels_per_point);
                             ui::order_feedback(ctx, &camera, &snapshot, &feedback, pixels_per_point);
                             if attack_move_armed {

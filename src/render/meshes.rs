@@ -18,10 +18,14 @@ pub enum Shape {
     PointDefense,
     Shell,
     Wreck,
+    /// Flat, around the feet of a selected mobile unit.
+    SelectionRing,
+    /// Flat, around the footprint of a selected structure.
+    SelectionBox,
 }
 
 impl Shape {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 15] = [
         Self::Cube,
         Self::Commander,
         Self::Engineer,
@@ -35,6 +39,8 @@ impl Shape {
         Self::PointDefense,
         Self::Shell,
         Self::Wreck,
+        Self::SelectionRing,
+        Self::SelectionBox,
     ];
     pub const COUNT: usize = Self::ALL.len();
 }
@@ -228,6 +234,27 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.block([-0.5, -0.5, -0.5], [0.5, 0.5, -0.25]);
             mesh.beam([-0.4, -0.35, -0.2], [0.35, -0.1, 0.3], 0.14, 0.1);
             mesh.beam([0.25, 0.35, -0.2], [-0.2, 0.05, 0.15], 0.12, 0.09);
+        }
+        Shape::SelectionRing => {
+            const SEGMENTS: usize = 24;
+            const INNER: f32 = 0.42;
+            let at = |index: usize, radius: f32, z: f32| {
+                let angle = 0.13 + index as f32 / SEGMENTS as f32 * std::f32::consts::TAU;
+                Vec3::new(angle.cos() * radius, angle.sin() * radius, z)
+            };
+            for index in 0..SEGMENTS {
+                let next = (index + 1) % SEGMENTS;
+                let corners = |z: f32| [at(index, INNER, z), at(next, INNER, z), at(next, 0.5, z), at(index, 0.5, z)];
+                mesh.cuboid(corners(-0.5), corners(0.5));
+            }
+        }
+        Shape::SelectionBox => {
+            const THICKNESS: f32 = 0.05;
+            let edge = 0.5 - THICKNESS;
+            mesh.block([-0.5, -0.5, -0.5], [0.5, -edge, 0.5]);
+            mesh.block([-0.5, edge, -0.5], [0.5, 0.5, 0.5]);
+            mesh.block([-0.5, -edge, -0.5], [-edge, edge, 0.5]);
+            mesh.block([edge, -edge, -0.5], [0.5, edge, 0.5]);
         }
     }
 }
