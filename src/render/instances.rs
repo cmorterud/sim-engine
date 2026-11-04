@@ -6,7 +6,7 @@ use std::f32::consts::FRAC_1_SQRT_2;
 use super::meshes::Shape;
 use crate::sim::blueprints::BlueprintDb;
 use crate::sim::components::{SimId, Team};
-use crate::sim::world::{ProjectileView, UnitView};
+use crate::sim::world::{ProjectileView, UnitView, WorkLinkView};
 
 const RAW_TO_WORLD: f64 = 1.0 / 4096.0;
 const PROJECTILE_SIZE: f32 = 0.6;
@@ -148,22 +148,32 @@ const fn default_heading(team: Team) -> [f32; 2] {
     }
 }
 
-/// Turns a unit towards the way it moved this tick. A unit that stops keeps its facing.
-fn update_heading(headings: &mut Headings, unit: &UnitView, before: Option<&UnitView>) -> [f32; 2] {
+/// Turns a heading a step towards a direction, given as a vector of any length.
+fn turn_towards(heading: &mut [f32; 2], dx: f64, dy: f64) {
+    // By angle, because blending two vectors never leaves a heading exactly opposite the target.
+    let length = dx.hypot(dy);
+    let target = [(dx / length) as f32, (dy / length) as f32];
+    let cross = heading[0] * target[1] - heading[1] * target[0];
+    let dot = heading[0] * target[0] + heading[1] * target[1];
+    let (sin, cos) = (cross.atan2(dot) * HEADING_BLEND).sin_cos();
+    let turned = [heading[0] * cos - heading[1] * sin, heading[0] * sin + heading[1] * cos];
+    let size = turned[0].hypot(turned[1]);
+    *heading = [turned[0] / size, turned[1] / size];
+}
+
+/// Turns a unit towards what it is working on, or else the way it moved this tick.
+/// A unit that stops keeps its facing.
+fn update_heading(headings: &mut Headings, unit: &UnitView, before: Option<&UnitView>, work: Option<&WorkLinkView>) -> [f32; 2] {
     let heading = headings.entry(unit.id).or_insert_with(|| default_heading(unit.team));
-    if let Some(before) = before {
+    if let Some(work) = work {
+        let (dx, dy) = (f64::from(work.target[0] - unit.x), f64::from(work.target[1] - unit.y));
+        if dx != 0.0 || dy != 0.0 {
+            turn_towards(heading, dx, dy);
+        }
+    } else if let Some(before) = before {
         let (dx, dy) = (f64::from(unit.x - before.x), f64::from(unit.y - before.y));
-        let moved_squared = dx * dx + dy * dy;
-        if moved_squared > HEADING_MIN_MOVE_SQUARED {
-            let length = moved_squared.sqrt();
-            let target = [(dx / length) as f32, (dy / length) as f32];
-            let blended = [
-                heading[0] + (target[0] - heading[0]) * HEADING_BLEND,
-                heading[1] + (target[1] - heading[1]) * HEADING_BLEND,
-            ];
-            let size = blended[0].hypot(blended[1]);
-            // Turning exactly around cancels out, so jump straight there.
-            *heading = if size > 0.01 { [blended[0] / size, blended[1] / size] } else { target };
+        if dx * dx + dy * dy > HEADING_MIN_MOVE_SQUARED {
+            turn_towards(heading, dx, dy);
         }
     }
     *heading
@@ -177,10 +187,12 @@ pub fn build_unit_instances(
     eye: [f64; 3],
     selected: &[SimId],
     looks: &[UnitLook],
+    work: &[WorkLinkView],
     headings: &mut Headings,
     out: &mut InstanceBatches,
 ) {
     let mut next_selected = 0;
+    let mut next_work = 0;
     merge_by_id(previous, current, |unit| unit.id, |before, unit| {
         let now = [unit.x, unit.y, unit.z];
         let from = before.map_or(now, |before| [before.x, before.y, before.z]);
@@ -188,6 +200,10 @@ pub fn build_unit_instances(
             next_selected += 1;
         }
         let is_selected = selected.get(next_selected) == Some(&unit.id);
+        while next_work < work.len() && work[next_work].builder < unit.id {
+            next_work += 1;
+        }
+        let working_on = work.get(next_work).filter(|link| link.builder == unit.id);
         let mut color = match unit.team {
             Team::Blue => BLUE,
             Team::Red => RED,
@@ -218,7 +234,7 @@ pub fn build_unit_instances(
             out.push(shape, instance(center, [size, size, height], NORTH, tinted, UNIT_ICON_PX * 1.6, eye));
         } else {
             // The stress test's plain cubes have no front, and skip this to save time.
-            let heading = if look.is_some() { update_heading(headings, unit, before) } else { NORTH };
+            let heading = if look.is_some() { update_heading(headings, unit, before, working_on) } else { NORTH };
             out.push(shape, instance(center, [size; 3], heading, color, UNIT_ICON_PX, eye));
         }
     });
@@ -287,7 +303,7 @@ mod tests {
     /// Builds instances with no looks, so that everything lands in the cube batch.
     fn cubes(previous: &[UnitView], current: &[UnitView], alpha: f64, eye: [f64; 3], selected: &[SimId]) -> Vec<UnitInstanceRaw> {
         let mut out = InstanceBatches::default();
-        build_unit_instances(previous, current, alpha, eye, selected, &[], &mut Headings::new(), &mut out);
+        build_unit_instances(previous, current, alpha, eye, selected, &[], &[], &mut Headings::new(), &mut out);
         out.shape(Shape::Cube).to_vec()
     }
 
@@ -311,7 +327,7 @@ mod tests {
     fn selected_units_keep_their_color_and_get_a_ring_at_their_feet() {
         let current = [unit(1, 0), unit(2, 0), unit(3, 0)];
         let mut out = InstanceBatches::default();
-        build_unit_instances(&current, &current, 0.0, [0.0; 3], &[SimId(2)], &[], &mut Headings::new(), &mut out);
+        build_unit_instances(&current, &current, 0.0, [0.0; 3], &[SimId(2)], &[], &[], &mut Headings::new(), &mut out);
         assert!(out.shape(Shape::Cube).iter().all(|cube| cube.color[..3] == BLUE), "selection must not recolor units");
         let rings = out.shape(Shape::SelectionRing);
         assert_eq!(rings.len(), 1, "only the selected unit gets a ring");
@@ -330,7 +346,7 @@ mod tests {
         generator.blueprint = db.id("power_generator").0;
         generator.is_structure = true;
         let mut out = InstanceBatches::default();
-        build_unit_instances(&[], &[generator], 0.0, [0.0; 3], &[SimId(1)], &looks, &mut Headings::new(), &mut out);
+        build_unit_instances(&[], &[generator], 0.0, [0.0; 3], &[SimId(1)], &looks, &[], &mut Headings::new(), &mut out);
         assert_eq!(out.shape(Shape::SelectionBox).len(), 1);
         assert_eq!(out.shape(Shape::SelectionRing).len(), 0);
         assert_ne!(out.shape(Shape::Generator)[0].color[..3], SELECTED);
@@ -359,7 +375,7 @@ mod tests {
         generator.blueprint = db.id("power_generator").0;
         generator.is_structure = true;
         let mut out = InstanceBatches::default();
-        build_unit_instances(&[], &[tank, generator], 0.0, [0.0; 3], &[], &looks, &mut Headings::new(), &mut out);
+        build_unit_instances(&[], &[tank, generator], 0.0, [0.0; 3], &[], &looks, &[], &mut Headings::new(), &mut out);
         assert_eq!(out.shape(Shape::Tank).len(), 1);
         assert_eq!(out.shape(Shape::Generator).len(), 1);
         assert_eq!(out.shape(Shape::Cube).len(), 0);
@@ -383,7 +399,7 @@ mod tests {
         let mut headings = Headings::new();
         let mut draw = |before: UnitView, after: UnitView| {
             let mut out = InstanceBatches::default();
-            build_unit_instances(&[before], &[after], 1.0, [0.0; 3], &[], &looks, &mut headings, &mut out);
+            build_unit_instances(&[before], &[after], 1.0, [0.0; 3], &[], &looks, &[], &mut headings, &mut out);
             facing(&out.shape(Shape::Tank)[0])
         };
         let start = draw(tank, tank);
@@ -394,6 +410,83 @@ mod tests {
         }
         assert!((now[0] - 1.0).abs() < 1e-3 && now[1].abs() < 1e-2, "moving east should face east: {now:?}");
         assert_eq!(draw(moved, moved), now, "a stopped unit keeps its facing");
+    }
+
+    #[test]
+    fn a_working_builder_turns_to_face_its_work_and_keeps_facing_it() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let mut acu = unit(1, 0);
+        acu.blueprint = db.id("acu").0;
+        // Directly north-west of the unit, whichever way it was facing.
+        let work = [WorkLinkView { builder: SimId(1), target: [-40_960, 40_960, 0], reclaim: false }];
+        let mut headings = Headings::new();
+        let mut draw = |before: UnitView, links: &[WorkLinkView]| {
+            let mut out = InstanceBatches::default();
+            build_unit_instances(&[before], &[acu], 1.0, [0.0; 3], &[], &looks, links, &mut headings, &mut out);
+            facing(&out.shape(Shape::Commander)[0])
+        };
+        let start = draw(acu, &[]);
+        assert!(start[0] > 0.0, "Blue starts out facing the middle of the map: {start:?}");
+        let mut now = start;
+        for _ in 0..60 {
+            now = draw(acu, &work);
+        }
+        assert!((now[0] + FRAC_1_SQRT_2).abs() < 1e-2 && (now[1] - FRAC_1_SQRT_2).abs() < 1e-2, "should face its work: {now:?}");
+
+        // Being nudged while working must not turn it away.
+        let mut nudged = acu;
+        nudged.x = -4096 * 4;
+        let settled = draw(nudged, &work);
+        assert!((settled[0] + FRAC_1_SQRT_2).abs() < 1e-2);
+        assert_eq!(draw(acu, &[]), settled, "it keeps facing the same way when the work is done");
+    }
+
+    /// Blue starts out facing north-east, and its first factory can be exactly behind it.
+    #[test]
+    fn a_unit_can_turn_towards_something_exactly_behind_it() {
+        let mut heading = [FRAC_1_SQRT_2, FRAC_1_SQRT_2];
+        for _ in 0..60 {
+            turn_towards(&mut heading, -50.0, -50.0);
+        }
+        assert!((heading[0] + FRAC_1_SQRT_2).abs() < 1e-3 && (heading[1] + FRAC_1_SQRT_2).abs() < 1e-3, "still facing {heading:?}");
+        assert!((heading[0].hypot(heading[1]) - 1.0).abs() < 1e-3, "a heading must stay a unit vector");
+    }
+
+    #[test]
+    fn turning_takes_the_short_way_round_in_both_directions() {
+        for (dx, dy) in [(1.0_f64, 0.2_f64), (0.2, 1.0), (-1.0, 0.1), (0.1, -1.0)] {
+            let mut heading = [FRAC_1_SQRT_2, FRAC_1_SQRT_2];
+            let target = dy.atan2(dx) as f32;
+            let gap = |heading: [f32; 2]| {
+                let delta = (heading[1].atan2(heading[0]) - target).rem_euclid(std::f32::consts::TAU);
+                delta.min(std::f32::consts::TAU - delta)
+            };
+            let before = gap(heading);
+            turn_towards(&mut heading, dx, dy);
+            assert!(gap(heading) < before, "turning towards ({dx}, {dy}) should close the gap");
+        }
+    }
+
+    #[test]
+    fn only_the_builder_doing_the_work_turns_towards_it() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let mut first = unit(1, 0);
+        first.blueprint = db.id("t1_engineer").0;
+        let mut second = unit(2, 0);
+        second.blueprint = db.id("t1_engineer").0;
+        let work = [WorkLinkView { builder: SimId(2), target: [-40_960, 0, 0], reclaim: false }];
+        let mut headings = Headings::new();
+        let units = [first, second];
+        let mut out = InstanceBatches::default();
+        for _ in 0..60 {
+            out.clear();
+            build_unit_instances(&units, &units, 1.0, [0.0; 3], &[], &looks, &work, &mut headings, &mut out);
+        }
+        let engineers = out.shape(Shape::Engineer);
+        assert!((facing(&engineers[0])[0] - FRAC_1_SQRT_2).abs() < 1e-3, "the idle one stays as it was");
+        assert!((facing(&engineers[1])[0] + 1.0).abs() < 1e-2, "the working one faces west");
     }
 
     #[test]

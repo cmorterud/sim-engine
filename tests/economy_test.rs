@@ -4,7 +4,7 @@
 use sim_engine::math::fp::{fp_int, Fp, Vec2Fp, Vec3Fp};
 use sim_engine::sim::blueprints::{BlueprintId, Res};
 use sim_engine::sim::commands::SimCommand;
-use sim_engine::sim::components::{BuildTask, Builder, Combat, Construction, Factory, Health, OrderKind, Projectile, SimId, Team};
+use sim_engine::sim::components::{BuildTask, Builder, Combat, Construction, Factory, Health, Order, OrderKind, Projectile, SimId, Team};
 use sim_engine::sim::config::{SimConfig, TerrainStyle};
 use sim_engine::sim::scenario::{self, skirmish_start};
 use sim_engine::sim::world::{MatchResult, PlanStepKind, SimWorld};
@@ -201,6 +201,126 @@ fn factory_builds_its_queue_and_assist_speeds_it_up() {
 }
 
 #[test]
+fn work_links_show_real_work_and_nothing_else() {
+    let mut world = test_world();
+    set_resources(&mut world, Team::Blue, 10_000, 100_000);
+    let engineer_blueprint = id(&world, "t1_engineer");
+    let generator = id(&world, "power_generator");
+    let engineer = world.spawn_mobile(engineer_blueprint, Team::Blue, point(1_000, 1_000));
+    let links = |world: &SimWorld| world.snapshot_for(Some(Team::Blue)).work_links;
+
+    // Walking to a far-off site is not work.
+    let (cell_x, cell_y) = (1_400 / CELL as u32, 1_000 / CELL as u32);
+    world.advance_tick(&[SimCommand::Build { units: vec![engineer], blueprint: generator, cell_x, cell_y, queued: false }]);
+    run(&mut world, 5);
+    assert!(links(&world).is_empty(), "still walking");
+
+    let cell = cell_y * world.terrain.cells_per_side() as u32 + cell_x;
+    let mut ticks = 0;
+    while links(&world).is_empty() {
+        world.advance_tick(&[]);
+        ticks += 1;
+        assert!(ticks < 2_000, "the engineer never started work");
+    }
+    let site = world.occupancy[&cell];
+    let link = links(&world)[0];
+    assert_eq!(link.builder, engineer);
+    assert!(!link.reclaim);
+    let view = *world.snapshot_for(Some(Team::Blue)).units.iter().find(|unit| unit.id == site).unwrap();
+    assert_eq!(link.target[..2], [view.x, view.y], "the link should point at the site");
+
+    // The link lasts as long as the work does.
+    while !is_finished(&world, site) {
+        assert_eq!(links(&world).len(), 1, "work is still going at {}", progress(&world, site));
+        world.advance_tick(&[]);
+    }
+    world.advance_tick(&[]);
+    assert!(links(&world).is_empty(), "nothing is left to do");
+}
+
+#[test]
+fn a_team_with_nothing_to_spend_shows_no_work() {
+    let mut world = test_world();
+    set_resources(&mut world, Team::Blue, 10_000, 100_000);
+    let (_, site) = engineer_at_site(&mut world);
+    run(&mut world, 5);
+    assert_eq!(world.snapshot_for(Some(Team::Blue)).work_links.len(), 1);
+    set_resources(&mut world, Team::Blue, 0, 100_000);
+    let before = progress(&world, site);
+    run(&mut world, 5);
+    assert_eq!(progress(&world, site), before, "the site must have stalled");
+    assert!(world.snapshot_for(Some(Team::Blue)).work_links.is_empty());
+    set_resources(&mut world, Team::Blue, 10_000, 100_000);
+    run(&mut world, 2);
+    assert_eq!(world.snapshot_for(Some(Team::Blue)).work_links.len(), 1, "the beam returns with the resources");
+}
+
+#[test]
+fn work_links_are_hidden_by_fog() {
+    let config = SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: true, ..SimConfig::default() };
+    let mut world = SimWorld::new(config, 1);
+    set_resources(&mut world, Team::Blue, 10_000, 100_000);
+    engineer_at_site(&mut world);
+    run(&mut world, 5);
+    assert_eq!(world.snapshot_for(Some(Team::Blue)).work_links.len(), 1, "a team sees its own work");
+    assert!(world.snapshot_for(Some(Team::Red)).work_links.is_empty(), "the enemy cannot see it through fog");
+}
+
+#[test]
+fn a_factory_under_construction_holds_its_orders_until_it_is_built() {
+    let mut world = test_world();
+    set_resources(&mut world, Team::Blue, 100_000, 1_000_000);
+    let engineer_blueprint = id(&world, "t1_engineer");
+    let (factory_blueprint, bot) = (id(&world, "land_factory_t1"), id(&world, "t1_light_bot"));
+    let engineer = world.spawn_mobile(engineer_blueprint, Team::Blue, point(1_000, 1_000));
+    let helper = world.spawn_mobile(engineer_blueprint, Team::Blue, point(1_000, 1_020));
+    let (cell_x, cell_y) = (1_100 / CELL as u32, 1_000 / CELL as u32);
+    world.advance_tick(&[SimCommand::Build { units: vec![engineer], blueprint: factory_blueprint, cell_x, cell_y, queued: false }]);
+    let cell = cell_y * world.terrain.cells_per_side() as u32 + cell_x;
+    let mut ticks = 0;
+    while !world.occupancy.contains_key(&cell) {
+        world.advance_tick(&[]);
+        ticks += 1;
+        assert!(ticks < 200, "the engineer never started the site");
+    }
+    let site = world.occupancy[&cell];
+    assert!(!is_finished(&world, site));
+
+    let rally = point(1_500, 1_000);
+    world.advance_tick(&[
+        SimCommand::QueueUnit { factory: site, blueprint: bot, count: 2 },
+        SimCommand::SetRally { factory: site, point: rally },
+        SimCommand::Assist { units: vec![helper], target: site },
+    ]);
+
+    // Nothing comes out early, however much help the site gets.
+    let mut ticks = 0;
+    while !is_finished(&world, site) {
+        let factory = world.ecs.get::<&Factory>(entity(&world, site)).unwrap();
+        assert_eq!(factory.queue.len(), 2, "the queue must wait for the factory");
+        assert_eq!(factory.progress, Res::ZERO, "no unit is started before the factory is built");
+        assert_eq!(factory.rally, Some(rally));
+        drop(factory);
+        world.advance_tick(&[]);
+        ticks += 1;
+        assert!(ticks < 5_000, "still at {}", progress(&world, site));
+    }
+    assert_eq!(world.units.len(), 3, "no unit may appear before the factory is built");
+
+    // Once it is built, the queue runs and the units go to the rally point.
+    let mut ticks = 0;
+    while !world.ecs.get::<&Factory>(entity(&world, site)).unwrap().queue.is_empty() {
+        world.advance_tick(&[]);
+        ticks += 1;
+        assert!(ticks < 5_000, "the queue never finished");
+    }
+    assert_eq!(world.units.len(), 5, "both queued units should have been built");
+    let newest = world.units.iter().map(|unit| unit.0).max().unwrap();
+    let order = *world.ecs.get::<&Order>(entity(&world, newest)).unwrap();
+    assert_ne!(order.kind, OrderKind::Idle, "the new unit should head for the rally point");
+}
+
+#[test]
 fn factory_repeat_loops_and_rally_sends_units() {
     let mut world = test_world();
     set_resources(&mut world, Team::Blue, 10_000, 100_000);
@@ -387,7 +507,12 @@ fn engineers_reclaim_wrecks_into_mass() {
 
     world.advance_tick(&[SimCommand::Reclaim { units: vec![engineer], target: wreck_id }]);
     // The wreck holds 81% of 36 mass, or 29.16. It takes time to walk there and 2.9 s to eat.
-    run(&mut world, 400);
+    let mut saw_reclaim_link = false;
+    for _ in 0..400 {
+        world.advance_tick(&[]);
+        saw_reclaim_link |= world.snapshot_for(Some(Team::Blue)).work_links.iter().any(|link| link.builder == engineer && link.reclaim);
+    }
+    assert!(saw_reclaim_link, "reclaiming should show as work");
     assert!(world.wrecks.is_empty(), "the wreck should be gone");
     let mass = world.economies[0].mass.to_num::<f64>();
     assert!((29.0..=29.2).contains(&mass), "reclaimed {mass} mass");
@@ -767,4 +892,50 @@ fn production_state_changes_the_checksum() {
         &|w| w.match_result = Some(MatchResult::Draw),
         &|w| w.match_result = None,
     );
+}
+
+/// A unit stopping short of a point that is not in the middle of a terrain cell must still
+/// finish its order. Otherwise a builder never starts the builds queued behind it.
+#[test]
+fn an_engineer_at_any_rally_point_goes_on_to_its_queued_builds() {
+    for rally in [(1_500, 1_000), (1_513, 1_013), (1_519, 1_009), (1_503, 1_017), (1_501, 1_001), (1_519, 1_019)] {
+        let mut world = test_world();
+        set_resources(&mut world, Team::Blue, 100_000, 1_000_000);
+        let (factory_blueprint, engineer_blueprint, generator) = (id(&world, "land_factory_t1"), id(&world, "t1_engineer"), id(&world, "power_generator"));
+        let factory = world.spawn_finished_structure(factory_blueprint, Team::Blue, 50, 50).unwrap();
+        world.advance_tick(&[
+            SimCommand::SetRally { factory, point: point(rally.0, rally.1) },
+            SimCommand::QueueUnit { factory, blueprint: engineer_blueprint, count: 1 },
+        ]);
+        let mut ticks = 0;
+        while world.ecs.get::<&Factory>(entity(&world, factory)).unwrap().queue.len() == 1 {
+            world.advance_tick(&[]);
+            ticks += 1;
+            assert!(ticks < 2_000, "the engineer never came out");
+        }
+        let engineer = world.units.iter().map(|unit| unit.0).max().unwrap();
+        run(&mut world, 400);
+        assert_eq!(world.ecs.get::<&Order>(entity(&world, engineer)).unwrap().kind, OrderKind::Idle, "stuck on the way to {rally:?}");
+        let here = world.unit_position(engineer).unwrap().xy();
+        let distance = (here - point(rally.0, rally.1)).length_squared().to_num::<f64>().sqrt();
+        assert!(distance < 10.0, "stopped {distance} from {rally:?}");
+
+        let (cell_x, cell_y) = (150, 150);
+        world.advance_tick(&[SimCommand::Build { units: vec![engineer], blueprint: generator, cell_x, cell_y, queued: true }]);
+        run(&mut world, 800);
+        assert!(world.ecs.get::<&Builder>(entity(&world, engineer)).unwrap().tasks.first().is_none_or(|task| matches!(task, BuildTask::Build { site: Some(_), .. })), "never reached the build from {rally:?}");
+        assert!(world.occupancy.contains_key(&(cell_y * world.terrain.cells_per_side() as u32 + cell_x)), "never started the build from {rally:?}");
+    }
+}
+
+#[test]
+fn a_unit_sent_onto_a_structure_finishes_its_order_beside_it() {
+    let mut world = test_world();
+    let (factory_blueprint, bot) = (id(&world, "land_factory_t1"), id(&world, "t1_light_bot"));
+    let factory = world.spawn_finished_structure(factory_blueprint, Team::Blue, 50, 50).unwrap();
+    let inside = world.unit_position(factory).unwrap().xy();
+    let unit = world.spawn_mobile(bot, Team::Blue, point(1_400, 1_000));
+    world.advance_tick(&[SimCommand::Move { units: vec![unit], goal: inside }]);
+    run(&mut world, 800);
+    assert_eq!(world.ecs.get::<&Order>(entity(&world, unit)).unwrap().kind, OrderKind::Idle);
 }

@@ -13,7 +13,7 @@ use super::components::{
 use super::config::{SimConfig, TARGET_SEARCH_INTERVAL, TERRAIN_CELL_UNITS, WRECK_MASS_PERMILLE};
 use super::flowfield::{nearest_passable_cell, FlowField, FlowSample};
 use super::formation::plan_formation;
-use super::production::Economy;
+use super::production::{Economy, WorkLink};
 use super::spatial::{GridUnit, Layer, SpatialGrid};
 use super::terrain::Terrain;
 use super::visibility::{Visibility, VISION_REFRESH_TICKS};
@@ -108,6 +108,17 @@ pub struct UnitPlanView {
     pub steps: Vec<PlanStep>,
 }
 
+/// A builder that is doing work this tick, and where. Only present while work is really
+/// happening, so not while walking to a site, waiting, or out of resources.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct WorkLinkView {
+    pub builder: SimId,
+    /// Where the work is being done, as raw `Fp` bits.
+    pub target: [i32; 3],
+    /// Reclaiming takes mass back, instead of spending it.
+    pub reclaim: bool,
+}
+
 /// Read-only wreck state. Values are raw `Fp` bits.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct WreckView {
@@ -154,6 +165,8 @@ pub struct SimSnapshot {
     pub factories: Vec<FactoryView>,
     /// Sorted by `SimId`.
     pub plans: Vec<UnitPlanView>,
+    /// Sorted by builder `SimId`.
+    pub work_links: Vec<WorkLinkView>,
     pub economy: EconomyView,
     /// Present when fog of war is on: one byte per cell, for the renderer.
     pub fog: Option<Arc<Vec<u8>>>,
@@ -208,6 +221,9 @@ pub struct SimWorld {
     pub commanders: [Option<SimId>; 2],
     pub match_result: Option<MatchResult>,
     pub(super) economy_dirty: bool,
+    /// Who worked on what this tick. Rebuilt every tick and only used for drawing,
+    /// so it is not part of the checksum.
+    pub(super) work_links: Vec<WorkLink>,
     max_mobile_radius: i32,
     max_structure_radius: i32,
     pending_shots: Vec<PendingShot>,
@@ -249,6 +265,7 @@ impl SimWorld {
             commanders: [None, None],
             match_result: None,
             economy_dirty: false,
+            work_links: Vec::new(),
             max_mobile_radius: 0,
             max_structure_radius: 0,
             pending_shots: Vec::new(),
@@ -578,7 +595,16 @@ impl SimWorld {
             if order.kind != OrderKind::Idle {
                 let goal = flow.goal(order.route).unwrap_or(here);
                 let arrive_radius = flow.arrive_radius(order.route).unwrap_or(Fp::ZERO);
-                let arrived = here.distance_squared(&goal) <= wide_mul(arrive_radius, arrive_radius);
+                // A flow field ends at the goal's cell, so the last steps are a straight walk.
+                // If the goal itself cannot be walked to, reaching that cell is as close as it gets.
+                let in_goal_cell = flow.goal_cell(order.route) == Some(terrain.cell_of(here));
+                let goal_is_here = in_goal_cell && terrain.in_bounds(goal) && terrain.cell_of(goal) == terrain.cell_of(here);
+                let arrived = here.distance_squared(&goal) <= wide_mul(arrive_radius, arrive_radius) || (in_goal_cell && !goal_is_here);
+                let walk_to_goal = |speed: Fp| {
+                    let direction = (goal - here).normalized();
+                    let speed = speed.min(sqrt_wide(here.distance_squared(&goal)));
+                    Vec2Fp::new(direction.x * speed, direction.y * speed)
+                };
                 let may_walk = order.kind == OrderKind::Move || combat.target.is_none();
                 if let Some(slot) = order.slot {
                     // Close enough to the group's goal to leave the route and walk to its own spot.
@@ -595,7 +621,9 @@ impl SimWorld {
                             desired = Vec2Fp::new(direction.x * speed, direction.y * speed);
                         }
                     } else if may_walk {
-                        if let FlowSample::Direction(direction) = flow.sample(order.route, tick, here, terrain) {
+                        if goal_is_here {
+                            desired = walk_to_goal(stats.max_speed);
+                        } else if let FlowSample::Direction(direction) = flow.sample(order.route, tick, here, terrain) {
                             desired = Vec2Fp::new(direction.x * stats.max_speed, direction.y * stats.max_speed);
                         }
                     }
@@ -605,7 +633,9 @@ impl SimWorld {
                         *order = Order::IDLE;
                     }
                 } else if may_walk {
-                    if let FlowSample::Direction(direction) = flow.sample(order.route, tick, here, terrain) {
+                    if goal_is_here {
+                        desired = walk_to_goal(stats.max_speed);
+                    } else if let FlowSample::Direction(direction) = flow.sample(order.route, tick, here, terrain) {
                         desired = Vec2Fp::new(direction.x * stats.max_speed, direction.y * stats.max_speed);
                     }
                 }
@@ -1246,6 +1276,7 @@ impl SimWorld {
                 .collect()
         });
         let plans = viewer.map_or_else(Vec::new, |viewer| self.plans_for(viewer));
+        let work_links = self.work_link_views(seen);
         let economy = viewer.map_or_else(EconomyView::default, |viewer| self.economies[viewer.index()].view());
         let fog = match viewer {
             Some(viewer) if self.config.fog_of_war => Some(Arc::new(self.visibility.fog_bytes(viewer))),
@@ -1258,6 +1289,7 @@ impl SimWorld {
             wrecks,
             factories,
             plans,
+            work_links,
             economy,
             fog,
             match_result: self.match_result,

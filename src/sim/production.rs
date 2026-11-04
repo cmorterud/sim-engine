@@ -13,7 +13,7 @@ use super::components::{
 use super::config::{PATROL_SEARCH_INTERVAL, PATROL_SEARCH_RADIUS_UNITS, RECLAIM_MASS_PER_POWER, TERRAIN_CELL_UNITS};
 use super::flowfield::nearest_passable_cell;
 use super::spatial::{GridEntry, Layer};
-use super::world::{EconomyView, PlanStep, PlanStepKind, SimWorld, UnitPlanView, UnitSpawn};
+use super::world::{EconomyView, PlanStep, PlanStepKind, SimWorld, UnitPlanView, UnitSpawn, WorkLinkView};
 use crate::math::fp::{fp_int, wide_mul, Fp, Vec2Fp};
 
 const MEX_STORAGE_BONUS: u32 = 125;
@@ -80,6 +80,14 @@ impl Economy {
             satisfaction_permille: (self.satisfaction.to_bits() * 1000 / Res::ONE.to_bits()).clamp(0, 1000) as u16,
         }
     }
+}
+
+/// A builder that worked on something this tick.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct WorkLink {
+    pub builder: SimId,
+    pub target: SimId,
+    pub reclaim: bool,
 }
 
 /// What a unit of build power is being spent on.
@@ -382,6 +390,7 @@ impl SimWorld {
 
     /// Runs one tick of the economy and everything that spends from it.
     pub fn step_production(&mut self) {
+        self.work_links.clear();
         if self.builders.is_empty() && self.factories.is_empty() && self.structures.is_empty() && self.patrols.is_empty() {
             return;
         }
@@ -474,9 +483,11 @@ impl SimWorld {
             TaskStep::Work { target, kind } => {
                 self.halt(id, entity);
                 *power_by_target.entry((target, kind)).or_insert(Fp::ZERO) += power;
+                self.work_links.push(WorkLink { builder: id, target, reclaim: false });
             }
             TaskStep::Reclaim { target, entity: wreck_entity } => {
                 self.halt(id, entity);
+                self.work_links.push(WorkLink { builder: id, target, reclaim: true });
                 let wanted = fp_to_res(power) * RECLAIM_MASS_PER_POWER / TICKS_PER_SECOND;
                 let mut wreck = self.ecs.get::<&mut Wreck>(wreck_entity).expect("task checked the wreck");
                 let taken = wanted.min(wreck.mass);
@@ -906,6 +917,40 @@ impl SimWorld {
             }
         }
         plans
+    }
+
+    /// This tick's work, limited to what `seen` allows. A team with nothing to spend is
+    /// not building anything, however hard its builders are trying.
+    pub(super) fn work_link_views(&self, seen: impl Fn(Team, i32, i32) -> bool) -> Vec<WorkLinkView> {
+        if self.match_result.is_some() {
+            return Vec::new();
+        }
+        self.work_links
+            .iter()
+            .filter_map(|link| {
+                let (_, builder) = self.find_unit(link.builder)?;
+                let team = self.ecs.get::<&UnitStats>(builder).ok()?.team;
+                if !link.reclaim && self.economies[team.index()].satisfaction == Res::ZERO {
+                    return None;
+                }
+                let (place, radius) = if link.reclaim {
+                    let index = self.wrecks.binary_search_by_key(&link.target, |wreck| wreck.0).ok()?;
+                    let wreck = self.ecs.get::<&Wreck>(self.wrecks[index].1).ok()?;
+                    (wreck.position, wreck.radius)
+                } else {
+                    let (_, target) = self.find_unit(link.target)?;
+                    let radius = self.ecs.get::<&UnitStats>(target).ok()?.radius;
+                    (self.ecs.get::<&Position>(target).ok()?.0.xy(), radius)
+                };
+                let here = self.ecs.get::<&Position>(builder).ok()?.0;
+                let (x, y) = (place.x.to_bits(), place.y.to_bits());
+                if !seen(team, here.x.to_bits(), here.y.to_bits()) || !seen(team, x, y) {
+                    return None;
+                }
+                let z = (self.terrain.height_at(place) + radius / 2).to_bits();
+                Some(WorkLinkView { builder: link.builder, target: [x, y, z], reclaim: link.reclaim })
+            })
+            .collect()
     }
 
     fn plan_step(&self, kind: PlanStepKind, point: Vec2Fp, pending_width: i32) -> PlanStep {

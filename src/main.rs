@@ -795,6 +795,8 @@ fn run_windowed(seed: u64, options: Options) {
                         if is_match && orders_view_strength > 0.0 {
                             trails.extend(ui::other_units_trails(&session.previous, &snapshot, alpha, &selected, orders_view_strength));
                         }
+                        let beams = if is_match { ui::work_beams(&session.previous, &snapshot, alpha) } else { Vec::new() };
+                        let beam_time = clock.elapsed().as_secs_f64();
                         let pending = pending_builds(&snapshot);
                         let cursor_ground = camera.screen_to_ground(selection.cursor(), &map.heights);
                         let placement_spot = placing.and_then(|blueprint| {
@@ -822,6 +824,7 @@ fn run_windowed(seed: u64, options: Options) {
                             ui::deposit_highlights(ctx, &camera, &open_deposits, snapped_deposit, pixels_per_point);
                             ui::pending_build_outlines(ctx, &camera, &pending, pixels_per_point);
                             ui::distant_selection_markers(ctx, &camera, &snapshot, &selected, pixels_per_point);
+                            ui::draw_work_beams(ctx, &camera, &beams, beam_time, pixels_per_point);
                             ui::order_trails(ctx, &camera, &trails, pixels_per_point);
                             ui::order_feedback(ctx, &camera, &snapshot, &feedback, pixels_per_point);
                             if attack_move_armed {
@@ -891,7 +894,7 @@ fn run_windowed(seed: u64, options: Options) {
                         let eye = camera.eye();
                         let (previous, current) = (&session.previous, &session.current);
                         scene_instances.clear();
-                        instances::build_unit_instances(&previous.units, &current.units, alpha, eye, selection.selected(), &looks, &mut headings, &mut scene_instances);
+                        instances::build_unit_instances(&previous.units, &current.units, alpha, eye, selection.selected(), &looks, &current.work_links, &mut headings, &mut scene_instances);
                         let drawn_units_and_shells = {
                             let units = scene_instances.total();
                             instances::build_projectile_instances(&previous.projectiles, &current.projectiles, alpha, eye, &mut scene_instances);

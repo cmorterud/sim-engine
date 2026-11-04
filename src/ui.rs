@@ -33,6 +33,15 @@ const RED: Color32 = Color32::from_rgb(255, 95, 80);
 const STALLED: Color32 = Color32::from_rgb(255, 110, 90);
 const HEALTHY: Color32 = Color32::from_rgb(120, 230, 120);
 const BUILDING: Color32 = Color32::from_rgb(120, 200, 255);
+/// Warm, so that beams stand out against both blue structures and the terrain.
+const BEAM_BUILD: Color32 = Color32::from_rgb(255, 215, 110);
+const BEAM_RECLAIM: Color32 = Color32::from_rgb(150, 255, 170);
+/// How many pulses are on a work beam at once.
+const BEAM_PULSES: usize = 5;
+/// How long a pulse takes to travel along a beam, in seconds.
+const BEAM_PULSE_SECONDS: f64 = 1.1;
+/// A beam shorter than this on screen is only clutter.
+const MIN_BEAM_POINTS: f32 = 6.0;
 
 /// What the player asked for through the interface.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -135,8 +144,6 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
 
         if let Some(menu) = factory_menu(snapshot, selected, db) {
             factory_controls(ui, &menu, db, actions);
-        } else if units.iter().any(|unit| db.get(BlueprintId(unit.blueprint)).is_factory()) {
-            ui.label("Under construction");
         }
     });
 }
@@ -149,7 +156,8 @@ pub enum RepeatState {
     Mixed,
 }
 
-/// What the selected, finished factories can do together.
+/// What the selected factories can do together. Unfinished factories take orders too,
+/// and start on them once they are built.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FactoryMenu {
     pub factories: Vec<SimId>,
@@ -162,9 +170,11 @@ pub struct FactoryMenu {
     pub queue: Vec<(BlueprintId, u32)>,
     /// Average progress on items under way, in thousandths, if any are.
     pub progress_permille: Option<u16>,
+    /// How many of the factories are still under construction.
+    pub unfinished: usize,
 }
 
-/// Works out the shared menu for the selected factories. `None` if no finished factory is selected.
+/// Works out the shared menu for the selected factories. `None` if no factory is selected.
 pub fn factory_menu(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb) -> Option<FactoryMenu> {
     let mut menu = FactoryMenu {
         factories: Vec::new(),
@@ -173,17 +183,20 @@ pub fn factory_menu(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb
         repeat: RepeatState::Off,
         queue: Vec::new(),
         progress_permille: None,
+        unfinished: 0,
     };
     let (mut repeating, mut progress_total, mut under_way) = (0usize, 0u32, 0u32);
     for &id in selected {
-        let Some(unit) = find_unit(snapshot, id).filter(|unit| unit.blueprint != u16::MAX && unit.built_permille == 1000) else {
+        let Some(unit) = find_unit(snapshot, id).filter(|unit| unit.blueprint != u16::MAX) else {
             continue;
         };
         let blueprint = db.get(BlueprintId(unit.blueprint));
         let Some(factory) = snapshot.factories.iter().find(|factory| factory.id == id).filter(|_| blueprint.is_factory()) else {
             continue;
         };
+        let finished = unit.built_permille == 1000;
         menu.factories.push(id);
+        menu.unfinished += usize::from(!finished);
         repeating += usize::from(factory.repeat);
         for &option in &blueprint.builds {
             match menu.options.iter_mut().find(|(existing, _)| *existing == option) {
@@ -201,7 +214,7 @@ pub fn factory_menu(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb
                 None => menu.queue.push((item, 1)),
             }
         }
-        if !factory.queue.is_empty() {
+        if finished && !factory.queue.is_empty() {
             progress_total += u32::from(factory.progress_permille);
             under_way += 1;
         }
@@ -216,6 +229,15 @@ pub fn factory_menu(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb
     };
     menu.progress_permille = (under_way > 0).then(|| (progress_total / under_way) as u16);
     Some(menu)
+}
+
+/// Says when queued units will start, if any selected factory is still being built.
+pub fn construction_note(unfinished: usize, total: usize) -> Option<String> {
+    match unfinished {
+        0 => None,
+        _ if unfinished == total => Some("Under construction: the queue starts once built.".to_string()),
+        _ => Some(format!("{unfinished} of {total} under construction: their queues start once built.")),
+    }
 }
 
 /// A count of factories for confirmation text.
@@ -284,6 +306,9 @@ fn factory_controls(ui: &mut egui::Ui, menu: &FactoryMenu, db: &BlueprintDb, act
             ui.label(names.join(", "));
         }
     });
+    if let Some(note) = construction_note(menu.unfinished, total) {
+        ui.label(note);
+    }
 }
 
 pub fn match_end_window(ctx: &egui::Context, result: MatchResult, player: Team, actions: &mut Vec<UiAction>) {
@@ -545,6 +570,79 @@ pub fn order_trails(ctx: &egui::Context, camera: &Camera, legs: &[TrailLeg], pix
     }
 }
 
+/// A beam between a builder and what it is working on, in world coordinates.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct WorkBeam {
+    pub builder: SimId,
+    pub from: [f64; 3],
+    pub to: [f64; 3],
+    pub reclaim: bool,
+}
+
+/// Works out the beams for all work being done. Each starts at the front of the builder,
+/// drawn where the builder appears between ticks.
+pub fn work_beams(previous: &SimSnapshot, current: &SimSnapshot, alpha: f64) -> Vec<WorkBeam> {
+    let raw = |value: i32| f64::from(value) / 4096.0;
+    current
+        .work_links
+        .iter()
+        .filter_map(|link| {
+            let unit = find_unit(current, link.builder)?;
+            let now = [raw(unit.x), raw(unit.y), raw(unit.z)];
+            let before = find_unit(previous, link.builder).map_or(now, |unit| [raw(unit.x), raw(unit.y), raw(unit.z)]);
+            let center: [f64; 3] = std::array::from_fn(|axis| before[axis] + (now[axis] - before[axis]) * alpha);
+            let to = link.target.map(raw);
+            let (dx, dy) = (to[0] - center[0], to[1] - center[1]);
+            let distance = dx.hypot(dy);
+            let reach = raw(unit.radius).min(distance);
+            let (forward_x, forward_y) = if distance > 0.0 { (dx / distance * reach, dy / distance * reach) } else { (0.0, 0.0) };
+            Some(WorkBeam { builder: link.builder, from: [center[0] + forward_x, center[1] + forward_y, center[2]], to, reclaim: link.reclaim })
+        })
+        .collect()
+}
+
+/// How far along its beam each pulse is, from 0 at the builder to 1 at the work. Pulses
+/// flow towards the work, or back to the builder when reclaiming. Builders are out of
+/// step with each other, so that a group reads as separate beams.
+pub fn beam_pulse_shares(time: f64, builder: SimId, reclaim: bool) -> [f32; BEAM_PULSES] {
+    let offset = (f64::from(builder.0) * 0.37).fract();
+    std::array::from_fn(|index| {
+        let share = (time / BEAM_PULSE_SECONDS + offset + index as f64 / BEAM_PULSES as f64).fract();
+        (if reclaim { 1.0 - share } else { share }) as f32
+    })
+}
+
+/// Draws work beams: a faint line, pulses travelling along it, and a ring at the work.
+pub fn draw_work_beams(ctx: &egui::Context, camera: &Camera, beams: &[WorkBeam], time: f64, pixels_per_point: f32) {
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    let to_points = |world: [f64; 3]| {
+        camera.world_to_screen(world).map(|pixels| Pos2::new(pixels[0] as f32 / pixels_per_point, pixels[1] as f32 / pixels_per_point))
+    };
+    let bounds = ctx.screen_rect().expand(16.0);
+    for beam in beams {
+        let (Some(from), Some(to)) = (to_points(beam.from), to_points(beam.to)) else {
+            continue;
+        };
+        if from.distance(to) < MIN_BEAM_POINTS || clip_segment(from, to, bounds).is_none() {
+            continue;
+        }
+        let color = if beam.reclaim { BEAM_RECLAIM } else { BEAM_BUILD };
+        // A soft glow under a bright core.
+        painter.line_segment([from, to], Stroke::new(5.0_f32, color.gamma_multiply(0.18)));
+        painter.line_segment([from, to], Stroke::new(1.5_f32, color.gamma_multiply(0.75)));
+        for share in beam_pulse_shares(time, beam.builder, beam.reclaim) {
+            // Pulses fade in and out at the ends, so that they do not pop.
+            let brightness = (share * std::f32::consts::PI).sin();
+            painter.circle_filled(from + (to - from) * share, 1.5 + 2.5 * brightness, color.gamma_multiply(0.3 + 0.7 * brightness));
+        }
+        if bounds.contains(to) {
+            let breath = ((time * 5.0 + f64::from(beam.builder.0)).sin() * 0.5 + 0.5) as f32;
+            painter.circle_stroke(to, 5.0 + 6.0 * breath, Stroke::new(2.0_f32, color.gamma_multiply(1.0 - 0.6 * breath)));
+            painter.circle_filled(to, 2.5, color);
+        }
+    }
+}
+
 /// Marks where an extractor can go while placing one, since deposits are small from far away.
 pub fn deposit_highlights(ctx: &egui::Context, camera: &Camera, free: &[[f64; 3]], target: Option<[f64; 3]>, pixels_per_point: f32) {
     let painter = ctx.layer_painter(egui::LayerId::background());
@@ -789,7 +887,7 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sim::world::{FactoryView, PlanStep, UnitPlanView};
+    use crate::sim::world::{FactoryView, PlanStep, UnitPlanView, WorkLinkView};
 
     fn raw(value: f64) -> i32 {
         (value * 4096.0) as i32
@@ -844,11 +942,12 @@ mod tests {
         let db = BlueprintDb::standard();
         let current = mixed_factories(&db);
         let menu = factory_menu(&current, &[SimId(1), SimId(2), SimId(3)], &db).unwrap();
-        assert_eq!(menu.factories, [SimId(1), SimId(2)], "unfinished factories take no orders");
+        assert_eq!(menu.factories, [SimId(1), SimId(2), SimId(3)], "unfinished factories take orders too");
+        assert_eq!(menu.unfinished, 1);
         let able = |key: &str| menu.options.iter().find(|(option, _)| *option == db.id(key)).map(|(_, able)| able.clone());
-        assert_eq!(able("t1_light_bot").unwrap(), [SimId(1), SimId(2)]);
+        assert_eq!(able("t1_light_bot").unwrap(), [SimId(1), SimId(2), SimId(3)]);
         assert_eq!(able("t2_heavy_tank").unwrap(), [SimId(2)], "only T2 factories can build tanks");
-        assert_eq!(menu.upgrade, Some((db.id("land_factory_t2"), vec![SimId(1)])), "only T1 factories can upgrade");
+        assert_eq!(menu.upgrade, Some((db.id("land_factory_t2"), vec![SimId(1), SimId(3)])), "only T1 factories can upgrade");
     }
 
     #[test]
@@ -877,9 +976,92 @@ mod tests {
     }
 
     #[test]
-    fn no_finished_factory_means_no_menu() {
+    fn a_factory_under_construction_has_a_menu_and_shows_its_queue() {
         let db = BlueprintDb::standard();
-        assert_eq!(factory_menu(&mixed_factories(&db), &[SimId(3)], &db), None);
+        let bot = db.id("t1_light_bot");
+        let mut current = mixed_factories(&db);
+        current.factories[2] = factory_view(3, vec![bot.0], false, 0);
+        let menu = factory_menu(&current, &[SimId(3)], &db).unwrap();
+        assert_eq!(menu.factories, [SimId(3)]);
+        assert_eq!(menu.unfinished, 1);
+        assert_eq!(menu.queue, [(bot, 1)]);
+        assert_eq!(menu.progress_permille, None, "nothing is being made until it is built");
+    }
+
+    #[test]
+    fn an_unfinished_factory_does_not_drag_down_the_progress_bar() {
+        let db = BlueprintDb::standard();
+        let bot = db.id("t1_light_bot");
+        let mut current = mixed_factories(&db);
+        current.factories[0] = factory_view(1, vec![bot.0], false, 600);
+        current.factories[2] = factory_view(3, vec![bot.0], false, 0);
+        let menu = factory_menu(&current, &[SimId(1), SimId(3)], &db).unwrap();
+        assert_eq!(menu.progress_permille, Some(600));
+        assert_eq!(menu.queue, [(bot, 2)]);
+    }
+
+    #[test]
+    fn no_factory_means_no_menu() {
+        let db = BlueprintDb::standard();
+        assert_eq!(factory_menu(&mixed_factories(&db), &[SimId(99)], &db), None);
+        assert_eq!(factory_menu(&mixed_factories(&db), &[], &db), None);
+    }
+
+    #[test]
+    fn the_note_says_when_queues_will_start() {
+        assert_eq!(construction_note(0, 2), None);
+        assert_eq!(construction_note(1, 1).unwrap(), "Under construction: the queue starts once built.");
+        assert_eq!(construction_note(2, 2).unwrap(), "Under construction: the queue starts once built.");
+        assert_eq!(construction_note(1, 3).unwrap(), "1 of 3 under construction: their queues start once built.");
+    }
+
+    #[test]
+    fn a_work_beam_runs_from_the_front_of_the_builder_to_the_work() {
+        let raw = |value: f64| (value * 4096.0) as i32;
+        let mut builder = unit(1, 100.0);
+        builder.radius = raw(5.0);
+        let mut current = snapshot(vec![builder], vec![]);
+        current.work_links = vec![
+            WorkLinkView { builder: SimId(1), target: [raw(150.0), 0, raw(7.0)], reclaim: false },
+            // A builder that cannot be seen has no beam.
+            WorkLinkView { builder: SimId(2), target: [raw(150.0), 0, 0], reclaim: false },
+        ];
+        let beams = work_beams(&current, &current, 1.0);
+        assert_eq!(beams.len(), 1);
+        assert_eq!(beams[0].from[0], 105.0, "the beam starts at the front of the builder");
+        assert_eq!(beams[0].to, [150.0, 0.0, 7.0]);
+
+        // Between ticks, the beam stays attached to where the builder is drawn.
+        let mut earlier = builder;
+        earlier.x = raw(90.0);
+        let before = snapshot(vec![earlier], vec![]);
+        assert_eq!(work_beams(&before, &current, 0.5)[0].from[0], 100.0);
+    }
+
+    #[test]
+    fn a_builder_standing_on_its_work_still_gets_a_valid_beam() {
+        let mut current = snapshot(vec![unit(1, 100.0)], vec![]);
+        current.work_links = vec![WorkLinkView { builder: SimId(1), target: [100 * 4096, 0, 0], reclaim: false }];
+        let beam = work_beams(&current, &current, 1.0)[0];
+        assert!(beam.from.iter().all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn beam_pulses_flow_to_the_work_and_back_when_reclaiming() {
+        let later = 0.05;
+        let (build_before, build_after) = (beam_pulse_shares(1.0, SimId(1), false), beam_pulse_shares(1.0 + later, SimId(1), false));
+        let (reclaim_before, reclaim_after) = (beam_pulse_shares(1.0, SimId(1), true), beam_pulse_shares(1.0 + later, SimId(1), true));
+        for index in 0..BEAM_PULSES {
+            for share in [build_before[index], reclaim_before[index]] {
+                assert!((0.0..=1.0).contains(&share));
+            }
+            let moved = build_after[index] - build_before[index];
+            // A pulse that just wrapped has jumped back to the start.
+            assert!(moved > 0.0 || moved < -0.5, "building should flow outwards: {moved}");
+            let moved = reclaim_after[index] - reclaim_before[index];
+            assert!(moved < 0.0 || moved > 0.5, "reclaiming should flow back: {moved}");
+        }
+        assert_ne!(beam_pulse_shares(1.0, SimId(1), false), beam_pulse_shares(1.0, SimId(2), false), "builders should be out of step");
     }
 
     #[test]

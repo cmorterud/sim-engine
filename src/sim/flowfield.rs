@@ -474,6 +474,11 @@ impl FlowField {
         self.routes.get(&id).map(|route| route.goal)
     }
 
+    /// The open cell the route ends in, which is not the goal's own cell if that is blocked.
+    pub fn goal_cell(&self, id: u32) -> Option<(usize, usize)> {
+        self.routes.get(&id).map(|route| route.goal_cell)
+    }
+
     pub fn arrive_radius(&self, id: u32) -> Option<Fp> {
         self.routes.get(&id).map(|route| route.arrive_radius)
     }
