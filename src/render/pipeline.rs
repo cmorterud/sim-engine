@@ -11,7 +11,8 @@ use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use winit::window::Window;
 
 use super::camera::{Camera, HeightField};
-use super::instances::UnitInstanceRaw;
+use super::instances::{InstanceBatches, UnitInstanceRaw};
+use super::meshes::{MeshSet, MeshVertex, Shape};
 
 const TERRAIN_GRID_SIZE: u32 = 512;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -34,36 +35,6 @@ struct Globals {
     terrain_scale: [f32; 4],
 }
 
-#[repr(C)]
-#[derive(Copy, Clone, Pod, Zeroable)]
-struct CubeVertex {
-    position: [f32; 3],
-    normal: [f32; 3],
-}
-
-fn cube_mesh() -> (Vec<CubeVertex>, Vec<u16>) {
-    // Each face: normal, then two axes that span it.
-    let faces: [([f32; 3], [f32; 3], [f32; 3]); 6] = [
-        ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
-        ([-1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]),
-        ([0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]),
-        ([0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
-        ([0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
-        ([0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]),
-    ];
-    let mut vertices = Vec::with_capacity(24);
-    let mut indices = Vec::with_capacity(36);
-    for (normal, u, v) in faces {
-        let base = vertices.len() as u16;
-        for (su, sv) in [(-0.5, -0.5), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5)] {
-            let position = std::array::from_fn(|axis| normal[axis] * 0.5 + u[axis] * su + v[axis] * sv);
-            vertices.push(CubeVertex { position, normal });
-        }
-        indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
-    }
-    (vertices, indices)
-}
-
 fn terrain_indices() -> Vec<u32> {
     let size = TERRAIN_GRID_SIZE;
     let mut indices = Vec::with_capacity(((size - 1) * (size - 1) * 6) as usize);
@@ -81,12 +52,11 @@ fn terrain_indices() -> Vec<u32> {
 struct InstanceBuffer {
     buffer: wgpu::Buffer,
     capacity: usize,
-    count: u32,
 }
 
 impl InstanceBuffer {
     fn new(device: &wgpu::Device, capacity: usize) -> Self {
-        Self { buffer: Self::create(device, capacity), capacity, count: 0 }
+        Self { buffer: Self::create(device, capacity), capacity }
     }
 
     fn create(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
@@ -104,7 +74,6 @@ impl InstanceBuffer {
             self.buffer = Self::create(device, self.capacity);
         }
         queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(instances));
-        self.count = instances.len() as u32;
     }
 }
 
@@ -118,9 +87,7 @@ pub struct UiFrame {
 /// Everything drawn in one frame.
 pub struct FrameScene<'a> {
     pub camera: &'a Camera,
-    pub units: &'a [UnitInstanceRaw],
-    pub projectiles: &'a [UnitInstanceRaw],
-    pub obstacles: &'a [UnitInstanceRaw],
+    pub instances: &'a InstanceBatches,
     /// The selection box in pixels, as `(min, max)`.
     pub selection_box: Option<([f64; 2], [f64; 2])>,
 }
@@ -136,14 +103,15 @@ pub struct Renderer {
     box_pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     globals_buffer: wgpu::Buffer,
-    cube_vertices: wgpu::Buffer,
-    cube_indices: wgpu::Buffer,
-    cube_index_count: u32,
+    mesh_vertices: wgpu::Buffer,
+    mesh_indices: wgpu::Buffer,
+    shape_indices: Vec<std::ops::Range<u32>>,
     terrain_index_buffer: wgpu::Buffer,
     terrain_index_count: u32,
-    unit_buffer: InstanceBuffer,
-    projectile_buffer: InstanceBuffer,
-    obstacle_buffer: InstanceBuffer,
+    instance_buffer: InstanceBuffer,
+    /// Every shape's instances, one after another, with where each shape's begin and end.
+    flat_instances: Vec<UnitInstanceRaw>,
+    shape_instances: Vec<std::ops::Range<u32>>,
     samples_per_side: i32,
     cell_units: f64,
     height_scale: f32,
@@ -351,7 +319,7 @@ impl Renderer {
             write_mask: wgpu::ColorWrites::ALL,
         })];
 
-        let cube_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3];
+        let mesh_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3];
         let instance_attributes = wgpu::vertex_attr_array![
             2 => Float32x4, 3 => Float32x4, 4 => Float32x4, 5 => Float32x4, 6 => Float32x4
         ];
@@ -364,9 +332,9 @@ impl Renderer {
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 buffers: &[
                     wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<CubeVertex>() as u64,
+                        array_stride: std::mem::size_of::<MeshVertex>() as u64,
                         step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &cube_attributes,
+                        attributes: &mesh_attributes,
                     },
                     wgpu::VertexBufferLayout {
                         array_stride: std::mem::size_of::<UnitInstanceRaw>() as u64,
@@ -427,15 +395,15 @@ impl Renderer {
             multiview: None,
         });
 
-        let (vertices, indices) = cube_mesh();
-        let cube_vertices = device.create_buffer_init(&BufferInitDescriptor {
-            label: Some("cube vertices"),
-            contents: bytemuck::cast_slice(&vertices),
+        let meshes = MeshSet::build();
+        let mesh_vertices = device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("mesh vertices"),
+            contents: bytemuck::cast_slice(&meshes.vertices),
             usage: wgpu::BufferUsages::VERTEX,
         });
-        let cube_indices = device.create_buffer_init(&BufferInitDescriptor {
-            label: Some("cube indices"),
-            contents: bytemuck::cast_slice(&indices),
+        let mesh_indices = device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("mesh indices"),
+            contents: bytemuck::cast_slice(&meshes.indices),
             usage: wgpu::BufferUsages::INDEX,
         });
         let grid_indices = terrain_indices();
@@ -446,9 +414,7 @@ impl Renderer {
         });
 
         let depth_view = create_depth_view(&device, config.width, config.height);
-        let unit_buffer = InstanceBuffer::new(&device, 8_192);
-        let projectile_buffer = InstanceBuffer::new(&device, 8_192);
-        let obstacle_buffer = InstanceBuffer::new(&device, 64);
+        let instance_buffer = InstanceBuffer::new(&device, 16_384);
         Self {
             surface,
             device,
@@ -460,14 +426,14 @@ impl Renderer {
             box_pipeline,
             bind_group,
             globals_buffer,
-            cube_vertices,
-            cube_indices,
-            cube_index_count: indices.len() as u32,
+            mesh_vertices,
+            mesh_indices,
+            shape_indices: meshes.ranges,
             terrain_index_buffer,
             terrain_index_count: grid_indices.len() as u32,
-            unit_buffer,
-            projectile_buffer,
-            obstacle_buffer,
+            instance_buffer,
+            flat_instances: Vec::new(),
+            shape_instances: Vec::with_capacity(Shape::COUNT),
             samples_per_side: heights.samples() as i32,
             cell_units: heights.cell_units(),
             height_scale: heights.units_per_step() as f32,
@@ -580,9 +546,14 @@ impl Renderer {
             terrain_scale: [self.height_scale, self.icon_scale, self.fog_scale, 0.0],
         };
         self.queue.write_buffer(&self.globals_buffer, 0, bytemuck::bytes_of(&globals));
-        self.unit_buffer.write(&self.device, &self.queue, scene.units);
-        self.projectile_buffer.write(&self.device, &self.queue, scene.projectiles);
-        self.obstacle_buffer.write(&self.device, &self.queue, scene.obstacles);
+        self.flat_instances.clear();
+        self.shape_instances.clear();
+        for shape in Shape::ALL {
+            let start = self.flat_instances.len() as u32;
+            self.flat_instances.extend_from_slice(scene.instances.shape(shape));
+            self.shape_instances.push(start..self.flat_instances.len() as u32);
+        }
+        self.instance_buffer.write(&self.device, &self.queue, &self.flat_instances);
     }
 
     fn encode(&self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView, depth: &wgpu::TextureView) {
@@ -609,12 +580,12 @@ impl Renderer {
         pass.draw_indexed(0..self.terrain_index_count, 0, 0..1);
 
         pass.set_pipeline(&self.unit_pipeline);
-        pass.set_vertex_buffer(0, self.cube_vertices.slice(..));
-        pass.set_index_buffer(self.cube_indices.slice(..), wgpu::IndexFormat::Uint16);
-        for buffer in [&self.obstacle_buffer, &self.unit_buffer, &self.projectile_buffer] {
-            if buffer.count > 0 {
-                pass.set_vertex_buffer(1, buffer.buffer.slice(..));
-                pass.draw_indexed(0..self.cube_index_count, 0, 0..buffer.count);
+        pass.set_vertex_buffer(0, self.mesh_vertices.slice(..));
+        pass.set_vertex_buffer(1, self.instance_buffer.buffer.slice(..));
+        pass.set_index_buffer(self.mesh_indices.slice(..), wgpu::IndexFormat::Uint16);
+        for (indices, instances) in self.shape_indices.iter().zip(&self.shape_instances) {
+            if !instances.is_empty() {
+                pass.draw_indexed(indices.clone(), 0, instances.clone());
             }
         }
 
@@ -729,18 +700,6 @@ fn encode_bmp(pixels: &[u8], width: u32, height: u32, stride: u32, rgba_input: b
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn cube_has_outward_facing_triangles() {
-        let (vertices, indices) = cube_mesh();
-        assert_eq!((vertices.len(), indices.len()), (24, 36));
-        for triangle in indices.chunks(3) {
-            let at = |i: usize| glam::Vec3::from(vertices[triangle[i] as usize].position);
-            let face_normal = (at(1) - at(0)).cross(at(2) - at(0));
-            let stored = glam::Vec3::from(vertices[triangle[0] as usize].normal);
-            assert!(face_normal.dot(stored) > 0.0, "triangle {triangle:?} faces inward");
-        }
-    }
 
     #[test]
     fn terrain_grid_indices_stay_in_range() {

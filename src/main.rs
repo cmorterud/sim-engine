@@ -12,7 +12,8 @@ use sim_engine::input::orders::{line_cells, pending_builds, placement_cell, plac
 use sim_engine::input::selection::Selection;
 use sim_engine::math::fp::{Fp, Vec2Fp};
 use sim_engine::render::camera::{Camera, HeightField, MIN_ALTITUDE};
-use sim_engine::render::instances::{self, UnitInstanceRaw};
+use sim_engine::render::instances::{self, Headings, InstanceBatches};
+use sim_engine::render::meshes::Shape;
 use sim_engine::render::pipeline::{FrameScene, Renderer, UiFrame};
 use sim_engine::sim::blueprints::{BlueprintDb, BlueprintId};
 use sim_engine::sim::commands::SimCommand;
@@ -499,13 +500,13 @@ fn run_windowed(seed: u64, options: Options) {
     let mut frames_seen = 0usize;
     let mut held_keys = [false; 4];
     let (mut alt_held, mut shift_held) = (false, false);
-    let mut unit_instances: Vec<UnitInstanceRaw> = Vec::new();
-    let mut projectile_instances: Vec<UnitInstanceRaw> = Vec::new();
-    let mut static_instances: Vec<UnitInstanceRaw> = Vec::new();
+    let mut scene_instances = InstanceBatches::default();
+    let mut headings = Headings::new();
     let mut title_timer = Instant::now();
     let mut title_frames = 0u32;
     let mut autotest_selected = false;
-    let tints = instances::role_tints(&map.blueprints);
+    // The stress test's units have no blueprints, and stay plain cubes.
+    let looks = instances::unit_looks(&map.blueprints);
 
     event_loop.set_control_flow(ControlFlow::Poll);
     event_loop
@@ -662,6 +663,8 @@ fn run_windowed(seed: u64, options: Options) {
                                 if let Some(fog) = &session.current.fog {
                                     renderer.update_fog(fog);
                                 }
+                                let units = &session.current.units;
+                                headings.retain(|id, _| units.binary_search_by_key(id, |unit| unit.id).is_ok());
                             }
                         }
                         selection.retain_alive(&session.current.units);
@@ -714,7 +717,12 @@ fn run_windowed(seed: u64, options: Options) {
                                     let at = snapshot.plans.partition_point(|plan| plan.id < commander);
                                     snapshot.plans.insert(at, UnitPlanView { id: commander, steps });
                                 }
-                                selection.select(own);
+                                // Early screenshots show true colors, and later ones the selection's trails.
+                                if fraction >= 0.2 {
+                                    selection.select(own);
+                                } else {
+                                    selection.clear();
+                                }
                                 demo_snapshot = Some(Arc::new(snapshot));
                                 // Place a generator at the middle of the screen, to show the preview and grid.
                                 placing = Some(map.blueprints.id("power_generator"));
@@ -825,23 +833,26 @@ fn run_windowed(seed: u64, options: Options) {
                         // The scene.
                         let eye = camera.eye();
                         let (previous, current) = (&session.previous, &session.current);
-                        instances::build_unit_instances(&previous.units, &current.units, alpha, eye, selection.selected(), &tints, &mut unit_instances);
-                        projectile_instances.clear();
-                        instances::build_projectile_instances(&previous.projectiles, &current.projectiles, alpha, eye, &mut projectile_instances);
-                        static_instances.clear();
+                        scene_instances.clear();
+                        instances::build_unit_instances(&previous.units, &current.units, alpha, eye, selection.selected(), &looks, &mut headings, &mut scene_instances);
+                        let drawn_units_and_shells = {
+                            let units = scene_instances.total();
+                            instances::build_projectile_instances(&previous.projectiles, &current.projectiles, alpha, eye, &mut scene_instances);
+                            units + current.projectiles.len()
+                        };
                         let cell = f64::from(TERRAIN_CELL_UNITS);
                         for &(min, top) in &map.wall_cells {
                             let max = [min[0] + cell, min[1] + cell];
-                            static_instances.push(instances::obstacle_instance(min, max, top - OBSTACLE_DRAW_HEIGHT, OBSTACLE_DRAW_HEIGHT, eye));
+                            scene_instances.push(Shape::Cube, instances::obstacle_instance(min, max, top - OBSTACLE_DRAW_HEIGHT, OBSTACLE_DRAW_HEIGHT, eye));
                         }
                         for &(x, y) in &map.deposits {
                             let (center_x, center_y) = ((f64::from(x) + 0.5) * cell, (f64::from(y) + 0.5) * cell);
                             let center = [center_x, center_y, map.heights.height_at(center_x, center_y) + 0.5];
-                            static_instances.push(instances::deposit_instance(center, cell * 0.8, eye));
+                            scene_instances.push(Shape::Cube, instances::deposit_instance(center, cell * 0.8, eye));
                         }
                         for wreck in &current.wrecks {
                             let center = [raw_to_world(wreck.x), raw_to_world(wreck.y), raw_to_world(wreck.z)];
-                            static_instances.push(instances::wreck_instance(center, raw_to_world(wreck.radius), eye));
+                            scene_instances.push(Shape::Wreck, instances::wreck_instance(center, raw_to_world(wreck.radius), eye));
                         }
                         if let Some(blueprint) = placing {
                             if let Some(ground) = camera.screen_to_ground(selection.cursor(), &map.heights) {
@@ -854,16 +865,15 @@ fn run_windowed(seed: u64, options: Options) {
                                 for spot in spots {
                                     let valid = placement_is_valid(&map.placement_map(), blueprint, spot, &current.units, &queued);
                                     let (center_x, center_y) = (f64::from(spot.0) * cell + width * 0.5, f64::from(spot.1) * cell + width * 0.5);
-                                    let center = [center_x, center_y, map.heights.height_at(center_x, center_y) + width * 0.15];
-                                    static_instances.push(instances::ghost_instance(center, width, valid, eye));
+                                    let ground = [center_x, center_y, map.heights.height_at(center_x, center_y)];
+                                    let look = instances::unit_look(&unit.key);
+                                    scene_instances.push(look.shape, instances::ghost_instance(ground, width, look.height_share, valid, eye));
                                 }
                             }
                         }
                         let scene = FrameScene {
                             camera: &camera,
-                            units: &unit_instances,
-                            projectiles: &projectile_instances,
-                            obstacles: &static_instances,
+                            instances: &scene_instances,
                             selection_box: selection.drag_box(),
                         };
 
@@ -899,7 +909,7 @@ fn run_windowed(seed: u64, options: Options) {
                                 test.frames_by_altitude.push((camera.altitude(), frame_time));
                             }
                             test.peak_projectiles = test.peak_projectiles.max(session.current.projectiles.len());
-                            test.peak_instances = test.peak_instances.max(unit_instances.len() + projectile_instances.len());
+                            test.peak_instances = test.peak_instances.max(drawn_units_and_shells);
                             if session.driver.as_ref().is_some_and(SimDriver::is_finished) {
                                 let result = session.driver.take().expect("driver is present").finish();
                                 test.report(result);

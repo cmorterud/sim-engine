@@ -60,7 +60,9 @@ fn vs_unit(
     let offset = corner * icon_px * 2.0 / globals.viewport_lod.xy * center_clip.w;
     let dot_clip = vec4<f32>(center_clip.xy + offset, center_clip.z, center_clip.w);
 
-    let shade = 0.5 + 0.5 * max(dot(normal, LIGHT), 0.0);
+    // Light the shape as it is turned in the world.
+    let world_normal = normalize((model * vec4<f32>(normal, 0.0)).xyz);
+    let shade = 0.5 + 0.5 * max(dot(world_normal, LIGHT), 0.0);
     var out: UnitOutput;
     out.clip = mix(cube_clip, dot_clip, morph);
     out.color = mix(instance.color.rgb * shade, instance.color.rgb, morph);

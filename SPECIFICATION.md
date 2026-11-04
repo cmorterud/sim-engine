@@ -419,7 +419,7 @@ The camera smoothly scales along an exponential zoom curve:
 * **Camera-Relative Coordinates:** `f32` has a precision of only about 0.008 units at the far edge of a maximum-size map, which would visibly jitter in close-up. Compute camera and interpolated positions in `f64`, subtract the camera position, and send the resulting camera-relative `f32` values to the GPU.
 
 ### 5.2 GPU Instanced Rendering (`src/render/instances.rs` & `shaders.wgsl`)
-* **Single Draw Call for Units:** All 5,000 units are rendered via one instanced `wgpu::RenderPass::draw_indexed` call. Projectiles use a second instanced call.
+* **One Draw Call per Shape:** Instances are grouped by low-poly shape, and each shape is one instanced `wgpu::RenderPass::draw_indexed` call. All 5,000 stress-test units share one shape, and so one call.
 * **Terrain:** A single camera-following grid of 512 × 512 vertices, with vertex spacing that doubles as altitude increases. The vertex shader reads heights from a texture of the height map. Flat shading only.
 * **Simulation Thread:** The simulation runs on its own thread and hands the renderer per-tick snapshots keyed by `SimId`, so a slow tick cannot stall a frame. Rendering never writes to simulation state. Entities present in only one snapshot are drawn at their known position without interpolation.
 * **Instance Buffer Structure:**
