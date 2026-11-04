@@ -7,13 +7,28 @@ on:
 permissions:
   contents: read
 
+env:
+  # Pinned so that a new compiler release cannot break the build unexpectedly.
+  RUST_VERSION: "1.99.1"
+
 jobs:
+  # Compiling takes nearly all of the time, and each profile compiles everything separately,
+  # so each job builds for itself and keeps its own cache instead of sharing artifacts.
   build-and-test:
+    name: Build and test (${{ matrix.profile }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      # Pinned so that a new compiler release cannot break the build unexpectedly.
-      RUST_VERSION: "1.99.1"
+    strategy:
+      # Let the other job finish, so that one run shows every failure.
+      fail-fast: false
+      matrix:
+        include:
+          # Some tests only run in release builds, such as the full-length determinism checks.
+          - profile: release
+            flags: --release
+          # Arithmetic overflow only fails loudly in unoptimized builds.
+          - profile: unoptimized
+            flags: ""
     steps:
       - uses: actions/checkout@v7
 
@@ -28,21 +43,17 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-${{ env.RUST_VERSION }}-${{ hashFiles('Cargo.lock') }}
+          key: ${{ runner.os }}-${{ env.RUST_VERSION }}-${{ matrix.profile }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-${{ env.RUST_VERSION }}-
+            ${{ runner.os }}-${{ env.RUST_VERSION }}-${{ matrix.profile }}-
 
       - name: Build
-        run: cargo build --release --locked
+        run: cargo build --locked ${{ matrix.flags }}
 
-      # Some tests only run in release builds, such as the full-length determinism checks.
-      - name: Test (release)
-        run: cargo test --release --locked
-
-      # Arithmetic overflow only fails loudly in unoptimized builds.
-      - name: Test (unoptimized)
-        run: cargo test --locked
+      - name: Test
+        run: cargo test --locked ${{ matrix.flags }}
 
       # Compiled but not run: timing limits would give false failures on shared runners.
       - name: Check that benchmarks compile
+        if: matrix.profile == 'release'
         run: cargo bench --no-run --locked
