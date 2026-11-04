@@ -882,7 +882,7 @@ impl SimWorld {
             let order = *self.ecs.get::<&Order>(entity).expect("units have orders");
             // A builder's route only leads to its first task, which is already listed.
             if steps.is_empty() && order.kind != OrderKind::Idle {
-                if let Some(goal) = self.flow_field.goal(order.route) {
+                if let Some(goal) = order.slot.or_else(|| self.flow_field.goal(order.route)) {
                     let kind = match order.kind {
                         OrderKind::AttackMove => PlanStepKind::AttackMove,
                         OrderKind::Attack => PlanStepKind::Attack,

@@ -8,6 +8,8 @@ use crate::sim::world::UnitView;
 
 /// Drags shorter than this, in pixels, count as a click.
 pub const CLICK_THRESHOLD_PX: f64 = 4.0;
+/// Two clicks on a unit within this many seconds make a double click.
+const DOUBLE_CLICK_SECONDS: f64 = 0.4;
 /// How far from a unit's center a click can land and still select it.
 const CLICK_RADIUS_PX: f64 = 12.0;
 
@@ -17,6 +19,9 @@ pub struct Selection {
     drag_start: Option<[f64; 2]>,
     cursor: [f64; 2],
     selected: Vec<SimId>,
+    /// The time, from `set_clock`, so that double clicks can be timed.
+    clock: f64,
+    last_click: Option<(SimId, f64)>,
 }
 
 impl Selection {
@@ -61,6 +66,20 @@ impl Selection {
         let Some(start) = self.drag_start.take() else {
             return;
         };
+        if dragged.is_none() {
+            let clicked = nearest_unit(units, camera, team, start);
+            let previous = self.last_click.take();
+            if let Some(clicked) = clicked {
+                let is_double = previous.is_some_and(|(unit, time)| unit == clicked && self.clock - time <= DOUBLE_CLICK_SECONDS);
+                if is_double {
+                    self.select_type_on_screen(clicked, units, camera, team, adding);
+                    return;
+                }
+                self.last_click = Some((clicked, self.clock));
+            }
+        } else {
+            self.last_click = None;
+        }
         if adding && dragged.is_none() {
             if let Some(clicked) = nearest_unit(units, camera, team, start) {
                 match self.selected.binary_search(&clicked) {
@@ -95,7 +114,29 @@ impl Selection {
         }
     }
 
+    /// Selects every unit of the same type as `clicked` that the player can see on screen.
+    fn select_type_on_screen(&mut self, clicked: SimId, units: &[UnitView], camera: &Camera, team: Team, adding: bool) {
+        let Ok(index) = units.binary_search_by_key(&clicked, |unit| unit.id) else {
+            return;
+        };
+        let blueprint = units[index].blueprint;
+        let viewport = camera.viewport();
+        let same_type = units.iter().filter(|unit| unit.team == team && unit.blueprint == blueprint).filter(|unit| {
+            screen_position(unit, camera).is_some_and(|p| p[0] >= 0.0 && p[0] <= viewport[0] && p[1] >= 0.0 && p[1] <= viewport[1])
+        });
+        if !adding {
+            self.selected.clear();
+        }
+        self.selected.extend(same_type.map(|unit| unit.id));
+        self.selected.sort_unstable();
+        self.selected.dedup();
+    }
+
     /// Replaces the selection directly, for hotkeys and scripted runs. Ids must be sorted.
+    pub fn set_clock(&mut self, seconds: f64) {
+        self.clock = seconds;
+    }
+
     pub fn select(&mut self, ids: Vec<SimId>) {
         self.selected = ids;
     }
@@ -263,6 +304,69 @@ mod tests {
         selection.move_cursor([second[0] + 10.0, second[1] + 10.0]);
         selection.finish_drag(&units, &camera, Team::Blue, true);
         assert_eq!(selection.selected(), [SimId(1), SimId(2)]);
+    }
+
+    /// Blue bots at 1 and 2, a Blue tank at 3, a Red bot at 4, and a Blue bot far off screen at 5.
+    fn mixed_units() -> [UnitView; 5] {
+        let typed = |id: u32, team: Team, blueprint: u16, x: f64| {
+            let mut view = unit(id, team, x, 40_000.0);
+            view.blueprint = blueprint;
+            view
+        };
+        [
+            typed(1, Team::Blue, 7, 40_000.0),
+            typed(2, Team::Blue, 7, 40_050.0),
+            typed(3, Team::Blue, 9, 40_100.0),
+            typed(4, Team::Red, 7, 40_150.0),
+            typed(5, Team::Blue, 7, 79_000.0),
+        ]
+    }
+
+    #[test]
+    fn double_click_selects_that_type_on_screen_only() {
+        let camera = camera();
+        let units = mixed_units();
+        let at = camera.world_to_screen([40_000.0, 40_000.0, 1.0]).unwrap();
+        let mut selection = Selection::default();
+        selection.set_clock(10.0);
+        click(&mut selection, &units, &camera, at, false);
+        assert_eq!(selection.selected(), [SimId(1)], "one click selects one unit");
+        selection.set_clock(10.2);
+        click(&mut selection, &units, &camera, at, false);
+        assert_eq!(selection.selected(), [SimId(1), SimId(2)], "not the tank, the enemy, or the unit off screen");
+    }
+
+    #[test]
+    fn slow_clicks_and_clicks_on_different_units_are_not_a_double_click() {
+        let camera = camera();
+        let units = mixed_units();
+        let first = camera.world_to_screen([40_000.0, 40_000.0, 1.0]).unwrap();
+        let second = camera.world_to_screen([40_050.0, 40_000.0, 1.0]).unwrap();
+        let mut selection = Selection::default();
+        selection.set_clock(10.0);
+        click(&mut selection, &units, &camera, first, false);
+        selection.set_clock(11.0);
+        click(&mut selection, &units, &camera, first, false);
+        assert_eq!(selection.selected(), [SimId(1)], "too slow");
+        selection.set_clock(11.1);
+        click(&mut selection, &units, &camera, second, false);
+        assert_eq!(selection.selected(), [SimId(2)], "a different unit");
+    }
+
+    #[test]
+    fn shift_double_click_adds_the_type_to_the_selection() {
+        let camera = camera();
+        let units = mixed_units();
+        let tank = camera.world_to_screen([40_100.0, 40_000.0, 1.0]).unwrap();
+        let bot = camera.world_to_screen([40_000.0, 40_000.0, 1.0]).unwrap();
+        let mut selection = Selection::default();
+        selection.set_clock(10.0);
+        click(&mut selection, &units, &camera, tank, false);
+        selection.set_clock(11.0);
+        click(&mut selection, &units, &camera, bot, true);
+        selection.set_clock(11.2);
+        click(&mut selection, &units, &camera, bot, true);
+        assert_eq!(selection.selected(), [SimId(1), SimId(2), SimId(3)]);
     }
 
     #[test]

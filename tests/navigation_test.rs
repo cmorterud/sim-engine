@@ -6,6 +6,7 @@ use sim_engine::sim::components::OrderKind;
 use sim_engine::sim::config::{SimConfig, TerrainStyle};
 use sim_engine::sim::scenario::{self, standard_unit};
 use sim_engine::sim::components::Team;
+use sim_engine::math::rect::RectFp as RectRange;
 use sim_engine::sim::world::{SimWorld, UnitSpawn};
 
 fn point(x: i32, y: i32) -> Vec2Fp {
@@ -89,6 +90,82 @@ fn units_sent_one_at_a_time_to_a_shared_point_all_settle() {
     let still_moving = units.iter().filter(|unit| world.unit_order(**unit).unwrap().kind != OrderKind::Idle).count();
     assert_eq!(still_moving, 0, "{still_moving} of 60 units never settled");
     assert_eq!(world.flow_field.route_count(), 0, "finished routes should be freed");
+}
+
+/// Standard units on a flat map, in a loose bunch around a point.
+fn bunch(world: &mut SimWorld, count: i32, x: i32, y: i32) -> Vec<sim_engine::sim::components::SimId> {
+    (0..count)
+        .map(|index| {
+            let spawn = UnitSpawn { radius: fp_int(5), max_speed: fp_int(3), ..standard_unit(Team::Blue, point(x + index % 6 * 25, y + index / 6 * 25)) };
+            world.spawn_unit(spawn)
+        })
+        .collect()
+}
+
+fn run_until_idle(world: &mut SimWorld, units: &[sim_engine::sim::components::SimId], limit: u32) -> usize {
+    for _ in 0..limit {
+        world.advance_tick(&[]);
+        if units.iter().all(|unit| world.unit_order(*unit).unwrap().kind == OrderKind::Idle) {
+            return 0;
+        }
+    }
+    units.iter().filter(|unit| world.unit_order(**unit).unwrap().kind != OrderKind::Idle).count()
+}
+
+#[test]
+fn a_group_order_ends_in_an_orderly_formation_at_the_goal() {
+    let mut world = flat_world();
+    let units = bunch(&mut world, 30, 300, 300);
+    let goal = point(1_500, 1_500);
+    world.advance_tick(&[SimCommand::Move { units: units.clone(), goal }]);
+    assert_eq!(run_until_idle(&mut world, &units, 2_000), 0, "every unit should settle");
+    assert_eq!(world.flow_field.route_count(), 0, "finished routes should be freed");
+
+    let positions: Vec<Vec2Fp> = units.iter().map(|unit| world.unit_position(*unit).unwrap().xy()).collect();
+    // Evenly spread: no blob, and everyone close to a spot 12.5 units from the next.
+    for (index, position) in positions.iter().enumerate() {
+        for other in &positions[index + 1..] {
+            assert!(sqrt_wide(position.distance_squared(other)) >= fp_int(10), "two units ended up {} apart", sqrt_wide(position.distance_squared(other)));
+        }
+        assert!(sqrt_wide(position.distance_squared(&goal)) <= fp_int(80), "a unit ended up far from the goal at {position:?}");
+    }
+    let count = positions.len() as i32;
+    let mean_x: i32 = positions.iter().map(|position| position.x.to_num::<i32>()).sum::<i32>() / count;
+    let mean_y: i32 = positions.iter().map(|position| position.y.to_num::<i32>()).sum::<i32>() / count;
+    assert!((mean_x - 1_500).abs() <= 5 && (mean_y - 1_500).abs() <= 5, "the formation should center on the goal: ({mean_x}, {mean_y})");
+}
+
+#[test]
+fn spots_on_a_wall_move_to_open_ground_and_nobody_gets_stuck() {
+    let mut world = flat_world();
+    let units = bunch(&mut world, 30, 300, 300);
+    let goal = point(1_500, 1_500);
+    // A wall through the middle of where the formation would stand.
+    world.add_box_obstacle(RectRange::new(point(1_400, 1_480), point(1_600, 1_520)));
+    world.advance_tick(&[SimCommand::Move { units: units.clone(), goal }]);
+    assert_eq!(run_until_idle(&mut world, &units, 3_000), 0, "every unit should settle");
+    for unit in &units {
+        assert!(world.terrain.is_passable(world.unit_position(*unit).unwrap().xy()), "a unit is inside the wall");
+    }
+}
+
+#[test]
+fn a_spot_sealed_off_by_walls_cannot_trap_a_group_forever() {
+    let mut world = flat_world();
+    let units = bunch(&mut world, 12, 300, 300);
+    let goal = point(1_500, 1_500);
+    // A box around one end of the formation, with its spots still technically open.
+    world.add_box_obstacle(RectRange::new(point(1_495, 1_420), point(1_505, 1_580)));
+    world.advance_tick(&[SimCommand::AttackMove { units: units.clone(), goal }]);
+    assert_eq!(run_until_idle(&mut world, &units, 3_000), 0, "units must give up on spots they cannot reach");
+}
+
+#[test]
+fn a_single_unit_still_goes_straight_to_the_click() {
+    let mut world = flat_world();
+    let unit = world.spawn_unit(standard_unit(Team::Blue, point(100, 100)));
+    world.advance_tick(&[SimCommand::Move { units: vec![unit], goal: point(300, 100) }]);
+    assert_eq!(world.unit_order(unit).unwrap().slot, None);
 }
 
 #[test]

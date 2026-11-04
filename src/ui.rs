@@ -13,6 +13,7 @@ use crate::sim::world::{MatchResult, PlanStepKind, SimSnapshot, UnitView};
 
 /// Trails are capped so that a large selection stays readable and cheap to draw.
 const MAX_TRAIL_UNITS: usize = 64;
+const ALL_ORDERS_UNIT_LIMIT: usize = 256;
 const TRAIL_OPACITY: f32 = 0.85;
 /// Rally lines are dimmer: they are a standing setting, not something under way.
 const RALLY_OPACITY: f32 = 0.5;
@@ -452,6 +453,25 @@ fn trail_marker_kind(kind: PlanStepKind) -> MarkerKind {
 /// Works out the trails for the selected units. Each one starts at the unit, drawn where
 /// the unit appears between ticks, and runs through its pending orders in sequence.
 pub fn build_trails(previous: &SimSnapshot, current: &SimSnapshot, alpha: f64, selected: &[SimId]) -> Vec<TrailLeg> {
+    trails_for(previous, current, alpha, selected, MAX_TRAIL_UNITS)
+}
+
+/// Trails for every other unit with pending orders, for while Shift is held.
+/// `strength` runs from 1 down to 0 as they fade out afterwards.
+pub fn other_units_trails(previous: &SimSnapshot, current: &SimSnapshot, alpha: f64, selected: &[SimId], strength: f32) -> Vec<TrailLeg> {
+    let mut ids: Vec<SimId> = current.plans.iter().map(|plan| plan.id).collect();
+    ids.extend(current.factories.iter().filter(|factory| factory.rally.is_some()).map(|factory| factory.id));
+    ids.sort_unstable();
+    ids.dedup();
+    ids.retain(|id| !selected.contains(id));
+    let mut legs = trails_for(previous, current, alpha, &ids, ALL_ORDERS_UNIT_LIMIT);
+    for leg in &mut legs {
+        leg.opacity *= strength;
+    }
+    legs
+}
+
+fn trails_for(previous: &SimSnapshot, current: &SimSnapshot, alpha: f64, selected: &[SimId], limit: usize) -> Vec<TrailLeg> {
     let raw = |value: i32| f64::from(value) / 4096.0;
     let mut legs = Vec::new();
     let mut units_drawn = 0;
@@ -475,7 +495,7 @@ pub fn build_trails(previous: &SimSnapshot, current: &SimSnapshot, alpha: f64, s
         let Ok(index) = current.plans.binary_search_by_key(&id, |plan| plan.id) else {
             continue;
         };
-        if units_drawn == MAX_TRAIL_UNITS {
+        if units_drawn == limit {
             continue;
         }
         units_drawn += 1;
@@ -522,6 +542,23 @@ pub fn order_trails(ctx: &egui::Context, camera: &Camera, legs: &[TrailLeg], pix
         if leg.number > 0 {
             painter.text(end + Vec2::new(6.0, -6.0), Align2::LEFT_BOTTOM, leg.number.to_string(), FontId::proportional(14.0), Color32::WHITE.gamma_multiply(leg.opacity));
         }
+    }
+}
+
+/// Marks where an extractor can go while placing one, since deposits are small from far away.
+pub fn deposit_highlights(ctx: &egui::Context, camera: &Camera, free: &[[f64; 3]], target: Option<[f64; 3]>, pixels_per_point: f32) {
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    let color = marker_color(MarkerKind::Build);
+    let to_points = |world: [f64; 3]| {
+        camera.world_to_screen(world).map(|pixels| Pos2::new(pixels[0] as f32 / pixels_per_point, pixels[1] as f32 / pixels_per_point))
+    };
+    for &deposit in free {
+        if let Some(center) = to_points(deposit) {
+            painter.circle_stroke(center, 9.0, Stroke::new(1.5_f32, color.gamma_multiply(0.7)));
+        }
+    }
+    if let Some(center) = target.and_then(to_points) {
+        painter.circle_stroke(center, 13.0, Stroke::new(2.5_f32, color));
     }
 }
 
@@ -884,6 +921,18 @@ mod tests {
         assert_eq!(to, [100.0, 200.0, 300.0]);
         let numbers: Vec<usize> = legs.iter().map(|leg| leg.number).collect();
         assert_eq!(numbers, [1, 2, 3]);
+    }
+
+    #[test]
+    fn shift_view_covers_every_other_unit_and_fades() {
+        let plan = |id: u32| UnitPlanView { id: SimId(id), steps: vec![step(PlanStepKind::Move, 100.0, 0.0)] };
+        let factory = FactoryView { id: SimId(3), queue: vec![], repeat: false, progress_permille: 0, rally: Some([raw(500.0), 0, 0]) };
+        let mut current = snapshot(vec![unit(1, 0.0), unit(2, 0.0), unit(3, 0.0), unit(4, 0.0)], vec![plan(1), plan(2)]);
+        current.factories = vec![factory];
+        let legs = other_units_trails(&current, &current, 1.0, &[SimId(1)], 0.5);
+        assert_eq!(legs.len(), 2, "the unselected unit and the factory, but not the selected unit or the idle one");
+        let walker = legs.iter().find(|leg| leg.kind == MarkerKind::Move).unwrap();
+        assert!((walker.opacity - TRAIL_OPACITY * 0.5).abs() < 1e-6);
     }
 
     #[test]

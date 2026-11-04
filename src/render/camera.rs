@@ -65,6 +65,7 @@ pub struct Camera {
     ground: f64,
     altitude: f64,
     target_altitude: f64,
+    min_altitude: f64,
     max_altitude: f64,
     zoom_anchor: Option<[f64; 2]>,
 }
@@ -79,6 +80,7 @@ impl Camera {
             ground: 0.0,
             altitude: 400.0,
             target_altitude: 400.0,
+            min_altitude: MIN_ALTITUDE,
             max_altitude: map_units * ALTITUDE_PER_MAP_UNIT,
             zoom_anchor: None,
         }
@@ -86,6 +88,16 @@ impl Camera {
 
     pub const fn altitude(&self) -> f64 {
         self.altitude
+    }
+
+    pub const fn min_altitude(&self) -> f64 {
+        self.min_altitude
+    }
+
+    /// Limits how close the camera can get. Pitch still follows altitude on the same curve.
+    pub fn set_min_altitude(&mut self, altitude: f64) {
+        self.min_altitude = altitude;
+        self.set_altitude(self.altitude);
     }
 
     pub const fn max_altitude(&self) -> f64 {
@@ -107,13 +119,13 @@ impl Camera {
     }
 
     pub fn set_altitude(&mut self, altitude: f64) {
-        self.altitude = altitude.clamp(MIN_ALTITUDE, self.max_altitude);
+        self.altitude = altitude.clamp(self.min_altitude, self.max_altitude);
         self.target_altitude = self.altitude;
     }
 
     /// One scroll step. Positive is in. The world point under `anchor` stays under the cursor.
     pub fn zoom(&mut self, steps: f64, anchor: Option<[f64; 2]>) {
-        self.target_altitude = (self.target_altitude * ZOOM_STEP.powf(-steps)).clamp(MIN_ALTITUDE, self.max_altitude);
+        self.target_altitude = (self.target_altitude * ZOOM_STEP.powf(-steps)).clamp(self.min_altitude, self.max_altitude);
         self.zoom_anchor = anchor;
     }
 
@@ -129,7 +141,7 @@ impl Camera {
         let before = self.altitude;
         let blend = 1.0 - (-ZOOM_RATE * dt).exp();
         let log_altitude = before.ln() + (self.target_altitude.ln() - before.ln()) * blend;
-        self.altitude = log_altitude.exp().clamp(MIN_ALTITUDE, self.max_altitude);
+        self.altitude = log_altitude.exp().clamp(self.min_altitude, self.max_altitude);
         if let Some(anchor) = self.zoom_anchor {
             let keep = 1.0 - self.altitude / before;
             self.focus[0] = (self.focus[0] + (anchor[0] - self.focus[0]) * keep).clamp(0.0, self.map_units);
@@ -235,6 +247,21 @@ mod tests {
             let p = camera.world_to_screen(corner).unwrap();
             assert!(p[0] >= 0.0 && p[0] <= 1000.0 && p[1] >= 0.0 && p[1] <= 1000.0, "{corner:?} is at {p:?}");
         }
+    }
+
+    #[test]
+    fn the_zoom_limit_stops_scrolling_and_jumps() {
+        let heights = flat();
+        let mut camera = Camera::new(10_240.0, [1000.0, 800.0]);
+        camera.set_min_altitude(130.0);
+        camera.look_at(5_000.0, 5_000.0, 5.0);
+        assert_eq!(camera.altitude(), 130.0);
+        camera.set_altitude(500.0);
+        camera.zoom(100.0, None);
+        for _ in 0..300 {
+            camera.update(1.0 / 60.0, &heights);
+        }
+        assert!((camera.altitude() - 130.0).abs() < 1e-6, "scrolled to {}", camera.altitude());
     }
 
     #[test]

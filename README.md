@@ -16,14 +16,16 @@ cargo run --release -- --battle  # The 5,000-unit stress test
 Destroy the enemy commander to win. Yours explodes if it dies, and your whole team goes with it.
 
 1. Press Space to select your commander. Choose a structure from the bottom panel, then left-click the ground to place it.
-2. Mass extractors go on the teal deposits. Power generators supply energy. Land factories build units.
+2. Mass extractors go on the teal deposits, and snap to the nearest free one near the cursor. Power generators supply energy. Land factories build units.
 3. Click a factory to queue units. Right-click the ground with a factory selected to set its rally point. With several factories selected, every order goes to all of them that can follow it.
 4. If the top bar says STALL, you are spending faster than you earn, and everything slows down.
 
 | Control | Action |
 | :--- | :--- |
 | Left-drag or click | Select your units |
+| Double-click | Select all your units of that type on screen |
 | Shift + click or drag | Add to the selection, and click again to remove a unit |
+| Hold Shift | Show every unit's pending orders, which fade after you let go |
 | Right-click | Attack an enemy, assist or repair a friend, reclaim a wreck, move, or set a rally point |
 | F, then left-click | Attack-move: stop to fire when enemies are in range |
 | Alt + right-click | Attack-move, as above |

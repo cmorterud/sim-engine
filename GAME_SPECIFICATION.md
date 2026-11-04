@@ -257,6 +257,10 @@ Units are not static; as they destroy hostile forces, they accumulate experience
 * Prevents fast scouts from sprinting ahead and dying piecemeal before heavy fire support arrives.
 * Giving a non-formation move order breaks the lock, letting fast units sprint at maximum speed.
 
+**Status:** Today, a group order ends in an orderly grid centered on the goal, but each unit travels to it on its own, at its own speed (§18.4).
+
+**Planned:** Formation travel, where a group keeps its orderly shape all the way to its destination, rather than only forming up on arrival. This builds on the speed lock above.
+
 ### 13.2 Automated Patrol Loops
 Issuing a `Patrol` order across waypoints turns units into automated patrol guardians:
 * **Combat Units:** Patrol the route, automatically engage enemies within sensory range, pursue within a leash radius, and return to the patrol loop.
@@ -390,7 +394,8 @@ These are starting points for tuning, recorded because they interpret or adjust 
 * **Friendly Fire:** A shell ignores allies until it reaches its aim point, so that rear ranks can fire through front ranks. Rounds that overshoot can hit allies, and splash damages everyone, which keeps the stray rounds and artillery spread of §7.1.
 * **Fog of War:** Sight is a simple radius, not blocked by terrain. Units cannot target what their team cannot see. Structures are not remembered once out of sight.
 * **Upkeep:** Nothing in the slice has an energy upkeep, so an energy stall only slows building. Sensor and shield effects from §3.2 arrive with those systems.
-* **Left for Later:** The Overcharge cannon (§2.1), production pausing (§3.2), and trees and rocks as reclaim (§6.1) are not in the slice. Formations (§13.1) are also not in the slice.
+* **Arrival Formations:** A group ordered to a location forms a grid about twice as wide as it is deep, centered on the goal and lined up across the direction of travel. Units follow a shared route, then walk to their own spots, with a time limit so that a blocked spot cannot trap a unit.
+* **Left for Later:** The Overcharge cannon (§2.1), production pausing (§3.2), trees and rocks as reclaim (§6.1), and formation travel (§13.1) are not in the slice.
 
 ---
 

@@ -7,6 +7,7 @@ pub mod commands;
 pub mod components;
 pub mod config;
 pub mod flowfield;
+pub mod formation;
 pub mod production;
 pub mod scenario;
 pub mod spatial;

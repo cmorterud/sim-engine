@@ -103,10 +103,14 @@ pub struct Order {
     pub kind: OrderKind,
     /// Flow field route. Meaningless when `kind` is `Idle`.
     pub route: u32,
+    /// This unit's spot in its group's arrival formation.
+    pub slot: Option<Vec2Fp>,
+    /// How long it may spend walking to its spot, so that a blocked spot cannot trap it.
+    pub slot_ticks: u32,
 }
 
 impl Order {
-    pub const IDLE: Self = Self { kind: OrderKind::Idle, route: 0 };
+    pub const IDLE: Self = Self { kind: OrderKind::Idle, route: 0, slot: None, slot_ticks: 0 };
 }
 
 /// Marks a unit made from a blueprint. PoC stress-test units have none.

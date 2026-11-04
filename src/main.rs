@@ -8,10 +8,12 @@ use std::time::{Duration, Instant};
 use sim_engine::ai::{advance_ai_vs_ai, AiBrain};
 use sim_engine::driver::{CommandSource, DriverOptions, DriverResult, SimDriver, TICK_DURATION};
 use sim_engine::input::feedback::{MarkerKind, OrderFeedback};
-use sim_engine::input::orders::{line_cells, pending_builds, placement_cell, placement_is_valid, right_click_orders, PlacementMap, RightClick};
+use sim_engine::input::orders::{
+    deposit_position, free_deposits, line_cells, pending_builds, placement_cell, placement_is_valid, placement_target, right_click_orders, PlacementMap, RightClick,
+};
 use sim_engine::input::selection::Selection;
 use sim_engine::math::fp::{Fp, Vec2Fp};
-use sim_engine::render::camera::{Camera, HeightField, MIN_ALTITUDE};
+use sim_engine::render::camera::{Camera, HeightField};
 use sim_engine::render::instances::{self, Headings, InstanceBatches};
 use sim_engine::render::meshes::Shape;
 use sim_engine::render::pipeline::{FrameScene, Renderer, UiFrame};
@@ -40,6 +42,10 @@ const DROPPED_FRAME_MS: f64 = 25.0;
 /// Height of each wall segment. Deep enough to reach below the terrain's raised samples.
 const OBSTACLE_DRAW_HEIGHT: f64 = 18.0;
 const STARTING_ALTITUDE: f64 = 900.0;
+/// How close the camera can get in a skirmish. Stress test units are far smaller, and keep the camera's own limit.
+const SKIRMISH_MIN_ALTITUDE: f64 = 130.0;
+/// How long the Shift view of everyone's orders takes to fade after letting go, in seconds.
+const ORDERS_FADE_SECONDS: f64 = 1.0;
 
 const USAGE: &str = "\
 Usage: sim-engine [options]
@@ -57,7 +63,9 @@ Usage: sim-engine [options]
 
 Controls:
   Left-drag or click   Select your units
+  Double-click         Select all your units of that type on screen
   Shift + click        Add a unit to the selection, or remove it
+  Shift (hold)         Show every unit's pending orders
   Shift + drag         Add a box of units to the selection
   Right-click          Attack an enemy, assist or repair a friend, reclaim a wreck,
                        move to the ground, or set a factory's rally point
@@ -196,9 +204,9 @@ impl Autotest {
     }
 
     /// Zooms from the minimum to the maximum altitude and back over the whole run.
-    fn altitude_at(progress: f64, max_altitude: f64) -> f64 {
+    fn altitude_at(progress: f64, min_altitude: f64, max_altitude: f64) -> f64 {
         let sweep = 1.0 - (progress * 2.0 - 1.0).abs();
-        (MIN_ALTITUDE.ln() + (max_altitude.ln() - MIN_ALTITUDE.ln()) * sweep).exp()
+        (min_altitude.ln() + (max_altitude.ln() - min_altitude.ln()) * sweep).exp()
     }
 
     fn report(&mut self, result: DriverResult) {
@@ -475,6 +483,7 @@ fn run_windowed(seed: u64, options: Options) {
     let mut renderer = Renderer::new(Arc::clone(&window), &map.heights, map.fog_side);
     let mut camera = Camera::new(map.map_units, [f64::from(size.width), f64::from(size.height)]);
     if is_match {
+        camera.set_min_altitude(SKIRMISH_MIN_ALTITUDE);
         let start = skirmish_start(PLAYER_TEAM);
         camera.look_at(raw_to_world(start.x.to_bits()), raw_to_world(start.y.to_bits()), STARTING_ALTITUDE);
     }
@@ -493,6 +502,8 @@ fn run_windowed(seed: u64, options: Options) {
     let mut attack_move_armed = false;
     // Where a Shift-drag row of structures began, while the button is held.
     let mut line_start: Option<(u32, u32)> = None;
+    let mut orders_view_strength = 0.0_f32;
+    let clock = Instant::now();
     let mut feedback = OrderFeedback::default();
     let mut patrol_points: Vec<Vec2Fp> = Vec::new();
     let mut patrol_held = false;
@@ -535,14 +546,17 @@ fn run_windowed(seed: u64, options: Options) {
                     }
                     WindowEvent::MouseInput { state: ElementState::Released, button: MouseButton::Left, .. } => {
                         if let (Some(start), Some(blueprint)) = (line_start.take(), placing) {
-                            let footprint = map.blueprints.get(blueprint).footprint;
+                            let unit = map.blueprints.get(blueprint);
+                            let footprint = unit.footprint;
                             let end = camera.screen_to_ground(selection.cursor(), &map.heights).map_or(start, |ground| placement_cell(ground, footprint));
-                            let cells = line_cells(start, end, footprint);
+                            // Deposits are never in a row, so an extractor stays where it snapped.
+                            let cells = if unit.requires_deposit { vec![start] } else { line_cells(start, end, footprint) };
                             let placed = place_structures(&session, &selection, &map, &mut feedback, blueprint, &cells, true);
                             if placed && !shift_held {
                                 placing = None;
                             }
                         }
+                        selection.set_clock(clock.elapsed().as_secs_f64());
                         selection.finish_drag(&session.current.units, &camera, PLAYER_TEAM, shift_held);
                     }
                     WindowEvent::MouseInput { state: ElementState::Pressed, button, .. } if !response.consumed => match button {
@@ -551,8 +565,20 @@ fn run_windowed(seed: u64, options: Options) {
                                 attack_move_armed = false;
                                 issue_click_orders(&session, &selection, &camera, &map, &mut feedback, true);
                             } else if let Some(blueprint) = placing {
-                                if let Some(point) = camera.screen_to_ground(selection.cursor(), &map.heights) {
-                                    let cell = placement_cell(point, map.blueprints.get(blueprint).footprint);
+                                let ground = camera.screen_to_ground(selection.cursor(), &map.heights);
+                                let pending = pending_builds(&session.current);
+                                let target = placement_target(
+                                    &map.placement_map(),
+                                    blueprint,
+                                    selection.cursor(),
+                                    ground,
+                                    &camera,
+                                    &map.heights,
+                                    &session.current.units,
+                                    &pending,
+                                    window.scale_factor(),
+                                );
+                                if let Some(cell) = target {
                                     if shift_held {
                                         // Placed on release, as one building or a row if the mouse moved.
                                         line_start = Some(cell);
@@ -680,7 +706,7 @@ fn run_windowed(seed: u64, options: Options) {
                         if let Some(test) = autotest.as_mut() {
                             let started = *test.started.get_or_insert(now);
                             let fraction = ((now - started).as_secs_f64() / test.duration.as_secs_f64()).min(1.0);
-                            camera.set_altitude(Autotest::altitude_at(fraction, camera.max_altitude()));
+                            camera.set_altitude(Autotest::altitude_at(fraction, camera.min_altitude(), camera.max_altitude()));
                             progress = Some(fraction);
                             if is_match && !autotest_selected {
                                 if let Some(commander) = commander_of(&session.current, &map.blueprints) {
@@ -725,10 +751,16 @@ fn run_windowed(seed: u64, options: Options) {
                                 }
                                 demo_snapshot = Some(Arc::new(snapshot));
                                 // Place a generator at the middle of the screen, to show the preview and grid.
-                                placing = Some(map.blueprints.id("power_generator"));
                                 selection.move_cursor([camera.viewport()[0] * 0.55, camera.viewport()[1] * 0.3]);
-                                let anchor = [camera.viewport()[0] * 0.3, camera.viewport()[1] * 0.3];
-                                line_start = camera.screen_to_ground(anchor, &map.heights).map(|ground| placement_cell(ground, 1));
+                                if fraction >= 0.4 {
+                                    // Zoomed out, show how extractors find deposits.
+                                    placing = Some(map.blueprints.id("mass_extractor"));
+                                    line_start = None;
+                                } else {
+                                    placing = Some(map.blueprints.id("power_generator"));
+                                    let anchor = [camera.viewport()[0] * 0.3, camera.viewport()[1] * 0.3];
+                                    line_start = camera.screen_to_ground(anchor, &map.heights).map(|ground| placement_cell(ground, 1));
+                                }
                                 let kinds = [
                                     MarkerKind::Move,
                                     MarkerKind::AttackMove,
@@ -754,16 +786,40 @@ fn run_windowed(seed: u64, options: Options) {
                         let snapshot = demo_snapshot.unwrap_or_else(|| Arc::clone(&session.current));
                         let selected = selection.selected().to_vec();
                         let trails = if is_match { ui::build_trails(&session.previous, &snapshot, alpha, &selected) } else { Vec::new() };
+                        orders_view_strength = if shift_held {
+                            1.0
+                        } else {
+                            (f64::from(orders_view_strength) - dt / ORDERS_FADE_SECONDS).max(0.0) as f32
+                        };
+                        let mut trails = trails;
+                        if is_match && orders_view_strength > 0.0 {
+                            trails.extend(ui::other_units_trails(&session.previous, &snapshot, alpha, &selected, orders_view_strength));
+                        }
                         let pending = pending_builds(&snapshot);
-                        let grid_lines = placing
-                            .and_then(|blueprint| {
-                                let ground = camera.screen_to_ground(selection.cursor(), &map.heights)?;
-                                let cell = placement_cell(ground, map.blueprints.get(blueprint).footprint);
-                                Some(ui::placement_grid_lines(cell, f64::from(TERRAIN_CELL_UNITS), map.heights.height_at(ground[0], ground[1]), map.cells_per_side))
+                        let cursor_ground = camera.screen_to_ground(selection.cursor(), &map.heights);
+                        let placement_spot = placing.and_then(|blueprint| {
+                            placement_target(&map.placement_map(), blueprint, selection.cursor(), cursor_ground, &camera, &map.heights, &snapshot.units, &pending, window.scale_factor())
+                        });
+                        let grid_lines = placement_spot
+                            .map(|cell| {
+                                let height = deposit_position(cell, &map.heights)[2];
+                                ui::placement_grid_lines(cell, f64::from(TERRAIN_CELL_UNITS), height, map.cells_per_side)
                             })
                             .unwrap_or_default();
+                        // While placing an extractor, mark the deposits it can go on.
+                        let extractor = placing.filter(|blueprint| map.blueprints.get(*blueprint).requires_deposit);
+                        let open_deposits: Vec<[f64; 3]> = extractor.map_or_else(Vec::new, |blueprint| {
+                            free_deposits(&map.placement_map(), blueprint, &snapshot.units, &pending)
+                                .into_iter()
+                                .map(|cell| deposit_position(cell, &map.heights))
+                                .collect()
+                        });
+                        let snapped_deposit = placement_spot
+                            .filter(|cell| extractor.is_some() && map.deposits.contains(cell))
+                            .map(|cell| deposit_position(cell, &map.heights));
                         let output = egui_context.run(raw_input, |ctx| {
                             ui::placement_grid(ctx, &camera, &grid_lines, f64::from(TERRAIN_CELL_UNITS), pixels_per_point);
+                            ui::deposit_highlights(ctx, &camera, &open_deposits, snapped_deposit, pixels_per_point);
                             ui::pending_build_outlines(ctx, &camera, &pending, pixels_per_point);
                             ui::distant_selection_markers(ctx, &camera, &snapshot, &selected, pixels_per_point);
                             ui::order_trails(ctx, &camera, &trails, pixels_per_point);
@@ -856,11 +912,14 @@ fn run_windowed(seed: u64, options: Options) {
                             scene_instances.push(Shape::Wreck, instances::wreck_instance(center, raw_to_world(wreck.radius), eye));
                         }
                         if let Some(blueprint) = placing {
-                            if let Some(ground) = camera.screen_to_ground(selection.cursor(), &map.heights) {
+                            if let Some(spot) = placement_spot {
                                 let unit = map.blueprints.get(blueprint);
-                                let spot = placement_cell(ground, unit.footprint);
-                                // While Shift-dragging, preview the whole row.
-                                let spots = line_start.map_or_else(|| vec![spot], |start| line_cells(start, spot, unit.footprint));
+                                // While Shift-dragging, preview the whole row. Extractors stay where they snapped.
+                                let spots = match line_start {
+                                    Some(start) if unit.requires_deposit => vec![start],
+                                    Some(start) => line_cells(start, spot, unit.footprint),
+                                    None => vec![spot],
+                                };
                                 let queued = pending_builds(current);
                                 let width = f64::from(unit.footprint) * cell;
                                 for spot in spots {

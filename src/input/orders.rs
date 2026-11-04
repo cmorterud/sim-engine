@@ -3,7 +3,7 @@
 
 use super::selection::{nearest_unit, order_command};
 use crate::math::fp::{Fp, Vec2Fp};
-use crate::render::camera::Camera;
+use crate::render::camera::{Camera, HeightField};
 use crate::sim::blueprints::{BlueprintDb, BlueprintId};
 use crate::sim::commands::SimCommand;
 use crate::sim::components::{SimId, Team};
@@ -140,6 +140,54 @@ pub fn placement_cell(ground: [f64; 2], footprint: u8) -> (u32, u32) {
     let offset = f64::from(footprint) * 0.5;
     let corner = |value: f64| (value / cell - offset + 0.5).floor().max(0.0) as u32;
     (corner(ground[0]), corner(ground[1]))
+}
+
+/// How far from the cursor, in points on screen, an extractor will snap to a free deposit.
+const DEPOSIT_SNAP_POINTS: f64 = 40.0;
+
+/// The middle of a cell on the ground, as a world position.
+pub fn deposit_position(cell: (u32, u32), heights: &HeightField) -> [f64; 3] {
+    let cell_units = f64::from(TERRAIN_CELL_UNITS);
+    let (x, y) = ((f64::from(cell.0) + 0.5) * cell_units, (f64::from(cell.1) + 0.5) * cell_units);
+    [x, y, heights.height_at(x, y)]
+}
+
+/// The deposits a new extractor could go on right now.
+pub fn free_deposits(map: &PlacementMap<'_>, blueprint: BlueprintId, units: &[UnitView], pending: &[PendingBuild]) -> Vec<(u32, u32)> {
+    map.deposits.iter().copied().filter(|cell| placement_is_valid(map, blueprint, *cell, units, pending)).collect()
+}
+
+/// Where a structure would go for this cursor position. Structures that need a deposit snap to
+/// the nearest free one on screen, so that the reach is the same however far out the camera is.
+#[allow(clippy::too_many_arguments)]
+pub fn placement_target(
+    map: &PlacementMap<'_>,
+    blueprint: BlueprintId,
+    cursor: [f64; 2],
+    ground: Option<[f64; 2]>,
+    camera: &Camera,
+    heights: &HeightField,
+    units: &[UnitView],
+    pending: &[PendingBuild],
+    pixels_per_point: f64,
+) -> Option<(u32, u32)> {
+    let unit = map.blueprints.get(blueprint);
+    if unit.requires_deposit {
+        let reach = DEPOSIT_SNAP_POINTS * pixels_per_point;
+        let mut best: Option<(f64, (u32, u32))> = None;
+        for cell in free_deposits(map, blueprint, units, pending) {
+            if let Some(screen) = camera.world_to_screen(deposit_position(cell, heights)) {
+                let distance = (screen[0] - cursor[0]).hypot(screen[1] - cursor[1]);
+                if distance <= reach && best.is_none_or(|(closest, _)| distance < closest) {
+                    best = Some((distance, cell));
+                }
+            }
+        }
+        if let Some((_, cell)) = best {
+            return Some(cell);
+        }
+    }
+    ground.map(|ground| placement_cell(ground, unit.footprint))
 }
 
 /// The longest row a single Shift-drag can lay out.
@@ -414,6 +462,62 @@ mod tests {
         assert!(placement_is_valid(&map, extractor, (20, 20), &existing, &[]));
         assert!(!placement_is_valid(&map, extractor, (21, 20), &existing, &[]), "off a deposit");
         assert!(!placement_is_valid(&map, factory, (510, 100), &existing, &[]), "off the map");
+    }
+
+    fn flat_heights() -> HeightField {
+        HeightField::new(513, vec![0; 513 * 513], 20.0, 1.0 / 16.0)
+    }
+
+    #[test]
+    fn extractors_snap_to_the_nearest_free_deposit_at_any_zoom() {
+        let db = db();
+        let extractor = db.id("mass_extractor");
+        let heights = flat_heights();
+        let deposits = [(100, 100), (110, 100), (140, 100)];
+        let map = PlacementMap { cells_per_side: 512, blocked_cells: &[], deposits: &deposits, blueprints: &db };
+        let target_at = |camera: &Camera, offset_px: f64| {
+            let screen = camera.world_to_screen(deposit_position((100, 100), &heights)).unwrap();
+            let cursor = [screen[0] + offset_px, screen[1]];
+            placement_target(&map, extractor, cursor, camera.screen_to_ground(cursor, &heights), camera, &heights, &[], &[], 1.0)
+        };
+        for altitude in [200.0, 1_000.0, 6_000.0] {
+            let mut camera = Camera::new(10_240.0, [1600.0, 1000.0]);
+            camera.look_at(2_000.0, 2_000.0, altitude);
+            assert_eq!(target_at(&camera, -25.0), Some((100, 100)), "25 pixels off at altitude {altitude}");
+        }
+        // Close in, a cursor far from every deposit does not snap.
+        let mut camera = Camera::new(10_240.0, [1600.0, 1000.0]);
+        camera.look_at(2_000.0, 2_000.0, 200.0);
+        assert!(!deposits.contains(&target_at(&camera, -300.0).unwrap()));
+    }
+
+    #[test]
+    fn extractors_skip_deposits_that_are_taken_or_already_queued() {
+        let db = db();
+        let extractor = db.id("mass_extractor");
+        let heights = flat_heights();
+        let deposits = [(100, 100), (102, 100)];
+        let map = PlacementMap { cells_per_side: 512, blocked_cells: &[], deposits: &deposits, blueprints: &db };
+        let mut camera = Camera::new(10_240.0, [1600.0, 1000.0]);
+        camera.look_at(2_000.0, 2_000.0, 1_500.0);
+        let cursor = camera.world_to_screen(deposit_position((100, 100), &heights)).unwrap();
+        let target = |pending: &[PendingBuild]| placement_target(&map, extractor, cursor, None, &camera, &heights, &[], pending, 1.0);
+        assert_eq!(target(&[]), Some((100, 100)));
+        let queued = deposit_position((100, 100), &heights);
+        assert_eq!(target(&[PendingBuild { center: queued, width: 20.0 }]), Some((102, 100)), "the queued one is taken");
+    }
+
+    #[test]
+    fn other_structures_do_not_snap_to_deposits() {
+        let db = db();
+        let generator = db.id("power_generator");
+        let heights = flat_heights();
+        let deposits = [(100, 100)];
+        let map = PlacementMap { cells_per_side: 512, blocked_cells: &[], deposits: &deposits, blueprints: &db };
+        let mut camera = Camera::new(10_240.0, [1600.0, 1000.0]);
+        camera.look_at(2_000.0, 2_000.0, 300.0);
+        let target = placement_target(&map, generator, [800.0, 500.0], Some([2_030.0, 2_010.0]), &camera, &heights, &[], &[], 1.0);
+        assert_eq!(target, Some(placement_cell([2_030.0, 2_010.0], 1)));
     }
 
     #[test]

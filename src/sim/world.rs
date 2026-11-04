@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::hash::Hasher;
 use std::sync::Arc;
 use twox_hash::XxHash64;
@@ -12,16 +12,20 @@ use super::components::{
 };
 use super::config::{SimConfig, TARGET_SEARCH_INTERVAL, TERRAIN_CELL_UNITS, WRECK_MASS_PERMILLE};
 use super::flowfield::{nearest_passable_cell, FlowField, FlowSample};
+use super::formation::plan_formation;
 use super::production::Economy;
 use super::spatial::{GridUnit, Layer, SpatialGrid};
 use super::terrain::Terrain;
 use super::visibility::{Visibility, VISION_REFRESH_TICKS};
-use crate::math::fp::{wide_mul, Fp, Vec2Fp, Vec3Fp, FP_FRAC_BITS};
+use crate::math::fp::{sqrt_wide, wide_mul, Fp, Vec2Fp, Vec3Fp, FP_FRAC_BITS};
 use crate::math::rect::RectFp;
 use crate::math::rng::SimRng;
 
 /// How far from a goal, in unit radii, a moving unit can settle against a crowd.
 const CROWD_SETTLE_RADII: i32 = 30;
+/// The gap between formation spots, in halves of the largest unit's radius.
+const FORMATION_SPACING_RADII: i32 = 5;
+const SLOT_EXTRA_TICKS: i64 = 40;
 
 /// Settings for spawning a unit.
 #[derive(Copy, Clone, Debug)]
@@ -438,13 +442,22 @@ impl SimWorld {
     }
 
     pub(super) fn assign_route(&mut self, units: &[SimId], kind: OrderKind, goal: Vec2Fp, follow: Option<SimId>) {
+        // Keeps the order given, because units take their orders in that order.
+        let mut seen = BTreeSet::new();
         let mut members = Vec::with_capacity(units.len());
+        let mut walkers = Vec::with_capacity(units.len());
         let mut largest_radius = 0;
         for &id in units {
             if let Some((_, entity)) = self.find_unit(id) {
+                if !seen.insert(id) {
+                    continue;
+                }
                 members.push(id);
                 let stats = self.ecs.get::<&UnitStats>(entity).expect("units have stats");
                 largest_radius = largest_radius.max(stats.radius.to_bits());
+                if !stats.is_structure {
+                    walkers.push((id, self.ecs.get::<&Position>(entity).expect("units have positions").0.xy(), stats.max_speed));
+                }
             }
         }
         if members.is_empty() {
@@ -452,7 +465,22 @@ impl SimWorld {
         }
         // Large groups stop further out, because they cannot all fit at the goal.
         let spread = (members.len() as u64).isqrt().max(1) as i64;
-        let arrive_radius = Fp::from_bits((i64::from(largest_radius) * spread * 6 / 5) as i32);
+        let mut arrive_radius = Fp::from_bits((i64::from(largest_radius) * spread * 6 / 5) as i32);
+
+        // A group ordered to a place ends up in a formation there.
+        let mut slots: Vec<(SimId, Vec2Fp, u32)> = Vec::new();
+        if follow.is_none() && matches!(kind, OrderKind::Move | OrderKind::AttackMove) && walkers.len() >= 2 {
+            let positions: Vec<(SimId, Vec2Fp)> = walkers.iter().map(|&(id, position, _)| (id, position)).collect();
+            let spacing = Fp::from_bits(largest_radius * FORMATION_SPACING_RADII / 2);
+            let formation = plan_formation(&positions, goal, spacing);
+            arrive_radius = formation.approach_radius;
+            for (&(id, _, speed), &slot) in walkers.iter().zip(&formation.slots) {
+                let slot = self.nearest_open_point(slot);
+                // Time to cross the whole approach twice, plus a margin for crowding.
+                let crossing = i64::from(arrive_radius.to_bits()) * 4 / i64::from(speed.to_bits().max(1));
+                slots.push((id, slot, (crossing + SLOT_EXTRA_TICKS).min(i64::from(u32::MAX)) as u32));
+            }
+        }
         let Some(route) = self.flow_field.create_route(
             &self.terrain,
             self.current_tick,
@@ -463,9 +491,26 @@ impl SimWorld {
         ) else {
             return;
         };
+        slots.sort_unstable_by_key(|slot| slot.0);
         for id in members {
-            self.set_order(id, Order { kind, route });
+            let (slot, slot_ticks) = slots
+                .binary_search_by_key(&id, |slot| slot.0)
+                .map_or((None, 0), |index| (Some(slots[index].1), slots[index].2));
+            self.set_order(id, Order { kind, route, slot, slot_ticks });
         }
+    }
+
+    /// The point itself if it can be walked on and is on the map, or else the nearest open cell's center.
+    fn nearest_open_point(&self, point: Vec2Fp) -> Vec2Fp {
+        let max = self.terrain.max_coordinate_raw();
+        let inside = Vec2Fp::new(Fp::from_bits(point.x.to_bits().clamp(0, max)), Fp::from_bits(point.y.to_bits().clamp(0, max)));
+        if self.terrain.is_passable(inside) {
+            return inside;
+        }
+        nearest_passable_cell(&self.terrain, inside).map_or(inside, |(x, y)| {
+            let center = |cell: usize| Fp::from_bits((cell as i32 * TERRAIN_CELL_UNITS + TERRAIN_CELL_UNITS / 2) << FP_FRAC_BITS);
+            Vec2Fp::new(center(x), center(y))
+        })
     }
 
     pub fn rebuild_grid(&mut self) {
@@ -534,12 +579,32 @@ impl SimWorld {
                 let goal = flow.goal(order.route).unwrap_or(here);
                 let arrive_radius = flow.arrive_radius(order.route).unwrap_or(Fp::ZERO);
                 let arrived = here.distance_squared(&goal) <= wide_mul(arrive_radius, arrive_radius);
-                if arrived {
+                let may_walk = order.kind == OrderKind::Move || combat.target.is_none();
+                if let Some(slot) = order.slot {
+                    // Close enough to the group's goal to leave the route and walk to its own spot.
+                    if arrived {
+                        let close_enough = stats.radius / 2;
+                        if order.slot_ticks == 0 || here.distance_squared(&slot) <= wide_mul(close_enough, close_enough) {
+                            flow.release(order.route);
+                            *order = Order::IDLE;
+                        } else if may_walk {
+                            order.slot_ticks -= 1;
+                            let direction = (slot - here).normalized();
+                            let remaining = sqrt_wide(here.distance_squared(&slot));
+                            let speed = stats.max_speed.min(remaining);
+                            desired = Vec2Fp::new(direction.x * speed, direction.y * speed);
+                        }
+                    } else if may_walk {
+                        if let FlowSample::Direction(direction) = flow.sample(order.route, tick, here, terrain) {
+                            desired = Vec2Fp::new(direction.x * stats.max_speed, direction.y * stats.max_speed);
+                        }
+                    }
+                } else if arrived {
                     if !flow.is_following(order.route) {
                         flow.release(order.route);
                         *order = Order::IDLE;
                     }
-                } else if order.kind == OrderKind::Move || combat.target.is_none() {
+                } else if may_walk {
                     if let FlowSample::Direction(direction) = flow.sample(order.route, tick, here, terrain) {
                         desired = Vec2Fp::new(direction.x * stats.max_speed, direction.y * stats.max_speed);
                     }
@@ -581,7 +646,12 @@ impl SimWorld {
             });
             // A crowd can cover a shared goal, such as a rally point, so that later units can
             // never reach it. A unit that bumps into a settled friend nearby has arrived too.
-            if touches_settled_friend && matches!(order.kind, OrderKind::Move | OrderKind::AttackMove) && !flow.is_following(order.route) {
+            // Units with a spot of their own have a time limit instead.
+            if touches_settled_friend
+                && order.slot.is_none()
+                && matches!(order.kind, OrderKind::Move | OrderKind::AttackMove)
+                && !flow.is_following(order.route)
+            {
                 let settle_radius = stats.radius * CROWD_SETTLE_RADII;
                 let goal = flow.goal(order.route).unwrap_or(here);
                 if here.distance_squared(&goal) <= wide_mul(settle_radius, settle_radius) {
@@ -1064,6 +1134,11 @@ impl SimWorld {
         hasher.write(&combat.forced_target.map_or(u32::MAX, |target| target.0).to_le_bytes());
         hasher.write(&[u8::from(combat.enabled), order.kind as u8]);
         hasher.write(&order.route.to_le_bytes());
+        if let Some(slot) = order.slot {
+            write_fp(hasher, slot.x);
+            write_fp(hasher, slot.y);
+        }
+        hasher.write(&order.slot_ticks.to_le_bytes());
         drop(query);
         self.hash_unit_extras(entity, hasher);
     }
