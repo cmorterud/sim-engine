@@ -57,6 +57,8 @@ fn top_up_projectiles(world: &mut SimWorld) {
                 source: id,
                 source_team: team,
                 lifetime_ticks: solution.flight_ticks + 10,
+                splash_radius: Fp::ZERO,
+                allied_safe_ticks: 0,
             },
         );
     }
@@ -109,6 +111,7 @@ fn percentile_gate() {
         lap(&mut phases, 3);
         world.step_projectiles();
         lap(&mut phases, 4);
+        world.step_production();
         world.step_cleanup();
         lap(&mut phases, 5);
         world.current_tick += 1;

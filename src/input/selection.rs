@@ -56,9 +56,25 @@ impl Selection {
             return;
         };
         self.selected = match dragged {
-            Some((min, max)) => units_in_box(units, camera, team, min, max),
+            Some((min, max)) => {
+                // A box over a base and an army means the army.
+                let found = units_in_box(units, camera, team, min, max);
+                let is_mobile = |id: &SimId| {
+                    units.binary_search_by_key(id, |unit| unit.id).is_ok_and(|index| !units[index].is_structure)
+                };
+                if found.iter().any(is_mobile) {
+                    found.into_iter().filter(is_mobile).collect()
+                } else {
+                    found
+                }
+            }
             None => nearest_unit(units, camera, team, start).into_iter().collect(),
         };
+    }
+
+    /// Replaces the selection directly, for hotkeys and scripted runs. Ids must be sorted.
+    pub fn select(&mut self, ids: Vec<SimId>) {
+        self.selected = ids;
     }
 
     /// Removes units that have died, given the current units sorted by `SimId`.
@@ -94,7 +110,12 @@ pub fn nearest_unit(units: &[UnitView], camera: &Camera, team: Team, point: [f64
     for unit in units.iter().filter(|unit| unit.team == team) {
         if let Some(p) = screen_position(unit, camera) {
             let distance = (p[0] - point[0]).powi(2) + (p[1] - point[1]).powi(2);
-            if distance <= CLICK_RADIUS_PX * CLICK_RADIUS_PX && best.is_none_or(|(closest, _)| distance < closest) {
+            // Large units can be clicked anywhere on them, as they appear on screen.
+            let radius = raw_to_world(unit.radius);
+            let edge = camera.world_to_screen([raw_to_world(unit.x) + radius, raw_to_world(unit.y), raw_to_world(unit.z)]);
+            let apparent = edge.map_or(0.0, |edge| (edge[0] - p[0]).hypot(edge[1] - p[1]));
+            let reach = CLICK_RADIUS_PX.max(apparent);
+            if distance <= reach * reach && best.is_none_or(|(closest, _)| distance < closest) {
                 best = Some((distance, unit.id));
             }
         }
@@ -126,7 +147,18 @@ mod tests {
 
     fn unit(id: u32, team: Team, x: f64, y: f64) -> UnitView {
         let raw = |value: f64| (value * 4096.0) as i32;
-        UnitView { id: SimId(id), team, x: raw(x), y: raw(y), z: raw(1.0), radius: raw(1.0) }
+        UnitView {
+            id: SimId(id),
+            team,
+            x: raw(x),
+            y: raw(y),
+            z: raw(1.0),
+            radius: raw(1.0),
+            blueprint: u16::MAX,
+            health_permille: 1000,
+            built_permille: 1000,
+            is_structure: false,
+        }
     }
 
     #[test]

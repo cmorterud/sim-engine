@@ -82,6 +82,16 @@ fn full_battle_matches_for_10000_ticks() {
     check_golden("battle_5000_units_10000_ticks", &a);
 }
 
+/// A whole AI-vs-AI match, covering economy, construction, fog of war, and AI decisions.
+/// Run on a second architecture, this proves that they all stay deterministic across platforms.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn full_ai_match_matches_its_golden_checksums() {
+    let record = sim_engine::ai::play_match(SEED, sim_engine::soak::MATCH_TICK_LIMIT, |_| {});
+    assert!(record.result.is_some(), "the match should finish");
+    check_golden("ai_match", &record.checksums);
+}
+
 /// A checksum that misses a field cannot detect a desync in that field.
 #[test]
 fn every_hashed_field_changes_the_checksum() {

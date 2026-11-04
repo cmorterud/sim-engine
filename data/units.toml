@@ -1,0 +1,169 @@
+# Unit and structure data for the vertical slice (GAME_SPECIFICATION.md §18-19).
+#
+# Values are whole numbers or quoted decimals, such as "2.5". TOML floats are rejected
+# when loading, so that no float rounding can enter the simulation.
+# Rates are per second, except speeds, which are units per tick.
+# One terrain cell is 20 units. These are starting values for tuning, not final balance.
+version = 1
+
+[[unit]]
+id = "acu"
+name = "Armored Command Unit"
+class = "commander"
+tier = 1
+mass = 2000
+energy = 10000
+build_time = 1
+health = 11000
+speed = 4
+radius = 16
+vision = 1000
+build_power = 10
+build_range = 200
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense"]
+weapon = { range = 440, reload_ticks = 7, projectile_speed = 50, damage = 70 }
+mass_income = 1
+energy_income = 20
+mass_storage = 650
+energy_storage = 4000
+death_explosion = { damage = 15000, radius = 300 }
+
+[[unit]]
+id = "t1_engineer"
+name = "Engineer"
+class = "engineer"
+tier = 1
+mass = 52
+energy = 260
+build_time = 130
+health = 160
+speed = 4
+radius = 8
+vision = 500
+build_power = 5
+build_range = 120
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense"]
+
+[[unit]]
+id = "t1_light_bot"
+name = "Light Assault Bot"
+class = "bot"
+tier = 1
+mass = 36
+energy = 180
+build_time = 90
+health = 200
+speed = "5.5"
+radius = 7
+vision = 500
+weapon = { range = 340, reload_ticks = 10, projectile_speed = 40, damage = 18 }
+
+[[unit]]
+id = "t1_light_artillery"
+name = "Light Artillery"
+class = "artillery"
+tier = 1
+mass = 72
+energy = 360
+build_time = 180
+health = 180
+speed = "3.5"
+radius = 8
+vision = 500
+weapon = { range = 600, reload_ticks = 40, projectile_speed = 12, damage = 90, splash_radius = 40 }
+
+[[unit]]
+id = "t2_heavy_tank"
+name = "Heavy Tank"
+class = "tank"
+tier = 2
+mass = 198
+energy = 990
+build_time = 440
+health = 900
+speed = "4.5"
+radius = 11
+vision = 600
+weapon = { range = 460, reload_ticks = 12, projectile_speed = 60, damage = 70 }
+
+[[unit]]
+id = "land_factory_t1"
+name = "Land Factory"
+class = "factory"
+tier = 1
+mass = 240
+energy = 2100
+build_time = 300
+health = 3200
+footprint = 3
+vision = 400
+build_power = 20
+builds = ["t1_engineer", "t1_light_bot", "t1_light_artillery"]
+upgrades_to = "land_factory_t2"
+
+[[unit]]
+id = "land_factory_t2"
+name = "Land Factory (T2)"
+class = "factory"
+tier = 2
+mass = 480
+energy = 4200
+build_time = 1000
+health = 6000
+footprint = 3
+vision = 400
+build_power = 40
+builds = ["t1_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank"]
+
+[[unit]]
+id = "mass_extractor"
+name = "Mass Extractor"
+class = "economy"
+tier = 1
+mass = 36
+energy = 360
+build_time = 60
+health = 600
+footprint = 1
+vision = 300
+requires_deposit = true
+mass_income = 2
+
+[[unit]]
+id = "power_generator"
+name = "Power Generator"
+class = "economy"
+tier = 1
+mass = 75
+energy = 750
+build_time = 125
+health = 600
+footprint = 1
+vision = 300
+energy_income = 20
+
+[[unit]]
+id = "mass_storage"
+name = "Mass Storage"
+class = "economy"
+tier = 1
+mass = 200
+energy = 1500
+build_time = 250
+health = 1000
+footprint = 1
+vision = 300
+mass_storage = 500
+
+[[unit]]
+id = "t1_point_defense"
+name = "Point Defense"
+class = "defense"
+tier = 1
+mass = 180
+energy = 1800
+build_time = 360
+health = 1400
+footprint = 1
+vision = 700
+weapon = { range = 520, reload_ticks = 8, projectile_speed = 70, damage = 60 }

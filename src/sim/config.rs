@@ -27,6 +27,8 @@ pub const TARGET_SEARCH_INTERVAL: u32 = 5;
 pub enum TerrainStyle {
     Flat,
     Hills,
+    /// Hills with 180° rotational symmetry, so that opposing starts are equal.
+    MirroredHills,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -38,6 +40,8 @@ pub struct SimConfig {
     pub friendly_fire: bool,
     /// Benchmark setting: keeps unit counts constant so the workload does not get easier.
     pub invulnerable_units: bool,
+    /// Units only see and target what their team can see.
+    pub fog_of_war: bool,
 }
 
 impl Default for SimConfig {
@@ -47,6 +51,18 @@ impl Default for SimConfig {
             terrain: TerrainStyle::Hills,
             friendly_fire: false,
             invulnerable_units: false,
+            fog_of_war: false,
         }
     }
 }
+
+/// Fog of war resolution.
+pub const VISIBILITY_CELL_UNITS: i32 = 80;
+/// One unit of build power reclaims this much mass per second.
+pub const RECLAIM_MASS_PER_POWER: i64 = 2;
+/// Wrecks keep this share of a unit's mass cost, in thousandths (GAME_SPECIFICATION.md §6.1).
+pub const WRECK_MASS_PERMILLE: i64 = 810;
+/// How often idle patrolling engineers look for work, in ticks.
+pub const PATROL_SEARCH_INTERVAL: u32 = 10;
+/// How far patrolling engineers look for work.
+pub const PATROL_SEARCH_RADIUS_UNITS: i32 = 300;

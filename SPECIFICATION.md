@@ -86,6 +86,9 @@ sim-engine/
 │   ├── main.rs                 # Application entry point, window loop, and mode switch (headless vs windowed)
 │   ├── lib.rs                  # Library root, so that tests and benchmarks can reach the modules
 │   ├── driver.rs               # Runs the simulation on its own thread and hands out snapshots
+│   ├── ai.rs                   # The scripted opponent, which acts only through commands
+│   ├── soak.rs                 # Plays and replays many AI-vs-AI matches
+│   ├── ui.rs                   # Resource bar, build menu, and unit overlays (egui)
 │   ├── math/
 │   │   ├── mod.rs
 │   │   ├── fp.rs               # Fixed-point aliases (I20F12, I40F24), Vec2Fp, Vec3Fp, integer sqrt/trig
@@ -94,6 +97,9 @@ sim-engine/
 │   ├── sim/
 │   │   ├── mod.rs
 │   │   ├── config.rs           # World-scale constants and per-world settings
+│   │   ├── blueprints.rs       # Unit data, loaded from data/units.toml
+│   │   ├── production.rs       # Flow economy, construction, factories, reclaim, and adjacency
+│   │   ├── visibility.rs       # Fog of war
 │   │   ├── scenario.rs         # Fixed scenarios and scripted orders shared by tests, benchmarks, and the app
 │   │   ├── components.rs       # ECS components (SimId, Position, Velocity, Unit, Team, Health, Combat, Projectile)
 │   │   ├── terrain.rs          # Height map, water level, per-movement-class cost grids
@@ -110,13 +116,17 @@ sim-engine/
 │   │   └── shaders.wgsl        # Shader: 3D cube instancing transitioning to 2D point sprites by distance
 │   └── input/
 │       ├── mod.rs
-│       └── selection.rs        # Drag-box selection and ground raycasting (screen to world)
+│       ├── selection.rs        # Drag-box selection and ground raycasting (screen to world)
+│       └── orders.rs           # Right-click orders and structure placement checks
 ├── tests/
 │   ├── determinism_test.rs     # Dual-instance, golden-checksum, and checksum-sensitivity tests
 │   ├── navigation_test.rs      # Phase 2 gate, arrival, separation, and moving goals
 │   ├── combat_test.rs          # Swept collision, terrain masking, dodging, and friendly fire
 │   ├── driver_test.rs          # The threaded driver matches a direct headless run
 │   ├── input_test.rs           # Drag-select and right-click, from screen coordinates to moving units
+│   ├── economy_test.rs         # The game rules: economy, construction, reclaim, fog, and assassination
+│   ├── ai_test.rs              # The scripted opponent: full matches, replays, and fog of war
+│   ├── match_test.rs           # A player's session against the AI, through the threaded driver
 │   └── golden/                 # Checked-in expected checksums for fixed scenarios
 └── benches/
     └── sim_benchmark.rs        # Criterion benchmark measuring tick execution time for 5,000 units
@@ -265,6 +275,7 @@ pub struct Projectile {
 ### 4.3 Sparse Spatial Grid (`src/sim/spatial.rs`)
 A dense grid would have millions of cells to walk every tick at maximum map size, so each team's entries are stored as a sorted list with a small index of where each row starts. Memory and rebuild cost depend on the unit count plus the row count, not the map's area, and results are deterministic by construction.
 
+* Mobile units and structures are stored in separate lists, so that a large structure's radius does not widen the short-range queries that every mobile unit runs on every tick.
 * Entries are sorted by `(row, column, SimId)`, using a counting sort by row followed by a sort within each row.
 * A query binary-searches each row of cells it covers and walks that row's entries. Results arrive in a fixed order: team, row, column, then `SimId`.
 * Entries carry their position and radius inline, so queries avoid ECS lookups, and a query can be limited to one team, so rear units do not pay for scanning their own army when looking for enemies.
@@ -274,13 +285,13 @@ A dense grid would have millions of cells to walk every tick at maximum map size
 
 ```rust
 pub struct SpatialGrid {
-    teams: [TeamEntries; 2],    // Sorted entries and row starts; reused between ticks
+    lists: [TeamEntries; 4],    // Per team and layer: sorted entries and row starts
     by_index: Vec<GridEntry>,   // Each unit's entry by its index in SimWorld::units
 }
 
 impl SpatialGrid {
     pub fn rebuild(&mut self, units: impl Iterator<Item = GridUnit>);
-    pub fn for_each_candidate(&self, team: Option<Team>, center_x: i32, center_y: i32, radius: i32, visit: impl FnMut(&GridEntry));
+    pub fn for_each_candidate(&self, team: Option<Team>, layer: Layer, center_x: i32, center_y: i32, radius: i32, visit: impl FnMut(&GridEntry));
     pub fn query_radius(&self, center: Vec2Fp, radius: Fp, out: &mut Vec<hecs::Entity>);
 }
 ```
@@ -309,7 +320,8 @@ A single 256 × 256 field gives cells 320 units wide on a maximum-size map, whic
      $$\vec{F}_{\text{push}} = \frac{\vec{Pos}_A - \vec{Pos}_B}{\|\vec{Pos}_A - \vec{Pos}_B\|} \cdot (\text{Radius}_A + \text{Radius}_B - \text{Dist})$$
    * The total push per tick is capped at the larger of half the unit's radius and its speed, so that fast units cannot simply overpower separation.
    * Units at exactly the same position push along a direction derived from their `SimId`s.
-   * Motion, including push, is applied one axis at a time against the cost grid, so no unit center can enter an impassable cell.
+   * Motion, including push, is applied one axis at a time against the cost grid, so no unit center can enter an impassable cell. A unit that a new structure lands on walks straight out.
+   * A moving unit that bumps into a settled friend near its goal counts as arrived, because a crowd can cover a shared goal such as a rally point.
    * A ground unit's `z` is set from the height map after moving.
 
 ### 4.5 Ballistics & Combat System (`src/sim/combat.rs`)
@@ -392,6 +404,7 @@ Terrain is simulation state, because it affects line of fire, unit height, and m
 * **Height Map:** 4,097 × 4,097 `i16` samples at maximum map size (about 32 MiB), in steps of 1/16 unit at 20-unit spacing. Sampling is bilinear in fixed-point.
 * **Water Level:** A single `Fp` value per map, stored for later naval and seabed movement. The PoC scenarios keep it below the terrain.
 * **PoC Maps:** Generated from `SimRng` and the map seed, using hills and box obstacles. No map file format is needed yet.
+* **Structures:** Placing or destroying a structure changes the cost grid and rebuilds the portal graph and every route. On the 10 km skirmish map, this costs about 8–15 ms for that one tick. It affects about 0.3% of ticks and runs on the simulation's own thread, so it does not delay frames, but larger maps would need an incremental rebuild.
 
 ---
 

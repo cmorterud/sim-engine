@@ -41,6 +41,8 @@ fn shoot(world: &mut SimWorld, from: Vec2Fp, to: Vec2Fp, speed: Fp, source: SimI
             source,
             source_team: team,
             lifetime_ticks: solution.flight_ticks + 20,
+            splash_radius: Fp::ZERO,
+            allied_safe_ticks: 0,
         },
     );
 }
@@ -148,7 +150,7 @@ fn projectile_leaving_the_map_is_removed() {
     let source = passive_unit(&mut world, Team::Blue, point(100, 100));
     let start = Vec3Fp::new(fp_int(5_100), fp_int(100), fp_int(50));
     let velocity = Vec3Fp::new(fp_int(30), Fp::ZERO, fp_int(5));
-    world.spawn_projectile(start, Projectile { velocity, damage: fp_int(1), source, source_team: Team::Blue, lifetime_ticks: 1_000 });
+    world.spawn_projectile(start, Projectile { velocity, damage: fp_int(1), source, source_team: Team::Blue, lifetime_ticks: 1_000, splash_radius: Fp::ZERO, allied_safe_ticks: 0 });
     world.advance_tick(&[]);
     world.advance_tick(&[]);
     assert!(world.projectiles.is_empty());

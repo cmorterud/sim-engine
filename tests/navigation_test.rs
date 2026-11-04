@@ -71,6 +71,26 @@ fn units_arrive_and_become_idle() {
     assert_eq!(world.flow_field.route_count(), 0, "finished routes should be freed");
 }
 
+/// Units sent one at a time to a shared point, like a factory's rally point, must all
+/// settle. Otherwise they push at the crowd forever and never become idle.
+#[test]
+fn units_sent_one_at_a_time_to_a_shared_point_all_settle() {
+    let mut world = flat_world();
+    let goal = point(1_000, 1_000);
+    let mut units = Vec::new();
+    for index in 0..60 {
+        let unit = world.spawn_unit(UnitSpawn { radius: fp_int(7), ..standard_unit(Team::Blue, point(600 + index * 20, 700)) });
+        units.push(unit);
+        world.advance_tick(&[SimCommand::Move { units: vec![unit], goal }]);
+    }
+    for _ in 0..800 {
+        world.advance_tick(&[]);
+    }
+    let still_moving = units.iter().filter(|unit| world.unit_order(**unit).unwrap().kind != OrderKind::Idle).count();
+    assert_eq!(still_moving, 0, "{still_moving} of 60 units never settled");
+    assert_eq!(world.flow_field.route_count(), 0, "finished routes should be freed");
+}
+
 #[test]
 fn overlapping_units_separate() {
     let mut world = flat_world();

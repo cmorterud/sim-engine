@@ -9,9 +9,11 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use crate::ai::{advance_ai_vs_ai, AiBrain};
 use crate::sim::commands::SimCommand;
+use crate::sim::components::Team;
 use crate::sim::scenario::{advance_scripted, Scenario};
-use crate::sim::world::SimSnapshot;
+use crate::sim::world::{SimSnapshot, SimWorld};
 
 pub const TICK_DURATION: Duration = Duration::from_millis(100);
 
@@ -22,6 +24,19 @@ pub enum CommandSource {
     Player,
     /// `scenario::advance_scripted`, stopping after a fixed number of ticks.
     Script { seed: u64, ticks: u32 },
+    /// The player commands Blue through `SimDriver::send`, against a scripted Red.
+    PlayerVsAi { seed: u64 },
+    /// Two scripted opponents, stopping after a fixed number of ticks or at the end of the match.
+    AiVsAi { seed: u64, ticks: u32 },
+}
+
+/// Extra settings for `SimDriver::start_with`.
+#[derive(Copy, Clone, Debug, Default)]
+pub struct DriverOptions {
+    /// Whose fog of war snapshots respect. `None` shows everything.
+    pub viewer: Option<Team>,
+    /// Ticks to run back to back before pacing starts, to reach a later point in a match.
+    pub fast_forward_ticks: u32,
 }
 
 /// The simulation's state when its thread ended.
@@ -42,6 +57,10 @@ pub struct SimDriver {
 impl SimDriver {
     /// Starts the simulation. `paced` runs at 10 Hz; otherwise ticks run back to back.
     pub fn start(scenario: Scenario, source: CommandSource, paced: bool) -> Self {
+        Self::start_with(scenario, source, paced, DriverOptions::default())
+    }
+
+    pub fn start_with(scenario: Scenario, source: CommandSource, paced: bool, options: DriverOptions) -> Self {
         let (command_sender, command_receiver) = mpsc::channel();
         let (snapshot_sender, snapshot_receiver) = mpsc::channel();
         let tick_micros = Arc::new(AtomicU32::new(0));
@@ -51,7 +70,7 @@ impl SimDriver {
         let thread = thread::Builder::new()
             .name("simulation".into())
             .spawn(move || {
-                run(scenario, source, paced, &command_receiver, &snapshot_sender, &thread_micros, &thread_stop)
+                run(scenario, source, paced, options, &command_receiver, &snapshot_sender, &thread_micros, &thread_stop)
             })
             .expect("simulation thread starts");
         Self {
@@ -93,17 +112,30 @@ impl Drop for SimDriver {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run(
     scenario: Scenario,
     source: CommandSource,
     paced: bool,
+    options: DriverOptions,
     commands: &Receiver<SimCommand>,
     snapshots: &Sender<Arc<SimSnapshot>>,
     tick_micros: &AtomicU32,
     stop: &AtomicBool,
 ) -> DriverResult {
     let Scenario { mut world, opening_commands } = scenario;
-    let _ = snapshots.send(Arc::new(world.snapshot()));
+    let seed = match source {
+        CommandSource::PlayerVsAi { seed } | CommandSource::AiVsAi { seed, .. } => seed,
+        CommandSource::Player | CommandSource::Script { .. } => 0,
+    };
+    let mut brains = [AiBrain::new(Team::Blue, seed), AiBrain::new(Team::Red, seed)];
+    for _ in 0..options.fast_forward_ticks {
+        if world.match_result.is_some() {
+            break;
+        }
+        step(&mut world, source, &opening_commands, commands, &mut brains);
+    }
+    let _ = snapshots.send(Arc::new(world.snapshot_for(options.viewer)));
     let mut next_tick = Instant::now();
     loop {
         if stop.load(Ordering::Relaxed) {
@@ -111,20 +143,19 @@ fn run(
         }
         let started = Instant::now();
         match source {
-            CommandSource::Player => {
-                let mut pending = if world.current_tick == 0 { opening_commands.clone() } else { Vec::new() };
-                pending.extend(commands.try_iter());
-                world.advance_tick(&pending);
-            }
-            CommandSource::Script { seed, ticks } => {
-                if world.current_tick >= ticks {
+            CommandSource::Script { ticks, .. } | CommandSource::AiVsAi { ticks, .. } => {
+                if world.current_tick >= ticks || world.match_result.is_some() {
                     break;
                 }
-                advance_scripted(&mut world, &opening_commands, seed);
             }
+            CommandSource::Player | CommandSource::PlayerVsAi { .. } => {}
+        }
+        // A finished match stays on screen until the player leaves it.
+        if world.match_result.is_none() {
+            step(&mut world, source, &opening_commands, commands, &mut brains);
         }
         tick_micros.store(started.elapsed().as_micros() as u32, Ordering::Relaxed);
-        if snapshots.send(Arc::new(world.snapshot())).is_err() {
+        if snapshots.send(Arc::new(world.snapshot_for(options.viewer))).is_err() {
             break;
         }
         if paced {
@@ -139,4 +170,24 @@ fn run(
         }
     }
     DriverResult { tick: world.current_tick, checksum: world.compute_checksum() }
+}
+
+/// Advances one tick from the command source. Everything that reaches the simulation goes through here.
+fn step(world: &mut SimWorld, source: CommandSource, opening: &[SimCommand], commands: &Receiver<SimCommand>, brains: &mut [AiBrain; 2]) {
+    match source {
+        CommandSource::Player => {
+            let mut pending = if world.current_tick == 0 { opening.to_vec() } else { Vec::new() };
+            pending.extend(commands.try_iter());
+            world.advance_tick(&pending);
+        }
+        CommandSource::Script { seed, .. } => advance_scripted(world, opening, seed),
+        CommandSource::PlayerVsAi { .. } => {
+            let mut pending: Vec<SimCommand> = commands.try_iter().collect();
+            pending.extend(brains[1].think(world));
+            world.advance_tick(&pending);
+        }
+        CommandSource::AiVsAi { .. } => {
+            advance_ai_vs_ai(world, brains);
+        }
+    }
 }

@@ -23,6 +23,9 @@ pub fn standard_unit(team: Team, position: Vec2Fp) -> UnitSpawn {
         reload_ticks: 28,
         projectile_speed: fp_int(2),
         projectile_damage: fp_int(8),
+        projectile_splash: Fp::ZERO,
+        is_structure: false,
+        vision: Fp::ZERO,
     }
 }
 
@@ -162,6 +165,73 @@ pub fn navigation(seed: u64, count: usize) -> (Scenario, NavigationLayout) {
         Scenario { world, opening_commands },
         NavigationLayout { goal, route_units, unit_speed, obstacles },
     )
+}
+
+/// Where each commander starts on the skirmish map. Red's start mirrors Blue's.
+pub const SKIRMISH_MAP_UNITS: i32 = 10_240;
+pub const SKIRMISH_BLUE_START: (i32, i32) = (1_600, 1_600);
+const SKIRMISH_START_MASS: i64 = 650;
+const SKIRMISH_START_ENERGY: i64 = 4_000;
+
+/// The start position of a team on the skirmish map.
+pub fn skirmish_start(team: Team) -> Vec2Fp {
+    let (x, y) = SKIRMISH_BLUE_START;
+    match team {
+        Team::Blue => Vec2Fp::new(fp_int(x), fp_int(y)),
+        Team::Red => Vec2Fp::new(fp_int(SKIRMISH_MAP_UNITS - x), fp_int(SKIRMISH_MAP_UNITS - y)),
+    }
+}
+
+/// A 1v1 map for the vertical slice, with 180° rotational symmetry so that neither
+/// start has an advantage: terrain, walls, mass deposits, and commanders all mirror.
+pub fn skirmish(seed: u64) -> Scenario {
+    let config = SimConfig {
+        map_units: SKIRMISH_MAP_UNITS,
+        terrain: TerrainStyle::MirroredHills,
+        friendly_fire: true,
+        fog_of_war: true,
+        ..SimConfig::default()
+    };
+    let mut world = SimWorld::new(config, seed);
+    let map = SKIRMISH_MAP_UNITS;
+    let last_cell = (map / super::config::TERRAIN_CELL_UNITS) as u32 - 1;
+
+    // Two mirrored walls in the middle make a choke point between the bases.
+    let wall = |min_x: i32, min_y: i32, max_x: i32, max_y: i32| {
+        RectFp::new(Vec2Fp::new(fp_int(min_x), fp_int(min_y)), Vec2Fp::new(fp_int(max_x), fp_int(max_y)))
+    };
+    world.add_box_obstacle(wall(3_200, 5_400, 5_000, 5_480));
+    world.add_box_obstacle(wall(map - 5_000, map - 5_480, map - 3_200, map - 5_400));
+
+    // Each deposit is added with its mirror image, in Blue's half of the map.
+    let start_cell = SKIRMISH_BLUE_START.0 as u32 / super::config::TERRAIN_CELL_UNITS as u32;
+    let near_base = [(-9i32, -5i32), (8, -7), (-6, 9), (9, 7)];
+    let mut blue_side: Vec<(u32, u32)> =
+        near_base.iter().map(|&(dx, dy)| ((start_cell as i32 + dx) as u32, (start_cell as i32 + dy) as u32)).collect();
+    while blue_side.len() < 12 {
+        let cell_x = 20 + world.rng.below(last_cell - 40);
+        let cell_y = 20 + world.rng.below(last_cell / 2 - 40);
+        let clear_of_base = cell_x.abs_diff(start_cell) > 16 || cell_y.abs_diff(start_cell) > 16;
+        let spaced = blue_side.iter().all(|&(x, y)| x.abs_diff(cell_x) + y.abs_diff(cell_y) > 12);
+        // Skip cells on, or right next to, a wall, so that every deposit can be reached and surrounded.
+        let open = (cell_x - 2..=cell_x + 2).all(|x| (cell_y - 2..=cell_y + 2).all(|y| {
+            world.terrain.cell_is_open(x, y) && world.terrain.cell_is_open(last_cell - x, last_cell - y)
+        }));
+        if clear_of_base && spaced && open {
+            blue_side.push((cell_x, cell_y));
+        }
+    }
+    for (x, y) in blue_side {
+        world.deposits.push((x, y));
+        world.deposits.push((last_cell - x, last_cell - y));
+    }
+
+    let commander = world.blueprints.id("acu");
+    world.spawn_mobile(commander, Team::Blue, skirmish_start(Team::Blue));
+    world.spawn_mobile(commander, Team::Red, skirmish_start(Team::Red));
+    world.start_economy(SKIRMISH_START_MASS, SKIRMISH_START_ENERGY);
+    world.prepare_map();
+    Scenario { world, opening_commands: Vec::new() }
 }
 
 /// Advances a world one tick with its opening commands (on tick 0) and scripted orders.

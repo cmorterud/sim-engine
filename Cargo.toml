@@ -22,6 +22,15 @@ glam = "0.27"
 # Deterministic Hashing
 twox-hash = "1.6"
 
+# Unit data files
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+# Menus, resource bar, and overlays
+egui = "0.28"
+egui-wgpu = "0.28"
+egui-winit = { version = "0.28", default-features = false, features = ["links", "wayland", "x11"] }
+
 # Logging
 log = "0.4"
 env_logger = "0.11"

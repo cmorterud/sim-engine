@@ -379,8 +379,18 @@ Naval, subsurface, and air warfare (§10); shields and missile defense (§8); ra
 
 ### 18.3 Exit Criteria
 * A human can win or lose a full match against the AI.
-* 100 headless AI-vs-AI matches finish without a crash or checksum mismatch when replayed.
-* The engine's tick and frame-rate gates still pass during a late-game match.
+* 100 headless AI-vs-AI matches finish without a crash or checksum mismatch when replayed. Check with `cargo run --release -- --soak 100`.
+* The engine's tick and frame-rate gates still pass during a late-game match. Check the frame rate with `cargo run --release -- --autotest 60 --fast-forward 10000`.
+
+### 18.4 Implementation Decisions
+These are starting points for tuning, recorded because they interpret or adjust the design above.
+
+* **Scale:** One terrain cell (20 units) is the game's basic grid square. Unit sizes, speeds, and ranges in `data/units.toml` are set in proportion to it, and the skirmish map is 10 km across.
+* **Commander Explosion:** §2.1 gives a 25-meter radius, which is barely more than one grid square and could not "vaporize surrounding bases". The slice uses 300 units, as a data value.
+* **Friendly Fire:** A shell ignores allies until it reaches its aim point, so that rear ranks can fire through front ranks. Rounds that overshoot can hit allies, and splash damages everyone, which keeps the stray rounds and artillery spread of §7.1.
+* **Fog of War:** Sight is a simple radius, not blocked by terrain. Units cannot target what their team cannot see. Structures are not remembered once out of sight.
+* **Upkeep:** Nothing in the slice has an energy upkeep, so an energy stall only slows building. Sensor and shield effects from §3.2 arrive with those systems.
+* **Left for Later:** The Overcharge cannon (§2.1), production pausing (§3.2), and trees and rocks as reclaim (§6.1) are not in the slice. Formations (§13.1) are also not in the slice.
 
 ---
 

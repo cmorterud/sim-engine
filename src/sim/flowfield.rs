@@ -710,7 +710,7 @@ fn uniform_cost(cost: &[u8], cells: usize, origin: (usize, usize)) -> Option<u8>
 
 /// Finds the closest passable cell to a point, searching outward in square rings.
 /// Ties resolve in a fixed scan order.
-fn nearest_passable_cell(terrain: &Terrain, point: Vec2Fp) -> Option<(usize, usize)> {
+pub fn nearest_passable_cell(terrain: &Terrain, point: Vec2Fp) -> Option<(usize, usize)> {
     let cost = land_cost(terrain);
     let cells = terrain.cells_per_side() as i64;
     let (cx, cy) = terrain.cell_of(point);

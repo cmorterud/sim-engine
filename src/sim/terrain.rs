@@ -36,10 +36,16 @@ impl Terrain {
         let cells = (map_units / TERRAIN_CELL_UNITS) as usize;
         let samples = cells + 1;
         let mut heights = vec![0i16; samples * samples];
-        if style == TerrainStyle::Hills {
+        if style != TerrainStyle::Flat {
             // Two octaves of smooth value noise: broad hills and smaller bumps.
             add_noise_octave(&mut heights, samples, 64, 30 << HEIGHT_FRAC_BITS, rng);
             add_noise_octave(&mut heights, samples, 16, 6 << HEIGHT_FRAC_BITS, rng);
+        }
+        if style == TerrainStyle::MirroredHills {
+            // Copy each sample from its partner across the map center.
+            for index in 0..heights.len() / 2 {
+                heights[index] = heights[samples * samples - 1 - index];
+            }
         }
         let mut terrain = Self {
             map_units,
@@ -85,6 +91,22 @@ impl Terrain {
             }
         }
         self.update_content_hash();
+    }
+
+    /// Blocks or clears the land cost of a structure's cells. Structures come and go
+    /// constantly, so this skips rehashing; the checksum covers them as units instead.
+    pub fn set_structure_cells(&mut self, cell_x: u32, cell_y: u32, size: u32, blocked: bool) {
+        let cost = if blocked { COST_IMPASSABLE } else { COST_OPEN };
+        for y in cell_y..cell_y + size {
+            for x in cell_x..cell_x + size {
+                self.land_cost[y as usize * self.cells + x as usize] = cost;
+            }
+        }
+    }
+
+    pub fn cell_is_open(&self, cell_x: u32, cell_y: u32) -> bool {
+        let (x, y) = (cell_x as usize, cell_y as usize);
+        x < self.cells && y < self.cells && self.land_cost[y * self.cells + x] != COST_IMPASSABLE
     }
 
     pub const fn map_units(&self) -> i32 {
@@ -206,6 +228,14 @@ mod tests {
         let c = Terrain::generate(2_560, TerrainStyle::Hills, &mut SimRng::new(6));
         assert_eq!(a.content_hash(), b.content_hash());
         assert_ne!(a.content_hash(), c.content_hash());
+    }
+
+    #[test]
+    fn mirrored_hills_are_symmetric_across_the_center() {
+        let terrain = Terrain::generate(2_560, TerrainStyle::MirroredHills, &mut SimRng::new(3));
+        for (x, y) in [(100, 700), (333, 2_100), (1_280, 1_280), (40, 2_500)] {
+            assert_eq!(terrain.height_at(point(x, y)), terrain.height_at(point(2_560 - x, 2_560 - y)), "({x}, {y})");
+        }
     }
 
     #[test]

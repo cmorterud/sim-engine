@@ -2,7 +2,7 @@
 
 struct Globals {
     view_proj: mat4x4<f32>,
-    // viewport width and height, then the distances where cubes start and finish becoming dots.
+    // viewport width and height, then the size-to-distance ratios where units are fully dots and fully cubes.
     viewport_lod: vec4<f32>,
     // camera-relative position of the terrain grid's first vertex, then camera height, cell size.
     terrain_origin: vec4<f32>,
@@ -10,12 +10,14 @@ struct Globals {
     terrain_grid: vec4<i32>,
     // selection box in clip space: min x, min y, max x, max y.
     selection_box: vec4<f32>,
-    // terrain height scale, display scale factor, then unused.
+    // terrain height scale, display scale factor, fog texture coordinates per height sample, unused.
     terrain_scale: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
 @group(0) @binding(1) var heights: texture_2d<i32>;
+@group(0) @binding(2) var fog_texture: texture_2d<f32>;
+@group(0) @binding(3) var fog_sampler: sampler;
 
 const LIGHT: vec3<f32> = vec3<f32>(0.38, 0.27, 0.88);
 const TERRAIN_GRID_SIZE: u32 = 512u;
@@ -51,7 +53,8 @@ fn vs_unit(
     // flatten: the top and bottom become the dot's square, and the sides become lines.
     var morph = 0.0;
     if (icon_px > 0.0 && center_clip.w > 0.0) {
-        morph = smoothstep(globals.viewport_lod.z, globals.viewport_lod.w, length(center));
+        let apparent_size = length(instance.m0.xyz) / max(length(center), 0.001);
+        morph = 1.0 - smoothstep(globals.viewport_lod.z, globals.viewport_lod.w, apparent_size);
     }
     let corner = sign(position.xy);
     let offset = corner * icon_px * 2.0 / globals.viewport_lod.xy * center_clip.w;
@@ -75,6 +78,7 @@ struct TerrainOutput {
     @builtin(position) clip: vec4<f32>,
     @location(0) relative: vec3<f32>,
     @location(1) height: f32,
+    @location(2) fog_coordinates: vec2<f32>,
 };
 
 @vertex
@@ -93,6 +97,7 @@ fn vs_terrain(@builtin(vertex_index) index: u32) -> TerrainOutput {
     out.clip = globals.view_proj * vec4<f32>(relative, 1.0);
     out.relative = relative;
     out.height = height;
+    out.fog_coordinates = vec2<f32>(sample) * globals.terrain_scale.z;
     return out;
 }
 
@@ -110,7 +115,9 @@ fn fs_terrain(input: TerrainOutput) -> @location(0) vec4<f32> {
     let contour = abs(fract(input.height / 8.0) - 0.5);
     let width = max(fwidth(input.height / 8.0), 0.0001);
     let line = 1.0 - clamp(contour / width, 0.0, 1.0);
-    return vec4<f32>(base * light * (1.0 - 0.18 * line), 1.0);
+    // Ground that has never been seen is dark, and ground seen before is dim.
+    let sight = 0.18 + 0.82 * textureSample(fog_texture, fog_sampler, input.fog_coordinates).r;
+    return vec4<f32>(base * light * (1.0 - 0.18 * line) * sight, 1.0);
 }
 
 // ---- Selection box ----

@@ -5,17 +5,23 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use sim_engine::driver::{CommandSource, DriverResult, SimDriver, TICK_DURATION};
-use sim_engine::input::selection::{order_command, Selection};
-use sim_engine::math::fp::Fp;
+use sim_engine::ai::{advance_ai_vs_ai, AiBrain};
+use sim_engine::driver::{CommandSource, DriverOptions, DriverResult, SimDriver, TICK_DURATION};
+use sim_engine::input::orders::{placement_cell, placement_is_valid, right_click_orders, PlacementMap, RightClick};
+use sim_engine::input::selection::Selection;
+use sim_engine::math::fp::{Fp, Vec2Fp};
 use sim_engine::render::camera::{Camera, HeightField, MIN_ALTITUDE};
 use sim_engine::render::instances::{self, UnitInstanceRaw};
-use sim_engine::render::pipeline::{FrameScene, Renderer};
-use sim_engine::sim::components::Team;
+use sim_engine::render::pipeline::{FrameScene, Renderer, UiFrame};
+use sim_engine::sim::blueprints::{BlueprintDb, BlueprintId};
+use sim_engine::sim::commands::SimCommand;
+use sim_engine::sim::components::{SimId, Team};
 use sim_engine::sim::config::TERRAIN_CELL_UNITS;
-use sim_engine::sim::scenario::{self, advance_scripted};
+use sim_engine::sim::scenario::{self, advance_scripted, skirmish_start, Scenario};
 use sim_engine::sim::terrain::HEIGHT_FRAC_BITS;
 use sim_engine::sim::world::SimSnapshot;
+use sim_engine::soak::run_soak;
+use sim_engine::ui::{self, UiAction};
 use winit::dpi::{LogicalSize, PhysicalPosition};
 use winit::event::{ElementState, Event, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -31,25 +37,43 @@ const WARMUP_FRAMES: usize = 120;
 const DROPPED_FRAME_MS: f64 = 25.0;
 /// Height of each wall segment. Deep enough to reach below the terrain's raised samples.
 const OBSTACLE_DRAW_HEIGHT: f64 = 18.0;
+const STARTING_ALTITUDE: f64 = 900.0;
 
 const USAGE: &str = "\
 Usage: sim-engine [options]
 
-  (no options)         Play: 2,500 Blue vs. 2,500 Red
-  --headless <ticks>   Run scripted orders with no window and print the checksum
-  --autotest <secs>    Run the same scripted orders in a window, sweep the zoom,
-                       print frame times, and print the checksum
+  (no options)         Play a skirmish against the scripted AI
+  --battle             Use the 5,000-unit stress test scenario instead of a skirmish
+  --headless <ticks>   Run with no window, with AI or scripted orders, and print the checksum
+  --autotest <secs>    Run the same thing in a window, sweep the zoom, print frame times,
+                       and print the checksum
+  --fast-forward <n>   With --autotest, run n ticks at full speed first, to test a later match
   --capture <dir>      With --autotest, save screenshots at several zoom levels
+  --soak <matches>     Play and replay AI-vs-AI matches, and report on the exit criteria
+  --threads <n>        Threads for --soak (default 6)
   --seed <number>      Scenario seed
 
-Controls: drag to select, right-click to move, Alt+right-click to attack-move,
-scroll to zoom, WASD or arrow keys to pan, Esc to clear the selection.";
+Controls:
+  Left-drag or click   Select your units
+  Right-click          Attack an enemy, assist or repair a friend, reclaim a wreck,
+                       move to the ground, or set a factory's rally point
+  Alt + right-click    Attack-move
+  P + right-click      Hold P and add patrol points, then release P
+  X                    Stop
+  Space                Jump to your commander
+  Scroll               Zoom, towards the cursor
+  WASD or arrow keys   Pan
+  Esc                  Cancel placement, or clear the selection";
 
 #[derive(Default)]
 struct Options {
+    battle: bool,
     headless_ticks: Option<u32>,
     autotest_seconds: Option<u32>,
+    fast_forward: u32,
     capture_dir: Option<PathBuf>,
+    soak: Option<u64>,
+    threads: Option<usize>,
     seed: Option<u64>,
 }
 
@@ -58,11 +82,16 @@ fn parse_options() -> Result<Options, String> {
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let mut value = |name: &str| args.next().ok_or_else(|| format!("{name} needs a value"));
+        let number = |name: &str, text: String| text.parse::<u64>().map_err(|_| format!("{name} needs a number"));
         match arg.as_str() {
-            "--headless" => options.headless_ticks = Some(value("--headless")?.parse().map_err(|_| "--headless needs a tick count")?),
-            "--autotest" => options.autotest_seconds = Some(value("--autotest")?.parse().map_err(|_| "--autotest needs a number of seconds")?),
+            "--battle" => options.battle = true,
+            "--headless" => options.headless_ticks = Some(number("--headless", value("--headless")?)? as u32),
+            "--autotest" => options.autotest_seconds = Some(number("--autotest", value("--autotest")?)? as u32),
+            "--fast-forward" => options.fast_forward = number("--fast-forward", value("--fast-forward")?)? as u32,
             "--capture" => options.capture_dir = Some(PathBuf::from(value("--capture")?)),
-            "--seed" => options.seed = Some(value("--seed")?.parse().map_err(|_| "--seed needs a number")?),
+            "--soak" => options.soak = Some(number("--soak", value("--soak")?)?),
+            "--threads" => options.threads = Some(number("--threads", value("--threads")?)? as usize),
+            "--seed" => options.seed = Some(number("--seed", value("--seed")?)?),
             "--help" | "-h" => return Err(USAGE.to_string()),
             other => return Err(format!("unknown option {other}\n\n{USAGE}")),
         }
@@ -80,20 +109,40 @@ fn main() {
         }
     };
     let seed = options.seed.unwrap_or(DEFAULT_SEED);
-    if let Some(ticks) = options.headless_ticks {
-        run_headless(seed, ticks);
+    if let Some(matches) = options.soak {
+        let mut report = run_soak(options.seed.unwrap_or(1), matches, options.threads.unwrap_or(6));
+        if !report.print() {
+            std::process::exit(1);
+        }
         return;
     }
-    run_windowed(seed, options.autotest_seconds, options.capture_dir);
+    if let Some(ticks) = options.headless_ticks {
+        run_headless(seed, ticks, options.battle);
+        return;
+    }
+    run_windowed(seed, options);
 }
 
-fn run_headless(seed: u64, ticks: u32) {
-    let scenario = scenario::default_battle(seed);
+fn make_scenario(seed: u64, battle: bool) -> Scenario {
+    if battle {
+        scenario::default_battle(seed)
+    } else {
+        scenario::skirmish(seed)
+    }
+}
+
+fn run_headless(seed: u64, ticks: u32, battle: bool) {
+    let scenario = make_scenario(seed, battle);
     let opening = scenario.opening_commands;
     let mut world = scenario.world;
+    let mut brains = [AiBrain::new(Team::Blue, seed), AiBrain::new(Team::Red, seed)];
     let started = Instant::now();
-    for _ in 0..ticks {
-        advance_scripted(&mut world, &opening, seed);
+    while world.current_tick < ticks && world.match_result.is_none() {
+        if battle {
+            advance_scripted(&mut world, &opening, seed);
+        } else {
+            advance_ai_vs_ai(&mut world, &mut brains);
+        }
     }
     println!(
         "headless: tick {} checksum {:016x} ({} units, {} projectiles, {:.2} ms per tick)",
@@ -101,7 +150,7 @@ fn run_headless(seed: u64, ticks: u32) {
         world.compute_checksum(),
         world.units.len(),
         world.projectiles.len(),
-        started.elapsed().as_secs_f64() * 1000.0 / f64::from(ticks.max(1)),
+        started.elapsed().as_secs_f64() * 1000.0 / f64::from(world.current_tick.max(1)),
     );
 }
 
@@ -191,39 +240,122 @@ fn raw_to_world(raw: i32) -> f64 {
     f64::from(raw) / 4096.0
 }
 
-fn run_windowed(seed: u64, autotest_seconds: Option<u32>, capture_dir: Option<PathBuf>) {
-    let scenario = scenario::default_battle(seed);
+/// The parts of a scenario that never change, for drawing and placement previews.
+struct MapInfo {
+    heights: HeightField,
+    map_units: f64,
+    cells_per_side: u32,
+    /// Terrain cells covered by walls: the lower corners for drawing, and sorted (y, x) for lookups.
+    wall_cells: Vec<([f64; 2], f64)>,
+    blocked_cells: Vec<(u32, u32)>,
+    deposits: Vec<(u32, u32)>,
+    blueprints: Arc<BlueprintDb>,
+    fog_side: Option<usize>,
+}
+
+fn read_map(scenario: &Scenario) -> MapInfo {
     let world = &scenario.world;
-    let map_units = f64::from(world.terrain.map_units());
+    let cell = f64::from(TERRAIN_CELL_UNITS);
     let heights = HeightField::new(
         world.terrain.samples_per_side(),
         world.terrain.heights().to_vec(),
-        f64::from(TERRAIN_CELL_UNITS),
+        cell,
         1.0 / f64::from(1 << HEIGHT_FRAC_BITS),
     );
+    let mut wall_cells = Vec::new();
+    let mut blocked_cells = Vec::new();
     // Walls are drawn one terrain cell at a time, so that they follow the hills.
-    let cell = f64::from(TERRAIN_CELL_UNITS);
-    let mut obstacles: Vec<([f64; 2], f64)> = Vec::new();
     for rect in &world.obstacles {
         let raw = |value: Fp| raw_to_world(value.to_bits());
-        let mut y = (raw(rect.min.y) / cell).floor() * cell;
-        while y < raw(rect.max.y) {
-            let mut x = (raw(rect.min.x) / cell).floor() * cell;
-            while x < raw(rect.max.x) {
-                let top = heights.height_at(x + cell * 0.5, y + cell * 0.5) + 1.0;
-                obstacles.push(([x, y], top));
-                x += cell;
+        let mut y = (raw(rect.min.y) / cell).floor();
+        while y * cell < raw(rect.max.y) {
+            let mut x = (raw(rect.min.x) / cell).floor();
+            while x * cell < raw(rect.max.x) {
+                let top = heights.height_at((x + 0.5) * cell, (y + 0.5) * cell) + 1.0;
+                wall_cells.push(([x * cell, y * cell], top));
+                blocked_cells.push((y as u32, x as u32));
+                x += 1.0;
             }
-            y += cell;
+            y += 1.0;
+        }
+    }
+    blocked_cells.sort_unstable();
+    MapInfo {
+        map_units: f64::from(world.terrain.map_units()),
+        cells_per_side: world.terrain.cells_per_side() as u32,
+        wall_cells,
+        blocked_cells,
+        deposits: world.deposits.clone(),
+        blueprints: Arc::clone(&world.blueprints),
+        fog_side: world.config.fog_of_war.then(|| world.visibility.side()),
+        heights,
+    }
+}
+
+/// Everything the window needs from the running simulation.
+struct Session {
+    driver: Option<SimDriver>,
+    previous: Arc<SimSnapshot>,
+    current: Arc<SimSnapshot>,
+    current_arrived: Instant,
+}
+
+impl Session {
+    fn start(scenario: Scenario, source: CommandSource, options: DriverOptions) -> Self {
+        Self {
+            driver: Some(SimDriver::start_with(scenario, source, true, options)),
+            previous: Arc::new(SimSnapshot::default()),
+            current: Arc::new(SimSnapshot::default()),
+            current_arrived: Instant::now(),
         }
     }
 
-    let mut autotest = autotest_seconds.map(|seconds| Autotest::new(seconds, capture_dir));
-    let source = match autotest_seconds {
-        Some(seconds) => CommandSource::Script { seed, ticks: seconds * 10 },
-        None => CommandSource::Player,
+    fn send(&self, command: SimCommand) {
+        if let Some(driver) = &self.driver {
+            driver.send(command);
+        }
+    }
+}
+
+/// The builders in a selection that can build a blueprint.
+fn builders_for(selected: &[SimId], snapshot: &SimSnapshot, blueprints: &BlueprintDb, blueprint: BlueprintId) -> Vec<SimId> {
+    selected
+        .iter()
+        .copied()
+        .filter(|id| {
+            snapshot.units.binary_search_by_key(id, |unit| unit.id).is_ok_and(|index| {
+                let unit = &snapshot.units[index];
+                unit.blueprint != u16::MAX && blueprints.get(BlueprintId(unit.blueprint)).builds.contains(&blueprint)
+            })
+        })
+        .collect()
+}
+
+fn commander_of(snapshot: &SimSnapshot, blueprints: &BlueprintDb) -> Option<SimId> {
+    snapshot
+        .units
+        .iter()
+        .find(|unit| unit.team == PLAYER_TEAM && unit.blueprint != u16::MAX && blueprints.get(BlueprintId(unit.blueprint)).is_commander())
+        .map(|unit| unit.id)
+}
+
+fn run_windowed(seed: u64, options: Options) {
+    let battle = options.battle;
+    let scenario = make_scenario(seed, battle);
+    let map = read_map(&scenario);
+    let is_match = !battle;
+    let autotest_seconds = options.autotest_seconds;
+    let fast_forward = options.fast_forward;
+
+    let mut autotest = autotest_seconds.map(|seconds| Autotest::new(seconds, options.capture_dir.clone()));
+    let source = match (autotest_seconds, battle) {
+        (Some(seconds), true) => CommandSource::Script { seed, ticks: fast_forward + seconds * 10 },
+        (Some(seconds), false) => CommandSource::AiVsAi { seed, ticks: fast_forward + seconds * 10 },
+        (None, true) => CommandSource::Player,
+        (None, false) => CommandSource::PlayerVsAi { seed },
     };
-    let mut driver = Some(SimDriver::start(scenario, source, true));
+    let driver_options = DriverOptions { viewer: is_match.then_some(PLAYER_TEAM), fast_forward_ticks: fast_forward };
+    let mut session = Session::start(scenario, source, driver_options);
 
     let event_loop = EventLoop::new().expect("event loop starts");
     let window = Arc::new(
@@ -234,172 +366,345 @@ fn run_windowed(seed: u64, autotest_seconds: Option<u32>, capture_dir: Option<Pa
             .expect("window opens"),
     );
     let size = window.inner_size();
-    let mut renderer = Renderer::new(Arc::clone(&window), &heights);
-    let mut camera = Camera::new(map_units, [f64::from(size.width), f64::from(size.height)]);
+    let mut renderer = Renderer::new(Arc::clone(&window), &map.heights, map.fog_side);
+    let mut camera = Camera::new(map.map_units, [f64::from(size.width), f64::from(size.height)]);
+    if is_match {
+        let start = skirmish_start(PLAYER_TEAM);
+        camera.look_at(raw_to_world(start.x.to_bits()), raw_to_world(start.y.to_bits()), STARTING_ALTITUDE);
+    }
+
+    let egui_context = egui::Context::default();
+    let mut egui_state = egui_winit::State::new(
+        egui_context.clone(),
+        egui::ViewportId::ROOT,
+        &window,
+        Some(window.scale_factor() as f32),
+        None,
+    );
 
     let mut selection = Selection::default();
-    let mut previous = Arc::new(SimSnapshot::default());
-    let mut current = Arc::new(SimSnapshot::default());
-    let mut current_arrived = Instant::now();
+    let mut placing: Option<BlueprintId> = None;
+    let mut patrol_points: Vec<Vec2Fp> = Vec::new();
+    let mut patrol_held = false;
     let mut last_frame = Instant::now();
     let mut frames_seen = 0usize;
     let mut held_keys = [false; 4];
-    let mut alt_held = false;
+    let (mut alt_held, mut shift_held) = (false, false);
     let mut unit_instances: Vec<UnitInstanceRaw> = Vec::new();
     let mut projectile_instances: Vec<UnitInstanceRaw> = Vec::new();
-    let mut obstacle_instances: Vec<UnitInstanceRaw> = Vec::new();
+    let mut static_instances: Vec<UnitInstanceRaw> = Vec::new();
     let mut title_timer = Instant::now();
     let mut title_frames = 0u32;
+    let mut autotest_selected = false;
+    let tints = instances::role_tints(&map.blueprints);
 
     event_loop.set_control_flow(ControlFlow::Poll);
     event_loop
         .run(move |event, target| match event {
             Event::AboutToWait => window.request_redraw(),
-            Event::WindowEvent { event, .. } => match event {
-                WindowEvent::CloseRequested => target.exit(),
-                WindowEvent::Resized(new_size) => {
-                    renderer.resize(new_size.width, new_size.height);
-                    camera.set_viewport([f64::from(new_size.width.max(1)), f64::from(new_size.height.max(1))]);
-                }
-                WindowEvent::ModifiersChanged(modifiers) => alt_held = modifiers.state().alt_key(),
-                WindowEvent::CursorMoved { position, .. } => selection.move_cursor([position.x, position.y]),
-                WindowEvent::MouseWheel { delta, .. } => {
-                    let steps = match delta {
-                        MouseScrollDelta::LineDelta(_, y) => f64::from(y),
-                        MouseScrollDelta::PixelDelta(PhysicalPosition { y, .. }) => y / 40.0,
-                    };
-                    let anchor = camera.screen_to_ground(selection.cursor(), &heights);
-                    camera.zoom(steps, anchor);
-                }
-                WindowEvent::MouseInput { state, button, .. } => match (button, state) {
-                    (MouseButton::Left, ElementState::Pressed) => selection.begin_drag(),
-                    (MouseButton::Left, ElementState::Released) => {
-                        selection.end_drag(&current.units, &camera, PLAYER_TEAM);
+            Event::WindowEvent { event, .. } => {
+                let response = egui_state.on_window_event(&window, &event);
+                match event {
+                    WindowEvent::CloseRequested => target.exit(),
+                    WindowEvent::Resized(new_size) => {
+                        renderer.resize(new_size.width, new_size.height);
+                        camera.set_viewport([f64::from(new_size.width.max(1)), f64::from(new_size.height.max(1))]);
                     }
-                    (MouseButton::Right, ElementState::Pressed) if !selection.selected().is_empty() => {
-                        if let (Some(ground), Some(driver)) =
-                            (camera.screen_to_ground(selection.cursor(), &heights), driver.as_ref())
-                        {
-                            driver.send(order_command(selection.selected(), ground, alt_held));
+                    WindowEvent::ModifiersChanged(modifiers) => {
+                        alt_held = modifiers.state().alt_key();
+                        shift_held = modifiers.state().shift_key();
+                    }
+                    WindowEvent::CursorMoved { position, .. } => selection.move_cursor([position.x, position.y]),
+                    WindowEvent::MouseWheel { delta, .. } if !response.consumed => {
+                        let steps = match delta {
+                            MouseScrollDelta::LineDelta(_, y) => f64::from(y),
+                            MouseScrollDelta::PixelDelta(PhysicalPosition { y, .. }) => y / 40.0,
+                        };
+                        let anchor = camera.screen_to_ground(selection.cursor(), &map.heights);
+                        camera.zoom(steps, anchor);
+                    }
+                    WindowEvent::MouseInput { state: ElementState::Released, button: MouseButton::Left, .. } => {
+                        selection.end_drag(&session.current.units, &camera, PLAYER_TEAM);
+                    }
+                    WindowEvent::MouseInput { state: ElementState::Pressed, button, .. } if !response.consumed => match button {
+                        MouseButton::Left => {
+                            if let Some(blueprint) = placing {
+                                if let Some(ground) = camera.screen_to_ground(selection.cursor(), &map.heights) {
+                                    let footprint = map.blueprints.get(blueprint).footprint;
+                                    let (cell_x, cell_y) = placement_cell(ground, footprint);
+                                    let units = builders_for(selection.selected(), &session.current, &map.blueprints, blueprint);
+                                    if !units.is_empty() {
+                                        session.send(SimCommand::Build { units, blueprint, cell_x, cell_y, queued: shift_held });
+                                    }
+                                }
+                                if !shift_held {
+                                    placing = None;
+                                }
+                            } else {
+                                selection.begin_drag();
+                            }
+                        }
+                        MouseButton::Right => {
+                            let ground = camera.screen_to_ground(selection.cursor(), &map.heights);
+                            if placing.take().is_some() {
+                                // Right-click only cancels a placement.
+                            } else if patrol_held {
+                                if let Some(ground) = ground {
+                                    patrol_points.push(Vec2Fp::new(Fp::from_num(ground[0]), Fp::from_num(ground[1])));
+                                }
+                            } else if !selection.selected().is_empty() {
+                                let orders = right_click_orders(&RightClick {
+                                    selected: selection.selected(),
+                                    units: &session.current.units,
+                                    wrecks: &session.current.wrecks,
+                                    blueprints: &map.blueprints,
+                                    team: PLAYER_TEAM,
+                                    camera: &camera,
+                                    cursor: selection.cursor(),
+                                    ground,
+                                    attack_move: alt_held,
+                                });
+                                for order in orders {
+                                    session.send(order);
+                                }
+                            }
+                        }
+                        _ => {}
+                    },
+                    WindowEvent::KeyboardInput { event, .. } if !response.consumed => {
+                        let pressed = event.state == ElementState::Pressed;
+                        match event.physical_key {
+                            PhysicalKey::Code(KeyCode::KeyW | KeyCode::ArrowUp) => held_keys[0] = pressed,
+                            PhysicalKey::Code(KeyCode::KeyS | KeyCode::ArrowDown) => held_keys[1] = pressed,
+                            PhysicalKey::Code(KeyCode::KeyA | KeyCode::ArrowLeft) => held_keys[2] = pressed,
+                            PhysicalKey::Code(KeyCode::KeyD | KeyCode::ArrowRight) => held_keys[3] = pressed,
+                            PhysicalKey::Code(KeyCode::Escape) if pressed => {
+                                if placing.take().is_none() {
+                                    selection.clear();
+                                }
+                            }
+                            PhysicalKey::Code(KeyCode::KeyX) if pressed && !selection.selected().is_empty() => {
+                                session.send(SimCommand::Stop { units: selection.selected().to_vec() });
+                            }
+                            PhysicalKey::Code(KeyCode::Space) if pressed && is_match => {
+                                if let Some(commander) = commander_of(&session.current, &map.blueprints) {
+                                    let index = session.current.units.binary_search_by_key(&commander, |unit| unit.id).expect("found in this list");
+                                    let unit = &session.current.units[index];
+                                    camera.look_at(raw_to_world(unit.x), raw_to_world(unit.y), 0.0);
+                                    selection.select(vec![commander]);
+                                }
+                            }
+                            PhysicalKey::Code(KeyCode::KeyP) => {
+                                if pressed {
+                                    patrol_held = true;
+                                } else {
+                                    patrol_held = false;
+                                    if !patrol_points.is_empty() && !selection.selected().is_empty() {
+                                        session.send(SimCommand::Patrol {
+                                            units: selection.selected().to_vec(),
+                                            points: std::mem::take(&mut patrol_points),
+                                        });
+                                    }
+                                    patrol_points.clear();
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    WindowEvent::RedrawRequested => {
+                        let now = Instant::now();
+                        let frame_time = now - last_frame;
+                        last_frame = now;
+                        let dt = frame_time.as_secs_f64().min(0.1);
+
+                        // Take the newest snapshots. The frame draws between the last two.
+                        if let Some(driver) = session.driver.as_ref() {
+                            let mut arrived = false;
+                            while let Some(snapshot) = driver.try_snapshot() {
+                                session.previous = std::mem::replace(&mut session.current, snapshot);
+                                session.current_arrived = now;
+                                arrived = true;
+                            }
+                            if arrived {
+                                if let Some(fog) = &session.current.fog {
+                                    renderer.update_fog(fog);
+                                }
+                            }
+                        }
+                        selection.retain_alive(&session.current.units);
+                        let alpha = ((now - session.current_arrived).as_secs_f64() / TICK_DURATION.as_secs_f64()).clamp(0.0, 1.0);
+
+                        let pan_x = f64::from(u8::from(held_keys[3])) - f64::from(u8::from(held_keys[2]));
+                        let pan_y = f64::from(u8::from(held_keys[0])) - f64::from(u8::from(held_keys[1]));
+                        camera.pan(pan_x, pan_y, dt);
+
+                        // Test runs follow a fixed zoom sweep, with the commander selected
+                        // so that screenshots show the build menu.
+                        let mut progress = None;
+                        if let Some(test) = autotest.as_mut() {
+                            let started = *test.started.get_or_insert(now);
+                            let fraction = ((now - started).as_secs_f64() / test.duration.as_secs_f64()).min(1.0);
+                            camera.set_altitude(Autotest::altitude_at(fraction, camera.max_altitude()));
+                            progress = Some(fraction);
+                            if is_match && !autotest_selected {
+                                if let Some(commander) = commander_of(&session.current, &map.blueprints) {
+                                    selection.select(vec![commander]);
+                                    autotest_selected = true;
+                                }
+                            }
+                        }
+                        camera.update(dt, &map.heights);
+
+                        // The interface.
+                        let mut actions = Vec::new();
+                        let raw_input = egui_state.take_egui_input(&window);
+                        let pixels_per_point = window.scale_factor() as f32;
+                        let snapshot = Arc::clone(&session.current);
+                        let selected = selection.selected().to_vec();
+                        let output = egui_context.run(raw_input, |ctx| {
+                            if is_match {
+                                ui::world_overlay(ctx, &camera, &snapshot, &selected, &map.blueprints, pixels_per_point);
+                                ui::resource_bar(ctx, &snapshot);
+                                ui::command_panel(ctx, &snapshot, &selected, &map.blueprints, &mut actions);
+                                if let Some(blueprint) = placing {
+                                    ui::placement_hint(ctx, &map.blueprints, blueprint);
+                                }
+                                if let Some(result) = snapshot.match_result {
+                                    ui::match_end_window(ctx, result, PLAYER_TEAM, &mut actions);
+                                }
+                            }
+                        });
+                        egui_state.handle_platform_output(&window, output.platform_output);
+                        let ui_frame = UiFrame {
+                            primitives: egui_context.tessellate(output.shapes, output.pixels_per_point),
+                            textures: output.textures_delta,
+                            screen: egui_wgpu::ScreenDescriptor {
+                                size_in_pixels: [camera.viewport()[0] as u32, camera.viewport()[1] as u32],
+                                pixels_per_point: output.pixels_per_point,
+                            },
+                        };
+                        for action in actions {
+                            match action {
+                                UiAction::BeginPlacement(blueprint) => placing = Some(blueprint),
+                                UiAction::Queue { factory, blueprint, count } => {
+                                    session.send(SimCommand::QueueUnit { factory, blueprint, count });
+                                }
+                                UiAction::SetRepeat { factory, repeat } => session.send(SimCommand::SetRepeat { factory, repeat }),
+                                UiAction::ClearQueue { factory } => session.send(SimCommand::ClearQueue { factory }),
+                                UiAction::Restart => {
+                                    session = Session::start(scenario::skirmish(seed), CommandSource::PlayerVsAi { seed }, driver_options);
+                                    selection.clear();
+                                    placing = None;
+                                }
+                            }
+                        }
+
+                        // The scene.
+                        let eye = camera.eye();
+                        let (previous, current) = (&session.previous, &session.current);
+                        instances::build_unit_instances(&previous.units, &current.units, alpha, eye, selection.selected(), &tints, &mut unit_instances);
+                        projectile_instances.clear();
+                        instances::build_projectile_instances(&previous.projectiles, &current.projectiles, alpha, eye, &mut projectile_instances);
+                        static_instances.clear();
+                        let cell = f64::from(TERRAIN_CELL_UNITS);
+                        for &(min, top) in &map.wall_cells {
+                            let max = [min[0] + cell, min[1] + cell];
+                            static_instances.push(instances::obstacle_instance(min, max, top - OBSTACLE_DRAW_HEIGHT, OBSTACLE_DRAW_HEIGHT, eye));
+                        }
+                        for &(x, y) in &map.deposits {
+                            let (center_x, center_y) = ((f64::from(x) + 0.5) * cell, (f64::from(y) + 0.5) * cell);
+                            let center = [center_x, center_y, map.heights.height_at(center_x, center_y) + 0.5];
+                            static_instances.push(instances::deposit_instance(center, cell * 0.8, eye));
+                        }
+                        for wreck in &current.wrecks {
+                            let center = [raw_to_world(wreck.x), raw_to_world(wreck.y), raw_to_world(wreck.z)];
+                            static_instances.push(instances::wreck_instance(center, raw_to_world(wreck.radius), eye));
+                        }
+                        if let Some(blueprint) = placing {
+                            if let Some(ground) = camera.screen_to_ground(selection.cursor(), &map.heights) {
+                                let unit = map.blueprints.get(blueprint);
+                                let spot = placement_cell(ground, unit.footprint);
+                                let placement_map = PlacementMap {
+                                    cells_per_side: map.cells_per_side,
+                                    blocked_cells: &map.blocked_cells,
+                                    deposits: &map.deposits,
+                                    blueprints: &map.blueprints,
+                                };
+                                let valid = placement_is_valid(&placement_map, blueprint, spot, &current.units);
+                                let width = f64::from(unit.footprint) * cell;
+                                let (center_x, center_y) = (f64::from(spot.0) * cell + width * 0.5, f64::from(spot.1) * cell + width * 0.5);
+                                let center = [center_x, center_y, map.heights.height_at(center_x, center_y) + width * 0.15];
+                                static_instances.push(instances::ghost_instance(center, width, valid, eye));
+                            }
+                        }
+                        let scene = FrameScene {
+                            camera: &camera,
+                            units: &unit_instances,
+                            projectiles: &projectile_instances,
+                            obstacles: &static_instances,
+                            selection_box: selection.drag_box(),
+                        };
+
+                        renderer.begin_ui(&ui_frame);
+                        if let (Some(test), Some(fraction)) = (autotest.as_mut(), progress) {
+                            if test.capture_points.first().is_some_and(|&point| fraction >= point) {
+                                let point = test.capture_points.remove(0);
+                                if let Some(directory) = &test.capture_dir {
+                                    let path = directory.join(format!("zoom_{:03}.bmp", (point * 100.0) as u32));
+                                    match renderer.capture(&scene, Some(&ui_frame), &path) {
+                                        Ok(()) => println!(
+                                            "captured {} at altitude {:.0}, {} units, {} projectiles",
+                                            path.display(), camera.altitude(), session.current.units.len(), session.current.projectiles.len()
+                                        ),
+                                        Err(error) => println!("capture failed: {error}"),
+                                    }
+                                    // A capture is not part of the frame being measured.
+                                    last_frame = Instant::now();
+                                }
+                            }
+                        }
+                        // Measured frame times span from the last frame's end to this one's,
+                        // so they include the drawable wait from the frame before.
+                        let previous_acquire = renderer.last_acquire();
+                        renderer.render(&scene, Some(&ui_frame));
+                        renderer.end_ui(&ui_frame);
+
+                        frames_seen += 1;
+                        if let Some(test) = autotest.as_mut() {
+                            if frames_seen > WARMUP_FRAMES {
+                                test.frame_times.push(frame_time);
+                                test.work_times.push(frame_time.saturating_sub(previous_acquire));
+                                test.frames_by_altitude.push((camera.altitude(), frame_time));
+                            }
+                            test.peak_projectiles = test.peak_projectiles.max(session.current.projectiles.len());
+                            test.peak_instances = test.peak_instances.max(unit_instances.len() + projectile_instances.len());
+                            if session.driver.as_ref().is_some_and(SimDriver::is_finished) {
+                                let result = session.driver.take().expect("driver is present").finish();
+                                test.report(result);
+                                target.exit();
+                            }
+                        }
+
+                        // The FPS counter.
+                        title_frames += 1;
+                        let elapsed = title_timer.elapsed();
+                        if elapsed >= Duration::from_millis(500) {
+                            let fps = f64::from(title_frames) / elapsed.as_secs_f64();
+                            let tick_ms = session.driver.as_ref().map_or(0.0, |driver| f64::from(driver.last_tick_micros()) / 1000.0);
+                            let blue = session.current.units.iter().filter(|unit| unit.team == Team::Blue).count();
+                            let red = session.current.units.len() - blue;
+                            window.set_title(&format!(
+                                "sim-engine | {fps:.0} FPS | tick {tick_ms:.1} ms | Blue {blue} vs Red {red} visible | {} shells | {} selected",
+                                session.current.projectiles.len(),
+                                selection.selected().len(),
+                            ));
+                            title_timer = Instant::now();
+                            title_frames = 0;
                         }
                     }
                     _ => {}
-                },
-                WindowEvent::KeyboardInput { event, .. } => {
-                    let pressed = event.state == ElementState::Pressed;
-                    match event.physical_key {
-                        PhysicalKey::Code(KeyCode::KeyW | KeyCode::ArrowUp) => held_keys[0] = pressed,
-                        PhysicalKey::Code(KeyCode::KeyS | KeyCode::ArrowDown) => held_keys[1] = pressed,
-                        PhysicalKey::Code(KeyCode::KeyA | KeyCode::ArrowLeft) => held_keys[2] = pressed,
-                        PhysicalKey::Code(KeyCode::KeyD | KeyCode::ArrowRight) => held_keys[3] = pressed,
-                        PhysicalKey::Code(KeyCode::Escape) if pressed => selection.clear(),
-                        _ => {}
-                    }
                 }
-                WindowEvent::RedrawRequested => {
-                    let now = Instant::now();
-                    let frame_time = now - last_frame;
-                    last_frame = now;
-                    let dt = frame_time.as_secs_f64().min(0.1);
-
-                    // Take the newest snapshots. The frame draws between the last two.
-                    if let Some(driver) = driver.as_ref() {
-                        while let Some(snapshot) = driver.try_snapshot() {
-                            previous = std::mem::replace(&mut current, snapshot);
-                            current_arrived = now;
-                        }
-                    }
-                    selection.retain_alive(&current.units);
-                    let alpha = ((now - current_arrived).as_secs_f64() / TICK_DURATION.as_secs_f64()).clamp(0.0, 1.0);
-
-                    let pan_x = f64::from(u8::from(held_keys[3])) - f64::from(u8::from(held_keys[2]));
-                    let pan_y = f64::from(u8::from(held_keys[0])) - f64::from(u8::from(held_keys[1]));
-                    camera.pan(pan_x, pan_y, dt);
-
-                    // Test runs follow a fixed zoom sweep.
-                    let mut progress = None;
-                    if let Some(test) = autotest.as_mut() {
-                        let started = *test.started.get_or_insert(now);
-                        let fraction = ((now - started).as_secs_f64() / test.duration.as_secs_f64()).min(1.0);
-                        camera.set_altitude(Autotest::altitude_at(fraction, camera.max_altitude()));
-                        progress = Some(fraction);
-                    }
-                    camera.update(dt, &heights);
-
-                    let eye = camera.eye();
-                    instances::build_unit_instances(&previous.units, &current.units, alpha, eye, selection.selected(), &mut unit_instances);
-                    projectile_instances.clear();
-                    instances::build_projectile_instances(&previous.projectiles, &current.projectiles, alpha, eye, &mut projectile_instances);
-                    obstacle_instances.clear();
-                    for &(min, top) in &obstacles {
-                        let max = [min[0] + cell, min[1] + cell];
-                        obstacle_instances.push(instances::obstacle_instance(min, max, top - OBSTACLE_DRAW_HEIGHT, OBSTACLE_DRAW_HEIGHT, eye));
-                    }
-                    let scene = FrameScene {
-                        camera: &camera,
-                        units: &unit_instances,
-                        projectiles: &projectile_instances,
-                        obstacles: &obstacle_instances,
-                        selection_box: selection.drag_box(),
-                    };
-
-                    if let (Some(test), Some(fraction)) = (autotest.as_mut(), progress) {
-                        if test.capture_points.first().is_some_and(|&point| fraction >= point) {
-                            let point = test.capture_points.remove(0);
-                            if let Some(directory) = &test.capture_dir {
-                                let path = directory.join(format!("zoom_{:03}.bmp", (point * 100.0) as u32));
-                                match renderer.capture(&scene, &path) {
-                                    Ok(()) => println!(
-                                        "captured {} at altitude {:.0}, {} units, {} projectiles",
-                                        path.display(), camera.altitude(), current.units.len(), current.projectiles.len()
-                                    ),
-                                    Err(error) => println!("capture failed: {error}"),
-                                }
-                                // A capture is not part of the frame being measured.
-                                last_frame = Instant::now();
-                            }
-                        }
-                    }
-                    // Measured frame times span from the last frame's end to this one's,
-                    // so they include the drawable wait from the frame before.
-                    let previous_acquire = renderer.last_acquire();
-                    renderer.render(&scene);
-
-                    frames_seen += 1;
-                    if let Some(test) = autotest.as_mut() {
-                        if frames_seen > WARMUP_FRAMES {
-                            test.frame_times.push(frame_time);
-                            test.work_times.push(frame_time.saturating_sub(previous_acquire));
-                            test.frames_by_altitude.push((camera.altitude(), frame_time));
-                        }
-                        test.peak_projectiles = test.peak_projectiles.max(current.projectiles.len());
-                        test.peak_instances = test.peak_instances.max(unit_instances.len() + projectile_instances.len());
-                        if driver.as_ref().is_some_and(SimDriver::is_finished) {
-                            let result = driver.take().expect("driver is present").finish();
-                            test.report(result);
-                            target.exit();
-                        }
-                    }
-
-                    // The FPS counter.
-                    title_frames += 1;
-                    let elapsed = title_timer.elapsed();
-                    if elapsed >= Duration::from_millis(500) {
-                        let fps = f64::from(title_frames) / elapsed.as_secs_f64();
-                        let tick_ms = driver.as_ref().map_or(0.0, |driver| f64::from(driver.last_tick_micros()) / 1000.0);
-                        let blue = current.units.iter().filter(|unit| unit.team == Team::Blue).count();
-                        let red = current.units.len() - blue;
-                        window.set_title(&format!(
-                            "sim-engine | {fps:.0} FPS | tick {tick_ms:.1} ms | Blue {blue} vs Red {red} | {} shells | {} selected",
-                            current.projectiles.len(),
-                            selection.selected().len(),
-                        ));
-                        title_timer = Instant::now();
-                        title_frames = 0;
-                    }
-                }
-                _ => {}
-            },
+            }
             _ => {}
         })
         .expect("event loop runs");

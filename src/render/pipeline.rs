@@ -17,10 +17,11 @@ const TERRAIN_GRID_SIZE: u32 = 512;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const BACKGROUND: wgpu::Color = wgpu::Color { r: 0.015, g: 0.02, b: 0.035, a: 1.0 };
 
-/// Camera distances where cubes begin and finish collapsing into dots. A 2-unit cube
-/// is about 8 pixels across at the start, and about 4 at the end, in a 1080p window.
-const LOD_START: f32 = 330.0;
-const LOD_END: f32 = 660.0;
+/// The size-to-distance ratios where a unit is fully a dot, and fully a cube. Based on
+/// apparent size, so that large units stay solid for longer. About 4 and 8 pixels at 1080p.
+const LOD_DOT_RATIO: f32 = 0.003;
+const LOD_CUBE_RATIO: f32 = 0.006;
+const FOG_CELL_UNITS: f64 = 80.0;
 
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]
@@ -107,6 +108,13 @@ impl InstanceBuffer {
     }
 }
 
+/// The interface for one frame, ready to draw over the scene.
+pub struct UiFrame {
+    pub primitives: Vec<egui::ClippedPrimitive>,
+    pub textures: egui::TexturesDelta,
+    pub screen: egui_wgpu::ScreenDescriptor,
+}
+
 /// Everything drawn in one frame.
 pub struct FrameScene<'a> {
     pub camera: &'a Camera,
@@ -140,6 +148,10 @@ pub struct Renderer {
     cell_units: f64,
     height_scale: f32,
     icon_scale: f32,
+    fog_texture: wgpu::Texture,
+    fog_side: u32,
+    fog_scale: f32,
+    egui: egui_wgpu::Renderer,
     draw_box: bool,
     last_acquire: Duration,
 }
@@ -160,7 +172,8 @@ fn create_depth_view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Te
 }
 
 impl Renderer {
-    pub fn new(window: Arc<Window>, heights: &HeightField) -> Self {
+    /// `fog_side` is the size of the fog of war grid, if the session has fog.
+    pub fn new(window: Arc<Window>, heights: &HeightField, fog_side: Option<usize>) -> Self {
         let size = window.inner_size();
         let icon_scale = window.scale_factor() as f32;
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -229,6 +242,36 @@ impl Renderer {
         );
         let height_view = height_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
+        // The fog of war, sampled with smoothing. Without fog, one white texel leaves terrain unchanged.
+        let fog_extent = fog_side.map_or(1, |side| side as u32);
+        let fog_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("fog of war"),
+            size: wgpu::Extent3d { width: fog_extent, height: fog_extent, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let fog_view = fog_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let fog_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("fog of war"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            ..Default::default()
+        });
+        queue.write_texture(
+            fog_texture.as_image_copy(),
+            &vec![255u8; (fog_extent * fog_extent) as usize],
+            wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(fog_extent), rows_per_image: Some(fog_extent) },
+            wgpu::Extent3d { width: fog_extent, height: fog_extent, depth_or_array_layers: 1 },
+        );
+        let fog_scale = fog_side.map_or(0.0, |side| (heights.cell_units() / (side as f64 * FOG_CELL_UNITS)) as f32);
+        let egui = egui_wgpu::Renderer::new(&device, format, None, 1);
+
         let globals_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("globals"),
             size: std::mem::size_of::<Globals>() as u64,
@@ -258,6 +301,22 @@ impl Renderer {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -266,6 +325,8 @@ impl Renderer {
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: globals_buffer.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&height_view) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&fog_view) },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(&fog_sampler) },
             ],
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -411,9 +472,59 @@ impl Renderer {
             cell_units: heights.cell_units(),
             height_scale: heights.units_per_step() as f32,
             icon_scale,
+            fog_texture,
+            fog_side: fog_extent,
+            fog_scale,
+            egui,
             draw_box: false,
             last_acquire: Duration::ZERO,
         }
+    }
+
+    /// Uploads the latest fog of war, one byte per cell.
+    pub fn update_fog(&self, bytes: &[u8]) {
+        let side = self.fog_side;
+        if bytes.len() == (side * side) as usize {
+            self.queue.write_texture(
+                self.fog_texture.as_image_copy(),
+                bytes,
+                wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(side), rows_per_image: Some(side) },
+                wgpu::Extent3d { width: side, height: side, depth_or_array_layers: 1 },
+            );
+        }
+    }
+
+    /// Uploads textures for a frame's interface. Call once per frame, before drawing it.
+    pub fn begin_ui(&mut self, frame: &UiFrame) {
+        for (id, delta) in &frame.textures.set {
+            self.egui.update_texture(&self.device, &self.queue, *id, delta);
+        }
+    }
+
+    /// Releases what a frame's interface no longer needs. Call once per frame, after drawing it.
+    pub fn end_ui(&mut self, frame: &UiFrame) {
+        for id in &frame.textures.free {
+            self.egui.free_texture(id);
+        }
+    }
+
+    /// Records the interface over whatever is already in the target.
+    fn encode_ui(&mut self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView, frame: &UiFrame) -> Vec<wgpu::CommandBuffer> {
+        let extra = self.egui.update_buffers(&self.device, &self.queue, encoder, &frame.primitives, &frame.screen);
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("interface"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        self.egui.render(&mut pass, &frame.primitives, &frame.screen);
+        drop(pass);
+        extra
     }
 
     /// How long the last frame waited for a drawable, which is how vsync paces frames.
@@ -457,7 +568,7 @@ impl Renderer {
 
         let globals = Globals {
             view_proj: camera.view_projection().to_cols_array_2d(),
-            viewport_lod: [viewport[0] as f32, viewport[1] as f32, LOD_START, LOD_END],
+            viewport_lod: [viewport[0] as f32, viewport[1] as f32, LOD_DOT_RATIO, LOD_CUBE_RATIO],
             terrain_origin: [
                 (f64::from(first[0]) * self.cell_units - eye[0]) as f32,
                 (f64::from(first[1]) * self.cell_units - eye[1]) as f32,
@@ -466,7 +577,7 @@ impl Renderer {
             ],
             terrain_grid: [first[0], first[1], step, self.samples_per_side],
             selection_box,
-            terrain_scale: [self.height_scale, self.icon_scale, 0.0, 0.0],
+            terrain_scale: [self.height_scale, self.icon_scale, self.fog_scale, 0.0],
         };
         self.queue.write_buffer(&self.globals_buffer, 0, bytemuck::bytes_of(&globals));
         self.unit_buffer.write(&self.device, &self.queue, scene.units);
@@ -513,7 +624,7 @@ impl Renderer {
         }
     }
 
-    pub fn render(&mut self, scene: &FrameScene<'_>) {
+    pub fn render(&mut self, scene: &FrameScene<'_>, ui: Option<&UiFrame>) {
         self.prepare(scene);
         let acquire_started = Instant::now();
         let acquired = self.surface.get_current_texture();
@@ -532,12 +643,13 @@ impl Renderer {
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") });
         self.encode(&mut encoder, &view, &self.depth_view);
-        self.queue.submit([encoder.finish()]);
+        let extra = ui.map_or_else(Vec::new, |ui| self.encode_ui(&mut encoder, &view, ui));
+        self.queue.submit(extra.into_iter().chain([encoder.finish()]));
         frame.present();
     }
 
     /// Draws a scene offscreen and saves it as a 24-bit BMP, for test runs.
-    pub fn capture(&mut self, scene: &FrameScene<'_>, path: &Path) -> io::Result<()> {
+    pub fn capture(&mut self, scene: &FrameScene<'_>, ui: Option<&UiFrame>, path: &Path) -> io::Result<()> {
         self.prepare(scene);
         let (width, height) = (self.config.width, self.config.height);
         let extent = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
@@ -562,6 +674,7 @@ impl Renderer {
         let depth = create_depth_view(&self.device, width, height);
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("capture") });
         self.encode(&mut encoder, &view, &depth);
+        let extra = ui.map_or_else(Vec::new, |ui| self.encode_ui(&mut encoder, &view, ui));
         encoder.copy_texture_to_buffer(
             target.as_image_copy(),
             wgpu::ImageCopyBuffer {
@@ -570,7 +683,7 @@ impl Renderer {
             },
             extent,
         );
-        self.queue.submit([encoder.finish()]);
+        self.queue.submit(extra.into_iter().chain([encoder.finish()]));
         let slice = readback.slice(..);
         slice.map_async(wgpu::MapMode::Read, |result| result.expect("capture buffer maps"));
         self.device.poll(wgpu::Maintain::Wait);
