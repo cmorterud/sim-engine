@@ -163,7 +163,9 @@ pub fn deposit_instance(center: [f64; 3], width: f64, eye: [f64; 3]) -> UnitInst
 /// A preview of a structure about to be placed.
 pub fn ghost_instance(center: [f64; 3], width: f64, valid: bool, eye: [f64; 3]) -> UnitInstanceRaw {
     let color = if valid { GHOST_VALID } else { GHOST_INVALID };
-    instance(center, [width as f32, width as f32, (width * 0.25) as f32], color, NO_ICON, eye)
+    // Slightly smaller than the real footprint, so that a row of them reads as separate buildings.
+    let shown = (width * 0.86) as f32;
+    instance(center, [shown, shown, (width * 0.25) as f32], color, NO_ICON, eye)
 }
 
 #[cfg(test)]

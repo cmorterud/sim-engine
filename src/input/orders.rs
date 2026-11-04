@@ -8,7 +8,7 @@ use crate::sim::blueprints::{BlueprintDb, BlueprintId};
 use crate::sim::commands::SimCommand;
 use crate::sim::components::{SimId, Team};
 use crate::sim::config::TERRAIN_CELL_UNITS;
-use crate::sim::world::{UnitView, WreckView};
+use crate::sim::world::{SimSnapshot, UnitView, WreckView};
 
 const RAW_TO_WORLD: f64 = 1.0 / 4096.0;
 /// How close, in pixels, a click must be to a wreck to reclaim it.
@@ -142,6 +142,51 @@ pub fn placement_cell(ground: [f64; 2], footprint: u8) -> (u32, u32) {
     (corner(ground[0]), corner(ground[1]))
 }
 
+/// The longest row a single Shift-drag can lay out.
+const MAX_LINE_BUILDS: i64 = 64;
+
+/// The corner cells for a row of structures between two cells, side by side with no gaps,
+/// in order from the start. A row ends on the last spot that fits before passing `end`.
+pub fn line_cells(start: (u32, u32), end: (u32, u32), footprint: u8) -> Vec<(u32, u32)> {
+    let size = i64::from(footprint.max(1));
+    let (dx, dy) = (i64::from(end.0) - i64::from(start.0), i64::from(end.1) - i64::from(start.1));
+    let steps = (dx.abs().max(dy.abs()) / size).min(MAX_LINE_BUILDS - 1);
+    // Each step advances one footprint along the longer axis, which keeps neighbors from overlapping.
+    let reach = dx.abs().max(dy.abs()).max(1);
+    (0..=steps)
+        .map(|step| {
+            let along = step * size;
+            let round_div = |value: i64| (2 * value * along + reach).div_euclid(2 * reach);
+            ((i64::from(start.0) + round_div(dx)) as u32, (i64::from(start.1) + round_div(dy)) as u32)
+        })
+        .collect()
+}
+
+/// A build that is queued but not started, in world units.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct PendingBuild {
+    pub center: [f64; 3],
+    pub width: f64,
+}
+
+/// Every queued build in a snapshot's plans, whichever builder holds it. Several builders
+/// queued on the same spot count once.
+pub fn pending_builds(snapshot: &SimSnapshot) -> Vec<PendingBuild> {
+    let mut builds: Vec<PendingBuild> = Vec::new();
+    for step in snapshot.plans.iter().flat_map(|plan| &plan.steps) {
+        if step.pending_width > 0 {
+            let build = PendingBuild {
+                center: [f64::from(step.x) * RAW_TO_WORLD, f64::from(step.y) * RAW_TO_WORLD, f64::from(step.z) * RAW_TO_WORLD],
+                width: f64::from(step.pending_width) * RAW_TO_WORLD,
+            };
+            if !builds.contains(&build) {
+                builds.push(build);
+            }
+        }
+    }
+    builds
+}
+
 /// Everything known to the player about where structures can go.
 pub struct PlacementMap<'a> {
     pub cells_per_side: u32,
@@ -153,7 +198,7 @@ pub struct PlacementMap<'a> {
 
 /// A client-side preview of whether a structure fits. The simulation has the final say, and
 /// it knows about hidden enemy structures that the player cannot.
-pub fn placement_is_valid(map: &PlacementMap<'_>, blueprint: BlueprintId, cell: (u32, u32), units: &[UnitView]) -> bool {
+pub fn placement_is_valid(map: &PlacementMap<'_>, blueprint: BlueprintId, cell: (u32, u32), units: &[UnitView], pending: &[PendingBuild]) -> bool {
     let unit = map.blueprints.get(blueprint);
     let size = u32::from(unit.footprint);
     if cell.0 + size > map.cells_per_side || cell.1 + size > map.cells_per_side {
@@ -167,6 +212,7 @@ pub fn placement_is_valid(map: &PlacementMap<'_>, blueprint: BlueprintId, cell: 
         .iter()
         .filter(|other| other.is_structure)
         .map(|other| (f64::from(other.x) * RAW_TO_WORLD, f64::from(other.y) * RAW_TO_WORLD, f64::from(other.radius) * RAW_TO_WORLD))
+        .chain(pending.iter().map(|build| (build.center[0], build.center[1], build.width * 0.5)))
         .collect();
     for y in cell.1..cell.1 + size {
         for x in cell.0..cell.0 + size {
@@ -361,13 +407,72 @@ mod tests {
         let deposits = [(20, 20)];
         let map = PlacementMap { cells_per_side: 512, blocked_cells: &blocked, deposits: &deposits, blueprints: &db };
         let existing = [view(1, Team::Blue, factory, &db, 1_030.0, 1_030.0)];
-        assert!(placement_is_valid(&map, generator, (100, 100), &existing));
-        assert!(!placement_is_valid(&map, generator, (10, 10), &existing), "on a wall");
-        assert!(!placement_is_valid(&map, generator, (51, 51), &existing), "on a structure");
-        assert!(!placement_is_valid(&map, generator, (20, 20), &existing), "on a deposit");
-        assert!(placement_is_valid(&map, extractor, (20, 20), &existing));
-        assert!(!placement_is_valid(&map, extractor, (21, 20), &existing), "off a deposit");
-        assert!(!placement_is_valid(&map, factory, (510, 100), &existing), "off the map");
+        assert!(placement_is_valid(&map, generator, (100, 100), &existing, &[]));
+        assert!(!placement_is_valid(&map, generator, (10, 10), &existing, &[]), "on a wall");
+        assert!(!placement_is_valid(&map, generator, (51, 51), &existing, &[]), "on a structure");
+        assert!(!placement_is_valid(&map, generator, (20, 20), &existing, &[]), "on a deposit");
+        assert!(placement_is_valid(&map, extractor, (20, 20), &existing, &[]));
+        assert!(!placement_is_valid(&map, extractor, (21, 20), &existing, &[]), "off a deposit");
+        assert!(!placement_is_valid(&map, factory, (510, 100), &existing, &[]), "off the map");
+    }
+
+    #[test]
+    fn a_line_lays_structures_side_by_side() {
+        assert_eq!(line_cells((10, 10), (10, 10), 1), [(10, 10)], "no drag means one building");
+        assert_eq!(line_cells((10, 10), (13, 10), 1), [(10, 10), (11, 10), (12, 10), (13, 10)]);
+        assert_eq!(line_cells((10, 10), (10, 7), 1), [(10, 10), (10, 9), (10, 8), (10, 7)], "lines can run backwards");
+        assert_eq!(line_cells((10, 10), (17, 10), 3), [(10, 10), (13, 10), (16, 10)], "wide buildings stay touching");
+        assert_eq!(line_cells((10, 10), (11, 10), 3), [(10, 10)], "too short a drag for a second one");
+        assert_eq!(line_cells((10, 10), (13, 13), 1), [(10, 10), (11, 11), (12, 12), (13, 13)], "diagonals work");
+    }
+
+    #[test]
+    fn no_two_structures_in_a_line_overlap_and_the_row_stays_on_course() {
+        for (end, footprint) in [((40, 17), 3u8), ((17, 40), 3), ((35, 22), 1), ((3, 30), 2), ((45, 45), 3)] {
+            let cells = line_cells((10, 10), end, footprint);
+            for pair in cells.windows(2) {
+                let apart = pair[0].0.abs_diff(pair[1].0).max(pair[0].1.abs_diff(pair[1].1));
+                assert!(apart >= u32::from(footprint), "{pair:?} overlap with footprint {footprint}");
+            }
+            let last = cells[cells.len() - 1];
+            assert!(last.0.abs_diff(end.0).max(last.1.abs_diff(end.1)) < u32::from(footprint), "stopped short of {end:?} at {last:?}");
+        }
+    }
+
+    #[test]
+    fn a_line_has_a_length_limit() {
+        assert_eq!(line_cells((0, 0), (500, 0), 1).len(), MAX_LINE_BUILDS as usize);
+    }
+
+    #[test]
+    fn queued_builds_block_placement_but_their_neighbors_are_free() {
+        let db = db();
+        let (generator, factory) = (db.id("power_generator"), db.id("land_factory_t1"));
+        let map = PlacementMap { cells_per_side: 512, blocked_cells: &[], deposits: &[], blueprints: &db };
+        // A queued factory covering cells 50 to 52.
+        let pending = [PendingBuild { center: [1_030.0, 1_030.0, 0.0], width: 60.0 }];
+        assert!(!placement_is_valid(&map, generator, (51, 51), &[], &pending), "on top of a queued build");
+        assert!(!placement_is_valid(&map, factory, (52, 50), &[], &pending), "overlapping one column of it");
+        assert!(placement_is_valid(&map, generator, (53, 51), &[], &pending), "touching is how adjacency works");
+        assert!(placement_is_valid(&map, generator, (49, 51), &[], &pending), "touching is how adjacency works");
+    }
+
+    #[test]
+    fn pending_builds_cover_every_plan_and_count_shared_spots_once() {
+        use crate::sim::world::{PlanStep, PlanStepKind, UnitPlanView};
+        let raw = |value: f64| (value * 4096.0) as i32;
+        let step = |x: f64, width: f64| PlanStep { kind: PlanStepKind::Build, x: raw(x), y: raw(50.0), z: 0, pending_width: raw(width) };
+        let snapshot = SimSnapshot {
+            plans: vec![
+                UnitPlanView { id: SimId(1), steps: vec![step(10.0, 0.0), step(100.0, 20.0)] },
+                UnitPlanView { id: SimId(2), steps: vec![step(100.0, 20.0), step(200.0, 60.0)] },
+            ],
+            ..SimSnapshot::default()
+        };
+        let builds = pending_builds(&snapshot);
+        assert_eq!(builds.len(), 2, "a started build has no outline, and a shared spot counts once");
+        assert_eq!(builds[0], PendingBuild { center: [100.0, 50.0, 0.0], width: 20.0 });
+        assert_eq!(builds[1].width, 60.0);
     }
 
     #[test]

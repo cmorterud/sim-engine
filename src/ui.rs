@@ -5,6 +5,7 @@
 use egui::{Align2, Color32, FontId, Pos2, Rect, Rounding, Stroke, Vec2};
 
 use crate::input::feedback::{Marker, MarkerKind, OrderFeedback, LABEL_SECONDS};
+use crate::input::orders::PendingBuild;
 use crate::render::camera::Camera;
 use crate::sim::blueprints::{BlueprintDb, BlueprintId, UnitClass};
 use crate::sim::components::{SimId, Team};
@@ -17,6 +18,10 @@ const TRAIL_OPACITY: f32 = 0.85;
 const RALLY_OPACITY: f32 = 0.5;
 const DASH_POINTS: f32 = 8.0;
 const GAP_POINTS: f32 = 5.0;
+/// Below this on-screen size, a terrain cell is too small for a placement grid to help.
+const MIN_GRID_CELL_POINTS: f32 = 5.0;
+/// The placement grid reaches this many cells from the cursor in each direction.
+const GRID_REACH_CELLS: i32 = 8;
 
 /// Above this altitude, units are drawn with tactical icons.
 const ICON_ALTITUDE: f64 = 1_200.0;
@@ -269,7 +274,7 @@ pub fn order_feedback(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsh
         let remaining = (1.0 - label.age / LABEL_SECONDS) as f32;
         let color = marker_color(label.kind).gamma_multiply((remaining * 3.0).min(1.0));
         egui::Area::new(egui::Id::new("order feedback"))
-            .anchor(Align2::CENTER_TOP, Vec2::new(0.0, 72.0))
+            .anchor(Align2::CENTER_TOP, Vec2::new(0.0, 80.0))
             .interactable(false)
             .show(ctx, |ui| {
                 egui::Frame::popup(ui.style()).multiply_with_opacity((remaining * 3.0).min(1.0)).show(ui, |ui| {
@@ -316,8 +321,6 @@ pub struct TrailLeg {
     pub to: [f64; 3],
     pub kind: MarkerKind,
     pub opacity: f32,
-    /// The outline to draw at the end of the leg, for a build that has not started.
-    pub pending_width: f64,
     /// The position in the unit's plan, from 1. Zero if it is not worth numbering.
     pub number: usize,
 }
@@ -353,7 +356,6 @@ pub fn build_trails(previous: &SimSnapshot, current: &SimSnapshot, alpha: f64, s
                 to: [raw(rally[0]), raw(rally[1]), raw(rally[2])],
                 kind: MarkerKind::Rally,
                 opacity: RALLY_OPACITY,
-                pending_width: 0.0,
                 number: 0,
             });
         }
@@ -373,7 +375,6 @@ pub fn build_trails(previous: &SimSnapshot, current: &SimSnapshot, alpha: f64, s
                 to,
                 kind: trail_marker_kind(step.kind),
                 opacity: TRAIL_OPACITY,
-                pending_width: raw(step.pending_width),
                 number: if steps.len() > 1 { position + 1 } else { 0 },
             });
             from = to;
@@ -382,8 +383,8 @@ pub fn build_trails(previous: &SimSnapshot, current: &SimSnapshot, alpha: f64, s
     legs
 }
 
-/// Draws the selected units' trails: dashed lines through their pending orders, a dot at each
-/// stop, numbers when there are several, and an outline for builds that have not started.
+/// Draws the selected units' trails: dashed lines through their pending orders, a dot at
+/// each stop, and numbers when there are several.
 pub fn order_trails(ctx: &egui::Context, camera: &Camera, legs: &[TrailLeg], pixels_per_point: f32) {
     let painter = ctx.layer_painter(egui::LayerId::background());
     let to_points = |world: [f64; 3]| {
@@ -405,17 +406,79 @@ pub fn order_trails(ctx: &egui::Context, camera: &Camera, legs: &[TrailLeg], pix
             continue;
         }
         painter.circle_filled(end, 2.5, color);
-        if leg.pending_width > 0.0 {
-            let half = leg.pending_width * 0.5;
-            let [x, y, z] = leg.to;
-            let corners = [[x - half, y - half, z], [x + half, y - half, z], [x + half, y + half, z], [x - half, y + half, z]];
-            let outline: Vec<Pos2> = corners.into_iter().filter_map(to_points).collect();
-            if outline.len() == corners.len() {
-                painter.add(egui::Shape::closed_line(outline, stroke));
-            }
-        }
         if leg.number > 0 {
             painter.text(end + Vec2::new(6.0, -6.0), Align2::LEFT_BOTTOM, leg.number.to_string(), FontId::proportional(14.0), Color32::WHITE.gamma_multiply(leg.opacity));
+        }
+    }
+}
+
+/// Draws a dimmed footprint for every queued build, so that the next one can be lined up.
+pub fn pending_build_outlines(ctx: &egui::Context, camera: &Camera, builds: &[PendingBuild], pixels_per_point: f32) {
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    let color = marker_color(MarkerKind::Build);
+    let stroke = Stroke::new(1.5_f32, color.gamma_multiply(0.7));
+    let fill = color.gamma_multiply(0.22);
+    for build in builds {
+        let half = build.width * 0.5;
+        let [x, y, z] = build.center;
+        let corners = [[x - half, y - half, z], [x + half, y - half, z], [x + half, y + half, z], [x - half, y + half, z]];
+        let points: Vec<Pos2> = corners
+            .into_iter()
+            .filter_map(|corner| camera.world_to_screen(corner))
+            .map(|pixels| Pos2::new(pixels[0] as f32 / pixels_per_point, pixels[1] as f32 / pixels_per_point))
+            .collect();
+        if points.len() == corners.len() {
+            painter.add(egui::Shape::convex_polygon(points, fill, stroke));
+        }
+    }
+}
+
+/// The grid lines around a placement, in world coordinates at the given height. Lines
+/// fall on terrain cell edges, which is where structures snap to.
+pub fn placement_grid_lines(center_cell: (u32, u32), cell_units: f64, height: f64, cells_per_side: u32) -> Vec<([f64; 3], [f64; 3])> {
+    let clamp = |cell: i32| f64::from(cell.clamp(0, cells_per_side as i32)) * cell_units;
+    let (center_x, center_y) = (center_cell.0 as i32, center_cell.1 as i32);
+    let (min_x, max_x) = (clamp(center_x - GRID_REACH_CELLS), clamp(center_x + GRID_REACH_CELLS));
+    let (min_y, max_y) = (clamp(center_y - GRID_REACH_CELLS), clamp(center_y + GRID_REACH_CELLS));
+    let mut lines = Vec::new();
+    for offset in -GRID_REACH_CELLS..=GRID_REACH_CELLS {
+        let (x, y) = (center_x + offset, center_y + offset);
+        if (0..=cells_per_side as i32).contains(&x) {
+            lines.push(([clamp(x), min_y, height], [clamp(x), max_y, height]));
+        }
+        if (0..=cells_per_side as i32).contains(&y) {
+            lines.push(([min_x, clamp(y), height], [max_x, clamp(y), height]));
+        }
+    }
+    lines
+}
+
+/// Draws a faint grid around the structure being placed, unless the camera is too far out for it to help.
+pub fn placement_grid(ctx: &egui::Context, camera: &Camera, lines: &[([f64; 3], [f64; 3])], cell_units: f64, pixels_per_point: f32) {
+    let to_points = |world: [f64; 3]| {
+        camera.world_to_screen(world).map(|pixels| Pos2::new(pixels[0] as f32 / pixels_per_point, pixels[1] as f32 / pixels_per_point))
+    };
+    let Some(first) = lines.first() else {
+        return;
+    };
+    // Measure one cell along the first line, near the middle of the grid.
+    let mid = |a: f64, b: f64| (a + b) * 0.5;
+    let middle = [mid(first.0[0], first.1[0]), mid(first.0[1], first.1[1]), first.0[2]];
+    let next = [middle[0], middle[1] + cell_units, middle[2]];
+    let (Some(a), Some(b)) = (to_points(middle), to_points(next)) else {
+        return;
+    };
+    if a.distance(b) < MIN_GRID_CELL_POINTS {
+        return;
+    }
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    let stroke = Stroke::new(1.0_f32, Color32::from_white_alpha(46));
+    let bounds = ctx.screen_rect().expand(16.0);
+    for &(from, to) in lines {
+        if let (Some(from), Some(to)) = (to_points(from), to_points(to)) {
+            if let Some((start, end)) = clip_segment(from, to, bounds) {
+                painter.line_segment([start, end], stroke);
+            }
         }
     }
 }
@@ -427,7 +490,8 @@ pub fn placement_hint(ctx: &egui::Context, db: &BlueprintDb, blueprint: Blueprin
         .interactable(false)
         .show(ctx, |ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
-                ui.label(format!("Placing {}: left-click to build, Shift to queue more, right-click to cancel", db.get(blueprint).name));
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                ui.label(format!("Placing {}: left-click to build, Shift-click to queue more, Shift-drag for a row, right-click to cancel", db.get(blueprint).name));
             });
         });
 }
@@ -578,6 +642,22 @@ mod tests {
     }
 
     #[test]
+    fn placement_grid_falls_on_cell_edges_and_stays_on_the_map() {
+        let lines = placement_grid_lines((50, 50), 20.0, 3.0, 512);
+        assert_eq!(lines.len(), (GRID_REACH_CELLS as usize * 2 + 1) * 2);
+        for (from, to) in &lines {
+            for value in [from[0], from[1], to[0], to[1]] {
+                assert_eq!(value % 20.0, 0.0, "{value} is not on a cell edge");
+            }
+            assert_eq!(from[2], 3.0);
+        }
+        // At the map's corner, lines that would fall outside it are dropped or cut short.
+        for (from, to) in placement_grid_lines((1, 1), 20.0, 0.0, 512) {
+            assert!(from[0] >= 0.0 && from[1] >= 0.0 && to[0] >= 0.0 && to[1] >= 0.0);
+        }
+    }
+
+    #[test]
     fn a_builders_trail_runs_through_each_build_in_order() {
         let plan = UnitPlanView {
             id: SimId(1),
@@ -591,8 +671,6 @@ mod tests {
         assert_eq!(to, [100.0, 200.0, 300.0]);
         let numbers: Vec<usize> = legs.iter().map(|leg| leg.number).collect();
         assert_eq!(numbers, [1, 2, 3]);
-        assert_eq!(legs[0].pending_width, 0.0, "a started build needs no outline");
-        assert_eq!(legs[1].pending_width, 60.0);
     }
 
     #[test]

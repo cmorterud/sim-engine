@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use sim_engine::ai::{advance_ai_vs_ai, AiBrain};
 use sim_engine::driver::{CommandSource, DriverOptions, DriverResult, SimDriver, TICK_DURATION};
 use sim_engine::input::feedback::{MarkerKind, OrderFeedback};
-use sim_engine::input::orders::{placement_cell, placement_is_valid, right_click_orders, PlacementMap, RightClick};
+use sim_engine::input::orders::{line_cells, pending_builds, placement_cell, placement_is_valid, right_click_orders, PlacementMap, RightClick};
 use sim_engine::input::selection::Selection;
 use sim_engine::math::fp::{Fp, Vec2Fp};
 use sim_engine::render::camera::{Camera, HeightField, MIN_ALTITUDE};
@@ -58,6 +58,8 @@ Controls:
   Left-drag or click   Select your units
   Right-click          Attack an enemy, assist or repair a friend, reclaim a wreck,
                        move to the ground, or set a factory's rally point
+  Shift + left-click   Queue a structure, and keep placing
+  Shift + left-drag    Queue a row of structures, and keep placing
   F, then left-click   Attack-move
   Alt + right-click    Attack-move
   P + right-click      Hold P and add patrol points, then release P
@@ -297,6 +299,17 @@ fn read_map(scenario: &Scenario) -> MapInfo {
     }
 }
 
+impl MapInfo {
+    fn placement_map(&self) -> PlacementMap<'_> {
+        PlacementMap {
+            cells_per_side: self.cells_per_side,
+            blocked_cells: &self.blocked_cells,
+            deposits: &self.deposits,
+            blueprints: &self.blueprints,
+        }
+    }
+}
+
 /// Everything the window needs from the running simulation.
 struct Session {
     driver: Option<SimDriver>,
@@ -372,6 +385,58 @@ fn issue_click_orders(
     }
 }
 
+/// Orders structures at each cell that can take one, and shows what happened.
+/// Returns whether anything was ordered.
+fn place_structures(
+    session: &Session,
+    selection: &Selection,
+    map: &MapInfo,
+    feedback: &mut OrderFeedback,
+    blueprint: BlueprintId,
+    cells: &[(u32, u32)],
+    queued: bool,
+) -> bool {
+    let unit = map.blueprints.get(blueprint);
+    let cell_units = f64::from(TERRAIN_CELL_UNITS);
+    let position_of = |cell: (u32, u32)| {
+        let half = f64::from(unit.footprint) * cell_units * 0.5;
+        let (x, y) = (f64::from(cell.0) * cell_units + half, f64::from(cell.1) * cell_units + half);
+        [x, y, map.heights.height_at(x, y)]
+    };
+    let last = cells[cells.len() - 1];
+    let builders = builders_for(selection.selected(), &session.current, &map.blueprints, blueprint);
+    if builders.is_empty() {
+        feedback.show_rejected(Some(position_of(last)), "No selected unit can build that");
+        return false;
+    }
+    let pending = pending_builds(&session.current);
+    let valid: Vec<(u32, u32)> = cells
+        .iter()
+        .copied()
+        .filter(|cell| placement_is_valid(&map.placement_map(), blueprint, *cell, &session.current.units, &pending))
+        .collect();
+    if valid.is_empty() {
+        // Placement stays active, so that the player can try the next spot over.
+        feedback.show_rejected(Some(position_of(last)), "Can't build there");
+        return false;
+    }
+    // Only the first can replace existing orders, or each would cancel the one before it.
+    for (index, &(cell_x, cell_y)) in valid.iter().enumerate() {
+        feedback.add_marker(MarkerKind::Build, position_of((cell_x, cell_y)), None);
+        session.send(SimCommand::Build { units: builders.clone(), blueprint, cell_x, cell_y, queued: queued || index > 0 });
+    }
+    let blocked = cells.len() - valid.len();
+    let mut label = match valid.len() {
+        1 => format!("Build: {}", unit.name),
+        count => format!("Build: {count} x {}", unit.name),
+    };
+    if blocked > 0 {
+        label.push_str(&format!(" ({blocked} blocked)"));
+    }
+    feedback.set_label(MarkerKind::Build, label);
+    true
+}
+
 /// A ground position with its height, for placing a marker.
 fn ground_point(ground: Option<[f64; 2]>, heights: &HeightField) -> Option<[f64; 3]> {
     ground.map(|ground| [ground[0], ground[1], heights.height_at(ground[0], ground[1])])
@@ -423,6 +488,8 @@ fn run_windowed(seed: u64, options: Options) {
     let mut selection = Selection::default();
     let mut placing: Option<BlueprintId> = None;
     let mut attack_move_armed = false;
+    // Where a Shift-drag row of structures began, while the button is held.
+    let mut line_start: Option<(u32, u32)> = None;
     let mut feedback = OrderFeedback::default();
     let mut patrol_points: Vec<Vec2Fp> = Vec::new();
     let mut patrol_held = false;
@@ -464,6 +531,15 @@ fn run_windowed(seed: u64, options: Options) {
                         camera.zoom(steps, anchor);
                     }
                     WindowEvent::MouseInput { state: ElementState::Released, button: MouseButton::Left, .. } => {
+                        if let (Some(start), Some(blueprint)) = (line_start.take(), placing) {
+                            let footprint = map.blueprints.get(blueprint).footprint;
+                            let end = camera.screen_to_ground(selection.cursor(), &map.heights).map_or(start, |ground| placement_cell(ground, footprint));
+                            let cells = line_cells(start, end, footprint);
+                            let placed = place_structures(&session, &selection, &map, &mut feedback, blueprint, &cells, true);
+                            if placed && !shift_held {
+                                placing = None;
+                            }
+                        }
                         selection.end_drag(&session.current.units, &camera, PLAYER_TEAM);
                     }
                     WindowEvent::MouseInput { state: ElementState::Pressed, button, .. } if !response.consumed => match button {
@@ -472,22 +548,14 @@ fn run_windowed(seed: u64, options: Options) {
                                 attack_move_armed = false;
                                 issue_click_orders(&session, &selection, &camera, &map, &mut feedback, true);
                             } else if let Some(blueprint) = placing {
-                                let ground = camera.screen_to_ground(selection.cursor(), &map.heights);
-                                if let Some(point) = ground {
-                                    let footprint = map.blueprints.get(blueprint).footprint;
-                                    let (cell_x, cell_y) = placement_cell(point, footprint);
-                                    let units = builders_for(selection.selected(), &session.current, &map.blueprints, blueprint);
-                                    let mut orders = Vec::new();
-                                    if !units.is_empty() {
-                                        orders.push(SimCommand::Build { units, blueprint, cell_x, cell_y, queued: shift_held });
+                                if let Some(point) = camera.screen_to_ground(selection.cursor(), &map.heights) {
+                                    let cell = placement_cell(point, map.blueprints.get(blueprint).footprint);
+                                    if shift_held {
+                                        // Placed on release, as one building or a row if the mouse moved.
+                                        line_start = Some(cell);
+                                    } else if place_structures(&session, &selection, &map, &mut feedback, blueprint, &[cell], false) {
+                                        placing = None;
                                     }
-                                    feedback.show_orders(&orders, ground_point(ground, &map.heights), &map.blueprints, "No selected unit can build that");
-                                    for order in orders {
-                                        session.send(order);
-                                    }
-                                }
-                                if !shift_held {
-                                    placing = None;
                                 }
                             } else {
                                 selection.begin_drag();
@@ -495,6 +563,7 @@ fn run_windowed(seed: u64, options: Options) {
                         }
                         MouseButton::Right => {
                             let ground = camera.screen_to_ground(selection.cursor(), &map.heights);
+                            line_start = None;
                             if std::mem::take(&mut attack_move_armed) || placing.take().is_some() {
                                 // Right-click only cancels what was armed.
                             } else if patrol_held {
@@ -519,6 +588,7 @@ fn run_windowed(seed: u64, options: Options) {
                             PhysicalKey::Code(KeyCode::KeyA | KeyCode::ArrowLeft) => held_keys[2] = pressed,
                             PhysicalKey::Code(KeyCode::KeyD | KeyCode::ArrowRight) => held_keys[3] = pressed,
                             PhysicalKey::Code(KeyCode::Escape) if pressed => {
+                                line_start = None;
                                 let was_armed = std::mem::take(&mut attack_move_armed);
                                 if placing.take().is_none() && !was_armed {
                                     selection.clear();
@@ -644,6 +714,11 @@ fn run_windowed(seed: u64, options: Options) {
                                 }
                                 selection.select(own);
                                 demo_snapshot = Some(Arc::new(snapshot));
+                                // Place a generator at the middle of the screen, to show the preview and grid.
+                                placing = Some(map.blueprints.id("power_generator"));
+                                selection.move_cursor([camera.viewport()[0] * 0.55, camera.viewport()[1] * 0.3]);
+                                let anchor = [camera.viewport()[0] * 0.3, camera.viewport()[1] * 0.3];
+                                line_start = camera.screen_to_ground(anchor, &map.heights).map(|ground| placement_cell(ground, 1));
                                 let kinds = [
                                     MarkerKind::Move,
                                     MarkerKind::AttackMove,
@@ -669,7 +744,17 @@ fn run_windowed(seed: u64, options: Options) {
                         let snapshot = demo_snapshot.unwrap_or_else(|| Arc::clone(&session.current));
                         let selected = selection.selected().to_vec();
                         let trails = if is_match { ui::build_trails(&session.previous, &snapshot, alpha, &selected) } else { Vec::new() };
+                        let pending = pending_builds(&snapshot);
+                        let grid_lines = placing
+                            .and_then(|blueprint| {
+                                let ground = camera.screen_to_ground(selection.cursor(), &map.heights)?;
+                                let cell = placement_cell(ground, map.blueprints.get(blueprint).footprint);
+                                Some(ui::placement_grid_lines(cell, f64::from(TERRAIN_CELL_UNITS), map.heights.height_at(ground[0], ground[1]), map.cells_per_side))
+                            })
+                            .unwrap_or_default();
                         let output = egui_context.run(raw_input, |ctx| {
+                            ui::placement_grid(ctx, &camera, &grid_lines, f64::from(TERRAIN_CELL_UNITS), pixels_per_point);
+                            ui::pending_build_outlines(ctx, &camera, &pending, pixels_per_point);
                             ui::order_trails(ctx, &camera, &trails, pixels_per_point);
                             ui::order_feedback(ctx, &camera, &snapshot, &feedback, pixels_per_point);
                             if attack_move_armed {
@@ -714,6 +799,7 @@ fn run_windowed(seed: u64, options: Options) {
                                     session = Session::start(scenario::skirmish(seed), CommandSource::PlayerVsAi { seed }, driver_options);
                                     selection.clear();
                                     placing = None;
+                                    line_start = None;
                                     attack_move_armed = false;
                                 }
                             }
@@ -744,17 +830,16 @@ fn run_windowed(seed: u64, options: Options) {
                             if let Some(ground) = camera.screen_to_ground(selection.cursor(), &map.heights) {
                                 let unit = map.blueprints.get(blueprint);
                                 let spot = placement_cell(ground, unit.footprint);
-                                let placement_map = PlacementMap {
-                                    cells_per_side: map.cells_per_side,
-                                    blocked_cells: &map.blocked_cells,
-                                    deposits: &map.deposits,
-                                    blueprints: &map.blueprints,
-                                };
-                                let valid = placement_is_valid(&placement_map, blueprint, spot, &current.units);
+                                // While Shift-dragging, preview the whole row.
+                                let spots = line_start.map_or_else(|| vec![spot], |start| line_cells(start, spot, unit.footprint));
+                                let queued = pending_builds(current);
                                 let width = f64::from(unit.footprint) * cell;
-                                let (center_x, center_y) = (f64::from(spot.0) * cell + width * 0.5, f64::from(spot.1) * cell + width * 0.5);
-                                let center = [center_x, center_y, map.heights.height_at(center_x, center_y) + width * 0.15];
-                                static_instances.push(instances::ghost_instance(center, width, valid, eye));
+                                for spot in spots {
+                                    let valid = placement_is_valid(&map.placement_map(), blueprint, spot, &current.units, &queued);
+                                    let (center_x, center_y) = (f64::from(spot.0) * cell + width * 0.5, f64::from(spot.1) * cell + width * 0.5);
+                                    let center = [center_x, center_y, map.heights.height_at(center_x, center_y) + width * 0.15];
+                                    static_instances.push(instances::ghost_instance(center, width, valid, eye));
+                                }
                             }
                         }
                         let scene = FrameScene {
