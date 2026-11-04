@@ -13,7 +13,7 @@ use super::components::{
 use super::config::{PATROL_SEARCH_INTERVAL, PATROL_SEARCH_RADIUS_UNITS, RECLAIM_MASS_PER_POWER, TERRAIN_CELL_UNITS};
 use super::flowfield::nearest_passable_cell;
 use super::spatial::{GridEntry, Layer};
-use super::world::{EconomyView, SimWorld, UnitSpawn};
+use super::world::{EconomyView, PlanStep, PlanStepKind, SimWorld, UnitPlanView, UnitSpawn};
 use crate::math::fp::{fp_int, wide_mul, Fp, Vec2Fp};
 
 const MEX_STORAGE_BONUS: u32 = 125;
@@ -851,6 +851,84 @@ impl SimWorld {
         self.spatial_grid.for_each_candidate(Some(team), Layer::Structure, x, y, radius.to_bits(), &mut consider);
         self.spatial_grid.for_each_candidate(Some(team), Layer::Mobile, x, y, radius.to_bits(), &mut consider);
         best.map(|(_, task)| task)
+    }
+
+    /// The pending orders of one team's units. A plan never reveals what the team cannot
+    /// see: a step at a hidden position, such as a fogged attack target, is left out.
+    pub(super) fn plans_for(&self, team: Team) -> Vec<UnitPlanView> {
+        let mut plans = Vec::new();
+        for &(id, entity) in &self.units {
+            let stats = self.ecs.get::<&UnitStats>(entity).expect("units have stats");
+            if stats.team != team || stats.is_structure {
+                continue;
+            }
+            let mut steps = Vec::new();
+            if let Ok(builder) = self.ecs.get::<&Builder>(entity) {
+                for task in &builder.tasks {
+                    if let Some(step) = self.task_step(task) {
+                        steps.push(step);
+                    }
+                }
+            }
+            let order = *self.ecs.get::<&Order>(entity).expect("units have orders");
+            // A builder's route only leads to its first task, which is already listed.
+            if steps.is_empty() && order.kind != OrderKind::Idle {
+                if let Some(goal) = self.flow_field.goal(order.route) {
+                    let kind = match order.kind {
+                        OrderKind::AttackMove => PlanStepKind::AttackMove,
+                        OrderKind::Attack => PlanStepKind::Attack,
+                        OrderKind::Move | OrderKind::Idle => PlanStepKind::Move,
+                    };
+                    steps.push(self.plan_step(kind, goal, 0));
+                }
+            }
+            if let Ok(patrol) = self.ecs.get::<&Patrol>(entity) {
+                let count = patrol.points.len() as u32;
+                for offset in 0..count {
+                    let point = patrol.points[((patrol.next + offset) % count) as usize];
+                    steps.push(self.plan_step(PlanStepKind::Patrol, point, 0));
+                }
+            }
+            steps.retain(|step| {
+                !self.config.fog_of_war || step.kind != PlanStepKind::Attack || self.visibility.is_visible(team, step.x, step.y)
+            });
+            if !steps.is_empty() {
+                plans.push(UnitPlanView { id, steps });
+            }
+        }
+        plans
+    }
+
+    fn plan_step(&self, kind: PlanStepKind, point: Vec2Fp, pending_width: i32) -> PlanStep {
+        PlanStep {
+            kind,
+            x: point.x.to_bits(),
+            y: point.y.to_bits(),
+            z: self.terrain.height_at(point).to_bits(),
+            pending_width,
+        }
+    }
+
+    fn task_step(&self, task: &BuildTask) -> Option<PlanStep> {
+        let unit_point = |target: SimId| {
+            let (_, entity) = self.find_unit(target)?;
+            Some(self.ecs.get::<&Position>(entity).ok()?.0.xy())
+        };
+        match *task {
+            BuildTask::Build { blueprint, cell_x, cell_y, site } => {
+                let size = u32::from(self.blueprints.get(blueprint).footprint);
+                let width = if site.is_none() { size as i32 * TERRAIN_CELL_UNITS } else { 0 };
+                Some(self.plan_step(PlanStepKind::Build, cell_center(cell_x, cell_y, size), width))
+            }
+            BuildTask::Assist { target } | BuildTask::Repair { target } => {
+                Some(self.plan_step(PlanStepKind::Support, unit_point(target)?, 0))
+            }
+            BuildTask::Reclaim { target } => {
+                let index = self.wrecks.binary_search_by_key(&target, |wreck| wreck.0).ok()?;
+                let position = self.ecs.get::<&Wreck>(self.wrecks[index].1).ok()?.position;
+                Some(self.plan_step(PlanStepKind::Support, position, 0))
+            }
+        }
     }
 
     /// Hashes the parts only some units have. A tag byte keeps "absent" distinct from zero.

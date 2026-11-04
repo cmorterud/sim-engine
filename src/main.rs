@@ -20,7 +20,7 @@ use sim_engine::sim::components::{SimId, Team};
 use sim_engine::sim::config::TERRAIN_CELL_UNITS;
 use sim_engine::sim::scenario::{self, advance_scripted, skirmish_start, Scenario};
 use sim_engine::sim::terrain::HEIGHT_FRAC_BITS;
-use sim_engine::sim::world::SimSnapshot;
+use sim_engine::sim::world::{PlanStep, PlanStepKind, SimSnapshot, UnitPlanView};
 use sim_engine::soak::run_soak;
 use sim_engine::ui::{self, UiAction};
 use winit::dpi::{LogicalSize, PhysicalPosition};
@@ -620,9 +620,30 @@ fn run_windowed(seed: u64, options: Options) {
                             attack_move_armed = false;
                         }
 
-                        // Screenshots show one of each marker, since test runs have no clicks.
+                        // Screenshots show one of each marker and a queue of builds, since test runs have no clicks.
+                        let mut demo_snapshot = None;
                         if let (Some(test), Some(fraction)) = (autotest.as_ref(), progress) {
                             if test.capture_dir.is_some() && test.capture_points.first().is_some_and(|&point| fraction >= point) {
+                                let mut snapshot = (*session.current).clone();
+                                let own: Vec<SimId> = snapshot.units.iter().filter(|unit| unit.team == PLAYER_TEAM).map(|unit| unit.id).collect();
+                                if let Some(commander) = commander_of(&snapshot, &map.blueprints) {
+                                    let index = snapshot.units.binary_search_by_key(&commander, |unit| unit.id).expect("found in this list");
+                                    let (x, y, z) = (snapshot.units[index].x, snapshot.units[index].y, snapshot.units[index].z);
+                                    let reach = (camera.altitude() * 0.15 * 4096.0) as i32;
+                                    let queued = |dx: i32, dy: i32, width: i32| PlanStep {
+                                        kind: PlanStepKind::Build,
+                                        x: x + dx * reach,
+                                        y: y + dy * reach,
+                                        z,
+                                        pending_width: width << 12,
+                                    };
+                                    let steps = vec![queued(1, 1, 0), queued(3, 1, 60), queued(3, -1, 20), queued(1, -2, 20)];
+                                    snapshot.plans.retain(|plan| plan.id != commander);
+                                    let at = snapshot.plans.partition_point(|plan| plan.id < commander);
+                                    snapshot.plans.insert(at, UnitPlanView { id: commander, steps });
+                                }
+                                selection.select(own);
+                                demo_snapshot = Some(Arc::new(snapshot));
                                 let kinds = [
                                     MarkerKind::Move,
                                     MarkerKind::AttackMove,
@@ -645,9 +666,11 @@ fn run_windowed(seed: u64, options: Options) {
                         let mut actions = Vec::new();
                         let raw_input = egui_state.take_egui_input(&window);
                         let pixels_per_point = window.scale_factor() as f32;
-                        let snapshot = Arc::clone(&session.current);
+                        let snapshot = demo_snapshot.unwrap_or_else(|| Arc::clone(&session.current));
                         let selected = selection.selected().to_vec();
+                        let trails = if is_match { ui::build_trails(&session.previous, &snapshot, alpha, &selected) } else { Vec::new() };
                         let output = egui_context.run(raw_input, |ctx| {
+                            ui::order_trails(ctx, &camera, &trails, pixels_per_point);
                             ui::order_feedback(ctx, &camera, &snapshot, &feedback, pixels_per_point);
                             if attack_move_armed {
                                 ui::attack_move_hint(ctx);

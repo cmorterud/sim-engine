@@ -7,7 +7,7 @@ use sim_engine::sim::commands::SimCommand;
 use sim_engine::sim::components::{BuildTask, Builder, Combat, Construction, Factory, Health, OrderKind, Projectile, SimId, Team};
 use sim_engine::sim::config::{SimConfig, TerrainStyle};
 use sim_engine::sim::scenario::{self, skirmish_start};
-use sim_engine::sim::world::{MatchResult, SimWorld};
+use sim_engine::sim::world::{MatchResult, PlanStepKind, SimWorld};
 
 const CELL: i32 = 20;
 
@@ -517,6 +517,116 @@ fn commander_death_detonates_and_eliminates_its_team() {
     assert!(world.unit_position(shooter).is_none(), "the reactor blast should kill nearby enemies");
     assert!(world.unit_position(red).is_some(), "the far commander survives");
     assert_eq!(world.snapshot_for(Some(Team::Blue)).match_result, Some(MatchResult::Winner(Team::Red)));
+}
+
+fn plan_kinds(world: &SimWorld, unit: SimId) -> Vec<PlanStepKind> {
+    let snapshot = world.snapshot_for(Some(Team::Blue));
+    snapshot
+        .plans
+        .iter()
+        .find(|plan| plan.id == unit)
+        .map_or_else(Vec::new, |plan| plan.steps.iter().map(|step| step.kind).collect())
+}
+
+#[test]
+fn queued_builds_appear_in_order_and_leave_the_plan_when_finished() {
+    let mut world = test_world();
+    set_resources(&mut world, Team::Blue, 10_000, 100_000);
+    let (engineer_blueprint, generator, storage) = (id(&world, "t1_engineer"), id(&world, "power_generator"), id(&world, "mass_storage"));
+    let engineer = world.spawn_mobile(engineer_blueprint, Team::Blue, point(1_000, 1_000));
+    world.advance_tick(&[
+        SimCommand::Build { units: vec![engineer], blueprint: generator, cell_x: 52, cell_y: 50, queued: false },
+        SimCommand::Build { units: vec![engineer], blueprint: storage, cell_x: 56, cell_y: 50, queued: true },
+        SimCommand::Build { units: vec![engineer], blueprint: generator, cell_x: 60, cell_y: 50, queued: true },
+    ]);
+    let snapshot = world.snapshot_for(Some(Team::Blue));
+    let plan = snapshot.plans.iter().find(|plan| plan.id == engineer).expect("the engineer has a plan");
+    assert_eq!(plan.steps.len(), 3);
+    let cell_center = |cell: i32| fp_int(cell * CELL + CELL / 2).to_bits();
+    let xs: Vec<i32> = plan.steps.iter().map(|step| step.x).collect();
+    assert_eq!(xs, [cell_center(52), cell_center(56), cell_center(60)], "steps must be in build order");
+
+    // A step shows an outline until its site exists.
+    run(&mut world, 4);
+    let snapshot = world.snapshot_for(Some(Team::Blue));
+    let plan = snapshot.plans.iter().find(|plan| plan.id == engineer).unwrap();
+    assert_eq!(plan.steps[0].pending_width, 0, "the first site has started");
+    assert_eq!(plan.steps[1].pending_width, CELL, "the second has not");
+
+    // The three builds take 25, 50, and 25 seconds of work, plus the walks between them.
+    run(&mut world, 1_400);
+    assert!(plan_kinds(&world, engineer).is_empty(), "a finished queue leaves nothing to show");
+}
+
+#[test]
+fn plans_show_moves_attacks_patrols_and_support() {
+    let mut world = test_world();
+    set_resources(&mut world, Team::Blue, 10_000, 100_000);
+    let (bot, engineer_blueprint, generator) = (id(&world, "t1_light_bot"), id(&world, "t1_engineer"), id(&world, "power_generator"));
+    let walker = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
+    let attacker = world.spawn_mobile(bot, Team::Blue, point(1_100, 1_000));
+    let fighter = world.spawn_mobile(bot, Team::Blue, point(1_200, 1_000));
+    let patroller = world.spawn_mobile(bot, Team::Blue, point(1_300, 1_000));
+    let idle = world.spawn_mobile(bot, Team::Blue, point(1_400, 1_000));
+    let helper = world.spawn_mobile(engineer_blueprint, Team::Blue, point(1_500, 1_000));
+    let enemy = world.spawn_mobile(bot, Team::Red, point(4_000, 4_000));
+    let site = world.spawn_site(generator, Team::Blue, 100, 100).unwrap();
+    world.ecs.get::<&mut Combat>(entity(&world, enemy)).unwrap().range = Fp::ZERO;
+    world.advance_tick(&[
+        SimCommand::Move { units: vec![walker], goal: point(3_000, 1_000) },
+        SimCommand::AttackMove { units: vec![attacker], goal: point(3_000, 1_500) },
+        SimCommand::Attack { units: vec![fighter], target: enemy },
+        SimCommand::Patrol { units: vec![patroller], points: vec![point(1_300, 1_200), point(1_500, 1_200)] },
+        SimCommand::Assist { units: vec![helper], target: site },
+    ]);
+    world.advance_tick(&[]);
+    assert_eq!(plan_kinds(&world, walker), [PlanStepKind::Move]);
+    assert_eq!(plan_kinds(&world, attacker), [PlanStepKind::AttackMove]);
+    assert_eq!(plan_kinds(&world, fighter), [PlanStepKind::Attack]);
+    assert_eq!(plan_kinds(&world, helper), [PlanStepKind::Support]);
+    assert_eq!(&plan_kinds(&world, patroller)[1..], [PlanStepKind::Patrol, PlanStepKind::Patrol]);
+    assert!(plan_kinds(&world, idle).is_empty());
+}
+
+#[test]
+fn plans_never_show_the_other_team_or_a_hidden_target() {
+    let config = SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: true, ..SimConfig::default() };
+    let mut world = SimWorld::new(config, 1);
+    let bot = id(&world, "t1_light_bot");
+    let attacker = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
+    let enemy = world.spawn_mobile(bot, Team::Red, point(4_000, 4_000));
+    world.ecs.get::<&mut Combat>(entity(&world, enemy)).unwrap().range = Fp::ZERO;
+    world.advance_tick(&[
+        SimCommand::Attack { units: vec![attacker], target: enemy },
+        SimCommand::Move { units: vec![enemy], goal: point(4_500, 4_500) },
+    ]);
+    world.advance_tick(&[]);
+    let snapshot = world.snapshot_for(Some(Team::Blue));
+    assert!(snapshot.plans.iter().all(|plan| plan.id != enemy), "another team's orders must stay hidden");
+    assert!(plan_kinds(&world, attacker).is_empty(), "a trail must not reveal a target in the fog");
+}
+
+#[test]
+fn factory_rally_points_reach_the_snapshot() {
+    let mut world = test_world();
+    let t1 = id(&world, "land_factory_t1");
+    let factory = world.spawn_finished_structure(t1, Team::Blue, 50, 50).unwrap();
+    let rally_of = |world: &SimWorld| world.snapshot_for(Some(Team::Blue)).factories[0].rally;
+    assert_eq!(rally_of(&world), None);
+    world.advance_tick(&[SimCommand::SetRally { factory, point: point(2_000, 1_500) }]);
+    let rally = rally_of(&world).expect("the rally point should be visible");
+    assert_eq!((rally[0], rally[1]), (fp_int(2_000).to_bits(), fp_int(1_500).to_bits()));
+}
+
+/// Plans are read for the player's view, and must never disturb the simulation.
+#[test]
+fn reading_plans_does_not_change_the_checksum() {
+    let mut world = test_world();
+    set_resources(&mut world, Team::Blue, 1_000, 10_000);
+    let (_, _) = engineer_at_site(&mut world);
+    let before = world.compute_checksum();
+    let _ = world.snapshot_for(Some(Team::Blue));
+    assert_eq!(world.compute_checksum(), before);
 }
 
 #[test]

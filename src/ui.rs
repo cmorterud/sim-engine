@@ -8,7 +8,15 @@ use crate::input::feedback::{Marker, MarkerKind, OrderFeedback, LABEL_SECONDS};
 use crate::render::camera::Camera;
 use crate::sim::blueprints::{BlueprintDb, BlueprintId, UnitClass};
 use crate::sim::components::{SimId, Team};
-use crate::sim::world::{MatchResult, SimSnapshot, UnitView};
+use crate::sim::world::{MatchResult, PlanStepKind, SimSnapshot, UnitView};
+
+/// Trails are capped so that a large selection stays readable and cheap to draw.
+const MAX_TRAIL_UNITS: usize = 64;
+const TRAIL_OPACITY: f32 = 0.85;
+/// Rally lines are dimmer: they are a standing setting, not something under way.
+const RALLY_OPACITY: f32 = 0.5;
+const DASH_POINTS: f32 = 8.0;
+const GAP_POINTS: f32 = 5.0;
 
 /// Above this altitude, units are drawn with tactical icons.
 const ICON_ALTITUDE: f64 = 1_200.0;
@@ -271,6 +279,147 @@ pub fn order_feedback(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsh
     }
 }
 
+/// Cuts a screen-space line down to the part inside a rectangle (Liang-Barsky). A goal far
+/// off-screen can project very far away, and dashing all of that would be wasted work.
+pub fn clip_segment(from: Pos2, to: Pos2, bounds: Rect) -> Option<(Pos2, Pos2)> {
+    let delta = to - from;
+    let (mut start, mut end) = (0.0_f32, 1.0_f32);
+    for (direction, offset) in [
+        (-delta.x, from.x - bounds.min.x),
+        (delta.x, bounds.max.x - from.x),
+        (-delta.y, from.y - bounds.min.y),
+        (delta.y, bounds.max.y - from.y),
+    ] {
+        if direction == 0.0 {
+            if offset < 0.0 {
+                return None;
+            }
+            continue;
+        }
+        let share = offset / direction;
+        if direction < 0.0 {
+            start = start.max(share);
+        } else {
+            end = end.min(share);
+        }
+        if start > end {
+            return None;
+        }
+    }
+    Some((from + delta * start, from + delta * end))
+}
+
+/// One leg of a trail, in world coordinates.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct TrailLeg {
+    pub from: [f64; 3],
+    pub to: [f64; 3],
+    pub kind: MarkerKind,
+    pub opacity: f32,
+    /// The outline to draw at the end of the leg, for a build that has not started.
+    pub pending_width: f64,
+    /// The position in the unit's plan, from 1. Zero if it is not worth numbering.
+    pub number: usize,
+}
+
+fn trail_marker_kind(kind: PlanStepKind) -> MarkerKind {
+    match kind {
+        PlanStepKind::Move => MarkerKind::Move,
+        PlanStepKind::AttackMove => MarkerKind::AttackMove,
+        PlanStepKind::Attack => MarkerKind::Attack,
+        PlanStepKind::Build => MarkerKind::Build,
+        PlanStepKind::Support => MarkerKind::Support,
+        PlanStepKind::Patrol => MarkerKind::Patrol,
+    }
+}
+
+/// Works out the trails for the selected units. Each one starts at the unit, drawn where
+/// the unit appears between ticks, and runs through its pending orders in sequence.
+pub fn build_trails(previous: &SimSnapshot, current: &SimSnapshot, alpha: f64, selected: &[SimId]) -> Vec<TrailLeg> {
+    let raw = |value: i32| f64::from(value) / 4096.0;
+    let mut legs = Vec::new();
+    let mut units_drawn = 0;
+    for &id in selected {
+        let Some(unit) = find_unit(current, id) else {
+            continue;
+        };
+        let now = [raw(unit.x), raw(unit.y), raw(unit.z)];
+        let before = find_unit(previous, id).map_or(now, |unit| [raw(unit.x), raw(unit.y), raw(unit.z)]);
+        let start: [f64; 3] = std::array::from_fn(|axis| before[axis] + (now[axis] - before[axis]) * alpha);
+
+        if let Some(rally) = current.factories.iter().find(|factory| factory.id == id).and_then(|factory| factory.rally) {
+            legs.push(TrailLeg {
+                from: start,
+                to: [raw(rally[0]), raw(rally[1]), raw(rally[2])],
+                kind: MarkerKind::Rally,
+                opacity: RALLY_OPACITY,
+                pending_width: 0.0,
+                number: 0,
+            });
+        }
+        let Ok(index) = current.plans.binary_search_by_key(&id, |plan| plan.id) else {
+            continue;
+        };
+        if units_drawn == MAX_TRAIL_UNITS {
+            continue;
+        }
+        units_drawn += 1;
+        let steps = &current.plans[index].steps;
+        let mut from = start;
+        for (position, step) in steps.iter().enumerate() {
+            let to = [raw(step.x), raw(step.y), raw(step.z)];
+            legs.push(TrailLeg {
+                from,
+                to,
+                kind: trail_marker_kind(step.kind),
+                opacity: TRAIL_OPACITY,
+                pending_width: raw(step.pending_width),
+                number: if steps.len() > 1 { position + 1 } else { 0 },
+            });
+            from = to;
+        }
+    }
+    legs
+}
+
+/// Draws the selected units' trails: dashed lines through their pending orders, a dot at each
+/// stop, numbers when there are several, and an outline for builds that have not started.
+pub fn order_trails(ctx: &egui::Context, camera: &Camera, legs: &[TrailLeg], pixels_per_point: f32) {
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    let to_points = |world: [f64; 3]| {
+        camera.world_to_screen(world).map(|pixels| Pos2::new(pixels[0] as f32 / pixels_per_point, pixels[1] as f32 / pixels_per_point))
+    };
+    let bounds = ctx.screen_rect().expand(16.0);
+    for leg in legs {
+        let color = marker_color(leg.kind).gamma_multiply(leg.opacity);
+        let stroke = Stroke::new(2.0_f32, color);
+        if let (Some(from), Some(to)) = (to_points(leg.from), to_points(leg.to)) {
+            if let Some((start, end)) = clip_segment(from, to, bounds) {
+                painter.extend(egui::Shape::dashed_line(&[start, end], stroke, DASH_POINTS, GAP_POINTS));
+            }
+        }
+        let Some(end) = to_points(leg.to) else {
+            continue;
+        };
+        if !bounds.contains(end) {
+            continue;
+        }
+        painter.circle_filled(end, 2.5, color);
+        if leg.pending_width > 0.0 {
+            let half = leg.pending_width * 0.5;
+            let [x, y, z] = leg.to;
+            let corners = [[x - half, y - half, z], [x + half, y - half, z], [x + half, y + half, z], [x - half, y + half, z]];
+            let outline: Vec<Pos2> = corners.into_iter().filter_map(to_points).collect();
+            if outline.len() == corners.len() {
+                painter.add(egui::Shape::closed_line(outline, stroke));
+            }
+        }
+        if leg.number > 0 {
+            painter.text(end + Vec2::new(6.0, -6.0), Align2::LEFT_BOTTOM, leg.number.to_string(), FontId::proportional(14.0), Color32::WHITE.gamma_multiply(leg.opacity));
+        }
+    }
+}
+
 /// A small floating reminder of the placement in progress.
 pub fn placement_hint(ctx: &egui::Context, db: &BlueprintDb, blueprint: BlueprintId) {
     egui::Area::new(egui::Id::new("placement hint"))
@@ -393,5 +542,114 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
             FontId::proportional(12.0),
             Color32::from_white_alpha(120),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sim::world::{FactoryView, PlanStep, UnitPlanView};
+
+    fn raw(value: f64) -> i32 {
+        (value * 4096.0) as i32
+    }
+
+    fn unit(id: u32, x: f64) -> UnitView {
+        UnitView {
+            id: SimId(id),
+            team: Team::Blue,
+            x: raw(x),
+            y: 0,
+            z: 0,
+            radius: raw(8.0),
+            blueprint: u16::MAX,
+            health_permille: 1000,
+            built_permille: 1000,
+            is_structure: false,
+        }
+    }
+
+    fn step(kind: PlanStepKind, x: f64, pending_width: f64) -> PlanStep {
+        PlanStep { kind, x: raw(x), y: 0, z: 0, pending_width: raw(pending_width) }
+    }
+
+    fn snapshot(units: Vec<UnitView>, plans: Vec<UnitPlanView>) -> SimSnapshot {
+        SimSnapshot { units, plans, ..SimSnapshot::default() }
+    }
+
+    #[test]
+    fn a_builders_trail_runs_through_each_build_in_order() {
+        let plan = UnitPlanView {
+            id: SimId(1),
+            steps: vec![step(PlanStepKind::Build, 100.0, 0.0), step(PlanStepKind::Build, 200.0, 60.0), step(PlanStepKind::Build, 300.0, 20.0)],
+        };
+        let current = snapshot(vec![unit(1, 0.0)], vec![plan]);
+        let legs = build_trails(&current, &current, 1.0, &[SimId(1)]);
+        let from: Vec<f64> = legs.iter().map(|leg| leg.from[0]).collect();
+        let to: Vec<f64> = legs.iter().map(|leg| leg.to[0]).collect();
+        assert_eq!(from, [0.0, 100.0, 200.0]);
+        assert_eq!(to, [100.0, 200.0, 300.0]);
+        let numbers: Vec<usize> = legs.iter().map(|leg| leg.number).collect();
+        assert_eq!(numbers, [1, 2, 3]);
+        assert_eq!(legs[0].pending_width, 0.0, "a started build needs no outline");
+        assert_eq!(legs[1].pending_width, 60.0);
+    }
+
+    #[test]
+    fn a_single_order_is_not_numbered() {
+        let plan = UnitPlanView { id: SimId(1), steps: vec![step(PlanStepKind::Move, 100.0, 0.0)] };
+        let current = snapshot(vec![unit(1, 0.0)], vec![plan]);
+        let legs = build_trails(&current, &current, 1.0, &[SimId(1)]);
+        assert_eq!(legs[0].number, 0);
+        assert_eq!(legs[0].kind, MarkerKind::Move);
+    }
+
+    #[test]
+    fn only_selected_units_have_trails() {
+        let plan = UnitPlanView { id: SimId(1), steps: vec![step(PlanStepKind::Move, 100.0, 0.0)] };
+        let current = snapshot(vec![unit(1, 0.0)], vec![plan]);
+        assert!(build_trails(&current, &current, 1.0, &[]).is_empty());
+    }
+
+    #[test]
+    fn a_factorys_rally_line_is_dimmer_than_an_order() {
+        let factory = FactoryView { id: SimId(2), queue: vec![], repeat: false, progress_permille: 0, rally: Some([raw(500.0), 0, 0]) };
+        let plan = UnitPlanView { id: SimId(1), steps: vec![step(PlanStepKind::Move, 100.0, 0.0)] };
+        let mut current = snapshot(vec![unit(1, 0.0), unit(2, 50.0)], vec![plan]);
+        current.factories = vec![factory];
+        let legs = build_trails(&current, &current, 1.0, &[SimId(1), SimId(2)]);
+        let rally = legs.iter().find(|leg| leg.kind == MarkerKind::Rally).expect("the factory has a rally line");
+        let order = legs.iter().find(|leg| leg.kind == MarkerKind::Move).unwrap();
+        assert_eq!(rally.to[0], 500.0);
+        assert!(rally.opacity < order.opacity);
+    }
+
+    #[test]
+    fn a_trail_starts_where_the_unit_appears_between_ticks() {
+        let plan = UnitPlanView { id: SimId(1), steps: vec![step(PlanStepKind::Move, 100.0, 0.0)] };
+        let previous = snapshot(vec![unit(1, 0.0)], vec![]);
+        let current = snapshot(vec![unit(1, 10.0)], vec![plan]);
+        let legs = build_trails(&previous, &current, 0.5, &[SimId(1)]);
+        assert_eq!(legs[0].from[0], 5.0);
+    }
+
+    #[test]
+    fn large_selections_are_capped() {
+        let units: Vec<UnitView> = (0..200).map(|id| unit(id, 0.0)).collect();
+        let plans: Vec<UnitPlanView> =
+            (0..200).map(|id| UnitPlanView { id: SimId(id), steps: vec![step(PlanStepKind::Move, 100.0, 0.0)] }).collect();
+        let selected: Vec<SimId> = (0..200).map(SimId).collect();
+        let current = snapshot(units, plans);
+        assert_eq!(build_trails(&current, &current, 1.0, &selected).len(), MAX_TRAIL_UNITS);
+    }
+
+    #[test]
+    fn segments_clip_to_the_screen() {
+        let bounds = Rect::from_min_max(Pos2::ZERO, Pos2::new(100.0, 100.0));
+        let inside = (Pos2::new(10.0, 10.0), Pos2::new(20.0, 20.0));
+        assert_eq!(clip_segment(inside.0, inside.1, bounds), Some(inside));
+        let across = clip_segment(Pos2::new(50.0, 50.0), Pos2::new(1_000_000.0, 50.0), bounds).unwrap();
+        assert_eq!(across, (Pos2::new(50.0, 50.0), Pos2::new(100.0, 50.0)));
+        assert_eq!(clip_segment(Pos2::new(200.0, 0.0), Pos2::new(300.0, 50.0), bounds), None);
     }
 }

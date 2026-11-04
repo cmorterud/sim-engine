@@ -71,6 +71,37 @@ pub struct FactoryView {
     pub queue: Vec<u16>,
     pub repeat: bool,
     pub progress_permille: u16,
+    /// Where new units go, as raw `Fp` bits: x, y, and ground height.
+    pub rally: Option<[i32; 3]>,
+}
+
+/// What a step in a unit's plan is.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum PlanStepKind {
+    Move,
+    AttackMove,
+    Attack,
+    Build,
+    Support,
+    Patrol,
+}
+
+/// One place a unit intends to go or work, as raw `Fp` bits.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct PlanStep {
+    pub kind: PlanStepKind,
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+    /// For a build that has not started: the width of its outline, in units.
+    pub pending_width: i32,
+}
+
+/// A unit's pending orders, in the order it will carry them out. Only for the viewer's team.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnitPlanView {
+    pub id: SimId,
+    pub steps: Vec<PlanStep>,
 }
 
 /// Read-only wreck state. Values are raw `Fp` bits.
@@ -117,6 +148,8 @@ pub struct SimSnapshot {
     pub projectiles: Vec<ProjectileView>,
     pub wrecks: Vec<WreckView>,
     pub factories: Vec<FactoryView>,
+    /// Sorted by `SimId`.
+    pub plans: Vec<UnitPlanView>,
     pub economy: EconomyView,
     /// Present when fog of war is on: one byte per cell, for the renderer.
     pub fog: Option<Arc<Vec<u8>>>,
@@ -1130,10 +1163,14 @@ impl SimWorld {
                         queue: factory.queue.iter().map(|blueprint| blueprint.0).collect(),
                         repeat: factory.repeat,
                         progress_permille: (factory.progress.to_bits() * 1000 / Res::ONE.to_bits()).clamp(0, 1000) as u16,
+                        rally: factory.rally.map(|point| {
+                            [point.x.to_bits(), point.y.to_bits(), self.terrain.height_at(point).to_bits()]
+                        }),
                     })
                 })
                 .collect()
         });
+        let plans = viewer.map_or_else(Vec::new, |viewer| self.plans_for(viewer));
         let economy = viewer.map_or_else(EconomyView::default, |viewer| self.economies[viewer.index()].view());
         let fog = match viewer {
             Some(viewer) if self.config.fog_of_war => Some(Arc::new(self.visibility.fog_bytes(viewer))),
@@ -1145,6 +1182,7 @@ impl SimWorld {
             projectiles,
             wrecks,
             factories,
+            plans,
             economy,
             fog,
             match_result: self.match_result,

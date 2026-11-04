@@ -34,7 +34,7 @@ Destroy the enemy commander to win. Yours explodes if it dies, and your whole te
 | WASD or arrow keys | Pan |
 | Esc | Cancel placement or attack-move, or clear the selection |
 
-A marker and a line of text confirm each order. A click that shows nothing never reached the game. The window title shows the frame rate and tick time. Run with `--help` for the headless and test modes.
+Selected units show a dashed trail through their pending orders, in the order they will carry them out, and selected factories show a dimmer line to their rally point. A marker and a line of text confirm each order. A click that shows nothing never reached the game. The window title shows the frame rate and tick time. Run with `--help` for the headless and test modes.
 
 ## Validate
 
