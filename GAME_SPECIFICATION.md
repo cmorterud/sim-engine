@@ -11,7 +11,7 @@
 A grand-scale, flow-economy real-time strategy game inspired by *Supreme Commander: Forged Alliance*. Players command planetary armies ranging from light scouts to colossal multi-screen Experimentals, orchestrating warfare across land, sea, subsurface, air, and orbit on maps spanning up to 81×81 km (6,500+ sq km).
 
 ### 1.2 Core Pillars
-1. **The Strategic Zoom:** No artificial camera boundaries. The perspective pans and zooms continuously from millimeter-scale close-ups out to an orbital military theater where units collapse into standardized NATO icons.
+1. **The Strategic Zoom:** No artificial camera boundaries. The perspective pans and zooms continuously from close-ups just above the ground out to an orbital military theater where units collapse into standardized NATO icons.
 2. **The Flow-Based Economy:** An economy governed by continuous streaming rates rather than static stockpiles. Players balance resource inflow versus drain in real-time differential equations.
 3. **True Physical Ballistics:** Every bullet, laser bolt, missile, and artillery shell exists as a simulated 3D physical object governed by mass, velocity, gravity, and terrain collision.
 4. **Radical Faction Asymmetry:** Four factions built around fundamentally distinct tactical doctrines (heavy kinetic brute force, stealth and ambush cybernetics, extreme doctrinal zealotry and hovering, and durable alien power with death mechanics).
@@ -338,3 +338,61 @@ Issuing a `Patrol` order across waypoints turns units into automated patrol guar
 2. **Annihilation:** The match ends only when all enemy mobile units, factories, and combat structures are completely eliminated. Losing an ACU does not end the match.
 3. **Supremacy:** A player is eliminated if they lose both their ACU and all Support Commanders or all factories.
 4. **Shared Armies & Reclaim Permissions:** Teammates can dynamically transfer units, economic income percentages, or full army control to allies.
+
+---
+
+## 17. Opponents & Multiplayer
+
+* **First Playable:** One human against a scripted AI. The AI issues commands through the same `SimCommand` interface as a player and sees only what its team's intel allows.
+* **Automated Matches:** AI-vs-AI matches run headlessly, serving as full-match regression tests and as the first tool for balance tuning.
+* **Multiplayer (Later):** Lockstep over the network, exchanging only commands and comparing checksums to detect desyncs. Matchmaking, lobbies, and transports are not yet specified.
+
+---
+
+## 18. Vertical Slice (First Playable Scope)
+
+The first playable build proves the core loop before the full design is attempted. It runs on the [engine specification](SPECIFICATION.md) after its PoC gates pass.
+
+### 18.1 Included
+* **Factions:** Two mirrored factions, identical apart from color. Asymmetry comes later.
+* **Roster:** About 10 land-only units and structures:
+
+| Entry | Role |
+| :--- | :--- |
+| ACU | Commander, engineer, and assassination target |
+| T1 Engineer | Builds, assists, and reclaims |
+| T1 Light Assault Bot | Cheap early combat |
+| T1 Light Artillery | Slow-shell indirect fire that can be dodged |
+| T2 Heavy Tank | Mainline combat |
+| Land Factory (T1, upgradable to T2) | Unit production with repeat mode |
+| Mass Extractor | Mass income on fixed deposits |
+| Power Generator | Energy income |
+| Mass Storage | Storage and extractor adjacency bonus |
+| T1 Point Defense | Static direct-fire defense |
+
+* **Systems:** Flow economy with stalling (§3.1–3.2), Mass Extractor and factory adjacency (§4), Build Power and assisting (§5.1), wreckage and reclaim (§6.1), ballistics with terrain masking and friendly fire (§7.1), line of sight with fog of war (§9), and Assassination mode (§16).
+* **Interface:** Selection, move, attack, patrol, build placement, a build menu, resource rates and storage, unit health bars, and NATO-style icons at far zoom.
+* **Presentation:** Placeholder geometry and no required audio.
+
+### 18.2 Deferred
+Naval, subsurface, and air warfare (§10); shields and missile defense (§8); radar, stealth, and cloaking (§9); capture (§5.3); veterancy (§11); exotic weapons (§12); Time-on-Target, ferry routes, and build templates (§13.3); T3 and T4; faction asymmetry (§14); ACU upgrades and teleportation (§2.1); and the remaining game modes (§16).
+
+### 18.3 Exit Criteria
+* A human can win or lose a full match against the AI.
+* 100 headless AI-vs-AI matches finish without a crash or checksum mismatch when replayed.
+* The engine's tick and frame-rate gates still pass during a late-game match.
+
+---
+
+## 19. Data & Simulation Requirements
+
+* **Unit Data:** Unit and structure stats live in versioned data files, not code, using fixed-point-safe values and loaded identically on every instance. Each entry defines at least cost (Mass, Energy, Build Time), health, speed, footprint, movement class, build options, weapons, intel ranges, and resource rates.
+* **Economy Precision:** Economy totals, storage, and veterancy XP use 64-bit fixed-point, because their values can exceed the range of the engine's `Fp` type. When demand exceeds supply, resources are shared among consumers using integer math in a fixed order, so stalling stays deterministic.
+* **Large Footprints:** Pathfinding for wide units needs cost grids inflated by unit size, in addition to one grid per movement class. Experimentals cannot be added without this.
+* **Open Numbers:** Values this document leaves undefined must be set in the data files before their feature is built. Examples include the exact energy-stall build rate, the veterancy regeneration curve, and all T1–T4 unit stats.
+
+---
+
+## 20. Naming & Licensing
+
+Faction, unit, and structure names in §2 and §14 are working references taken from *Supreme Commander: Forged Alliance*. They must be replaced with original names, and designs reviewed for similarity, before any public release. Code and data files use neutral identifiers (for example `faction_a`, `t2_heavy_tank`) so that renaming does not touch game logic.
