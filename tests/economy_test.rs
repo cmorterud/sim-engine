@@ -246,6 +246,57 @@ fn upgrade_halts_production_then_improves_the_factory() {
 }
 
 #[test]
+fn an_upgrade_on_a_repeating_factory_happens_once_and_units_keep_looping() {
+    let mut world = test_world();
+    set_resources(&mut world, Team::Blue, 100_000, 1_000_000);
+    let (t1, t2, bot) = (id(&world, "land_factory_t1"), id(&world, "land_factory_t2"), id(&world, "t1_light_bot"));
+    let factory = world.spawn_finished_structure(t1, Team::Blue, 50, 50).unwrap();
+    world.advance_tick(&[
+        SimCommand::SetRepeat { factory, repeat: true },
+        SimCommand::QueueUnit { factory, blueprint: t2, count: 1 },
+        SimCommand::QueueUnit { factory, blueprint: bot, count: 1 },
+    ]);
+    run(&mut world, 700);
+    let queue = world.ecs.get::<&Factory>(entity(&world, factory)).unwrap().queue.clone();
+    assert_eq!(queue, [bot], "only the bot should loop");
+    assert_eq!(world.ecs.get::<&Factory>(entity(&world, factory)).unwrap().power, fp_int(40));
+    assert!(world.units.len() >= 3, "the bots should keep coming after the upgrade, got {} units", world.units.len());
+}
+
+#[test]
+fn asking_for_an_upgrade_twice_only_queues_it_once() {
+    let mut world = test_world();
+    let (t1, t2) = (id(&world, "land_factory_t1"), id(&world, "land_factory_t2"));
+    let factory = world.spawn_finished_structure(t1, Team::Blue, 50, 50).unwrap();
+    world.advance_tick(&[
+        SimCommand::QueueUnit { factory, blueprint: t2, count: 1 },
+        SimCommand::QueueUnit { factory, blueprint: t2, count: 3 },
+    ]);
+    assert_eq!(world.ecs.get::<&Factory>(entity(&world, factory)).unwrap().queue, [t2]);
+}
+
+#[test]
+fn several_factories_can_take_the_same_orders() {
+    let mut world = test_world();
+    set_resources(&mut world, Team::Blue, 100_000, 1_000_000);
+    let (t1, t2, bot, tank) = (id(&world, "land_factory_t1"), id(&world, "land_factory_t2"), id(&world, "t1_light_bot"), id(&world, "t2_heavy_tank"));
+    let first = world.spawn_finished_structure(t1, Team::Blue, 50, 50).unwrap();
+    let second = world.spawn_finished_structure(t1, Team::Blue, 60, 50).unwrap();
+    let third = world.spawn_finished_structure(t2, Team::Blue, 70, 50).unwrap();
+    let factories = [first, second, third];
+    let mut commands: Vec<SimCommand> = factories.iter().map(|&factory| SimCommand::QueueUnit { factory, blueprint: bot, count: 1 }).collect();
+    commands.extend(factories.iter().map(|&factory| SimCommand::QueueUnit { factory, blueprint: tank, count: 1 }));
+    commands.extend(factories.iter().map(|&factory| SimCommand::SetRepeat { factory, repeat: true }));
+    commands.extend(factories.iter().map(|&factory| SimCommand::SetRally { factory, point: point(2_000, 2_000) }));
+    world.advance_tick(&commands);
+    let state = world.snapshot_for(Some(Team::Blue)).factories;
+    assert_eq!(state[0].queue, [bot.0], "a T1 factory cannot take the tank");
+    assert_eq!(state[1].queue, [bot.0]);
+    assert_eq!(state[2].queue, [bot.0, tank.0], "the T2 factory takes both");
+    assert!(state.iter().all(|factory| factory.repeat && factory.rally.is_some()));
+}
+
+#[test]
 fn extractor_output_grows_with_each_touching_storage() {
     let mut world = test_world();
     let (extractor, storage) = (id(&world, "mass_extractor"), id(&world, "mass_storage"));

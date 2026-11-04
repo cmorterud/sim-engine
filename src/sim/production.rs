@@ -298,9 +298,17 @@ impl SimWorld {
                 };
                 let current = self.ecs.get::<&Blueprinted>(entity).expect("factories have blueprints").0;
                 let unit = self.blueprints.get(current);
-                if unit.builds.contains(blueprint) || unit.upgrades_to == Some(*blueprint) {
+                let is_upgrade = unit.upgrades_to == Some(*blueprint);
+                if unit.builds.contains(blueprint) || is_upgrade {
                     let mut factory = self.ecs.get::<&mut Factory>(entity).expect("factory list only holds factories");
-                    factory.queue.extend(std::iter::repeat_n(*blueprint, (*count).min(100) as usize));
+                    if is_upgrade {
+                        // A factory only upgrades once, however many times it is asked.
+                        if !factory.queue.contains(blueprint) {
+                            factory.queue.push(*blueprint);
+                        }
+                    } else {
+                        factory.queue.extend(std::iter::repeat_n(*blueprint, (*count).min(100) as usize));
+                    }
                 }
             }
             SimCommand::ClearQueue { factory } => {
@@ -642,7 +650,8 @@ impl SimWorld {
                 }
                 factory.progress = Res::ZERO;
                 let finished = factory.queue.remove(0);
-                if factory.repeat {
+                // Repeat loops units, not upgrades, which only happen once.
+                if factory.repeat && !self.blueprints.get(finished).is_factory() {
                     factory.queue.push(finished);
                 }
                 let rally = factory.rally;

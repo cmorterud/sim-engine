@@ -56,6 +56,8 @@ Usage: sim-engine [options]
 
 Controls:
   Left-drag or click   Select your units
+  Shift + click        Add a unit to the selection, or remove it
+  Shift + drag         Add a box of units to the selection
   Right-click          Attack an enemy, assist or repair a friend, reclaim a wreck,
                        move to the ground, or set a factory's rally point
   Shift + left-click   Queue a structure, and keep placing
@@ -540,7 +542,7 @@ fn run_windowed(seed: u64, options: Options) {
                                 placing = None;
                             }
                         }
-                        selection.end_drag(&session.current.units, &camera, PLAYER_TEAM);
+                        selection.finish_drag(&session.current.units, &camera, PLAYER_TEAM, shift_held);
                     }
                     WindowEvent::MouseInput { state: ElementState::Pressed, button, .. } if !response.consumed => match button {
                         MouseButton::Left => {
@@ -790,11 +792,26 @@ fn run_windowed(seed: u64, options: Options) {
                                     placing = Some(blueprint);
                                     attack_move_armed = false;
                                 }
-                                UiAction::Queue { factory, blueprint, count } => {
-                                    session.send(SimCommand::QueueUnit { factory, blueprint, count });
+                                UiAction::Queue { factories, blueprint, selected_count } => {
+                                    let name = &map.blueprints.get(blueprint).name;
+                                    feedback.set_label(MarkerKind::Build, ui::queue_label(name, factories.len(), selected_count));
+                                    for factory in factories {
+                                        session.send(SimCommand::QueueUnit { factory, blueprint, count: 1 });
+                                    }
                                 }
-                                UiAction::SetRepeat { factory, repeat } => session.send(SimCommand::SetRepeat { factory, repeat }),
-                                UiAction::ClearQueue { factory } => session.send(SimCommand::ClearQueue { factory }),
+                                UiAction::SetRepeat { factories, repeat } => {
+                                    let state = if repeat { "on" } else { "off" };
+                                    feedback.set_label(MarkerKind::Build, format!("Repeat {state}: {}", ui::factory_count(factories.len())));
+                                    for factory in factories {
+                                        session.send(SimCommand::SetRepeat { factory, repeat });
+                                    }
+                                }
+                                UiAction::ClearQueue { factories } => {
+                                    feedback.set_label(MarkerKind::Build, format!("Queue cleared: {}", ui::factory_count(factories.len())));
+                                    for factory in factories {
+                                        session.send(SimCommand::ClearQueue { factory });
+                                    }
+                                }
                                 UiAction::Restart => {
                                     session = Session::start(scenario::skirmish(seed), CommandSource::PlayerVsAi { seed }, driver_options);
                                     selection.clear();

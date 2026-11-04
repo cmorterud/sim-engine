@@ -35,9 +35,10 @@ const BUILDING: Color32 = Color32::from_rgb(120, 200, 255);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UiAction {
     BeginPlacement(BlueprintId),
-    Queue { factory: SimId, blueprint: BlueprintId, count: u32 },
-    SetRepeat { factory: SimId, repeat: bool },
-    ClearQueue { factory: SimId },
+    /// Queue one item in each of these factories, out of `selected_count` selected.
+    Queue { factories: Vec<SimId>, blueprint: BlueprintId, selected_count: usize },
+    SetRepeat { factories: Vec<SimId>, repeat: bool },
+    ClearQueue { factories: Vec<SimId> },
     Restart,
 }
 
@@ -129,45 +130,155 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
             });
         }
 
-        for unit in units.iter().filter(|unit| db.get(BlueprintId(unit.blueprint)).is_factory()).take(1) {
-            let Some(factory) = snapshot.factories.iter().find(|factory| factory.id == unit.id) else {
-                continue;
-            };
-            let blueprint = db.get(BlueprintId(unit.blueprint));
-            if unit.built_permille < 1000 {
-                ui.label("Under construction");
-                continue;
+        if let Some(menu) = factory_menu(snapshot, selected, db) {
+            factory_controls(ui, &menu, db, actions);
+        } else if units.iter().any(|unit| db.get(BlueprintId(unit.blueprint)).is_factory()) {
+            ui.label("Under construction");
+        }
+    });
+}
+
+/// Whether selected factories are set to repeat.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum RepeatState {
+    Off,
+    On,
+    Mixed,
+}
+
+/// What the selected, finished factories can do together.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FactoryMenu {
+    pub factories: Vec<SimId>,
+    /// Everything at least one factory can build, with the factories able to build it.
+    pub options: Vec<(BlueprintId, Vec<SimId>)>,
+    /// The upgrade, with the factories able to start it.
+    pub upgrade: Option<(BlueprintId, Vec<SimId>)>,
+    pub repeat: RepeatState,
+    /// The combined queue, in order of first appearance, with how many of each.
+    pub queue: Vec<(BlueprintId, u32)>,
+    /// Average progress on items under way, in thousandths, if any are.
+    pub progress_permille: Option<u16>,
+}
+
+/// Works out the shared menu for the selected factories. `None` if no finished factory is selected.
+pub fn factory_menu(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb) -> Option<FactoryMenu> {
+    let mut menu = FactoryMenu {
+        factories: Vec::new(),
+        options: Vec::new(),
+        upgrade: None,
+        repeat: RepeatState::Off,
+        queue: Vec::new(),
+        progress_permille: None,
+    };
+    let (mut repeating, mut progress_total, mut under_way) = (0usize, 0u32, 0u32);
+    for &id in selected {
+        let Some(unit) = find_unit(snapshot, id).filter(|unit| unit.blueprint != u16::MAX && unit.built_permille == 1000) else {
+            continue;
+        };
+        let blueprint = db.get(BlueprintId(unit.blueprint));
+        let Some(factory) = snapshot.factories.iter().find(|factory| factory.id == id).filter(|_| blueprint.is_factory()) else {
+            continue;
+        };
+        menu.factories.push(id);
+        repeating += usize::from(factory.repeat);
+        for &option in &blueprint.builds {
+            match menu.options.iter_mut().find(|(existing, _)| *existing == option) {
+                Some((_, able)) => able.push(id),
+                None => menu.options.push((option, vec![id])),
             }
-            ui.horizontal_wrapped(|ui| {
-                for &option in &blueprint.builds {
-                    if ui.button(cost_label(db, option)).clicked() {
-                        actions.push(UiAction::Queue { factory: unit.id, blueprint: option, count: 1 });
-                    }
-                }
-                if let Some(upgrade) = blueprint.upgrades_to {
-                    let upgrading = factory.queue.contains(&upgrade.0);
-                    let label = format!("Upgrade to T2\n{}", cost_label(db, upgrade).lines().nth(1).unwrap_or(""));
-                    if ui.add_enabled(!upgrading, egui::Button::new(label)).clicked() {
-                        actions.push(UiAction::Queue { factory: unit.id, blueprint: upgrade, count: 1 });
-                    }
-                }
-            });
-            ui.horizontal(|ui| {
-                let mut repeat = factory.repeat;
-                if ui.checkbox(&mut repeat, "Repeat").changed() {
-                    actions.push(UiAction::SetRepeat { factory: unit.id, repeat });
-                }
-                if ui.button("Clear queue").clicked() {
-                    actions.push(UiAction::ClearQueue { factory: unit.id });
-                }
-                let names: Vec<&str> = factory.queue.iter().take(6).map(|item| db.get(BlueprintId(*item)).name.as_str()).collect();
-                if names.is_empty() {
-                    ui.label("Queue is empty. Right-click the ground to set a rally point.");
-                } else {
-                    ui.add(egui::ProgressBar::new(f32::from(factory.progress_permille) / 1000.0).desired_width(100.0));
-                    ui.label(names.join(", "));
-                }
-            });
+        }
+        if let Some(upgrade) = blueprint.upgrades_to.filter(|upgrade| !factory.queue.contains(&upgrade.0)) {
+            menu.upgrade.get_or_insert_with(|| (upgrade, Vec::new())).1.push(id);
+        }
+        for &item in &factory.queue {
+            let item = BlueprintId(item);
+            match menu.queue.iter_mut().find(|(existing, _)| *existing == item) {
+                Some((_, count)) => *count += 1,
+                None => menu.queue.push((item, 1)),
+            }
+        }
+        if !factory.queue.is_empty() {
+            progress_total += u32::from(factory.progress_permille);
+            under_way += 1;
+        }
+    }
+    if menu.factories.is_empty() {
+        return None;
+    }
+    menu.repeat = match repeating {
+        0 => RepeatState::Off,
+        count if count == menu.factories.len() => RepeatState::On,
+        _ => RepeatState::Mixed,
+    };
+    menu.progress_permille = (under_way > 0).then(|| (progress_total / under_way) as u16);
+    Some(menu)
+}
+
+/// A count of factories for confirmation text.
+pub fn factory_count(count: usize) -> String {
+    match count {
+        1 => "1 factory".to_string(),
+        count => format!("{count} factories"),
+    }
+}
+
+/// Text confirming a queue order, saying how many factories took it.
+pub fn queue_label(name: &str, given: usize, selected: usize) -> String {
+    match (given, selected) {
+        (_, 1) => format!("{name} queued"),
+        (given, selected) if given == selected => format!("{name}: all {selected} factories"),
+        (given, selected) => format!("{name}: {given} of {selected} factories"),
+    }
+}
+
+fn factory_controls(ui: &mut egui::Ui, menu: &FactoryMenu, db: &BlueprintDb, actions: &mut Vec<UiAction>) {
+    let total = menu.factories.len();
+    let partial = |able: usize| if able < total { format!("\n{able} of {total} factories") } else { String::new() };
+    ui.horizontal_wrapped(|ui| {
+        for (option, able) in &menu.options {
+            if ui.button(format!("{}{}", cost_label(db, *option), partial(able.len()))).clicked() {
+                actions.push(UiAction::Queue { factories: able.clone(), blueprint: *option, selected_count: total });
+            }
+        }
+        if let Some((upgrade, able)) = &menu.upgrade {
+            let cost = cost_label(db, *upgrade);
+            let label = format!("Upgrade to T2\n{}{}", cost.lines().nth(1).unwrap_or(""), partial(able.len()));
+            if ui.button(label).clicked() {
+                actions.push(UiAction::Queue { factories: able.clone(), blueprint: *upgrade, selected_count: total });
+            }
+        }
+    });
+    ui.horizontal(|ui| {
+        let mut repeat = menu.repeat == RepeatState::On;
+        let checkbox = egui::Checkbox::new(&mut repeat, "Repeat").indeterminate(menu.repeat == RepeatState::Mixed);
+        if ui.add(checkbox).clicked() {
+            // A mixed selection turns on for all, as the next click turns off for all.
+            let turn_on = menu.repeat != RepeatState::On;
+            actions.push(UiAction::SetRepeat { factories: menu.factories.clone(), repeat: turn_on });
+        }
+        if ui.button("Clear queue").clicked() {
+            actions.push(UiAction::ClearQueue { factories: menu.factories.clone() });
+        }
+        if total > 1 {
+            ui.label(format!("{total} factories:"));
+        }
+        if menu.queue.is_empty() {
+            ui.label("Queue is empty. Right-click the ground to set a rally point.");
+        } else {
+            if let Some(progress) = menu.progress_permille {
+                ui.add(egui::ProgressBar::new(f32::from(progress) / 1000.0).desired_width(100.0));
+            }
+            let names: Vec<String> = menu
+                .queue
+                .iter()
+                .take(6)
+                .map(|(item, count)| {
+                    let name = &db.get(*item).name;
+                    if *count > 1 { format!("{name} x{count}") } else { name.clone() }
+                })
+                .collect();
+            ui.label(names.join(", "));
         }
     });
 }
@@ -639,6 +750,79 @@ mod tests {
 
     fn snapshot(units: Vec<UnitView>, plans: Vec<UnitPlanView>) -> SimSnapshot {
         SimSnapshot { units, plans, ..SimSnapshot::default() }
+    }
+
+    fn factory_view(id: u32, queue: Vec<u16>, repeat: bool, progress_permille: u16) -> FactoryView {
+        FactoryView { id: SimId(id), queue, repeat, progress_permille, rally: None }
+    }
+
+    /// One T1 factory, one T2 factory, and a T1 factory still under construction.
+    fn mixed_factories(db: &BlueprintDb) -> SimSnapshot {
+        let factory_unit = |id: u32, key: &str, built: u16| {
+            let mut view = unit(id, 0.0);
+            view.blueprint = db.id(key).0;
+            view.is_structure = true;
+            view.built_permille = built;
+            view
+        };
+        let mut current = snapshot(
+            vec![factory_unit(1, "land_factory_t1", 1000), factory_unit(2, "land_factory_t2", 1000), factory_unit(3, "land_factory_t1", 400)],
+            vec![],
+        );
+        current.factories = vec![factory_view(1, vec![], false, 0), factory_view(2, vec![], false, 0), factory_view(3, vec![], false, 0)];
+        current
+    }
+
+    #[test]
+    fn the_menu_lists_everything_any_factory_can_build_and_who_can() {
+        let db = BlueprintDb::standard();
+        let current = mixed_factories(&db);
+        let menu = factory_menu(&current, &[SimId(1), SimId(2), SimId(3)], &db).unwrap();
+        assert_eq!(menu.factories, [SimId(1), SimId(2)], "unfinished factories take no orders");
+        let able = |key: &str| menu.options.iter().find(|(option, _)| *option == db.id(key)).map(|(_, able)| able.clone());
+        assert_eq!(able("t1_light_bot").unwrap(), [SimId(1), SimId(2)]);
+        assert_eq!(able("t2_heavy_tank").unwrap(), [SimId(2)], "only T2 factories can build tanks");
+        assert_eq!(menu.upgrade, Some((db.id("land_factory_t2"), vec![SimId(1)])), "only T1 factories can upgrade");
+    }
+
+    #[test]
+    fn repeat_can_be_off_on_or_mixed() {
+        let db = BlueprintDb::standard();
+        let mut current = mixed_factories(&db);
+        let state = |current: &SimSnapshot| factory_menu(current, &[SimId(1), SimId(2)], &db).unwrap().repeat;
+        assert_eq!(state(&current), RepeatState::Off);
+        current.factories[0].repeat = true;
+        assert_eq!(state(&current), RepeatState::Mixed);
+        current.factories[1].repeat = true;
+        assert_eq!(state(&current), RepeatState::On);
+    }
+
+    #[test]
+    fn the_queue_is_combined_and_an_upgrade_under_way_is_not_offered_again() {
+        let db = BlueprintDb::standard();
+        let (bot, upgrade) = (db.id("t1_light_bot"), db.id("land_factory_t2"));
+        let mut current = mixed_factories(&db);
+        current.factories[0] = factory_view(1, vec![upgrade.0, bot.0], false, 200);
+        current.factories[1] = factory_view(2, vec![bot.0, bot.0], false, 400);
+        let menu = factory_menu(&current, &[SimId(1), SimId(2)], &db).unwrap();
+        assert_eq!(menu.queue, [(upgrade, 1), (bot, 3)]);
+        assert_eq!(menu.progress_permille, Some(300));
+        assert_eq!(menu.upgrade, None);
+    }
+
+    #[test]
+    fn no_finished_factory_means_no_menu() {
+        let db = BlueprintDb::standard();
+        assert_eq!(factory_menu(&mixed_factories(&db), &[SimId(3)], &db), None);
+    }
+
+    #[test]
+    fn queue_text_says_how_many_factories_took_the_order() {
+        assert_eq!(queue_label("Bot", 1, 1), "Bot queued");
+        assert_eq!(queue_label("Bot", 3, 3), "Bot: all 3 factories");
+        assert_eq!(queue_label("Tank", 2, 3), "Tank: 2 of 3 factories");
+        assert_eq!(factory_count(1), "1 factory");
+        assert_eq!(factory_count(4), "4 factories");
     }
 
     #[test]

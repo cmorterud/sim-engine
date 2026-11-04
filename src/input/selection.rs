@@ -51,10 +51,28 @@ impl Selection {
     /// Ends the drag, replacing the selection with the player's units in the box,
     /// or the nearest one if it was a click.
     pub fn end_drag(&mut self, units: &[UnitView], camera: &Camera, team: Team) {
+        self.finish_drag(units, camera, team, false);
+    }
+
+    /// Ends the drag. When adding, a box adds to the selection, a click on a unit adds or
+    /// removes it, and a click on empty ground leaves the selection alone.
+    pub fn finish_drag(&mut self, units: &[UnitView], camera: &Camera, team: Team, adding: bool) {
         let dragged = self.drag_box();
         let Some(start) = self.drag_start.take() else {
             return;
         };
+        if adding && dragged.is_none() {
+            if let Some(clicked) = nearest_unit(units, camera, team, start) {
+                match self.selected.binary_search(&clicked) {
+                    Ok(index) => {
+                        self.selected.remove(index);
+                    }
+                    Err(index) => self.selected.insert(index, clicked),
+                }
+            }
+            return;
+        }
+        let previous = if adding { std::mem::take(&mut self.selected) } else { Vec::new() };
         self.selected = match dragged {
             Some((min, max)) => {
                 // A box over a base and an army means the army.
@@ -70,6 +88,11 @@ impl Selection {
             }
             None => nearest_unit(units, camera, team, start).into_iter().collect(),
         };
+        if adding {
+            self.selected.extend(previous);
+            self.selected.sort_unstable();
+            self.selected.dedup();
+        }
     }
 
     /// Replaces the selection directly, for hotkeys and scripted runs. Ids must be sorted.
@@ -203,6 +226,43 @@ mod tests {
         selection.begin_drag();
         selection.end_drag(&units, &camera, Team::Blue);
         assert!(selection.selected().is_empty());
+    }
+
+    fn click(selection: &mut Selection, units: &[UnitView], camera: &Camera, at: [f64; 2], adding: bool) {
+        selection.move_cursor(at);
+        selection.begin_drag();
+        selection.finish_drag(units, camera, Team::Blue, adding);
+    }
+
+    #[test]
+    fn shift_click_adds_and_removes_units_one_at_a_time() {
+        let camera = camera();
+        let units = [unit(1, Team::Blue, 40_000.0, 40_000.0), unit(2, Team::Blue, 40_050.0, 40_000.0)];
+        let first = camera.world_to_screen([40_000.0, 40_000.0, 1.0]).unwrap();
+        let second = camera.world_to_screen([40_050.0, 40_000.0, 1.0]).unwrap();
+        let mut selection = Selection::default();
+        click(&mut selection, &units, &camera, second, true);
+        click(&mut selection, &units, &camera, first, true);
+        assert_eq!(selection.selected(), [SimId(1), SimId(2)], "the selection must stay sorted");
+        click(&mut selection, &units, &camera, second, true);
+        assert_eq!(selection.selected(), [SimId(1)], "a second click removes it");
+        click(&mut selection, &units, &camera, [first[0] + 300.0, first[1]], true);
+        assert_eq!(selection.selected(), [SimId(1)], "missing keeps what is selected");
+    }
+
+    #[test]
+    fn shift_drag_adds_a_box_to_the_selection() {
+        let camera = camera();
+        let units = [unit(1, Team::Blue, 40_000.0, 40_000.0), unit(2, Team::Blue, 40_050.0, 40_000.0)];
+        let first = camera.world_to_screen([40_000.0, 40_000.0, 1.0]).unwrap();
+        let second = camera.world_to_screen([40_050.0, 40_000.0, 1.0]).unwrap();
+        let mut selection = Selection::default();
+        click(&mut selection, &units, &camera, first, false);
+        selection.move_cursor([second[0] - 10.0, second[1] - 10.0]);
+        selection.begin_drag();
+        selection.move_cursor([second[0] + 10.0, second[1] + 10.0]);
+        selection.finish_drag(&units, &camera, Team::Blue, true);
+        assert_eq!(selection.selected(), [SimId(1), SimId(2)]);
     }
 
     #[test]

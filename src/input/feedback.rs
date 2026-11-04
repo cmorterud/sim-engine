@@ -128,7 +128,14 @@ impl OrderFeedback {
         if let Some(position) = position {
             self.add_marker(*first_kind, position, *first_target);
         }
-        let text: Vec<&str> = described.iter().map(|(_, text, _)| text.as_str()).collect();
+        // Rally points are reported once, however many factories took one.
+        let rally_count = described.iter().filter(|(kind, _, _)| *kind == MarkerKind::Rally).count();
+        let mut text: Vec<String> = described.iter().filter(|(kind, _, _)| *kind != MarkerKind::Rally).map(|(_, text, _)| text.clone()).collect();
+        match rally_count {
+            0 => {}
+            1 => text.push("Rally point set".to_string()),
+            count => text.push(format!("Rally point set: {count} factories")),
+        }
         self.set_label(*first_kind, text.join(", "));
     }
 
@@ -201,6 +208,15 @@ mod tests {
         let commands = [SimCommand::Move { units: units(2), goal }, SimCommand::SetRally { factory: SimId(5), point: goal }];
         feedback.show_orders(&commands, Some(AT), &db, "unused");
         assert_eq!(feedback.label().unwrap().text, "Move: 2 units, Rally point set");
+    }
+
+    #[test]
+    fn several_rally_points_are_reported_once() {
+        let db = db();
+        let rally = |factory: u32| SimCommand::SetRally { factory: SimId(factory), point: Vec2Fp::ZERO };
+        let mut feedback = OrderFeedback::default();
+        feedback.show_orders(&[rally(1), rally(2), rally(3)], Some(AT), &db, "unused");
+        assert_eq!(feedback.label().unwrap().text, "Rally point set: 3 factories");
     }
 
     #[test]
