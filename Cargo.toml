@@ -32,3 +32,10 @@ criterion = "0.5"
 [[bench]]
 name = "sim_benchmark"
 harness = false
+
+# Keep unoptimized test runs fast enough to use, with overflow checks still on.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2

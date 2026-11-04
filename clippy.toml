@@ -1,0 +1,8 @@
+# Determinism guard: these types are banned crate-wide. Presentation code
+# (src/render, src/input, src/driver.rs, src/main.rs) and benchmarks opt out explicitly.
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "iteration order is randomized; use BTreeMap or a sorted Vec" },
+    { path = "std::collections::HashSet", reason = "iteration order is randomized; use BTreeSet or a sorted Vec" },
+    { path = "std::time::Instant", reason = "simulation must not depend on wall-clock time" },
+    { path = "std::time::SystemTime", reason = "simulation must not depend on wall-clock time" },
+]

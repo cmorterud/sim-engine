@@ -28,7 +28,7 @@ These constants apply to every system. Benchmarks and gates run at the maximum m
 | Gravity | `Fp::from_bits(401)` per tick² | About 9.8 m/s² |
 | Terrain cell | 20 units | 4,096 × 4,096 cells at maximum map size |
 | Flow field sector | 64 × 64 cells (1,280 units) | 64 × 64 sectors at maximum map size |
-| Spatial grid cell | 32 units | |
+| Spatial grid cell | 8 units | Keeps dense crowds cheap for the short-range separation queries, which run for every unit on every tick |
 
 ---
 
@@ -84,6 +84,8 @@ sim-engine/
 ├── SPECIFICATION.md
 ├── src/
 │   ├── main.rs                 # Application entry point, window loop, and mode switch (headless vs windowed)
+│   ├── lib.rs                  # Library root, so that tests and benchmarks can reach the modules
+│   ├── driver.rs               # Runs the simulation on its own thread and hands out snapshots
 │   ├── math/
 │   │   ├── mod.rs
 │   │   ├── fp.rs               # Fixed-point aliases (I20F12, I40F24), Vec2Fp, Vec3Fp, integer sqrt/trig
@@ -91,6 +93,8 @@ sim-engine/
 │   │   └── rng.rs              # Seeded integer RNG owned by SimWorld
 │   ├── sim/
 │   │   ├── mod.rs
+│   │   ├── config.rs           # World-scale constants and per-world settings
+│   │   ├── scenario.rs         # Fixed scenarios and scripted orders shared by tests, benchmarks, and the app
 │   │   ├── components.rs       # ECS components (SimId, Position, Velocity, Unit, Team, Health, Combat, Projectile)
 │   │   ├── terrain.rs          # Height map, water level, per-movement-class cost grids
 │   │   ├── spatial.rs          # Sparse sorted 2D grid for neighbor/collision lookups
@@ -109,6 +113,10 @@ sim-engine/
 │       └── selection.rs        # Drag-box selection and ground raycasting (screen to world)
 ├── tests/
 │   ├── determinism_test.rs     # Dual-instance, golden-checksum, and checksum-sensitivity tests
+│   ├── navigation_test.rs      # Phase 2 gate, arrival, separation, and moving goals
+│   ├── combat_test.rs          # Swept collision, terrain masking, dodging, and friendly fire
+│   ├── driver_test.rs          # The threaded driver matches a direct headless run
+│   ├── input_test.rs           # Drag-select and right-click, from screen coordinates to moving units
 │   └── golden/                 # Checked-in expected checksums for fixed scenarios
 └── benches/
     └── sim_benchmark.rs        # Criterion benchmark measuring tick execution time for 5,000 units
@@ -255,26 +263,24 @@ pub struct Projectile {
 * Any work budget is a constant count per tick and never depends on elapsed time.
 
 ### 4.3 Sparse Spatial Grid (`src/sim/spatial.rs`)
-A dense grid at maximum map size has 6.5 million cells that must be walked every tick, so the grid is stored as a sorted list of occupied entries. Memory and rebuild cost depend on the unit count, not the map size, and results are deterministic by construction.
+A dense grid would have millions of cells to walk every tick at maximum map size, so each team's entries are stored as a sorted list with a small index of where each row starts. Memory and rebuild cost depend on the unit count plus the row count, not the map's area, and results are deterministic by construction.
 
-* Each entry's key packs `(cell_y, cell_x, SimId)` into a `u64`. Keys are unique, so `sort_unstable` is safe.
-* A query binary-searches each row of cells it covers and walks that row's entries. Results arrive in `(cell, SimId)` order.
+* Entries are sorted by `(row, column, SimId)`, using a counting sort by row followed by a sort within each row.
+* A query binary-searches each row of cells it covers and walks that row's entries. Results arrive in a fixed order: team, row, column, then `SimId`.
+* Entries carry their position and radius inline, so queries avoid ECS lookups, and a query can be limited to one team, so rear units do not pay for scanning their own army when looking for enemies.
 * A query with a radius above 512 units scans all entries, so map-range weapons stay bounded by the unit count.
 * Only units are inserted. Projectiles query the grid but are not stored in it.
 * The grid is rebuilt twice per tick (§4.6), so combat always sees post-movement positions.
 
 ```rust
-pub struct GridEntry {
-    key: u64,
-    entity: hecs::Entity,
-}
-
 pub struct SpatialGrid {
-    entries: Vec<GridEntry>, // Sorted by key; reused between ticks
+    teams: [TeamEntries; 2],    // Sorted entries and row starts; reused between ticks
+    by_index: Vec<GridEntry>,   // Each unit's entry by its index in SimWorld::units
 }
 
 impl SpatialGrid {
-    pub fn rebuild(&mut self, units: impl Iterator<Item = (SimId, hecs::Entity, Vec2Fp)>);
+    pub fn rebuild(&mut self, units: impl Iterator<Item = GridUnit>);
+    pub fn for_each_candidate(&self, team: Option<Team>, center_x: i32, center_y: i32, radius: i32, visit: impl FnMut(&GridEntry));
     pub fn query_radius(&self, center: Vec2Fp, radius: Fp, out: &mut Vec<hecs::Entity>);
 }
 ```
@@ -284,21 +290,24 @@ A single 256 × 256 field gives cells 320 units wide on a maximum-size map, whic
 
 1. **Cost Grid:** One 4,096 × 4,096 grid per `MoveClass` (1 byte per cell, 16 MiB each). 1–254 = passable cost, 255 = impassable. Only `Land` is allocated in the PoC.
 2. **Portal Graph:** Built at map load. Each contiguous passable span along a sector edge is a portal. Portals in the same sector are linked when connected, with the path cost as the edge weight.
-3. **Route:** A move command runs A* over the portal graph once per unit group, breaking ties by lowest portal index. Cost grid changes invalidate routes and fields through a per-sector version number.
+3. **Route:** A move command runs Dijkstra outward from the goal over the portal graph once per unit group, breaking ties by lowest portal index. This gives every portal its distance to the goal and the sector it continues into, so a group spread across many sectors shares one search (about 0.3 ms at maximum map size). Cost grid changes rebuild the graph and existing routes.
 4. **Sector Flow Field:**
-   * Dijkstra runs within one 64 × 64 sector from its target cells: the goal cell or the exit portal cells. A bucket queue is preferred. BFS is not valid because cell costs vary.
+   * Dijkstra runs within one 64 × 64 sector from its target cells: the goal cell or the exit portal cells. BFS is not valid because cell costs vary.
+   * A portal seeds only the sector it does not continue into. Seeding both sides would let units bounce back and forth across it.
+   * Cells along a portal are seeded with a one-step lookahead into the next sector, so that they differ in value. Without this, units cross each border head-on and walk in staircases.
    * Orthogonal steps cost `10 × cell cost` and diagonal steps `14 × cell cost`. Integration values are `u32`, since a worst-case sector path exceeds `u16`.
-   * Each cell stores a direction code pointing to its lowest-valued neighbor, using a fixed neighbor order for ties. Diagonals may not cut the corner of an impassable cell.
+   * Each cell stores a direction code pointing to the neighbor that reached it first with the lowest value, using a fixed neighbor order for ties. Diagonals may not cut the corner of an impassable cell.
 5. **Lazy Build & Cache:**
    * Fields are built only for sectors occupied by units on that route, plus the next sector along it.
    * At most `MAX_FIELD_BUILDS_PER_TICK` fields are built per tick, in request order. The value starts at 8 and is tuned from the Phase 3 benchmark.
    * A unit whose field is not built yet holds position until it is.
-   * Fields are cached by `(sector, target set, sector version)`, with least-recently-used eviction at a fixed entry limit.
+   * Fields are cached per route and sector, with least-recently-used eviction at a fixed entry limit. A stale field stays in use until its replacement is built, so that units do not stutter when a goal moves.
 6. **Moving Destinations:** A moving goal is re-routed only when it changes cells, and at most once every 10 ticks per group.
 7. **Steering & Local Separation:**
    * Units sample the flow direction of the cell they occupy.
    * If two units overlap within their radii, apply a soft repelling push impulse:
      $$\vec{F}_{\text{push}} = \frac{\vec{Pos}_A - \vec{Pos}_B}{\|\vec{Pos}_A - \vec{Pos}_B\|} \cdot (\text{Radius}_A + \text{Radius}_B - \text{Dist})$$
+   * The total push per tick is capped at the larger of half the unit's radius and its speed, so that fast units cannot simply overpower separation.
    * Units at exactly the same position push along a direction derived from their `SimId`s.
    * Motion, including push, is applied one axis at a time against the cost grid, so no unit center can enter an impassable cell.
    * A ground unit's `z` is set from the height map after moving.
@@ -334,6 +343,7 @@ pub struct SimWorld {
     // Sorted by SimId: spawns append, despawns retain order.
     pub units: Vec<(SimId, hecs::Entity)>,
     pub projectiles: Vec<(SimId, hecs::Entity)>,
+    pub obstacles: Vec<RectFp>,
 }
 
 impl SimWorld {
@@ -368,7 +378,7 @@ impl SimWorld {
             hasher.write(&id.0.to_le_bytes());
             self.hash_entity_components(entity, &mut hasher);
         }
-        self.flow_field.hash_routes(&mut hasher);
+        self.flow_field.hash_state(&mut hasher);
         hasher.finish()
     }
 }
@@ -397,7 +407,7 @@ The camera smoothly scales along an exponential zoom curve:
 
 ### 5.2 GPU Instanced Rendering (`src/render/instances.rs` & `shaders.wgsl`)
 * **Single Draw Call for Units:** All 5,000 units are rendered via one instanced `wgpu::RenderPass::draw_indexed` call. Projectiles use a second instanced call.
-* **Terrain:** A single camera-following grid of 256 × 256 vertices, with vertex spacing that doubles as altitude increases. The vertex shader reads heights from a texture of the height map. Flat shading only.
+* **Terrain:** A single camera-following grid of 512 × 512 vertices, with vertex spacing that doubles as altitude increases. The vertex shader reads heights from a texture of the height map. Flat shading only.
 * **Simulation Thread:** The simulation runs on its own thread and hands the renderer per-tick snapshots keyed by `SimId`, so a slow tick cannot stall a frame. Rendering never writes to simulation state. Entities present in only one snapshot are drawn at their known position without interpolation.
 * **Instance Buffer Structure:**
   ```rust
@@ -450,11 +460,16 @@ Execute the implementation in strict sequential phases:
 * Implement `render::pipeline`, `render::instances`, and `render::camera`.
 * Render 5,000 cubes with GPU instancing, plus projectiles and terrain.
 * Implement camera scroll-zoom and interpolation between ticks.
-* **Gate:** The application holds **60+ FPS** during full combat, measured as a 99th-percentile frame time of ≤ 16.7 ms over 60 seconds, including a full zoom from minimum to maximum altitude. A determinism test confirms that a windowed run and a headless run with the same inputs produce the same checksum.
+* **Gate:** The application holds **60+ FPS** during full combat, with vsync on, over 60 seconds including a full zoom from minimum to maximum altitude (`--autotest 60`, without `--capture`, which disturbs frame timing):
+  * Average frame rate of at least 59.5 FPS.
+  * 99th-percentile work per frame of ≤ 16.7 ms, excluding the wait for vsync.
+  * 99th-percentile frame interval of ≤ 25 ms, which is the point where a frame has clearly missed a 60 Hz vsync. Intervals cannot be compared with 16.7 ms directly, because the nominal 60 Hz interval is 16.67 ms and timestamp jitter alone exceeds that margin.
+  * A windowed run and a headless run with the same inputs produce the same checksum.
 
 ### Phase 5: Selection & Interactive Control (Days 16–18)
 * Implement `input::selection`: Left-click drag selection box and right-click move command.
 * Enable full user interaction in the windowed application.
+* **Gate:** An automated test drives selection and orders from screen coordinates through to moving units. Real mouse input and the feel of the controls are checked by hand.
 
 ---
 
@@ -479,7 +494,11 @@ cargo test --release --target x86_64-apple-darwin --test determinism_test
 # 5. Run simulation performance benchmarks
 cargo bench
 
-# 6. Launch the visual interactive proof of concept
+# 6. Run the frame-rate gate in a window, then confirm that a headless run prints the same checksum
+cargo run --release -- --autotest 60
+cargo run --release -- --headless 600
+
+# 7. Launch the visual interactive proof of concept
 cargo run --release
 ```
 
