@@ -6,7 +6,7 @@ use crate::math::fp::{Fp, Vec2Fp};
 use crate::render::camera::{Camera, HeightField};
 use crate::sim::blueprints::{BlueprintDb, BlueprintId};
 use crate::sim::commands::SimCommand;
-use crate::sim::components::{SimId, Team};
+use crate::sim::components::{BuildTask, SimId, Team};
 use crate::sim::config::TERRAIN_CELL_UNITS;
 use crate::sim::world::{SimSnapshot, UnitView, WreckView};
 
@@ -118,6 +118,30 @@ pub fn right_click_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
         }
     }
     commands
+}
+
+/// The same orders, to carry out after what units are already doing. An attack becomes an
+/// attack-move to where the target is now. A rally point or a follow order has no end to
+/// wait for, so those stay as they are.
+pub fn queued_commands(commands: Vec<SimCommand>, units: &[UnitView]) -> Vec<SimCommand> {
+    commands
+        .into_iter()
+        .map(|command| match command {
+            SimCommand::Move { units, goal } => SimCommand::QueueMove { units, goal, attack: false },
+            SimCommand::AttackMove { units, goal } => SimCommand::QueueMove { units, goal, attack: true },
+            SimCommand::Attack { units: attackers, target } => match units.binary_search_by_key(&target, |unit| unit.id) {
+                Ok(index) => {
+                    let goal = Vec2Fp::new(Fp::from_bits(units[index].x), Fp::from_bits(units[index].y));
+                    SimCommand::QueueMove { units: attackers, goal, attack: true }
+                }
+                Err(_) => SimCommand::Attack { units: attackers, target },
+            },
+            SimCommand::Assist { units, target } => SimCommand::QueueTask { units, task: BuildTask::Assist { target } },
+            SimCommand::Repair { units, target } => SimCommand::QueueTask { units, task: BuildTask::Repair { target } },
+            SimCommand::Reclaim { units, target } => SimCommand::QueueTask { units, task: BuildTask::Reclaim { target } },
+            other => other,
+        })
+        .collect()
 }
 
 /// The selected units that can walk.
@@ -370,6 +394,48 @@ mod tests {
     fn click_for<'a>(selected: &'a [SimId], units: &'a [UnitView], db: &'a BlueprintDb, camera: &'a Camera, world: [f64; 2]) -> RightClick<'a> {
         let cursor = camera.world_to_screen([world[0], world[1], 8.0]).unwrap();
         RightClick { selected, units, wrecks: &[], blueprints: db, team: Team::Blue, camera, cursor, ground: Some(world), attack_move: false }
+    }
+
+    #[test]
+    fn shift_turns_orders_into_their_queued_forms() {
+        let db = db();
+        let units = [view(1, Team::Blue, db.id("t1_light_bot"), &db, 2_000.0, 1_950.0), view(2, Team::Red, db.id("t1_light_bot"), &db, 2_100.0, 2_050.0)];
+        let goal = Vec2Fp::new(Fp::from_num(10.0), Fp::from_num(20.0));
+        let ids = || vec![SimId(1)];
+        let raw = |value: f64| Fp::from_bits((value * 4096.0) as i32);
+        let at_enemy = Vec2Fp::new(raw(2_100.0), raw(2_050.0));
+        let target = SimId(2);
+        let queued = queued_commands(
+            vec![
+                SimCommand::Move { units: ids(), goal },
+                SimCommand::AttackMove { units: ids(), goal },
+                SimCommand::Attack { units: ids(), target },
+                SimCommand::Assist { units: ids(), target },
+                SimCommand::Repair { units: ids(), target },
+                SimCommand::Reclaim { units: ids(), target },
+            ],
+            &units,
+        );
+        assert_eq!(
+            queued,
+            [
+                SimCommand::QueueMove { units: ids(), goal, attack: false },
+                SimCommand::QueueMove { units: ids(), goal, attack: true },
+                SimCommand::QueueMove { units: ids(), goal: at_enemy, attack: true },
+                SimCommand::QueueTask { units: ids(), task: BuildTask::Assist { target } },
+                SimCommand::QueueTask { units: ids(), task: BuildTask::Repair { target } },
+                SimCommand::QueueTask { units: ids(), task: BuildTask::Reclaim { target } },
+            ]
+        );
+    }
+
+    #[test]
+    fn orders_with_no_end_to_wait_for_are_not_queued() {
+        let goal = Vec2Fp::new(Fp::from_num(10.0), Fp::from_num(20.0));
+        let unchanged = vec![SimCommand::SetRally { factory: SimId(1), point: goal }, SimCommand::Follow { units: vec![SimId(2)], target: SimId(1) }];
+        assert_eq!(queued_commands(unchanged.clone(), &[]), unchanged);
+        let gone = vec![SimCommand::Attack { units: vec![SimId(2)], target: SimId(9) }];
+        assert_eq!(queued_commands(gone.clone(), &[]), gone, "a target that cannot be found has no position to go to");
     }
 
     #[test]

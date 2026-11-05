@@ -7,7 +7,7 @@ use super::blueprints::{BlueprintDb, Res};
 use super::combat::{entry_hit, firing_solution, probe_terrain, GRAVITY};
 use super::commands::SimCommand;
 use super::components::{BuildTask, 
-    Blueprinted, Builder, Combat, Construction, Factory, Footprint, Health, MoveClass, Order, OrderKind, Patrol,
+    Blueprinted, Builder, Combat, Construction, Factory, Footprint, Health, MoveClass, Order, OrderKind, OrderQueue, Patrol,
     Position, Projectile, SimId, Team, UnitStats, Velocity, Wreck,
 };
 use super::config::{SimConfig, TARGET_SEARCH_INTERVAL, TERRAIN_CELL_UNITS, WRECK_MASS_PERMILLE};
@@ -227,6 +227,8 @@ pub struct SimWorld {
     pub factories: Vec<(SimId, hecs::Entity)>,
     pub structures: Vec<(SimId, hecs::Entity)>,
     pub patrols: Vec<(SimId, hecs::Entity)>,
+    /// Units that are not builders with movement orders waiting, sorted by `SimId`.
+    pub order_queues: Vec<(SimId, hecs::Entity)>,
     pub commanders: [Option<SimId>; 2],
     pub match_result: Option<MatchResult>,
     pub(super) economy_dirty: bool,
@@ -271,6 +273,7 @@ impl SimWorld {
             factories: Vec::new(),
             structures: Vec::new(),
             patrols: Vec::new(),
+            order_queues: Vec::new(),
             commanders: [None, None],
             match_result: None,
             economy_dirty: false,
@@ -412,9 +415,100 @@ impl SimWorld {
                     }
                 }
                 SimCommand::Attack { units, target } => self.command_attack(units, *target),
+                SimCommand::QueueMove { units, goal, attack } => self.queue_move(units, *goal, *attack),
                 other => self.apply_production_command(other),
             }
         }
+        self.step_order_queues();
+    }
+
+    fn queue_move(&mut self, units: &[SimId], goal: Vec2Fp, attack: bool) {
+        let mobile: Vec<SimId> = units
+            .iter()
+            .copied()
+            .filter(|id| self.find_unit(*id).is_some_and(|(_, entity)| !self.ecs.get::<&UnitStats>(entity).expect("units have stats").is_structure))
+            .collect();
+        let kind = if attack { OrderKind::AttackMove } else { OrderKind::Move };
+        for (id, order) in self.plan_orders(&mobile, kind, goal, None, true) {
+            let (_, entity) = self.find_unit(id).expect("just checked");
+            self.end_patrol(id, entity);
+            if self.ecs.get::<&Builder>(entity).is_ok() {
+                self.adopt_current_order(id);
+                self.ecs.get::<&mut Builder>(entity).expect("just checked").tasks.push(BuildTask::Walk { order, started: false });
+            } else if self.ecs.get::<&OrderQueue>(entity).is_ok() {
+                self.ecs.get::<&mut OrderQueue>(entity).expect("just checked").0.push(order);
+            } else {
+                self.ecs.insert_one(entity, OrderQueue(vec![order])).expect("unit is live");
+                let at = self.order_queues.partition_point(|queue| queue.0 < id);
+                self.order_queues.insert(at, (id, entity));
+            }
+        }
+    }
+
+    /// Starts the next queued order for units that have finished the last one.
+    fn step_order_queues(&mut self) {
+        let mut index = 0;
+        while index < self.order_queues.len() {
+            let (id, entity) = self.order_queues[index];
+            if self.ecs.get::<&Order>(entity).expect("units have orders").kind == OrderKind::Idle {
+                let mut queue = self.ecs.get::<&mut OrderQueue>(entity).expect("queue list only holds queues");
+                let next = queue.0.remove(0);
+                let finished = queue.0.is_empty();
+                drop(queue);
+                self.set_order(id, next);
+                if finished {
+                    self.ecs.remove_one::<OrderQueue>(entity).expect("just checked");
+                    self.order_queues.remove(index);
+                    continue;
+                }
+            }
+            index += 1;
+        }
+    }
+
+    pub(super) fn end_patrol(&mut self, id: SimId, entity: hecs::Entity) {
+        if self.ecs.remove_one::<Patrol>(entity).is_ok() {
+            self.patrols.retain(|patrol| patrol.0 != id);
+        }
+    }
+
+    /// Hands back the routes held by orders that never started.
+    pub(super) fn release_waiting_orders(&mut self, id: SimId, entity: hecs::Entity) {
+        if let Ok(builder) = self.ecs.get::<&Builder>(entity) {
+            for task in &builder.tasks {
+                if let BuildTask::Walk { order, started: false } = task {
+                    self.flow_field.release(order.route);
+                }
+            }
+        }
+        if let Ok(queue) = self.ecs.remove_one::<OrderQueue>(entity) {
+            for order in &queue.0 {
+                self.flow_field.release(order.route);
+            }
+            self.order_queues.retain(|queue| queue.0 != id);
+        }
+    }
+
+    /// Where a unit will be once it has done everything it has been told to, so that the
+    /// next group order can line up from there.
+    fn planned_end(&self, entity: hecs::Entity, here: Vec2Fp) -> Vec2Fp {
+        let order_end = |order: &Order| order.slot.or_else(|| self.flow_field.goal(order.route));
+        if let Ok(builder) = self.ecs.get::<&Builder>(entity) {
+            match builder.tasks.last() {
+                Some(BuildTask::Walk { order, .. }) => return order_end(order).unwrap_or(here),
+                Some(BuildTask::Build { blueprint, cell_x, cell_y, .. }) => {
+                    let unit = self.blueprints.get(*blueprint);
+                    return super::production::cell_center(*cell_x, *cell_y, u32::from(unit.footprint));
+                }
+                Some(_) => return here,
+                None => {}
+            }
+        }
+        if let Some(order) = self.ecs.get::<&OrderQueue>(entity).ok().and_then(|queue| queue.0.last().copied()) {
+            return order_end(&order).unwrap_or(here);
+        }
+        let order = *self.ecs.get::<&Order>(entity).expect("units have orders");
+        if order.kind == OrderKind::Idle { here } else { order_end(&order).unwrap_or(here) }
     }
 
     /// Forgets a unit's patrol, build tasks, and forced target. A new order replaces them.
@@ -426,12 +520,11 @@ impl SimWorld {
             if let Ok(mut combat) = self.ecs.get::<&mut Combat>(entity) {
                 combat.forced_target = None;
             }
+            self.release_waiting_orders(id, entity);
             if let Ok(mut builder) = self.ecs.get::<&mut Builder>(entity) {
                 builder.tasks.clear();
             }
-            if self.ecs.remove_one::<Patrol>(entity).is_ok() {
-                self.patrols.retain(|patrol| patrol.0 != id);
-            }
+            self.end_patrol(id, entity);
         }
     }
 
@@ -468,6 +561,15 @@ impl SimWorld {
     }
 
     pub(super) fn assign_route(&mut self, units: &[SimId], kind: OrderKind, goal: Vec2Fp, follow: Option<SimId>) {
+        for (id, order) in self.plan_orders(units, kind, goal, follow, false) {
+            self.set_order(id, order);
+        }
+    }
+
+    /// Works out a group's route and each unit's order, without giving them yet. Each order
+    /// holds one reference to the route. With `from_planned_end`, a formation is lined up from
+    /// where units will be after what they are already doing, instead of from where they are.
+    fn plan_orders(&mut self, units: &[SimId], kind: OrderKind, goal: Vec2Fp, follow: Option<SimId>, from_planned_end: bool) -> Vec<(SimId, Order)> {
         // Keeps the order given, because units take their orders in that order.
         let mut seen = BTreeSet::new();
         let mut members = Vec::with_capacity(units.len());
@@ -482,12 +584,14 @@ impl SimWorld {
                 let stats = self.ecs.get::<&UnitStats>(entity).expect("units have stats");
                 largest_radius = largest_radius.max(stats.radius.to_bits());
                 if !stats.is_structure {
-                    walkers.push((id, self.ecs.get::<&Position>(entity).expect("units have positions").0.xy(), stats.max_speed));
+                    let here = self.ecs.get::<&Position>(entity).expect("units have positions").0.xy();
+                    let start = if from_planned_end { self.planned_end(entity, here) } else { here };
+                    walkers.push((id, start, stats.max_speed));
                 }
             }
         }
         if members.is_empty() {
-            return;
+            return Vec::new();
         }
         // Large groups stop further out, because they cannot all fit at the goal.
         let spread = (members.len() as u64).isqrt().max(1) as i64;
@@ -521,15 +625,18 @@ impl SimWorld {
             arrive_radius,
             follow,
         ) else {
-            return;
+            return Vec::new();
         };
         slots.sort_unstable_by_key(|slot| slot.0);
-        for id in members {
-            let (slot, slot_ticks) = slots
-                .binary_search_by_key(&id, |slot| slot.0)
-                .map_or((None, 0), |index| (Some(slots[index].1), slots[index].2));
-            self.set_order(id, Order { kind, route, slot, slot_ticks });
-        }
+        members
+            .into_iter()
+            .map(|id| {
+                let (slot, slot_ticks) = slots
+                    .binary_search_by_key(&id, |slot| slot.0)
+                    .map_or((None, 0), |index| (Some(slots[index].1), slots[index].2));
+                (id, Order { kind, route, slot, slot_ticks })
+            })
+            .collect()
     }
 
     /// The point itself if it can be walked on and is on the map, or else the nearest open cell's center.
@@ -1013,6 +1120,7 @@ impl SimWorld {
             for index in 0..self.dead_units.len() {
                 let id = self.dead_units[index];
                 let (_, entity) = self.find_unit(id).expect("dead units are still listed");
+                self.release_dead_units_orders(entity);
                 self.remove_unit(entity);
             }
             let dead = &self.dead_units;
@@ -1022,6 +1130,7 @@ impl SimWorld {
             self.factories.retain(alive);
             self.structures.retain(alive);
             self.patrols.retain(alive);
+            self.order_queues.retain(alive);
             self.dead_units.clear();
         }
         if !self.dead_projectiles.is_empty() {
@@ -1070,6 +1179,23 @@ impl SimWorld {
     }
 
     /// Despawns a dead unit, leaving a wreck if it had any mass in it.
+    /// Hands back routes held by orders that will now never start. The list of queues is
+    /// tidied up with the other lists afterwards.
+    fn release_dead_units_orders(&mut self, entity: hecs::Entity) {
+        if let Ok(builder) = self.ecs.get::<&Builder>(entity) {
+            for task in &builder.tasks {
+                if let BuildTask::Walk { order, started: false } = task {
+                    self.flow_field.release(order.route);
+                }
+            }
+        }
+        if let Ok(queue) = self.ecs.get::<&OrderQueue>(entity) {
+            for order in &queue.0 {
+                self.flow_field.release(order.route);
+            }
+        }
+    }
+
     fn remove_unit(&mut self, entity: hecs::Entity) {
         let order = *self.ecs.get::<&Order>(entity).expect("units have orders");
         if order.kind != OrderKind::Idle {

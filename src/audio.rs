@@ -16,13 +16,15 @@ pub const ALARM_COOLDOWN_SECONDS: f64 = 30.0;
 /// How long the text alert stays on screen.
 const ALERT_SECONDS: f64 = 4.0;
 
-const BUILD_GAIN: f32 = 0.16;
-const FACTORY_GAIN: f32 = 0.13;
+const BUILD_GAIN: f32 = 0.085;
+const FACTORY_GAIN: f32 = 0.07;
 const ALARM_GAIN: f32 = 0.4;
 /// How long sounds take to fade in and out, so that they never click.
 const FADE_SECONDS: f32 = 0.08;
-/// Building heard from far away is quieter, down to this share at the highest zoom.
-const FAR_ZOOM_REDUCTION: f64 = 0.65;
+/// Building is only heard from close up: at full volume up to the first zoom level,
+/// fading to silence by the second. Zoom runs from 0, as close as allowed, to 1, all the way out.
+const FULL_VOLUME_ZOOM: f64 = 0.12;
+const SILENT_ZOOM: f64 = 0.3;
 
 const ALARM_NOTE_SECONDS: f32 = 0.18;
 const ALARM_STEP_SECONDS: f32 = 0.22;
@@ -75,7 +77,7 @@ impl Synth {
         Self {
             rate,
             fade: 1.0 - (-1.0 / (FADE_SECONDS * rate)).exp(),
-            filter: 1.0 - (-TAU * 4_500.0 / rate).exp(),
+            filter: 1.0 - (-TAU * 2_600.0 / rate).exp(),
             build_level: 0.0,
             factory_level: 0.0,
             volume: 0.0,
@@ -92,22 +94,22 @@ impl Synth {
     fn build_voice(&mut self) -> f32 {
         let rate = self.rate;
         let [low, fifth, octave, detuned, shimmer] = &mut self.build_phases;
-        let tone = 0.5 * sine(advance(low, 196.0, rate))
-            + 0.3 * sine(advance(fifth, 293.66, rate))
-            + 0.12 * sine(advance(octave, 587.33, rate))
-            + 0.35 * self.build_level * sine(advance(detuned, 197.4, rate));
-        tone * (0.8 + 0.2 * sine(advance(shimmer, 6.0, rate)))
+        let tone = 0.5 * sine(advance(low, 164.81, rate))
+            + 0.3 * sine(advance(fifth, 246.94, rate))
+            + 0.05 * sine(advance(octave, 329.63, rate))
+            + 0.3 * self.build_level * sine(advance(detuned, 165.5, rate));
+        tone * (0.92 + 0.08 * sine(advance(shimmer, 2.5, rate)))
     }
 
     /// A low, buzzing machine sound, pulsing as if something is being stamped out.
     fn factory_voice(&mut self) -> f32 {
         let rate = self.rate;
         let [first, second, buzz, pulse] = &mut self.factory_phases;
-        let gate = if advance(pulse, 8.0, rate) < 0.5 { 1.0 } else { 0.7 };
-        // A narrow pulse is full of upper harmonics, and clipping adds some grit.
+        let gate = if advance(pulse, 5.0, rate) < 0.5 { 1.0 } else { 0.88 };
+        // A narrow pulse is full of upper harmonics, and clipping adds a little grit.
         let narrow = if advance(buzz, 246.94, rate) < 0.15 { 1.0 } else { -0.2 };
-        let tone = 0.4 * saw(advance(first, 82.41, rate)) + 0.3 * saw(advance(second, 123.47, rate)) + 0.5 * narrow;
-        let raw = (tone * gate * 1.6).clamp(-1.0, 1.0);
+        let tone = 0.45 * saw(advance(first, 82.41, rate)) + 0.35 * saw(advance(second, 123.47, rate)) + 0.2 * narrow;
+        let raw = (tone * gate * 1.1).clamp(-1.0, 1.0);
         self.factory_filtered += self.filter * (raw - self.factory_filtered);
         self.factory_filtered
     }
@@ -251,7 +253,7 @@ fn crowd_level(count: usize) -> f32 {
     count as f32 / (count as f32 + 2.0)
 }
 
-/// Works out the levels from what is really happening on screen. Builders only count while
+/// Works out the levels from what is really happening on screen, when zoomed in. Builders only count while
 /// they have work links, which already stop when walking, waiting, or out of resources.
 pub fn sound_levels(snapshot: &SimSnapshot, zoom_fraction: f64, on_screen: impl Fn(&UnitView) -> bool) -> SoundLevels {
     if snapshot.match_result.is_some() {
@@ -266,7 +268,7 @@ pub fn sound_levels(snapshot: &SimSnapshot, zoom_fraction: f64, on_screen: impl 
         .filter(|factory| can_spend && !factory.queue.is_empty())
         .filter(|factory| find(factory.id).is_some_and(|unit| unit.built_permille == 1000 && on_screen(unit)))
         .count();
-    let distance = (1.0 - FAR_ZOOM_REDUCTION * zoom_fraction.clamp(0.0, 1.0)) as f32;
+    let distance = ((SILENT_ZOOM - zoom_fraction) / (SILENT_ZOOM - FULL_VOLUME_ZOOM)).clamp(0.0, 1.0) as f32;
     SoundLevels { build: crowd_level(builders) * distance, factory: crowd_level(factories) * distance }
 }
 
@@ -390,9 +392,12 @@ mod tests {
     fn the_factory_is_harsher_than_the_builders_and_both_stay_light() {
         let build = settled(SoundTargets { build: 1.0, volume: 1.0, ..SoundTargets::default() });
         let factory = settled(SoundTargets { factory: 1.0, volume: 1.0, ..SoundTargets::default() });
-        assert!(harshness(&factory) > harshness(&build) * 2.0, "factory {} builders {}", harshness(&factory), harshness(&build));
+        assert!(harshness(&factory) > harshness(&build) * 1.3, "factory {} builders {}", harshness(&factory), harshness(&build));
+        // Played on repeat for a whole match, so they must not nag. The first version was
+        // called annoying at about 0.1 harshness, and with 0.06 loudness.
+        assert!(harshness(&factory) < 0.075, "factory at {}", harshness(&factory));
         for (name, samples) in [("builders", &build), ("factory", &factory)] {
-            assert!((0.02..0.2).contains(&loudness(samples)), "{name} at {}", loudness(samples));
+            assert!((0.015..0.045).contains(&loudness(samples)), "{name} at {}", loudness(samples));
         }
     }
 
@@ -482,12 +487,18 @@ mod tests {
     }
 
     #[test]
-    fn building_is_quieter_from_far_away_and_silent_after_the_match() {
+    fn building_is_only_heard_zoomed_in_and_silent_after_the_match() {
         let mut snapshot = scene();
         snapshot.work_links = working(&[1]);
-        let near = sound_levels(&snapshot, 0.0, |_| true).build;
-        let far = sound_levels(&snapshot, 1.0, |_| true).build;
-        assert!(far < near * 0.5 && far > 0.0, "{near} then {far}");
+        snapshot.factories = vec![factory(2, vec![7])];
+        let at = |zoom: f64| sound_levels(&snapshot, zoom, |_| true);
+        let near = at(0.0);
+        assert!(near.build > 0.0 && near.factory > 0.0);
+        assert_eq!(at(FULL_VOLUME_ZOOM), near, "still at full volume");
+        let halfway = at((FULL_VOLUME_ZOOM + SILENT_ZOOM) / 2.0);
+        assert!(halfway.factory > 0.0 && halfway.factory < near.factory, "it should fade, not cut out");
+        assert_eq!(at(SILENT_ZOOM), SoundLevels::default());
+        assert_eq!(at(1.0), SoundLevels::default(), "silent zoomed out, whatever is in view");
         snapshot.match_result = Some(crate::sim::world::MatchResult::Draw);
         assert_eq!(sound_levels(&snapshot, 0.0, |_| true), SoundLevels::default());
     }

@@ -156,6 +156,12 @@ impl Camera {
         ((self.altitude / MIN_ALTITUDE).ln() / (self.max_altitude / MIN_ALTITUDE).ln()).clamp(0.0, 1.0)
     }
 
+    /// How far out the camera is from the closest it is allowed to go, from 0 to 1. Unlike
+    /// `zoom_fraction`, this is 0 at the closest zoom in every mode.
+    pub fn zoom_from_closest(&self) -> f64 {
+        ((self.altitude / self.min_altitude).ln() / (self.max_altitude / self.min_altitude).ln()).clamp(0.0, 1.0)
+    }
+
     pub fn pitch_degrees(&self) -> f64 {
         NEAR_PITCH_DEGREES + (FAR_PITCH_DEGREES - NEAR_PITCH_DEGREES) * self.zoom_fraction()
     }
@@ -236,6 +242,19 @@ mod tests {
 
     fn flat() -> HeightField {
         HeightField::new(3, vec![0; 9], 20.0, 1.0 / 16.0)
+    }
+
+
+    /// Sound fades on this, so being above 0 at the closest zoom would silence the game.
+    #[test]
+    fn zoom_from_closest_starts_at_zero_whatever_the_closest_zoom_is() {
+        let mut camera = Camera::new(10_240.0, [1600.0, 1000.0]);
+        camera.set_min_altitude(130.0);
+        camera.set_altitude(130.0);
+        assert!(camera.zoom_from_closest() < 1e-9, "at {}", camera.zoom_from_closest());
+        assert!(camera.zoom_fraction() > 0.3, "this test is only useful if the two differ");
+        camera.set_altitude(camera.max_altitude());
+        assert!((camera.zoom_from_closest() - 1.0).abs() < 1e-9);
     }
 
     #[test]

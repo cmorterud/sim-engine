@@ -11,7 +11,7 @@ use sim_engine::audio::{self, AttackAlarm, SoundEngine, SoundSettings};
 use sim_engine::input::feedback::{MarkerKind, OrderFeedback};
 use sim_engine::input::hotkeys;
 use sim_engine::input::orders::{
-    assist_orders, deposit_position, free_deposits, line_cells, mobile_units, move_orders, pending_builds, placement_cell, placement_is_valid, placement_target, right_click_orders, PlacementMap, RightClick,
+    assist_orders, deposit_position, free_deposits, line_cells, mobile_units, move_orders, pending_builds, queued_commands, placement_cell, placement_is_valid, placement_target, right_click_orders, PlacementMap, RightClick,
 };
 use sim_engine::input::selection::Selection;
 use sim_engine::math::fp::{Fp, Vec2Fp};
@@ -72,6 +72,7 @@ Controls:
   Shift + drag         Add a box of units to the selection
   Right-click          Attack an enemy, assist or repair a friend, reclaim a wreck,
                        move to the ground, or set a factory's rally point
+  Shift + right-click  Queue the order after what the selection is already doing
   Shift + left-click   Queue a structure, and keep placing
   Shift + left-drag    Queue a row of structures, and keep placing
   M, then left-click   Move there, whatever is under the cursor
@@ -415,6 +416,7 @@ fn issue_planned_orders(
     map: &MapInfo,
     feedback: &mut OrderFeedback,
     attack_move: bool,
+    queued: bool,
     reason: &str,
     plan: fn(&RightClick<'_>) -> Vec<SimCommand>,
 ) -> bool {
@@ -430,6 +432,7 @@ fn issue_planned_orders(
         ground,
         attack_move,
     });
+    let orders = if queued { queued_commands(orders, &session.current.units) } else { orders };
     let reason = if selection.selected().is_empty() { "No units selected" } else { reason };
     feedback.show_orders(&orders, ground_point(ground, &map.heights), &map.blueprints, reason);
     let ordered = !orders.is_empty();
@@ -447,8 +450,9 @@ fn issue_click_orders(
     map: &MapInfo,
     feedback: &mut OrderFeedback,
     attack_move: bool,
+    queued: bool,
 ) {
-    issue_planned_orders(session, selection, camera, map, feedback, attack_move, "The selected units cannot do that", right_click_orders);
+    issue_planned_orders(session, selection, camera, map, feedback, attack_move, queued, "The selected units cannot do that", right_click_orders);
 }
 
 /// Adds a patrol point under the cursor, and shows what to do next.
@@ -665,20 +669,25 @@ fn run_windowed(seed: u64, options: Options) {
                         MouseButton::Left => {
                             if let Some(order) = armed {
                                 match order {
+                                    // With Shift, each click queues another, and the order stays armed.
                                     ArmedOrder::Move => {
-                                        armed = None;
-                                        issue_planned_orders(&session, &selection, &camera, &map, &mut feedback, false, "The selected units cannot move", move_orders);
+                                        if !shift_held {
+                                            armed = None;
+                                        }
+                                        issue_planned_orders(&session, &selection, &camera, &map, &mut feedback, false, shift_held, "The selected units cannot move", move_orders);
                                     }
                                     ArmedOrder::AttackMove => {
-                                        armed = None;
-                                        issue_click_orders(&session, &selection, &camera, &map, &mut feedback, true);
+                                        if !shift_held {
+                                            armed = None;
+                                        }
+                                        issue_click_orders(&session, &selection, &camera, &map, &mut feedback, true, shift_held);
                                     }
                                     ArmedOrder::Patrol => {
                                         add_patrol_point(&selection, &camera, &map, &mut feedback, &mut patrol_points, "right-click or press P to start");
                                     }
                                     ArmedOrder::Assist => {
                                         // Stays armed after a miss, so that the player can try again.
-                                        if issue_planned_orders(&session, &selection, &camera, &map, &mut feedback, false, "Click a friendly unit to assist", assist_orders) {
+                                        if issue_planned_orders(&session, &selection, &camera, &map, &mut feedback, false, shift_held, "Click a friendly unit to assist", assist_orders) && !shift_held {
                                             armed = None;
                                         }
                                     }
@@ -720,7 +729,7 @@ fn run_windowed(seed: u64, options: Options) {
                             } else if patrol_held {
                                 add_patrol_point(&selection, &camera, &map, &mut feedback, &mut patrol_points, "release P to start");
                             } else {
-                                issue_click_orders(&session, &selection, &camera, &map, &mut feedback, alt_held);
+                                issue_click_orders(&session, &selection, &camera, &map, &mut feedback, alt_held, shift_held);
                             }
                         }
                         _ => {}
@@ -839,7 +848,7 @@ fn run_windowed(seed: u64, options: Options) {
                         let attacked = is_match && attack_alarm.update(commander, dt);
                         if let Some(sound) = &sound {
                             let viewport = camera.viewport();
-                            let levels = audio::sound_levels(&session.current, camera.zoom_fraction(), |unit| {
+                            let levels = audio::sound_levels(&session.current, camera.zoom_from_closest(), |unit| {
                                 camera
                                     .world_to_screen([raw_to_world(unit.x), raw_to_world(unit.y), raw_to_world(unit.z)])
                                     .is_some_and(|at| (0.0..=viewport[0]).contains(&at[0]) && (0.0..=viewport[1]).contains(&at[1]))

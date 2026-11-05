@@ -7,7 +7,7 @@ use std::hash::Hasher;
 use super::blueprints::{BlueprintId, Res, TICKS_PER_SECOND};
 use super::commands::SimCommand;
 use super::components::{
-    Adjacency, Blueprinted, BuildTask, Builder, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, Patrol,
+    Adjacency, Blueprinted, BuildTask, Builder, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, OrderQueue, Patrol,
     Position, SimId, Team, UnitStats, Wreck,
 };
 use super::config::{PATROL_SEARCH_INTERVAL, PATROL_SEARCH_RADIUS_UNITS, RECLAIM_MASS_PER_POWER, TERRAIN_CELL_UNITS};
@@ -122,7 +122,7 @@ fn fp_to_res(value: Fp) -> Res {
     Res::from_bits(i64::from(value.to_bits()) << 12)
 }
 
-fn cell_center(cell_x: u32, cell_y: u32, size: u32) -> Vec2Fp {
+pub(super) fn cell_center(cell_x: u32, cell_y: u32, size: u32) -> Vec2Fp {
     let half_cells = |cell: u32| fp_int(cell as i32 * TERRAIN_CELL_UNITS) + fp_int(size as i32 * TERRAIN_CELL_UNITS) / 2;
     Vec2Fp::new(half_cells(cell_x), half_cells(cell_y))
 }
@@ -295,7 +295,25 @@ impl SimWorld {
                     }
                 }
                 let task = BuildTask::Build { blueprint: *blueprint, cell_x: *cell_x, cell_y: *cell_y, site: None };
+                if *queued {
+                    for &id in &builders {
+                        self.adopt_current_order(id);
+                    }
+                }
                 self.push_task(&builders, task);
+            }
+            SimCommand::QueueTask { units, task } => {
+                let builders: Vec<SimId> = units
+                    .iter()
+                    .copied()
+                    .filter(|id| self.find_unit(*id).is_some_and(|(_, entity)| self.ecs.get::<&Builder>(entity).is_ok()))
+                    .collect();
+                for &id in &builders {
+                    let (_, entity) = self.find_unit(id).expect("just checked");
+                    self.end_patrol(id, entity);
+                    self.adopt_current_order(id);
+                }
+                self.push_task(&builders, *task);
             }
             SimCommand::Assist { units, target } => self.replace_tasks(units, BuildTask::Assist { target: *target }),
             SimCommand::Reclaim { units, target } => self.replace_tasks(units, BuildTask::Reclaim { target: *target }),
@@ -336,13 +354,17 @@ impl SimWorld {
                         continue;
                     };
                     let Ok(mut builder) = self.ecs.get::<&mut Builder>(entity) else {
+                        self.cancel_queued_walk(id, entity, task);
                         continue;
                     };
                     let Some(index) = builder.tasks.iter().position(|other| other.is_same_order(task)) else {
                         continue;
                     };
-                    builder.tasks.remove(index);
+                    let removed = builder.tasks.remove(index);
                     drop(builder);
+                    if let BuildTask::Walk { order, started: false } = removed {
+                        self.flow_field.release(order.route);
+                    }
                     // It may be walking to that order. The next tick starts it on whatever is left.
                     if index == 0 {
                         self.set_order(id, Order::IDLE);
@@ -378,9 +400,48 @@ impl SimWorld {
             }
             SimCommand::Move { .. }
             | SimCommand::AttackMove { .. }
+            | SimCommand::QueueMove { .. }
             | SimCommand::Follow { .. }
             | SimCommand::Stop { .. }
             | SimCommand::Attack { .. } => {}
+        }
+    }
+
+    /// Keeps a builder's current walk as the first thing in its queue, so that what is queued
+    /// next waits for it, even if the next job happens to be within reach already.
+    pub(super) fn adopt_current_order(&mut self, id: SimId) {
+        let Some((_, entity)) = self.find_unit(id) else {
+            return;
+        };
+        let order = *self.ecs.get::<&Order>(entity).expect("units have orders");
+        if let Ok(mut builder) = self.ecs.get::<&mut Builder>(entity) {
+            if builder.tasks.is_empty() && matches!(order.kind, OrderKind::Move | OrderKind::AttackMove) {
+                builder.tasks.push(BuildTask::Walk { order, started: true });
+            }
+        }
+    }
+
+    /// Removes a walk from a unit that is not a builder, whether waiting or under way.
+    fn cancel_queued_walk(&mut self, id: SimId, entity: hecs::Entity, task: &BuildTask) {
+        let BuildTask::Walk { order: cancelled, .. } = task else {
+            return;
+        };
+        let removed = self.ecs.get::<&mut OrderQueue>(entity).ok().and_then(|mut queue| {
+            let index = queue.0.iter().position(|order| order.route == cancelled.route)?;
+            queue.0.remove(index);
+            Some(queue.0.is_empty())
+        });
+        if let Some(empty) = removed {
+            self.flow_field.release(cancelled.route);
+            if empty {
+                self.ecs.remove_one::<OrderQueue>(entity).expect("just checked");
+                self.order_queues.retain(|queue| queue.0 != id);
+            }
+            return;
+        }
+        let current = *self.ecs.get::<&Order>(entity).expect("units have orders");
+        if current.kind != OrderKind::Idle && current.route == cancelled.route {
+            self.set_order(id, Order::IDLE);
         }
     }
 
@@ -512,6 +573,20 @@ impl SimWorld {
             };
             (task, builder.power, builder.range)
         };
+        if let BuildTask::Walk { order, started } = task {
+            let idle = self.ecs.get::<&Order>(entity).expect("units have orders").kind == OrderKind::Idle;
+            if idle {
+                let mut builder = self.ecs.get::<&mut Builder>(entity).expect("builder list only holds builders");
+                if started {
+                    builder.tasks.remove(0);
+                } else {
+                    builder.tasks[0] = BuildTask::Walk { order, started: true };
+                    drop(builder);
+                    self.set_order(id, order);
+                }
+            }
+            return;
+        }
         let here = self.ecs.get::<&Position>(entity).expect("units have positions").0.xy();
         let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team;
 
@@ -635,6 +710,7 @@ impl SimWorld {
                 }
                 TaskStep::Work { target, kind: WorkKind::Repair }
             }
+            BuildTask::Walk { .. } => unreachable!("walks are handled before looking at a task"),
             BuildTask::Reclaim { target } => {
                 let Ok(index) = self.wrecks.binary_search_by_key(&target, |wreck| wreck.0) else {
                     return TaskStep::Done;
@@ -933,14 +1009,10 @@ impl SimWorld {
             let order = *self.ecs.get::<&Order>(entity).expect("units have orders");
             // A builder's route only leads to its first task, which is already listed.
             if steps.is_empty() && order.kind != OrderKind::Idle {
-                if let Some(goal) = order.slot.or_else(|| self.flow_field.goal(order.route)) {
-                    let kind = match order.kind {
-                        OrderKind::AttackMove => PlanStepKind::AttackMove,
-                        OrderKind::Attack => PlanStepKind::Attack,
-                        OrderKind::Move | OrderKind::Idle => PlanStepKind::Move,
-                    };
-                    steps.push(self.plan_step(kind, goal, 0));
-                }
+                steps.extend(self.order_step(&order));
+            }
+            if let Ok(queue) = self.ecs.get::<&OrderQueue>(entity) {
+                steps.extend(queue.0.iter().filter_map(|order| self.order_step(order)));
             }
             if let Ok(patrol) = self.ecs.get::<&Patrol>(entity) {
                 let count = patrol.points.len() as u32;
@@ -959,18 +1031,28 @@ impl SimWorld {
         plans
     }
 
-    /// The viewer's builders with orders waiting, in `SimId` order.
+    /// The viewer's units with orders waiting, in `SimId` order. A unit that is not a builder
+    /// shows its current walk first, so that it can be removed like any other.
     pub(super) fn build_queues_for(&self, team: Team) -> Vec<BuildQueueView> {
-        self.builders
+        let on_team = |entity: hecs::Entity| self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team == team);
+        let mut queues: Vec<BuildQueueView> = self
+            .builders
             .iter()
+            .filter(|(_, entity)| on_team(*entity))
             .filter_map(|&(id, entity)| {
-                if self.ecs.get::<&UnitStats>(entity).ok()?.team != team {
-                    return None;
-                }
                 let builder = self.ecs.get::<&Builder>(entity).ok()?;
                 (!builder.tasks.is_empty()).then(|| BuildQueueView { id, tasks: builder.tasks.clone() })
             })
-            .collect()
+            .collect();
+        for &(id, entity) in self.order_queues.iter().filter(|(_, entity)| on_team(*entity)) {
+            let current = *self.ecs.get::<&Order>(entity).expect("units have orders");
+            let waiting = self.ecs.get::<&OrderQueue>(entity).expect("queue list only holds queues");
+            let walking = (current.kind != OrderKind::Idle).then_some(BuildTask::Walk { order: current, started: true });
+            let tasks = walking.into_iter().chain(waiting.0.iter().map(|order| BuildTask::Walk { order: *order, started: false })).collect();
+            queues.push(BuildQueueView { id, tasks });
+        }
+        queues.sort_unstable_by_key(|queue| queue.id);
+        queues
     }
 
     /// This tick's work, limited to what `seen` allows. A team with nothing to spend is
@@ -1007,6 +1089,16 @@ impl SimWorld {
             .collect()
     }
 
+    fn order_step(&self, order: &Order) -> Option<PlanStep> {
+        let goal = order.slot.or_else(|| self.flow_field.goal(order.route))?;
+        let kind = match order.kind {
+            OrderKind::AttackMove => PlanStepKind::AttackMove,
+            OrderKind::Attack => PlanStepKind::Attack,
+            OrderKind::Move | OrderKind::Idle => PlanStepKind::Move,
+        };
+        Some(self.plan_step(kind, goal, 0))
+    }
+
     fn plan_step(&self, kind: PlanStepKind, point: Vec2Fp, pending_width: i32) -> PlanStep {
         PlanStep {
             kind,
@@ -1031,6 +1123,7 @@ impl SimWorld {
             BuildTask::Assist { target } | BuildTask::Repair { target } => {
                 Some(self.plan_step(PlanStepKind::Support, unit_point(target)?, 0))
             }
+            BuildTask::Walk { order, .. } => self.order_step(&order),
             BuildTask::Reclaim { target } => {
                 let index = self.wrecks.binary_search_by_key(&target, |wreck| wreck.0).ok()?;
                 let position = self.ecs.get::<&Wreck>(self.wrecks[index].1).ok()?.position;
@@ -1073,6 +1166,10 @@ impl SimWorld {
                     BuildTask::Assist { target } => (1, target.0, 0, 0, 0),
                     BuildTask::Reclaim { target } => (2, target.0, 0, 0, 0),
                     BuildTask::Repair { target } => (3, target.0, 0, 0, 0),
+                    BuildTask::Walk { order, started } => {
+                        hash_slot(hasher, order.slot);
+                        (4, order.route, u32::from(started), order.slot_ticks, order.kind as u32)
+                    }
                 };
                 hasher.write(&[kind]);
                 for value in [first, second, third, fourth] {
@@ -1092,6 +1189,15 @@ impl SimWorld {
                 hasher.write(&rally.y.to_bits().to_le_bytes());
             }
         }
+        if let Ok(queue) = self.ecs.get::<&OrderQueue>(entity) {
+            hasher.write(&[8]);
+            for order in &queue.0 {
+                hasher.write(&[order.kind as u8]);
+                hasher.write(&order.route.to_le_bytes());
+                hasher.write(&order.slot_ticks.to_le_bytes());
+                hash_slot(hasher, order.slot);
+            }
+        }
         if let Ok(patrol) = self.ecs.get::<&Patrol>(entity) {
             hasher.write(&[7]);
             hasher.write(&patrol.next.to_le_bytes());
@@ -1100,5 +1206,12 @@ impl SimWorld {
                 hasher.write(&point.y.to_bits().to_le_bytes());
             }
         }
+    }
+}
+
+fn hash_slot(hasher: &mut impl Hasher, slot: Option<Vec2Fp>) {
+    if let Some(slot) = slot {
+        hasher.write(&slot.x.to_bits().to_le_bytes());
+        hasher.write(&slot.y.to_bits().to_le_bytes());
     }
 }

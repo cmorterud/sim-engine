@@ -14,6 +14,11 @@ pub enum SimCommand {
     Attack { units: Vec<SimId>, target: SimId },
     /// Repeat a route. Combat units attack-move along it; engineers also reclaim and repair.
     Patrol { units: Vec<SimId>, points: Vec<Vec2Fp> },
+    /// Go there after finishing what is already ordered. A group shares one route, and ends
+    /// up in a formation there.
+    QueueMove { units: Vec<SimId>, goal: Vec2Fp, attack: bool },
+    /// Add a task after what is already ordered, for those that are builders.
+    QueueTask { units: Vec<SimId>, task: BuildTask },
     /// Build a structure with its corner at a terrain cell. `queued` keeps existing tasks.
     Build { units: Vec<SimId>, blueprint: BlueprintId, cell_x: u32, cell_y: u32, queued: bool },
     /// Add build power to a factory, a construction site, or another builder's work.

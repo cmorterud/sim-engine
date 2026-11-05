@@ -1250,3 +1250,256 @@ fn a_follower_stands_down_when_its_unit_dies() {
     assert!(world.unit_entity(ward).is_none(), "the test needs the unit to die");
     assert_eq!(world.ecs.get::<&Order>(entity(&world, guard)).unwrap().kind, OrderKind::Idle, "there is nothing left to follow");
 }
+
+fn order_kind(world: &SimWorld, unit: SimId) -> OrderKind {
+    world.ecs.get::<&Order>(entity(world, unit)).unwrap().kind
+}
+
+fn distance_to(world: &SimWorld, unit: SimId, place: Vec2Fp) -> f64 {
+    (world.unit_position(unit).unwrap().xy() - place).length_squared().to_num::<f64>().sqrt()
+}
+
+/// Runs until a unit comes near a place, and returns how long that took.
+fn run_until_near(world: &mut SimWorld, unit: SimId, place: Vec2Fp, within: f64) -> u32 {
+    for tick in 0..3_000 {
+        if distance_to(world, unit, place) <= within {
+            return tick;
+        }
+        world.advance_tick(&[]);
+    }
+    panic!("never got near {place:?}, stopped at {:?}", world.unit_position(unit));
+}
+
+#[test]
+fn a_unit_works_through_queued_moves_in_order_then_stops() {
+    let mut world = test_world();
+    let bot = id(&world, "t1_light_bot");
+    let unit = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
+    let (first, second, third) = (point(1_300, 1_000), point(1_300, 1_300), point(1_000, 1_300));
+    world.advance_tick(&[
+        SimCommand::Move { units: vec![unit], goal: first },
+        SimCommand::QueueMove { units: vec![unit], goal: second, attack: false },
+        SimCommand::QueueMove { units: vec![unit], goal: third, attack: false },
+    ]);
+    assert!(distance_to(&world, unit, first) > 100.0);
+    run_until_near(&mut world, unit, first, 12.0);
+    assert!(distance_to(&world, unit, third) > 200.0, "it must not cut straight to the last stop");
+    run_until_near(&mut world, unit, second, 12.0);
+    run_until_near(&mut world, unit, third, 12.0);
+    run(&mut world, 30);
+    assert_eq!(order_kind(&world, unit), OrderKind::Idle);
+    assert!(world.order_queues.is_empty());
+    assert!(world.ecs.get::<&sim_engine::sim::components::OrderQueue>(entity(&world, unit)).is_err());
+    assert_eq!(world.flow_field.route_count(), 0, "every route should have been handed back");
+}
+
+#[test]
+fn a_queued_move_starts_straight_away_for_an_idle_unit() {
+    let mut world = test_world();
+    let bot = id(&world, "t1_light_bot");
+    let unit = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
+    world.advance_tick(&[SimCommand::QueueMove { units: vec![unit], goal: point(1_300, 1_000), attack: true }]);
+    assert_eq!(order_kind(&world, unit), OrderKind::AttackMove);
+    assert!(world.order_queues.is_empty(), "nothing is left waiting");
+}
+
+#[test]
+fn a_group_shares_a_route_for_each_stop_and_forms_up_at_each_one() {
+    let mut world = test_world();
+    let bot = id(&world, "t1_light_bot");
+    let units: Vec<SimId> = (0..16).map(|index| world.spawn_mobile(bot, Team::Blue, point(1_000 + index % 4 * 30, 1_000 + index / 4 * 30))).collect();
+    let (first, second) = (point(1_600, 1_000), point(1_600, 1_600));
+    world.advance_tick(&[
+        SimCommand::Move { units: units.clone(), goal: first },
+        SimCommand::QueueMove { units: units.clone(), goal: second, attack: false },
+    ]);
+    assert_eq!(world.flow_field.route_count(), 2, "one route per stop, not one per unit");
+    assert_eq!(world.order_queues.len(), 16);
+
+    let mut ticks = 0;
+    while units.iter().any(|unit| order_kind(&world, *unit) != OrderKind::Idle) || !world.order_queues.is_empty() {
+        world.advance_tick(&[]);
+        ticks += 1;
+        assert!(ticks < 3_000, "the group never finished");
+    }
+    let spots: Vec<Vec2Fp> = units.iter().map(|unit| world.unit_position(*unit).unwrap().xy()).collect();
+    for (index, spot) in spots.iter().enumerate() {
+        let away = (*spot - second).length_squared().to_num::<f64>().sqrt();
+        assert!(away < 90.0, "unit {index} ended {away} from the last stop");
+        for other in &spots[index + 1..] {
+            let gap = (*spot - *other).length_squared().to_num::<f64>().sqrt();
+            assert!(gap > 10.0, "units should end in a formation, but two are {gap} apart");
+        }
+    }
+    assert_eq!(world.flow_field.route_count(), 0);
+}
+
+#[test]
+fn an_engineer_finishes_its_move_before_a_queued_build_even_one_within_reach() {
+    let mut world = test_world();
+    set_resources(&mut world, Team::Blue, 100_000, 1_000_000);
+    let (engineer_blueprint, extractor) = (id(&world, "t1_engineer"), id(&world, "mass_extractor"));
+    let engineer = world.spawn_mobile(engineer_blueprint, Team::Blue, point(1_000, 1_000));
+    // The deposit is right next to it, and the move goes the other way.
+    world.deposits.push((51, 50));
+    let goal = point(1_500, 1_000);
+    world.advance_tick(&[SimCommand::Move { units: vec![engineer], goal }]);
+    run(&mut world, 5);
+    world.advance_tick(&[SimCommand::Build { units: vec![engineer], blueprint: extractor, cell_x: 51, cell_y: 50, queued: true }]);
+    let cell = cell_of_index(&world, 51, 50);
+    run(&mut world, 5);
+    assert!(!world.occupancy.contains_key(&cell), "the build must wait for the move");
+    assert_ne!(order_kind(&world, engineer), OrderKind::Idle, "it should still be walking");
+    run_until_near(&mut world, engineer, goal, 12.0);
+    assert!(!world.occupancy.contains_key(&cell), "the build must wait for the move");
+
+    // Then it comes back and builds it.
+    let mut ticks = 0;
+    while !world.occupancy.contains_key(&cell) {
+        world.advance_tick(&[]);
+        ticks += 1;
+        assert!(ticks < 2_000, "it never started the extractor");
+    }
+    assert!(distance_to(&world, engineer, goal) > 100.0, "it should have walked back");
+}
+
+#[test]
+fn an_engineer_can_mix_moves_and_builds_in_any_order() {
+    let mut world = test_world();
+    set_resources(&mut world, Team::Blue, 100_000, 1_000_000);
+    let (engineer_blueprint, generator) = (id(&world, "t1_engineer"), id(&world, "power_generator"));
+    let engineer = world.spawn_mobile(engineer_blueprint, Team::Blue, point(1_000, 1_000));
+    let (out, back) = (point(1_400, 1_000), point(1_000, 1_400));
+    world.advance_tick(&[
+        SimCommand::QueueMove { units: vec![engineer], goal: out, attack: false },
+        SimCommand::Build { units: vec![engineer], blueprint: generator, cell_x: 80, cell_y: 60, queued: true },
+        SimCommand::QueueMove { units: vec![engineer], goal: back, attack: false },
+    ]);
+    let cell = cell_of_index(&world, 80, 60);
+    let plan = world.snapshot_for(Some(Team::Blue));
+    assert_eq!(plan.plans[0].steps.len(), 3, "the trail should show all three");
+    assert_eq!(plan.plans[0].steps.iter().map(|step| step.kind).collect::<Vec<_>>(), [PlanStepKind::Move, PlanStepKind::Build, PlanStepKind::Move]);
+    assert_eq!(plan.build_queues[0].tasks.len(), 3, "the panel should list all three");
+
+    run_until_near(&mut world, engineer, out, 12.0);
+    assert!(!world.occupancy.contains_key(&cell));
+    let mut ticks = 0;
+    while !world.occupancy.get(&cell).is_some_and(|site| is_finished(&world, *site)) {
+        assert!(distance_to(&world, engineer, back) > 12.0, "it must build before walking on");
+        world.advance_tick(&[]);
+        ticks += 1;
+        assert!(ticks < 2_000, "it never finished the build");
+    }
+    run_until_near(&mut world, engineer, back, 12.0);
+    run(&mut world, 5);
+    assert!(tasks(&world, engineer).is_empty());
+    assert_eq!(world.flow_field.route_count(), 0);
+}
+
+#[test]
+fn a_new_order_or_stop_drops_the_queue_and_hands_its_routes_back() {
+    let mut world = test_world();
+    let (bot, engineer_blueprint) = (id(&world, "t1_light_bot"), id(&world, "t1_engineer"));
+    let unit = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
+    let engineer = world.spawn_mobile(engineer_blueprint, Team::Blue, point(1_000, 1_100));
+    let both = vec![unit, engineer];
+    let queue = |goal: Vec2Fp| SimCommand::QueueMove { units: vec![unit, engineer], goal, attack: false };
+    world.advance_tick(&[queue(point(1_500, 1_000)), queue(point(1_500, 1_500)), queue(point(1_000, 1_500))]);
+    assert_eq!(world.flow_field.route_count(), 3);
+
+    let goal = point(800, 1_000);
+    world.advance_tick(&[SimCommand::Move { units: both.clone(), goal }]);
+    assert!(world.order_queues.is_empty());
+    assert!(tasks(&world, engineer).is_empty());
+    assert_eq!(world.flow_field.route_count(), 1, "only the new order's route is left");
+
+    world.advance_tick(&[queue(point(1_500, 1_000))]);
+    world.advance_tick(&[SimCommand::Stop { units: both }]);
+    assert_eq!(order_kind(&world, unit), OrderKind::Idle);
+    assert_eq!(order_kind(&world, engineer), OrderKind::Idle);
+    assert_eq!(world.flow_field.route_count(), 0);
+}
+
+#[test]
+fn a_unit_that_dies_hands_its_queued_routes_back() {
+    let mut world = test_world();
+    let (bot, engineer_blueprint) = (id(&world, "t1_light_bot"), id(&world, "t1_engineer"));
+    let unit = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
+    let engineer = world.spawn_mobile(engineer_blueprint, Team::Blue, point(1_000, 1_100));
+    let queue = |goal: Vec2Fp| SimCommand::QueueMove { units: vec![unit, engineer], goal, attack: false };
+    world.advance_tick(&[queue(point(4_000, 1_000)), queue(point(4_000, 2_000))]);
+    assert_eq!(world.flow_field.route_count(), 2);
+    let killer = id(&world, "acu");
+    for doomed in [unit, engineer] {
+        world.ecs.get::<&mut Health>(entity(&world, doomed)).unwrap().current = Fp::ONE;
+    }
+    world.spawn_mobile(killer, Team::Red, point(1_020, 1_050));
+    run(&mut world, 150);
+    assert!(world.unit_entity(unit).is_none() && world.unit_entity(engineer).is_none(), "the test needs them dead");
+    assert!(world.order_queues.is_empty());
+    assert_eq!(world.flow_field.route_count(), 0);
+}
+
+#[test]
+fn a_queued_move_can_be_removed_from_the_panel_whether_waiting_or_under_way() {
+    let mut world = test_world();
+    let (bot, engineer_blueprint) = (id(&world, "t1_light_bot"), id(&world, "t1_engineer"));
+    let unit = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
+    let engineer = world.spawn_mobile(engineer_blueprint, Team::Blue, point(1_000, 1_100));
+    let both = vec![unit, engineer];
+    let queue = |goal: Vec2Fp| SimCommand::QueueMove { units: vec![unit, engineer], goal, attack: false };
+    world.advance_tick(&[SimCommand::Move { units: both.clone(), goal: point(1_500, 1_000) }, queue(point(1_500, 1_500)), queue(point(1_000, 1_500))]);
+    run(&mut world, 3);
+
+    let view = world.snapshot_for(Some(Team::Blue));
+    for queue_view in &view.build_queues {
+        assert_eq!(queue_view.tasks.len(), 3, "{:?} should list its walk and two more", queue_view.id);
+    }
+    assert_eq!(view.build_queues.len(), 2);
+
+    // The middle one goes, for both of them, and the same order matches on each.
+    let middle = view.build_queues[0].tasks[1];
+    assert!(view.build_queues[1].tasks[1].is_same_order(&middle));
+    world.advance_tick(&[SimCommand::CancelTask { units: both.clone(), task: middle }]);
+    let view = world.snapshot_for(Some(Team::Blue));
+    assert!(view.build_queues.iter().all(|queue| queue.tasks.len() == 2));
+    assert_eq!(world.flow_field.route_count(), 2);
+
+    // Removing the one under way moves on to what is left.
+    let current = view.build_queues[0].tasks[0];
+    world.advance_tick(&[SimCommand::CancelTask { units: both.clone(), task: current }]);
+    run_until_near(&mut world, unit, point(1_000, 1_500), 40.0);
+    run_until_near(&mut world, engineer, point(1_000, 1_500), 40.0);
+}
+
+#[test]
+fn queueing_an_order_ends_a_patrol_and_only_builders_take_queued_tasks() {
+    let mut world = test_world();
+    let (bot, engineer_blueprint) = (id(&world, "t1_light_bot"), id(&world, "t1_engineer"));
+    let unit = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
+    let engineer = world.spawn_mobile(engineer_blueprint, Team::Blue, point(1_000, 1_100));
+    world.advance_tick(&[SimCommand::Patrol { units: vec![unit], points: vec![point(1_200, 1_000), point(1_000, 1_000)] }]);
+    run(&mut world, 5);
+    assert_eq!(world.patrols.len(), 1);
+    let goal = point(1_500, 1_500);
+    world.advance_tick(&[SimCommand::QueueMove { units: vec![unit], goal, attack: false }]);
+    assert!(world.patrols.is_empty());
+    run_until_near(&mut world, unit, goal, 12.0);
+
+    world.advance_tick(&[SimCommand::QueueTask { units: vec![unit, engineer], task: BuildTask::Assist { target: unit } }]);
+    assert_eq!(tasks(&world, engineer).len(), 1);
+    assert!(world.ecs.get::<&Builder>(entity(&world, unit)).is_err());
+}
+
+#[test]
+fn structures_in_a_queued_group_are_left_out() {
+    let mut world = test_world();
+    let (bot, factory_blueprint) = (id(&world, "t1_light_bot"), id(&world, "land_factory_t1"));
+    let unit = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
+    let factory = world.spawn_finished_structure(factory_blueprint, Team::Blue, 80, 80).unwrap();
+    world.advance_tick(&[SimCommand::QueueMove { units: vec![unit, factory], goal: point(1_300, 1_000), attack: false }]);
+    assert_eq!(order_kind(&world, factory), OrderKind::Idle);
+    assert_eq!(order_kind(&world, unit), OrderKind::Move);
+    run(&mut world, 200);
+    assert_eq!(world.flow_field.route_count(), 0, "a structure must not hold the route open");
+}

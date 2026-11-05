@@ -146,6 +146,8 @@ pub enum BuildTask {
     Assist { target: SimId },
     Reclaim { target: SimId },
     Repair { target: SimId },
+    /// Walk somewhere as part of a queue. Until `started`, this task holds the route's reference.
+    Walk { order: Order, started: bool },
 }
 
 impl BuildTask {
@@ -156,10 +158,16 @@ impl BuildTask {
             (Self::Build { blueprint, cell_x, cell_y, .. }, Self::Build { blueprint: other_blueprint, cell_x: other_x, cell_y: other_y, .. }) => {
                 blueprint == other_blueprint && cell_x == other_x && cell_y == other_y
             }
+            (Self::Walk { order, .. }, Self::Walk { order: other_order, .. }) => order.route == other_order.route,
             _ => self == other,
         }
     }
 }
+
+/// Movement orders waiting their turn, for a unit that is not a builder. Builders keep theirs
+/// among their tasks. Each order holds a reference to its route until it starts.
+#[derive(Clone, Debug, Default)]
+pub struct OrderQueue(pub Vec<Order>);
 
 /// An engineer or commander. Works through its tasks in order.
 #[derive(Clone, Debug)]

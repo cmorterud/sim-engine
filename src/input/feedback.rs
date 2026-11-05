@@ -80,6 +80,9 @@ pub fn describe(command: &SimCommand, blueprints: &BlueprintDb) -> Option<(Marke
             (MarkerKind::Patrol, format!("Patrol: {} points, {}", points.len(), unit_count(units)), None)
         }
         SimCommand::Build { blueprint, .. } => (MarkerKind::Build, format!("Build: {}", blueprints.get(*blueprint).name), None),
+        SimCommand::QueueMove { units, attack: false, .. } => (MarkerKind::Move, format!("Queued move: {}", unit_count(units)), None),
+        SimCommand::QueueMove { units, attack: true, .. } => (MarkerKind::AttackMove, format!("Queued attack-move: {}", unit_count(units)), None),
+        SimCommand::QueueTask { units, .. } => (MarkerKind::Support, format!("Queued: {}", unit_count(units)), None),
         SimCommand::Stop { .. } | SimCommand::QueueUnit { .. } | SimCommand::ClearQueue { .. } | SimCommand::CancelTask { .. } | SimCommand::RemoveQueued { .. } | SimCommand::SetRepeat { .. } => return None,
     })
 }

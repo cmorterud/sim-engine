@@ -11,7 +11,7 @@ use crate::input::hotkeys::{self, blueprint_hotkey};
 use crate::input::orders::PendingBuild;
 use crate::render::camera::Camera;
 use crate::sim::blueprints::{BlueprintDb, BlueprintId, UnitClass};
-use crate::sim::components::{BuildTask, SimId, Team};
+use crate::sim::components::{BuildTask, OrderKind, SimId, Team};
 use crate::sim::world::{MatchResult, PlanStepKind, SimSnapshot, UnitView};
 
 /// Trails are capped so that a large selection stays readable and cheap to draw.
@@ -230,6 +230,7 @@ pub fn task_name(task: &BuildTask, db: &BlueprintDb) -> String {
         BuildTask::Assist { .. } => "Assist".to_string(),
         BuildTask::Reclaim { .. } => "Reclaim".to_string(),
         BuildTask::Repair { .. } => "Repair".to_string(),
+        BuildTask::Walk { order, .. } => if order.kind == OrderKind::AttackMove { "Attack-move" } else { "Move" }.to_string(),
     }
 }
 
@@ -463,6 +464,12 @@ pub fn quick_select_bar(
     });
 }
 
+/// A label that never wraps. A popup near the middle of the screen has little room by default,
+/// which would otherwise squeeze its text into a tall, narrow column.
+fn one_line_label(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>) {
+    ui.add(egui::Label::new(text).extend());
+}
+
 /// The text alert that goes with the "ACU under attack" sound.
 pub fn commander_alert(ctx: &egui::Context, strength: f32) {
     if strength <= 0.0 {
@@ -474,7 +481,7 @@ pub fn commander_alert(ctx: &egui::Context, strength: f32) {
         .show(ctx, |ui| {
             let text = egui::RichText::new("ACU under attack").size(22.0).strong().color(STALLED.gamma_multiply(strength));
             egui::Frame::popup(ui.style()).multiply_with_opacity(strength).show(ui, |ui| {
-                ui.label(text);
+                one_line_label(ui, text);
             });
         });
 }
@@ -764,7 +771,7 @@ pub fn armed_order_hint(ctx: &egui::Context, order: ArmedOrder) {
         .interactable(false)
         .show(ctx, |ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
-                ui.label(order.hint());
+                one_line_label(ui, order.hint());
             });
         });
 }
@@ -841,7 +848,7 @@ pub fn order_feedback(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsh
             .interactable(false)
             .show(ctx, |ui| {
                 egui::Frame::popup(ui.style()).multiply_with_opacity((remaining * 3.0).min(1.0)).show(ui, |ui| {
-                    ui.colored_label(color, egui::RichText::new(&label.text).strong());
+                    one_line_label(ui, egui::RichText::new(&label.text).strong().color(color));
                 });
             });
     }
@@ -1878,6 +1885,24 @@ mod tests {
         bar.time += 1.0;
         assert_eq!(bar.click(2, egui::Modifiers::NONE), [UiAction::QuickSelect { units: vec![SimId(3)], add: false }]);
         assert_eq!(bar.click(3, egui::Modifiers::NONE), [UiAction::QuickSelect { units: vec![SimId(5)], add: false }]);
+    }
+
+    /// Reproduces the squeezed popup: an area with little room, as near the middle of the screen.
+    #[test]
+    fn popup_text_stays_on_one_line_however_little_room_it_has() {
+        let ctx = egui::Context::default();
+        let input = || egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1440.0, 900.0))), ..egui::RawInput::default() };
+        let id = egui::Id::new("test popup");
+        for _ in 0..3 {
+            let _ = ctx.run(input(), |ctx| {
+                egui::Area::new(id).anchor(Align2::CENTER_TOP, Vec2::new(0.0, 80.0)).show(ctx, |ui| {
+                    ui.set_max_width(40.0);
+                    egui::Frame::popup(ui.style()).show(ui, |ui| one_line_label(ui, "Light Artillery queued"));
+                });
+            });
+        }
+        let rect = ctx.memory(|memory| memory.area_rect(id)).expect("the popup was shown");
+        assert!(rect.width() > 100.0 && rect.height() < 50.0, "the popup is {} by {}", rect.width(), rect.height());
     }
 
     #[test]
