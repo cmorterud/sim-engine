@@ -165,6 +165,26 @@ fn raw_to_world(raw: i32) -> f64 {
 }
 
 /// The team's units whose centers are inside a screen box, sorted by `SimId`.
+/// Saved selections, on the number keys. Group 1 is the key 1, and group 0 is the key 0.
+#[derive(Clone, Debug, Default)]
+pub struct ControlGroups {
+    groups: [Vec<SimId>; 10],
+}
+
+impl ControlGroups {
+    /// Replaces a group with these units. Group numbers run from 0 to 9.
+    pub fn store(&mut self, group: usize, units: &[SimId]) {
+        self.groups[group] = units.to_vec();
+    }
+
+    /// The group's units that are still alive, given the current units sorted by `SimId`.
+    pub fn recall(&mut self, group: usize, units: &[UnitView]) -> &[SimId] {
+        let members = &mut self.groups[group];
+        members.retain(|id| units.binary_search_by_key(id, |unit| unit.id).is_ok());
+        members
+    }
+}
+
 pub fn units_in_box(units: &[UnitView], camera: &Camera, team: Team, min: [f64; 2], max: [f64; 2]) -> Vec<SimId> {
     units
         .iter()
@@ -232,6 +252,42 @@ mod tests {
             built_permille: 1000,
             is_structure: false,
         }
+    }
+
+
+    fn plain_unit(id: u32) -> UnitView {
+        UnitView { id: SimId(id), team: Team::Blue, x: 0, y: 0, z: 0, radius: 4096, blueprint: u16::MAX, health_permille: 1000, built_permille: 1000, is_structure: false }
+    }
+
+    #[test]
+    fn control_groups_keep_any_mix_of_units_apart_from_each_other() {
+        let units: Vec<UnitView> = (1..=5).map(plain_unit).collect();
+        let mut groups = ControlGroups::default();
+        groups.store(1, &[SimId(1), SimId(4)]);
+        groups.store(0, &[SimId(5)]);
+        assert_eq!(groups.recall(1, &units), [SimId(1), SimId(4)]);
+        assert_eq!(groups.recall(0, &units), [SimId(5)]);
+        assert!(groups.recall(2, &units).is_empty());
+        groups.store(1, &[SimId(2)]);
+        assert_eq!(groups.recall(1, &units), [SimId(2)], "storing again replaces the group");
+    }
+
+    #[test]
+    fn dead_units_drop_out_of_control_groups() {
+        let mut groups = ControlGroups::default();
+        groups.store(3, &[SimId(1), SimId(2), SimId(3)]);
+        let survivors = [plain_unit(1), plain_unit(3)];
+        assert_eq!(groups.recall(3, &survivors), [SimId(1), SimId(3)]);
+        assert!(groups.recall(3, &[]).is_empty());
+    }
+
+    #[test]
+    fn recalling_a_group_can_add_to_a_selection_without_duplicates_and_stays_sorted() {
+        let mut selection = Selection::default();
+        selection.select(vec![SimId(3), SimId(1), SimId(3)]);
+        assert_eq!(selection.selected(), [SimId(1), SimId(3)], "drawing relies on this being sorted");
+        selection.add(&[SimId(2), SimId(3)]);
+        assert_eq!(selection.selected(), [SimId(1), SimId(2), SimId(3)]);
     }
 
     #[test]

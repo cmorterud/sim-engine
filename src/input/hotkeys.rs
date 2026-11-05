@@ -56,6 +56,23 @@ pub const fn letter_for(code: KeyCode) -> Option<char> {
     })
 }
 
+/// The control group on a number key, from 0 to 9.
+pub const fn group_for(code: KeyCode) -> Option<usize> {
+    Some(match code {
+        KeyCode::Digit0 => 0,
+        KeyCode::Digit1 => 1,
+        KeyCode::Digit2 => 2,
+        KeyCode::Digit3 => 3,
+        KeyCode::Digit4 => 4,
+        KeyCode::Digit5 => 5,
+        KeyCode::Digit6 => 6,
+        KeyCode::Digit7 => 7,
+        KeyCode::Digit8 => 8,
+        KeyCode::Digit9 => 9,
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -112,6 +129,15 @@ mod tests {
         letters.sort_unstable();
         letters.dedup();
         assert_eq!(letters.len(), count, "two options share a key");
+    }
+
+    #[test]
+    fn every_number_key_has_its_own_control_group() {
+        let digits = [KeyCode::Digit0, KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4, KeyCode::Digit5, KeyCode::Digit6, KeyCode::Digit7, KeyCode::Digit8, KeyCode::Digit9];
+        for (expected, code) in digits.into_iter().enumerate() {
+            assert_eq!(group_for(code), Some(expected));
+        }
+        assert_eq!(group_for(KeyCode::KeyQ), None);
     }
 
     #[test]

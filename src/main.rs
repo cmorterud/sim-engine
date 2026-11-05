@@ -13,7 +13,7 @@ use sim_engine::input::hotkeys;
 use sim_engine::input::orders::{
     assist_orders, deposit_position, free_deposits, line_cells, mobile_units, move_orders, pending_builds, queued_commands, placement_cell, placement_is_valid, placement_target, right_click_orders, PlacementMap, RightClick,
 };
-use sim_engine::input::selection::Selection;
+use sim_engine::input::selection::{ControlGroups, Selection};
 use sim_engine::math::fp::{Fp, Vec2Fp};
 use sim_engine::render::camera::{Camera, HeightField};
 use sim_engine::render::instances::{self, Headings, InstanceBatches};
@@ -82,6 +82,8 @@ Controls:
   P, then left-clicks  Add patrol points, then right-click or press P to start
   P + right-click      Hold P and add patrol points, then release P
   X                    Stop
+  Ctrl + 1 to 0        Save the selection as a group. Command works too
+  1 to 0               Select that group
   N                    Mute or unmute
   - and =              Sound quieter and louder
   Space                Jump to your commander
@@ -606,6 +608,7 @@ fn run_windowed(seed: u64, options: Options) {
     let (mut alt_held, mut shift_held, mut command_held) = (false, false, false);
     let mut hotkey_actions: Vec<UiAction> = Vec::new();
     let mut quick_select = QuickSelectState::default();
+    let mut control_groups = ControlGroups::default();
     let mut attack_alarm = AttackAlarm::default();
     let mut sound_settings = SoundSettings::default();
     // Test runs stay silent. The game plays on without sound if there is no device.
@@ -774,6 +777,29 @@ fn run_windowed(seed: u64, options: Options) {
                                         feedback.show_rejected(None, "No units selected");
                                     } else {
                                         feedback.show_rejected(None, "Not available for this selection");
+                                    }
+                                }
+                            }
+                            // Control or Command saves a group, and the number alone brings it back.
+                            PhysicalKey::Code(code) if pressed && !event.repeat && is_match && hotkeys::group_for(code).is_some() => {
+                                let group = hotkeys::group_for(code).expect("just checked");
+                                if command_held {
+                                    if selection.selected().is_empty() {
+                                        feedback.show_rejected(None, "No units selected");
+                                    } else {
+                                        control_groups.store(group, selection.selected());
+                                        feedback.set_label(MarkerKind::Move, format!("Group {group} saved: {} units", selection.selected().len()));
+                                    }
+                                } else {
+                                    let members = control_groups.recall(group, &session.current.units).to_vec();
+                                    if members.is_empty() {
+                                        feedback.show_rejected(None, &format!("Group {group} is empty"));
+                                    } else {
+                                        selection.select(members);
+                                        armed = None;
+                                        placing = None;
+                                        line_start = None;
+                                        patrol_points.clear();
                                     }
                                 }
                             }
@@ -1063,6 +1089,7 @@ fn run_windowed(seed: u64, options: Options) {
                                 }
                                 UiAction::Restart => {
                                     attack_alarm = AttackAlarm::default();
+                                    control_groups = ControlGroups::default();
                                     session = Session::start(scenario::skirmish(seed), CommandSource::PlayerVsAi { seed }, driver_options);
                                     selection.clear();
                                     placing = None;
