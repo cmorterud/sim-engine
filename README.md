@@ -27,12 +27,15 @@ Destroy the enemy commander to win. Yours explodes if it dies, and your whole te
 | Shift + click or drag | Add to the selection, and click again to remove a unit |
 | Hold Shift | Show every unit's pending orders, which fade after you let go |
 | Right-click | Attack an enemy, assist or repair a friend, reclaim a wreck, move, or set a rally point |
+| M, then left-click | Move there, whatever is under the cursor |
 | F, then left-click | Attack-move: stop to fire when enemies are in range |
+| Y, then left-click a friendly unit | Assist: stay with it and protect it, and builders also help it build |
+| P, then left-click each point, then right-click or P | Patrol |
 | Alt + right-click | Attack-move, as above |
 | Hold P + right-click | Add patrol points, then release P |
 | Shift + left-click | Queue a structure, and keep placing |
 | Shift + left-drag | Queue a row of structures, and keep placing |
-| X | Stop |
+| X | Stop: drop all orders |
 | Q, E, G, T, C | With a builder selected: Land Factory, Mass Extractor, Power Generator, Mass Storage, Point Defense |
 | Z, B, V, H | With a factory selected: queue an Engineer, Light Bot, Light Artillery, Heavy Tank |
 | U, R, K | With a factory selected: Upgrade, Repeat, Clear queue |
@@ -41,7 +44,7 @@ Destroy the enemy commander to win. Yours explodes if it dies, and your whole te
 | WASD or arrow keys | Pan |
 | Esc | Cancel placement or attack-move, or clear the selection |
 
-Selected units show a dashed trail through their pending orders, in the order they will carry them out, and selected factories show a dimmer line to their rally point. Queued builds always show a dimmed footprint, and a faint grid appears while placing, so that the next one can be lined up against them. Builders turn to face what they are working on, and a beam with moving pulses joins them to it for as long as work is really happening: it stops if they are out of resources. Each option in the command panel shows its key, and the panel lists what is selected has queued: right-click an item to remove it. A site that was already started stays, and can be finished by assisting it. A marker and a line of text confirm each order. A click that shows nothing never reached the game. The window title shows the frame rate and tick time. Run with `--help` for the headless and test modes.
+Selected units show a dashed trail through their pending orders, in the order they will carry them out, and selected factories show a dimmer line to their rally point. Queued builds always show a dimmed footprint, and a faint grid appears while placing, so that the next one can be lined up against them. Builders turn to face what they are working on, and a beam with moving pulses joins them to it for as long as work is really happening: it stops if they are out of resources. Each option in the command panel shows its key, including the unit orders above, which are also buttons, and the panel lists what is selected has queued: right-click an item to remove it. A site that was already started stays, and can be finished by assisting it. A marker and a line of text confirm each order. A click that shows nothing never reached the game. The window title shows the frame rate and tick time. Run with `--help` for the headless and test modes.
 
 ## Validate
 

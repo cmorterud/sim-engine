@@ -493,6 +493,12 @@ impl SimWorld {
         let spread = (members.len() as u64).isqrt().max(1) as i64;
         let mut arrive_radius = Fp::from_bits((i64::from(largest_radius) * spread * 6 / 5) as i32);
 
+        // Following means staying beside the unit, not pushing against it.
+        if let (OrderKind::Move, Some((_, target))) = (kind, follow.and_then(|target| self.find_unit(target))) {
+            let target_radius = self.ecs.get::<&UnitStats>(target).expect("units have stats").radius;
+            arrive_radius += target_radius + Fp::from_bits(largest_radius.saturating_mul(2));
+        }
+
         // A group ordered to a place ends up in a formation there.
         let mut slots: Vec<(SimId, Vec2Fp, u32)> = Vec::new();
         if follow.is_none() && matches!(kind, OrderKind::Move | OrderKind::AttackMove) && walkers.len() >= 2 {

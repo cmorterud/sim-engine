@@ -10,7 +10,7 @@ use sim_engine::driver::{CommandSource, DriverOptions, DriverResult, SimDriver, 
 use sim_engine::input::feedback::{MarkerKind, OrderFeedback};
 use sim_engine::input::hotkeys;
 use sim_engine::input::orders::{
-    deposit_position, free_deposits, line_cells, pending_builds, placement_cell, placement_is_valid, placement_target, right_click_orders, PlacementMap, RightClick,
+    assist_orders, deposit_position, free_deposits, line_cells, mobile_units, move_orders, pending_builds, placement_cell, placement_is_valid, placement_target, right_click_orders, PlacementMap, RightClick,
 };
 use sim_engine::input::selection::Selection;
 use sim_engine::math::fp::{Fp, Vec2Fp};
@@ -26,7 +26,7 @@ use sim_engine::sim::scenario::{self, advance_scripted, skirmish_start, Scenario
 use sim_engine::sim::terrain::HEIGHT_FRAC_BITS;
 use sim_engine::sim::world::{PlanStep, PlanStepKind, SimSnapshot, UnitPlanView};
 use sim_engine::soak::run_soak;
-use sim_engine::ui::{self, UiAction};
+use sim_engine::ui::{self, ArmedOrder, UiAction};
 use winit::dpi::{LogicalSize, PhysicalPosition};
 use winit::event::{ElementState, Event, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -369,17 +369,21 @@ fn commander_of(snapshot: &SimSnapshot, blueprints: &BlueprintDb) -> Option<SimI
         .map(|unit| unit.id)
 }
 
-/// Orders the selection from a click, and shows what happened.
-fn issue_click_orders(
+/// Orders the selection from a click using `plan`, and shows what happened.
+/// Returns whether anything was ordered.
+#[allow(clippy::too_many_arguments)]
+fn issue_planned_orders(
     session: &Session,
     selection: &Selection,
     camera: &Camera,
     map: &MapInfo,
     feedback: &mut OrderFeedback,
     attack_move: bool,
-) {
+    reason: &str,
+    plan: fn(&RightClick<'_>) -> Vec<SimCommand>,
+) -> bool {
     let ground = camera.screen_to_ground(selection.cursor(), &map.heights);
-    let orders = right_click_orders(&RightClick {
+    let orders = plan(&RightClick {
         selected: selection.selected(),
         units: &session.current.units,
         wrecks: &session.current.wrecks,
@@ -390,10 +394,58 @@ fn issue_click_orders(
         ground,
         attack_move,
     });
-    let reason = if selection.selected().is_empty() { "No units selected" } else { "The selected units cannot do that" };
+    let reason = if selection.selected().is_empty() { "No units selected" } else { reason };
     feedback.show_orders(&orders, ground_point(ground, &map.heights), &map.blueprints, reason);
+    let ordered = !orders.is_empty();
     for order in orders {
         session.send(order);
+    }
+    ordered
+}
+
+/// Orders the selection from a click, and shows what happened.
+fn issue_click_orders(
+    session: &Session,
+    selection: &Selection,
+    camera: &Camera,
+    map: &MapInfo,
+    feedback: &mut OrderFeedback,
+    attack_move: bool,
+) {
+    issue_planned_orders(session, selection, camera, map, feedback, attack_move, "The selected units cannot do that", right_click_orders);
+}
+
+/// Adds a patrol point under the cursor, and shows what to do next.
+fn add_patrol_point(selection: &Selection, camera: &Camera, map: &MapInfo, feedback: &mut OrderFeedback, points: &mut Vec<Vec2Fp>, next_step: &str) {
+    let ground = camera.screen_to_ground(selection.cursor(), &map.heights);
+    if let Some(point) = ground {
+        points.push(Vec2Fp::new(Fp::from_num(point[0]), Fp::from_num(point[1])));
+        if let Some(position) = ground_point(ground, &map.heights) {
+            feedback.add_marker(MarkerKind::Patrol, position, None);
+        }
+        feedback.set_label(MarkerKind::Patrol, format!("Patrol point {}: {next_step}", points.len()));
+    }
+}
+
+/// Sends the selection on patrol through the points so far.
+fn start_patrol(session: &Session, selection: &Selection, map: &MapInfo, feedback: &mut OrderFeedback, points: &mut Vec<Vec2Fp>) {
+    let units = mobile_units(selection.selected(), &session.current.units, &map.blueprints);
+    let points = std::mem::take(points);
+    if units.is_empty() {
+        feedback.show_rejected(None, "No units selected that can patrol");
+    } else {
+        let order = SimCommand::Patrol { units, points };
+        feedback.show_orders(std::slice::from_ref(&order), None, &map.blueprints, "");
+        session.send(order);
+    }
+}
+
+fn stop_selection(session: &Session, selection: &Selection, feedback: &mut OrderFeedback) {
+    if selection.selected().is_empty() {
+        feedback.show_rejected(None, "No units selected");
+    } else {
+        feedback.set_label(MarkerKind::Move, format!("Stop: {} units", selection.selected().len()));
+        session.send(SimCommand::Stop { units: selection.selected().to_vec() });
     }
 }
 
@@ -500,7 +552,7 @@ fn run_windowed(seed: u64, options: Options) {
 
     let mut selection = Selection::default();
     let mut placing: Option<BlueprintId> = None;
-    let mut attack_move_armed = false;
+    let mut armed: Option<ArmedOrder> = None;
     // Where a Shift-drag row of structures began, while the button is held.
     let mut line_start: Option<(u32, u32)> = None;
     let mut orders_view_strength = 0.0_f32;
@@ -564,9 +616,26 @@ fn run_windowed(seed: u64, options: Options) {
                     }
                     WindowEvent::MouseInput { state: ElementState::Pressed, button, .. } if !response.consumed => match button {
                         MouseButton::Left => {
-                            if attack_move_armed {
-                                attack_move_armed = false;
-                                issue_click_orders(&session, &selection, &camera, &map, &mut feedback, true);
+                            if let Some(order) = armed {
+                                match order {
+                                    ArmedOrder::Move => {
+                                        armed = None;
+                                        issue_planned_orders(&session, &selection, &camera, &map, &mut feedback, false, "The selected units cannot move", move_orders);
+                                    }
+                                    ArmedOrder::AttackMove => {
+                                        armed = None;
+                                        issue_click_orders(&session, &selection, &camera, &map, &mut feedback, true);
+                                    }
+                                    ArmedOrder::Patrol => {
+                                        add_patrol_point(&selection, &camera, &map, &mut feedback, &mut patrol_points, "right-click or press P to start");
+                                    }
+                                    ArmedOrder::Assist => {
+                                        // Stays armed after a miss, so that the player can try again.
+                                        if issue_planned_orders(&session, &selection, &camera, &map, &mut feedback, false, "Click a friendly unit to assist", assist_orders) {
+                                            armed = None;
+                                        }
+                                    }
+                                }
                             } else if let Some(blueprint) = placing {
                                 let ground = camera.screen_to_ground(selection.cursor(), &map.heights);
                                 let pending = pending_builds(&session.current);
@@ -594,18 +663,15 @@ fn run_windowed(seed: u64, options: Options) {
                             }
                         }
                         MouseButton::Right => {
-                            let ground = camera.screen_to_ground(selection.cursor(), &map.heights);
                             line_start = None;
-                            if std::mem::take(&mut attack_move_armed) || placing.take().is_some() {
+                            if armed == Some(ArmedOrder::Patrol) && !patrol_points.is_empty() {
+                                armed = None;
+                                start_patrol(&session, &selection, &map, &mut feedback, &mut patrol_points);
+                            } else if armed.take().is_some() || placing.take().is_some() {
                                 // Right-click only cancels what was armed.
+                                patrol_points.clear();
                             } else if patrol_held {
-                                if let Some(point) = ground {
-                                    patrol_points.push(Vec2Fp::new(Fp::from_num(point[0]), Fp::from_num(point[1])));
-                                    if let Some(position) = ground_point(ground, &map.heights) {
-                                        feedback.add_marker(MarkerKind::Patrol, position, None);
-                                    }
-                                    feedback.set_label(MarkerKind::Patrol, format!("Patrol point {}: release P to start", patrol_points.len()));
-                                }
+                                add_patrol_point(&selection, &camera, &map, &mut feedback, &mut patrol_points, "release P to start");
                             } else {
                                 issue_click_orders(&session, &selection, &camera, &map, &mut feedback, alt_held);
                             }
@@ -621,26 +687,10 @@ fn run_windowed(seed: u64, options: Options) {
                             PhysicalKey::Code(KeyCode::KeyD | KeyCode::ArrowRight) => held_keys[3] = pressed,
                             PhysicalKey::Code(KeyCode::Escape) if pressed => {
                                 line_start = None;
-                                let was_armed = std::mem::take(&mut attack_move_armed);
+                                let was_armed = armed.take().is_some();
+                                patrol_points.clear();
                                 if placing.take().is_none() && !was_armed {
                                     selection.clear();
-                                }
-                            }
-                            PhysicalKey::Code(KeyCode::KeyF) if pressed && !event.repeat => {
-                                if selection.selected().is_empty() {
-                                    let ground = camera.screen_to_ground(selection.cursor(), &map.heights);
-                                    feedback.show_rejected(ground_point(ground, &map.heights), "No units selected");
-                                } else {
-                                    attack_move_armed = true;
-                                    placing = None;
-                                }
-                            }
-                            PhysicalKey::Code(KeyCode::KeyX) if pressed => {
-                                if selection.selected().is_empty() {
-                                    feedback.show_rejected(None, "No units selected");
-                                } else {
-                                    feedback.set_label(MarkerKind::Move, format!("Stop: {} units", selection.selected().len()));
-                                    session.send(SimCommand::Stop { units: selection.selected().to_vec() });
                                 }
                             }
                             PhysicalKey::Code(KeyCode::Space) if pressed && is_match => {
@@ -657,22 +707,22 @@ fn run_windowed(seed: u64, options: Options) {
                                 } else {
                                     patrol_held = false;
                                     if !patrol_points.is_empty() {
-                                        let order = SimCommand::Patrol {
-                                            units: selection.selected().to_vec(),
-                                            points: std::mem::take(&mut patrol_points),
-                                        };
-                                        if selection.selected().is_empty() {
-                                            feedback.show_rejected(None, "No units selected");
-                                        } else {
-                                            feedback.show_orders(std::slice::from_ref(&order), None, &map.blueprints, "");
-                                            session.send(order);
-                                        }
+                                        armed = None;
+                                        start_patrol(&session, &selection, &map, &mut feedback, &mut patrol_points);
+                                    } else if ui::has_mobile_units(&session.current, selection.selected()) {
+                                        // A tap, with no points placed while holding it.
+                                        armed = Some(ArmedOrder::Patrol);
+                                        placing = None;
+                                        line_start = None;
+                                    } else if selection.selected().is_empty() {
+                                        feedback.show_rejected(None, "No units selected");
+                                    } else {
+                                        feedback.show_rejected(None, "Not available for this selection");
                                     }
-                                    patrol_points.clear();
                                 }
                             }
                             // Command and Control belong to the system: Command-Q must not start a factory.
-                            PhysicalKey::Code(code) if pressed && !event.repeat && is_match && !command_held => {
+                            PhysicalKey::Code(code) if pressed && !event.repeat && !command_held => {
                                 if let Some(letter) = hotkeys::letter_for(code) {
                                     match ui::hotkey_action(&session.current, selection.selected(), &map.blueprints, letter) {
                                         Some(action) => hotkey_actions.push(action),
@@ -731,7 +781,10 @@ fn run_windowed(seed: u64, options: Options) {
                         camera.update(dt, &map.heights);
                         feedback.update(dt);
                         if selection.selected().is_empty() {
-                            attack_move_armed = false;
+                            armed = None;
+                            if !patrol_held {
+                                patrol_points.clear();
+                            }
                         }
 
                         // Screenshots show one of each marker and a queue of builds, since test runs have no clicks.
@@ -841,16 +894,16 @@ fn run_windowed(seed: u64, options: Options) {
                             ui::draw_work_beams(ctx, &camera, &beams, beam_time, pixels_per_point);
                             ui::order_trails(ctx, &camera, &trails, pixels_per_point);
                             ui::order_feedback(ctx, &camera, &snapshot, &feedback, pixels_per_point);
-                            if attack_move_armed {
-                                ui::attack_move_hint(ctx);
+                            if let Some(order) = armed {
+                                ui::armed_order_hint(ctx, order);
                             }
-                            if attack_move_armed || placing.is_some() {
+                            if armed.is_some() || placing.is_some() {
                                 ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
                             }
                             if is_match {
                                 ui::world_overlay(ctx, &camera, &snapshot, &selected, &map.blueprints, pixels_per_point);
                                 ui::resource_bar(ctx, &snapshot);
-                                ui::command_panel(ctx, &snapshot, &selected, &map.blueprints, &mut actions);
+                                ui::command_panel(ctx, &snapshot, &selected, &map.blueprints, armed, &mut actions);
                                 if let Some(blueprint) = placing {
                                     ui::placement_hint(ctx, &map.blueprints, blueprint);
                                 }
@@ -874,7 +927,8 @@ fn run_windowed(seed: u64, options: Options) {
                                     placing = Some(blueprint);
                                     // A row being dragged out was for the previous structure.
                                     line_start = None;
-                                    attack_move_armed = false;
+                                    armed = None;
+                                    patrol_points.clear();
                                 }
                                 UiAction::Queue { factories, blueprint, selected_count } => {
                                     let name = &map.blueprints.get(blueprint).name;
@@ -896,6 +950,13 @@ fn run_windowed(seed: u64, options: Options) {
                                         session.send(SimCommand::ClearQueue { factory });
                                     }
                                 }
+                                UiAction::Arm(order) => {
+                                    armed = Some(order);
+                                    placing = None;
+                                    line_start = None;
+                                    patrol_points.clear();
+                                }
+                                UiAction::Stop => stop_selection(&session, &selection, &mut feedback),
                                 UiAction::CancelTask { units, task } => {
                                     feedback.set_label(MarkerKind::Build, format!("{} removed", ui::task_name(&task, &map.blueprints)));
                                     session.send(SimCommand::CancelTask { units, task });
@@ -911,7 +972,8 @@ fn run_windowed(seed: u64, options: Options) {
                                     selection.clear();
                                     placing = None;
                                     line_start = None;
-                                    attack_move_armed = false;
+                                    armed = None;
+                                    patrol_points.clear();
                                 }
                             }
                         }

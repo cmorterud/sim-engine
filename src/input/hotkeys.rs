@@ -4,13 +4,18 @@
 
 use winit::keyboard::KeyCode;
 
+pub const MOVE: char = 'M';
+pub const ATTACK_MOVE: char = 'F';
+pub const PATROL: char = 'P';
+pub const ASSIST: char = 'Y';
+pub const STOP: char = 'X';
 pub const UPGRADE: char = 'U';
 pub const REPEAT: char = 'R';
 /// Away from the others, because it throws away a queue.
 pub const CLEAR_QUEUE: char = 'K';
 
-/// Letters that already do something else: panning, attack-move, stop, and patrol.
-pub const RESERVED: [char; 7] = ['W', 'A', 'S', 'D', 'F', 'X', 'P'];
+/// Letters handled on their own: panning, and patrol, which also works by holding the key.
+pub const RESERVED: [char; 5] = ['W', 'A', 'S', 'D', PATROL];
 
 /// The key for building a blueprint, by its key in the blueprint data.
 pub fn blueprint_hotkey(key: &str) -> Option<char> {
@@ -40,6 +45,10 @@ pub const fn letter_for(code: KeyCode) -> Option<char> {
         KeyCode::KeyB => 'B',
         KeyCode::KeyV => 'V',
         KeyCode::KeyH => 'H',
+        KeyCode::KeyM => MOVE,
+        KeyCode::KeyF => ATTACK_MOVE,
+        KeyCode::KeyY => ASSIST,
+        KeyCode::KeyX => STOP,
         KeyCode::KeyU => UPGRADE,
         KeyCode::KeyR => REPEAT,
         KeyCode::KeyK => CLEAR_QUEUE,
@@ -52,7 +61,11 @@ mod tests {
     use super::*;
     use crate::sim::blueprints::BlueprintDb;
 
-    const ALL_KEYS: [KeyCode; 12] = [
+    const ALL_KEYS: [KeyCode; 16] = [
+        KeyCode::KeyM,
+        KeyCode::KeyF,
+        KeyCode::KeyY,
+        KeyCode::KeyX,
         KeyCode::KeyQ,
         KeyCode::KeyE,
         KeyCode::KeyG,
@@ -66,6 +79,8 @@ mod tests {
         KeyCode::KeyR,
         KeyCode::KeyK,
     ];
+
+    const PANEL_LETTERS: [char; 7] = [MOVE, ATTACK_MOVE, ASSIST, STOP, UPGRADE, REPEAT, CLEAR_QUEUE];
 
     /// Everything that can appear in a build menu, from the real data.
     fn buildable(db: &BlueprintDb) -> Vec<String> {
@@ -89,7 +104,7 @@ mod tests {
     fn no_two_options_share_a_key_or_take_one_already_in_use() {
         let db = BlueprintDb::standard();
         let mut letters: Vec<char> = buildable(&db).iter().filter_map(|key| blueprint_hotkey(key)).collect();
-        letters.extend([UPGRADE, REPEAT, CLEAR_QUEUE]);
+        letters.extend(PANEL_LETTERS);
         let count = letters.len();
         for letter in &letters {
             assert!(!RESERVED.contains(letter), "{letter} is already used");
@@ -104,7 +119,7 @@ mod tests {
         let db = BlueprintDb::standard();
         let pressable: Vec<char> = ALL_KEYS.iter().filter_map(|code| letter_for(*code)).collect();
         let mut shown: Vec<char> = buildable(&db).iter().filter_map(|key| blueprint_hotkey(key)).collect();
-        shown.extend([UPGRADE, REPEAT, CLEAR_QUEUE]);
+        shown.extend(PANEL_LETTERS);
         for letter in shown {
             assert!(pressable.contains(&letter), "{letter} is shown but cannot be pressed");
         }

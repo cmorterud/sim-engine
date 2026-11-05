@@ -1188,3 +1188,65 @@ fn a_repeating_factory_keeps_a_waiting_unit_behind_the_upgrade() {
     }
     assert!(queue_of(&world, factory).contains(&tank));
 }
+
+fn distance_between(world: &SimWorld, first: SimId, second: SimId) -> f64 {
+    let (first, second) = (world.unit_position(first).unwrap().xy(), world.unit_position(second).unwrap().xy());
+    (first - second).length_squared().to_num::<f64>().sqrt()
+}
+
+#[test]
+fn a_follower_waits_beside_its_unit_without_pushing_it() {
+    let mut world = test_world();
+    let (acu, bot) = (id(&world, "acu"), id(&world, "t1_light_bot"));
+    let ward = world.spawn_mobile(acu, Team::Blue, point(1_000, 1_000));
+    let guard = world.spawn_mobile(bot, Team::Blue, point(1_300, 1_000));
+    let start = world.unit_position(ward).unwrap();
+    world.advance_tick(&[SimCommand::Follow { units: vec![guard], target: ward }]);
+    run(&mut world, 300);
+    let distance = distance_between(&world, ward, guard);
+    assert!((16.0..=60.0).contains(&distance), "the guard should wait close by, not at {distance}");
+    assert_eq!(world.unit_position(ward).unwrap(), start, "the guard must not shove the unit it follows");
+    assert_ne!(world.ecs.get::<&Order>(entity(&world, guard)).unwrap().kind, OrderKind::Idle, "it should still be on guard");
+
+    // And it goes with the unit when it moves.
+    world.advance_tick(&[SimCommand::Move { units: vec![ward], goal: point(1_000, 1_800) }]);
+    run(&mut world, 800);
+    assert!(distance_between(&world, ward, guard) < 80.0, "the guard was left behind");
+}
+
+#[test]
+fn a_follower_fires_at_enemies_in_range_without_leaving_its_unit() {
+    let mut world = test_world();
+    let (engineer, bot) = (id(&world, "t1_engineer"), id(&world, "t1_light_bot"));
+    let ward = world.spawn_mobile(engineer, Team::Blue, point(1_000, 1_000));
+    let guard = world.spawn_mobile(bot, Team::Blue, point(1_030, 1_000));
+    world.advance_tick(&[SimCommand::Follow { units: vec![guard], target: ward }]);
+    run(&mut world, 30);
+    let enemy = world.spawn_mobile(bot, Team::Red, point(1_100, 1_000));
+    let full = world.ecs.get::<&Health>(entity(&world, enemy)).unwrap().current;
+    for _ in 0..80 {
+        world.advance_tick(&[]);
+        if world.unit_entity(enemy).is_none() {
+            break;
+        }
+    }
+    let hurt = world.unit_entity(enemy).is_none_or(|enemy| world.ecs.get::<&Health>(enemy).unwrap().current < full);
+    assert!(hurt, "the guard should fire at an enemy in range");
+    if world.unit_entity(guard).is_some() {
+        assert!(distance_between(&world, ward, guard) < 80.0, "the guard must not chase away from its unit");
+    }
+}
+
+#[test]
+fn a_follower_stands_down_when_its_unit_dies() {
+    let mut world = test_world();
+    let (engineer, bot, acu) = (id(&world, "t1_engineer"), id(&world, "t1_light_bot"), id(&world, "acu"));
+    let ward = world.spawn_mobile(engineer, Team::Blue, point(1_000, 1_000));
+    let guard = world.spawn_mobile(acu, Team::Blue, point(1_200, 1_000));
+    world.advance_tick(&[SimCommand::Follow { units: vec![guard], target: ward }]);
+    world.ecs.get::<&mut Health>(entity(&world, ward)).unwrap().current = Fp::ONE;
+    world.spawn_mobile(bot, Team::Red, point(1_000, 1_040));
+    run(&mut world, 600);
+    assert!(world.unit_entity(ward).is_none(), "the test needs the unit to die");
+    assert_eq!(world.ecs.get::<&Order>(entity(&world, guard)).unwrap().kind, OrderKind::Idle, "there is nothing left to follow");
+}

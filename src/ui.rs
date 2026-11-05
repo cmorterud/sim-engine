@@ -46,6 +46,56 @@ const BEAM_PULSE_SECONDS: f64 = 1.1;
 /// A beam shorter than this on screen is only clutter.
 const MIN_BEAM_POINTS: f32 = 6.0;
 
+/// An order waiting for the player to click where it should go.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ArmedOrder {
+    Move,
+    AttackMove,
+    Patrol,
+    Assist,
+}
+
+impl ArmedOrder {
+    const ALL: [Self; 4] = [Self::Move, Self::AttackMove, Self::Patrol, Self::Assist];
+
+    const fn letter(self) -> char {
+        match self {
+            Self::Move => hotkeys::MOVE,
+            Self::AttackMove => hotkeys::ATTACK_MOVE,
+            Self::Patrol => hotkeys::PATROL,
+            Self::Assist => hotkeys::ASSIST,
+        }
+    }
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Move => "Move",
+            Self::AttackMove => "Attack-move",
+            Self::Patrol => "Patrol",
+            Self::Assist => "Assist",
+        }
+    }
+
+    const fn description(self) -> &'static str {
+        match self {
+            Self::Move => "Walk there, ignoring what is under the cursor. Units still fire at what comes into range.",
+            Self::AttackMove => "Walk there, stopping to fire when enemies are in range.",
+            Self::Patrol => "Repeat a route. Combat units fight along it, and engineers also reclaim and repair.",
+            Self::Assist => "Stay with a friendly unit and protect it. Builders also help it build.",
+        }
+    }
+
+    /// What to do next, shown while the order is armed.
+    pub const fn hint(self) -> &'static str {
+        match self {
+            Self::Move => "Move: left-click a destination. Right-click or Esc to cancel.",
+            Self::AttackMove => "Attack-move: left-click a destination. Right-click or Esc to cancel.",
+            Self::Patrol => "Patrol: left-click each point, then right-click or press P to start. Esc to cancel.",
+            Self::Assist => "Assist: left-click a friendly unit. Right-click or Esc to cancel.",
+        }
+    }
+}
+
 /// What the player asked for through the interface.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UiAction {
@@ -54,6 +104,9 @@ pub enum UiAction {
     Queue { factories: Vec<SimId>, blueprint: BlueprintId, selected_count: usize },
     SetRepeat { factories: Vec<SimId>, repeat: bool },
     ClearQueue { factories: Vec<SimId> },
+    /// The next click on the map gives this order.
+    Arm(ArmedOrder),
+    Stop,
     /// Remove one order from these builders' queues.
     CancelTask { units: Vec<SimId>, task: BuildTask },
     /// Remove one of an item from each of these factories' queues.
@@ -70,6 +123,25 @@ fn cost_label(db: &BlueprintDb, blueprint: BlueprintId) -> String {
     let unit = db.get(blueprint);
     let key = blueprint_hotkey(&unit.key).map_or(String::new(), |letter| format!("[{letter}] "));
     format!("{key}{}\n{} mass  {} energy", unit.name, unit.mass.to_num::<i64>(), unit.energy.to_num::<i64>())
+}
+
+/// Whether anything selected can walk, and so take the unit orders.
+pub fn has_mobile_units(snapshot: &SimSnapshot, selected: &[SimId]) -> bool {
+    selected.iter().filter_map(|id| find_unit(snapshot, *id)).any(|unit| !unit.is_structure)
+}
+
+fn unit_order_row(ui: &mut egui::Ui, armed: Option<ArmedOrder>, actions: &mut Vec<UiAction>) {
+    ui.horizontal_wrapped(|ui| {
+        for order in ArmedOrder::ALL {
+            let button = egui::Button::new(format!("[{}] {}", order.letter(), order.name())).selected(armed == Some(order));
+            if ui.add(button).on_hover_text(order.description()).clicked() {
+                actions.push(UiAction::Arm(order));
+            }
+        }
+        if ui.button(format!("[{}] Stop", hotkeys::STOP)).on_hover_text("Drop all orders.").clicked() {
+            actions.push(UiAction::Stop);
+        }
+    });
 }
 
 /// What all the selected builders can build, in the order of the first one's list.
@@ -111,6 +183,15 @@ fn clear_action(menu: &FactoryMenu) -> UiAction {
 /// What a command panel key does for this selection: the same as its button, or `None`
 /// if the panel has no such option right now.
 pub fn hotkey_action(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb, letter: char) -> Option<UiAction> {
+    if has_mobile_units(snapshot, selected) {
+        match letter {
+            hotkeys::MOVE => return Some(UiAction::Arm(ArmedOrder::Move)),
+            hotkeys::ATTACK_MOVE => return Some(UiAction::Arm(ArmedOrder::AttackMove)),
+            hotkeys::ASSIST => return Some(UiAction::Arm(ArmedOrder::Assist)),
+            hotkeys::STOP => return Some(UiAction::Stop),
+            _ => {}
+        }
+    }
     let is_key = |blueprint: BlueprintId| blueprint_hotkey(&db.get(blueprint).key) == Some(letter);
     if let Some(option) = builder_options(snapshot, selected, db).into_iter().find(|option| is_key(*option)) {
         return Some(UiAction::BeginPlacement(option));
@@ -245,7 +326,7 @@ pub fn resource_bar(ctx: &egui::Context, snapshot: &SimSnapshot) {
 }
 
 /// The panel along the bottom: what is selected, and what it can build.
-pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb, actions: &mut Vec<UiAction>) {
+pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb, armed: Option<ArmedOrder>, actions: &mut Vec<UiAction>) {
     if selected.is_empty() {
         return;
     }
@@ -266,6 +347,10 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
             format!("{} units selected", units.len())
         };
         ui.strong(summary);
+
+        if has_mobile_units(snapshot, selected) {
+            unit_order_row(ui, armed, actions);
+        }
 
         let options = builder_options(snapshot, selected, db);
         if !options.is_empty() {
@@ -468,13 +553,13 @@ pub fn match_end_window(ctx: &egui::Context, result: MatchResult, player: Team, 
 }
 
 /// A small floating reminder that the next click will attack-move.
-pub fn attack_move_hint(ctx: &egui::Context) {
-    egui::Area::new(egui::Id::new("attack move hint"))
+pub fn armed_order_hint(ctx: &egui::Context, order: ArmedOrder) {
+    egui::Area::new(egui::Id::new("armed order hint"))
         .anchor(Align2::CENTER_TOP, Vec2::new(0.0, 36.0))
         .interactable(false)
         .show(ctx, |ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
-                ui.label("Attack-move: left-click a destination. Right-click or Esc to cancel.");
+                ui.label(order.hint());
             });
         });
 }
@@ -1292,6 +1377,40 @@ mod tests {
         assert_eq!(hotkey_action(&current, &selected, &db, 'E'), Some(UiAction::BeginPlacement(db.id("mass_extractor"))));
         let expected = UiAction::Queue { factories: vec![SimId(1)], blueprint: db.id("t1_engineer"), selected_count: 1 };
         assert_eq!(hotkey_action(&current, &selected, &db, 'Z'), Some(expected));
+    }
+
+    #[test]
+    fn unit_order_keys_arm_their_orders_for_anything_that_can_walk() {
+        let db = BlueprintDb::standard();
+        let current = commander_and_engineer(&db);
+        for selected in [SimId(10), SimId(11), SimId(12)] {
+            for (letter, order) in [('M', ArmedOrder::Move), ('F', ArmedOrder::AttackMove), ('Y', ArmedOrder::Assist)] {
+                assert_eq!(hotkey_action(&current, &[selected], &db, letter), Some(UiAction::Arm(order)), "{letter} for {selected:?}");
+            }
+            assert_eq!(hotkey_action(&current, &[selected], &db, 'X'), Some(UiAction::Stop));
+        }
+        assert_eq!(hotkey_action(&current, &[], &db, 'M'), None, "nothing is selected");
+    }
+
+    #[test]
+    fn structures_do_not_take_unit_orders_but_a_mixed_selection_does() {
+        let db = BlueprintDb::standard();
+        let mut current = mixed_factories(&db);
+        for letter in ['M', 'F', 'Y', 'X'] {
+            assert_eq!(hotkey_action(&current, &[SimId(1)], &db, letter), None, "{letter} for a factory");
+        }
+        let mut engineer = unit(4, 0.0);
+        engineer.blueprint = db.id("t1_engineer").0;
+        current.units.push(engineer);
+        assert!(has_mobile_units(&current, &[SimId(1), SimId(4)]));
+        assert!(!has_mobile_units(&current, &[SimId(1), SimId(2)]));
+    }
+
+    #[test]
+    fn every_unit_order_says_what_to_do_next() {
+        for order in ArmedOrder::ALL {
+            assert!(order.hint().starts_with(order.name()), "{}", order.hint());
+        }
     }
 
     #[test]

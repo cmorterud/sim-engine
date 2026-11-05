@@ -120,6 +120,46 @@ pub fn right_click_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
     commands
 }
 
+/// The selected units that can walk.
+pub fn mobile_units(selected: &[SimId], units: &[UnitView], blueprints: &BlueprintDb) -> Vec<SimId> {
+    sort_selection(selected, units, blueprints).mobile
+}
+
+/// A plain move to the ground, whatever is under the cursor.
+pub fn move_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
+    let mobile = mobile_units(click.selected, click.units, click.blueprints);
+    match click.ground {
+        Some(ground) if !mobile.is_empty() => vec![order_command(&mobile, ground, false)],
+        _ => Vec::new(),
+    }
+}
+
+/// Assist the friendly unit under the cursor. Builders lend their build power if it has work
+/// that can use it. Everything else follows it, and fires at what comes into range.
+pub fn assist_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
+    let Some(target) = nearest_unit(click.units, click.camera, click.team, click.cursor) else {
+        return Vec::new();
+    };
+    let index = click.units.binary_search_by_key(&target, |unit| unit.id).expect("found in this list");
+    let unit = &click.units[index];
+    let has_build_work = unit.built_permille < 1000
+        || (unit.blueprint != u16::MAX && {
+            let blueprint = click.blueprints.get(BlueprintId(unit.blueprint));
+            blueprint.is_factory() || (!blueprint.is_structure() && blueprint.build_power > Fp::ZERO)
+        });
+    let parts = sort_selection(click.selected, click.units, click.blueprints);
+    let helpers: Vec<SimId> = if has_build_work { parts.builders.iter().copied().filter(|id| *id != target).collect() } else { Vec::new() };
+    let followers: Vec<SimId> = parts.mobile.iter().copied().filter(|id| *id != target && !helpers.contains(id)).collect();
+    let mut commands = Vec::new();
+    if !helpers.is_empty() {
+        commands.push(SimCommand::Assist { units: helpers, target });
+    }
+    if !followers.is_empty() {
+        commands.push(SimCommand::Follow { units: followers, target });
+    }
+    commands
+}
+
 fn wreck_under_cursor(click: &RightClick<'_>) -> Option<SimId> {
     let mut best: Option<(f64, SimId)> = None;
     for wreck in click.wrecks {
@@ -325,6 +365,61 @@ mod tests {
             ground: Some(world),
             attack_move: false,
         })
+    }
+
+    fn click_for<'a>(selected: &'a [SimId], units: &'a [UnitView], db: &'a BlueprintDb, camera: &'a Camera, world: [f64; 2]) -> RightClick<'a> {
+        let cursor = camera.world_to_screen([world[0], world[1], 8.0]).unwrap();
+        RightClick { selected, units, wrecks: &[], blueprints: db, team: Team::Blue, camera, cursor, ground: Some(world), attack_move: false }
+    }
+
+    #[test]
+    fn an_armed_move_goes_to_the_ground_even_on_top_of_a_unit_and_leaves_structures_out() {
+        let db = db();
+        let units = [
+            view(1, Team::Blue, db.id("t1_light_bot"), &db, 2_000.0, 1_950.0),
+            view(2, Team::Blue, db.id("land_factory_t1"), &db, 1_900.0, 1_950.0),
+            view(3, Team::Red, db.id("t1_light_bot"), &db, 2_000.0, 2_050.0),
+        ];
+        let camera = camera();
+        let goal = Vec2Fp::new(Fp::from_num(2_000.0), Fp::from_num(2_050.0));
+        let orders = move_orders(&click_for(&[SimId(1), SimId(2)], &units, &db, &camera, [2_000.0, 2_050.0]));
+        assert_eq!(orders, [SimCommand::Move { units: vec![SimId(1)], goal }]);
+        assert!(move_orders(&click_for(&[SimId(2)], &units, &db, &camera, [2_000.0, 2_050.0])).is_empty(), "a factory cannot walk");
+    }
+
+    #[test]
+    fn assisting_a_combat_unit_means_following_it() {
+        let db = db();
+        let units = [
+            view(1, Team::Blue, db.id("t1_light_bot"), &db, 2_000.0, 1_900.0),
+            view(2, Team::Blue, db.id("t1_engineer"), &db, 2_040.0, 1_900.0),
+            view(3, Team::Blue, db.id("t2_heavy_tank"), &db, 2_000.0, 2_050.0),
+        ];
+        let camera = camera();
+        let orders = assist_orders(&click_for(&[SimId(1), SimId(2)], &units, &db, &camera, [2_000.0, 2_050.0]));
+        assert_eq!(orders, [SimCommand::Follow { units: vec![SimId(1), SimId(2)], target: SimId(3) }]);
+    }
+
+    #[test]
+    fn assisting_a_builder_lends_build_power_and_guards_it_with_the_rest() {
+        let db = db();
+        let units = [
+            view(1, Team::Blue, db.id("t1_light_bot"), &db, 2_000.0, 1_900.0),
+            view(2, Team::Blue, db.id("t1_engineer"), &db, 2_040.0, 1_900.0),
+            view(3, Team::Blue, db.id("acu"), &db, 2_000.0, 2_050.0),
+        ];
+        let camera = camera();
+        let orders = assist_orders(&click_for(&[SimId(1), SimId(2)], &units, &db, &camera, [2_000.0, 2_050.0]));
+        assert_eq!(orders, [SimCommand::Assist { units: vec![SimId(2)], target: SimId(3) }, SimCommand::Follow { units: vec![SimId(1)], target: SimId(3) }]);
+    }
+
+    #[test]
+    fn assisting_needs_a_friendly_unit_and_a_unit_cannot_assist_itself() {
+        let db = db();
+        let units = [view(1, Team::Blue, db.id("t1_light_bot"), &db, 2_000.0, 1_950.0), view(2, Team::Red, db.id("t2_heavy_tank"), &db, 2_000.0, 2_050.0)];
+        let camera = camera();
+        assert!(assist_orders(&click_for(&[SimId(1)], &units, &db, &camera, [2_000.0, 2_050.0])).is_empty(), "the enemy is not a friend");
+        assert!(assist_orders(&click_for(&[SimId(1)], &units, &db, &camera, [2_000.0, 1_950.0])).is_empty(), "it is the only one selected");
     }
 
     #[test]
