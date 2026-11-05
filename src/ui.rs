@@ -45,6 +45,8 @@ const BEAM_BUILD: Color32 = Color32::from_rgb(255, 215, 110);
 const BEAM_RECLAIM: Color32 = Color32::from_rgb(150, 255, 170);
 /// Matches how double-clicking a unit works.
 const QUICK_DOUBLE_CLICK_SECONDS: f64 = 0.4;
+/// How many units a factory queues at once with Shift held.
+const SHIFT_QUEUE_COUNT: u32 = 5;
 const QUICK_ROW_WIDTH: f32 = 170.0;
 const CONTROL_GROUP_ROW_WIDTH: f32 = 220.0;
 /// How tall the queue can grow before it scrolls, in points.
@@ -110,8 +112,8 @@ impl ArmedOrder {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UiAction {
     BeginPlacement(BlueprintId),
-    /// Queue one item in each of these factories, out of `selected_count` selected.
-    Queue { factories: Vec<SimId>, blueprint: BlueprintId, selected_count: usize },
+    /// Queue `count` of an item in each of these factories, out of `selected_count` selected.
+    Queue { factories: Vec<SimId>, blueprint: BlueprintId, selected_count: usize, count: u32 },
     SetRepeat { factories: Vec<SimId>, repeat: bool },
     ClearQueue { factories: Vec<SimId> },
     /// The next click on the map gives this order.
@@ -179,8 +181,18 @@ fn builder_options(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb)
         .collect()
 }
 
+/// Holding Shift queues several units at once. An upgrade only ever happens once.
+pub fn with_shift(action: UiAction, shift: bool, db: &BlueprintDb) -> UiAction {
+    match action {
+        UiAction::Queue { factories, blueprint, selected_count, .. } if shift && !db.get(blueprint).is_factory() => {
+            UiAction::Queue { factories, blueprint, selected_count, count: SHIFT_QUEUE_COUNT }
+        }
+        other => other,
+    }
+}
+
 fn queue_action(menu: &FactoryMenu, able: &[SimId], blueprint: BlueprintId) -> UiAction {
-    UiAction::Queue { factories: able.to_vec(), blueprint, selected_count: menu.factories.len() }
+    UiAction::Queue { factories: able.to_vec(), blueprint, selected_count: menu.factories.len(), count: 1 }
 }
 
 /// A mixed selection turns on for all, as the next press turns off for all.
@@ -917,10 +929,12 @@ pub fn queue_label(name: &str, given: usize, selected: usize) -> String {
 fn factory_controls(ui: &mut egui::Ui, menu: &FactoryMenu, db: &BlueprintDb, actions: &mut Vec<UiAction>) {
     let total = menu.factories.len();
     let partial = |able: usize| if able < total { format!("\n{able} of {total} factories") } else { String::new() };
+    let shift = ui.input(|input| input.modifiers.shift);
     ui.horizontal_wrapped(|ui| {
         for (option, able) in &menu.options {
-            if ui.button(format!("{}{}", cost_label(db, *option), partial(able.len()))).clicked() {
-                actions.push(queue_action(menu, able, *option));
+            let hint = format!("Hold Shift to queue {SHIFT_QUEUE_COUNT}.");
+            if ui.button(format!("{}{}", cost_label(db, *option), partial(able.len()))).on_hover_text(hint).clicked() {
+                actions.push(with_shift(queue_action(menu, able, *option), shift, db));
             }
         }
         if let Some((upgrade, able)) = &menu.upgrade {
@@ -1658,7 +1672,7 @@ mod tests {
         current.factories[0] = factory_view(1, vec![upgrade.0], false, 200);
         assert_eq!(able(&current, &[SimId(1)], tank).unwrap(), [SimId(1)]);
         assert_eq!(able(&current, &[SimId(1)], bot).unwrap(), [SimId(1)], "listed once, though both tiers can build it");
-        let expected = UiAction::Queue { factories: vec![SimId(1)], blueprint: tank, selected_count: 1 };
+        let expected = UiAction::Queue { factories: vec![SimId(1)], blueprint: tank, selected_count: 1, count: 1 };
         assert_eq!(hotkey_action(&current, &[SimId(1)], &db, 'H'), Some(expected));
 
         // The other T1 factory has no upgrade queued, so it is left out.
@@ -1769,7 +1783,7 @@ mod tests {
         let db = BlueprintDb::standard();
         let current = mixed_factories(&db);
         let selected = [SimId(1), SimId(2), SimId(3)];
-        let queue = |key: &str, factories: Vec<SimId>| UiAction::Queue { factories, blueprint: db.id(key), selected_count: 3 };
+        let queue = |key: &str, factories: Vec<SimId>| UiAction::Queue { factories, blueprint: db.id(key), selected_count: 3, count: 1 };
         assert_eq!(hotkey_action(&current, &selected, &db, 'Z'), Some(queue("t1_engineer", selected.to_vec())));
         assert_eq!(hotkey_action(&current, &selected, &db, 'B'), Some(queue("t1_light_bot", selected.to_vec())));
         assert_eq!(hotkey_action(&current, &selected, &db, 'V'), Some(queue("t1_light_artillery", selected.to_vec())));
@@ -1801,7 +1815,7 @@ mod tests {
         current.units.push(engineer);
         let selected = [SimId(1), SimId(4)];
         assert_eq!(hotkey_action(&current, &selected, &db, 'E'), Some(UiAction::BeginPlacement(db.id("mass_extractor"))));
-        let expected = UiAction::Queue { factories: vec![SimId(1)], blueprint: db.id("t1_engineer"), selected_count: 1 };
+        let expected = UiAction::Queue { factories: vec![SimId(1)], blueprint: db.id("t1_engineer"), selected_count: 1, count: 1 };
         assert_eq!(hotkey_action(&current, &selected, &db, 'Z'), Some(expected));
     }
 
@@ -2223,6 +2237,47 @@ mod tests {
         };
         assert_eq!(click(0, egui::Modifiers::NONE), [UiAction::QuickSelect { units: vec![SimId(10), SimId(11)], add: false }]);
         assert_eq!(click(1, egui::Modifiers::SHIFT), [UiAction::QuickSelect { units: vec![SimId(12)], add: true }]);
+    }
+
+    #[test]
+    fn shift_queues_five_units_but_only_one_upgrade() {
+        let db = BlueprintDb::standard();
+        let current = mixed_factories(&db);
+        let press = |letter: char, shift: bool| with_shift(hotkey_action(&current, &[SimId(1)], &db, letter).unwrap(), shift, &db);
+        let count_of = |action: UiAction| match action {
+            UiAction::Queue { count, .. } => count,
+            other => panic!("expected a queue order, not {other:?}"),
+        };
+        assert_eq!(count_of(press('B', false)), 1);
+        assert_eq!(count_of(press('B', true)), 5);
+        assert_eq!(count_of(press('Z', true)), 5);
+        assert_eq!(count_of(press('U', true)), 1, "a factory only upgrades once");
+        let other = with_shift(UiAction::Stop, true, &db);
+        assert_eq!(other, UiAction::Stop, "other orders are not affected");
+    }
+
+    #[test]
+    fn shift_clicking_a_factory_button_queues_five() {
+        let db = BlueprintDb::standard();
+        let current = mixed_factories(&db);
+        let menu = factory_menu(&current, &[SimId(1)], &db).unwrap();
+        let click = |modifiers: egui::Modifiers| {
+            let ctx = egui::Context::default();
+            let at = egui::pos2(40.0, 25.0);
+            let press = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers };
+            let mut actions = Vec::new();
+            for events in [vec![], vec![egui::Event::PointerMoved(at)], vec![press(true)], vec![press(false)], vec![]] {
+                let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 600.0))), modifiers, events, ..egui::RawInput::default() };
+                let _ = ctx.run(input, |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| factory_controls(ui, &menu, &db, &mut actions));
+                });
+            }
+            actions
+        };
+        let engineer = db.id("t1_engineer");
+        let queue = |count| vec![UiAction::Queue { factories: vec![SimId(1)], blueprint: engineer, selected_count: 1, count }];
+        assert_eq!(click(egui::Modifiers::NONE), queue(1));
+        assert_eq!(click(egui::Modifiers::SHIFT), queue(5));
     }
 
     #[test]

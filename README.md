@@ -43,7 +43,7 @@ Destroy the enemy commander to win. Yours explodes if it dies, and your whole te
 | N | Mute or unmute |
 | - and = | Sound quieter and louder |
 | Q, E, G, T, C | With a builder selected: Land Factory, Mass Extractor, Power Generator, Mass Storage, Point Defense |
-| Z, B, V, H | With a factory selected: queue an Engineer, Light Bot, Light Artillery, Heavy Tank |
+| Z, B, V, H | With a factory selected: queue an Engineer, Light Bot, Light Artillery, Heavy Tank. Hold Shift, on the key or the button, to queue 5 |
 | U, R, K | With a factory selected: Upgrade, Repeat, Clear queue |
 | Space | Jump to your commander and select it |
 | Scroll | Zoom, towards the cursor |

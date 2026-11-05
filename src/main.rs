@@ -75,6 +75,7 @@ Controls:
   Shift + drag         Add a box of units to the selection
   Right-click          Attack an enemy, assist or repair a friend, reclaim a wreck,
                        move to the ground, or set a factory's rally point
+  Shift + a factory unit  Queue 5 at a time, by button or key
   Shift + drag an icon Move an order or rally point somewhere else
   Shift + right-click  Queue the order after what the selection is already doing
   Shift + left-click   Queue a structure, and keep placing
@@ -898,7 +899,7 @@ fn run_windowed(seed: u64, options: Options) {
                             PhysicalKey::Code(code) if pressed && !event.repeat && !command_held => {
                                 if let Some(letter) = hotkeys::letter_for(code) {
                                     match ui::hotkey_action(&session.current, selection.selected(), &map.blueprints, letter) {
-                                        Some(action) => hotkey_actions.push(action),
+                                        Some(action) => hotkey_actions.push(ui::with_shift(action, shift_held, &map.blueprints)),
                                         None if selection.selected().is_empty() => feedback.show_rejected(None, "No units selected"),
                                         None => feedback.show_rejected(None, "Not available for this selection"),
                                     }
@@ -1150,11 +1151,12 @@ fn run_windowed(seed: u64, options: Options) {
                                     armed = None;
                                     patrol_points.clear();
                                 }
-                                UiAction::Queue { factories, blueprint, selected_count } => {
-                                    let name = &map.blueprints.get(blueprint).name;
-                                    feedback.set_label(MarkerKind::Build, ui::queue_label(name, factories.len(), selected_count));
+                                UiAction::Queue { factories, blueprint, selected_count, count } => {
+                                    let unit = &map.blueprints.get(blueprint).name;
+                                    let name = if count > 1 { format!("{unit} x{count}") } else { unit.clone() };
+                                    feedback.set_label(MarkerKind::Build, ui::queue_label(&name, factories.len(), selected_count));
                                     for factory in factories {
-                                        session.send(SimCommand::QueueUnit { factory, blueprint, count: 1 });
+                                        session.send(SimCommand::QueueUnit { factory, blueprint, count });
                                     }
                                 }
                                 UiAction::SetRepeat { factories, repeat } => {
