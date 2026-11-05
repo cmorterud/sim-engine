@@ -115,6 +115,26 @@ pub struct BuildQueueView {
     pub tasks: Vec<BuildTask>,
 }
 
+/// Where one unit's order that can still be moved will take it. Only for the viewer's team.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct OrderStopView {
+    pub unit: SimId,
+    pub task: BuildTask,
+    /// Raw `Fp` bits.
+    pub position: [i32; 3],
+}
+
+/// What a structure or commander makes and spends, in tenths per second. Only for the viewer's team.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct UnitRatesView {
+    pub id: SimId,
+    pub mass_income: i32,
+    pub energy_income: i32,
+    /// What a factory is really spending: less than its full rate during a stall, and more with help.
+    pub mass_use: i32,
+    pub energy_use: i32,
+}
+
 /// A builder that is doing work this tick, and where. Only present while work is really
 /// happening, so not while walking to a site, waiting, or out of resources.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -176,6 +196,10 @@ pub struct SimSnapshot {
     pub work_links: Vec<WorkLinkView>,
     /// Sorted by builder `SimId`.
     pub build_queues: Vec<BuildQueueView>,
+    /// Sorted by unit `SimId`.
+    pub order_stops: Vec<OrderStopView>,
+    /// Sorted by `SimId`.
+    pub rates: Vec<UnitRatesView>,
     pub economy: EconomyView,
     /// Present when fog of war is on: one byte per cell, for the renderer.
     pub fog: Option<Arc<Vec<u8>>>,
@@ -235,6 +259,9 @@ pub struct SimWorld {
     /// Who worked on what this tick. Rebuilt every tick and only used for drawing,
     /// so it is not part of the checksum.
     pub(super) work_links: Vec<WorkLink>,
+    /// What each factory spent this tick. Rebuilt every tick and only used for showing,
+    /// so it is not part of the checksum.
+    pub(super) factory_spending: Vec<(SimId, Res, Res)>,
     max_mobile_radius: i32,
     max_structure_radius: i32,
     pending_shots: Vec<PendingShot>,
@@ -278,6 +305,7 @@ impl SimWorld {
             match_result: None,
             economy_dirty: false,
             work_links: Vec::new(),
+            factory_spending: Vec::new(),
             max_mobile_radius: 0,
             max_structure_radius: 0,
             pending_shots: Vec::new(),
@@ -416,6 +444,7 @@ impl SimWorld {
                 }
                 SimCommand::Attack { units, target } => self.command_attack(units, *target),
                 SimCommand::QueueMove { units, goal, attack } => self.queue_move(units, *goal, *attack),
+                SimCommand::MoveOrder { units, task, goal } => self.move_order(units, *task, *goal),
                 other => self.apply_production_command(other),
             }
         }
@@ -441,6 +470,59 @@ impl SimWorld {
                 self.ecs.insert_one(entity, OrderQueue(vec![order])).expect("unit is live");
                 let at = self.order_queues.partition_point(|queue| queue.0 < id);
                 self.order_queues.insert(at, (id, entity));
+            }
+        }
+    }
+
+    /// Whether a unit is on, or is waiting to start, an order on this route.
+    fn holds_route(&self, id: SimId, route: u32) -> bool {
+        let Some((_, entity)) = self.find_unit(id) else {
+            return false;
+        };
+        let in_tasks = self
+            .ecs
+            .get::<&Builder>(entity)
+            .is_ok_and(|builder| builder.tasks.iter().any(|task| matches!(task, BuildTask::Walk { order, .. } if order.route == route)));
+        let in_queue = self.ecs.get::<&OrderQueue>(entity).is_ok_and(|queue| queue.0.iter().any(|order| order.route == route));
+        let order = *self.ecs.get::<&Order>(entity).expect("units have orders");
+        in_tasks || in_queue || (order.kind != OrderKind::Idle && order.route == route)
+    }
+
+    fn move_order(&mut self, units: &[SimId], task: BuildTask, goal: Vec2Fp) {
+        let BuildTask::Walk { order: old, .. } = task else {
+            return;
+        };
+        // Attacks and follow orders have targets of their own to go to.
+        if !matches!(old.kind, OrderKind::Move | OrderKind::AttackMove) || self.flow_field.is_following(old.route) {
+            return;
+        }
+        let holders: Vec<SimId> = units.iter().copied().filter(|id| self.holds_route(*id, old.route)).collect();
+        for (id, new) in self.plan_orders(&holders, old.kind, goal, None, false) {
+            let (_, entity) = self.find_unit(id).expect("just checked");
+            let mut waiting = false;
+            let mut in_tasks = false;
+            if let Ok(mut builder) = self.ecs.get::<&mut Builder>(entity) {
+                let at = builder.tasks.iter().position(|task| matches!(task, BuildTask::Walk { order, .. } if order.route == old.route));
+                if let Some(at) = at {
+                    let started = matches!(builder.tasks[at], BuildTask::Walk { started: true, .. });
+                    builder.tasks[at] = BuildTask::Walk { order: new, started };
+                    in_tasks = true;
+                    waiting = !started;
+                }
+            }
+            if !in_tasks {
+                if let Ok(mut queue) = self.ecs.get::<&mut OrderQueue>(entity) {
+                    if let Some(at) = queue.0.iter().position(|order| order.route == old.route) {
+                        queue.0[at] = new;
+                        waiting = true;
+                    }
+                }
+            }
+            if waiting {
+                // Its order has not started, so only the reference it held needs handing back.
+                self.flow_field.release(old.route);
+            } else {
+                self.set_order(id, new);
             }
         }
     }
@@ -1419,6 +1501,8 @@ impl SimWorld {
         let plans = viewer.map_or_else(Vec::new, |viewer| self.plans_for(viewer));
         let work_links = self.work_link_views(seen);
         let build_queues = viewer.map_or_else(Vec::new, |viewer| self.build_queues_for(viewer));
+        let order_stops = viewer.map_or_else(Vec::new, |viewer| self.order_stops_for(viewer));
+        let rates = viewer.map_or_else(Vec::new, |viewer| self.rates_for(viewer));
         let economy = viewer.map_or_else(EconomyView::default, |viewer| self.economies[viewer.index()].view());
         let fog = match viewer {
             Some(viewer) if self.config.fog_of_war => Some(Arc::new(self.visibility.fog_bytes(viewer))),
@@ -1433,6 +1517,8 @@ impl SimWorld {
             plans,
             work_links,
             build_queues,
+            order_stops,
+            rates,
             economy,
             fog,
             match_result: self.match_result,

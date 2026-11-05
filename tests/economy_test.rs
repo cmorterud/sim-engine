@@ -1503,3 +1503,156 @@ fn structures_in_a_queued_group_are_left_out() {
     run(&mut world, 200);
     assert_eq!(world.flow_field.route_count(), 0, "a structure must not hold the route open");
 }
+
+fn stops_of(world: &SimWorld, unit: SimId) -> Vec<BuildTask> {
+    world.snapshot_for(Some(Team::Blue)).order_stops.iter().filter(|stop| stop.unit == unit).map(|stop| stop.task).collect()
+}
+
+#[test]
+fn a_move_under_way_can_be_dragged_somewhere_else() {
+    let mut world = test_world();
+    let bot = id(&world, "t1_light_bot");
+    let unit = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
+    world.advance_tick(&[SimCommand::Move { units: vec![unit], goal: point(1_500, 1_000) }]);
+    run(&mut world, 5);
+    let stops = stops_of(&world, unit);
+    assert_eq!(stops.len(), 1, "a plain move can be dragged too");
+    let goal = point(1_000, 1_500);
+    world.advance_tick(&[SimCommand::MoveOrder { units: vec![unit], task: stops[0], goal }]);
+    assert_eq!(world.flow_field.route_count(), 1, "the old route should be handed back");
+    run_until_near(&mut world, unit, goal, 12.0);
+    run(&mut world, 10);
+    assert_eq!(order_kind(&world, unit), OrderKind::Idle);
+    assert_eq!(world.flow_field.route_count(), 0);
+}
+
+#[test]
+fn a_queued_move_can_be_dragged_and_keeps_its_place_in_line() {
+    let mut world = test_world();
+    let (bot, engineer_blueprint) = (id(&world, "t1_light_bot"), id(&world, "t1_engineer"));
+    let unit = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
+    let engineer = world.spawn_mobile(engineer_blueprint, Team::Blue, point(1_000, 1_100));
+    let both = vec![unit, engineer];
+    let first = point(1_400, 1_000);
+    world.advance_tick(&[
+        SimCommand::Move { units: both.clone(), goal: first },
+        SimCommand::QueueMove { units: both.clone(), goal: point(4_000, 4_000), attack: false },
+    ]);
+    // The move under way, and the queued one.
+    assert_eq!(world.flow_field.route_count(), 2);
+    let queued = *stops_of(&world, unit).last().unwrap();
+    let last = point(1_400, 1_400);
+    world.advance_tick(&[SimCommand::MoveOrder { units: both.clone(), task: queued, goal: last }]);
+    assert_eq!(world.flow_field.route_count(), 2, "one route swapped for another, shared by both");
+    assert_eq!(stops_of(&world, unit).len(), 2);
+    assert_eq!(stops_of(&world, engineer).len(), 2);
+
+    run_until_near(&mut world, unit, first, 40.0);
+    assert!(distance_to(&world, unit, last) > 200.0, "it must still go to the first stop first");
+    run_until_near(&mut world, unit, last, 40.0);
+    run_until_near(&mut world, engineer, last, 40.0);
+    run(&mut world, 100);
+    assert_eq!(world.flow_field.route_count(), 0);
+}
+
+#[test]
+fn a_build_that_has_not_started_can_be_dragged_and_one_that_has_cannot() {
+    let mut world = test_world();
+    set_resources(&mut world, Team::Blue, 100_000, 1_000_000);
+    let (engineer, orders) = engineer_with_three_builds(&mut world);
+    run(&mut world, 3);
+
+    // Moving the one it is walking to sends it to the new spot instead.
+    world.advance_tick(&[SimCommand::MoveBuild { units: vec![engineer], task: orders[0], cell_x: 60, cell_y: 70 }]);
+    let moved = tasks(&world, engineer)[0];
+    assert!(matches!(moved, BuildTask::Build { cell_x: 60, cell_y: 70, .. }));
+    assert_eq!(tasks(&world, engineer)[1..], orders[1..], "the rest keep their places");
+    let new_cell = cell_of_index(&world, 60, 70);
+    let mut ticks = 0;
+    while !world.occupancy.contains_key(&new_cell) {
+        world.advance_tick(&[]);
+        ticks += 1;
+        assert!(ticks < 1_000, "it never started at the new spot");
+    }
+    assert!(!world.occupancy.contains_key(&cell_of_index(&world, 80, 50)), "nothing should be built at the old spot");
+
+    // Now that it has started, it stays.
+    let started = tasks(&world, engineer)[0];
+    assert!(!stops_of(&world, engineer).iter().any(|task| task.is_same_order(&started)), "a started site has no handle");
+    world.advance_tick(&[SimCommand::MoveBuild { units: vec![engineer], task: started, cell_x: 20, cell_y: 20 }]);
+    assert!(matches!(tasks(&world, engineer)[0], BuildTask::Build { cell_x: 60, cell_y: 70, site: Some(_), .. }));
+}
+
+#[test]
+fn moving_an_order_that_is_already_finished_does_nothing() {
+    let mut world = test_world();
+    let bot = id(&world, "t1_light_bot");
+    let unit = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
+    world.advance_tick(&[SimCommand::Move { units: vec![unit], goal: point(1_100, 1_000) }]);
+    let task = stops_of(&world, unit)[0];
+    run(&mut world, 200);
+    assert_eq!(order_kind(&world, unit), OrderKind::Idle);
+    world.advance_tick(&[SimCommand::MoveOrder { units: vec![unit], task, goal: point(2_000, 2_000) }]);
+    assert_eq!(order_kind(&world, unit), OrderKind::Idle);
+    assert_eq!(world.flow_field.route_count(), 0, "no route should be left open");
+}
+
+#[test]
+fn patrols_and_attacks_and_follow_orders_have_no_handles() {
+    let mut world = test_world();
+    let bot = id(&world, "t1_light_bot");
+    let patroller = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
+    let attacker = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_100));
+    let follower = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_200));
+    let enemy = world.spawn_mobile(bot, Team::Red, point(3_000, 3_000));
+    world.advance_tick(&[
+        SimCommand::Patrol { units: vec![patroller], points: vec![point(1_200, 1_000), point(1_000, 1_000)] },
+        SimCommand::Attack { units: vec![attacker], target: enemy },
+        SimCommand::Follow { units: vec![follower], target: patroller },
+    ]);
+    run(&mut world, 3);
+    for unit in [patroller, attacker, follower] {
+        assert!(stops_of(&world, unit).is_empty(), "{unit:?} should have nothing to drag");
+    }
+    assert!(world.snapshot_for(Some(Team::Red)).order_stops.is_empty());
+}
+
+#[test]
+fn rates_show_real_output_and_what_a_factory_really_spends() {
+    let mut world = test_world();
+    let (extractor, generator, factory_blueprint, bot) = (id(&world, "mass_extractor"), id(&world, "power_generator"), id(&world, "land_factory_t1"), id(&world, "t1_light_bot"));
+    world.deposits.push((10, 10));
+    let mine = world.spawn_finished_structure(extractor, Team::Blue, 10, 10).unwrap();
+    let power = world.spawn_finished_structure(generator, Team::Blue, 30, 30).unwrap();
+    let factory = world.spawn_finished_structure(factory_blueprint, Team::Blue, 50, 50).unwrap();
+    set_resources(&mut world, Team::Blue, 100_000, 1_000_000);
+    run(&mut world, 2);
+    let rates_of = |world: &SimWorld, unit: SimId| *world.snapshot_for(Some(Team::Blue)).rates.iter().find(|rates| rates.id == unit).expect("should be listed");
+    assert_eq!(rates_of(&world, mine).mass_income, 20, "2 mass per second, in tenths");
+    assert_eq!(rates_of(&world, power).energy_income, 200, "20 energy per second, in tenths");
+    assert_eq!(rates_of(&world, factory).mass_use, 0, "an idle factory spends nothing");
+
+    world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: bot, count: 5 }]);
+    run(&mut world, 2);
+    let full = rates_of(&world, factory);
+    assert!(full.mass_use > 0 && full.energy_use > 0, "{full:?}");
+
+    // With nothing left, it spends only what comes in.
+    set_resources(&mut world, Team::Blue, 0, 1_000_000);
+    run(&mut world, 3);
+    let stalled = rates_of(&world, factory);
+    assert!(stalled.mass_use < full.mass_use, "{stalled:?} against {full:?}");
+    assert!(stalled.mass_use <= 21, "it cannot spend more than the 2 mass per second coming in: {stalled:?}");
+    assert!(world.snapshot_for(Some(Team::Red)).rates.iter().all(|rates| rates.id != factory), "the enemy must not see this");
+}
+
+#[test]
+fn a_structure_being_built_shows_no_output_yet() {
+    let mut world = test_world();
+    set_resources(&mut world, Team::Blue, 10_000, 100_000);
+    let (_, site) = engineer_at_site(&mut world);
+    assert!(world.snapshot_for(Some(Team::Blue)).rates.iter().all(|rates| rates.id != site));
+    run(&mut world, 400);
+    assert!(is_finished(&world, site));
+    assert_eq!(world.snapshot_for(Some(Team::Blue)).rates.iter().find(|rates| rates.id == site).unwrap().energy_income, 200);
+}

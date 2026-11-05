@@ -13,7 +13,7 @@ use super::components::{
 use super::config::{PATROL_SEARCH_INTERVAL, PATROL_SEARCH_RADIUS_UNITS, RECLAIM_MASS_PER_POWER, TERRAIN_CELL_UNITS};
 use super::flowfield::nearest_passable_cell;
 use super::spatial::{GridEntry, Layer};
-use super::world::{BuildQueueView, EconomyView, PlanStep, PlanStepKind, SimWorld, UnitPlanView, UnitSpawn, WorkLinkView};
+use super::world::{BuildQueueView, EconomyView, OrderStopView, PlanStep, UnitRatesView, PlanStepKind, SimWorld, UnitPlanView, UnitSpawn, WorkLinkView};
 use crate::math::fp::{fp_int, wide_mul, Fp, Vec2Fp};
 
 const MEX_STORAGE_BONUS: u32 = 125;
@@ -109,6 +109,7 @@ enum TaskStep {
 
 /// One item's cost per tick at full speed.
 struct WorkItem {
+    target: SimId,
     entity: hecs::Entity,
     kind: WorkKind,
     team: Team,
@@ -302,6 +303,30 @@ impl SimWorld {
                 }
                 self.push_task(&builders, task);
             }
+            SimCommand::MoveBuild { units, task, cell_x, cell_y } => {
+                let BuildTask::Build { blueprint, .. } = *task else {
+                    return;
+                };
+                for &id in units {
+                    let Some((_, entity)) = self.find_unit(id) else {
+                        continue;
+                    };
+                    let Ok(mut builder) = self.ecs.get::<&mut Builder>(entity) else {
+                        continue;
+                    };
+                    // A site that has been started stays where it is.
+                    let at = builder.tasks.iter().position(|other| other.is_same_order(task) && matches!(other, BuildTask::Build { site: None, .. }));
+                    let Some(at) = at else {
+                        continue;
+                    };
+                    builder.tasks[at] = BuildTask::Build { blueprint, cell_x: *cell_x, cell_y: *cell_y, site: None };
+                    drop(builder);
+                    // It may be walking to the old spot.
+                    if at == 0 {
+                        self.set_order(id, Order::IDLE);
+                    }
+                }
+            }
             SimCommand::QueueTask { units, task } => {
                 let builders: Vec<SimId> = units
                     .iter()
@@ -401,6 +426,7 @@ impl SimWorld {
             SimCommand::Move { .. }
             | SimCommand::AttackMove { .. }
             | SimCommand::QueueMove { .. }
+            | SimCommand::MoveOrder { .. }
             | SimCommand::Follow { .. }
             | SimCommand::Stop { .. }
             | SimCommand::Attack { .. } => {}
@@ -492,6 +518,7 @@ impl SimWorld {
     /// Runs one tick of the economy and everything that spends from it.
     pub fn step_production(&mut self) {
         self.work_links.clear();
+        self.factory_spending.clear();
         if self.builders.is_empty() && self.factories.is_empty() && self.structures.is_empty() && self.patrols.is_empty() {
             return;
         }
@@ -555,6 +582,9 @@ impl SimWorld {
             let share = satisfaction[team];
             spent[team].0 += item.mass * share;
             spent[team].1 += item.energy * share;
+            if item.kind == WorkKind::FactoryItem {
+                self.factory_spending.push((item.target, item.mass * share, item.energy * share));
+            }
             self.apply_work(item, item.step * share);
         }
         for (team_index, economy) in self.economies.iter_mut().enumerate() {
@@ -745,7 +775,7 @@ impl SimWorld {
         };
         let mass = unit.mass * step * (1000 - i64::from(mass_discount)) / 1000;
         let energy = unit.energy * step * (1000 - i64::from(energy_discount)) / 1000;
-        Some(WorkItem { entity, kind, team, step, mass, energy })
+        Some(WorkItem { target, entity, kind, team, step, mass, energy })
     }
 
     fn apply_work(&mut self, item: &WorkItem, amount: Res) {
@@ -1053,6 +1083,70 @@ impl SimWorld {
         }
         queues.sort_unstable_by_key(|queue| queue.id);
         queues
+    }
+
+    /// The viewer's orders that can still be moved. Patrols repeat on their own, attacks and
+    /// follow orders go wherever their target goes, and a site that has started stays put.
+    pub(super) fn order_stops_for(&self, team: Team) -> Vec<OrderStopView> {
+        let mut stops = Vec::new();
+        for &(id, entity) in &self.units {
+            let stats = self.ecs.get::<&UnitStats>(entity).expect("units have stats");
+            if stats.team != team || stats.is_structure || self.ecs.get::<&Patrol>(entity).is_ok() {
+                continue;
+            }
+            let mut add = |task: BuildTask| {
+                if let Some(step) = self.task_step(&task) {
+                    stops.push(OrderStopView { unit: id, task, position: [step.x, step.y, step.z] });
+                }
+            };
+            let tasks = self.ecs.get::<&Builder>(entity).map_or(0, |builder| builder.tasks.len());
+            if let Ok(builder) = self.ecs.get::<&Builder>(entity) {
+                for task in &builder.tasks {
+                    if matches!(task, BuildTask::Walk { .. } | BuildTask::Build { site: None, .. }) {
+                        add(*task);
+                    }
+                }
+            }
+            let order = *self.ecs.get::<&Order>(entity).expect("units have orders");
+            // A builder's route only leads to its first task, which is already listed.
+            if tasks == 0 && matches!(order.kind, OrderKind::Move | OrderKind::AttackMove) && !self.flow_field.is_following(order.route) {
+                add(BuildTask::Walk { order, started: true });
+            }
+            if let Ok(queue) = self.ecs.get::<&OrderQueue>(entity) {
+                for order in &queue.0 {
+                    add(BuildTask::Walk { order: *order, started: false });
+                }
+            }
+        }
+        stops
+    }
+
+    /// What the viewer's structures and commander make and spend, in tenths per second.
+    pub(super) fn rates_for(&self, team: Team) -> Vec<UnitRatesView> {
+        let tenths_per_second = |per_tick: Res| (per_tick * TICKS_PER_SECOND * 10).round().to_num::<i32>();
+        let commander = self.commanders[team.index()].and_then(|id| self.find_unit(id).map(|(_, entity)| (id, entity)));
+        let mut rates: Vec<UnitRatesView> = self
+            .structures
+            .iter()
+            .copied()
+            .chain(commander)
+            .filter(|&(_, entity)| self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team == team) && self.ecs.get::<&Construction>(entity).is_err())
+            .filter_map(|(id, entity)| {
+                let unit = self.blueprints.get(self.ecs.get::<&Blueprinted>(entity).ok()?.0);
+                let bonus = self.ecs.get::<&Adjacency>(entity).map_or(0, |adjacency| adjacency.mass_output_bonus);
+                let mass = unit.mass_income + unit.mass_income * i64::from(bonus) / 1000;
+                let spent = self.factory_spending.iter().find(|spending| spending.0 == id);
+                Some(UnitRatesView {
+                    id,
+                    mass_income: tenths_per_second(mass),
+                    energy_income: tenths_per_second(unit.energy_income),
+                    mass_use: spent.map_or(0, |spending| tenths_per_second(spending.1)),
+                    energy_use: spent.map_or(0, |spending| tenths_per_second(spending.2)),
+                })
+            })
+            .collect();
+        rates.sort_unstable_by_key(|rates| rates.id);
+        rates
     }
 
     /// This tick's work, limited to what `seen` allows. A team with nothing to spend is

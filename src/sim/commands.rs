@@ -19,6 +19,10 @@ pub enum SimCommand {
     QueueMove { units: Vec<SimId>, goal: Vec2Fp, attack: bool },
     /// Add a task after what is already ordered, for those that are builders.
     QueueTask { units: Vec<SimId>, task: BuildTask },
+    /// Send a move that has not finished somewhere else, for everyone sharing it.
+    MoveOrder { units: Vec<SimId>, task: BuildTask, goal: Vec2Fp },
+    /// Put a build that has not started somewhere else, for everyone sharing it.
+    MoveBuild { units: Vec<SimId>, task: BuildTask, cell_x: u32, cell_y: u32 },
     /// Build a structure with its corner at a terrain cell. `queued` keeps existing tasks.
     Build { units: Vec<SimId>, blueprint: BlueprintId, cell_x: u32, cell_y: u32, queued: bool },
     /// Add build power to a factory, a construction site, or another builder's work.

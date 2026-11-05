@@ -12,7 +12,7 @@ use crate::input::orders::PendingBuild;
 use crate::render::camera::Camera;
 use crate::sim::blueprints::{BlueprintDb, BlueprintId, UnitClass};
 use crate::sim::components::{BuildTask, OrderKind, SimId, Team};
-use crate::sim::world::{MatchResult, PlanStepKind, SimSnapshot, UnitView};
+use crate::sim::world::{MatchResult, PlanStepKind, SimSnapshot, UnitRatesView, UnitView};
 
 /// Trails are capped so that a large selection stays readable and cheap to draw.
 const MAX_TRAIL_UNITS: usize = 64;
@@ -36,6 +36,10 @@ const RED: Color32 = Color32::from_rgb(255, 95, 80);
 const STALLED: Color32 = Color32::from_rgb(255, 110, 90);
 const HEALTHY: Color32 = Color32::from_rgb(120, 230, 120);
 const BUILDING: Color32 = Color32::from_rgb(120, 200, 255);
+const SPENDING: Color32 = Color32::from_rgb(250, 190, 120);
+/// How close to an order's icon a Shift-press grabs it, in points.
+const HANDLE_GRAB_POINTS: f64 = 18.0;
+const HANDLE_RADIUS_POINTS: f32 = 10.0;
 /// Warm, so that beams stand out against both blue structures and the terrain.
 const BEAM_BUILD: Color32 = Color32::from_rgb(255, 215, 110);
 const BEAM_RECLAIM: Color32 = Color32::from_rgb(150, 255, 170);
@@ -213,6 +217,156 @@ pub fn hotkey_action(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintD
         hotkeys::CLEAR_QUEUE => Some(clear_action(&menu)),
         _ => None,
     }
+}
+
+/// What the selection makes and spends, as text. Empty if it has nothing to show.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SelectionRates {
+    pub output: String,
+    pub spending: String,
+}
+
+fn per_second(tenths: i32) -> String {
+    format!("{}.{}", tenths / 10, tenths % 10)
+}
+
+/// Adds up what the selected structures make, and what the selected factories are spending.
+pub fn selection_rates(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb) -> SelectionRates {
+    let mut total = UnitRatesView { id: SimId(0), mass_income: 0, energy_income: 0, mass_use: 0, energy_use: 0 };
+    let mut factories = 0;
+    for &id in selected {
+        let Ok(index) = snapshot.rates.binary_search_by_key(&id, |rates| rates.id) else {
+            continue;
+        };
+        let rates = snapshot.rates[index];
+        total.mass_income += rates.mass_income;
+        total.energy_income += rates.energy_income;
+        total.mass_use += rates.mass_use;
+        total.energy_use += rates.energy_use;
+        factories += usize::from(find_unit(snapshot, id).is_some_and(|unit| unit.blueprint != u16::MAX && db.get(BlueprintId(unit.blueprint)).is_factory()));
+    }
+    let mut output = Vec::new();
+    if total.mass_income > 0 {
+        output.push(format!("+{} mass/s", per_second(total.mass_income)));
+    }
+    if total.energy_income > 0 {
+        output.push(format!("+{} energy/s", per_second(total.energy_income)));
+    }
+    let spending = match (factories, total.mass_use + total.energy_use) {
+        (0, _) => String::new(),
+        (_, 0) => "Using nothing".to_string(),
+        _ => format!("Using {} mass/s, {} energy/s", per_second(total.mass_use), per_second(total.energy_use)),
+    };
+    SelectionRates { output: output.join(", "), spending }
+}
+
+/// An order that can be picked up and put somewhere else.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DraggableOrder {
+    Walk { units: Vec<SimId>, task: BuildTask },
+    Build { units: Vec<SimId>, task: BuildTask },
+    Rally { factories: Vec<SimId> },
+}
+
+/// An order's icon on the map. A group's order has one, in the middle of the group's spots.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OrderHandle {
+    pub position: [f64; 3],
+    pub kind: MarkerKind,
+    pub order: DraggableOrder,
+}
+
+/// One icon for each order that can be moved. Orders shared by several units count once.
+pub fn order_handles(snapshot: &SimSnapshot) -> Vec<OrderHandle> {
+    let raw = |value: i32| f64::from(value) / 4096.0;
+    // The task, its units, and the sum of their positions.
+    let mut orders: Vec<(BuildTask, Vec<SimId>, [f64; 3])> = Vec::new();
+    for stop in &snapshot.order_stops {
+        let position = stop.position.map(raw);
+        match orders.iter_mut().find(|(task, _, _)| task.is_same_order(&stop.task)) {
+            Some((_, units, sum)) => {
+                units.push(stop.unit);
+                *sum = std::array::from_fn(|axis| sum[axis] + position[axis]);
+            }
+            None => orders.push((stop.task, vec![stop.unit], position)),
+        }
+    }
+    let mut handles: Vec<OrderHandle> = orders
+        .into_iter()
+        .map(|(task, units, sum)| {
+            let position = sum.map(|value| value / units.len() as f64);
+            match task {
+                BuildTask::Walk { order, .. } => {
+                    let kind = if order.kind == OrderKind::AttackMove { MarkerKind::AttackMove } else { MarkerKind::Move };
+                    OrderHandle { position, kind, order: DraggableOrder::Walk { units, task } }
+                }
+                _ => OrderHandle { position, kind: MarkerKind::Build, order: DraggableOrder::Build { units, task } },
+            }
+        })
+        .collect();
+    // Factories given a rally point together keep sharing it.
+    let mut rallies: Vec<([i32; 3], Vec<SimId>)> = Vec::new();
+    for factory in &snapshot.factories {
+        let Some(rally) = factory.rally else {
+            continue;
+        };
+        match rallies.iter_mut().find(|(point, _)| *point == rally) {
+            Some((_, factories)) => factories.push(factory.id),
+            None => rallies.push((rally, vec![factory.id])),
+        }
+    }
+    handles.extend(rallies.into_iter().map(|(point, factories)| OrderHandle { position: point.map(raw), kind: MarkerKind::Rally, order: DraggableOrder::Rally { factories } }));
+    handles
+}
+
+/// The index of the handle under the cursor, if any. Both are in pixels.
+pub fn handle_under_cursor(handles: &[OrderHandle], camera: &Camera, cursor: [f64; 2], pixels_per_point: f64) -> Option<usize> {
+    let reach = HANDLE_GRAB_POINTS * pixels_per_point;
+    let mut best: Option<(f64, usize)> = None;
+    for (index, handle) in handles.iter().enumerate() {
+        if let Some(at) = camera.world_to_screen(handle.position) {
+            let away = (at[0] - cursor[0]).hypot(at[1] - cursor[1]);
+            if away <= reach && best.is_none_or(|(closest, _)| away < closest) {
+                best = Some((away, index));
+            }
+        }
+    }
+    best.map(|(_, index)| index)
+}
+
+fn draw_handle(painter: &egui::Painter, center: Pos2, kind: MarkerKind, radius: f32, opacity: f32) {
+    let color = marker_color(kind).gamma_multiply(opacity);
+    painter.circle(center, radius, Color32::from_black_alpha((210.0 * opacity) as u8), Stroke::new(2.0_f32, color));
+    let letter = match kind {
+        MarkerKind::AttackMove => "A",
+        MarkerKind::Build => "B",
+        MarkerKind::Rally => "R",
+        _ => "M",
+    };
+    painter.text(center, Align2::CENTER_CENTER, letter, FontId::proportional(radius * 1.2), color);
+}
+
+/// Draws the icons that can be grabbed, for while Shift is held.
+pub fn draw_order_handles(ctx: &egui::Context, camera: &Camera, handles: &[OrderHandle], hovered: Option<usize>, strength: f32, pixels_per_point: f32) {
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    for (index, handle) in handles.iter().enumerate() {
+        if let Some(at) = camera.world_to_screen(handle.position) {
+            let radius = if hovered == Some(index) { HANDLE_RADIUS_POINTS * 1.35 } else { HANDLE_RADIUS_POINTS };
+            draw_handle(&painter, Pos2::new(at[0] as f32 / pixels_per_point, at[1] as f32 / pixels_per_point), handle.kind, radius, strength);
+        }
+    }
+}
+
+/// Shows where an order being dragged was, and where it would go.
+pub fn draw_dragged_order(ctx: &egui::Context, camera: &Camera, handle: &OrderHandle, cursor: [f64; 2], pixels_per_point: f32) {
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    let to = Pos2::new(cursor[0] as f32 / pixels_per_point, cursor[1] as f32 / pixels_per_point);
+    if let Some(at) = camera.world_to_screen(handle.position) {
+        let from = Pos2::new(at[0] as f32 / pixels_per_point, at[1] as f32 / pixels_per_point);
+        painter.extend(egui::Shape::dashed_line(&[from, to], Stroke::new(1.5_f32, marker_color(handle.kind).gamma_multiply(0.7)), DASH_POINTS, GAP_POINTS));
+        draw_handle(&painter, from, handle.kind, HANDLE_RADIUS_POINTS * 0.7, 0.5);
+    }
+    draw_handle(&painter, to, handle.kind, HANDLE_RADIUS_POINTS * 1.35, 1.0);
 }
 
 /// One entry in the queue shown for the selection.
@@ -558,7 +712,18 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
         } else {
             format!("{} units selected", units.len())
         };
-        ui.strong(summary);
+        ui.horizontal(|ui| {
+            ui.strong(summary);
+            let rates = selection_rates(snapshot, selected, db);
+            if !rates.output.is_empty() {
+                ui.separator();
+                ui.colored_label(HEALTHY, rates.output);
+            }
+            if !rates.spending.is_empty() {
+                ui.separator();
+                ui.colored_label(SPENDING, rates.spending);
+            }
+        });
 
         if has_mobile_units(snapshot, selected) {
             unit_order_row(ui, armed, actions);
@@ -1318,7 +1483,7 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sim::world::{BuildQueueView, FactoryView, PlanStep, UnitPlanView, WorkLinkView};
+    use crate::sim::world::{BuildQueueView, FactoryView, OrderStopView, PlanStep, UnitPlanView, WorkLinkView};
 
     fn raw(value: f64) -> i32 {
         (value * 4096.0) as i32
@@ -1903,6 +2068,80 @@ mod tests {
         }
         let rect = ctx.memory(|memory| memory.area_rect(id)).expect("the popup was shown");
         assert!(rect.width() > 100.0 && rect.height() < 50.0, "the popup is {} by {}", rect.width(), rect.height());
+    }
+
+    fn walk(route: u32) -> BuildTask {
+        let order = crate::sim::components::Order { kind: OrderKind::Move, route, slot: None, slot_ticks: 0 };
+        BuildTask::Walk { order, started: false }
+    }
+
+    fn stop(unit: u32, task: BuildTask, x: f64) -> OrderStopView {
+        OrderStopView { unit: SimId(unit), task, position: [(x * 4096.0) as i32, 0, 0] }
+    }
+
+    #[test]
+    fn a_group_order_gets_one_handle_in_the_middle_of_its_spots() {
+        let db = BlueprintDb::standard();
+        let build = BuildTask::Build { blueprint: db.id("power_generator"), cell_x: 5, cell_y: 5, site: None };
+        let mut current = snapshot(vec![], vec![]);
+        current.order_stops = vec![stop(1, walk(7), 100.0), stop(2, walk(7), 200.0), stop(3, walk(8), 500.0), stop(4, build, 900.0), stop(5, build, 900.0)];
+        let handles = order_handles(&current);
+        assert_eq!(handles.len(), 3);
+        assert_eq!(handles[0].position[0], 150.0);
+        assert_eq!(handles[0].kind, MarkerKind::Move);
+        assert_eq!(handles[0].order, DraggableOrder::Walk { units: vec![SimId(1), SimId(2)], task: walk(7) });
+        assert_eq!(handles[1].order, DraggableOrder::Walk { units: vec![SimId(3)], task: walk(8) });
+        assert_eq!(handles[2].kind, MarkerKind::Build);
+        assert_eq!(handles[2].order, DraggableOrder::Build { units: vec![SimId(4), SimId(5)], task: build });
+    }
+
+    #[test]
+    fn factories_sharing_a_rally_point_share_a_handle() {
+        let mut current = snapshot(vec![], vec![]);
+        let rally = |id: u32, x: i32| FactoryView { id: SimId(id), queue: vec![], repeat: false, progress_permille: 0, rally: Some([x, 0, 0]) };
+        current.factories = vec![rally(1, 4096), rally(2, 4096), rally(3, 8192), factory_view(4, vec![], false, 0)];
+        let handles = order_handles(&current);
+        assert_eq!(handles.len(), 2, "the one with no rally point has no handle");
+        assert_eq!(handles[0].order, DraggableOrder::Rally { factories: vec![SimId(1), SimId(2)] });
+        assert_eq!(handles[1].order, DraggableOrder::Rally { factories: vec![SimId(3)] });
+    }
+
+    #[test]
+    fn handles_are_easy_to_grab_but_only_near_the_icon() {
+        let mut camera = Camera::new(10_240.0, [1600.0, 1000.0]);
+        camera.look_at(2_000.0, 2_000.0, 300.0);
+        let near = OrderHandle { position: [2_000.0, 2_000.0, 0.0], kind: MarkerKind::Move, order: DraggableOrder::Rally { factories: vec![] } };
+        let beside = OrderHandle { position: [2_100.0, 2_000.0, 0.0], ..near.clone() };
+        let handles = [near.clone(), beside];
+        let at = camera.world_to_screen(near.position).unwrap();
+        assert_eq!(handle_under_cursor(&handles, &camera, at, 1.0), Some(0));
+        assert_eq!(handle_under_cursor(&handles, &camera, [at[0] + 14.0, at[1] + 8.0], 1.0), Some(0), "a near miss still grabs it");
+        assert_eq!(handle_under_cursor(&handles, &camera, [at[0], at[1] + 40.0], 1.0), None);
+        assert_eq!(handle_under_cursor(&handles, &camera, [at[0], at[1] + 30.0], 2.0), Some(0), "the reach follows the screen's scale");
+    }
+
+    fn rates(id: u32, mass_income: i32, energy_income: i32, mass_use: i32, energy_use: i32) -> UnitRatesView {
+        UnitRatesView { id: SimId(id), mass_income, energy_income, mass_use, energy_use }
+    }
+
+    #[test]
+    fn the_panel_shows_what_structures_make_and_factories_spend() {
+        let db = BlueprintDb::standard();
+        let mut current = mixed_factories(&db);
+        let mut generator = unit(4, 0.0);
+        generator.blueprint = db.id("power_generator").0;
+        let mut extractor = unit(5, 0.0);
+        extractor.blueprint = db.id("mass_extractor").0;
+        current.units.extend([generator, extractor]);
+        current.rates = vec![rates(1, 0, 0, 36, 180), rates(2, 0, 0, 0, 0), rates(4, 0, 200, 0, 0), rates(5, 25, 0, 0, 0)];
+
+        let of = |selected: &[SimId]| selection_rates(&current, selected, &db);
+        assert_eq!(of(&[SimId(5)]), SelectionRates { output: "+2.5 mass/s".to_string(), spending: String::new() });
+        assert_eq!(of(&[SimId(4)]), SelectionRates { output: "+20.0 energy/s".to_string(), spending: String::new() });
+        assert_eq!(of(&[SimId(4), SimId(5)]).output, "+2.5 mass/s, +20.0 energy/s", "several add up");
+        assert_eq!(of(&[SimId(1)]), SelectionRates { output: String::new(), spending: "Using 3.6 mass/s, 18.0 energy/s".to_string() });
+        assert_eq!(of(&[SimId(2)]).spending, "Using nothing");
+        assert_eq!(of(&[SimId(99)]), SelectionRates::default());
     }
 
     #[test]

@@ -11,7 +11,7 @@ use sim_engine::audio::{self, AttackAlarm, SoundEngine, SoundSettings};
 use sim_engine::input::feedback::{MarkerKind, OrderFeedback};
 use sim_engine::input::hotkeys;
 use sim_engine::input::orders::{
-    assist_orders, deposit_position, free_deposits, line_cells, mobile_units, move_orders, pending_builds, queued_commands, placement_cell, placement_is_valid, placement_target, right_click_orders, PlacementMap, RightClick,
+    assist_orders, deposit_position, free_deposits, line_cells, mobile_units, move_orders, pending_builds, queued_commands, PendingBuild, placement_cell, placement_is_valid, placement_target, right_click_orders, PlacementMap, RightClick,
 };
 use sim_engine::input::selection::{ControlGroups, Selection};
 use sim_engine::math::fp::{Fp, Vec2Fp};
@@ -27,7 +27,8 @@ use sim_engine::sim::scenario::{self, advance_scripted, skirmish_start, Scenario
 use sim_engine::sim::terrain::HEIGHT_FRAC_BITS;
 use sim_engine::sim::world::{PlanStep, PlanStepKind, SimSnapshot, UnitPlanView};
 use sim_engine::soak::run_soak;
-use sim_engine::ui::{self, ArmedOrder, QuickSelectState, UiAction};
+use sim_engine::sim::components::BuildTask;
+use sim_engine::ui::{self, ArmedOrder, DraggableOrder, OrderHandle, QuickSelectState, UiAction};
 use winit::dpi::{LogicalSize, PhysicalPosition};
 use winit::event::{ElementState, Event, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -46,6 +47,8 @@ const OBSTACLE_DRAW_HEIGHT: f64 = 18.0;
 const STARTING_ALTITUDE: f64 = 900.0;
 /// How close the camera can get in a skirmish. Stress test units are far smaller, and keep the camera's own limit.
 const SKIRMISH_MIN_ALTITUDE: f64 = 130.0;
+/// A Shift-press on an order's icon that moves less than this is only a click.
+const MIN_ORDER_DRAG_PIXELS: f64 = 6.0;
 /// How long the Shift view of everyone's orders takes to fade after letting go, in seconds.
 const ORDERS_FADE_SECONDS: f64 = 1.0;
 
@@ -72,6 +75,7 @@ Controls:
   Shift + drag         Add a box of units to the selection
   Right-click          Attack an enemy, assist or repair a friend, reclaim a wreck,
                        move to the ground, or set a factory's rally point
+  Shift + drag an icon Move an order or rally point somewhere else
   Shift + right-click  Queue the order after what the selection is already doing
   Shift + left-click   Queue a structure, and keep placing
   Shift + left-drag    Queue a row of structures, and keep placing
@@ -385,6 +389,47 @@ fn commander_of(snapshot: &SimSnapshot, blueprints: &BlueprintDb) -> Option<SimI
         .map(|unit| unit.id)
 }
 
+/// Puts an order that was dragged where the cursor is now, if the normal rules allow it there.
+fn drop_order(session: &Session, selection: &Selection, camera: &Camera, map: &MapInfo, feedback: &mut OrderFeedback, handle: &OrderHandle, pixels_per_point: f64) {
+    let cursor = selection.cursor();
+    let ground = camera.screen_to_ground(cursor, &map.heights);
+    let Some(point) = ground else {
+        feedback.show_rejected(None, "Can't move an order off the map");
+        return;
+    };
+    let goal = Vec2Fp::new(Fp::from_num(point[0]), Fp::from_num(point[1]));
+    let position = ground_point(ground, &map.heights);
+    let orders = match &handle.order {
+        DraggableOrder::Walk { units, task } => vec![SimCommand::MoveOrder { units: units.clone(), task: *task, goal }],
+        DraggableOrder::Rally { factories } => factories.iter().map(|factory| SimCommand::SetRally { factory: *factory, point: goal }).collect(),
+        DraggableOrder::Build { units, task } => {
+            let BuildTask::Build { blueprint, .. } = *task else {
+                return;
+            };
+            let pending = pending_without(pending_builds(&session.current), handle);
+            let target = placement_target(&map.placement_map(), blueprint, cursor, ground, camera, &map.heights, &session.current.units, &pending, pixels_per_point);
+            match target.filter(|cell| placement_is_valid(&map.placement_map(), blueprint, *cell, &session.current.units, &pending)) {
+                Some((cell_x, cell_y)) => vec![SimCommand::MoveBuild { units: units.clone(), task: *task, cell_x, cell_y }],
+                // The order stays where it was.
+                None => {
+                    feedback.show_rejected(position, "Can't build there");
+                    return;
+                }
+            }
+        }
+    };
+    feedback.show_orders(&orders, position, &map.blueprints, "");
+    for order in orders {
+        session.send(order);
+    }
+}
+
+/// Queued builds, apart from the one being dragged, which must not block its own new spot.
+fn pending_without(mut pending: Vec<PendingBuild>, handle: &OrderHandle) -> Vec<PendingBuild> {
+    pending.retain(|build| (build.center[0] - handle.position[0]).abs() + (build.center[1] - handle.position[1]).abs() > 0.01);
+    pending
+}
+
 /// Plays each sound in turn, to hear them without playing a match.
 fn sound_check() {
     let engine = match SoundEngine::start() {
@@ -609,6 +654,8 @@ fn run_windowed(seed: u64, options: Options) {
     let mut hotkey_actions: Vec<UiAction> = Vec::new();
     let mut quick_select = QuickSelectState::default();
     let mut control_groups = ControlGroups::default();
+    // An order being dragged, and where the drag started.
+    let mut order_drag: Option<(OrderHandle, [f64; 2])> = None;
     let mut attack_alarm = AttackAlarm::default();
     let mut sound_settings = SoundSettings::default();
     // Test runs stay silent. The game plays on without sound if there is no device.
@@ -652,6 +699,19 @@ fn run_windowed(seed: u64, options: Options) {
                         };
                         let anchor = camera.screen_to_ground(selection.cursor(), &map.heights);
                         camera.zoom(steps, anchor);
+                    }
+                    WindowEvent::MouseInput { state: ElementState::Released, button: MouseButton::Left, .. } if order_drag.is_some() => {
+                        let (handle, start) = order_drag.take().expect("just checked");
+                        placing = None;
+                        let cursor = selection.cursor();
+                        if (cursor[0] - start[0]).hypot(cursor[1] - start[1]) < MIN_ORDER_DRAG_PIXELS {
+                            // Barely moved, so this was a Shift-click on whatever is there.
+                            selection.set_clock(clock.elapsed().as_secs_f64());
+                            selection.begin_drag();
+                            selection.finish_drag(&session.current.units, &camera, PLAYER_TEAM, shift_held);
+                        } else {
+                            drop_order(&session, &selection, &camera, &map, &mut feedback, &handle, window.scale_factor());
+                        }
                     }
                     WindowEvent::MouseInput { state: ElementState::Released, button: MouseButton::Left, .. } => {
                         if let (Some(start), Some(blueprint)) = (line_start.take(), placing) {
@@ -718,12 +778,27 @@ fn run_windowed(seed: u64, options: Options) {
                                     }
                                 }
                             } else {
-                                selection.begin_drag();
+                                // With Shift held, an order's icon can be picked up.
+                                let handles = if is_match && shift_held { ui::order_handles(&session.current) } else { Vec::new() };
+                                match ui::handle_under_cursor(&handles, &camera, selection.cursor(), window.scale_factor()) {
+                                    Some(index) => {
+                                        let handle = handles[index].clone();
+                                        if let DraggableOrder::Build { task: BuildTask::Build { blueprint, .. }, .. } = handle.order {
+                                            // Shows the same preview, grid, and deposits as placing a new one.
+                                            placing = Some(blueprint);
+                                        }
+                                        order_drag = Some((handle, selection.cursor()));
+                                    }
+                                    None => selection.begin_drag(),
+                                }
                             }
                         }
                         MouseButton::Right => {
                             line_start = None;
-                            if armed == Some(ArmedOrder::Patrol) && !patrol_points.is_empty() {
+                            if order_drag.take().is_some() {
+                                // Right-click cancels the drag, and the order stays where it was.
+                                placing = None;
+                            } else if armed == Some(ArmedOrder::Patrol) && !patrol_points.is_empty() {
                                 armed = None;
                                 start_patrol(&session, &selection, &map, &mut feedback, &mut patrol_points);
                             } else if armed.take().is_some() || placing.take().is_some() {
@@ -744,6 +819,10 @@ fn run_windowed(seed: u64, options: Options) {
                             PhysicalKey::Code(KeyCode::KeyS | KeyCode::ArrowDown) => held_keys[1] = pressed,
                             PhysicalKey::Code(KeyCode::KeyA | KeyCode::ArrowLeft) => held_keys[2] = pressed,
                             PhysicalKey::Code(KeyCode::KeyD | KeyCode::ArrowRight) => held_keys[3] = pressed,
+                            PhysicalKey::Code(KeyCode::Escape) if pressed && order_drag.is_some() => {
+                                order_drag = None;
+                                placing = None;
+                            }
                             PhysicalKey::Code(KeyCode::Escape) if pressed => {
                                 line_start = None;
                                 let was_armed = armed.take().is_some();
@@ -969,7 +1048,14 @@ fn run_windowed(seed: u64, options: Options) {
                         }
                         let beams = if is_match { ui::work_beams(&session.previous, &snapshot, alpha) } else { Vec::new() };
                         let beam_time = clock.elapsed().as_secs_f64();
-                        let pending = pending_builds(&snapshot);
+                        let pending = match &order_drag {
+                            Some((handle, _)) => pending_without(pending_builds(&snapshot), handle),
+                            None => pending_builds(&snapshot),
+                        };
+                        // Icons for moving orders, while Shift shows them.
+                        let handles = if is_match && orders_view_strength > 0.0 { ui::order_handles(&snapshot) } else { Vec::new() };
+                        let can_grab = shift_held && armed.is_none() && placing.is_none() && order_drag.is_none();
+                        let hovered_handle = if can_grab { ui::handle_under_cursor(&handles, &camera, selection.cursor(), window.scale_factor()) } else { None };
                         let cursor_ground = camera.screen_to_ground(selection.cursor(), &map.heights);
                         let placement_spot = placing.and_then(|blueprint| {
                             placement_target(&map.placement_map(), blueprint, selection.cursor(), cursor_ground, &camera, &map.heights, &snapshot.units, &pending, window.scale_factor())
@@ -999,11 +1085,21 @@ fn run_windowed(seed: u64, options: Options) {
                             ui::distant_selection_markers(ctx, &camera, &snapshot, &selected, pixels_per_point);
                             ui::draw_work_beams(ctx, &camera, &beams, beam_time, pixels_per_point);
                             ui::order_trails(ctx, &camera, &trails, pixels_per_point);
+                            match &order_drag {
+                                Some((handle, _)) => {
+                                    ui::draw_dragged_order(ctx, &camera, handle, selection.cursor(), pixels_per_point);
+                                    ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+                                }
+                                None => ui::draw_order_handles(ctx, &camera, &handles, hovered_handle, orders_view_strength, pixels_per_point),
+                            }
+                            if hovered_handle.is_some() {
+                                ctx.set_cursor_icon(egui::CursorIcon::Grab);
+                            }
                             ui::order_feedback(ctx, &camera, &snapshot, &feedback, pixels_per_point);
                             if let Some(order) = armed {
                                 ui::armed_order_hint(ctx, order);
                             }
-                            if armed.is_some() || placing.is_some() {
+                            if (armed.is_some() || placing.is_some()) && order_drag.is_none() {
                                 ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
                             }
                             if is_match {
@@ -1013,7 +1109,7 @@ fn run_windowed(seed: u64, options: Options) {
                                 ui::commander_alert(ctx, attack_alarm.alert_strength());
                                 ui::quick_select_bar(ctx, &snapshot, PLAYER_TEAM, &map.blueprints, &selected, camera.focus(), &mut quick_select, &mut actions);
                                 ui::command_panel(ctx, &snapshot, &selected, &map.blueprints, armed, &mut actions);
-                                if let Some(blueprint) = placing {
+                                if let Some(blueprint) = placing.filter(|_| order_drag.is_none()) {
                                     ui::placement_hint(ctx, &map.blueprints, blueprint);
                                 }
                                 if let Some(result) = snapshot.match_result {
@@ -1090,6 +1186,7 @@ fn run_windowed(seed: u64, options: Options) {
                                 UiAction::Restart => {
                                     attack_alarm = AttackAlarm::default();
                                     control_groups = ControlGroups::default();
+                                    order_drag = None;
                                     session = Session::start(scenario::skirmish(seed), CommandSource::PlayerVsAi { seed }, driver_options);
                                     selection.clear();
                                     placing = None;
