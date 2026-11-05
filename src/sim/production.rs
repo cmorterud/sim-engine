@@ -1211,7 +1211,7 @@ impl SimWorld {
         match *task {
             BuildTask::Build { blueprint, cell_x, cell_y, site } => {
                 let size = u32::from(self.blueprints.get(blueprint).footprint);
-                let width = if site.is_none() { size as i32 * TERRAIN_CELL_UNITS } else { 0 };
+                let width = if site.is_none() { fp_int(size as i32 * TERRAIN_CELL_UNITS).to_bits() } else { 0 };
                 Some(self.plan_step(PlanStepKind::Build, cell_center(cell_x, cell_y, size), width))
             }
             BuildTask::Assist { target } | BuildTask::Repair { target } => {

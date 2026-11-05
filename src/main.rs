@@ -86,7 +86,8 @@ Controls:
   P, then left-clicks  Add patrol points, then right-click or press P to start
   P + right-click      Hold P and add patrol points, then release P
   X                    Stop
-  Ctrl + 1 to 0        Save the selection as a group. Command works too
+  Ctrl + 1 to 0        Save the selection as a group, or clear it if nothing is selected.
+                       Command works too
   1 to 0               Select that group
   N                    Mute or unmute
   - and =              Sound quieter and louder
@@ -864,7 +865,12 @@ fn run_windowed(seed: u64, options: Options) {
                                 let group = hotkeys::group_for(code).expect("just checked");
                                 if command_held {
                                     if selection.selected().is_empty() {
-                                        feedback.show_rejected(None, "No units selected");
+                                        // Saving nothing means forgetting what was saved.
+                                        if control_groups.clear(group) {
+                                            feedback.set_label(MarkerKind::Move, format!("Group {group} cleared"));
+                                        } else {
+                                            feedback.show_rejected(None, &format!("Group {group} is already empty"));
+                                        }
                                     } else {
                                         control_groups.store(group, selection.selected());
                                         feedback.set_label(MarkerKind::Move, format!("Group {group} saved: {} units", selection.selected().len()));
@@ -1077,6 +1083,7 @@ fn run_windowed(seed: u64, options: Options) {
                         let snapped_deposit = placement_spot
                             .filter(|cell| extractor.is_some() && map.deposits.contains(cell))
                             .map(|cell| deposit_position(cell, &map.heights));
+                        let group_rows = control_groups.in_use(&snapshot.units);
                         let output = egui_context.run(raw_input, |ctx| {
                             ui::release_keyboard_focus(ctx);
                             ui::placement_grid(ctx, &camera, &grid_lines, f64::from(TERRAIN_CELL_UNITS), pixels_per_point);
@@ -1107,6 +1114,7 @@ fn run_windowed(seed: u64, options: Options) {
                                 let sound_label = sound.as_ref().map(|_| sound_settings.label());
                                 ui::resource_bar(ctx, &snapshot, sound_label.as_deref());
                                 ui::commander_alert(ctx, attack_alarm.alert_strength());
+                                ui::control_group_bar(ctx, &group_rows, &snapshot, PLAYER_TEAM, &map.blueprints, &selected, &mut actions);
                                 ui::quick_select_bar(ctx, &snapshot, PLAYER_TEAM, &map.blueprints, &selected, camera.focus(), &mut quick_select, &mut actions);
                                 ui::command_panel(ctx, &snapshot, &selected, &map.blueprints, armed, &mut actions);
                                 if let Some(blueprint) = placing.filter(|_| order_drag.is_none()) {

@@ -97,7 +97,7 @@ pub struct PlanStep {
     pub x: i32,
     pub y: i32,
     pub z: i32,
-    /// For a build that has not started: the width of its outline, in units.
+    /// For a build that has not started: the width of its outline, as raw `Fp` bits like the rest.
     pub pending_width: i32,
 }
 

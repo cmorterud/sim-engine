@@ -46,6 +46,7 @@ const BEAM_RECLAIM: Color32 = Color32::from_rgb(150, 255, 170);
 /// Matches how double-clicking a unit works.
 const QUICK_DOUBLE_CLICK_SECONDS: f64 = 0.4;
 const QUICK_ROW_WIDTH: f32 = 170.0;
+const CONTROL_GROUP_ROW_WIDTH: f32 = 220.0;
 /// How tall the queue can grow before it scrolls, in points.
 const QUEUE_MAX_HEIGHT: f32 = 60.0;
 /// How many pulses are on a work beam at once.
@@ -535,8 +536,12 @@ impl QuickSelectState {
 }
 
 fn quick_row(ui: &mut egui::Ui, text: &str, class: UnitClass, color: Color32, selected: bool) -> egui::Response {
+    bar_row(ui, QUICK_ROW_WIDTH, text, class, color, selected)
+}
+
+fn bar_row(ui: &mut egui::Ui, width: f32, text: &str, class: UnitClass, color: Color32, selected: bool) -> egui::Response {
     // Drawn by hand, because a wide button would center its text over the icon.
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(QUICK_ROW_WIDTH, 24.0), egui::Sense::click());
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 24.0), egui::Sense::click());
     let visuals = ui.style().interact_selectable(&response, selected);
     let painter = ui.painter();
     painter.rect(rect, visuals.rounding, visuals.weak_bg_fill, visuals.bg_stroke);
@@ -622,6 +627,50 @@ pub fn quick_select_bar(
 /// which would otherwise squeeze its text into a tall, narrow column.
 fn one_line_label(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>) {
     ui.add(egui::Label::new(text).extend());
+}
+
+/// What a control group's row says: its number, and what is in it.
+pub fn control_group_label(group: usize, members: &[SimId], snapshot: &SimSnapshot, db: &BlueprintDb) -> String {
+    let short_name = |unit: &UnitView| {
+        let blueprint = db.get(BlueprintId(unit.blueprint));
+        if blueprint.is_commander() { "ACU".to_string() } else { blueprint.name.clone() }
+    };
+    let mut names = members.iter().filter_map(|id| find_unit(snapshot, *id)).filter(|unit| unit.blueprint != u16::MAX).map(short_name);
+    let first = names.next();
+    let what = match first {
+        Some(name) if names.all(|other| other == name) => {
+            if members.len() == 1 { name } else { format!("{name} x{}", members.len()) }
+        }
+        _ => format!("{} units", members.len()),
+    };
+    format!("{group}: {what}")
+}
+
+fn control_group_rows(ui: &mut egui::Ui, groups: &[(usize, Vec<SimId>)], snapshot: &SimSnapshot, db: &BlueprintDb, color: Color32, selected: &[SimId], actions: &mut Vec<UiAction>) {
+    let shift = ui.input(|input| input.modifiers.shift);
+    for (group, members) in groups {
+        let class = members
+            .first()
+            .and_then(|id| find_unit(snapshot, *id))
+            .filter(|unit| unit.blueprint != u16::MAX)
+            .map_or(UnitClass::Bot, |unit| db.get(BlueprintId(unit.blueprint)).class);
+        let any_selected = members.iter().any(|id| selected.contains(id));
+        let label = control_group_label(*group, members, snapshot, db);
+        let hint = format!("Click or press {group} to select. Hold Shift to add. Ctrl + {group} with nothing selected clears it.");
+        if bar_row(ui, CONTROL_GROUP_ROW_WIDTH, &label, class, color, any_selected).on_hover_text(hint).clicked() {
+            actions.push(UiAction::QuickSelect { units: members.clone(), add: shift });
+        }
+    }
+}
+
+/// The bar on the left: the saved control groups, and what is in them.
+pub fn control_group_bar(ctx: &egui::Context, groups: &[(usize, Vec<SimId>)], snapshot: &SimSnapshot, team: Team, db: &BlueprintDb, selected: &[SimId], actions: &mut Vec<UiAction>) {
+    if groups.is_empty() {
+        return;
+    }
+    egui::Area::new(egui::Id::new("control groups")).anchor(Align2::LEFT_TOP, Vec2::new(8.0, 36.0)).show(ctx, |ui| {
+        egui::Frame::popup(ui.style()).show(ui, |ui| control_group_rows(ui, groups, snapshot, db, team_color(team), selected, actions));
+    });
 }
 
 /// The text alert that goes with the "ACU under attack" sound.
@@ -1287,8 +1336,8 @@ pub fn distant_selection_markers(ctx: &egui::Context, camera: &Camera, snapshot:
 pub fn pending_build_outlines(ctx: &egui::Context, camera: &Camera, builds: &[PendingBuild], pixels_per_point: f32) {
     let painter = ctx.layer_painter(egui::LayerId::background());
     let color = marker_color(MarkerKind::Build);
-    let stroke = Stroke::new(1.5_f32, color.gamma_multiply(0.7));
-    let fill = color.gamma_multiply(0.22);
+    let stroke = Stroke::new(2.0_f32, color.gamma_multiply(0.9));
+    let fill = color.gamma_multiply(0.25);
     for build in builds {
         let half = build.width * 0.5;
         let [x, y, z] = build.center;
@@ -2142,6 +2191,38 @@ mod tests {
         assert_eq!(of(&[SimId(1)]), SelectionRates { output: String::new(), spending: "Using 3.6 mass/s, 18.0 energy/s".to_string() });
         assert_eq!(of(&[SimId(2)]).spending, "Using nothing");
         assert_eq!(of(&[SimId(99)]), SelectionRates::default());
+    }
+
+    #[test]
+    fn a_control_group_says_what_is_in_it() {
+        let db = BlueprintDb::standard();
+        let current = commander_and_engineer(&db);
+        assert_eq!(control_group_label(1, &[SimId(11)], &current, &db), "1: Engineer");
+        assert_eq!(control_group_label(2, &[SimId(11), SimId(11)], &current, &db), "2: Engineer x2");
+        assert_eq!(control_group_label(0, &[SimId(10), SimId(12)], &current, &db), "0: 2 units");
+        assert_eq!(control_group_label(3, &[SimId(10)], &current, &db), "3: ACU");
+    }
+
+    #[test]
+    fn clicking_a_control_group_selects_it_and_shift_adds_it() {
+        let db = BlueprintDb::standard();
+        let current = commander_and_engineer(&db);
+        let groups = vec![(1, vec![SimId(10), SimId(11)]), (0, vec![SimId(12)])];
+        let click = |row: usize, modifiers: egui::Modifiers| {
+            let ctx = egui::Context::default();
+            let at = egui::pos2(70.0, 20.0 + row as f32 * 27.0);
+            let press = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers };
+            let mut actions = Vec::new();
+            for events in [vec![], vec![egui::Event::PointerMoved(at)], vec![press(true)], vec![press(false)], vec![]] {
+                let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))), modifiers, events, ..egui::RawInput::default() };
+                let _ = ctx.run(input, |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| control_group_rows(ui, &groups, &current, &db, BLUE, &[], &mut actions));
+                });
+            }
+            actions
+        };
+        assert_eq!(click(0, egui::Modifiers::NONE), [UiAction::QuickSelect { units: vec![SimId(10), SimId(11)], add: false }]);
+        assert_eq!(click(1, egui::Modifiers::SHIFT), [UiAction::QuickSelect { units: vec![SimId(12)], add: true }]);
     }
 
     #[test]

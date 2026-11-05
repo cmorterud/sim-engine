@@ -1,6 +1,7 @@
 //! The vertical slice's rules: flow economy, construction, factories, reclaim, adjacency,
 //! fog of war, and assassination (GAME_SPECIFICATION.md §2-9, §16).
 
+use sim_engine::input::orders::{pending_builds, placement_is_valid, PlacementMap};
 use sim_engine::math::fp::{fp_int, Fp, Vec2Fp, Vec3Fp};
 use sim_engine::sim::blueprints::{BlueprintId, Res};
 use sim_engine::sim::commands::SimCommand;
@@ -727,7 +728,7 @@ fn queued_builds_appear_in_order_and_leave_the_plan_when_finished() {
     let snapshot = world.snapshot_for(Some(Team::Blue));
     let plan = snapshot.plans.iter().find(|plan| plan.id == engineer).unwrap();
     assert_eq!(plan.steps[0].pending_width, 0, "the first site has started");
-    assert_eq!(plan.steps[1].pending_width, CELL, "the second has not");
+    assert_eq!(plan.steps[1].pending_width, fp_int(CELL).to_bits(), "the second has not");
 
     // The three builds take 25, 50, and 25 seconds of work, plus the walks between them.
     run(&mut world, 1_400);
@@ -1655,4 +1656,32 @@ fn a_structure_being_built_shows_no_output_yet() {
     run(&mut world, 400);
     assert!(is_finished(&world, site));
     assert_eq!(world.snapshot_for(Some(Team::Blue)).rates.iter().find(|rates| rates.id == site).unwrap().energy_income, 200);
+}
+
+/// The whole path from an order to what the interface draws and checks against. Each side was
+/// once tested with its own idea of the width's units, which hid the outlines in real play.
+#[test]
+fn a_queued_build_gives_a_full_size_outline_and_blocks_its_spot() {
+    let mut world = test_world();
+    set_resources(&mut world, Team::Blue, 100_000, 1_000_000);
+    let (engineer_blueprint, factory, generator) = (id(&world, "t1_engineer"), id(&world, "land_factory_t1"), id(&world, "power_generator"));
+    let engineer = world.spawn_mobile(engineer_blueprint, Team::Blue, point(1_000, 1_000));
+    world.advance_tick(&[
+        SimCommand::Build { units: vec![engineer], blueprint: generator, cell_x: 150, cell_y: 150, queued: false },
+        SimCommand::Build { units: vec![engineer], blueprint: factory, cell_x: 100, cell_y: 100, queued: true },
+    ]);
+    let current = world.snapshot_for(Some(Team::Blue));
+    let pending = pending_builds(&current);
+    assert_eq!(pending.len(), 2);
+    let cell = f64::from(CELL);
+    assert_eq!(pending[0].width, f64::from(world.blueprints.get(generator).footprint) * cell);
+    assert_eq!(pending[1].width, f64::from(world.blueprints.get(factory).footprint) * cell, "the outline should be the size of the factory");
+    let size = f64::from(world.blueprints.get(factory).footprint);
+    assert_eq!(pending[1].center[..2], [(100.0 + size / 2.0) * cell, (100.0 + size / 2.0) * cell]);
+
+    let deposits: Vec<(u32, u32)> = world.deposits.clone();
+    let cells_per_side = world.terrain.cells_per_side() as u32;
+    let map = PlacementMap { cells_per_side, blocked_cells: &[], deposits: &deposits, blueprints: &world.blueprints };
+    assert!(!placement_is_valid(&map, generator, (101, 101), &current.units, &pending), "a queued factory must block its spot");
+    assert!(placement_is_valid(&map, generator, (120, 120), &current.units, &pending));
 }

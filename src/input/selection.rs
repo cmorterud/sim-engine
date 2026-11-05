@@ -177,6 +177,24 @@ impl ControlGroups {
         self.groups[group] = units.to_vec();
     }
 
+    /// Forgets a group. Returns whether there was anything in it.
+    pub fn clear(&mut self, group: usize) -> bool {
+        let had_units = !self.groups[group].is_empty();
+        self.groups[group].clear();
+        had_units
+    }
+
+    /// The groups with living units, in keyboard order, with 0 last.
+    pub fn in_use(&self, units: &[UnitView]) -> Vec<(usize, Vec<SimId>)> {
+        (1..10)
+            .chain(std::iter::once(0))
+            .filter_map(|group| {
+                let alive: Vec<SimId> = self.groups[group].iter().copied().filter(|id| units.binary_search_by_key(id, |unit| unit.id).is_ok()).collect();
+                (!alive.is_empty()).then_some((group, alive))
+            })
+            .collect()
+    }
+
     /// The group's units that are still alive, given the current units sorted by `SimId`.
     pub fn recall(&mut self, group: usize, units: &[UnitView]) -> &[SimId] {
         let members = &mut self.groups[group];
@@ -270,6 +288,29 @@ mod tests {
         assert!(groups.recall(2, &units).is_empty());
         groups.store(1, &[SimId(2)]);
         assert_eq!(groups.recall(1, &units), [SimId(2)], "storing again replaces the group");
+    }
+
+    #[test]
+    fn clearing_a_group_forgets_its_units_and_only_that_group() {
+        let units: Vec<UnitView> = (1..=3).map(plain_unit).collect();
+        let mut groups = ControlGroups::default();
+        groups.store(1, &[SimId(1)]);
+        groups.store(2, &[SimId(2)]);
+        assert!(groups.clear(1));
+        assert!(groups.recall(1, &units).is_empty());
+        assert_eq!(groups.recall(2, &units), [SimId(2)]);
+        assert!(!groups.clear(1), "there was nothing left to clear");
+    }
+
+    #[test]
+    fn the_sidebar_lists_groups_in_keyboard_order_without_empty_or_dead_ones() {
+        let units: Vec<UnitView> = (1..=3).map(plain_unit).collect();
+        let mut groups = ControlGroups::default();
+        assert!(groups.in_use(&units).is_empty());
+        groups.store(0, &[SimId(3)]);
+        groups.store(4, &[SimId(9)]);
+        groups.store(2, &[SimId(1), SimId(9)]);
+        assert_eq!(groups.in_use(&units), [(2, vec![SimId(1)]), (0, vec![SimId(3)])], "0 comes last, as on the keyboard");
     }
 
     #[test]
