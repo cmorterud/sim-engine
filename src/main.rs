@@ -448,6 +448,9 @@ fn sound_check() {
         wait(3);
     }
     engine.set_levels(audio::SoundLevels::default());
+    println!("selecting a unit");
+    engine.play_select();
+    wait(1);
     println!("ACU under attack");
     engine.play_alarm();
     wait(2);
@@ -957,7 +960,11 @@ fn run_windowed(seed: u64, options: Options) {
                             Some((id, session.current.units[index].health_permille))
                         });
                         let attacked = is_match && attack_alarm.update(commander, dt);
+                        let picked = selection.take_picked();
                         if let Some(sound) = &sound {
+                            if picked {
+                                sound.play_select();
+                            }
                             let viewport = camera.viewport();
                             let levels = audio::sound_levels(&session.current, camera.zoom_from_closest(), |unit| {
                                 camera

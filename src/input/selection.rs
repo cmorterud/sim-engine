@@ -22,6 +22,8 @@ pub struct Selection {
     /// The time, from `set_clock`, so that double clicks can be timed.
     clock: f64,
     last_click: Option<(SimId, f64)>,
+    /// Whether the player has picked units since this was last checked, for the sound.
+    picked: bool,
 }
 
 impl Selection {
@@ -31,6 +33,12 @@ impl Selection {
 
     pub fn clear(&mut self) {
         self.selected.clear();
+    }
+
+    /// Whether units have been picked since the last call. Picking units that were already
+    /// selected counts. Removing units, clicking empty ground, and units dying do not.
+    pub fn take_picked(&mut self) -> bool {
+        std::mem::take(&mut self.picked)
     }
 
     pub fn move_cursor(&mut self, cursor: [f64; 2]) {
@@ -86,13 +94,16 @@ impl Selection {
                     Ok(index) => {
                         self.selected.remove(index);
                     }
-                    Err(index) => self.selected.insert(index, clicked),
+                    Err(index) => {
+                        self.selected.insert(index, clicked);
+                        self.picked = true;
+                    }
                 }
             }
             return;
         }
         let previous = if adding { std::mem::take(&mut self.selected) } else { Vec::new() };
-        self.selected = match dragged {
+        let found = match dragged {
             Some((min, max)) => {
                 // A box over a base and an army means the army.
                 let found = units_in_box(units, camera, team, min, max);
@@ -105,8 +116,10 @@ impl Selection {
                     found
                 }
             }
-            None => nearest_unit(units, camera, team, start).into_iter().collect(),
+            None => nearest_unit(units, camera, team, start).into_iter().collect::<Vec<_>>(),
         };
+        self.picked |= !found.is_empty();
+        self.selected = found;
         if adding {
             self.selected.extend(previous);
             self.selected.sort_unstable();
@@ -128,6 +141,7 @@ impl Selection {
             self.selected.clear();
         }
         self.selected.extend(same_type.map(|unit| unit.id));
+        self.picked = true;
         self.selected.sort_unstable();
         self.selected.dedup();
     }
@@ -138,6 +152,7 @@ impl Selection {
     }
 
     pub fn select(&mut self, ids: Vec<SimId>) {
+        self.picked |= !ids.is_empty();
         self.selected = ids;
         self.selected.sort_unstable();
         self.selected.dedup();
@@ -145,6 +160,7 @@ impl Selection {
 
     /// Adds to the selection, keeping what is already there.
     pub fn add(&mut self, ids: &[SimId]) {
+        self.picked |= !ids.is_empty();
         self.selected.extend_from_slice(ids);
         self.selected.sort_unstable();
         self.selected.dedup();
@@ -395,6 +411,81 @@ mod tests {
         assert_eq!(selection.selected(), [SimId(1)], "a second click removes it");
         click(&mut selection, &units, &camera, [first[0] + 300.0, first[1]], true);
         assert_eq!(selection.selected(), [SimId(1)], "missing keeps what is selected");
+    }
+
+    #[test]
+    fn picking_units_any_way_is_reported_once() {
+        let camera = camera();
+        let units = [unit(1, Team::Blue, 40_000.0, 40_000.0), unit(2, Team::Blue, 40_050.0, 40_000.0)];
+        let (first, second) = (camera.world_to_screen([40_000.0, 40_000.0, 1.0]).unwrap(), camera.world_to_screen([40_050.0, 40_000.0, 1.0]).unwrap());
+        let mut selection = Selection::default();
+        assert!(!selection.take_picked());
+
+        click(&mut selection, &units, &camera, first, false);
+        assert!(selection.take_picked(), "a click on a unit");
+        assert!(!selection.take_picked(), "it should only be reported once");
+
+        selection.move_cursor([first[0] - 10.0, first[1] - 10.0]);
+        selection.begin_drag();
+        selection.move_cursor([second[0] + 10.0, second[1] + 10.0]);
+        selection.end_drag(&units, &camera, Team::Blue);
+        assert!(selection.take_picked(), "a box");
+
+        selection.select(vec![SimId(1)]);
+        assert!(selection.take_picked(), "a hotkey or the quick select bar");
+        selection.select(vec![SimId(1)]);
+        assert!(selection.take_picked(), "pressing a group's key again, with the same units");
+        selection.add(&[SimId(2)]);
+        assert!(selection.take_picked(), "Shift on a bar");
+
+        click(&mut selection, &units, &camera, first, false);
+        selection.take_picked();
+        click(&mut selection, &units, &camera, second, true);
+        assert!(selection.take_picked(), "Shift-clicking a unit in");
+    }
+
+    #[test]
+    fn a_double_click_is_reported() {
+        let camera = camera();
+        let units = [unit(1, Team::Blue, 40_000.0, 40_000.0)];
+        let at = camera.world_to_screen([40_000.0, 40_000.0, 1.0]).unwrap();
+        let mut selection = Selection::default();
+        click(&mut selection, &units, &camera, at, false);
+        selection.take_picked();
+        click(&mut selection, &units, &camera, at, false);
+        assert!(selection.take_picked());
+    }
+
+    #[test]
+    fn nothing_is_reported_without_picking_units() {
+        let camera = camera();
+        let units = [unit(1, Team::Blue, 40_000.0, 40_000.0)];
+        let at = camera.world_to_screen([40_000.0, 40_000.0, 1.0]).unwrap();
+        let mut selection = Selection::default();
+
+        let empty = [at[0] + 300.0, at[1]];
+        click(&mut selection, &units, &camera, empty, false);
+        assert!(!selection.take_picked(), "a click on empty ground");
+        click(&mut selection, &units, &camera, empty, true);
+        assert!(!selection.take_picked(), "a Shift-click on empty ground");
+        selection.select(vec![]);
+        assert!(!selection.take_picked(), "selecting nothing");
+        selection.add(&[]);
+        assert!(!selection.take_picked(), "adding nothing");
+
+        click(&mut selection, &units, &camera, at, false);
+        selection.take_picked();
+        selection.set_clock(10.0);
+        click(&mut selection, &units, &camera, at, true);
+        assert!(selection.selected().is_empty(), "the test needs the unit removed");
+        assert!(!selection.take_picked(), "a Shift-click removing a unit");
+
+        click(&mut selection, &units, &camera, at, false);
+        selection.take_picked();
+        selection.retain_alive(&[]);
+        assert!(!selection.take_picked(), "a selected unit dying");
+        selection.clear();
+        assert!(!selection.take_picked(), "clearing the selection");
     }
 
     #[test]

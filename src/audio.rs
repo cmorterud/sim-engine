@@ -26,6 +26,9 @@ const FADE_SECONDS: f32 = 0.08;
 const FULL_VOLUME_ZOOM: f64 = 0.12;
 const SILENT_ZOOM: f64 = 0.3;
 
+const SELECT_GAIN: f32 = 0.14;
+const SELECT_SECONDS: f32 = 0.09;
+
 const ALARM_NOTE_SECONDS: f32 = 0.18;
 const ALARM_STEP_SECONDS: f32 = 0.22;
 const ALARM_NOTES: u32 = 4;
@@ -38,6 +41,8 @@ pub struct SoundTargets {
     pub volume: f32,
     /// Goes up by one for each alarm to play.
     pub alarm_serial: u32,
+    /// Goes up by one for each selection cue to play.
+    pub select_serial: u32,
 }
 
 fn advance(phase: &mut f32, frequency: f32, rate: f32) -> f32 {
@@ -70,6 +75,9 @@ pub struct Synth {
     alarm_phase: f32,
     alarm_elapsed: Option<f32>,
     alarm_serial: u32,
+    select_phase: f32,
+    select_elapsed: Option<f32>,
+    select_serial: u32,
 }
 
 impl Synth {
@@ -87,6 +95,9 @@ impl Synth {
             alarm_phase: 0.0,
             alarm_elapsed: None,
             alarm_serial: 0,
+            select_phase: 0.0,
+            select_elapsed: None,
+            select_serial: 0,
         }
     }
 
@@ -112,6 +123,25 @@ impl Synth {
         let raw = (tone * gate * 1.1).clamp(-1.0, 1.0);
         self.factory_filtered += self.filter * (raw - self.factory_filtered);
         self.factory_filtered
+    }
+
+    /// A short, soft tick that rises a little, so that it reads as a response and not a warning.
+    fn select_voice(&mut self, serial: u32) -> f32 {
+        if serial != self.select_serial {
+            self.select_serial = serial;
+            self.select_elapsed = Some(0.0);
+        }
+        let Some(elapsed) = self.select_elapsed else {
+            return 0.0;
+        };
+        if elapsed >= SELECT_SECONDS {
+            self.select_elapsed = None;
+            return 0.0;
+        }
+        self.select_elapsed = Some(elapsed + 1.0 / self.rate);
+        let phase = advance(&mut self.select_phase, 880.0 + 1_800.0 * elapsed, self.rate);
+        let envelope = (elapsed / 0.003).min(1.0) * (-elapsed / 0.025).exp() * ((SELECT_SECONDS - elapsed) / 0.01).min(1.0);
+        envelope * sine(phase)
     }
 
     /// Two notes, high then low, played twice.
@@ -146,8 +176,9 @@ impl Synth {
         let build = self.build_voice() * self.build_level * BUILD_GAIN;
         let factory = self.factory_voice() * self.factory_level * FACTORY_GAIN;
         let alarm = self.alarm_voice(targets.alarm_serial) * ALARM_GAIN;
+        let select = self.select_voice(targets.select_serial) * SELECT_GAIN;
         // Soft clipping, so that everything at once cannot distort harshly.
-        ((build + factory + alarm) * self.volume).tanh()
+        ((build + factory + alarm + select) * self.volume).tanh()
     }
 }
 
@@ -158,6 +189,7 @@ struct SharedTargets {
     factory: AtomicU32,
     volume: AtomicU32,
     alarm_serial: AtomicU32,
+    select_serial: AtomicU32,
     frames_played: AtomicU64,
 }
 
@@ -168,6 +200,7 @@ impl SharedTargets {
             factory: f32::from_bits(self.factory.load(Ordering::Relaxed)),
             volume: f32::from_bits(self.volume.load(Ordering::Relaxed)),
             alarm_serial: self.alarm_serial.load(Ordering::Relaxed),
+            select_serial: self.select_serial.load(Ordering::Relaxed),
         }
     }
 }
@@ -209,6 +242,10 @@ impl SoundEngine {
 
     pub fn play_alarm(&self) {
         self.shared.alarm_serial.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn play_select(&self) {
+        self.shared.select_serial.fetch_add(1, Ordering::Relaxed);
     }
 
     /// How many frames the device has asked for, to confirm that sound is really running.
@@ -384,7 +421,7 @@ mod tests {
     fn silence_when_nothing_is_happening_or_when_muted() {
         let quiet = settled(SoundTargets { volume: 1.0, ..SoundTargets::default() });
         assert!(quiet.iter().all(|sample| sample.abs() < 1e-6));
-        let muted = settled(SoundTargets { build: 1.0, factory: 1.0, volume: 0.0, alarm_serial: 0 });
+        let muted = settled(SoundTargets { build: 1.0, factory: 1.0, volume: 0.0, ..SoundTargets::default() });
         assert!(muted.iter().all(|sample| sample.abs() < 1e-3));
     }
 
@@ -425,6 +462,43 @@ mod tests {
         assert!(loudness(&after[RATE as usize / 4..]) < background * 1.1, "the alarm must end, and not repeat");
         let again = render(&mut synth, 0.8, SoundTargets { alarm_serial: 2, ..before });
         assert!(loudness(&again) > background * 2.0, "the next request plays again");
+    }
+
+    fn peak(samples: &[f32]) -> f32 {
+        samples.iter().fold(0.0, |most, sample| most.max(sample.abs()))
+    }
+
+    #[test]
+    fn the_selection_cue_is_short_soft_and_plays_for_each_request() {
+        let mut synth = Synth::new(RATE);
+        let quiet = SoundTargets { volume: 1.0, ..SoundTargets::default() };
+        render(&mut synth, 1.0, quiet);
+        let cue = render(&mut synth, 0.2, SoundTargets { select_serial: 1, ..quiet });
+        let tail = (SELECT_SECONDS * RATE) as usize + 2;
+        assert!(peak(&cue[..tail]) > 0.05, "it should be heard, at {}", peak(&cue[..tail]));
+        assert!(peak(&cue) < ALARM_GAIN * 0.5, "it should be well under the alarm, at {}", peak(&cue));
+        assert!(peak(&cue[tail..]) < 1e-6, "it should be over quickly");
+        let jump = cue.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0, f32::max);
+        assert!(jump < 0.05, "a jump of {jump} would click");
+
+        let silent = render(&mut synth, 0.2, SoundTargets { select_serial: 1, ..quiet });
+        assert!(peak(&silent) < 1e-6, "it must not repeat by itself");
+        let again = render(&mut synth, 0.2, SoundTargets { select_serial: 2, ..quiet });
+        assert!(peak(&again) > 0.05, "the next request plays again");
+    }
+
+    #[test]
+    fn the_selection_cue_is_silent_when_muted_and_can_be_heard_over_building() {
+        let mut synth = Synth::new(RATE);
+        let muted = SoundTargets { select_serial: 1, ..SoundTargets::default() };
+        assert!(peak(&render(&mut synth, 0.2, muted)) < 1e-6);
+
+        let mut synth = Synth::new(RATE);
+        let busy = SoundTargets { build: 1.0, volume: 1.0, ..SoundTargets::default() };
+        render(&mut synth, 1.0, busy);
+        let hum = peak(&render(&mut synth, 0.2, busy));
+        let with_cue = peak(&render(&mut synth, 0.1, SoundTargets { select_serial: 1, ..busy }));
+        assert!(with_cue > hum * 1.3, "{with_cue} over {hum}");
     }
 
     fn view(id: u32, built_permille: u16) -> UnitView {
