@@ -148,6 +148,19 @@ pub enum BuildTask {
     Repair { target: SimId },
 }
 
+impl BuildTask {
+    /// Whether two tasks are the same order. A build is the same order before and after
+    /// its site appears.
+    pub fn is_same_order(&self, other: &Self) -> bool {
+        match (*self, *other) {
+            (Self::Build { blueprint, cell_x, cell_y, .. }, Self::Build { blueprint: other_blueprint, cell_x: other_x, cell_y: other_y, .. }) => {
+                blueprint == other_blueprint && cell_x == other_x && cell_y == other_y
+            }
+            _ => self == other,
+        }
+    }
+}
+
 /// An engineer or commander. Works through its tasks in order.
 #[derive(Clone, Debug)]
 pub struct Builder {

@@ -9,7 +9,7 @@ use crate::input::hotkeys::{self, blueprint_hotkey};
 use crate::input::orders::PendingBuild;
 use crate::render::camera::Camera;
 use crate::sim::blueprints::{BlueprintDb, BlueprintId, UnitClass};
-use crate::sim::components::{SimId, Team};
+use crate::sim::components::{BuildTask, SimId, Team};
 use crate::sim::world::{MatchResult, PlanStepKind, SimSnapshot, UnitView};
 
 /// Trails are capped so that a large selection stays readable and cheap to draw.
@@ -37,6 +37,8 @@ const BUILDING: Color32 = Color32::from_rgb(120, 200, 255);
 /// Warm, so that beams stand out against both blue structures and the terrain.
 const BEAM_BUILD: Color32 = Color32::from_rgb(255, 215, 110);
 const BEAM_RECLAIM: Color32 = Color32::from_rgb(150, 255, 170);
+/// How tall the queue can grow before it scrolls, in points.
+const QUEUE_MAX_HEIGHT: f32 = 60.0;
 /// How many pulses are on a work beam at once.
 const BEAM_PULSES: usize = 5;
 /// How long a pulse takes to travel along a beam, in seconds.
@@ -52,6 +54,10 @@ pub enum UiAction {
     Queue { factories: Vec<SimId>, blueprint: BlueprintId, selected_count: usize },
     SetRepeat { factories: Vec<SimId>, repeat: bool },
     ClearQueue { factories: Vec<SimId> },
+    /// Remove one order from these builders' queues.
+    CancelTask { units: Vec<SimId>, task: BuildTask },
+    /// Remove one of an item from each of these factories' queues.
+    RemoveQueued { factories: Vec<SimId>, blueprint: BlueprintId },
     Restart,
 }
 
@@ -119,6 +125,76 @@ pub fn hotkey_action(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintD
         hotkeys::CLEAR_QUEUE => Some(clear_action(&menu)),
         _ => None,
     }
+}
+
+/// One entry in the queue shown for the selection.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QueueChip {
+    pub label: String,
+    /// What right-clicking it does.
+    pub remove: UiAction,
+}
+
+/// What a builder's order is called on screen.
+pub fn task_name(task: &BuildTask, db: &BlueprintDb) -> String {
+    match *task {
+        BuildTask::Build { blueprint, .. } => db.get(blueprint).name.clone(),
+        BuildTask::Assist { .. } => "Assist".to_string(),
+        BuildTask::Reclaim { .. } => "Reclaim".to_string(),
+        BuildTask::Repair { .. } => "Repair".to_string(),
+    }
+}
+
+/// The queue for the selection: builders' orders in order, then factories' items. An order
+/// that several selected units share appears once, and removing it removes it from them all.
+pub fn queue_chips(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb) -> Vec<QueueChip> {
+    let mut orders: Vec<(BuildTask, Vec<SimId>)> = Vec::new();
+    for &id in selected {
+        let Ok(index) = snapshot.build_queues.binary_search_by_key(&id, |queue| queue.id) else {
+            continue;
+        };
+        for task in &snapshot.build_queues[index].tasks {
+            match orders.iter_mut().find(|(existing, _)| existing.is_same_order(task)) {
+                Some((_, units)) => units.push(id),
+                None => orders.push((*task, vec![id])),
+            }
+        }
+    }
+    let mut chips: Vec<QueueChip> = orders
+        .into_iter()
+        .enumerate()
+        .map(|(position, (task, units))| {
+            let built = match task {
+                BuildTask::Build { site: Some(site), .. } => find_unit(snapshot, site).map_or(String::new(), |site| format!(" {}%", site.built_permille / 10)),
+                _ => String::new(),
+            };
+            QueueChip { label: format!("{}. {}{built}", position + 1, task_name(&task, db)), remove: UiAction::CancelTask { units, task } }
+        })
+        .collect();
+
+    if let Some(menu) = factory_menu(snapshot, selected, db) {
+        for &(item, count) in &menu.queue {
+            let holding = |id: &&SimId| snapshot.factories.iter().any(|factory| factory.id == **id && factory.queue.contains(&item.0));
+            let factories: Vec<SimId> = menu.factories.iter().filter(holding).copied().collect();
+            let name = &db.get(item).name;
+            let label = if count > 1 { format!("{name} x{count}") } else { name.clone() };
+            chips.push(QueueChip { label, remove: UiAction::RemoveQueued { factories, blueprint: item } });
+        }
+    }
+    chips
+}
+
+fn queue_chip_row(ui: &mut egui::Ui, chips: &[QueueChip], actions: &mut Vec<UiAction>) {
+    // Long queues scroll, so that the panel cannot cover the map.
+    egui::ScrollArea::vertical().max_height(QUEUE_MAX_HEIGHT).show(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            for chip in chips {
+                if ui.button(&chip.label).on_hover_text("Right-click to remove").secondary_clicked() {
+                    actions.push(chip.remove.clone());
+                }
+            }
+        });
+    });
 }
 
 /// Nothing in the game takes typing. Without this, Tab would give a button keyboard focus,
@@ -205,6 +281,12 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
         if let Some(menu) = factory_menu(snapshot, selected, db) {
             factory_controls(ui, &menu, db, actions);
         }
+
+        let chips = queue_chips(snapshot, selected, db);
+        if !chips.is_empty() {
+            ui.label("Queue (right-click to remove):");
+            queue_chip_row(ui, &chips, actions);
+        }
     });
 }
 
@@ -258,9 +340,13 @@ pub fn factory_menu(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb
         menu.factories.push(id);
         menu.unfinished += usize::from(!finished);
         repeating += usize::from(factory.repeat);
-        for &option in &blueprint.builds {
+        // With an upgrade queued, it can also queue what the upgrade will let it build.
+        let queued_upgrade = blueprint.upgrades_to.filter(|upgrade| factory.queue.contains(&upgrade.0));
+        let after_upgrade = queued_upgrade.iter().flat_map(|upgrade| &db.get(*upgrade).builds);
+        for &option in blueprint.builds.iter().chain(after_upgrade) {
             match menu.options.iter_mut().find(|(existing, _)| *existing == option) {
-                Some((_, able)) => able.push(id),
+                Some((_, able)) if !able.contains(&id) => able.push(id),
+                Some(_) => {}
                 None => menu.options.push((option, vec![id])),
             }
         }
@@ -352,16 +438,6 @@ fn factory_controls(ui: &mut egui::Ui, menu: &FactoryMenu, db: &BlueprintDb, act
             if let Some(progress) = menu.progress_permille {
                 ui.add(egui::ProgressBar::new(f32::from(progress) / 1000.0).desired_width(100.0));
             }
-            let names: Vec<String> = menu
-                .queue
-                .iter()
-                .take(6)
-                .map(|(item, count)| {
-                    let name = &db.get(*item).name;
-                    if *count > 1 { format!("{name} x{count}") } else { name.clone() }
-                })
-                .collect();
-            ui.label(names.join(", "));
         }
     });
     if let Some(note) = construction_note(menu.unfinished, total) {
@@ -945,7 +1021,7 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sim::world::{FactoryView, PlanStep, UnitPlanView, WorkLinkView};
+    use crate::sim::world::{BuildQueueView, FactoryView, PlanStep, UnitPlanView, WorkLinkView};
 
     fn raw(value: f64) -> i32 {
         (value * 4096.0) as i32
@@ -1056,6 +1132,26 @@ mod tests {
         let menu = factory_menu(&current, &[SimId(1), SimId(3)], &db).unwrap();
         assert_eq!(menu.progress_permille, Some(600));
         assert_eq!(menu.queue, [(bot, 2)]);
+    }
+
+    #[test]
+    fn a_factory_with_an_upgrade_queued_offers_what_the_upgrade_will_build() {
+        let db = BlueprintDb::standard();
+        let (upgrade, tank, bot) = (db.id("land_factory_t2"), db.id("t2_heavy_tank"), db.id("t1_light_bot"));
+        let mut current = mixed_factories(&db);
+        let able = |current: &SimSnapshot, selected: &[SimId], option| {
+            factory_menu(current, selected, &db).unwrap().options.iter().find(|(existing, _)| *existing == option).map(|(_, able)| able.clone())
+        };
+        assert_eq!(able(&current, &[SimId(1)], tank), None, "without an upgrade, no tanks");
+
+        current.factories[0] = factory_view(1, vec![upgrade.0], false, 200);
+        assert_eq!(able(&current, &[SimId(1)], tank).unwrap(), [SimId(1)]);
+        assert_eq!(able(&current, &[SimId(1)], bot).unwrap(), [SimId(1)], "listed once, though both tiers can build it");
+        let expected = UiAction::Queue { factories: vec![SimId(1)], blueprint: tank, selected_count: 1 };
+        assert_eq!(hotkey_action(&current, &[SimId(1)], &db, 'H'), Some(expected));
+
+        // The other T1 factory has no upgrade queued, so it is left out.
+        assert_eq!(able(&current, &[SimId(1), SimId(3)], tank).unwrap(), [SimId(1)]);
     }
 
     #[test]
@@ -1203,6 +1299,94 @@ mod tests {
         let db = BlueprintDb::standard();
         assert!(cost_label(&db, db.id("mass_extractor")).starts_with("[E] Mass Extractor"), "{}", cost_label(&db, db.id("mass_extractor")));
         assert!(cost_label(&db, db.id("t1_light_bot")).starts_with("[B] "));
+    }
+
+    fn build(db: &BlueprintDb, key: &str, cell_x: u32, site: Option<SimId>) -> BuildTask {
+        BuildTask::Build { blueprint: db.id(key), cell_x, cell_y: 5, site }
+    }
+
+    #[test]
+    fn a_builders_orders_are_listed_in_order_with_how_far_a_started_site_has_got() {
+        let db = BlueprintDb::standard();
+        let mut site = unit(20, 0.0);
+        site.built_permille = 450;
+        let mut current = commander_and_engineer(&db);
+        current.units.push(site);
+        let tasks = vec![build(&db, "power_generator", 1, Some(SimId(20))), build(&db, "mass_extractor", 2, None), BuildTask::Reclaim { target: SimId(30) }];
+        current.build_queues = vec![BuildQueueView { id: SimId(10), tasks: tasks.clone() }];
+        let chips = queue_chips(&current, &[SimId(10)], &db);
+        let labels: Vec<&str> = chips.iter().map(|chip| chip.label.as_str()).collect();
+        assert_eq!(labels, ["1. Power Generator 45%", "2. Mass Extractor", "3. Reclaim"]);
+        assert_eq!(chips[1].remove, UiAction::CancelTask { units: vec![SimId(10)], task: tasks[1] });
+        assert!(queue_chips(&current, &[SimId(11)], &db).is_empty(), "the engineer has no orders");
+    }
+
+    #[test]
+    fn an_order_shared_by_several_builders_appears_once_and_is_removed_from_them_all() {
+        let db = BlueprintDb::standard();
+        let mut current = commander_and_engineer(&db);
+        // One has started the site, and the other has not reached it yet.
+        current.build_queues = vec![
+            BuildQueueView { id: SimId(10), tasks: vec![build(&db, "power_generator", 1, Some(SimId(20)))] },
+            BuildQueueView { id: SimId(11), tasks: vec![build(&db, "mass_extractor", 2, None), build(&db, "power_generator", 1, None)] },
+        ];
+        let chips = queue_chips(&current, &[SimId(10), SimId(11)], &db);
+        assert_eq!(chips.len(), 2);
+        let UiAction::CancelTask { units, .. } = &chips[0].remove else {
+            panic!("a builder's order should cancel a task");
+        };
+        assert_eq!(units, &[SimId(10), SimId(11)]);
+        let UiAction::CancelTask { units, .. } = &chips[1].remove else {
+            panic!("a builder's order should cancel a task");
+        };
+        assert_eq!(units, &[SimId(11)]);
+    }
+
+    #[test]
+    fn a_factorys_items_are_grouped_and_only_reach_factories_holding_them() {
+        let db = BlueprintDb::standard();
+        let (bot, tank) = (db.id("t1_light_bot"), db.id("t2_heavy_tank"));
+        let mut current = mixed_factories(&db);
+        current.factories[0] = factory_view(1, vec![bot.0, bot.0], false, 100);
+        current.factories[1] = factory_view(2, vec![tank.0, bot.0], false, 100);
+        let chips = queue_chips(&current, &[SimId(1), SimId(2)], &db);
+        assert_eq!(chips.len(), 2);
+        assert_eq!(chips[0].label, "Light Assault Bot x3");
+        assert_eq!(chips[0].remove, UiAction::RemoveQueued { factories: vec![SimId(1), SimId(2)], blueprint: bot });
+        assert_eq!(chips[1].label, "Heavy Tank");
+        assert_eq!(chips[1].remove, UiAction::RemoveQueued { factories: vec![SimId(2)], blueprint: tank });
+    }
+
+    /// Runs real egui input through the queue row, and returns what came out.
+    fn click_first_chip(button: egui::PointerButton) -> (Vec<UiAction>, bool) {
+        let ctx = egui::Context::default();
+        let chips = [QueueChip { label: "1. Mass Extractor".to_string(), remove: UiAction::Restart }];
+        let at = egui::pos2(20.0, 16.0);
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
+        let input = |events: Vec<egui::Event>| egui::RawInput { screen_rect: Some(screen), events, ..egui::RawInput::default() };
+        let press = |pressed: bool| egui::Event::PointerButton { pos: at, button, pressed, modifiers: egui::Modifiers::NONE };
+        let mut actions = Vec::new();
+        let mut run = |events: Vec<egui::Event>| {
+            let _ = ctx.run(input(events), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| queue_chip_row(ui, &chips, &mut actions));
+            });
+        };
+        run(vec![]);
+        run(vec![egui::Event::PointerMoved(at)]);
+        run(vec![]);
+        let over_panel = ctx.wants_pointer_input();
+        run(vec![press(true)]);
+        run(vec![press(false)]);
+        run(vec![]);
+        (actions, over_panel)
+    }
+
+    #[test]
+    fn right_clicking_a_queue_item_removes_it_and_left_clicking_does_not() {
+        let (actions, over_panel) = click_first_chip(egui::PointerButton::Secondary);
+        assert_eq!(actions, [UiAction::Restart], "a right-click should remove the order");
+        assert!(over_panel, "the interface must claim the click, or it would also order units to move");
+        assert!(click_first_chip(egui::PointerButton::Primary).0.is_empty());
     }
 
     #[test]

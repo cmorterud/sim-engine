@@ -13,7 +13,7 @@ use super::components::{
 use super::config::{PATROL_SEARCH_INTERVAL, PATROL_SEARCH_RADIUS_UNITS, RECLAIM_MASS_PER_POWER, TERRAIN_CELL_UNITS};
 use super::flowfield::nearest_passable_cell;
 use super::spatial::{GridEntry, Layer};
-use super::world::{EconomyView, PlanStep, PlanStepKind, SimWorld, UnitPlanView, UnitSpawn, WorkLinkView};
+use super::world::{BuildQueueView, EconomyView, PlanStep, PlanStepKind, SimWorld, UnitPlanView, UnitSpawn, WorkLinkView};
 use crate::math::fp::{fp_int, wide_mul, Fp, Vec2Fp};
 
 const MEX_STORAGE_BONUS: u32 = 125;
@@ -307,8 +307,12 @@ impl SimWorld {
                 let current = self.ecs.get::<&Blueprinted>(entity).expect("factories have blueprints").0;
                 let unit = self.blueprints.get(current);
                 let is_upgrade = unit.upgrades_to == Some(*blueprint);
-                if unit.builds.contains(blueprint) || is_upgrade {
-                    let mut factory = self.ecs.get::<&mut Factory>(entity).expect("factory list only holds factories");
+                let mut factory = self.ecs.get::<&mut Factory>(entity).expect("factory list only holds factories");
+                // Always added at the end, so it can only come out after the upgrade has finished.
+                let after_upgrade = unit
+                    .upgrades_to
+                    .is_some_and(|upgrade| factory.queue.contains(&upgrade) && self.blueprints.get(upgrade).builds.contains(blueprint));
+                if unit.builds.contains(blueprint) || is_upgrade || after_upgrade {
                     if is_upgrade {
                         // A factory only upgrades once, however many times it is asked.
                         if !factory.queue.contains(blueprint) {
@@ -324,6 +328,42 @@ impl SimWorld {
                     let mut factory = self.ecs.get::<&mut Factory>(entity).expect("factory list only holds factories");
                     factory.queue.clear();
                     factory.progress = Res::ZERO;
+                }
+            }
+            SimCommand::CancelTask { units, task } => {
+                for &id in units {
+                    let Some((_, entity)) = self.find_unit(id) else {
+                        continue;
+                    };
+                    let Ok(mut builder) = self.ecs.get::<&mut Builder>(entity) else {
+                        continue;
+                    };
+                    let Some(index) = builder.tasks.iter().position(|other| other.is_same_order(task)) else {
+                        continue;
+                    };
+                    builder.tasks.remove(index);
+                    drop(builder);
+                    // It may be walking to that order. The next tick starts it on whatever is left.
+                    if index == 0 {
+                        self.set_order(id, Order::IDLE);
+                    }
+                }
+            }
+            SimCommand::RemoveQueued { factory, blueprint } => {
+                if let Some(entity) = self.factory_entity(*factory) {
+                    let mut factory = self.ecs.get::<&mut Factory>(entity).expect("factory list only holds factories");
+                    if let Some(index) = factory.queue.iter().rposition(|item| item == blueprint) {
+                        factory.queue.remove(index);
+                        if index == 0 {
+                            factory.progress = Res::ZERO;
+                        }
+                        // Without its upgrade, a factory cannot build what was waiting for it.
+                        if self.blueprints.get(*blueprint).is_factory() {
+                            let current = self.ecs.get::<&Blueprinted>(entity).expect("factories have blueprints").0;
+                            let builds = &self.blueprints.get(current).builds;
+                            factory.queue.retain(|item| builds.contains(item));
+                        }
+                    }
                 }
             }
             SimCommand::SetRepeat { factory, repeat } => {
@@ -917,6 +957,20 @@ impl SimWorld {
             }
         }
         plans
+    }
+
+    /// The viewer's builders with orders waiting, in `SimId` order.
+    pub(super) fn build_queues_for(&self, team: Team) -> Vec<BuildQueueView> {
+        self.builders
+            .iter()
+            .filter_map(|&(id, entity)| {
+                if self.ecs.get::<&UnitStats>(entity).ok()?.team != team {
+                    return None;
+                }
+                let builder = self.ecs.get::<&Builder>(entity).ok()?;
+                (!builder.tasks.is_empty()).then(|| BuildQueueView { id, tasks: builder.tasks.clone() })
+            })
+            .collect()
     }
 
     /// This tick's work, limited to what `seen` allows. A team with nothing to spend is

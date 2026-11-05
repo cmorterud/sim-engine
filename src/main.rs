@@ -896,6 +896,16 @@ fn run_windowed(seed: u64, options: Options) {
                                         session.send(SimCommand::ClearQueue { factory });
                                     }
                                 }
+                                UiAction::CancelTask { units, task } => {
+                                    feedback.set_label(MarkerKind::Build, format!("{} removed", ui::task_name(&task, &map.blueprints)));
+                                    session.send(SimCommand::CancelTask { units, task });
+                                }
+                                UiAction::RemoveQueued { factories, blueprint } => {
+                                    feedback.set_label(MarkerKind::Build, format!("{} removed", map.blueprints.get(blueprint).name));
+                                    for factory in factories {
+                                        session.send(SimCommand::RemoveQueued { factory, blueprint });
+                                    }
+                                }
                                 UiAction::Restart => {
                                     session = Session::start(scenario::skirmish(seed), CommandSource::PlayerVsAi { seed }, driver_options);
                                     selection.clear();

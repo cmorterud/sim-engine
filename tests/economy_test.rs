@@ -4,7 +4,7 @@
 use sim_engine::math::fp::{fp_int, Fp, Vec2Fp, Vec3Fp};
 use sim_engine::sim::blueprints::{BlueprintId, Res};
 use sim_engine::sim::commands::SimCommand;
-use sim_engine::sim::components::{BuildTask, Builder, Combat, Construction, Factory, Health, Order, OrderKind, Projectile, SimId, Team};
+use sim_engine::sim::components::{Blueprinted, BuildTask, Builder, Combat, Construction, Factory, Health, Order, OrderKind, Projectile, SimId, Team};
 use sim_engine::sim::config::{SimConfig, TerrainStyle};
 use sim_engine::sim::scenario::{self, skirmish_start};
 use sim_engine::sim::world::{MatchResult, PlanStepKind, SimWorld};
@@ -938,4 +938,253 @@ fn a_unit_sent_onto_a_structure_finishes_its_order_beside_it() {
     world.advance_tick(&[SimCommand::Move { units: vec![unit], goal: inside }]);
     run(&mut world, 800);
     assert_eq!(world.ecs.get::<&Order>(entity(&world, unit)).unwrap().kind, OrderKind::Idle);
+}
+
+fn cell_of_index(world: &SimWorld, cell_x: u32, cell_y: u32) -> u32 {
+    cell_y * world.terrain.cells_per_side() as u32 + cell_x
+}
+
+fn tasks(world: &SimWorld, unit: SimId) -> Vec<BuildTask> {
+    world.ecs.get::<&Builder>(entity(world, unit)).unwrap().tasks.clone()
+}
+
+/// An engineer with three far-off builds queued, walking to the first.
+fn engineer_with_three_builds(world: &mut SimWorld) -> (SimId, [BuildTask; 3]) {
+    set_resources(world, Team::Blue, 100_000, 1_000_000);
+    let engineer_blueprint = id(world, "t1_engineer");
+    let generator = id(world, "power_generator");
+    let engineer = world.spawn_mobile(engineer_blueprint, Team::Blue, point(1_000, 1_000));
+    let order = |cell_x: u32, queued: bool| SimCommand::Build { units: vec![engineer], blueprint: generator, cell_x, cell_y: 50, queued };
+    world.advance_tick(&[order(80, false), order(90, true), order(100, true)]);
+    let task = |cell_x: u32| BuildTask::Build { blueprint: generator, cell_x, cell_y: 50, site: None };
+    (engineer, [task(80), task(90), task(100)])
+}
+
+#[test]
+fn a_builders_queue_is_shown_to_its_own_team_only() {
+    let mut world = test_world();
+    let (engineer, orders) = engineer_with_three_builds(&mut world);
+    let own = world.snapshot_for(Some(Team::Blue));
+    assert_eq!(own.build_queues.len(), 1);
+    assert_eq!(own.build_queues[0].id, engineer);
+    assert_eq!(own.build_queues[0].tasks, orders);
+    assert!(world.snapshot_for(Some(Team::Red)).build_queues.is_empty());
+}
+
+#[test]
+fn removing_a_later_order_leaves_the_others_running() {
+    let mut world = test_world();
+    let (engineer, orders) = engineer_with_three_builds(&mut world);
+    run(&mut world, 5);
+    assert_ne!(world.ecs.get::<&Order>(entity(&world, engineer)).unwrap().kind, OrderKind::Idle);
+    world.advance_tick(&[SimCommand::CancelTask { units: vec![engineer], task: orders[1] }]);
+    assert_eq!(tasks(&world, engineer), [orders[0], orders[2]]);
+    assert_ne!(world.ecs.get::<&Order>(entity(&world, engineer)).unwrap().kind, OrderKind::Idle, "it should keep walking to the first");
+}
+
+#[test]
+fn removing_the_order_being_walked_to_moves_on_to_the_next() {
+    let mut world = test_world();
+    let (engineer, orders) = engineer_with_three_builds(&mut world);
+    run(&mut world, 5);
+    world.advance_tick(&[SimCommand::CancelTask { units: vec![engineer], task: orders[0] }]);
+    assert_eq!(tasks(&world, engineer), [orders[1], orders[2]]);
+    let mut ticks = 0;
+    while !world.occupancy.contains_key(&cell_of_index(&world, 90, 50)) {
+        world.advance_tick(&[]);
+        ticks += 1;
+        assert!(ticks < 1_000, "it never started the next build");
+    }
+    assert!(!world.occupancy.contains_key(&cell_of_index(&world, 80, 50)), "the removed build must never start");
+}
+
+#[test]
+fn removing_an_order_under_way_leaves_its_site_and_stops_spending_on_it() {
+    let mut world = test_world();
+    set_resources(&mut world, Team::Blue, 10_000, 100_000);
+    let (engineer, site) = engineer_at_site(&mut world);
+    run(&mut world, 20);
+    let task = tasks(&world, engineer)[0];
+    assert!(matches!(task, BuildTask::Build { site: Some(_), .. }));
+    // Named as the panel might have seen it, before the site appeared.
+    let BuildTask::Build { blueprint, cell_x, cell_y, .. } = task else {
+        unreachable!();
+    };
+    world.advance_tick(&[SimCommand::CancelTask { units: vec![engineer], task: BuildTask::Build { blueprint, cell_x, cell_y, site: None } }]);
+    assert!(tasks(&world, engineer).is_empty());
+    let (before, mass) = (progress(&world, site), world.economies[0].mass);
+    run(&mut world, 50);
+    assert_eq!(progress(&world, site), before, "nobody is building it now");
+    assert_eq!(world.economies[0].mass, mass, "nothing should be spent on it");
+    assert!(world.snapshot_for(Some(Team::Blue)).work_links.is_empty());
+    assert!(world.unit_entity(site).is_some(), "the site stays");
+
+    // It can still be finished.
+    world.advance_tick(&[SimCommand::Assist { units: vec![engineer], target: site }]);
+    run(&mut world, 400);
+    assert!(is_finished(&world, site));
+}
+
+#[test]
+fn removing_an_order_that_is_already_gone_does_nothing() {
+    let mut world = test_world();
+    let (engineer, orders) = engineer_with_three_builds(&mut world);
+    let other = BuildTask::Build { blueprint: id(&world, "mass_storage"), cell_x: 80, cell_y: 50, site: None };
+    world.advance_tick(&[SimCommand::CancelTask { units: vec![engineer], task: other }]);
+    assert_eq!(tasks(&world, engineer), orders, "a different structure on the same spot is a different order");
+    let dead = SimId(9_999);
+    world.advance_tick(&[SimCommand::CancelTask { units: vec![dead], task: orders[0] }]);
+    assert_eq!(tasks(&world, engineer), orders);
+}
+
+#[test]
+fn removing_an_order_only_affects_the_builders_named() {
+    let mut world = test_world();
+    let (engineer, orders) = engineer_with_three_builds(&mut world);
+    let helper_blueprint = id(&world, "t1_engineer");
+    let helper = world.spawn_mobile(helper_blueprint, Team::Blue, point(1_000, 1_040));
+    let generator = id(&world, "power_generator");
+    world.advance_tick(&[SimCommand::Build { units: vec![helper], blueprint: generator, cell_x: 90, cell_y: 50, queued: false }]);
+    world.advance_tick(&[SimCommand::CancelTask { units: vec![engineer], task: orders[1] }]);
+    assert_eq!(tasks(&world, helper), [orders[1]]);
+    assert_eq!(tasks(&world, engineer), [orders[0], orders[2]]);
+}
+
+#[test]
+fn removing_a_factory_item_takes_the_last_one_and_keeps_work_under_way() {
+    let mut world = test_world();
+    set_resources(&mut world, Team::Blue, 100_000, 1_000_000);
+    let (factory_blueprint, bot, artillery) = (id(&world, "land_factory_t1"), id(&world, "t1_light_bot"), id(&world, "t1_light_artillery"));
+    let factory = world.spawn_finished_structure(factory_blueprint, Team::Blue, 50, 50).unwrap();
+    world.advance_tick(&[
+        SimCommand::QueueUnit { factory, blueprint: bot, count: 1 },
+        SimCommand::QueueUnit { factory, blueprint: artillery, count: 1 },
+        SimCommand::QueueUnit { factory, blueprint: bot, count: 1 },
+    ]);
+    run(&mut world, 5);
+    let state = |world: &SimWorld| {
+        let factory = world.ecs.get::<&Factory>(entity(world, factory)).unwrap();
+        (factory.queue.clone(), factory.progress)
+    };
+    let under_way = state(&world).1;
+    assert!(under_way > Res::ZERO);
+
+    world.advance_tick(&[SimCommand::RemoveQueued { factory, blueprint: bot }]);
+    let (queue, progress_now) = state(&world);
+    assert_eq!(queue, [bot, artillery]);
+    assert!(progress_now > under_way, "the bot under way should carry on");
+
+    world.advance_tick(&[SimCommand::RemoveQueued { factory, blueprint: id(&world, "t2_heavy_tank") }]);
+    assert_eq!(state(&world).0, [bot, artillery], "an item not in the queue changes nothing");
+
+    // The last bot is the one under way, so its work goes with it.
+    world.advance_tick(&[SimCommand::RemoveQueued { factory, blueprint: bot }]);
+    let (queue, _) = state(&world);
+    assert_eq!(queue, [artillery]);
+    let artillery_progress = state(&world).1;
+    assert!(artillery_progress < under_way * 2, "the next item starts from the beginning, not {artillery_progress}");
+}
+
+/// A T1 factory with an upgrade queued, and everything needed for it.
+fn factory_upgrading(world: &mut SimWorld) -> (SimId, BlueprintId, BlueprintId, BlueprintId) {
+    set_resources(world, Team::Blue, 100_000, 1_000_000);
+    let (t1, t2, tank, bot) = (id(world, "land_factory_t1"), id(world, "land_factory_t2"), id(world, "t2_heavy_tank"), id(world, "t1_light_bot"));
+    let factory = world.spawn_finished_structure(t1, Team::Blue, 50, 50).unwrap();
+    world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: t2, count: 1 }]);
+    (factory, t2, tank, bot)
+}
+
+fn queue_of(world: &SimWorld, factory: SimId) -> Vec<BlueprintId> {
+    world.ecs.get::<&Factory>(entity(world, factory)).unwrap().queue.clone()
+}
+
+#[test]
+fn units_queued_during_an_upgrade_wait_for_it_and_then_get_built() {
+    let mut world = test_world();
+    let (factory, t2, tank, _) = factory_upgrading(&mut world);
+    let units_before = world.units.len();
+    world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: tank, count: 2 }]);
+    assert_eq!(queue_of(&world, factory), [t2, tank, tank]);
+
+    let mut ticks = 0;
+    while world.ecs.get::<&Blueprinted>(entity(&world, factory)).unwrap().0 != t2 {
+        assert_eq!(world.units.len(), units_before, "no tank may appear before the upgrade finishes");
+        world.advance_tick(&[]);
+        ticks += 1;
+        assert!(ticks < 5_000, "the upgrade never finished");
+    }
+    assert_eq!(queue_of(&world, factory), [tank, tank], "the tanks should still be waiting");
+    let mut ticks = 0;
+    while !queue_of(&world, factory).is_empty() {
+        world.advance_tick(&[]);
+        ticks += 1;
+        assert!(ticks < 5_000, "the tanks never finished");
+    }
+    let newest = world.units.iter().map(|unit| unit.0).max().unwrap();
+    assert_eq!(world.ecs.get::<&Blueprinted>(entity(&world, newest)).unwrap().0, tank);
+    assert_eq!(world.units.len(), units_before + 2);
+}
+
+#[test]
+fn a_factory_without_an_upgrade_queued_still_refuses_higher_units() {
+    let mut world = test_world();
+    set_resources(&mut world, Team::Blue, 100_000, 1_000_000);
+    let (t1, tank, bot) = (id(&world, "land_factory_t1"), id(&world, "t2_heavy_tank"), id(&world, "t1_light_bot"));
+    let factory = world.spawn_finished_structure(t1, Team::Blue, 50, 50).unwrap();
+    world.advance_tick(&[
+        SimCommand::QueueUnit { factory, blueprint: bot, count: 1 },
+        SimCommand::QueueUnit { factory, blueprint: tank, count: 1 },
+    ]);
+    assert_eq!(queue_of(&world, factory), [bot]);
+}
+
+#[test]
+fn removing_an_upgrade_removes_what_was_waiting_for_it() {
+    let mut world = test_world();
+    let (factory, t2, tank, bot) = factory_upgrading(&mut world);
+    world.advance_tick(&[
+        SimCommand::QueueUnit { factory, blueprint: tank, count: 2 },
+        SimCommand::QueueUnit { factory, blueprint: bot, count: 1 },
+    ]);
+    assert_eq!(queue_of(&world, factory), [t2, tank, tank, bot]);
+    world.advance_tick(&[SimCommand::RemoveQueued { factory, blueprint: t2 }]);
+    assert_eq!(queue_of(&world, factory), [bot], "a T1 factory must be left with nothing it cannot build");
+    assert_eq!(world.ecs.get::<&Blueprinted>(entity(&world, factory)).unwrap().0, id(&world, "land_factory_t1"));
+    run(&mut world, 400);
+    assert!(world.units.iter().all(|unit| world.ecs.get::<&Blueprinted>(unit.1).unwrap().0 != tank), "no tank may ever come out");
+}
+
+#[test]
+fn removing_a_waiting_unit_leaves_the_upgrade_alone() {
+    let mut world = test_world();
+    let (factory, t2, tank, _) = factory_upgrading(&mut world);
+    world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: tank, count: 1 }]);
+    run(&mut world, 5);
+    let under_way = world.ecs.get::<&Factory>(entity(&world, factory)).unwrap().progress;
+    world.advance_tick(&[SimCommand::RemoveQueued { factory, blueprint: tank }]);
+    assert_eq!(queue_of(&world, factory), [t2]);
+    assert!(world.ecs.get::<&Factory>(entity(&world, factory)).unwrap().progress > under_way, "the upgrade should carry on");
+}
+
+#[test]
+fn a_repeating_factory_keeps_a_waiting_unit_behind_the_upgrade() {
+    let mut world = test_world();
+    set_resources(&mut world, Team::Blue, 100_000, 1_000_000);
+    let (t1, t2, tank, bot) = (id(&world, "land_factory_t1"), id(&world, "land_factory_t2"), id(&world, "t2_heavy_tank"), id(&world, "t1_light_bot"));
+    let factory = world.spawn_finished_structure(t1, Team::Blue, 50, 50).unwrap();
+    world.advance_tick(&[
+        SimCommand::SetRepeat { factory, repeat: true },
+        SimCommand::QueueUnit { factory, blueprint: bot, count: 1 },
+        SimCommand::QueueUnit { factory, blueprint: t2, count: 1 },
+        SimCommand::QueueUnit { factory, blueprint: tank, count: 1 },
+    ]);
+    let mut ticks = 0;
+    while world.ecs.get::<&Blueprinted>(entity(&world, factory)).unwrap().0 != t2 {
+        let queue = queue_of(&world, factory);
+        assert_ne!(queue.first(), Some(&tank), "a tank reached the front before the upgrade finished: {queue:?}");
+        world.advance_tick(&[]);
+        ticks += 1;
+        assert!(ticks < 5_000, "the upgrade never finished");
+    }
+    assert!(queue_of(&world, factory).contains(&tank));
 }

@@ -1,5 +1,5 @@
 use super::blueprints::BlueprintId;
-use super::components::SimId;
+use super::components::{BuildTask, SimId};
 use crate::math::fp::Vec2Fp;
 
 /// Player input. Every instance must apply the same commands on the same tick, in the same order.
@@ -20,10 +20,18 @@ pub enum SimCommand {
     Assist { units: Vec<SimId>, target: SimId },
     Reclaim { units: Vec<SimId>, target: SimId },
     Repair { units: Vec<SimId>, target: SimId },
-    /// Add to a factory's queue. An item that is a factory is an upgrade.
+    /// Add to a factory's queue. An item that is a factory is an upgrade. With an upgrade in
+    /// its queue, a factory also takes what the upgrade will let it build, which waits behind it.
     QueueUnit { factory: SimId, blueprint: BlueprintId, count: u32 },
     /// Clear a factory's queue, keeping nothing in progress.
     ClearQueue { factory: SimId },
+    /// Remove one order from builders' queues, wherever it has got to by now. The order is
+    /// named rather than numbered, because the queue may have moved on since it was shown.
+    /// A site that was already started stays where it is.
+    CancelTask { units: Vec<SimId>, task: BuildTask },
+    /// Remove one of an item from a factory's queue: the last, so that work under way is
+    /// only lost if it is the only one. Removing an upgrade also removes what depended on it.
+    RemoveQueued { factory: SimId, blueprint: BlueprintId },
     SetRepeat { factory: SimId, repeat: bool },
     SetRally { factory: SimId, point: Vec2Fp },
 }

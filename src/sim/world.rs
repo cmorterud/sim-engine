@@ -6,7 +6,7 @@ use twox_hash::XxHash64;
 use super::blueprints::{BlueprintDb, Res};
 use super::combat::{entry_hit, firing_solution, probe_terrain, GRAVITY};
 use super::commands::SimCommand;
-use super::components::{
+use super::components::{BuildTask, 
     Blueprinted, Builder, Combat, Construction, Factory, Footprint, Health, MoveClass, Order, OrderKind, Patrol,
     Position, Projectile, SimId, Team, UnitStats, Velocity, Wreck,
 };
@@ -108,6 +108,13 @@ pub struct UnitPlanView {
     pub steps: Vec<PlanStep>,
 }
 
+/// A builder's orders, in the order it will carry them out. Only for the viewer's team.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BuildQueueView {
+    pub id: SimId,
+    pub tasks: Vec<BuildTask>,
+}
+
 /// A builder that is doing work this tick, and where. Only present while work is really
 /// happening, so not while walking to a site, waiting, or out of resources.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -167,6 +174,8 @@ pub struct SimSnapshot {
     pub plans: Vec<UnitPlanView>,
     /// Sorted by builder `SimId`.
     pub work_links: Vec<WorkLinkView>,
+    /// Sorted by builder `SimId`.
+    pub build_queues: Vec<BuildQueueView>,
     pub economy: EconomyView,
     /// Present when fog of war is on: one byte per cell, for the renderer.
     pub fog: Option<Arc<Vec<u8>>>,
@@ -1277,6 +1286,7 @@ impl SimWorld {
         });
         let plans = viewer.map_or_else(Vec::new, |viewer| self.plans_for(viewer));
         let work_links = self.work_link_views(seen);
+        let build_queues = viewer.map_or_else(Vec::new, |viewer| self.build_queues_for(viewer));
         let economy = viewer.map_or_else(EconomyView::default, |viewer| self.economies[viewer.index()].view());
         let fog = match viewer {
             Some(viewer) if self.config.fog_of_war => Some(Arc::new(self.visibility.fog_bytes(viewer))),
@@ -1290,6 +1300,7 @@ impl SimWorld {
             factories,
             plans,
             work_links,
+            build_queues,
             economy,
             fog,
             match_result: self.match_result,
