@@ -139,6 +139,15 @@ impl Selection {
 
     pub fn select(&mut self, ids: Vec<SimId>) {
         self.selected = ids;
+        self.selected.sort_unstable();
+        self.selected.dedup();
+    }
+
+    /// Adds to the selection, keeping what is already there.
+    pub fn add(&mut self, ids: &[SimId]) {
+        self.selected.extend_from_slice(ids);
+        self.selected.sort_unstable();
+        self.selected.dedup();
     }
 
     /// Removes units that have died, given the current units sorted by `SimId`.

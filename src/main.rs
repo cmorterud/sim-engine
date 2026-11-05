@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use sim_engine::ai::{advance_ai_vs_ai, AiBrain};
 use sim_engine::driver::{CommandSource, DriverOptions, DriverResult, SimDriver, TICK_DURATION};
+use sim_engine::audio::{self, AttackAlarm, SoundEngine, SoundSettings};
 use sim_engine::input::feedback::{MarkerKind, OrderFeedback};
 use sim_engine::input::hotkeys;
 use sim_engine::input::orders::{
@@ -26,7 +27,7 @@ use sim_engine::sim::scenario::{self, advance_scripted, skirmish_start, Scenario
 use sim_engine::sim::terrain::HEIGHT_FRAC_BITS;
 use sim_engine::sim::world::{PlanStep, PlanStepKind, SimSnapshot, UnitPlanView};
 use sim_engine::soak::run_soak;
-use sim_engine::ui::{self, ArmedOrder, UiAction};
+use sim_engine::ui::{self, ArmedOrder, QuickSelectState, UiAction};
 use winit::dpi::{LogicalSize, PhysicalPosition};
 use winit::event::{ElementState, Event, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -61,6 +62,7 @@ Usage: sim-engine [options]
   --soak <matches>     Play and replay AI-vs-AI matches, and report on the exit criteria
   --threads <n>        Threads for --soak (default 6)
   --seed <number>      Scenario seed
+  --sound-check        Play each sound in turn, and exit
 
 Controls:
   Left-drag or click   Select your units
@@ -72,10 +74,15 @@ Controls:
                        move to the ground, or set a factory's rally point
   Shift + left-click   Queue a structure, and keep placing
   Shift + left-drag    Queue a row of structures, and keep placing
+  M, then left-click   Move there, whatever is under the cursor
   F, then left-click   Attack-move
+  Y, then left-click   Assist a friendly unit: stay with it and protect it
   Alt + right-click    Attack-move
+  P, then left-clicks  Add patrol points, then right-click or press P to start
   P + right-click      Hold P and add patrol points, then release P
   X                    Stop
+  N                    Mute or unmute
+  - and =              Sound quieter and louder
   Space                Jump to your commander
   Scroll               Zoom, towards the cursor
   WASD or arrow keys   Pan
@@ -94,6 +101,7 @@ struct Options {
     soak: Option<u64>,
     threads: Option<usize>,
     seed: Option<u64>,
+    sound_check: bool,
 }
 
 fn parse_options() -> Result<Options, String> {
@@ -111,6 +119,7 @@ fn parse_options() -> Result<Options, String> {
             "--soak" => options.soak = Some(number("--soak", value("--soak")?)?),
             "--threads" => options.threads = Some(number("--threads", value("--threads")?)? as usize),
             "--seed" => options.seed = Some(number("--seed", value("--seed")?)?),
+            "--sound-check" => options.sound_check = true,
             "--help" | "-h" => return Err(USAGE.to_string()),
             other => return Err(format!("unknown option {other}\n\n{USAGE}")),
         }
@@ -128,6 +137,10 @@ fn main() {
         }
     };
     let seed = options.seed.unwrap_or(DEFAULT_SEED);
+    if options.sound_check {
+        sound_check();
+        return;
+    }
     if let Some(matches) = options.soak {
         let mut report = run_soak(options.seed.unwrap_or(1), matches, options.threads.unwrap_or(6));
         if !report.print() {
@@ -369,6 +382,29 @@ fn commander_of(snapshot: &SimSnapshot, blueprints: &BlueprintDb) -> Option<SimI
         .map(|unit| unit.id)
 }
 
+/// Plays each sound in turn, to hear them without playing a match.
+fn sound_check() {
+    let engine = match SoundEngine::start() {
+        Ok(engine) => engine,
+        Err(error) => {
+            eprintln!("sound could not start: {error}");
+            std::process::exit(1);
+        }
+    };
+    engine.set_volume(SoundSettings::default().volume());
+    let wait = |seconds: u64| std::thread::sleep(std::time::Duration::from_secs(seconds));
+    for (name, build, factory) in [("one builder", 0.33, 0.0), ("ten builders", 0.83, 0.0), ("one factory", 0.0, 0.33), ("ten factories", 0.0, 0.83)] {
+        println!("{name}");
+        engine.set_levels(audio::SoundLevels { build, factory });
+        wait(3);
+    }
+    engine.set_levels(audio::SoundLevels::default());
+    println!("ACU under attack");
+    engine.play_alarm();
+    wait(2);
+    println!("{} frames played", engine.frames_played());
+}
+
 /// Orders the selection from a click using `plan`, and shows what happened.
 /// Returns whether anything was ordered.
 #[allow(clippy::too_many_arguments)]
@@ -565,6 +601,17 @@ fn run_windowed(seed: u64, options: Options) {
     let mut held_keys = [false; 4];
     let (mut alt_held, mut shift_held, mut command_held) = (false, false, false);
     let mut hotkey_actions: Vec<UiAction> = Vec::new();
+    let mut quick_select = QuickSelectState::default();
+    let mut attack_alarm = AttackAlarm::default();
+    let mut sound_settings = SoundSettings::default();
+    // Test runs stay silent. The game plays on without sound if there is no device.
+    let sound = (is_match && autotest_seconds.is_none()).then(SoundEngine::start).and_then(|started| match started {
+        Ok(engine) => Some(engine),
+        Err(error) => {
+            eprintln!("playing without sound: {error}");
+            None
+        }
+    });
     let mut scene_instances = InstanceBatches::default();
     let mut headings = Headings::new();
     let mut title_timer = Instant::now();
@@ -721,6 +768,9 @@ fn run_windowed(seed: u64, options: Options) {
                                     }
                                 }
                             }
+                            PhysicalKey::Code(KeyCode::KeyN) if pressed && !event.repeat && !command_held => sound_settings.toggle_mute(),
+                            PhysicalKey::Code(KeyCode::Minus) if pressed && !command_held => sound_settings.quieter(),
+                            PhysicalKey::Code(KeyCode::Equal) if pressed && !command_held => sound_settings.louder(),
                             // Command and Control belong to the system: Command-Q must not start a factory.
                             PhysicalKey::Code(code) if pressed && !event.repeat && !command_held => {
                                 if let Some(letter) = hotkeys::letter_for(code) {
@@ -780,6 +830,26 @@ fn run_windowed(seed: u64, options: Options) {
                         }
                         camera.update(dt, &map.heights);
                         feedback.update(dt);
+
+                        // Sound follows what is really happening in view.
+                        let commander = commander_of(&session.current, &map.blueprints).and_then(|id| {
+                            let index = session.current.units.binary_search_by_key(&id, |unit| unit.id).ok()?;
+                            Some((id, session.current.units[index].health_permille))
+                        });
+                        let attacked = is_match && attack_alarm.update(commander, dt);
+                        if let Some(sound) = &sound {
+                            let viewport = camera.viewport();
+                            let levels = audio::sound_levels(&session.current, camera.zoom_fraction(), |unit| {
+                                camera
+                                    .world_to_screen([raw_to_world(unit.x), raw_to_world(unit.y), raw_to_world(unit.z)])
+                                    .is_some_and(|at| (0.0..=viewport[0]).contains(&at[0]) && (0.0..=viewport[1]).contains(&at[1]))
+                            });
+                            sound.set_levels(levels);
+                            sound.set_volume(sound_settings.volume());
+                            if attacked {
+                                sound.play_alarm();
+                            }
+                        }
                         if selection.selected().is_empty() {
                             armed = None;
                             if !patrol_held {
@@ -816,6 +886,7 @@ fn run_windowed(seed: u64, options: Options) {
                                     selection.clear();
                                 }
                                 demo_snapshot = Some(Arc::new(snapshot));
+                                quick_select.expand("Land Factory");
                                 // Place a generator at the middle of the screen, to show the preview and grid.
                                 selection.move_cursor([camera.viewport()[0] * 0.55, camera.viewport()[1] * 0.3]);
                                 if fraction >= 0.4 {
@@ -902,7 +973,10 @@ fn run_windowed(seed: u64, options: Options) {
                             }
                             if is_match {
                                 ui::world_overlay(ctx, &camera, &snapshot, &selected, &map.blueprints, pixels_per_point);
-                                ui::resource_bar(ctx, &snapshot);
+                                let sound_label = sound.as_ref().map(|_| sound_settings.label());
+                                ui::resource_bar(ctx, &snapshot, sound_label.as_deref());
+                                ui::commander_alert(ctx, attack_alarm.alert_strength());
+                                ui::quick_select_bar(ctx, &snapshot, PLAYER_TEAM, &map.blueprints, &selected, camera.focus(), &mut quick_select, &mut actions);
                                 ui::command_panel(ctx, &snapshot, &selected, &map.blueprints, armed, &mut actions);
                                 if let Some(blueprint) = placing {
                                     ui::placement_hint(ctx, &map.blueprints, blueprint);
@@ -957,6 +1031,17 @@ fn run_windowed(seed: u64, options: Options) {
                                     patrol_points.clear();
                                 }
                                 UiAction::Stop => stop_selection(&session, &selection, &mut feedback),
+                                UiAction::QuickSelect { units, add } => {
+                                    if add {
+                                        selection.add(&units);
+                                    } else {
+                                        selection.select(units);
+                                    }
+                                    armed = None;
+                                    placing = None;
+                                    line_start = None;
+                                    patrol_points.clear();
+                                }
                                 UiAction::CancelTask { units, task } => {
                                     feedback.set_label(MarkerKind::Build, format!("{} removed", ui::task_name(&task, &map.blueprints)));
                                     session.send(SimCommand::CancelTask { units, task });
@@ -968,6 +1053,7 @@ fn run_windowed(seed: u64, options: Options) {
                                     }
                                 }
                                 UiAction::Restart => {
+                                    attack_alarm = AttackAlarm::default();
                                     session = Session::start(scenario::skirmish(seed), CommandSource::PlayerVsAi { seed }, driver_options);
                                     selection.clear();
                                     placing = None;

@@ -14,8 +14,8 @@ pub const REPEAT: char = 'R';
 /// Away from the others, because it throws away a queue.
 pub const CLEAR_QUEUE: char = 'K';
 
-/// Letters handled on their own: panning, and patrol, which also works by holding the key.
-pub const RESERVED: [char; 5] = ['W', 'A', 'S', 'D', PATROL];
+/// Letters handled on their own: panning, patrol, which also works by holding the key, and mute.
+pub const RESERVED: [char; 6] = ['W', 'A', 'S', 'D', PATROL, 'N'];
 
 /// The key for building a blueprint, by its key in the blueprint data.
 pub fn blueprint_hotkey(key: &str) -> Option<char> {

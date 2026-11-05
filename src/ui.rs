@@ -2,6 +2,8 @@
 //! It reads snapshots and returns actions. It never touches the simulation.
 #![allow(clippy::disallowed_types)]
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use egui::{Align2, Color32, FontId, Pos2, Rect, Rounding, Stroke, Vec2};
 
 use crate::input::feedback::{Marker, MarkerKind, OrderFeedback, LABEL_SECONDS};
@@ -37,6 +39,9 @@ const BUILDING: Color32 = Color32::from_rgb(120, 200, 255);
 /// Warm, so that beams stand out against both blue structures and the terrain.
 const BEAM_BUILD: Color32 = Color32::from_rgb(255, 215, 110);
 const BEAM_RECLAIM: Color32 = Color32::from_rgb(150, 255, 170);
+/// Matches how double-clicking a unit works.
+const QUICK_DOUBLE_CLICK_SECONDS: f64 = 0.4;
+const QUICK_ROW_WIDTH: f32 = 170.0;
 /// How tall the queue can grow before it scrolls, in points.
 const QUEUE_MAX_HEIGHT: f32 = 60.0;
 /// How many pulses are on a work beam at once.
@@ -107,6 +112,8 @@ pub enum UiAction {
     /// The next click on the map gives this order.
     Arm(ArmedOrder),
     Stop,
+    /// From the quick select bar: select these, or add them to the selection.
+    QuickSelect { units: Vec<SimId>, add: bool },
     /// Remove one order from these builders' queues.
     CancelTask { units: Vec<SimId>, task: BuildTask },
     /// Remove one of an item from each of these factories' queues.
@@ -278,6 +285,200 @@ fn queue_chip_row(ui: &mut egui::Ui, chips: &[QueueChip], actions: &mut Vec<UiAc
     });
 }
 
+/// One tier of one kind of factory in the quick select bar.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QuickTier {
+    pub label: String,
+    pub units: Vec<SimId>,
+}
+
+/// One kind of factory in the quick select bar.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QuickFamily {
+    pub name: String,
+    pub tiers: Vec<QuickTier>,
+}
+
+/// What the quick select bar offers right now.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct QuickSelect {
+    pub commander: Option<SimId>,
+    pub families: Vec<QuickFamily>,
+}
+
+/// "land_factory_t2" is the kind "Land Factory". Later kinds of factory get their own rows.
+fn factory_family_name(key: &str) -> String {
+    let base = key.rsplit_once("_t").filter(|(_, tier)| tier.parse::<u8>().is_ok()).map_or(key, |(base, _)| base);
+    base.split('_')
+        .map(|word| {
+            let mut letters = word.chars();
+            letters.next().map_or(String::new(), |first| first.to_uppercase().chain(letters).collect())
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Sorts a team's commander and factories into the bar's rows. Tiers and kinds with
+/// nothing in them do not appear. Factories still being built count, as they take orders.
+pub fn quick_select_groups(snapshot: &SimSnapshot, team: Team, db: &BlueprintDb) -> QuickSelect {
+    let mut groups = QuickSelect::default();
+    let mut families: BTreeMap<String, BTreeMap<u8, Vec<SimId>>> = BTreeMap::new();
+    for unit in snapshot.units.iter().filter(|unit| unit.team == team && unit.blueprint != u16::MAX) {
+        let blueprint = db.get(BlueprintId(unit.blueprint));
+        if blueprint.is_commander() {
+            groups.commander.get_or_insert(unit.id);
+        } else if blueprint.is_factory() {
+            families.entry(factory_family_name(&blueprint.key)).or_default().entry(blueprint.tier).or_default().push(unit.id);
+        }
+    }
+    groups.families = families
+        .into_iter()
+        .map(|(name, tiers)| QuickFamily {
+            name,
+            tiers: tiers.into_iter().map(|(tier, units)| QuickTier { label: format!("T{tier}  x{}", units.len()), units }).collect(),
+        })
+        .collect();
+    groups
+}
+
+/// The one of these units closest to a point on the map, with the lowest id winning a tie.
+pub fn closest_unit(snapshot: &SimSnapshot, units: &[SimId], point: [f64; 2]) -> Option<SimId> {
+    let distance = |id: SimId| {
+        find_unit(snapshot, id).map(|unit| (f64::from(unit.x) / 4096.0 - point[0]).hypot(f64::from(unit.y) / 4096.0 - point[1]))
+    };
+    let mut best: Option<(f64, SimId)> = None;
+    for &id in units {
+        if let Some(away) = distance(id) {
+            if best.is_none_or(|(closest, _)| away < closest) {
+                best = Some((away, id));
+            }
+        }
+    }
+    best.map(|(_, id)| id)
+}
+
+/// What the quick select bar remembers between frames.
+#[derive(Clone, Debug, Default)]
+pub struct QuickSelectState {
+    expanded: BTreeSet<String>,
+    last_click: Option<(String, f64)>,
+}
+
+impl QuickSelectState {
+    /// Opens a kind of factory, as a click on it would.
+    pub fn expand(&mut self, family: &str) {
+        self.expanded.insert(family.to_string());
+    }
+
+    /// Returns whether this click makes a double-click on the same row.
+    fn register_click(&mut self, row: &str, now: f64) -> bool {
+        let double = self.last_click.as_ref().is_some_and(|(last, at)| last == row && now - at <= QUICK_DOUBLE_CLICK_SECONDS);
+        // A third click starts over, instead of counting as another double-click.
+        self.last_click = if double { None } else { Some((row.to_string(), now)) };
+        double
+    }
+}
+
+fn quick_row(ui: &mut egui::Ui, text: &str, class: UnitClass, color: Color32, selected: bool) -> egui::Response {
+    // Drawn by hand, because a wide button would center its text over the icon.
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(QUICK_ROW_WIDTH, 24.0), egui::Sense::click());
+    let visuals = ui.style().interact_selectable(&response, selected);
+    let painter = ui.painter();
+    painter.rect(rect, visuals.rounding, visuals.weak_bg_fill, visuals.bg_stroke);
+    draw_icon(painter, Pos2::new(rect.left() + 17.0, rect.center().y), class, color, selected);
+    painter.text(Pos2::new(rect.left() + 34.0, rect.center().y), Align2::LEFT_CENTER, text, FontId::proportional(14.0), visuals.text_color());
+    response
+}
+
+#[allow(clippy::too_many_arguments)]
+fn quick_rows(
+    ui: &mut egui::Ui,
+    snapshot: &SimSnapshot,
+    groups: &QuickSelect,
+    color: Color32,
+    selected: &[SimId],
+    view_center: [f64; 2],
+    state: &mut QuickSelectState,
+    actions: &mut Vec<UiAction>,
+) {
+    let (shift, now) = ui.input(|input| (input.modifiers.shift, input.time));
+    if let Some(commander) = groups.commander {
+        if quick_row(ui, "ACU", UnitClass::Commander, color, selected.contains(&commander)).on_hover_text("Click to select. The view stays where it is.").clicked() {
+            actions.push(UiAction::QuickSelect { units: vec![commander], add: shift });
+        }
+    }
+    for family in &groups.families {
+        let open = state.expanded.contains(&family.name);
+        let total: usize = family.tiers.iter().map(|tier| tier.units.len()).sum();
+        let text = format!("{} {}  x{total}", if open { "-" } else { "+" }, family.name);
+        if quick_row(ui, &text, UnitClass::Factory, color, false).clicked() {
+            if open {
+                state.expanded.remove(&family.name);
+            } else {
+                state.expanded.insert(family.name.clone());
+            }
+        }
+        if !open {
+            continue;
+        }
+        for tier in &family.tiers {
+            let any_selected = tier.units.iter().any(|id| selected.contains(id));
+            ui.horizontal(|ui| {
+                ui.add_space(14.0);
+                let hint = "Click for the closest to your view. Double-click for all.";
+                if quick_row(ui, &tier.label, UnitClass::Factory, color, any_selected).on_hover_text(hint).clicked() {
+                    let row = format!("{} {}", family.name, tier.label.split(' ').next().unwrap_or(""));
+                    let units = if state.register_click(&row, now) {
+                        tier.units.clone()
+                    } else {
+                        closest_unit(snapshot, &tier.units, view_center).into_iter().collect()
+                    };
+                    actions.push(UiAction::QuickSelect { units, add: shift });
+                }
+            });
+        }
+    }
+}
+
+/// The bar on the right: select the commander or factories from anywhere, without moving the view.
+#[allow(clippy::too_many_arguments)]
+pub fn quick_select_bar(
+    ctx: &egui::Context,
+    snapshot: &SimSnapshot,
+    team: Team,
+    db: &BlueprintDb,
+    selected: &[SimId],
+    view_center: [f64; 2],
+    state: &mut QuickSelectState,
+    actions: &mut Vec<UiAction>,
+) {
+    let groups = quick_select_groups(snapshot, team, db);
+    if groups.commander.is_none() && groups.families.is_empty() {
+        return;
+    }
+    egui::Area::new(egui::Id::new("quick select")).anchor(Align2::RIGHT_TOP, Vec2::new(-8.0, 36.0)).show(ctx, |ui| {
+        egui::Frame::popup(ui.style()).show(ui, |ui| {
+            quick_rows(ui, snapshot, &groups, team_color(team), selected, view_center, state, actions);
+        });
+    });
+}
+
+/// The text alert that goes with the "ACU under attack" sound.
+pub fn commander_alert(ctx: &egui::Context, strength: f32) {
+    if strength <= 0.0 {
+        return;
+    }
+    egui::Area::new(egui::Id::new("commander alert"))
+        .anchor(Align2::CENTER_TOP, Vec2::new(0.0, 150.0))
+        .interactable(false)
+        .show(ctx, |ui| {
+            let text = egui::RichText::new("ACU under attack").size(22.0).strong().color(STALLED.gamma_multiply(strength));
+            egui::Frame::popup(ui.style()).multiply_with_opacity(strength).show(ui, |ui| {
+                ui.label(text);
+            });
+        });
+}
+
 /// Nothing in the game takes typing. Without this, Tab would give a button keyboard focus,
 /// and it would then swallow every key, so that hotkeys seem to stop working.
 pub fn release_keyboard_focus(ctx: &egui::Context) {
@@ -289,7 +490,7 @@ pub fn release_keyboard_focus(ctx: &egui::Context) {
 }
 
 /// The bar across the top of the screen.
-pub fn resource_bar(ctx: &egui::Context, snapshot: &SimSnapshot) {
+pub fn resource_bar(ctx: &egui::Context, snapshot: &SimSnapshot, sound: Option<&str>) {
     egui::TopBottomPanel::top("resources").show(ctx, |ui| {
         ui.horizontal(|ui| {
             let economy = &snapshot.economy;
@@ -320,6 +521,10 @@ pub fn resource_bar(ctx: &egui::Context, snapshot: &SimSnapshot) {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let seconds = snapshot.tick / 10;
                 ui.label(format!("{}:{:02}", seconds / 60, seconds % 60));
+                if let Some(sound) = sound {
+                    ui.separator();
+                    ui.label(sound);
+                }
             });
         });
     });
@@ -1506,6 +1711,173 @@ mod tests {
         assert_eq!(actions, [UiAction::Restart], "a right-click should remove the order");
         assert!(over_panel, "the interface must claim the click, or it would also order units to move");
         assert!(click_first_chip(egui::PointerButton::Primary).0.is_empty());
+    }
+
+    fn base_with_factories(db: &BlueprintDb) -> SimSnapshot {
+        let raw = |value: f64| (value * 4096.0) as i32;
+        let make = |id: u32, key: &str, x: f64, built: u16, team: Team| {
+            let mut view = unit(id, x);
+            view.x = raw(x);
+            view.blueprint = db.id(key).0;
+            view.is_structure = key != "acu";
+            view.built_permille = built;
+            view.team = team;
+            view
+        };
+        snapshot(
+            vec![
+                make(1, "acu", 0.0, 1000, Team::Blue),
+                make(2, "land_factory_t1", 100.0, 1000, Team::Blue),
+                make(3, "land_factory_t1", 900.0, 400, Team::Blue),
+                make(4, "land_factory_t2", 500.0, 1000, Team::Blue),
+                make(5, "land_factory_t2", 700.0, 1000, Team::Blue),
+                make(6, "power_generator", 50.0, 1000, Team::Blue),
+                make(7, "land_factory_t1", 300.0, 1000, Team::Red),
+                make(8, "acu", 300.0, 1000, Team::Red),
+            ],
+            vec![],
+        )
+    }
+
+    #[test]
+    fn the_bar_lists_your_commander_and_factories_by_kind_and_tier() {
+        let db = BlueprintDb::standard();
+        let groups = quick_select_groups(&base_with_factories(&db), Team::Blue, &db);
+        assert_eq!(groups.commander, Some(SimId(1)));
+        assert_eq!(groups.families.len(), 1);
+        assert_eq!(groups.families[0].name, "Land Factory");
+        let tiers = &groups.families[0].tiers;
+        assert_eq!(tiers.len(), 2);
+        assert_eq!((tiers[0].label.as_str(), tiers[0].units.as_slice()), ("T1  x2", [SimId(2), SimId(3)].as_slice()), "an unfinished one counts");
+        assert_eq!((tiers[1].label.as_str(), tiers[1].units.as_slice()), ("T2  x2", [SimId(4), SimId(5)].as_slice()));
+    }
+
+    #[test]
+    fn empty_tiers_and_kinds_are_left_out() {
+        let db = BlueprintDb::standard();
+        let mut current = base_with_factories(&db);
+        current.units.retain(|unit| unit.id != SimId(4) && unit.id != SimId(5));
+        let groups = quick_select_groups(&current, Team::Blue, &db);
+        assert_eq!(groups.families[0].tiers.len(), 1, "no T2 factories");
+        current.units.retain(|unit| unit.team == Team::Blue && !db.get(BlueprintId(unit.blueprint)).is_factory());
+        assert!(quick_select_groups(&current, Team::Blue, &db).families.is_empty());
+        assert_eq!(quick_select_groups(&snapshot(vec![], vec![]), Team::Blue, &db), QuickSelect::default());
+    }
+
+    #[test]
+    fn kinds_of_factory_get_readable_names() {
+        assert_eq!(factory_family_name("land_factory_t1"), "Land Factory");
+        assert_eq!(factory_family_name("land_factory_t2"), "Land Factory");
+        assert_eq!(factory_family_name("air_factory_t3"), "Air Factory");
+        assert_eq!(factory_family_name("shipyard"), "Shipyard");
+    }
+
+    #[test]
+    fn closest_means_closest_to_the_view_and_a_tie_goes_to_the_lowest_id() {
+        let db = BlueprintDb::standard();
+        let current = base_with_factories(&db);
+        let t2 = [SimId(4), SimId(5)];
+        assert_eq!(closest_unit(&current, &t2, [520.0, 0.0]), Some(SimId(4)));
+        assert_eq!(closest_unit(&current, &t2, [680.0, 0.0]), Some(SimId(5)));
+        assert_eq!(closest_unit(&current, &t2, [600.0, 0.0]), Some(SimId(4)));
+        assert_eq!(closest_unit(&current, &[SimId(99)], [0.0, 0.0]), None);
+    }
+
+    /// Clicks on the bar's rows through real egui input.
+    struct BarTest {
+        ctx: egui::Context,
+        current: SimSnapshot,
+        groups: QuickSelect,
+        state: QuickSelectState,
+        time: f64,
+    }
+
+    impl BarTest {
+        fn new() -> Self {
+            let db = BlueprintDb::standard();
+            let current = base_with_factories(&db);
+            let groups = quick_select_groups(&current, Team::Blue, &db);
+            let mut test = Self { ctx: egui::Context::default(), current, groups, state: QuickSelectState::default(), time: 10.0 };
+            test.frame(vec![], egui::Modifiers::NONE);
+            test
+        }
+
+        fn frame(&mut self, events: Vec<egui::Event>, modifiers: egui::Modifiers) -> Vec<UiAction> {
+            self.time += 0.02;
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0))),
+                time: Some(self.time),
+                modifiers,
+                events,
+                ..egui::RawInput::default()
+            };
+            let mut actions = Vec::new();
+            let (current, groups, state) = (&self.current, &self.groups, &mut self.state);
+            let _ = self.ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    quick_rows(ui, current, groups, BLUE, &[], [680.0, 0.0], state, &mut actions);
+                });
+            });
+            actions
+        }
+
+        /// Row 0 is the ACU, row 1 the factory kind, and rows 2 and 3 its tiers.
+        fn click(&mut self, row: usize, modifiers: egui::Modifiers) -> Vec<UiAction> {
+            let at = egui::pos2(70.0, 20.0 + row as f32 * 27.0);
+            let press = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers };
+            let mut actions = self.frame(vec![egui::Event::PointerMoved(at)], modifiers);
+            actions.extend(self.frame(vec![press(true)], modifiers));
+            actions.extend(self.frame(vec![press(false)], modifiers));
+            actions.extend(self.frame(vec![], modifiers));
+            actions
+        }
+    }
+
+    #[test]
+    fn clicking_the_commander_selects_it_and_shift_adds_it() {
+        let mut bar = BarTest::new();
+        assert_eq!(bar.click(0, egui::Modifiers::NONE), [UiAction::QuickSelect { units: vec![SimId(1)], add: false }]);
+        bar.time += 1.0;
+        assert_eq!(bar.click(0, egui::Modifiers::SHIFT), [UiAction::QuickSelect { units: vec![SimId(1)], add: true }]);
+    }
+
+    #[test]
+    fn clicking_a_kind_only_opens_and_closes_it() {
+        let mut bar = BarTest::new();
+        assert!(bar.click(2, egui::Modifiers::NONE).is_empty(), "closed, so there is no tier row there");
+        assert!(bar.click(1, egui::Modifiers::NONE).is_empty(), "opening must not change the selection");
+        assert!(bar.state.expanded.contains("Land Factory"));
+        bar.time += 1.0;
+        assert!(bar.click(1, egui::Modifiers::NONE).is_empty());
+        assert!(!bar.state.expanded.contains("Land Factory"));
+    }
+
+    #[test]
+    fn clicking_a_tier_selects_the_closest_and_double_clicking_selects_all() {
+        let mut bar = BarTest::new();
+        bar.click(1, egui::Modifiers::NONE);
+        bar.time += 1.0;
+        let closest = || vec![UiAction::QuickSelect { units: vec![SimId(5)], add: false }];
+        assert_eq!(bar.click(3, egui::Modifiers::NONE), closest(), "the T2 factory nearest the view");
+        assert_eq!(bar.click(3, egui::Modifiers::NONE), [UiAction::QuickSelect { units: vec![SimId(4), SimId(5)], add: false }], "a second click soon after");
+
+        // Too slow to be a double-click.
+        bar.time += 1.0;
+        assert_eq!(bar.click(3, egui::Modifiers::NONE), closest());
+        bar.time += 1.0;
+        assert_eq!(bar.click(3, egui::Modifiers::NONE), closest());
+    }
+
+    #[test]
+    fn shift_adds_from_a_tier_and_clicks_on_different_tiers_are_not_a_double_click() {
+        let mut bar = BarTest::new();
+        bar.click(1, egui::Modifiers::NONE);
+        bar.time += 1.0;
+        assert_eq!(bar.click(3, egui::Modifiers::SHIFT), [UiAction::QuickSelect { units: vec![SimId(5)], add: true }]);
+        assert_eq!(bar.click(3, egui::Modifiers::SHIFT), [UiAction::QuickSelect { units: vec![SimId(4), SimId(5)], add: true }]);
+        bar.time += 1.0;
+        assert_eq!(bar.click(2, egui::Modifiers::NONE), [UiAction::QuickSelect { units: vec![SimId(3)], add: false }]);
+        assert_eq!(bar.click(3, egui::Modifiers::NONE), [UiAction::QuickSelect { units: vec![SimId(5)], add: false }]);
     }
 
     #[test]

@@ -32,6 +32,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The audio library needs the system's sound headers to compile.
+      - name: Install audio headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
       - name: Install Rust
         run: |
           rustup toolchain install "$RUST_VERSION" --profile minimal
