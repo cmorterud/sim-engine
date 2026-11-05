@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use sim_engine::ai::{advance_ai_vs_ai, AiBrain};
 use sim_engine::driver::{CommandSource, DriverOptions, DriverResult, SimDriver, TICK_DURATION};
 use sim_engine::input::feedback::{MarkerKind, OrderFeedback};
+use sim_engine::input::hotkeys;
 use sim_engine::input::orders::{
     deposit_position, free_deposits, line_cells, pending_builds, placement_cell, placement_is_valid, placement_target, right_click_orders, PlacementMap, RightClick,
 };
@@ -510,7 +511,8 @@ fn run_windowed(seed: u64, options: Options) {
     let mut last_frame = Instant::now();
     let mut frames_seen = 0usize;
     let mut held_keys = [false; 4];
-    let (mut alt_held, mut shift_held) = (false, false);
+    let (mut alt_held, mut shift_held, mut command_held) = (false, false, false);
+    let mut hotkey_actions: Vec<UiAction> = Vec::new();
     let mut scene_instances = InstanceBatches::default();
     let mut headings = Headings::new();
     let mut title_timer = Instant::now();
@@ -533,6 +535,7 @@ fn run_windowed(seed: u64, options: Options) {
                     }
                     WindowEvent::ModifiersChanged(modifiers) => {
                         alt_held = modifiers.state().alt_key();
+                        command_held = modifiers.state().super_key() || modifiers.state().control_key();
                         shift_held = modifiers.state().shift_key();
                     }
                     WindowEvent::CursorMoved { position, .. } => selection.move_cursor([position.x, position.y]),
@@ -668,6 +671,16 @@ fn run_windowed(seed: u64, options: Options) {
                                     patrol_points.clear();
                                 }
                             }
+                            // Command and Control belong to the system: Command-Q must not start a factory.
+                            PhysicalKey::Code(code) if pressed && !event.repeat && is_match && !command_held => {
+                                if let Some(letter) = hotkeys::letter_for(code) {
+                                    match ui::hotkey_action(&session.current, selection.selected(), &map.blueprints, letter) {
+                                        Some(action) => hotkey_actions.push(action),
+                                        None if selection.selected().is_empty() => feedback.show_rejected(None, "No units selected"),
+                                        None => feedback.show_rejected(None, "Not available for this selection"),
+                                    }
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -780,7 +793,7 @@ fn run_windowed(seed: u64, options: Options) {
                         }
 
                         // The interface.
-                        let mut actions = Vec::new();
+                        let mut actions = std::mem::take(&mut hotkey_actions);
                         let raw_input = egui_state.take_egui_input(&window);
                         let pixels_per_point = window.scale_factor() as f32;
                         let snapshot = demo_snapshot.unwrap_or_else(|| Arc::clone(&session.current));
@@ -820,6 +833,7 @@ fn run_windowed(seed: u64, options: Options) {
                             .filter(|cell| extractor.is_some() && map.deposits.contains(cell))
                             .map(|cell| deposit_position(cell, &map.heights));
                         let output = egui_context.run(raw_input, |ctx| {
+                            ui::release_keyboard_focus(ctx);
                             ui::placement_grid(ctx, &camera, &grid_lines, f64::from(TERRAIN_CELL_UNITS), pixels_per_point);
                             ui::deposit_highlights(ctx, &camera, &open_deposits, snapped_deposit, pixels_per_point);
                             ui::pending_build_outlines(ctx, &camera, &pending, pixels_per_point);
@@ -858,6 +872,8 @@ fn run_windowed(seed: u64, options: Options) {
                             match action {
                                 UiAction::BeginPlacement(blueprint) => {
                                     placing = Some(blueprint);
+                                    // A row being dragged out was for the previous structure.
+                                    line_start = None;
                                     attack_move_armed = false;
                                 }
                                 UiAction::Queue { factories, blueprint, selected_count } => {

@@ -396,6 +396,7 @@ These are starting points for tuning, recorded because they interpret or adjust 
 * **Upkeep:** Nothing in the slice has an energy upkeep, so an energy stall only slows building. Sensor and shield effects from §3.2 arrive with those systems.
 * **Orders During Construction:** A factory takes queue, repeat, rally, and upgrade orders while it is under construction. They wait at no cost, and production starts once it is built.
 * **Work Beams:** A builder faces what it is working on, joined to it by an animated beam, which covers building, assisting, repairing, and reclaiming. A team with nothing to spend shows no beams, so a beam always means progress. This is presentation only, and not part of the checksum.
+* **Command Panel Hotkeys:** Every option in the command panel shows a key, which does the same as its button. Each option has one key whatever is selected, so that a builder and a factory selected together never compete for a key. Keys are mostly on the left of the keyboard, because the other hand is on the mouse.
 * **Arrival Formations:** A group ordered to a location forms a grid about twice as wide as it is deep, centered on the goal and lined up across the direction of travel. Units follow a shared route, then walk to their own spots, with a time limit so that a blocked spot cannot trap a unit.
 * **Left for Later:** The Overcharge cannon (§2.1), production pausing (§3.2), trees and rocks as reclaim (§6.1), and formation travel (§13.1) are not in the slice.
 

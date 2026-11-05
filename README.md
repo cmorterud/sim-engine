@@ -33,12 +33,15 @@ Destroy the enemy commander to win. Yours explodes if it dies, and your whole te
 | Shift + left-click | Queue a structure, and keep placing |
 | Shift + left-drag | Queue a row of structures, and keep placing |
 | X | Stop |
+| Q, E, G, T, C | With a builder selected: Land Factory, Mass Extractor, Power Generator, Mass Storage, Point Defense |
+| Z, B, V, H | With a factory selected: queue an Engineer, Light Bot, Light Artillery, Heavy Tank |
+| U, R, K | With a factory selected: Upgrade, Repeat, Clear queue |
 | Space | Jump to your commander and select it |
 | Scroll | Zoom, towards the cursor |
 | WASD or arrow keys | Pan |
 | Esc | Cancel placement or attack-move, or clear the selection |
 
-Selected units show a dashed trail through their pending orders, in the order they will carry them out, and selected factories show a dimmer line to their rally point. Queued builds always show a dimmed footprint, and a faint grid appears while placing, so that the next one can be lined up against them. Builders turn to face what they are working on, and a beam with moving pulses joins them to it for as long as work is really happening: it stops if they are out of resources. A marker and a line of text confirm each order. A click that shows nothing never reached the game. The window title shows the frame rate and tick time. Run with `--help` for the headless and test modes.
+Selected units show a dashed trail through their pending orders, in the order they will carry them out, and selected factories show a dimmer line to their rally point. Queued builds always show a dimmed footprint, and a faint grid appears while placing, so that the next one can be lined up against them. Builders turn to face what they are working on, and a beam with moving pulses joins them to it for as long as work is really happening: it stops if they are out of resources. Each option in the command panel shows its key. A marker and a line of text confirm each order. A click that shows nothing never reached the game. The window title shows the frame rate and tick time. Run with `--help` for the headless and test modes.
 
 ## Validate
 

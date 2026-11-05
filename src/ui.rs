@@ -5,6 +5,7 @@
 use egui::{Align2, Color32, FontId, Pos2, Rect, Rounding, Stroke, Vec2};
 
 use crate::input::feedback::{Marker, MarkerKind, OrderFeedback, LABEL_SECONDS};
+use crate::input::hotkeys::{self, blueprint_hotkey};
 use crate::input::orders::PendingBuild;
 use crate::render::camera::Camera;
 use crate::sim::blueprints::{BlueprintDb, BlueprintId, UnitClass};
@@ -58,9 +59,76 @@ fn find_unit(snapshot: &SimSnapshot, id: SimId) -> Option<&UnitView> {
     snapshot.units.binary_search_by_key(&id, |unit| unit.id).ok().map(|index| &snapshot.units[index])
 }
 
+/// A button's name and cost, with its key in front.
 fn cost_label(db: &BlueprintDb, blueprint: BlueprintId) -> String {
     let unit = db.get(blueprint);
-    format!("{}\n{} mass  {} energy", unit.name, unit.mass.to_num::<i64>(), unit.energy.to_num::<i64>())
+    let key = blueprint_hotkey(&unit.key).map_or(String::new(), |letter| format!("[{letter}] "));
+    format!("{key}{}\n{} mass  {} energy", unit.name, unit.mass.to_num::<i64>(), unit.energy.to_num::<i64>())
+}
+
+/// What all the selected builders can build, in the order of the first one's list.
+fn builder_options(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb) -> Vec<BlueprintId> {
+    let builders: Vec<&UnitView> = selected
+        .iter()
+        .filter_map(|id| find_unit(snapshot, *id))
+        .filter(|unit| {
+            unit.blueprint != u16::MAX && {
+                let blueprint = db.get(BlueprintId(unit.blueprint));
+                !blueprint.is_factory() && !blueprint.builds.is_empty()
+            }
+        })
+        .collect();
+    let Some(first) = builders.first() else {
+        return Vec::new();
+    };
+    db.get(BlueprintId(first.blueprint))
+        .builds
+        .iter()
+        .copied()
+        .filter(|option| builders.iter().all(|unit| db.get(BlueprintId(unit.blueprint)).builds.contains(option)))
+        .collect()
+}
+
+fn queue_action(menu: &FactoryMenu, able: &[SimId], blueprint: BlueprintId) -> UiAction {
+    UiAction::Queue { factories: able.to_vec(), blueprint, selected_count: menu.factories.len() }
+}
+
+/// A mixed selection turns on for all, as the next press turns off for all.
+fn repeat_action(menu: &FactoryMenu) -> UiAction {
+    UiAction::SetRepeat { factories: menu.factories.clone(), repeat: menu.repeat != RepeatState::On }
+}
+
+fn clear_action(menu: &FactoryMenu) -> UiAction {
+    UiAction::ClearQueue { factories: menu.factories.clone() }
+}
+
+/// What a command panel key does for this selection: the same as its button, or `None`
+/// if the panel has no such option right now.
+pub fn hotkey_action(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb, letter: char) -> Option<UiAction> {
+    let is_key = |blueprint: BlueprintId| blueprint_hotkey(&db.get(blueprint).key) == Some(letter);
+    if let Some(option) = builder_options(snapshot, selected, db).into_iter().find(|option| is_key(*option)) {
+        return Some(UiAction::BeginPlacement(option));
+    }
+    let menu = factory_menu(snapshot, selected, db)?;
+    if let Some((option, able)) = menu.options.iter().find(|(option, _)| is_key(*option)) {
+        return Some(queue_action(&menu, able, *option));
+    }
+    match letter {
+        hotkeys::UPGRADE => menu.upgrade.as_ref().map(|(upgrade, able)| queue_action(&menu, able, *upgrade)),
+        hotkeys::REPEAT => Some(repeat_action(&menu)),
+        hotkeys::CLEAR_QUEUE => Some(clear_action(&menu)),
+        _ => None,
+    }
+}
+
+/// Nothing in the game takes typing. Without this, Tab would give a button keyboard focus,
+/// and it would then swallow every key, so that hotkeys seem to stop working.
+pub fn release_keyboard_focus(ctx: &egui::Context) {
+    ctx.memory_mut(|memory| {
+        if let Some(focused) = memory.focused() {
+            memory.surrender_focus(focused);
+        }
+    });
 }
 
 /// The bar across the top of the screen.
@@ -123,19 +191,11 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
         };
         ui.strong(summary);
 
-        // What all the selected builders can build, in the order of the first one's list.
-        let builders: Vec<&&UnitView> = units
-            .iter()
-            .filter(|unit| {
-                let blueprint = db.get(BlueprintId(unit.blueprint));
-                !blueprint.is_factory() && !blueprint.builds.is_empty()
-            })
-            .collect();
-        if let Some(builder) = builders.first() {
+        let options = builder_options(snapshot, selected, db);
+        if !options.is_empty() {
             ui.horizontal_wrapped(|ui| {
-                for &option in &db.get(BlueprintId(builder.blueprint)).builds {
-                    let everyone_can = builders.iter().all(|unit| db.get(BlueprintId(unit.blueprint)).builds.contains(&option));
-                    if everyone_can && ui.button(cost_label(db, option)).clicked() {
+                for &option in &options {
+                    if ui.button(cost_label(db, option)).clicked() {
                         actions.push(UiAction::BeginPlacement(option));
                     }
                 }
@@ -263,27 +323,25 @@ fn factory_controls(ui: &mut egui::Ui, menu: &FactoryMenu, db: &BlueprintDb, act
     ui.horizontal_wrapped(|ui| {
         for (option, able) in &menu.options {
             if ui.button(format!("{}{}", cost_label(db, *option), partial(able.len()))).clicked() {
-                actions.push(UiAction::Queue { factories: able.clone(), blueprint: *option, selected_count: total });
+                actions.push(queue_action(menu, able, *option));
             }
         }
         if let Some((upgrade, able)) = &menu.upgrade {
             let cost = cost_label(db, *upgrade);
-            let label = format!("Upgrade to T2\n{}{}", cost.lines().nth(1).unwrap_or(""), partial(able.len()));
+            let label = format!("[{}] Upgrade to T2\n{}{}", hotkeys::UPGRADE, cost.lines().nth(1).unwrap_or(""), partial(able.len()));
             if ui.button(label).clicked() {
-                actions.push(UiAction::Queue { factories: able.clone(), blueprint: *upgrade, selected_count: total });
+                actions.push(queue_action(menu, able, *upgrade));
             }
         }
     });
     ui.horizontal(|ui| {
         let mut repeat = menu.repeat == RepeatState::On;
-        let checkbox = egui::Checkbox::new(&mut repeat, "Repeat").indeterminate(menu.repeat == RepeatState::Mixed);
+        let checkbox = egui::Checkbox::new(&mut repeat, format!("[{}] Repeat", hotkeys::REPEAT)).indeterminate(menu.repeat == RepeatState::Mixed);
         if ui.add(checkbox).clicked() {
-            // A mixed selection turns on for all, as the next click turns off for all.
-            let turn_on = menu.repeat != RepeatState::On;
-            actions.push(UiAction::SetRepeat { factories: menu.factories.clone(), repeat: turn_on });
+            actions.push(repeat_action(menu));
         }
-        if ui.button("Clear queue").clicked() {
-            actions.push(UiAction::ClearQueue { factories: menu.factories.clone() });
+        if ui.button(format!("[{}] Clear queue", hotkeys::CLEAR_QUEUE)).clicked() {
+            actions.push(clear_action(menu));
         }
         if total > 1 {
             ui.label(format!("{total} factories:"));
@@ -1062,6 +1120,99 @@ mod tests {
             assert!(moved < 0.0 || moved > 0.5, "reclaiming should flow back: {moved}");
         }
         assert_ne!(beam_pulse_shares(1.0, SimId(1), false), beam_pulse_shares(1.0, SimId(2), false), "builders should be out of step");
+    }
+
+    fn commander_and_engineer(db: &BlueprintDb) -> SimSnapshot {
+        let mut commander = unit(10, 0.0);
+        commander.blueprint = db.id("acu").0;
+        let mut engineer = unit(11, 0.0);
+        engineer.blueprint = db.id("t1_engineer").0;
+        let mut bot = unit(12, 0.0);
+        bot.blueprint = db.id("t1_light_bot").0;
+        snapshot(vec![commander, engineer, bot], vec![])
+    }
+
+    #[test]
+    fn builder_keys_begin_placing_the_same_structures_as_the_buttons() {
+        let db = BlueprintDb::standard();
+        let current = commander_and_engineer(&db);
+        for (letter, key) in [('Q', "land_factory_t1"), ('E', "mass_extractor"), ('G', "power_generator"), ('T', "mass_storage"), ('C', "t1_point_defense")] {
+            for selected in [vec![SimId(10)], vec![SimId(11)], vec![SimId(10), SimId(11)]] {
+                assert_eq!(hotkey_action(&current, &selected, &db, letter), Some(UiAction::BeginPlacement(db.id(key))), "{letter} for {selected:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn keys_do_nothing_when_the_selection_has_no_such_option() {
+        let db = BlueprintDb::standard();
+        let current = commander_and_engineer(&db);
+        assert_eq!(hotkey_action(&current, &[], &db, 'E'), None, "nothing is selected");
+        assert_eq!(hotkey_action(&current, &[SimId(12)], &db, 'E'), None, "a bot cannot build");
+        assert_eq!(hotkey_action(&current, &[SimId(10)], &db, 'B'), None, "a commander is not a factory");
+        assert_eq!(hotkey_action(&current, &[SimId(10)], &db, 'R'), None, "a commander has no repeat");
+        let factories = mixed_factories(&db);
+        assert_eq!(hotkey_action(&factories, &[SimId(1)], &db, 'H'), None, "a T1 factory cannot build tanks");
+        assert_eq!(hotkey_action(&factories, &[SimId(1)], &db, 'E'), None, "a factory does not place structures");
+        assert_eq!(hotkey_action(&factories, &[SimId(2)], &db, 'U'), None, "a T2 factory has no upgrade");
+    }
+
+    #[test]
+    fn factory_keys_reach_every_factory_able_to_follow_them() {
+        let db = BlueprintDb::standard();
+        let current = mixed_factories(&db);
+        let selected = [SimId(1), SimId(2), SimId(3)];
+        let queue = |key: &str, factories: Vec<SimId>| UiAction::Queue { factories, blueprint: db.id(key), selected_count: 3 };
+        assert_eq!(hotkey_action(&current, &selected, &db, 'Z'), Some(queue("t1_engineer", selected.to_vec())));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'B'), Some(queue("t1_light_bot", selected.to_vec())));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'V'), Some(queue("t1_light_artillery", selected.to_vec())));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'H'), Some(queue("t2_heavy_tank", vec![SimId(2)])));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'U'), Some(queue("land_factory_t2", vec![SimId(1), SimId(3)])));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'K'), Some(UiAction::ClearQueue { factories: selected.to_vec() }));
+    }
+
+    #[test]
+    fn the_repeat_key_toggles_like_the_checkbox() {
+        let db = BlueprintDb::standard();
+        let mut current = mixed_factories(&db);
+        let selected = [SimId(1), SimId(2)];
+        let press = |current: &SimSnapshot| hotkey_action(current, &selected, &db, 'R');
+        let set = |repeat: bool| Some(UiAction::SetRepeat { factories: selected.to_vec(), repeat });
+        assert_eq!(press(&current), set(true));
+        current.factories[0].repeat = true;
+        assert_eq!(press(&current), set(true), "a mixed selection turns on for all");
+        current.factories[1].repeat = true;
+        assert_eq!(press(&current), set(false));
+    }
+
+    #[test]
+    fn a_builder_and_a_factory_selected_together_both_answer_their_own_keys() {
+        let db = BlueprintDb::standard();
+        let mut current = mixed_factories(&db);
+        let mut engineer = unit(4, 0.0);
+        engineer.blueprint = db.id("t1_engineer").0;
+        current.units.push(engineer);
+        let selected = [SimId(1), SimId(4)];
+        assert_eq!(hotkey_action(&current, &selected, &db, 'E'), Some(UiAction::BeginPlacement(db.id("mass_extractor"))));
+        let expected = UiAction::Queue { factories: vec![SimId(1)], blueprint: db.id("t1_engineer"), selected_count: 1 };
+        assert_eq!(hotkey_action(&current, &selected, &db, 'Z'), Some(expected));
+    }
+
+    #[test]
+    fn every_button_label_shows_its_key() {
+        let db = BlueprintDb::standard();
+        assert!(cost_label(&db, db.id("mass_extractor")).starts_with("[E] Mass Extractor"), "{}", cost_label(&db, db.id("mass_extractor")));
+        assert!(cost_label(&db, db.id("t1_light_bot")).starts_with("[B] "));
+    }
+
+    #[test]
+    fn keyboard_focus_never_stays_on_a_button() {
+        let ctx = egui::Context::default();
+        let id = egui::Id::new("button");
+        ctx.memory_mut(|memory| memory.request_focus(id));
+        assert!(ctx.wants_keyboard_input(), "the test needs a focused button to begin with");
+        release_keyboard_focus(&ctx);
+        assert!(!ctx.wants_keyboard_input(), "focus would swallow hotkeys");
     }
 
     #[test]
