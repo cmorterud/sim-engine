@@ -8,7 +8,7 @@ use super::combat::{entry_hit, firing_solution, probe_terrain, GRAVITY};
 use super::commands::SimCommand;
 use super::components::{BuildTask, 
     Blueprinted, Builder, Combat, Construction, Factory, Footprint, Health, MoveClass, Order, OrderKind, OrderQueue, Patrol,
-    Position, Projectile, SimId, Team, Turning, UnitStats, Velocity, Wreck,
+    Position, Projectile, SimId, Team, Turning, Turret, UnitStats, Velocity, Wreck,
 };
 use super::config::{SimConfig, TARGET_SEARCH_INTERVAL, TERRAIN_CELL_UNITS, WRECK_MASS_PERMILLE};
 use super::flowfield::{nearest_passable_cell, FlowField, FlowSample};
@@ -68,6 +68,8 @@ pub struct UnitView {
     pub is_structure: bool,
     /// Which way the body faces, as a raw unit vector. Zero for units that turn instantly.
     pub facing: [i32; 2],
+    /// Which way the weapon points, as a raw unit vector. Zero for weapons that do not swivel.
+    pub aim: [i32; 2],
 }
 
 /// A factory's production state, for the build menu. Only for the viewer's team.
@@ -1007,10 +1009,10 @@ impl SimWorld {
         let (max_mobile, max_structure) = (self.max_mobile_radius, self.max_structure_radius);
         shots.clear();
         let mut finished_attacks: Vec<SimId> = Vec::new();
-        let mut query = self.ecs.query_mut::<(&UnitStats, &mut Combat)>();
+        let mut query = self.ecs.query_mut::<(&UnitStats, &mut Combat, Option<&mut Turret>, Option<&Turning>)>();
         let mut view = query.view();
         for (index, &(id, entity)) in units.iter().enumerate() {
-            let (stats, combat) = view.get_mut(entity).expect("unit list only holds live units");
+            let (stats, combat, turret, turning) = view.get_mut(entity).expect("unit list only holds live units");
             combat.ticks_until_ready = combat.ticks_until_ready.saturating_sub(1);
             if !combat.enabled || combat.range == Fp::ZERO {
                 continue;
@@ -1080,7 +1082,26 @@ impl SimWorld {
                 }
             }
 
-            if combat.ticks_until_ready == 0 {
+            // A turret swivels to its target, or back to the front without one, and only fires once it points there.
+            let aimed = match turret {
+                None => true,
+                Some(turret) => {
+                    let toward = |entry: &super::spatial::GridEntry| {
+                        let away = Vec2Fp::new(Fp::from_bits(entry.x - me.x), Fp::from_bits(entry.y - me.y));
+                        (away != Vec2Fp::ZERO).then(|| away.normalized())
+                    };
+                    match combat.target.and_then(locate) {
+                        Some(entry) => toward(entry).is_none_or(|toward| turret.aim(toward)),
+                        None => {
+                            if let Some(front) = turning.map(|turning| turning.facing) {
+                                turret.aim(front);
+                            }
+                            false
+                        }
+                    }
+                }
+            };
+            if combat.ticks_until_ready == 0 && aimed {
                 if let Some(target) = combat.target {
                     let entry = locate(target).expect("target was just validated or found");
                     let raw = |x: i32, y: i32, z: i32| Vec3Fp::new(Fp::from_bits(x), Fp::from_bits(y), Fp::from_bits(z));
@@ -1479,13 +1500,13 @@ impl SimWorld {
             Some(viewer) if self.config.fog_of_war && team != viewer => self.visibility.is_visible(viewer, x, y),
             _ => true,
         };
-        let mut unit_query = self.ecs.query::<(&Position, &UnitStats, &Health, Option<&Blueprinted>, Option<&Construction>, Option<&Turning>)>();
+        let mut unit_query = self.ecs.query::<(&Position, &UnitStats, &Health, Option<&Blueprinted>, Option<&Construction>, Option<&Turning>, Option<&Turret>)>();
         let unit_view = unit_query.view();
         let units = self
             .units
             .iter()
             .filter_map(|&(id, entity)| {
-                let (position, stats, health, blueprint, construction, turning) = unit_view.get(entity).expect("unit list only holds live units");
+                let (position, stats, health, blueprint, construction, turning, turret) = unit_view.get(entity).expect("unit list only holds live units");
                 let (x, y, z) = (position.0.x.to_bits(), position.0.y.to_bits(), position.0.z.to_bits());
                 seen(stats.team, x, y).then(|| UnitView {
                     id,
@@ -1501,6 +1522,7 @@ impl SimWorld {
                     }),
                     is_structure: stats.is_structure,
                     facing: turning.map_or([0, 0], |turning| [turning.facing.x.to_bits(), turning.facing.y.to_bits()]),
+                    aim: turret.map_or([0, 0], |turret| [turret.facing.x.to_bits(), turret.facing.y.to_bits()]),
                 })
             })
             .collect();

@@ -124,15 +124,15 @@ pub fn unit_look(key: &str) -> UnitLook {
     match key {
         "acu" => UnitLook { base: Some(Shape::CommanderLegs), ..look(Shape::Commander, Some([1.00, 1.00, 1.00]), 1.0) },
         "t1_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([0.95, 0.80, 0.30]), 1.0) },
-        "t1_light_bot" => look(Shape::Bot, None, 1.0),
-        "t1_light_artillery" => look(Shape::Artillery, None, 1.0),
-        "t2_heavy_tank" => look(Shape::Tank, None, 1.0),
+        "t1_light_bot" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::Bot, None, 1.0) },
+        "t1_light_artillery" => UnitLook { base: Some(Shape::ArtilleryHull), ..look(Shape::Artillery, None, 1.0) },
+        "t2_heavy_tank" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::Tank, None, 1.0) },
         "land_factory_t1" => look(Shape::Factory, Some([0.35, 0.35, 0.45]), 0.55),
         "land_factory_t2" => look(Shape::Factory, Some([0.20, 0.20, 0.30]), 0.7),
         "mass_extractor" => look(Shape::Extractor, Some([0.10, 0.95, 0.75]), 0.8),
         "power_generator" => look(Shape::Generator, Some([1.00, 0.85, 0.20]), 1.2),
         "mass_storage" => look(Shape::Storage, Some([0.60, 0.90, 0.60]), 0.65),
-        "t1_point_defense" => look(Shape::PointDefense, Some([0.75, 0.25, 0.85]), 0.9),
+        "t1_point_defense" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::PointDefense, Some([0.75, 0.25, 0.85]), 0.9) },
         _ => look(Shape::Cube, None, 0.6),
     }
 }
@@ -181,6 +181,16 @@ fn update_heading(headings: &mut Headings, unit: &UnitView, before: Option<&Unit
         }
     }
     *heading
+}
+
+/// A raw unit vector as one for drawing, or `None` for zero.
+fn unit_vector(raw: [i32; 2]) -> Option<[f32; 2]> {
+    if raw == [0, 0] {
+        return None;
+    }
+    let (x, y) = (f64::from(raw[0]), f64::from(raw[1]));
+    let length = x.hypot(y);
+    Some([(x / length) as f32, (y / length) as f32])
 }
 
 /// The body's facing from the simulation, turned smoothly between ticks.
@@ -250,13 +260,20 @@ pub fn build_unit_instances(
             center[2] += f64::from(height - size) * 0.5;
             let shade = 0.55 + 0.45 * built;
             let tinted = [color[0] * shade, color[1] * shade, color[2] * shade];
-            out.push(shape, instance(center, [size, size, height], NORTH, tinted, UNIT_ICON_PX * 1.6, eye));
+            // A structure's base stays put, and its gun, if any, turns to aim.
+            if let Some(base) = look.and_then(|look| look.base) {
+                out.push(base, instance(center, [size, size, height], NORTH, tinted, UNIT_ICON_PX * 1.6, eye));
+            }
+            let aim = unit_vector(unit.aim).unwrap_or(NORTH);
+            out.push(shape, instance(center, [size, size, height], aim, tinted, UNIT_ICON_PX * 1.6, eye));
         } else {
             // The body faces the way the simulation says. Units that turn instantly, such as the
             // stress test's cubes, have no facing, so they are turned here as before.
             let (body, upper) = match body_facing(unit, before, alpha) {
                 Some(body) => {
-                    let upper = if look.is_some_and(|look| look.base.is_some()) { update_heading(headings, unit, before, working_on, Some(body)) } else { body };
+                    // Work comes first, then the weapon's aim, and otherwise straight ahead.
+                    let rest = unit_vector(unit.aim).unwrap_or(body);
+                    let upper = if look.is_some_and(|look| look.base.is_some()) { update_heading(headings, unit, before, working_on, Some(rest)) } else { body };
                     (body, upper)
                 }
                 None => {
@@ -325,7 +342,7 @@ mod tests {
             health_permille: 1000,
             built_permille: 1000,
             is_structure: false,
-            facing: [0, 0],
+            facing: [0, 0], aim: [0, 0],
         }
     }
 
@@ -413,7 +430,8 @@ mod tests {
         assert_eq!(out.shape(Shape::Tank).len(), 1);
         assert_eq!(out.shape(Shape::Generator).len(), 1);
         assert_eq!(out.shape(Shape::Cube).len(), 0);
-        assert_eq!(out.total(), 2);
+        assert_eq!(out.shape(Shape::TankHull).len(), 1, "a tank is drawn as a hull and a turret");
+        assert_eq!(out.total(), 3);
     }
 
     fn facing(instance: &UnitInstanceRaw) -> [f32; 2] {
@@ -529,6 +547,38 @@ mod tests {
         }
         let body = facing(&out.shape(Shape::Commander)[0]);
         assert!((body[0] - 1.0).abs() < 1e-2, "the body should face the way the legs do: {body:?}");
+    }
+
+    #[test]
+    fn a_tank_drives_one_way_while_its_turret_aims_another() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let mut tank = unit(1, 0);
+        tank.blueprint = db.id("t2_heavy_tank").0;
+        tank.facing = [4096, 0];
+        tank.aim = [0, -4096];
+        let mut headings = Headings::new();
+        let mut out = InstanceBatches::default();
+        for _ in 0..60 {
+            out.clear();
+            build_unit_instances(&[tank], &[tank], 1.0, [0.0; 3], &[], &looks, &[], &mut headings, &mut out);
+        }
+        assert!((facing(&out.shape(Shape::TankHull)[0])[0] - 1.0).abs() < 1e-3, "the hull should face east");
+        assert!((facing(&out.shape(Shape::Tank)[0])[1] + 1.0).abs() < 1e-2, "the turret should aim south");
+    }
+
+    #[test]
+    fn a_point_defense_turns_only_its_gun() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let mut tower = unit(1, 0);
+        tower.blueprint = db.id("t1_point_defense").0;
+        tower.is_structure = true;
+        tower.aim = [-4096, 0];
+        let mut out = InstanceBatches::default();
+        build_unit_instances(&[tower], &[tower], 1.0, [0.0; 3], &[], &looks, &[], &mut Headings::new(), &mut out);
+        assert_eq!(facing(&out.shape(Shape::PointDefenseBase)[0]), NORTH, "the base stays put");
+        assert!((facing(&out.shape(Shape::PointDefense)[0])[0] + 1.0).abs() < 1e-3, "the gun should aim west");
     }
 
     #[test]

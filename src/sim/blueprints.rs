@@ -36,6 +36,8 @@ pub struct WeaponDef {
     pub projectile_speed: Fp,
     pub damage: Fp,
     pub splash_radius: Fp,
+    /// How fast the weapon swivels, in degrees per second. `None` fires in any direction at once.
+    pub turn_rate: Option<u32>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -137,6 +139,8 @@ struct RawWeapon {
     projectile_speed: Number,
     damage: Number,
     splash_radius: Option<Number>,
+    /// How fast the weapon swivels, in degrees per second. Without one, it fires in any direction at once.
+    turn_rate: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -240,6 +244,7 @@ impl BlueprintDb {
                     projectile_speed: weapon.projectile_speed.fp().map_err(context)?,
                     damage: weapon.damage.fp().map_err(context)?,
                     splash_radius: whole(&weapon.splash_radius)?,
+                    turn_rate: weapon.turn_rate,
                 }),
             };
             let death_explosion = match &unit.death_explosion {

@@ -179,6 +179,45 @@ pub struct Turning {
     pub radius: Fp,
 }
 
+/// Turns a unit vector towards another by at most `turn` radians, the short way round.
+/// Exactly behind has no shorter side, so it turns the positive way.
+pub fn rotate_toward(facing: Vec2Fp, toward: Vec2Fp, turn: Fp) -> Vec2Fp {
+    let dot = facing.x * toward.x + facing.y * toward.y;
+    let (cos, sin) = cos_sin_radians(FpWide::from_bits(i64::from(turn.to_bits()) << 12));
+    if dot >= cos {
+        return toward;
+    }
+    let left = facing.x * toward.y - facing.y * toward.x >= Fp::ZERO;
+    let sin = if left { sin } else { -sin };
+    Vec2Fp::new(facing.x * cos - facing.y * sin, facing.x * sin + facing.y * cos).normalized()
+}
+
+/// A weapon that has to swivel to its target before it can fire.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Turret {
+    /// A unit vector.
+    pub facing: Vec2Fp,
+    /// The most it can turn in a tick, in radians.
+    pub max_turn: Fp,
+}
+
+/// About cos(6 degrees): a turret pointing this close to its target can fire.
+pub const AIMED: Fp = Fp::from_bits(4_074);
+
+impl Turret {
+    /// From a turn rate in degrees per second.
+    pub fn new(facing: Vec2Fp, degrees_per_second: u32) -> Self {
+        let max_turn = radians_from_tenths_of_degree(degrees_per_second.min(900));
+        Self { facing, max_turn: Fp::from_bits((max_turn.to_bits() >> 12) as i32) }
+    }
+
+    /// Swivels towards a direction, given as a unit vector, and returns whether it now points close enough to fire.
+    pub fn aim(&mut self, toward: Vec2Fp) -> bool {
+        self.facing = rotate_toward(self.facing, toward, self.max_turn);
+        self.facing.x * toward.x + self.facing.y * toward.y >= AIMED
+    }
+}
+
 /// In a tight turn, a vehicle slows to this share of its speed.
 const TURNING_SPEED_SHARE: Fp = Fp::from_bits(2_048);
 /// A unit pivoting on the spot turns at this share of its turn rate.
@@ -214,13 +253,7 @@ impl Turning {
             let forward = speed * dot.clamp(TURNING_SPEED_SHARE, Fp::ONE);
             (forward, self.max_turn.min(forward / self.radius))
         };
-        let (cos, sin) = cos_sin_radians(FpWide::from_bits(i64::from(turn.to_bits()) << 12));
-        if dot >= cos {
-            self.facing = toward;
-        } else {
-            let sin = if left { sin } else { -sin };
-            self.facing = Vec2Fp::new(facing.x * cos - facing.y * sin, facing.x * sin + facing.y * cos).normalized();
-        }
+        self.facing = rotate_toward(facing, toward, turn);
         let ahead = if self.radius == Fp::ZERO { forward.min(speed * (self.facing.x * toward.x + self.facing.y * toward.y).max(Fp::ZERO)) } else { forward };
         Vec2Fp::new(self.facing.x * ahead, self.facing.y * ahead)
     }
@@ -369,6 +402,20 @@ mod tests {
         let goal = Vec2Fp::new(Fp::ZERO, fp_int(30));
         let path = drive(&mut turning, goal, 200);
         assert!(path.len() < 120, "it took {} ticks, so it may be going round in circles", path.len());
+    }
+
+    #[test]
+    fn a_turret_swivels_at_its_own_rate_and_is_only_aimed_when_on_target() {
+        // 90 degrees a second is 9 degrees a tick, so half a turn takes 20 ticks.
+        let mut turret = Turret::new(east(), 90);
+        let behind = Vec2Fp::new(-Fp::ONE, Fp::ZERO);
+        let mut ticks = 0;
+        while !turret.aim(behind) {
+            ticks += 1;
+            assert!(ticks < 40, "it never came round");
+        }
+        assert!((19..=21).contains(&ticks), "took {ticks} ticks");
+        assert!(turret.aim(behind), "it stays on target");
     }
 
     #[test]

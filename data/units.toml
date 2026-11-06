@@ -22,7 +22,7 @@ vision = 1000
 build_power = 10
 build_range = 200
 builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense"]
-weapon = { range = 440, reload_ticks = 7, projectile_speed = 50, damage = 70 }
+weapon = { range = 440, reload_ticks = 7, projectile_speed = 50, damage = 70, turn_rate = 180 }
 mass_income = 1
 energy_income = 20
 mass_storage = 650
@@ -60,7 +60,7 @@ speed = "5.5"
 turn_rate = 360
 radius = 7
 vision = 500
-weapon = { range = 340, reload_ticks = 10, projectile_speed = 40, damage = 18 }
+weapon = { range = 340, reload_ticks = 10, projectile_speed = 40, damage = 18, turn_rate = 300 }
 
 [[unit]]
 id = "t1_light_artillery"
@@ -76,7 +76,7 @@ turn_rate = 120
 turn_radius = 30
 radius = 8
 vision = 500
-weapon = { range = 600, reload_ticks = 40, projectile_speed = 12, damage = 90, splash_radius = 40 }
+weapon = { range = 600, reload_ticks = 40, projectile_speed = 12, damage = 90, splash_radius = 40, turn_rate = 90 }
 
 [[unit]]
 id = "t2_heavy_tank"
@@ -92,7 +92,7 @@ turn_rate = 90
 turn_radius = 40
 radius = 11
 vision = 600
-weapon = { range = 460, reload_ticks = 12, projectile_speed = 60, damage = 70 }
+weapon = { range = 460, reload_ticks = 12, projectile_speed = 60, damage = 70, turn_rate = 60 }
 
 [[unit]]
 id = "land_factory_t1"
@@ -174,4 +174,4 @@ build_time = 360
 health = 1400
 footprint = 1
 vision = 700
-weapon = { range = 520, reload_ticks = 8, projectile_speed = 70, damage = 60 }
+weapon = { range = 520, reload_ticks = 8, projectile_speed = 70, damage = 60, turn_rate = 120 }

@@ -4,7 +4,7 @@ use sim_engine::math::fp::{fp_int, Fp, Vec2Fp, Vec3Fp};
 use sim_engine::math::rect::RectFp;
 use sim_engine::sim::commands::SimCommand;
 use sim_engine::sim::combat::firing_solution;
-use sim_engine::sim::components::{Combat, Position, Projectile, SimId, Team};
+use sim_engine::sim::components::{Combat, Position, Projectile, SimId, Team, Turning, Turret};
 use sim_engine::sim::config::{SimConfig, TerrainStyle};
 use sim_engine::sim::scenario::{self, standard_unit};
 use sim_engine::sim::world::SimWorld;
@@ -169,5 +169,60 @@ fn battle_on_a_maximum_size_map_runs_to_casualties() {
     for &(_, entity) in world.units.iter().take(50) {
         let z = world.ecs.get::<&Position>(entity).unwrap().0.z;
         assert!(z.abs() < fp_int(200), "unit height {z} looks wrong");
+    }
+}
+
+/// A heavy tank facing east with a Red bot behind it, both from the real data.
+fn tank_with_enemy_behind() -> (SimWorld, SimId, SimId) {
+    let config = SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: false, ..SimConfig::default() };
+    let mut world = SimWorld::new(config, 1);
+    let (tank, bot) = (world.blueprints.id("t2_heavy_tank"), world.blueprints.id("t1_light_bot"));
+    let shooter = world.spawn_mobile(tank, Team::Blue, point(1_000, 1_000));
+    let east = Vec2Fp::new(Fp::ONE, Fp::ZERO);
+    let entity = world.unit_entity(shooter).unwrap();
+    world.ecs.get::<&mut Turret>(entity).unwrap().facing = east;
+    let target = world.spawn_mobile(bot, Team::Red, point(700, 1_000));
+    // The bot must not shoot back, so that only the tank's aim is measured.
+    world.ecs.get::<&mut Combat>(world.unit_entity(target).unwrap()).unwrap().range = Fp::ZERO;
+    (world, shooter, target)
+}
+
+#[test]
+fn a_turret_must_swivel_round_before_it_can_fire() {
+    let (mut world, shooter, _) = tank_with_enemy_behind();
+    let entity = world.unit_entity(shooter).unwrap();
+    let mut first_shot = None;
+    for tick in 0..60 {
+        world.advance_tick(&[]);
+        if !world.projectiles.is_empty() {
+            first_shot = Some(tick);
+            break;
+        }
+    }
+    // 60 degrees a second is 6 degrees a tick, so half a turn takes about 30 ticks, plus finding the target.
+    let tick = first_shot.expect("it should fire once it has come round");
+    assert!(tick >= 25, "it fired after only {tick} ticks, before it could have turned");
+    let facing = world.ecs.get::<&Turret>(entity).unwrap().facing;
+    assert!(facing.x < Fp::from_num(-0.99), "it should be aiming back at the bot, not {facing:?}");
+}
+
+#[test]
+fn a_turret_without_a_target_turns_back_to_the_front() {
+    let (mut world, shooter, target) = tank_with_enemy_behind();
+    run_ticks(&mut world, 40);
+    let entity = world.unit_entity(shooter).unwrap();
+    assert!(world.ecs.get::<&Turret>(entity).unwrap().facing.x < Fp::ZERO);
+    // The bot leaves, and the tank's turret goes back over its hull.
+    let far = world.unit_entity(target).unwrap();
+    world.ecs.get::<&mut Position>(far).unwrap().0 = Vec3Fp::new(fp_int(4_000), fp_int(4_000), Fp::ZERO);
+    run_ticks(&mut world, 60);
+    let turret = world.ecs.get::<&Turret>(entity).unwrap().facing;
+    let body = world.ecs.get::<&Turning>(entity).unwrap().facing;
+    assert!(turret.x * body.x + turret.y * body.y > Fp::from_num(0.99), "turret {turret:?}, hull {body:?}");
+}
+
+fn run_ticks(world: &mut SimWorld, ticks: u32) {
+    for _ in 0..ticks {
+        world.advance_tick(&[]);
     }
 }

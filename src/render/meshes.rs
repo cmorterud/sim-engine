@@ -14,14 +14,22 @@ pub enum Shape {
     Engineer,
     /// The engineer's hull, which faces the way it drives.
     EngineerHull,
+    /// The bot's upper body and gun, which turn to aim.
     Bot,
+    BotLegs,
+    /// The tank's turret and gun, which swivel to aim.
     Tank,
+    TankHull,
+    /// The artillery's barrel, which swivels to aim.
     Artillery,
+    ArtilleryHull,
     Factory,
     Extractor,
     Generator,
     Storage,
+    /// The point defense's gun, which swivels to aim.
     PointDefense,
+    PointDefenseBase,
     Shell,
     Wreck,
     /// Flat, around the feet of a selected mobile unit.
@@ -31,20 +39,24 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 21] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
         Self::Engineer,
         Self::EngineerHull,
         Self::Bot,
+        Self::BotLegs,
         Self::Tank,
+        Self::TankHull,
         Self::Artillery,
+        Self::ArtilleryHull,
         Self::Factory,
         Self::Extractor,
         Self::Generator,
         Self::Storage,
         Self::PointDefense,
+        Self::PointDefenseBase,
         Self::Shell,
         Self::Wreck,
         Self::SelectionRing,
@@ -179,23 +191,33 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         }
         // A narrow two-legged walker.
         Shape::Bot => {
-            mesh.block([-0.3, -0.12, -0.5], [-0.1, 0.12, -0.02]);
-            mesh.block([0.1, -0.12, -0.5], [0.3, 0.12, -0.02]);
             mesh.block([-0.34, -0.22, -0.02], [0.34, 0.22, 0.42]);
             mesh.beam([0.0, 0.1, 0.2], [0.0, 0.5, 0.2], 0.08, 0.07);
             mesh.block([-0.12, -0.1, 0.42], [0.12, 0.1, 0.5]);
         }
-        // A wide hull, a turret, and one long gun.
-        Shape::Tank => {
+        Shape::BotLegs => {
+            mesh.block([-0.3, -0.12, -0.5], [-0.1, 0.12, -0.02]);
+            mesh.block([0.1, -0.12, -0.5], [0.3, 0.12, -0.02]);
+            mesh.block([-0.3, 0.12, -0.5], [-0.1, 0.2, -0.42]);
+            mesh.block([0.1, 0.12, -0.5], [0.3, 0.2, -0.42]);
+        }
+        // A wide hull on two tracks.
+        Shape::TankHull => {
             mesh.block([-0.48, -0.5, -0.5], [-0.2, 0.42, -0.18]);
             mesh.block([0.2, -0.5, -0.5], [0.48, 0.42, -0.18]);
             mesh.block([-0.3, -0.42, -0.42], [0.3, 0.34, -0.1]);
+        }
+        // A turret and one long gun.
+        Shape::Tank => {
             mesh.frustum([0.0, -0.08], [-0.1, 0.16], [0.28, 0.2], 8);
             mesh.beam([0.0, 0.1, 0.03], [0.0, 0.49, 0.03], 0.05, 0.05);
         }
         // A small hull with a long barrel pointing up.
-        Shape::Artillery => {
+        Shape::ArtilleryHull => {
             mesh.block([-0.45, -0.5, -0.5], [0.45, 0.25, -0.2]);
+            mesh.block([-0.3, 0.25, -0.5], [0.3, 0.38, -0.3]);
+        }
+        Shape::Artillery => {
             mesh.block([-0.2, -0.4, -0.2], [0.2, 0.05, 0.02]);
             mesh.beam([0.0, -0.2, -0.05], [0.0, 0.42, 0.42], 0.08, 0.08);
         }
@@ -236,8 +258,10 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.frustum([0.0, 0.0], [0.15, 0.5], [0.46, 0.14], 10);
         }
         // A turret on a pedestal, with a long gun.
-        Shape::PointDefense => {
+        Shape::PointDefenseBase => {
             mesh.frustum([0.0, 0.0], [-0.5, -0.05], [0.48, 0.22], 8);
+        }
+        Shape::PointDefense => {
             mesh.block([-0.26, -0.3, -0.05], [0.26, 0.2, 0.3]);
             mesh.beam([0.0, 0.1, 0.12], [0.0, 0.5, 0.12], 0.07, 0.07);
             mesh.block([-0.1, -0.2, 0.3], [0.1, 0.05, 0.5]);
