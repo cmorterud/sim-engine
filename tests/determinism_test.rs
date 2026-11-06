@@ -4,7 +4,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use sim_engine::math::fp::{Fp, Vec2Fp};
-use sim_engine::sim::components::{Combat, Health, Order, OrderKind, OrderQueue, OverchargeOrder, Paused, Position, SimId, Turning, Turret, Velocity};
+use sim_engine::sim::components::{Combat, Health, Order, OrderKind, OrderQueue, OverchargeOrder, Paused, Position, SimId, Turning, Turret, Velocity, Veterancy};
+use sim_engine::sim::blueprints::Res;
 use sim_engine::sim::config::{SimConfig, TerrainStyle};
 use sim_engine::sim::scenario::{self, Scenario};
 use sim_engine::sim::world::SimWorld;
@@ -112,6 +113,14 @@ fn every_hashed_field_changes_the_checksum() {
         &mut world,
         &|w| w.ecs.get::<&mut Position>(entity).unwrap().0.x += one_bit,
         &|w| w.ecs.get::<&mut Position>(entity).unwrap().0.x -= one_bit,
+    );
+    assert_changes(
+        "veterancy",
+        &mut world,
+        &|w| w.ecs.insert_one(entity, Veterancy { experience: Res::ONE, rank: 1 }).unwrap(),
+        &|w| {
+            w.ecs.remove_one::<Veterancy>(entity).unwrap();
+        },
     );
     assert_changes(
         "an overcharge order",

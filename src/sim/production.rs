@@ -7,7 +7,7 @@ use std::hash::Hasher;
 use super::blueprints::{BlueprintId, Res, TICKS_PER_SECOND};
 use super::commands::SimCommand;
 use super::components::{
-    Adjacency, Blueprinted, BuildTask, Builder, OverchargeOrder, OverchargeWeapon, Paused, Turning, Turret, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, OrderQueue, Patrol,
+    Adjacency, Blueprinted, BuildTask, Builder, OverchargeOrder, OverchargeWeapon, Paused, Turning, Turret, Veterancy, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, OrderQueue, Patrol,
     Position, SimId, Team, UnitStats, Wreck,
 };
 use super::config::{PATROL_SEARCH_INTERVAL, PATROL_SEARCH_RADIUS_UNITS, RECLAIM_MASS_PER_POWER, TERRAIN_CELL_UNITS};
@@ -1355,6 +1355,10 @@ impl SimWorld {
         if let Ok(order) = self.ecs.get::<&OverchargeOrder>(entity) {
             hasher.write(&[13]);
             hasher.write(&order.target.0.to_le_bytes());
+        }
+        if let Ok(veterancy) = self.ecs.get::<&Veterancy>(entity) {
+            hasher.write(&[14, veterancy.rank]);
+            hasher.write(&veterancy.experience.to_bits().to_le_bytes());
         }
         if let Ok(turret) = self.ecs.get::<&Turret>(entity) {
             hasher.write(&[10]);

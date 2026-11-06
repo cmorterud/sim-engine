@@ -294,6 +294,15 @@ pub struct Overcharged {
     pub structure_damage: Fp,
 }
 
+/// Experience from destroying enemies, and the rank it has earned, from 1 to 5. Units with
+/// none have neither component.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Veterancy {
+    /// The mass of the enemies this unit has destroyed.
+    pub experience: Res,
+    pub rank: u8,
+}
+
 /// Marks a factory or a construction site that the player has paused. It spends nothing and
 /// makes no progress until resumed, and keeps its queue and progress meanwhile.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

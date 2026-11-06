@@ -37,6 +37,7 @@ const STALLED: Color32 = Color32::from_rgb(255, 110, 90);
 const HEALTHY: Color32 = Color32::from_rgb(120, 230, 120);
 const BUILDING: Color32 = Color32::from_rgb(120, 200, 255);
 const SPENDING: Color32 = Color32::from_rgb(250, 190, 120);
+const VETERAN: Color32 = Color32::from_rgb(255, 205, 60);
 /// How close to an order's icon a Shift-press grabs it, in points.
 const HANDLE_GRAB_POINTS: f64 = 18.0;
 const HANDLE_RADIUS_POINTS: f32 = 10.0;
@@ -249,6 +250,11 @@ pub fn hotkey_action(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintD
         hotkeys::CLEAR_QUEUE => Some(clear_action(&menu)),
         _ => None,
     }
+}
+
+/// A unit's veteran rank, or 0.
+pub fn rank_of(snapshot: &SimSnapshot, id: SimId) -> u8 {
+    snapshot.veterans.binary_search_by_key(&id, |veteran| veteran.0).map_or(0, |index| snapshot.veterans[index].1)
 }
 
 /// The selected units that can be paused: factories, and the player's sites still being built.
@@ -811,7 +817,9 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
         }
         let summary = if units.len() == 1 {
             let unit = db.get(BlueprintId(first.blueprint));
-            format!("{}: {}% health", unit.name, first.health_permille / 10)
+            let rank = rank_of(snapshot, first.id);
+            let veteran = if rank > 0 { format!(", veteran rank {rank}") } else { String::new() };
+            format!("{}: {}% health{veteran}", unit.name, first.health_permille / 10)
         } else {
             format!("{} units selected", units.len())
         };
@@ -1576,6 +1584,15 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
         }
         if snapshot.paused.binary_search(&unit.id).is_ok() {
             painter.text(center, Align2::CENTER_CENTER, "PAUSED", FontId::proportional(13.0), Color32::YELLOW);
+        }
+        let rank = rank_of(snapshot, unit.id);
+        if rank > 0 {
+            // One gold pip per rank, under the unit.
+            let spacing = 5.0;
+            let left = center.x - spacing * f32::from(rank - 1) / 2.0;
+            for pip in 0..rank {
+                painter.circle_filled(Pos2::new(left + spacing * f32::from(pip), center.y + 10.0), 2.0, VETERAN);
+            }
         }
         let hurt = unit.health_permille < 1000;
         let building = unit.built_permille < 1000;

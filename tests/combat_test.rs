@@ -5,7 +5,7 @@ use sim_engine::math::rect::RectFp;
 use sim_engine::sim::blueprints::Res;
 use sim_engine::sim::commands::SimCommand;
 use sim_engine::sim::combat::firing_solution;
-use sim_engine::sim::components::{Combat, Health, OverchargeOrder, Position, Projectile, SimId, Team, Turning, Turret};
+use sim_engine::sim::components::{Combat, Health, OverchargeOrder, Position, Projectile, SimId, Team, Turning, Turret, Veterancy};
 use sim_engine::sim::config::{SimConfig, TerrainStyle};
 use sim_engine::sim::scenario::{self, standard_unit};
 use sim_engine::sim::world::SimWorld;
@@ -313,4 +313,99 @@ fn overcharge_is_refused_at_a_friend_and_ends_when_the_target_dies() {
     run_ticks(&mut world, 80);
     assert!(world.unit_entity(target).is_none(), "the test needs the target dead");
     assert!(world.ecs.get::<&OverchargeOrder>(world.unit_entity(commander).unwrap()).is_err(), "there is nothing left to Overcharge");
+}
+
+/// A Blue bot and a weakened Red bot right beside it, from the real data.
+fn bot_duel() -> (SimWorld, SimId, SimId) {
+    let config = SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: false, ..SimConfig::default() };
+    let mut world = SimWorld::new(config, 1);
+    let bot = world.blueprints.id("t1_light_bot");
+    let hunter = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
+    let prey = world.spawn_mobile(bot, Team::Red, point(1_100, 1_000));
+    world.ecs.get::<&mut Combat>(world.unit_entity(prey).unwrap()).unwrap().range = Fp::ZERO;
+    (world, hunter, prey)
+}
+
+fn veterancy_of(world: &SimWorld, unit: SimId) -> Option<Veterancy> {
+    world.ecs.get::<&Veterancy>(world.unit_entity(unit).unwrap()).ok().map(|veterancy| *veterancy)
+}
+
+#[test]
+fn destroying_an_enemy_earns_its_mass_and_a_rank() {
+    let (mut world, hunter, prey) = bot_duel();
+    let base = world.ecs.get::<&Health>(world.unit_entity(hunter).unwrap()).unwrap().max;
+    // Hurt it first, so that the heal on promotion shows.
+    world.ecs.get::<&mut Health>(world.unit_entity(hunter).unwrap()).unwrap().current = base / 2;
+    let mut ticks = 0;
+    while world.unit_entity(prey).is_some() {
+        world.advance_tick(&[]);
+        ticks += 1;
+        assert!(ticks < 400, "the prey never died");
+    }
+    // One light bot destroying another of the same cost is one times its own mass.
+    let veterancy = veterancy_of(&world, hunter).expect("it should have experience");
+    assert_eq!(veterancy.experience, world.blueprints.get(world.blueprints.id("t1_light_bot")).mass);
+    assert_eq!(veterancy.rank, 1);
+    let health = *world.ecs.get::<&Health>(world.unit_entity(hunter).unwrap()).unwrap();
+    assert_eq!(health.max, base * 6 / 5, "rank 1 adds a fifth of its base health");
+    assert!(health.current > base / 2 + base / 5, "promotion should heal it");
+    assert_eq!(world.snapshot_for(Some(Team::Blue)).veterans, [(hunter, 1)]);
+}
+
+#[test]
+fn veterans_heal_over_time_and_ranks_stop_at_five() {
+    let (mut world, hunter, _) = bot_duel();
+    let mass = world.blueprints.get(world.blueprints.id("t1_light_bot")).mass;
+    let tank = world.blueprints.get(world.blueprints.id("t2_heavy_tank")).mass;
+    // Destroying ten heavy tanks' worth is far past rank 5.
+    let entity = world.unit_entity(hunter).unwrap();
+    let _ = entity;
+    let prey: Vec<SimId> = (0..10).map(|index| world.spawn_mobile(world.blueprints.id("t2_heavy_tank"), Team::Red, point(1_150 + index * 20, 1_200))).collect();
+    for target in &prey {
+        let target_entity = world.unit_entity(*target).unwrap();
+        world.ecs.get::<&mut Combat>(target_entity).unwrap().range = Fp::ZERO;
+        world.ecs.get::<&mut Health>(target_entity).unwrap().current = Fp::ONE;
+    }
+    run_ticks(&mut world, 300);
+    let veterancy = veterancy_of(&world, hunter).expect("it should have experience");
+    assert!(veterancy.experience >= tank * 5, "it should have destroyed several tanks");
+    assert_eq!(veterancy.rank, 5, "rank stops at 5");
+    assert!(veterancy.experience >= mass * 5);
+    let entity = world.unit_entity(hunter).unwrap();
+    let max = world.ecs.get::<&Health>(entity).unwrap().max;
+    world.ecs.get::<&mut Health>(entity).unwrap().current = max / 2;
+    run_ticks(&mut world, 10);
+    let healed = world.ecs.get::<&Health>(entity).unwrap().current - max / 2;
+    // Rank 5 heals 1% of maximum health a second.
+    assert!(healed >= max / 110 && healed <= max / 90, "healed {healed} of {max} in a second");
+}
+
+#[test]
+fn nothing_is_earned_for_destroying_your_own_side() {
+    let config = SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: false, friendly_fire: true, ..SimConfig::default() };
+    let mut world = SimWorld::new(config, 1);
+    let artillery = world.blueprints.id("t1_light_artillery");
+    let bot = world.blueprints.id("t1_light_bot");
+    let gunner = world.spawn_mobile(artillery, Team::Blue, point(1_000, 1_000));
+    let enemy = world.spawn_mobile(bot, Team::Red, point(1_400, 1_000));
+    world.ecs.get::<&mut Combat>(world.unit_entity(enemy).unwrap()).unwrap().range = Fp::ZERO;
+    // A friend standing beside the target, so close to dying that splash will finish it.
+    let friend = world.spawn_mobile(bot, Team::Blue, point(1_410, 1_000));
+    world.ecs.get::<&mut Health>(world.unit_entity(friend).unwrap()).unwrap().current = Fp::ONE;
+    world.ecs.get::<&mut Health>(world.unit_entity(enemy).unwrap()).unwrap().current = fp_int(100_000);
+    run_ticks(&mut world, 200);
+    assert!(world.unit_entity(friend).is_none(), "the test needs the friend destroyed by splash");
+    assert_eq!(veterancy_of(&world, gunner), None, "destroying a friend earns nothing");
+}
+
+#[test]
+fn units_without_a_blueprint_earn_nothing() {
+    let mut world = flat_world(false);
+    let shooter = world.spawn_unit(standard_unit(Team::Blue, point(1_000, 1_000)));
+    let victim = world.spawn_unit(standard_unit(Team::Red, point(1_020, 1_000)));
+    world.ecs.get::<&mut Health>(world.unit_entity(victim).unwrap()).unwrap().current = Fp::ONE;
+    run_ticks(&mut world, 100);
+    assert!(world.unit_entity(victim).is_none());
+    assert_eq!(veterancy_of(&world, shooter), None);
+    assert!(world.veterans.is_empty());
 }

@@ -8,7 +8,8 @@ use super::combat::{entry_hit, firing_solution, probe_terrain, GRAVITY};
 use super::commands::SimCommand;
 use super::components::{BuildTask, 
     Blueprinted, Builder, Combat, Construction, Factory, Footprint, Health, MoveClass, Order, OrderKind, OrderQueue, Patrol,
-    Overcharged, OverchargeOrder, OverchargeWeapon, Position, Projectile, SimId, Team, Turning, Turret, UnitStats, Velocity, Wreck,
+    Overcharged, OverchargeOrder, OverchargeWeapon, Position, Projectile, SimId, Team, Turning, Turret, UnitStats, Velocity, Veterancy,
+    Wreck,
 };
 use super::config::{SimConfig, TARGET_SEARCH_INTERVAL, TERRAIN_CELL_UNITS, WRECK_MASS_PERMILLE};
 use super::flowfield::{nearest_passable_cell, FlowField, FlowSample};
@@ -210,6 +211,8 @@ pub struct SimSnapshot {
     pub orders_cancelled: u32,
     /// The viewer's paused factories and sites, sorted by `SimId`.
     pub paused: Vec<SimId>,
+    /// The rank of each veteran the viewer can see, sorted by `SimId`.
+    pub veterans: Vec<(SimId, u8)>,
     pub economy: EconomyView,
     /// Present when fog of war is on: one byte per cell, for the renderer.
     pub fog: Option<Arc<Vec<u8>>>,
@@ -223,7 +226,18 @@ struct Explosion {
     y: i32,
     radius: Fp,
     damage: Fp,
+    /// Who gets the credit for what it destroys.
+    source: Option<SimId>,
 }
+
+/// The highest veteran rank.
+pub const MAX_RANK: u8 = 5;
+/// Each rank adds this share of a unit's base health, so rank 5 doubles it.
+const RANK_HEALTH_PERMILLE: i64 = 200;
+/// Reaching a rank heals this share of the new maximum health at once.
+const PROMOTION_HEAL_PERMILLE: i64 = 250;
+/// Each rank regenerates this share of maximum health per second, in tenths of a permille.
+const REGEN_PER_RANK_PER_SECOND: i64 = 20;
 
 struct PendingShot {
     source: SimId,
@@ -265,6 +279,8 @@ pub struct SimWorld {
     pub patrols: Vec<(SimId, hecs::Entity)>,
     /// Units that are not builders with movement orders waiting, sorted by `SimId`.
     pub order_queues: Vec<(SimId, hecs::Entity)>,
+    /// Units with a veteran rank, sorted by `SimId`.
+    pub veterans: Vec<(SimId, hecs::Entity)>,
     pub commanders: [Option<SimId>; 2],
     pub match_result: Option<MatchResult>,
     pub(super) economy_dirty: bool,
@@ -282,7 +298,8 @@ pub struct SimWorld {
     max_mobile_radius: i32,
     max_structure_radius: i32,
     pending_shots: Vec<PendingShot>,
-    pending_hits: Vec<(hecs::Entity, Fp)>,
+    /// Each hit, and who caused it.
+    pending_hits: Vec<(hecs::Entity, Fp, Option<SimId>)>,
     pending_explosions: Vec<Explosion>,
     dead_units: Vec<SimId>,
     dead_projectiles: Vec<SimId>,
@@ -318,6 +335,7 @@ impl SimWorld {
             structures: Vec::new(),
             patrols: Vec::new(),
             order_queues: Vec::new(),
+            veterans: Vec::new(),
             commanders: [None, None],
             match_result: None,
             economy_dirty: false,
@@ -1005,6 +1023,58 @@ impl SimWorld {
         self.unreachable = units;
     }
 
+    /// Gives a unit the mass of an enemy it destroyed, and promotes it when it has earned a
+    /// rank: one for each time its own mass cost. Units without a blueprint have no mass, so
+    /// they earn nothing, and nobody earns anything for destroying their own side.
+    fn award_experience(&mut self, killer: SimId, victim_team: Team, mass: Res) {
+        let Some((_, entity)) = self.find_unit(killer) else {
+            return;
+        };
+        let Ok(blueprint) = self.ecs.get::<&Blueprinted>(entity).map(|unit| unit.0) else {
+            return;
+        };
+        let (team, alive) = (self.ecs.get::<&UnitStats>(entity).expect("units have stats").team, self.ecs.get::<&Health>(entity).expect("units have health").current > Fp::ZERO);
+        let unit = self.blueprints.get(blueprint);
+        if team == victim_team || !alive || unit.mass <= Res::ZERO {
+            return;
+        }
+        let before = self.ecs.get::<&Veterancy>(entity).map_or(Veterancy { experience: Res::ZERO, rank: 0 }, |veterancy| *veterancy);
+        let experience = before.experience + mass;
+        let earned = (experience / unit.mass).to_num::<i64>().clamp(0, i64::from(MAX_RANK)) as u8;
+        let rank = before.rank.max(earned);
+        if self.ecs.get::<&Veterancy>(entity).is_err() {
+            self.ecs.insert_one(entity, Veterancy { experience, rank }).expect("unit is live");
+        } else {
+            *self.ecs.get::<&mut Veterancy>(entity).expect("just checked") = Veterancy { experience, rank };
+        }
+        if rank > before.rank {
+            if before.rank == 0 {
+                let at = self.veterans.partition_point(|veteran| veteran.0 < killer);
+                self.veterans.insert(at, (killer, entity));
+            }
+            let base = i64::from(unit.health.to_bits());
+            let new_max = Fp::from_bits((base * (1_000 + RANK_HEALTH_PERMILLE * i64::from(rank)) / 1_000) as i32);
+            let mut health = self.ecs.get::<&mut Health>(entity).expect("units have health");
+            let gained = new_max - health.max;
+            let heal = Fp::from_bits((i64::from(new_max.to_bits()) * PROMOTION_HEAL_PERMILLE / 1_000) as i32);
+            health.max = new_max;
+            health.current = (health.current + gained + heal).min(new_max);
+        }
+    }
+
+    /// Veterans heal a little every tick, more for each rank.
+    fn regenerate_veterans(&mut self) {
+        for &(_, entity) in &self.veterans {
+            let rank = self.ecs.get::<&Veterancy>(entity).map_or(0, |veterancy| veterancy.rank);
+            let mut health = self.ecs.get::<&mut Health>(entity).expect("veterans are live units");
+            if health.current <= Fp::ZERO {
+                continue;
+            }
+            let per_tick = i64::from(health.max.to_bits()) * REGEN_PER_RANK_PER_SECOND * i64::from(rank) / 10_000 / 10;
+            health.current = (health.current + Fp::from_bits(per_tick as i32)).min(health.max);
+        }
+    }
+
     /// Updates what each team can see. Units take turns, which spreads out the cost.
     pub fn step_visibility(&mut self) {
         if !self.config.fog_of_war {
@@ -1269,7 +1339,7 @@ impl SimWorld {
 
             // Splash shells detonate where they stop, and damage everything nearby.
             let splash = projectile.splash_radius > Fp::ZERO;
-            let blast = Explosion { x: end.x.to_bits(), y: end.y.to_bits(), radius: projectile.splash_radius, damage: projectile.damage };
+            let blast = Explosion { x: end.x.to_bits(), y: end.y.to_bits(), radius: projectile.splash_radius, damage: projectile.damage, source: Some(projectile.source) };
 
             match (best, probe.hit) {
                 (Some((along, _, target, is_structure)), terrain_hit) if terrain_hit.is_none_or(|ground| along <= ground) => {
@@ -1281,7 +1351,7 @@ impl SimWorld {
                             Some(overcharged) if is_structure => projectile.damage.min(overcharged.structure_damage),
                             _ => projectile.damage,
                         };
-                        hits.push((target, damage));
+                        hits.push((target, damage, Some(projectile.source)));
                     }
                     dead.push(id);
                 }
@@ -1309,7 +1379,7 @@ impl SimWorld {
             let (dx, dy) = (i64::from(other.x - blast.x), i64::from(other.y - blast.y));
             let reach = radius + i64::from(other.radius);
             if dx * dx + dy * dy <= reach * reach {
-                hits.push((other.entity, blast.damage));
+                hits.push((other.entity, blast.damage, blast.source));
             }
         };
         let search = blast.radius.to_bits();
@@ -1321,6 +1391,7 @@ impl SimWorld {
     /// chain reactions they cause, then removes everything that died.
     pub fn step_cleanup(&mut self) {
         self.dead_units.clear();
+        let mut kills: Vec<(SimId, Team, Res)> = Vec::new();
         if !self.config.invulnerable_units {
             loop {
                 for blast in std::mem::take(&mut self.pending_explosions) {
@@ -1329,19 +1400,26 @@ impl SimWorld {
                 if self.pending_hits.is_empty() {
                     break;
                 }
-                for (target, damage) in std::mem::take(&mut self.pending_hits) {
-                    let (id, position, health, blueprint) = self
+                for (target, damage, source) in std::mem::take(&mut self.pending_hits) {
+                    let (id, position, health, blueprint, stats, construction) = self
                         .ecs
-                        .query_one_mut::<(&SimId, &Position, &mut Health, Option<&Blueprinted>)>(target)
+                        .query_one_mut::<(&SimId, &Position, &mut Health, Option<&Blueprinted>, &UnitStats, Option<&Construction>)>(target)
                         .expect("hit entities are live until the end of this step");
                     let was_alive = health.current > Fp::ZERO;
                     health.current = health.current.saturating_sub(damage);
                     if was_alive && health.current <= Fp::ZERO {
-                        let (id, x, y, blueprint) =
-                            (*id, position.0.x.to_bits(), position.0.y.to_bits(), blueprint.map(|b| b.0));
+                        let (id, x, y, blueprint, team) =
+                            (*id, position.0.x.to_bits(), position.0.y.to_bits(), blueprint.map(|b| b.0), stats.team);
+                        let built = construction.map_or(Res::ONE, |construction| construction.progress);
                         self.dead_units.push(id);
-                        if let Some(blast) = blueprint.and_then(|b| self.blueprints.get(b).death_explosion) {
-                            self.pending_explosions.push(Explosion { x, y, radius: blast.radius, damage: blast.damage });
+                        if let Some(blueprint) = blueprint {
+                            // The one who destroyed it earns its mass, or as much of it as had been built.
+                            if let Some(killer) = source {
+                                kills.push((killer, team, self.blueprints.get(blueprint).mass * built));
+                            }
+                            if let Some(blast) = self.blueprints.get(blueprint).death_explosion {
+                                self.pending_explosions.push(Explosion { x, y, radius: blast.radius, damage: blast.damage, source: None });
+                            }
                         }
                     }
                 }
@@ -1349,6 +1427,10 @@ impl SimWorld {
         }
         self.pending_explosions.clear();
         self.pending_hits.clear();
+        for (killer, victim_team, mass) in kills {
+            self.award_experience(killer, victim_team, mass);
+        }
+        self.regenerate_veterans();
         self.resolve_match_end();
 
         if !self.dead_units.is_empty() {
@@ -1368,6 +1450,7 @@ impl SimWorld {
             self.structures.retain(alive);
             self.patrols.retain(alive);
             self.order_queues.retain(alive);
+            self.veterans.retain(alive);
             self.dead_units.clear();
         }
         if !self.dead_projectiles.is_empty() {
@@ -1682,6 +1765,16 @@ impl SimWorld {
             rates,
             orders_cancelled: viewer.map_or(0, |viewer| self.orders_cancelled[viewer.index()]),
             paused: viewer.map_or_else(Vec::new, |viewer| self.paused_for(viewer)),
+            veterans: self
+                .veterans
+                .iter()
+                .filter_map(|&(id, entity)| {
+                    let position = self.ecs.get::<&Position>(entity).ok()?.0;
+                    let team = self.ecs.get::<&UnitStats>(entity).ok()?.team;
+                    let rank = self.ecs.get::<&Veterancy>(entity).ok()?.rank;
+                    seen(team, position.x.to_bits(), position.y.to_bits()).then_some((id, rank))
+                })
+                .collect(),
             economy,
             fog,
             match_result: self.match_result,
