@@ -87,6 +87,7 @@ Controls:
   P, then left-clicks  Add patrol points, then right-click or press P to start
   P + right-click      Hold P and add patrol points, then release P
   X                    Stop
+  O                    Pause or resume the selected factories and construction sites
   Ctrl + 1 to 0        Save the selection as a group, or clear it if nothing is selected.
                        Command works too
   1 to 0               Select that group
@@ -1187,6 +1188,11 @@ fn run_windowed(seed: u64, options: Options) {
                                     patrol_points.clear();
                                 }
                                 UiAction::Stop => stop_selection(&session, &selection, &mut feedback),
+                                UiAction::SetPaused { units, paused } => {
+                                    let word = if paused { "Paused" } else { "Resumed" };
+                                    feedback.set_label(MarkerKind::Build, format!("{word}: {}", units.len()));
+                                    session.send(SimCommand::SetPaused { units, paused });
+                                }
                                 UiAction::QuickSelect { units, add } => {
                                     if add {
                                         selection.add(&units);

@@ -84,7 +84,7 @@ pub fn describe(command: &SimCommand, blueprints: &BlueprintDb) -> Option<(Marke
         SimCommand::QueueMove { units, attack: true, .. } => (MarkerKind::AttackMove, format!("Queued attack-move: {}", unit_count(units)), None),
         SimCommand::MoveOrder { units, .. } | SimCommand::MoveBuild { units, .. } => (MarkerKind::Build, format!("Order moved: {}", unit_count(units)), None),
         SimCommand::QueueTask { units, .. } => (MarkerKind::Support, format!("Queued: {}", unit_count(units)), None),
-        SimCommand::Stop { .. } | SimCommand::QueueUnit { .. } | SimCommand::ClearQueue { .. } | SimCommand::CancelTask { .. } | SimCommand::RemoveQueued { .. } | SimCommand::SetRepeat { .. } => return None,
+        SimCommand::Stop { .. } | SimCommand::QueueUnit { .. } | SimCommand::ClearQueue { .. } | SimCommand::CancelTask { .. } | SimCommand::RemoveQueued { .. } | SimCommand::SetPaused { .. } | SimCommand::SetRepeat { .. } => return None,
     })
 }
 

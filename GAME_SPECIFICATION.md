@@ -410,7 +410,8 @@ These are starting points for tuning, recorded because they interpret or adjust 
 * **Queuing Ahead of an Upgrade:** Once a factory has an upgrade queued, it also takes what the upgrade unlocks. New items go to the end of the queue, so they can only come out after the upgrade has finished. Removing the upgrade removes what depended on it.
 * **Removing Queued Orders:** The command panel lists the selection's queue, and right-clicking an item removes it. Orders are named rather than numbered, because a queue can move on between the click and the command arriving. A site that was already started stays where it is, without a refund, and can be finished by assisting it. A factory loses its last matching item, so that work under way is only lost if it is the only one.
 * **Arrival Formations:** A group ordered to a location forms a grid about twice as wide as it is deep, centered on the goal and lined up across the direction of travel. Units follow a shared route, then walk to their own spots, with a time limit so that a blocked spot cannot trap a unit.
-* **Left for Later:** The Overcharge cannon (§2.1), production pausing (§3.2), trees and rocks as reclaim (§6.1), and formation travel (§13.1) are not in the slice.
+* **Production Pausing:** A factory or construction site can be paused with O or the panel button, and resumed the same way. It spends nothing and makes no progress until resumed, keeps its queue and progress, and builders helping it wait beside it. Shields and mass fabricators will pause the same way when they exist.
+* **Left for Later:** The Overcharge cannon (§2.1), trees and rocks as reclaim (§6.1), and formation travel (§13.1) are not in the slice.
 
 ---
 

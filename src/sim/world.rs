@@ -206,6 +206,8 @@ pub struct SimSnapshot {
     pub rates: Vec<UnitRatesView>,
     /// How many of the viewer's orders have been cancelled because they could not be reached.
     pub orders_cancelled: u32,
+    /// The viewer's paused factories and sites, sorted by `SimId`.
+    pub paused: Vec<SimId>,
     pub economy: EconomyView,
     /// Present when fog of war is on: one byte per cell, for the renderer.
     pub fog: Option<Arc<Vec<u8>>>,
@@ -1598,6 +1600,7 @@ impl SimWorld {
             order_stops,
             rates,
             orders_cancelled: viewer.map_or(0, |viewer| self.orders_cancelled[viewer.index()]),
+            paused: viewer.map_or_else(Vec::new, |viewer| self.paused_for(viewer)),
             economy,
             fog,
             match_result: self.match_result,

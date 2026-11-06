@@ -272,6 +272,11 @@ impl Turning {
     }
 }
 
+/// Marks a factory or a construction site that the player has paused. It spends nothing and
+/// makes no progress until resumed, and keeps its queue and progress meanwhile.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Paused;
+
 /// Movement orders waiting their turn, for a unit that is not a builder. Builders keep theirs
 /// among their tasks. Each order holds a reference to its route until it starts.
 #[derive(Clone, Debug, Default)]

@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use sim_engine::math::fp::{Fp, Vec2Fp};
-use sim_engine::sim::components::{Combat, Health, Order, OrderKind, OrderQueue, Position, Turning, Turret, Velocity};
+use sim_engine::sim::components::{Combat, Health, Order, OrderKind, OrderQueue, Paused, Position, Turning, Turret, Velocity};
 use sim_engine::sim::config::{SimConfig, TerrainStyle};
 use sim_engine::sim::scenario::{self, Scenario};
 use sim_engine::sim::world::SimWorld;
@@ -112,6 +112,14 @@ fn every_hashed_field_changes_the_checksum() {
         &mut world,
         &|w| w.ecs.get::<&mut Position>(entity).unwrap().0.x += one_bit,
         &|w| w.ecs.get::<&mut Position>(entity).unwrap().0.x -= one_bit,
+    );
+    assert_changes(
+        "paused",
+        &mut world,
+        &|w| w.ecs.insert_one(entity, Paused).unwrap(),
+        &|w| {
+            w.ecs.remove_one::<Paused>(entity).unwrap();
+        },
     );
     assert_changes(
         "aim",

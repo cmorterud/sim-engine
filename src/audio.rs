@@ -302,7 +302,7 @@ pub fn sound_levels(snapshot: &SimSnapshot, zoom_fraction: f64, on_screen: impl 
     let factories = snapshot
         .factories
         .iter()
-        .filter(|factory| can_spend && !factory.queue.is_empty())
+        .filter(|factory| can_spend && !factory.queue.is_empty() && snapshot.paused.binary_search(&factory.id).is_err())
         .filter(|factory| find(factory.id).is_some_and(|unit| unit.built_permille == 1000 && on_screen(unit)))
         .count();
     let distance = ((SILENT_ZOOM - zoom_fraction) / (SILENT_ZOOM - FULL_VOLUME_ZOOM)).clamp(0.0, 1.0) as f32;

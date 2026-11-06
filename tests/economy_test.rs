@@ -1719,3 +1719,58 @@ fn a_build_that_cannot_be_reached_is_dropped_and_the_next_one_built() {
     assert!(most_routes <= 1, "it must not keep making new routes to the sealed spot");
     assert_eq!(world.snapshot_for(Some(Team::Blue)).orders_cancelled, 1);
 }
+
+#[test]
+fn a_paused_factory_spends_nothing_and_keeps_its_queue_until_resumed() {
+    let mut world = test_world();
+    set_resources(&mut world, Team::Blue, 100_000, 1_000_000);
+    let (factory_blueprint, bot) = (id(&world, "land_factory_t1"), id(&world, "t1_light_bot"));
+    let factory = world.spawn_finished_structure(factory_blueprint, Team::Blue, 50, 50).unwrap();
+    world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: bot, count: 3 }]);
+    run(&mut world, 5);
+    let progress_of = |world: &SimWorld| world.ecs.get::<&Factory>(entity(world, factory)).unwrap().progress;
+    let under_way = progress_of(&world);
+    assert!(under_way > Res::ZERO);
+
+    world.advance_tick(&[SimCommand::SetPaused { units: vec![factory], paused: true }]);
+    let (mass, held) = (world.economies[0].mass, progress_of(&world));
+    run(&mut world, 50);
+    assert_eq!(progress_of(&world), held, "a paused factory makes no progress");
+    assert_eq!(world.economies[0].mass, mass, "a paused factory spends nothing");
+    assert_eq!(world.ecs.get::<&Factory>(entity(&world, factory)).unwrap().queue.len(), 3, "it keeps its queue");
+    assert_eq!(world.snapshot_for(Some(Team::Blue)).paused, [factory]);
+    assert!(world.snapshot_for(Some(Team::Red)).paused.is_empty(), "the enemy does not see it");
+
+    world.advance_tick(&[SimCommand::SetPaused { units: vec![factory], paused: false }]);
+    run(&mut world, 5);
+    assert!(progress_of(&world) > held || world.ecs.get::<&Factory>(entity(&world, factory)).unwrap().queue.len() < 3, "it carries on where it left off");
+    assert!(world.snapshot_for(Some(Team::Blue)).paused.is_empty());
+}
+
+#[test]
+fn a_paused_site_stops_and_its_builders_wait_beside_it() {
+    let mut world = test_world();
+    set_resources(&mut world, Team::Blue, 10_000, 100_000);
+    let (engineer, site) = engineer_at_site(&mut world);
+    run(&mut world, 20);
+    world.advance_tick(&[SimCommand::SetPaused { units: vec![site], paused: true }]);
+    let before = progress(&world, site);
+    run(&mut world, 50);
+    assert_eq!(progress(&world, site), before, "nobody may build a paused site");
+    assert!(world.snapshot_for(Some(Team::Blue)).work_links.is_empty(), "no beam should show for work that is not happening");
+    assert!(!tasks(&world, engineer).is_empty(), "the builder keeps its task, waiting");
+
+    world.advance_tick(&[SimCommand::SetPaused { units: vec![site], paused: false }]);
+    run(&mut world, 400);
+    assert!(is_finished(&world, site));
+}
+
+#[test]
+fn only_factories_and_sites_can_be_paused() {
+    let mut world = test_world();
+    let (generator, engineer_blueprint) = (id(&world, "power_generator"), id(&world, "t1_engineer"));
+    let power = world.spawn_finished_structure(generator, Team::Blue, 50, 50).unwrap();
+    let engineer = world.spawn_mobile(engineer_blueprint, Team::Blue, point(1_400, 1_400));
+    world.advance_tick(&[SimCommand::SetPaused { units: vec![power, engineer], paused: true }]);
+    assert!(world.snapshot_for(Some(Team::Blue)).paused.is_empty());
+}

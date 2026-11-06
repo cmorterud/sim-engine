@@ -42,5 +42,7 @@ pub enum SimCommand {
     /// only lost if it is the only one. Removing an upgrade also removes what depended on it.
     RemoveQueued { factory: SimId, blueprint: BlueprintId },
     SetRepeat { factory: SimId, repeat: bool },
+    /// Pause or resume factories and construction sites. Anything else is left alone.
+    SetPaused { units: Vec<SimId>, paused: bool },
     SetRally { factory: SimId, point: Vec2Fp },
 }

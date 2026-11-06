@@ -38,6 +38,7 @@ Destroy the enemy commander to win. Yours explodes if it dies, and your whole te
 | Shift + left-click | Queue a structure, and keep placing. With M, F, or Y armed, queue that order and stay armed |
 | Shift + left-drag | Queue a row of structures, and keep placing |
 | X | Stop: drop all orders |
+| O | Pause or resume the selected factories and construction sites. They keep their queue and progress |
 | Ctrl + 1 to 0 | Save the selection as a group, or clear the group if nothing is selected. Command works too |
 | 1 to 0, or click it in the bar on the left | Select that group. Hold Shift on the bar to add it to the selection |
 | N | Mute or unmute |

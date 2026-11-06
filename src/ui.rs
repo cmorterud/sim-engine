@@ -119,6 +119,8 @@ pub enum UiAction {
     /// The next click on the map gives this order.
     Arm(ArmedOrder),
     Stop,
+    /// Pause or resume these factories and construction sites.
+    SetPaused { units: Vec<SimId>, paused: bool },
     /// From the quick select bar: select these, or add them to the selection.
     QuickSelect { units: Vec<SimId>, add: bool },
     /// Remove one order from these builders' queues.
@@ -207,6 +209,9 @@ fn clear_action(menu: &FactoryMenu) -> UiAction {
 /// What a command panel key does for this selection: the same as its button, or `None`
 /// if the panel has no such option right now.
 pub fn hotkey_action(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb, letter: char) -> Option<UiAction> {
+    if letter == hotkeys::PAUSE {
+        return pause_action(snapshot, selected, db);
+    }
     if has_mobile_units(snapshot, selected) {
         match letter {
             hotkeys::MOVE => return Some(UiAction::Arm(ArmedOrder::Move)),
@@ -230,6 +235,29 @@ pub fn hotkey_action(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintD
         hotkeys::CLEAR_QUEUE => Some(clear_action(&menu)),
         _ => None,
     }
+}
+
+/// The selected units that can be paused: factories, and the player's sites still being built.
+pub fn pausable_units(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb) -> Vec<SimId> {
+    selected
+        .iter()
+        .copied()
+        .filter(|id| {
+            find_unit(snapshot, *id).is_some_and(|unit| {
+                unit.blueprint != u16::MAX && (db.get(BlueprintId(unit.blueprint)).is_factory() || unit.built_permille < 1000)
+            })
+        })
+        .collect()
+}
+
+/// Pauses them all, unless they are all paused already, in which case it resumes them.
+pub fn pause_action(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb) -> Option<UiAction> {
+    let units = pausable_units(snapshot, selected, db);
+    if units.is_empty() {
+        return None;
+    }
+    let all_paused = units.iter().all(|id| snapshot.paused.binary_search(id).is_ok());
+    Some(UiAction::SetPaused { units, paused: !all_paused })
 }
 
 /// What the selection makes and spends, as text. Empty if it has nothing to show.
@@ -788,6 +816,21 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
 
         if has_mobile_units(snapshot, selected) {
             unit_order_row(ui, armed, actions);
+        }
+        if let Some(action) = pause_action(snapshot, selected, db) {
+            let UiAction::SetPaused { paused, .. } = &action else {
+                unreachable!("pause_action only returns a pause");
+            };
+            let label = if *paused { format!("[{}] Pause", hotkeys::PAUSE) } else { format!("[{}] Resume", hotkeys::PAUSE) };
+            let hint = "Stops spending and making progress, keeping the queue and what is done so far.";
+            ui.horizontal(|ui| {
+                if ui.button(label).on_hover_text(hint).clicked() {
+                    actions.push(action.clone());
+                }
+                if !*paused {
+                    ui.colored_label(Color32::YELLOW, "Paused");
+                }
+            });
         }
 
         let options = builder_options(snapshot, selected, db);
@@ -1516,6 +1559,9 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
         let blueprint = db.get(BlueprintId(unit.blueprint));
         if show_icons {
             draw_icon(&painter, center, blueprint.class, team_color(unit.team), is_selected);
+        }
+        if snapshot.paused.binary_search(&unit.id).is_ok() {
+            painter.text(center, Align2::CENTER_CENTER, "PAUSED", FontId::proportional(13.0), Color32::YELLOW);
         }
         let hurt = unit.health_permille < 1000;
         let building = unit.built_permille < 1000;
@@ -2279,6 +2325,25 @@ mod tests {
         let queue = |count| vec![UiAction::Queue { factories: vec![SimId(1)], blueprint: engineer, selected_count: 1, count }];
         assert_eq!(click(egui::Modifiers::NONE), queue(1));
         assert_eq!(click(egui::Modifiers::SHIFT), queue(5));
+    }
+
+    #[test]
+    fn pause_covers_factories_and_sites_and_resumes_when_all_are_paused() {
+        let db = BlueprintDb::standard();
+        let mut current = mixed_factories(&db);
+        let mut engineer = unit(4, 0.0);
+        engineer.blueprint = db.id("t1_engineer").0;
+        current.units.push(engineer);
+        // 1 and 2 are finished factories, 3 is a factory still being built, 4 is an engineer.
+        let everything = [SimId(1), SimId(2), SimId(3), SimId(4)];
+        assert_eq!(pausable_units(&current, &everything, &db), [SimId(1), SimId(2), SimId(3)], "an engineer cannot be paused");
+        let press = |current: &SimSnapshot| hotkey_action(current, &everything, &db, 'O');
+        assert_eq!(press(&current), Some(UiAction::SetPaused { units: vec![SimId(1), SimId(2), SimId(3)], paused: true }));
+        current.paused = vec![SimId(1)];
+        assert_eq!(press(&current), Some(UiAction::SetPaused { units: vec![SimId(1), SimId(2), SimId(3)], paused: true }), "some still run, so pause them all");
+        current.paused = vec![SimId(1), SimId(2), SimId(3)];
+        assert_eq!(press(&current), Some(UiAction::SetPaused { units: vec![SimId(1), SimId(2), SimId(3)], paused: false }));
+        assert_eq!(hotkey_action(&current, &[SimId(4)], &db, 'O'), None);
     }
 
     #[test]

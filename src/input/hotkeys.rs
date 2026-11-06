@@ -9,6 +9,7 @@ pub const ATTACK_MOVE: char = 'F';
 pub const PATROL: char = 'P';
 pub const ASSIST: char = 'Y';
 pub const STOP: char = 'X';
+pub const PAUSE: char = 'O';
 pub const UPGRADE: char = 'U';
 pub const REPEAT: char = 'R';
 /// Away from the others, because it throws away a queue.
@@ -49,6 +50,7 @@ pub const fn letter_for(code: KeyCode) -> Option<char> {
         KeyCode::KeyF => ATTACK_MOVE,
         KeyCode::KeyY => ASSIST,
         KeyCode::KeyX => STOP,
+        KeyCode::KeyO => PAUSE,
         KeyCode::KeyU => UPGRADE,
         KeyCode::KeyR => REPEAT,
         KeyCode::KeyK => CLEAR_QUEUE,
@@ -78,7 +80,8 @@ mod tests {
     use super::*;
     use crate::sim::blueprints::BlueprintDb;
 
-    const ALL_KEYS: [KeyCode; 16] = [
+    const ALL_KEYS: [KeyCode; 17] = [
+        KeyCode::KeyO,
         KeyCode::KeyM,
         KeyCode::KeyF,
         KeyCode::KeyY,
@@ -97,7 +100,7 @@ mod tests {
         KeyCode::KeyK,
     ];
 
-    const PANEL_LETTERS: [char; 7] = [MOVE, ATTACK_MOVE, ASSIST, STOP, UPGRADE, REPEAT, CLEAR_QUEUE];
+    const PANEL_LETTERS: [char; 8] = [MOVE, ATTACK_MOVE, ASSIST, STOP, PAUSE, UPGRADE, REPEAT, CLEAR_QUEUE];
 
     /// Everything that can appear in a build menu, from the real data.
     fn buildable(db: &BlueprintDb) -> Vec<String> {

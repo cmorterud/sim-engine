@@ -7,7 +7,7 @@ use std::hash::Hasher;
 use super::blueprints::{BlueprintId, Res, TICKS_PER_SECOND};
 use super::commands::SimCommand;
 use super::components::{
-    Adjacency, Blueprinted, BuildTask, Builder, Turning, Turret, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, OrderQueue, Patrol,
+    Adjacency, Blueprinted, BuildTask, Builder, Paused, Turning, Turret, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, OrderQueue, Patrol,
     Position, SimId, Team, UnitStats, Wreck,
 };
 use super::config::{PATROL_SEARCH_INTERVAL, PATROL_SEARCH_RADIUS_UNITS, RECLAIM_MASS_PER_POWER, TERRAIN_CELL_UNITS};
@@ -387,6 +387,22 @@ impl SimWorld {
                     factory.progress = Res::ZERO;
                 }
             }
+            SimCommand::SetPaused { units, paused } => {
+                for &id in units {
+                    let Some((_, entity)) = self.find_unit(id) else {
+                        continue;
+                    };
+                    let pausable = self.ecs.get::<&Factory>(entity).is_ok() || self.ecs.get::<&Construction>(entity).is_ok();
+                    if !pausable {
+                        continue;
+                    }
+                    if *paused {
+                        self.ecs.insert_one(entity, Paused).expect("unit is live");
+                    } else {
+                        let _ = self.ecs.remove_one::<Paused>(entity);
+                    }
+                }
+            }
             SimCommand::CancelTask { units, task } => {
                 for &id in units {
                     let Some((_, entity)) = self.find_unit(id) else {
@@ -556,6 +572,13 @@ impl SimWorld {
                 *power_by_target.entry((id, WorkKind::FactoryItem)).or_insert(Fp::ZERO) += power;
             }
         }
+
+        // Paused factories and sites take nothing, and nobody works on them meanwhile.
+        let is_paused = |world: &Self, target: SimId| world.find_unit(target).is_some_and(|(_, entity)| world.ecs.get::<&Paused>(entity).is_ok());
+        power_by_target.retain(|&(target, kind), _| kind == WorkKind::Repair || !is_paused(self, target));
+        let mut links = std::mem::take(&mut self.work_links);
+        links.retain(|link| link.reclaim || !is_paused(self, link.target));
+        self.work_links = links;
 
         // Work out what everything costs at full speed.
         let mut items = Vec::with_capacity(power_by_target.len());
@@ -1080,6 +1103,15 @@ impl SimWorld {
         plans
     }
 
+    /// The viewer's paused factories and sites, in `SimId` order.
+    pub(super) fn paused_for(&self, team: Team) -> Vec<SimId> {
+        self.units
+            .iter()
+            .filter(|&&(_, entity)| self.ecs.get::<&Paused>(entity).is_ok() && self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team == team))
+            .map(|&(id, _)| id)
+            .collect()
+    }
+
     /// The viewer's units with orders waiting, in `SimId` order. A unit that is not a builder
     /// shows its current walk first, so that it can be removed like any other.
     pub(super) fn build_queues_for(&self, team: Team) -> Vec<BuildQueueView> {
@@ -1301,6 +1333,9 @@ impl SimWorld {
                 hasher.write(&rally.x.to_bits().to_le_bytes());
                 hasher.write(&rally.y.to_bits().to_le_bytes());
             }
+        }
+        if self.ecs.get::<&Paused>(entity).is_ok() {
+            hasher.write(&[11]);
         }
         if let Ok(turret) = self.ecs.get::<&Turret>(entity) {
             hasher.write(&[10]);
