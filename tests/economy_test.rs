@@ -1685,3 +1685,37 @@ fn a_queued_build_gives_a_full_size_outline_and_blocks_its_spot() {
     assert!(!placement_is_valid(&map, generator, (101, 101), &current.units, &pending), "a queued factory must block its spot");
     assert!(placement_is_valid(&map, generator, (120, 120), &current.units, &pending));
 }
+
+#[test]
+fn a_build_that_cannot_be_reached_is_dropped_and_the_next_one_built() {
+    let mut world = test_world();
+    set_resources(&mut world, Team::Blue, 100_000, 1_000_000);
+    // A closed ring of walls, with room for a generator inside.
+    for x in 120..=126 {
+        world.terrain.set_structure_cells(x, 120, 1, true);
+        world.terrain.set_structure_cells(x, 126, 1, true);
+    }
+    for y in 120..=126 {
+        world.terrain.set_structure_cells(120, y, 1, true);
+        world.terrain.set_structure_cells(126, y, 1, true);
+    }
+    world.flow_field.invalidate();
+    let (engineer_blueprint, generator) = (id(&world, "t1_engineer"), id(&world, "power_generator"));
+    let engineer = world.spawn_mobile(engineer_blueprint, Team::Blue, point(1_000, 1_000));
+    world.advance_tick(&[
+        SimCommand::Build { units: vec![engineer], blueprint: generator, cell_x: 123, cell_y: 123, queued: false },
+        SimCommand::Build { units: vec![engineer], blueprint: generator, cell_x: 60, cell_y: 50, queued: true },
+    ]);
+    let reachable = cell_of_index(&world, 60, 50);
+    let mut most_routes = 0;
+    let mut ticks = 0;
+    while !world.occupancy.contains_key(&reachable) {
+        most_routes = most_routes.max(world.flow_field.route_count());
+        world.advance_tick(&[]);
+        ticks += 1;
+        assert!(ticks < 1_500, "it never moved on to the build it can reach");
+    }
+    assert!(!world.occupancy.contains_key(&cell_of_index(&world, 123, 123)));
+    assert!(most_routes <= 1, "it must not keep making new routes to the sealed spot");
+    assert_eq!(world.snapshot_for(Some(Team::Blue)).orders_cancelled, 1);
+}

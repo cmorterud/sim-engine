@@ -198,3 +198,161 @@ fn followers_track_a_moving_target() {
     assert!(sqrt_wide(follower_at.distance_squared(&start)) > fp_int(700), "follower barely moved");
     assert!(sqrt_wide(follower_at.distance_squared(&leader_at)) < fp_int(60), "follower lost its target: {follower_at:?} {leader_at:?}");
 }
+
+/// Walls in a closed ring of cells, from one corner cell to the other, open inside.
+fn seal_off(world: &mut SimWorld, low: (u32, u32), high: (u32, u32)) {
+    for x in low.0..=high.0 {
+        world.terrain.set_structure_cells(x, low.1, 1, true);
+        world.terrain.set_structure_cells(x, high.1, 1, true);
+    }
+    for y in low.1..=high.1 {
+        world.terrain.set_structure_cells(low.0, y, 1, true);
+        world.terrain.set_structure_cells(high.0, y, 1, true);
+    }
+    world.flow_field.invalidate();
+}
+
+/// The middle of a terrain cell.
+fn cell_point(x: i32, y: i32) -> Vec2Fp {
+    point(x * 20 + 10, y * 20 + 10)
+}
+
+fn cancelled(world: &SimWorld) -> u32 {
+    world.snapshot_for(Some(Team::Blue)).orders_cancelled
+}
+
+fn travelled(world: &SimWorld, unit: sim_engine::sim::components::SimId, start: Vec2Fp) -> i64 {
+    sqrt_wide(world.unit_position(unit).unwrap().xy().distance_squared(&start)).to_num::<i64>()
+}
+
+#[test]
+fn a_move_into_a_sealed_area_is_cancelled_straight_away() {
+    let mut world = flat_world();
+    seal_off(&mut world, (100, 100), (110, 110));
+    let start = point(300, 300);
+    let unit = world.spawn_unit(standard_unit(Team::Blue, start));
+    world.advance_tick(&[SimCommand::Move { units: vec![unit], goal: cell_point(105, 105) }]);
+    for _ in 0..20 {
+        world.advance_tick(&[]);
+    }
+    assert_eq!(world.unit_order(unit).unwrap().kind, OrderKind::Idle, "it should give up");
+    assert!(travelled(&world, unit, start) < 10, "it should not wander towards the walls");
+    assert_eq!(world.flow_field.route_count(), 0, "the route should be handed back");
+    assert_eq!(cancelled(&world), 1, "the player should be told");
+    assert_eq!(world.snapshot_for(Some(Team::Red)).orders_cancelled, 0, "only the team that lost the order");
+}
+
+#[test]
+fn a_unit_inside_a_sealed_area_cannot_be_sent_out() {
+    let mut world = flat_world();
+    seal_off(&mut world, (100, 100), (110, 110));
+    let unit = world.spawn_unit(standard_unit(Team::Blue, cell_point(105, 105)));
+    world.advance_tick(&[SimCommand::Move { units: vec![unit], goal: point(300, 300) }]);
+    for _ in 0..20 {
+        world.advance_tick(&[]);
+    }
+    assert_eq!(world.unit_order(unit).unwrap().kind, OrderKind::Idle);
+    assert_eq!(cancelled(&world), 1);
+}
+
+#[test]
+fn only_the_units_that_cannot_reach_a_group_order_are_cancelled() {
+    let mut world = flat_world();
+    seal_off(&mut world, (100, 100), (110, 110));
+    let trapped = world.spawn_unit(standard_unit(Team::Blue, cell_point(105, 105)));
+    let free = bunch(&mut world, 6, 300, 300);
+    let mut everyone = free.clone();
+    everyone.push(trapped);
+    world.advance_tick(&[SimCommand::Move { units: everyone.clone(), goal: point(800, 300) }]);
+    assert_eq!(run_until_idle(&mut world, &everyone, 3_000), 0, "nobody may be left waiting forever");
+    for unit in &free {
+        assert!(sqrt_wide(world.unit_position(*unit).unwrap().xy().distance_squared(&point(800, 300))) < fp_int(80), "{unit:?} should have arrived");
+    }
+    assert_eq!(cancelled(&world), 1, "only the trapped unit's order");
+}
+
+#[test]
+fn a_long_way_round_is_still_taken_and_never_cancelled() {
+    let mut world = flat_world();
+    // A long wall with one gap at the far end.
+    for y in 0..120 {
+        world.terrain.set_structure_cells(60, y, 1, true);
+    }
+    world.flow_field.invalidate();
+    let unit = world.spawn_unit(standard_unit(Team::Blue, cell_point(50, 20)));
+    let goal = cell_point(70, 20);
+    world.advance_tick(&[SimCommand::Move { units: vec![unit], goal }]);
+    assert_eq!(run_until_idle(&mut world, &[unit], 5_000), 0);
+    assert!(sqrt_wide(world.unit_position(unit).unwrap().xy().distance_squared(&goal)) < fp_int(12), "it should have gone round");
+    assert_eq!(cancelled(&world), 0);
+}
+
+#[test]
+fn an_unreachable_queued_stop_is_skipped_and_the_next_one_taken() {
+    let mut world = flat_world();
+    seal_off(&mut world, (100, 100), (110, 110));
+    let unit = world.spawn_unit(standard_unit(Team::Blue, point(300, 300)));
+    let reachable = point(800, 300);
+    world.advance_tick(&[
+        SimCommand::Move { units: vec![unit], goal: cell_point(105, 105) },
+        SimCommand::QueueMove { units: vec![unit], goal: reachable, attack: false },
+    ]);
+    // Between one order and the next, a unit is idle for a tick, so wait for the queue too.
+    let mut ticks = 0;
+    while world.unit_order(unit).unwrap().kind != OrderKind::Idle || !world.order_queues.is_empty() {
+        world.advance_tick(&[]);
+        ticks += 1;
+        assert!(ticks < 3_000, "it never finished");
+    }
+    assert!(sqrt_wide(world.unit_position(unit).unwrap().xy().distance_squared(&reachable)) < fp_int(12));
+    assert_eq!(cancelled(&world), 1);
+    assert_eq!(world.flow_field.route_count(), 0);
+}
+
+#[test]
+fn a_patrol_with_an_unreachable_point_ends() {
+    let mut world = flat_world();
+    seal_off(&mut world, (100, 100), (110, 110));
+    let unit = world.spawn_unit(standard_unit(Team::Blue, point(300, 300)));
+    world.advance_tick(&[SimCommand::Patrol { units: vec![unit], points: vec![cell_point(105, 105), point(800, 300)] }]);
+    for _ in 0..40 {
+        world.advance_tick(&[]);
+    }
+    assert!(world.patrols.is_empty(), "trying again forever would only waste time");
+    assert_eq!(world.unit_order(unit).unwrap().kind, OrderKind::Idle);
+}
+
+#[test]
+fn following_a_unit_that_cannot_be_reached_is_cancelled() {
+    let mut world = flat_world();
+    seal_off(&mut world, (100, 100), (110, 110));
+    let leader = world.spawn_unit(standard_unit(Team::Blue, cell_point(105, 105)));
+    let follower = world.spawn_unit(standard_unit(Team::Blue, point(300, 300)));
+    world.advance_tick(&[SimCommand::Follow { units: vec![follower], target: leader }]);
+    for _ in 0..40 {
+        world.advance_tick(&[]);
+    }
+    assert_eq!(world.unit_order(follower).unwrap().kind, OrderKind::Idle);
+    assert_eq!(cancelled(&world), 1);
+}
+
+#[test]
+fn cancelling_unreachable_orders_replays_identically() {
+    let build = || {
+        let mut world = flat_world();
+        seal_off(&mut world, (100, 100), (110, 110));
+        let units = bunch(&mut world, 8, 300, 300);
+        (world, units)
+    };
+    let (mut first, units) = build();
+    let (mut second, _) = build();
+    let orders = [SimCommand::Move { units: units.clone(), goal: cell_point(105, 105) }];
+    first.advance_tick(&orders);
+    second.advance_tick(&orders);
+    for _ in 0..200 {
+        first.advance_tick(&[]);
+        second.advance_tick(&[]);
+        assert_eq!(first.compute_checksum(), second.compute_checksum());
+    }
+    assert_eq!(cancelled(&first), 8);
+}

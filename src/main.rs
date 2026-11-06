@@ -661,6 +661,8 @@ fn run_windowed(seed: u64, options: Options) {
     let mut control_groups = ControlGroups::default();
     // An order being dragged, and where the drag started.
     let mut order_drag: Option<(OrderHandle, [f64; 2])> = None;
+    // How many cancelled orders the player has been told about.
+    let mut cancelled_seen = 0;
     let mut attack_alarm = AttackAlarm::default();
     let mut sound_settings = SoundSettings::default();
     // Test runs stay silent. The game plays on without sound if there is no device.
@@ -961,6 +963,12 @@ fn run_windowed(seed: u64, options: Options) {
                             Some((id, session.current.units[index].health_permille))
                         });
                         let attacked = is_match && attack_alarm.update(commander, dt);
+                        let cancelled = session.current.orders_cancelled;
+                        if cancelled > cancelled_seen {
+                            feedback.show_rejected(None, "Can't reach there: order cancelled");
+                        }
+                        // A new match starts counting again.
+                        cancelled_seen = cancelled;
                         let picked = selection.take_picked();
                         if let Some(sound) = &sound {
                             if picked {

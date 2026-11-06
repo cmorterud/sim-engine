@@ -603,6 +603,11 @@ impl SimWorld {
             };
             (task, builder.power, builder.range)
         };
+        // Its way to this task turned out to be cut off, so the task cannot be done.
+        if !matches!(task, BuildTask::Walk { .. }) && self.unreachable.binary_search(&id).is_ok() {
+            self.ecs.get::<&mut Builder>(entity).expect("builder list only holds builders").tasks.remove(0);
+            return;
+        }
         if let BuildTask::Walk { order, started } = task {
             let idle = self.ecs.get::<&Order>(entity).expect("units have orders").kind == OrderKind::Idle;
             if idle {

@@ -192,8 +192,11 @@ struct Route {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum FlowSample {
     Direction(Vec2Fp),
-    /// No field yet, or the unit is at the goal or cannot reach it.
+    /// No up-to-date field yet, or the unit is at the goal.
     Hold,
+    /// The up-to-date field has no way from this cell to the goal: it is walled off, or on
+    /// the far side of ground this unit cannot cross.
+    Unreachable,
 }
 
 pub struct FlowField {
@@ -535,10 +538,12 @@ impl FlowField {
             route.queued[sector as usize] = true;
             self.queue.push_back((id, sector));
         }
-        if direction == DIR_NONE {
-            FlowSample::Hold
-        } else {
+        if direction != DIR_NONE {
             FlowSample::Direction(direction_vector(direction as usize))
+        } else if field_generation == Some(route.generation) && cell != route.goal_cell {
+            FlowSample::Unreachable
+        } else {
+            FlowSample::Hold
         }
     }
 
@@ -868,15 +873,19 @@ mod tests {
     }
 
     #[test]
-    fn walled_off_goal_leaves_unit_holding() {
+    fn walled_off_goal_is_reported_as_unreachable_once_the_field_is_built() {
         let mut terrain = flat(SECTOR_UNITS * 3);
         terrain.add_box_obstacle(rect(1_900, 0, 1_940, 3_840));
         let mut flow = FlowField::new(&terrain);
         let route = flow.create_route(&terrain, 0, point(3_000, 300), 1, fp_int(1), None).unwrap();
+        // Until a field exists there is nothing to go on, so it only holds.
+        assert_eq!(flow.sample(route, 0, point(300, 300), &terrain), FlowSample::Hold);
         for tick in 0..4 {
             flow.build_pending(&terrain, tick);
-            assert_eq!(flow.sample(route, tick, point(300, 300), &terrain), FlowSample::Hold);
+            assert_eq!(flow.sample(route, tick, point(300, 300), &terrain), FlowSample::Unreachable);
         }
+        // The goal's own side can still get there.
+        assert!(matches!(flow.sample(route, 5, point(2_500, 300), &terrain), FlowSample::Hold | FlowSample::Direction(_)));
     }
 
     #[test]

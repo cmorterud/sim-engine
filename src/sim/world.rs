@@ -200,6 +200,8 @@ pub struct SimSnapshot {
     pub order_stops: Vec<OrderStopView>,
     /// Sorted by `SimId`.
     pub rates: Vec<UnitRatesView>,
+    /// How many of the viewer's orders have been cancelled because they could not be reached.
+    pub orders_cancelled: u32,
     pub economy: EconomyView,
     /// Present when fog of war is on: one byte per cell, for the renderer.
     pub fog: Option<Arc<Vec<u8>>>,
@@ -262,6 +264,11 @@ pub struct SimWorld {
     /// What each factory spent this tick. Rebuilt every tick and only used for showing,
     /// so it is not part of the checksum.
     pub(super) factory_spending: Vec<(SimId, Res, Res)>,
+    /// Units whose order was cancelled this tick because they cannot reach it, sorted by `SimId`.
+    pub(super) unreachable: Vec<SimId>,
+    /// How many orders each team has had cancelled that way, for telling the player.
+    /// Only for showing, so it is not part of the checksum.
+    orders_cancelled: [u32; 2],
     max_mobile_radius: i32,
     max_structure_radius: i32,
     pending_shots: Vec<PendingShot>,
@@ -306,6 +313,8 @@ impl SimWorld {
             economy_dirty: false,
             work_links: Vec::new(),
             factory_spending: Vec::new(),
+            unreachable: Vec::new(),
+            orders_cancelled: [0; 2],
             max_mobile_radius: 0,
             max_structure_radius: 0,
             pending_shots: Vec::new(),
@@ -768,9 +777,10 @@ impl SimWorld {
 
         let max_radius = self.max_mobile_radius;
         let max_coordinate = terrain.max_coordinate_raw();
+        let mut unreachable = Vec::new();
         let mut query = self.ecs.query_mut::<(&mut Position, &mut Velocity, &UnitStats, &mut Order, &Combat)>();
         let mut view = query.view();
-        for (index, &(_, entity)) in units.iter().enumerate() {
+        for (index, &(id, entity)) in units.iter().enumerate() {
             let (position, velocity, stats, order, combat) = view.get_mut(entity).expect("unit list only holds live units");
             if stats.is_structure {
                 continue;
@@ -827,8 +837,16 @@ impl SimWorld {
                     } else if may_walk {
                         if goal_is_here {
                             desired = walk_to_goal(stats.max_speed);
-                        } else if let FlowSample::Direction(direction) = flow.sample(order.route, tick, here, terrain) {
-                            desired = Vec2Fp::new(direction.x * stats.max_speed, direction.y * stats.max_speed);
+                        } else {
+                            match flow.sample(order.route, tick, here, terrain) {
+                                FlowSample::Direction(direction) => desired = Vec2Fp::new(direction.x * stats.max_speed, direction.y * stats.max_speed),
+                                FlowSample::Unreachable => {
+                                    flow.release(order.route);
+                                    *order = Order::IDLE;
+                                    unreachable.push(id);
+                                }
+                                FlowSample::Hold => {}
+                            }
                         }
                     }
                 } else if arrived {
@@ -839,8 +857,16 @@ impl SimWorld {
                 } else if may_walk {
                     if goal_is_here {
                         desired = walk_to_goal(stats.max_speed);
-                    } else if let FlowSample::Direction(direction) = flow.sample(order.route, tick, here, terrain) {
-                        desired = Vec2Fp::new(direction.x * stats.max_speed, direction.y * stats.max_speed);
+                    } else {
+                        match flow.sample(order.route, tick, here, terrain) {
+                            FlowSample::Direction(direction) => desired = Vec2Fp::new(direction.x * stats.max_speed, direction.y * stats.max_speed),
+                            FlowSample::Unreachable => {
+                                flow.release(order.route);
+                                *order = Order::IDLE;
+                                unreachable.push(id);
+                            }
+                            FlowSample::Hold => {}
+                        }
                     }
                 }
             }
@@ -920,6 +946,23 @@ impl SimWorld {
                 position.0 = Vec3Fp::new(next.x, next.y, terrain.height_at(next) + stats.radius);
             }
         }
+        self.cancel_unreachable(unreachable);
+    }
+
+    /// Finishes cancelling orders that cannot be reached. A forced target goes with its order,
+    /// and a patrol ends, since it would only try the same thing again. Builders drop the task
+    /// that led there later this tick.
+    fn cancel_unreachable(&mut self, units: Vec<SimId>) {
+        for &id in &units {
+            let (_, entity) = self.find_unit(id).expect("the unit just moved");
+            if let Ok(mut combat) = self.ecs.get::<&mut Combat>(entity) {
+                combat.forced_target = None;
+            }
+            self.end_patrol(id, entity);
+            let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team;
+            self.orders_cancelled[team.index()] = self.orders_cancelled[team.index()].saturating_add(1);
+        }
+        self.unreachable = units;
     }
 
     /// Updates what each team can see. Units take turns, which spreads out the cost.
@@ -1519,6 +1562,7 @@ impl SimWorld {
             build_queues,
             order_stops,
             rates,
+            orders_cancelled: viewer.map_or(0, |viewer| self.orders_cancelled[viewer.index()]),
             economy,
             fog,
             match_result: self.match_result,
