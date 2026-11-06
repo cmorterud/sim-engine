@@ -507,7 +507,7 @@ fn engineers_reclaim_wrecks_into_mass() {
     world.ecs.get::<&mut Combat>(entity(&world, attacker)).unwrap().range = Fp::ZERO;
 
     world.advance_tick(&[SimCommand::Reclaim { units: vec![engineer], target: wreck_id }]);
-    // The wreck holds 81% of 36 mass, or 29.16. It takes time to walk there and 2.9 s to eat.
+    // The wreck holds 81% of 30 mass, or 24.3. It takes time to walk there and 2.4 s to eat.
     let mut saw_reclaim_link = false;
     for _ in 0..400 {
         world.advance_tick(&[]);
@@ -516,7 +516,7 @@ fn engineers_reclaim_wrecks_into_mass() {
     assert!(saw_reclaim_link, "reclaiming should show as work");
     assert!(world.wrecks.is_empty(), "the wreck should be gone");
     let mass = world.economies[0].mass.to_num::<f64>();
-    assert!((29.0..=29.2).contains(&mass), "reclaimed {mass} mass");
+    assert!((24.2..=24.4).contains(&mass), "reclaimed {mass} mass");
     assert!(world.ecs.get::<&Builder>(entity(&world, engineer)).unwrap().tasks.is_empty());
 }
 
