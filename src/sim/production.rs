@@ -7,7 +7,7 @@ use std::hash::Hasher;
 use super::blueprints::{BlueprintId, Res, TICKS_PER_SECOND};
 use super::commands::SimCommand;
 use super::components::{
-    Adjacency, Blueprinted, BuildTask, Builder, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, OrderQueue, Patrol,
+    Adjacency, Blueprinted, BuildTask, Builder, Turning, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, OrderQueue, Patrol,
     Position, SimId, Team, UnitStats, Wreck,
 };
 use super::config::{PATROL_SEARCH_INTERVAL, PATROL_SEARCH_RADIUS_UNITS, RECLAIM_MASS_PER_POWER, TERRAIN_CELL_UNITS};
@@ -246,6 +246,17 @@ impl SimWorld {
         let unit = self.blueprints.get(blueprint);
         let (power, range, is_factory) = (unit.build_power, unit.build_range, unit.is_factory());
         self.ecs.insert_one(entity, Blueprinted(blueprint)).expect("entity was just spawned");
+        if let (Some(rate), false) = (unit.turn_rate, unit.is_structure()) {
+            let radius = fp_int(unit.turn_radius as i32);
+            // Each side starts out facing the middle of the map, as it is drawn.
+            let half = Fp::from_bits(2_896);
+            let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team;
+            let facing = match team {
+                Team::Blue => Vec2Fp::new(half, half),
+                Team::Red => Vec2Fp::new(-half, -half),
+            };
+            self.ecs.insert_one(entity, Turning::new(facing, rate, radius)).expect("entity was just spawned");
+        }
         if is_factory {
             let factory = Factory { power, queue: Vec::new(), repeat: false, progress: Res::ZERO, rally: None };
             self.ecs.insert_one(entity, factory).expect("entity was just spawned");
@@ -1287,6 +1298,11 @@ impl SimWorld {
                 hasher.write(&rally.x.to_bits().to_le_bytes());
                 hasher.write(&rally.y.to_bits().to_le_bytes());
             }
+        }
+        if let Ok(turning) = self.ecs.get::<&Turning>(entity) {
+            hasher.write(&[9]);
+            hasher.write(&turning.facing.x.to_bits().to_le_bytes());
+            hasher.write(&turning.facing.y.to_bits().to_le_bytes());
         }
         if let Ok(queue) = self.ecs.get::<&OrderQueue>(entity) {
             hasher.write(&[8]);

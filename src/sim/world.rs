@@ -8,7 +8,7 @@ use super::combat::{entry_hit, firing_solution, probe_terrain, GRAVITY};
 use super::commands::SimCommand;
 use super::components::{BuildTask, 
     Blueprinted, Builder, Combat, Construction, Factory, Footprint, Health, MoveClass, Order, OrderKind, OrderQueue, Patrol,
-    Position, Projectile, SimId, Team, UnitStats, Velocity, Wreck,
+    Position, Projectile, SimId, Team, Turning, UnitStats, Velocity, Wreck,
 };
 use super::config::{SimConfig, TARGET_SEARCH_INTERVAL, TERRAIN_CELL_UNITS, WRECK_MASS_PERMILLE};
 use super::flowfield::{nearest_passable_cell, FlowField, FlowSample};
@@ -66,6 +66,8 @@ pub struct UnitView {
     /// 1000 once finished.
     pub built_permille: u16,
     pub is_structure: bool,
+    /// Which way the body faces, as a raw unit vector. Zero for units that turn instantly.
+    pub facing: [i32; 2],
 }
 
 /// A factory's production state, for the build menu. Only for the viewer's team.
@@ -778,10 +780,10 @@ impl SimWorld {
         let max_radius = self.max_mobile_radius;
         let max_coordinate = terrain.max_coordinate_raw();
         let mut unreachable = Vec::new();
-        let mut query = self.ecs.query_mut::<(&mut Position, &mut Velocity, &UnitStats, &mut Order, &Combat)>();
+        let mut query = self.ecs.query_mut::<(&mut Position, &mut Velocity, &UnitStats, &mut Order, &Combat, Option<&mut Turning>)>();
         let mut view = query.view();
         for (index, &(id, entity)) in units.iter().enumerate() {
-            let (position, velocity, stats, order, combat) = view.get_mut(entity).expect("unit list only holds live units");
+            let (position, velocity, stats, order, combat, turning) = view.get_mut(entity).expect("unit list only holds live units");
             if stats.is_structure {
                 continue;
             }
@@ -869,6 +871,16 @@ impl SimWorld {
                         }
                     }
                 }
+            }
+
+            // A unit with a turn rate can only go the way it faces.
+            if let Some(turning) = turning {
+                let heading_for = if order.kind == OrderKind::Idle {
+                    here
+                } else {
+                    order.slot.filter(|_| desired != Vec2Fp::ZERO).unwrap_or_else(|| flow.goal(order.route).unwrap_or(here))
+                };
+                desired = turning.steer(desired, sqrt_wide(here.distance_squared(&heading_for)));
             }
 
             // Ease velocity towards the steering direction to round off the 8-way flow directions.
@@ -1467,13 +1479,13 @@ impl SimWorld {
             Some(viewer) if self.config.fog_of_war && team != viewer => self.visibility.is_visible(viewer, x, y),
             _ => true,
         };
-        let mut unit_query = self.ecs.query::<(&Position, &UnitStats, &Health, Option<&Blueprinted>, Option<&Construction>)>();
+        let mut unit_query = self.ecs.query::<(&Position, &UnitStats, &Health, Option<&Blueprinted>, Option<&Construction>, Option<&Turning>)>();
         let unit_view = unit_query.view();
         let units = self
             .units
             .iter()
             .filter_map(|&(id, entity)| {
-                let (position, stats, health, blueprint, construction) = unit_view.get(entity).expect("unit list only holds live units");
+                let (position, stats, health, blueprint, construction, turning) = unit_view.get(entity).expect("unit list only holds live units");
                 let (x, y, z) = (position.0.x.to_bits(), position.0.y.to_bits(), position.0.z.to_bits());
                 seen(stats.team, x, y).then(|| UnitView {
                     id,
@@ -1488,6 +1500,7 @@ impl SimWorld {
                         (construction.progress.to_bits() * 1000 / Res::ONE.to_bits()).clamp(0, 1000) as u16
                     }),
                     is_structure: stats.is_structure,
+                    facing: turning.map_or([0, 0], |turning| [turning.facing.x.to_bits(), turning.facing.y.to_bits()]),
                 })
             })
             .collect();

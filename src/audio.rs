@@ -513,6 +513,7 @@ mod tests {
             health_permille: 1000,
             built_permille,
             is_structure: false,
+            facing: [0, 0],
         }
     }
 

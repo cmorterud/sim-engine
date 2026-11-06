@@ -373,6 +373,7 @@ mod tests {
             health_permille: 1000,
             built_permille: 1000,
             is_structure: unit.is_structure(),
+            facing: [0, 0],
         }
     }
 

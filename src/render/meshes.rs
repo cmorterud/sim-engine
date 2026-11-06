@@ -6,8 +6,14 @@ use glam::Vec3;
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Shape {
     Cube,
+    /// The commander's upper body, which turns to face its work.
     Commander,
+    /// The commander's legs, which face the way it walks.
+    CommanderLegs,
+    /// The engineer's construction arm, which turns to face its work.
     Engineer,
+    /// The engineer's hull, which faces the way it drives.
+    EngineerHull,
     Bot,
     Tank,
     Artillery,
@@ -25,10 +31,12 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 17] = [
         Self::Cube,
         Self::Commander,
+        Self::CommanderLegs,
         Self::Engineer,
+        Self::EngineerHull,
         Self::Bot,
         Self::Tank,
         Self::Artillery,
@@ -145,17 +153,26 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         Shape::Cube => mesh.block([-0.5; 3], [0.5; 3]),
         // A broad walking figure with a gun arm: the one unit that must never be missed.
         Shape::Commander => {
-            mesh.block([-0.28, -0.14, -0.5], [-0.07, 0.14, -0.1]);
-            mesh.block([0.07, -0.14, -0.5], [0.28, 0.14, -0.1]);
             mesh.block([-0.3, -0.2, -0.1], [0.3, 0.2, 0.28]);
             mesh.block([-0.5, -0.12, -0.05], [-0.3, 0.12, 0.26]);
             mesh.block([0.3, -0.12, -0.05], [0.5, 0.12, 0.26]);
             mesh.beam([0.4, 0.1, 0.1], [0.4, 0.5, 0.1], 0.07, 0.07);
             mesh.block([-0.13, -0.1, 0.28], [0.13, 0.13, 0.5]);
         }
-        // A low hull with a raised construction arm.
+        // Two legs, with feet that point the way it walks.
+        Shape::CommanderLegs => {
+            mesh.block([-0.28, -0.14, -0.5], [-0.07, 0.14, -0.1]);
+            mesh.block([0.07, -0.14, -0.5], [0.28, 0.14, -0.1]);
+            mesh.block([-0.28, 0.14, -0.5], [-0.07, 0.24, -0.4]);
+            mesh.block([0.07, 0.14, -0.5], [0.28, 0.24, -0.4]);
+        }
+        // A low hull, with a sloped front so that its direction shows.
+        Shape::EngineerHull => {
+            mesh.block([-0.42, -0.5, -0.5], [0.42, 0.3, -0.12]);
+            mesh.block([-0.36, 0.3, -0.5], [0.36, 0.45, -0.22]);
+        }
+        // A raised construction arm on a turntable.
         Shape::Engineer => {
-            mesh.block([-0.42, -0.5, -0.5], [0.42, 0.45, -0.12]);
             mesh.frustum([0.0, -0.15], [-0.12, 0.05], [0.3, 0.22], 6);
             mesh.beam([0.0, -0.15, 0.03], [0.0, 0.42, 0.42], 0.07, 0.06);
             mesh.frustum([0.0, 0.4], [0.3, 0.5], [0.04, 0.09], 6);

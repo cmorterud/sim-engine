@@ -115,9 +115,44 @@ impl Sub for Vec3Fp {
     }
 }
 
+/// The cosine and sine of an angle in tenths of a degree, from 0 to 900, using only
+/// fixed-point arithmetic so that every machine gets the same bits.
+pub fn cos_sin_tenths_of_degree(tenths: u32) -> (Fp, Fp) {
+    assert!(tenths <= 900, "only angles up to a right angle are needed");
+    cos_sin_radians(radians_from_tenths_of_degree(tenths))
+}
+
+/// An angle in tenths of a degree, in radians.
+pub fn radians_from_tenths_of_degree(tenths: u32) -> FpWide {
+    // Pi in 24 fractional bits.
+    FpWide::from_bits(52_707_179) * i64::from(tenths) / 1_800
+}
+
+/// The cosine and sine of an angle in radians, from 0 to a right angle, from fixed-point arithmetic only.
+pub fn cos_sin_radians(x: FpWide) -> (Fp, Fp) {
+    let x2 = x * x;
+    // Taylor series, with enough terms for a right angle to stay well within one Fp step.
+    let sin = x * (FpWide::ONE - x2 / 6 * (FpWide::ONE - x2 / 20 * (FpWide::ONE - x2 / 42 * (FpWide::ONE - x2 / 72))));
+    let cos = FpWide::ONE - x2 / 2 * (FpWide::ONE - x2 / 12 * (FpWide::ONE - x2 / 30 * (FpWide::ONE - x2 / 56)));
+    let narrow = |value: FpWide| Fp::from_bits((value.to_bits() >> (24 - FP_FRAC_BITS)) as i32);
+    (narrow(cos), narrow(sin))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+
+    #[test]
+    fn cosine_and_sine_match_the_true_values_closely() {
+        let step = 1.0 / 4096.0;
+        for tenths in [0_u32, 50, 90, 180, 360, 450, 600, 900] {
+            let (cos, sin) = cos_sin_tenths_of_degree(tenths);
+            let angle = f64::from(tenths) / 10.0 * std::f64::consts::PI / 180.0;
+            assert!((cos.to_num::<f64>() - angle.cos()).abs() <= step * 2.0, "cos of {tenths} tenths was {cos}");
+            assert!((sin.to_num::<f64>() - angle.sin()).abs() <= step * 2.0, "sin of {tenths} tenths was {sin}");
+        }
+    }
 
     #[test]
     fn maximum_map_distance_does_not_overflow() {

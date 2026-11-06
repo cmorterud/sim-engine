@@ -2,7 +2,7 @@
 #
 # Values are whole numbers or quoted decimals, such as "2.5". TOML floats are rejected
 # when loading, so that no float rounding can enter the simulation.
-# Rates are per second, except speeds, which are units per tick.
+# Rates are per second, except speeds, which are units per tick. Turn rates are degrees per second, and turn radii are units: without one, a unit turns on the spot.
 # One terrain cell is 20 units. These are starting values for tuning, not final balance.
 version = 1
 
@@ -16,6 +16,7 @@ energy = 10000
 build_time = 1
 health = 11000
 speed = 4
+turn_rate = 180
 radius = 16
 vision = 1000
 build_power = 10
@@ -38,6 +39,8 @@ energy = 260
 build_time = 130
 health = 160
 speed = 4
+turn_rate = 240
+turn_radius = 10
 radius = 8
 vision = 500
 build_power = 5
@@ -54,6 +57,7 @@ energy = 180
 build_time = 90
 health = 200
 speed = "5.5"
+turn_rate = 360
 radius = 7
 vision = 500
 weapon = { range = 340, reload_ticks = 10, projectile_speed = 40, damage = 18 }
@@ -68,6 +72,8 @@ energy = 360
 build_time = 180
 health = 180
 speed = "3.5"
+turn_rate = 120
+turn_radius = 30
 radius = 8
 vision = 500
 weapon = { range = 600, reload_ticks = 40, projectile_speed = 12, damage = 90, splash_radius = 40 }
@@ -82,6 +88,8 @@ energy = 990
 build_time = 440
 health = 900
 speed = "4.5"
+turn_rate = 90
+turn_radius = 40
 radius = 11
 vision = 600
 weapon = { range = 460, reload_ticks = 12, projectile_speed = 60, damage = 70 }

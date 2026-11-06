@@ -114,14 +114,16 @@ pub struct UnitLook {
     pub tint: Option<[f32; 3]>,
     /// A structure's height, as a share of its width.
     pub height_share: f32,
+    /// A lower part that faces the way the unit moves, under a `shape` that can face its work.
+    pub base: Option<Shape>,
 }
 
 /// Maps a blueprint to its look. Unknown keys fall back to a plain cube.
 pub fn unit_look(key: &str) -> UnitLook {
-    let look = |shape, tint, height_share| UnitLook { shape, tint, height_share };
+    let look = |shape, tint, height_share| UnitLook { shape, tint, height_share, base: None };
     match key {
-        "acu" => look(Shape::Commander, Some([1.00, 1.00, 1.00]), 1.0),
-        "t1_engineer" => look(Shape::Engineer, Some([0.95, 0.80, 0.30]), 1.0),
+        "acu" => UnitLook { base: Some(Shape::CommanderLegs), ..look(Shape::Commander, Some([1.00, 1.00, 1.00]), 1.0) },
+        "t1_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([0.95, 0.80, 0.30]), 1.0) },
         "t1_light_bot" => look(Shape::Bot, None, 1.0),
         "t1_light_artillery" => look(Shape::Artillery, None, 1.0),
         "t2_heavy_tank" => look(Shape::Tank, None, 1.0),
@@ -161,15 +163,17 @@ fn turn_towards(heading: &mut [f32; 2], dx: f64, dy: f64) {
     *heading = [turned[0] / size, turned[1] / size];
 }
 
-/// Turns a unit towards what it is working on, or else the way it moved this tick.
-/// A unit that stops keeps its facing.
-fn update_heading(headings: &mut Headings, unit: &UnitView, before: Option<&UnitView>, work: Option<&WorkLinkView>) -> [f32; 2] {
+/// Turns a unit towards what it is working on, or else towards `rest` if given, or else the
+/// way it moved this tick. A unit that stops keeps its facing.
+fn update_heading(headings: &mut Headings, unit: &UnitView, before: Option<&UnitView>, work: Option<&WorkLinkView>, rest: Option<[f32; 2]>) -> [f32; 2] {
     let heading = headings.entry(unit.id).or_insert_with(|| default_heading(unit.team));
     if let Some(work) = work {
         let (dx, dy) = (f64::from(work.target[0] - unit.x), f64::from(work.target[1] - unit.y));
         if dx != 0.0 || dy != 0.0 {
             turn_towards(heading, dx, dy);
         }
+    } else if let Some(rest) = rest {
+        turn_towards(heading, f64::from(rest[0]), f64::from(rest[1]));
     } else if let Some(before) = before {
         let (dx, dy) = (f64::from(unit.x - before.x), f64::from(unit.y - before.y));
         if dx * dx + dy * dy > HEADING_MIN_MOVE_SQUARED {
@@ -177,6 +181,21 @@ fn update_heading(headings: &mut Headings, unit: &UnitView, before: Option<&Unit
         }
     }
     *heading
+}
+
+/// The body's facing from the simulation, turned smoothly between ticks.
+fn body_facing(unit: &UnitView, before: Option<&UnitView>, alpha: f64) -> Option<[f32; 2]> {
+    if unit.facing == [0, 0] {
+        return None;
+    }
+    let now = [f64::from(unit.facing[0]), f64::from(unit.facing[1])];
+    let from = before.filter(|before| before.facing != [0, 0]).map_or(now, |before| [f64::from(before.facing[0]), f64::from(before.facing[1])]);
+    let blended = [from[0] + (now[0] - from[0]) * alpha, from[1] + (now[1] - from[1]) * alpha];
+    let length = blended[0].hypot(blended[1]);
+    // Turning right round in one tick passes through nothing, so use where it ends up.
+    let [x, y] = if length > 1.0 { blended } else { now };
+    let length = x.hypot(y);
+    Some([(x / length) as f32, (y / length) as f32])
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -233,9 +252,23 @@ pub fn build_unit_instances(
             let tinted = [color[0] * shade, color[1] * shade, color[2] * shade];
             out.push(shape, instance(center, [size, size, height], NORTH, tinted, UNIT_ICON_PX * 1.6, eye));
         } else {
-            // The stress test's plain cubes have no front, and skip this to save time.
-            let heading = if look.is_some() { update_heading(headings, unit, before, working_on) } else { NORTH };
-            out.push(shape, instance(center, [size; 3], heading, color, UNIT_ICON_PX, eye));
+            // The body faces the way the simulation says. Units that turn instantly, such as the
+            // stress test's cubes, have no facing, so they are turned here as before.
+            let (body, upper) = match body_facing(unit, before, alpha) {
+                Some(body) => {
+                    let upper = if look.is_some_and(|look| look.base.is_some()) { update_heading(headings, unit, before, working_on, Some(body)) } else { body };
+                    (body, upper)
+                }
+                None => {
+                    // The stress test's plain cubes have no front, and skip this to save time.
+                    let heading = if look.is_some() { update_heading(headings, unit, before, working_on, None) } else { NORTH };
+                    (heading, heading)
+                }
+            };
+            if let Some(base) = look.and_then(|look| look.base) {
+                out.push(base, instance(center, [size; 3], body, color, UNIT_ICON_PX, eye));
+            }
+            out.push(shape, instance(center, [size; 3], upper, color, UNIT_ICON_PX, eye));
         }
     });
 }
@@ -292,6 +325,7 @@ mod tests {
             health_permille: 1000,
             built_permille: 1000,
             is_structure: false,
+            facing: [0, 0],
         }
     }
 
@@ -466,6 +500,50 @@ mod tests {
             turn_towards(&mut heading, dx, dy);
             assert!(gap(heading) < before, "turning towards ({dx}, {dy}) should close the gap");
         }
+    }
+
+    #[test]
+    fn a_commanders_legs_face_the_way_it_walks_while_its_body_faces_its_work() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let mut acu = unit(1, 0);
+        acu.blueprint = db.id("acu").0;
+        // Walking east, and building something to the north.
+        acu.facing = [4096, 0];
+        let work = [WorkLinkView { builder: SimId(1), target: [0, 40_960, 0], reclaim: false }];
+        let mut headings = Headings::new();
+        let mut out = InstanceBatches::default();
+        for _ in 0..60 {
+            out.clear();
+            build_unit_instances(&[acu], &[acu], 1.0, [0.0; 3], &[], &looks, &work, &mut headings, &mut out);
+        }
+        let legs = facing(&out.shape(Shape::CommanderLegs)[0]);
+        let body = facing(&out.shape(Shape::Commander)[0]);
+        assert!((legs[0] - 1.0).abs() < 1e-3, "the legs should face east: {legs:?}");
+        assert!((body[1] - 1.0).abs() < 1e-2, "the body should face its work to the north: {body:?}");
+
+        // With the work done, the body settles back over its legs.
+        for _ in 0..60 {
+            out.clear();
+            build_unit_instances(&[acu], &[acu], 1.0, [0.0; 3], &[], &looks, &[], &mut headings, &mut out);
+        }
+        let body = facing(&out.shape(Shape::Commander)[0]);
+        assert!((body[0] - 1.0).abs() < 1e-2, "the body should face the way the legs do: {body:?}");
+    }
+
+    #[test]
+    fn a_units_body_turns_smoothly_between_ticks() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let mut before = unit(1, 0);
+        before.blueprint = db.id("t2_heavy_tank").0;
+        before.facing = [4096, 0];
+        let mut after = before;
+        after.facing = [0, 4096];
+        let mut out = InstanceBatches::default();
+        build_unit_instances(&[before], &[after], 0.5, [0.0; 3], &[], &looks, &[], &mut Headings::new(), &mut out);
+        let halfway = facing(&out.shape(Shape::Tank)[0]);
+        assert!((halfway[0] - FRAC_1_SQRT_2).abs() < 1e-3 && (halfway[1] - FRAC_1_SQRT_2).abs() < 1e-3, "{halfway:?}");
     }
 
     #[test]

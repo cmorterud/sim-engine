@@ -58,6 +58,10 @@ pub struct Blueprint {
     pub health: Fp,
     /// Units per tick. Zero for structures.
     pub speed: Fp,
+    /// How fast the body turns, in degrees per second. `None` turns instantly.
+    pub turn_rate: Option<u32>,
+    /// The tightest arc it can turn in while moving, in units. Zero turns on the spot.
+    pub turn_radius: u32,
     pub radius: Fp,
     /// Structure width in terrain cells. Zero for mobile units.
     pub footprint: u8,
@@ -154,6 +158,10 @@ struct RawUnit {
     build_time: Number,
     health: Number,
     speed: Option<Number>,
+    /// Degrees per second. Units without one turn instantly.
+    turn_rate: Option<u32>,
+    /// The tightest arc, in units. Without one, a unit turns on the spot.
+    turn_radius: Option<u32>,
     radius: Option<Number>,
     footprint: Option<u8>,
     vision: Number,
@@ -262,6 +270,8 @@ impl BlueprintDb {
                 build_time,
                 health: unit.health.fp().map_err(context)?,
                 speed: whole(&unit.speed)?,
+                turn_rate: unit.turn_rate,
+                turn_radius: unit.turn_radius.unwrap_or(0),
                 radius,
                 footprint,
                 vision: unit.vision.fp().map_err(context)?,
