@@ -483,6 +483,7 @@ impl SimWorld {
             SimCommand::Move { .. }
             | SimCommand::AttackMove { .. }
             | SimCommand::QueueMove { .. }
+            | SimCommand::FormationMove { .. }
             | SimCommand::Overcharge { .. }
             | SimCommand::MoveOrder { .. }
             | SimCommand::Follow { .. }

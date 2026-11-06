@@ -537,6 +537,8 @@ impl AiBrain {
             .map(|enemy| enemy.position);
         let full_strength = gathered >= LARGEST_WAVE;
         let goal = target.unwrap_or_else(|| self.search_point(world, full_strength));
+        // Not in formation: waves at the slowest unit's pace arrived late enough that, in 200
+        // AI-vs-AI matches, 6 went past the time limit, against none with each at its own speed.
         commands.push(SimCommand::AttackMove { units: forces.idle_combat.clone(), goal });
         if gathered >= self.wave_size {
             self.wave_size = (self.wave_size + self.wave_size / 4 + 1).min(LARGEST_WAVE);

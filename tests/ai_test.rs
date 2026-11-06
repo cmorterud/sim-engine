@@ -52,7 +52,8 @@ fn ai_commands_only_its_own_units() {
                     SimCommand::Build { units, .. }
                     | SimCommand::Assist { units, .. }
                     | SimCommand::Reclaim { units, .. }
-                    | SimCommand::AttackMove { units, .. } => units.clone(),
+                    | SimCommand::AttackMove { units, .. }
+                    | SimCommand::FormationMove { units, .. } => units.clone(),
                     SimCommand::QueueUnit { factory, .. } | SimCommand::SetRally { factory, .. } => vec![*factory],
                     other => panic!("unexpected command {other:?}"),
                 };
@@ -92,6 +93,7 @@ fn mirrored_order(world: &SimWorld, team: Team, command: &SimCommand) -> String 
             format!("build {} x{} at {cell:?}", blueprint.0, units.len())
         }
         SimCommand::AttackMove { units, goal } => format!("attack-move x{} to {:?}", units.len(), point(*goal)),
+        SimCommand::FormationMove { units, goal, attack, queued } => format!("formation x{} to {:?} {attack} {queued}", units.len(), point(*goal)),
         SimCommand::SetRally { point: rally, .. } => format!("rally {:?}", point(*rally)),
         SimCommand::QueueUnit { blueprint, count, .. } => format!("queue {} x{count}", blueprint.0),
         SimCommand::Assist { units, .. } => format!("assist x{}", units.len()),

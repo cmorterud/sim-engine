@@ -93,6 +93,45 @@ fn full_ai_match_matches_its_golden_checksums() {
     check_golden("ai_match", &record.checksums);
 }
 
+/// A formation's state is hashed only while there is one, so it has a test of its own.
+#[test]
+fn every_formation_field_changes_the_checksum() {
+    let (_, mut world) = run(scenario::battle(SEED, 100, small_config()), 10, 10);
+    let units: Vec<SimId> = world.units.iter().take(6).map(|unit| unit.0).collect();
+    let goal = world.unit_position(units[0]).unwrap().xy();
+    world.advance_tick(&[sim_engine::sim::commands::SimCommand::FormationMove { units, goal, attack: false, queued: false }]);
+    let route = *world.formations.keys().next().expect("a formation");
+    let baseline = world.compute_checksum();
+    let one_bit = Fp::from_bits(1);
+    type Edit = fn(&mut sim_engine::sim::formation::Travel, Fp);
+    let edits: [(&str, Edit); 11] = [
+        ("leader x", |t, d| t.leader.x += d),
+        ("leader y", |t, d| t.leader.y += d),
+        ("heading x", |t, d| t.heading.x += d),
+        ("heading y", |t, d| t.heading.y += d),
+        ("speed", |t, d| t.speed += d),
+        ("max turn", |t, d| t.max_turn += d),
+        ("lag distance", |t, d| t.lag_distance += d),
+        ("catch-up distance", |t, d| t.catch_up_distance += d),
+        ("held ticks", |t, d| t.held_ticks = t.held_ticks.wrapping_add(d.to_bits() as u32)),
+        ("spot ahead", |t, d| t.members[0].1 += d),
+        ("spot aside", |t, d| t.members[0].2 += d),
+    ];
+    for (name, edit) in edits {
+        edit(world.formations.get_mut(&route).unwrap(), one_bit);
+        assert_ne!(world.compute_checksum(), baseline, "{name} is not covered by the checksum");
+        edit(world.formations.get_mut(&route).unwrap(), -one_bit);
+        assert_eq!(world.compute_checksum(), baseline, "undoing {name} did not restore the checksum");
+    }
+    let member = world.formations.get_mut(&route).unwrap().members.pop().unwrap();
+    assert_ne!(world.compute_checksum(), baseline, "membership is not covered by the checksum");
+    world.formations.get_mut(&route).unwrap().members.push(member);
+    let travel = world.formations.remove(&route).unwrap();
+    assert_ne!(world.compute_checksum(), baseline, "the formation's route is not covered by the checksum");
+    world.formations.insert(route, travel);
+    assert_eq!(world.compute_checksum(), baseline);
+}
+
 /// A checksum that misses a field cannot detect a desync in that field.
 #[test]
 fn every_hashed_field_changes_the_checksum() {

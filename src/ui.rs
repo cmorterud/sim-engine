@@ -64,18 +64,20 @@ const MIN_BEAM_POINTS: f32 = 6.0;
 pub enum ArmedOrder {
     Move,
     AttackMove,
+    Formation,
     Patrol,
     Assist,
     Overcharge,
 }
 
 impl ArmedOrder {
-    const ALL: [Self; 5] = [Self::Move, Self::AttackMove, Self::Patrol, Self::Assist, Self::Overcharge];
+    const ALL: [Self; 6] = [Self::Move, Self::AttackMove, Self::Formation, Self::Patrol, Self::Assist, Self::Overcharge];
 
     const fn letter(self) -> char {
         match self {
             Self::Move => hotkeys::MOVE,
             Self::AttackMove => hotkeys::ATTACK_MOVE,
+            Self::Formation => hotkeys::FORMATION,
             Self::Patrol => hotkeys::PATROL,
             Self::Assist => hotkeys::ASSIST,
             Self::Overcharge => hotkeys::OVERCHARGE,
@@ -86,6 +88,7 @@ impl ArmedOrder {
         match self {
             Self::Move => "Move",
             Self::AttackMove => "Attack-move",
+            Self::Formation => "Formation move",
             Self::Patrol => "Patrol",
             Self::Assist => "Assist",
             Self::Overcharge => "Overcharge",
@@ -96,6 +99,7 @@ impl ArmedOrder {
         match self {
             Self::Move => "Walk there, ignoring what is under the cursor. Units still fire at what comes into range.",
             Self::AttackMove => "Walk there, stopping to fire when enemies are in range.",
+            Self::Formation => "Travel together at the pace of the slowest unit, keeping the formation all the way. Hold Alt to attack-move, which stops the whole group to fight. Also Ctrl+right-click.",
             Self::Patrol => "Repeat a route. Combat units fight along it, and engineers also reclaim and repair.",
             Self::Assist => "Stay with a friendly unit and protect it. Builders also help it build.",
             Self::Overcharge => "Spend stored energy on one shot that destroys almost any unit. Weak against structures.",
@@ -107,6 +111,7 @@ impl ArmedOrder {
         match self {
             Self::Move => "Move: left-click a destination. Right-click or Esc to cancel.",
             Self::AttackMove => "Attack-move: left-click a destination. Right-click or Esc to cancel.",
+            Self::Formation => "Formation move: left-click a destination, holding Alt to attack-move. Right-click or Esc to cancel.",
             Self::Patrol => "Patrol: left-click each point, then right-click or press P to start. Esc to cancel.",
             Self::Assist => "Assist: left-click a friendly unit. Right-click or Esc to cancel.",
             Self::Overcharge => "Overcharge: left-click an enemy. Right-click or Esc to cancel.",
@@ -230,6 +235,7 @@ pub fn hotkey_action(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintD
         match letter {
             hotkeys::MOVE => return Some(UiAction::Arm(ArmedOrder::Move)),
             hotkeys::ATTACK_MOVE => return Some(UiAction::Arm(ArmedOrder::AttackMove)),
+            hotkeys::FORMATION => return Some(UiAction::Arm(ArmedOrder::Formation)),
             hotkeys::ASSIST => return Some(UiAction::Arm(ArmedOrder::Assist)),
             hotkeys::OVERCHARGE if has_overcharge(snapshot, selected, db) => return Some(UiAction::Arm(ArmedOrder::Overcharge)),
             hotkeys::STOP => return Some(UiAction::Stop),
@@ -1902,7 +1908,7 @@ mod tests {
         let db = BlueprintDb::standard();
         let current = commander_and_engineer(&db);
         for selected in [SimId(10), SimId(11), SimId(12)] {
-            for (letter, order) in [('M', ArmedOrder::Move), ('F', ArmedOrder::AttackMove), ('Y', ArmedOrder::Assist)] {
+            for (letter, order) in [('M', ArmedOrder::Move), ('F', ArmedOrder::AttackMove), ('J', ArmedOrder::Formation), ('Y', ArmedOrder::Assist)] {
                 assert_eq!(hotkey_action(&current, &[selected], &db, letter), Some(UiAction::Arm(order)), "{letter} for {selected:?}");
             }
             assert_eq!(hotkey_action(&current, &[selected], &db, 'X'), Some(UiAction::Stop));
@@ -1914,7 +1920,7 @@ mod tests {
     fn structures_do_not_take_unit_orders_but_a_mixed_selection_does() {
         let db = BlueprintDb::standard();
         let mut current = mixed_factories(&db);
-        for letter in ['M', 'F', 'Y', 'X'] {
+        for letter in ['M', 'F', 'J', 'Y', 'X'] {
             assert_eq!(hotkey_action(&current, &[SimId(1)], &db, letter), None, "{letter} for a factory");
         }
         let mut engineer = unit(4, 0.0);

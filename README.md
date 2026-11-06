@@ -32,10 +32,12 @@ Destroy the enemy commander to win. Yours explodes if it dies, and your whole te
 | Y, then left-click a friendly unit | Assist: stay with it and protect it, and builders also help it build |
 | P, then left-click each point, then right-click or P | Patrol |
 | Alt + right-click | Attack-move, as above |
+| Ctrl (or Cmd) + right-click the ground | Formation move: the group travels at its slowest unit's pace, keeping its shape all the way. Add Alt to attack-move, which stops the whole group to fight |
+| J, then left-click | Formation move, as above. Hold Alt when clicking to attack-move |
 | Hold P + right-click | Add patrol points, then release P |
 | Hold Shift, drag an order's icon | Move a move, build, or rally point somewhere else. Right-click or Esc cancels |
 | Shift + right-click | Queue the order after what the selection is already doing, including moves for groups |
-| Shift + left-click | Queue a structure, and keep placing. With M, F, or Y armed, queue that order and stay armed |
+| Shift + left-click | Queue a structure, and keep placing. With M, F, J, or Y armed, queue that order and stay armed |
 | Shift + left-drag | Queue a row of structures, and keep placing |
 | X | Stop: drop all orders |
 | L, then left-click an enemy | Overcharge with the commander: 3,000 stored energy for a shot that destroys almost any unit, but does little to structures |

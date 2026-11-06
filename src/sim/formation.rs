@@ -1,7 +1,10 @@
-//! Arrival formations: where each unit in a group order ends up. Integer math only.
+//! Formations: where each unit in a group order ends up, and for a formation move, the
+//! moving grid the group keeps on the way there. Integer math only.
+
+use std::hash::Hasher;
 
 use super::components::SimId;
-use crate::math::fp::{Fp, Vec2Fp, FP_FRAC_BITS};
+use crate::math::fp::{wide_mul, Fp, Vec2Fp, FP_FRAC_BITS};
 
 /// The grid for a group order.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -10,6 +13,9 @@ pub struct Formation {
     pub slots: Vec<Vec2Fp>,
     /// Distance from the goal at which units leave the shared route for their spot.
     pub approach_radius: Fp,
+    /// Where the group starts from, and the way it faces: from there towards the goal.
+    pub center: Vec2Fp,
+    pub forward: Vec2Fp,
 }
 
 /// The number of columns for a grid about twice as wide as it is deep.
@@ -66,7 +72,94 @@ pub fn plan_formation(units: &[(SimId, Vec2Fp)], goal: Vec2Fp, spacing: Fp) -> F
         }
     }
     let reach = (columns as i64 + rows as i64) * spacing_raw / 2 + 4 * spacing_raw;
-    Formation { slots, approach_radius: Fp::from_bits(reach as i32) }
+    Formation { slots, approach_radius: Fp::from_bits(reach as i32), center, forward }
+}
+
+/// How far a member may be from its spot before the formation waits for it, in spacings.
+const LAG_SPACINGS: i64 = 4;
+/// Further than this from its spot, a member follows the route on its own to catch up.
+const CATCH_UP_SPACINGS: i64 = 12;
+/// The most a formation turns in a tick, in radians: about 6 degrees.
+const MAX_TURN_RAW: i32 = 430;
+
+/// A group on a formation move. A leader point walks the group's route at a speed every member
+/// can keep, and each member keeps to its own spot in a grid that moves and turns with it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Travel {
+    pub leader: Vec2Fp,
+    /// A unit vector.
+    pub heading: Vec2Fp,
+    pub speed: Fp,
+    /// The most the grid turns in a tick, in radians, so that its outer spots move no faster
+    /// than its members can.
+    pub max_turn: Fp,
+    pub lag_distance: Fp,
+    pub catch_up_distance: Fp,
+    /// How long the leader has been waiting for members to catch up.
+    pub held_ticks: u32,
+    /// Each member's spot, ahead of the leader and to its right. Sorted by id.
+    pub members: Vec<(SimId, Fp, Fp)>,
+}
+
+impl Travel {
+    /// Lays the group out as it will stand at the goal, and starts the leader at its center.
+    /// `members` are each unit's id, start, and top speed.
+    pub fn plan(members: &[(SimId, Vec2Fp, Fp)], formation: &Formation, goal: Vec2Fp, spacing: Fp) -> Self {
+        let (forward, right) = (formation.forward, Vec2Fp::new(formation.forward.y, -formation.forward.x));
+        let dot = |a: Vec2Fp, b: Vec2Fp| a.x * b.x + a.y * b.y;
+        let mut spots: Vec<(SimId, Fp, Fp)> = members
+            .iter()
+            .zip(&formation.slots)
+            .map(|(&(id, _, _), &slot)| (id, dot(slot - goal, forward), dot(slot - goal, right)))
+            .collect();
+        spots.sort_unstable_by_key(|spot| spot.0);
+        // The slowest member sets the pace, with some to spare so that it can catch up after a bend.
+        let slowest = members.iter().map(|member| member.2).min().unwrap_or(Fp::ONE);
+        let speed = slowest * 9 / 10;
+        let reach = spots.iter().map(|&(_, ahead, aside)| ahead.abs().max(aside.abs())).max().unwrap_or(Fp::ZERO);
+        // An outer spot moves `reach` times the turn, which should stay within half the pace.
+        let max_turn = if reach > Fp::ZERO { (speed / 2 / reach).min(Fp::from_bits(MAX_TURN_RAW)) } else { Fp::from_bits(MAX_TURN_RAW) };
+        let spacings = |count: i64| Fp::from_bits((i64::from(spacing.to_bits()) * count) as i32);
+        Self {
+            leader: formation.center,
+            heading: forward,
+            speed,
+            max_turn: max_turn.max(Fp::from_bits(1)),
+            lag_distance: spacings(LAG_SPACINGS),
+            catch_up_distance: spacings(CATCH_UP_SPACINGS),
+            held_ticks: 0,
+            members: spots,
+        }
+    }
+
+    /// A member's spot right now, if it is a member.
+    pub fn spot(&self, id: SimId) -> Option<Vec2Fp> {
+        let index = self.members.binary_search_by_key(&id, |member| member.0).ok()?;
+        let (_, ahead, aside) = self.members[index];
+        let right = Vec2Fp::new(self.heading.y, -self.heading.x);
+        Some(Vec2Fp::new(
+            self.leader.x + self.heading.x * ahead + right.x * aside,
+            self.leader.y + self.heading.y * ahead + right.y * aside,
+        ))
+    }
+
+    pub fn hash_state(&self, hasher: &mut impl Hasher) {
+        for value in [self.leader.x, self.leader.y, self.heading.x, self.heading.y, self.speed, self.max_turn, self.lag_distance, self.catch_up_distance] {
+            hasher.write(&value.to_bits().to_le_bytes());
+        }
+        hasher.write(&self.held_ticks.to_le_bytes());
+        hasher.write(&(self.members.len() as u64).to_le_bytes());
+        for &(id, ahead, aside) in &self.members {
+            hasher.write(&id.0.to_le_bytes());
+            hasher.write(&ahead.to_bits().to_le_bytes());
+            hasher.write(&aside.to_bits().to_le_bytes());
+        }
+    }
+}
+
+/// Whether a point is within `distance` of another.
+pub fn within(a: Vec2Fp, b: Vec2Fp, distance: Fp) -> bool {
+    a.distance_squared(&b) <= wide_mul(distance, distance)
 }
 
 #[cfg(test)]
@@ -153,6 +246,54 @@ mod tests {
             let other = reversed.iter().position(|(candidate, _)| *candidate == id).unwrap();
             assert_eq!(forward.slots[index], backward.slots[other]);
         }
+    }
+
+    fn travel_for(units: &[(SimId, Vec2Fp)], goal: Vec2Fp) -> (Formation, Travel) {
+        let members: Vec<(SimId, Vec2Fp, Fp)> = units.iter().map(|&(id, at)| (id, at, fp_int(4))).collect();
+        let formation = plan_formation(units, goal, fp_int(10));
+        let travel = Travel::plan(&members, &formation, goal, fp_int(10));
+        (formation, travel)
+    }
+
+    #[test]
+    fn the_moving_grid_starts_as_the_arrival_grid_moved_to_the_group() {
+        let units = line_of_units(9);
+        let goal = point(40, 2_000);
+        let (formation, travel) = travel_for(&units, goal);
+        assert_eq!(travel.leader, formation.center);
+        for (&(id, _), &slot) in units.iter().zip(&formation.slots) {
+            let spot = travel.spot(id).unwrap();
+            let expected = slot - goal + formation.center;
+            let close = |a: Fp, b: Fp| (a - b).abs() <= Fp::from_bits(8);
+            assert!(close(spot.x, expected.x) && close(spot.y, expected.y), "{id:?}: {spot:?} against {expected:?}");
+        }
+        assert_eq!(travel.spot(SimId(99)), None, "not a member");
+    }
+
+    #[test]
+    fn the_grid_turns_with_its_heading() {
+        let units = line_of_units(4);
+        let (_, mut travel) = travel_for(&units, point(15, 2_000));
+        let before: Vec<Vec2Fp> = units.iter().map(|&(id, _)| travel.spot(id).unwrap() - travel.leader).collect();
+        // A quarter turn to the right: forward becomes what was the right.
+        travel.heading = Vec2Fp::new(travel.heading.y, -travel.heading.x);
+        for (&(id, _), was) in units.iter().zip(&before) {
+            let now = travel.spot(id).unwrap() - travel.leader;
+            let turned = Vec2Fp::new(was.y, -was.x);
+            assert!((now.x - turned.x).abs() <= Fp::from_bits(8) && (now.y - turned.y).abs() <= Fp::from_bits(8), "{now:?} against {turned:?}");
+        }
+    }
+
+    #[test]
+    fn the_slowest_sets_the_pace_and_wide_grids_turn_slowly() {
+        let units = line_of_units(40);
+        let mut members: Vec<(SimId, Vec2Fp, Fp)> = units.iter().map(|&(id, at)| (id, at, fp_int(5))).collect();
+        members[7].2 = fp_int(2);
+        let formation = plan_formation(&units, point(200, 3_000), fp_int(10));
+        let wide = Travel::plan(&members, &formation, point(200, 3_000), fp_int(10));
+        assert_eq!(wide.speed, fp_int(2) * 9 / 10);
+        let narrow = Travel::plan(&members[..2], &plan_formation(&units[..2], point(200, 3_000), fp_int(10)), point(200, 3_000), fp_int(10));
+        assert!(wide.max_turn < narrow.max_turn, "{} against {}", wide.max_turn, narrow.max_turn);
     }
 
     #[test]

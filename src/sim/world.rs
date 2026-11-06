@@ -9,11 +9,11 @@ use super::commands::SimCommand;
 use super::components::{BuildTask, 
     Blueprinted, Builder, Combat, Construction, Factory, Footprint, Health, MoveClass, Order, OrderKind, OrderQueue, Patrol,
     Overcharged, OverchargeOrder, OverchargeWeapon, Position, Projectile, SimId, Team, Turning, Turret, UnitStats, Velocity, Veterancy,
-    Wreck,
+    Wreck, rotate_toward,
 };
 use super::config::{SimConfig, TARGET_SEARCH_INTERVAL, TERRAIN_CELL_UNITS, WRECK_MASS_PERMILLE};
 use super::flowfield::{nearest_passable_cell, FlowField, FlowSample};
-use super::formation::plan_formation;
+use super::formation::{plan_formation, within, Travel};
 use super::production::{Economy, WorkLink};
 use super::spatial::{GridUnit, Layer, SpatialGrid};
 use super::terrain::Terrain;
@@ -27,6 +27,8 @@ const CROWD_SETTLE_RADII: i32 = 30;
 /// The gap between formation spots, in halves of the largest unit's radius.
 const FORMATION_SPACING_RADII: i32 = 5;
 const SLOT_EXTRA_TICKS: i64 = 40;
+/// How long a formation waits for members that have fallen behind, before going on without them.
+const FORMATION_PATIENCE_TICKS: u32 = 100;
 /// How long a unit passes over a target that the ground stops its shots at.
 const BLOCKED_TARGET_TICKS: u32 = 50;
 
@@ -283,6 +285,8 @@ pub struct SimWorld {
     pub order_queues: Vec<(SimId, hecs::Entity)>,
     /// Units with a veteran rank, sorted by `SimId`.
     pub veterans: Vec<(SimId, hecs::Entity)>,
+    /// Groups on a formation move, by the route they share.
+    pub formations: BTreeMap<u32, Travel>,
     pub commanders: [Option<SimId>; 2],
     pub match_result: Option<MatchResult>,
     pub(super) economy_dirty: bool,
@@ -338,6 +342,7 @@ impl SimWorld {
             patrols: Vec::new(),
             order_queues: Vec::new(),
             veterans: Vec::new(),
+            formations: BTreeMap::new(),
             commanders: [None, None],
             match_result: None,
             economy_dirty: false,
@@ -484,7 +489,15 @@ impl SimWorld {
                 }
                 SimCommand::Attack { units, target } => self.command_attack(units, *target),
                 SimCommand::Overcharge { unit, target } => self.command_overcharge(*unit, *target),
-                SimCommand::QueueMove { units, goal, attack } => self.queue_move(units, *goal, *attack),
+                SimCommand::QueueMove { units, goal, attack } => self.queue_move(units, *goal, *attack, false),
+                SimCommand::FormationMove { units, goal, attack, queued: true } => self.queue_move(units, *goal, *attack, true),
+                SimCommand::FormationMove { units, goal, attack, queued: false } => {
+                    self.clear_unit_plans(units);
+                    let kind = if *attack { OrderKind::AttackMove } else { OrderKind::Move };
+                    for (id, order) in self.plan_orders(units, kind, *goal, None, false, true) {
+                        self.set_order(id, order);
+                    }
+                }
                 SimCommand::MoveOrder { units, task, goal } => self.move_order(units, *task, *goal),
                 other => self.apply_production_command(other),
             }
@@ -492,14 +505,14 @@ impl SimWorld {
         self.step_order_queues();
     }
 
-    fn queue_move(&mut self, units: &[SimId], goal: Vec2Fp, attack: bool) {
+    fn queue_move(&mut self, units: &[SimId], goal: Vec2Fp, attack: bool, formation: bool) {
         let mobile: Vec<SimId> = units
             .iter()
             .copied()
             .filter(|id| self.find_unit(*id).is_some_and(|(_, entity)| !self.ecs.get::<&UnitStats>(entity).expect("units have stats").is_structure))
             .collect();
         let kind = if attack { OrderKind::AttackMove } else { OrderKind::Move };
-        for (id, order) in self.plan_orders(&mobile, kind, goal, None, true) {
+        for (id, order) in self.plan_orders(&mobile, kind, goal, None, true, formation) {
             let (_, entity) = self.find_unit(id).expect("just checked");
             self.end_patrol(id, entity);
             if self.ecs.get::<&Builder>(entity).is_ok() {
@@ -538,7 +551,9 @@ impl SimWorld {
             return;
         }
         let holders: Vec<SimId> = units.iter().copied().filter(|id| self.holds_route(*id, old.route)).collect();
-        for (id, new) in self.plan_orders(&holders, old.kind, goal, None, false) {
+        // A formation move stays one.
+        let formation = self.formations.contains_key(&old.route);
+        for (id, new) in self.plan_orders(&holders, old.kind, goal, None, false, formation) {
             let (_, entity) = self.find_unit(id).expect("just checked");
             let mut waiting = false;
             let mut in_tasks = false;
@@ -703,7 +718,7 @@ impl SimWorld {
     }
 
     pub(super) fn assign_route(&mut self, units: &[SimId], kind: OrderKind, goal: Vec2Fp, follow: Option<SimId>) {
-        for (id, order) in self.plan_orders(units, kind, goal, follow, false) {
+        for (id, order) in self.plan_orders(units, kind, goal, follow, false, false) {
             self.set_order(id, order);
         }
     }
@@ -711,7 +726,16 @@ impl SimWorld {
     /// Works out a group's route and each unit's order, without giving them yet. Each order
     /// holds one reference to the route. With `from_planned_end`, a formation is lined up from
     /// where units will be after what they are already doing, instead of from where they are.
-    fn plan_orders(&mut self, units: &[SimId], kind: OrderKind, goal: Vec2Fp, follow: Option<SimId>, from_planned_end: bool) -> Vec<(SimId, Order)> {
+    /// With `travel`, a group of two or more also keeps that formation on the way.
+    fn plan_orders(
+        &mut self,
+        units: &[SimId],
+        kind: OrderKind,
+        goal: Vec2Fp,
+        follow: Option<SimId>,
+        from_planned_end: bool,
+        travel: bool,
+    ) -> Vec<(SimId, Order)> {
         // Keeps the order given, because units take their orders in that order.
         let mut seen = BTreeSet::new();
         let mut members = Vec::with_capacity(units.len());
@@ -747,11 +771,15 @@ impl SimWorld {
 
         // A group ordered to a place ends up in a formation there.
         let mut slots: Vec<(SimId, Vec2Fp, u32)> = Vec::new();
+        let mut keep_formation = None;
         if follow.is_none() && matches!(kind, OrderKind::Move | OrderKind::AttackMove) && walkers.len() >= 2 {
             let positions: Vec<(SimId, Vec2Fp)> = walkers.iter().map(|&(id, position, _)| (id, position)).collect();
             let spacing = Fp::from_bits(largest_radius * FORMATION_SPACING_RADII / 2);
             let formation = plan_formation(&positions, goal, spacing);
             arrive_radius = formation.approach_radius;
+            if travel {
+                keep_formation = Some(Travel::plan(&walkers, &formation, goal, spacing));
+            }
             for (&(id, _, speed), &slot) in walkers.iter().zip(&formation.slots) {
                 let slot = self.nearest_open_point(slot);
                 // Time to cross the whole approach twice, plus a margin for crowding.
@@ -769,6 +797,9 @@ impl SimWorld {
         ) else {
             return Vec::new();
         };
+        if let Some(travel) = keep_formation {
+            self.formations.insert(route, travel);
+        }
         slots.sort_unstable_by_key(|slot| slot.0);
         members
             .into_iter()
@@ -794,6 +825,66 @@ impl SimWorld {
         })
     }
 
+    /// Moves each formation's leader along its route, unless the group should wait: for members
+    /// still finishing earlier orders, for a fight on an attack-move, or for a while, for members
+    /// out of place. A formation ends when fewer than two members are left on it.
+    fn step_formations(&mut self) {
+        if self.formations.is_empty() {
+            return;
+        }
+        let tick = self.current_tick;
+        let mut formations = std::mem::take(&mut self.formations);
+        formations.retain(|&route, travel| {
+            travel.members.retain(|member| self.holds_route(member.0, route));
+            let (Some(goal), Some(approach)) = (self.flow_field.goal(route), self.flow_field.arrive_radius(route)) else {
+                return false;
+            };
+            if travel.members.len() < 2 {
+                return false;
+            }
+            let (mut waiting, mut lagging, mut fighting) = (0, 0, false);
+            for &(id, _, _) in &travel.members {
+                let (_, entity) = self.find_unit(id).expect("members hold the route, so they are alive");
+                let order = *self.ecs.get::<&Order>(entity).expect("units have orders");
+                if order.route != route {
+                    waiting += 1;
+                    continue;
+                }
+                let here = self.ecs.get::<&Position>(entity).expect("units have positions").0.xy();
+                let spot = travel.spot(id).expect("it is a member");
+                // Near the goal, members leave for their own spots, so they are not behind.
+                if !within(here, spot, travel.lag_distance) && !within(here, goal, approach) {
+                    lagging += 1;
+                }
+                fighting |= order.kind == OrderKind::AttackMove && self.ecs.get::<&Combat>(entity).is_ok_and(|combat| combat.target.is_some());
+            }
+            let behind = lagging * 4 > travel.members.len();
+            travel.held_ticks = if behind { travel.held_ticks.saturating_add(1) } else { 0 };
+            if waiting > 0 || fighting || (behind && travel.held_ticks <= FORMATION_PATIENCE_TICKS) {
+                return true;
+            }
+            let leader = travel.leader;
+            if within(leader, goal, travel.speed) {
+                travel.leader = goal;
+                return true;
+            }
+            let direction = if self.flow_field.goal_cell(route) == Some(self.terrain.cell_of(leader)) {
+                (goal - leader).normalized()
+            } else {
+                match self.flow_field.sample(route, tick, leader, &self.terrain) {
+                    FlowSample::Direction(direction) => direction,
+                    FlowSample::Hold => return true,
+                    // Members find out for themselves, and drop the order.
+                    FlowSample::Unreachable => return false,
+                }
+            };
+            travel.leader = Vec2Fp::new(leader.x + direction.x * travel.speed, leader.y + direction.y * travel.speed);
+            travel.heading = rotate_toward(travel.heading, direction, travel.max_turn);
+            true
+        });
+        self.formations = formations;
+    }
+
     pub fn rebuild_grid(&mut self) {
         let mut query = self.ecs.query::<(&Position, &UnitStats, &Order)>();
         let view = query.view();
@@ -814,7 +905,9 @@ impl SimWorld {
     }
 
     pub fn step_movement(&mut self) {
+        self.step_formations();
         let tick = self.current_tick;
+        let formations = &self.formations;
         let units = &self.units;
         let grid = &self.spatial_grid;
         let terrain = &self.terrain;
@@ -886,8 +979,19 @@ impl SimWorld {
                             desired = Vec2Fp::new(direction.x * speed, direction.y * speed);
                         }
                     } else if may_walk {
+                        // On a formation move, a member keeps to its spot unless it has fallen too far behind.
+                        let spot = formations.get(&order.route).and_then(|travel| {
+                            travel.spot(id).filter(|spot| within(here, *spot, travel.catch_up_distance) && terrain.is_passable(*spot))
+                        });
                         if goal_is_here {
                             desired = walk_to_goal(stats.max_speed);
+                        } else if let Some(spot) = spot {
+                            let remaining = sqrt_wide(here.distance_squared(&spot));
+                            if remaining > Fp::ZERO {
+                                let direction = (spot - here).normalized();
+                                let speed = stats.max_speed.min(remaining);
+                                desired = Vec2Fp::new(direction.x * speed, direction.y * speed);
+                            }
                         } else {
                             match flow.sample(order.route, tick, here, terrain) {
                                 FlowSample::Direction(direction) => desired = Vec2Fp::new(direction.x * stats.max_speed, direction.y * stats.max_speed),
@@ -1615,6 +1719,14 @@ impl SimWorld {
             write_fp(&mut hasher, wreck.position.y);
         }
         self.flow_field.hash_state(&mut hasher);
+        // Nothing is written without formations, so checksums from before they existed still hold.
+        if !self.formations.is_empty() {
+            hasher.write(&(self.formations.len() as u64).to_le_bytes());
+            for (route, travel) in &self.formations {
+                hasher.write(&route.to_le_bytes());
+                travel.hash_state(&mut hasher);
+            }
+        }
         hasher.finish()
     }
 

@@ -19,6 +19,9 @@ pub enum SimCommand {
     /// Go there after finishing what is already ordered. A group shares one route, and ends
     /// up in a formation there.
     QueueMove { units: Vec<SimId>, goal: Vec2Fp, attack: bool },
+    /// Travel together at the pace of the slowest, keeping a formation all the way there.
+    /// `attack` stops the whole group to fight, and `queued` goes after what is already ordered.
+    FormationMove { units: Vec<SimId>, goal: Vec2Fp, attack: bool, queued: bool },
     /// Add a task after what is already ordered, for those that are builders.
     QueueTask { units: Vec<SimId>, task: BuildTask },
     /// Send a move that has not finished somewhere else, for everyone sharing it.

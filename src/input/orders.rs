@@ -144,6 +144,20 @@ pub fn queued_commands(commands: Vec<SimCommand>, units: &[UnitView]) -> Vec<Sim
         .collect()
 }
 
+/// The same moves, made formation moves: the group travels at the pace of its slowest unit and
+/// keeps its shape on the way. Anything that is not a move stays as it is.
+pub fn formation_commands(commands: Vec<SimCommand>) -> Vec<SimCommand> {
+    commands
+        .into_iter()
+        .map(|command| match command {
+            SimCommand::Move { units, goal } => SimCommand::FormationMove { units, goal, attack: false, queued: false },
+            SimCommand::AttackMove { units, goal } => SimCommand::FormationMove { units, goal, attack: true, queued: false },
+            SimCommand::QueueMove { units, goal, attack } => SimCommand::FormationMove { units, goal, attack, queued: true },
+            other => other,
+        })
+        .collect()
+}
+
 /// Overcharge the enemy under the cursor with each selected unit that has it.
 pub fn overcharge_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
     let Some(target) = nearest_unit(click.units, click.camera, click.team.enemy(), click.cursor) else {
@@ -466,6 +480,31 @@ mod tests {
         assert_eq!(queued_commands(unchanged.clone(), &[]), unchanged);
         let gone = vec![SimCommand::Attack { units: vec![SimId(2)], target: SimId(9) }];
         assert_eq!(queued_commands(gone.clone(), &[]), gone, "a target that cannot be found has no position to go to");
+    }
+
+    #[test]
+    fn ctrl_makes_moves_formation_moves_and_leaves_other_orders_alone() {
+        let goal = Vec2Fp::new(Fp::from_num(10.0), Fp::from_num(20.0));
+        let ids = || vec![SimId(1), SimId(2)];
+        let orders = vec![
+            SimCommand::Move { units: ids(), goal },
+            SimCommand::AttackMove { units: ids(), goal },
+            SimCommand::QueueMove { units: ids(), goal, attack: false },
+            SimCommand::QueueMove { units: ids(), goal, attack: true },
+            SimCommand::Attack { units: ids(), target: SimId(9) },
+            SimCommand::SetRally { factory: SimId(3), point: goal },
+        ];
+        assert_eq!(
+            formation_commands(orders),
+            [
+                SimCommand::FormationMove { units: ids(), goal, attack: false, queued: false },
+                SimCommand::FormationMove { units: ids(), goal, attack: true, queued: false },
+                SimCommand::FormationMove { units: ids(), goal, attack: false, queued: true },
+                SimCommand::FormationMove { units: ids(), goal, attack: true, queued: true },
+                SimCommand::Attack { units: ids(), target: SimId(9) },
+                SimCommand::SetRally { factory: SimId(3), point: goal },
+            ]
+        );
     }
 
     #[test]

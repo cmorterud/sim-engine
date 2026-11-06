@@ -8,6 +8,8 @@ pub const MOVE: char = 'M';
 pub const ATTACK_MOVE: char = 'F';
 pub const PATROL: char = 'P';
 pub const ASSIST: char = 'Y';
+/// Off to the right, because every letter on the left is taken.
+pub const FORMATION: char = 'J';
 pub const STOP: char = 'X';
 pub const PAUSE: char = 'O';
 pub const OVERCHARGE: char = 'L';
@@ -50,6 +52,7 @@ pub const fn letter_for(code: KeyCode) -> Option<char> {
         KeyCode::KeyM => MOVE,
         KeyCode::KeyF => ATTACK_MOVE,
         KeyCode::KeyY => ASSIST,
+        KeyCode::KeyJ => FORMATION,
         KeyCode::KeyX => STOP,
         KeyCode::KeyO => PAUSE,
         KeyCode::KeyL => OVERCHARGE,

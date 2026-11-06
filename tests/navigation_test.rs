@@ -356,3 +356,171 @@ fn cancelling_unreachable_orders_replays_identically() {
     }
     assert_eq!(cancelled(&first), 8);
 }
+
+/// Bots, tanks, and artillery in a block: fast, medium, and slow.
+fn mixed_group(world: &mut SimWorld) -> Vec<sim_engine::sim::components::SimId> {
+    let kinds = ["t1_light_bot", "t2_heavy_tank", "t1_light_artillery"];
+    (0..12)
+        .map(|index| {
+            let blueprint = world.blueprints.id(kinds[index % 3]);
+            let at = point(500 + (index as i32 % 4) * 30, 500 + (index as i32 / 4) * 30);
+            world.spawn_mobile(blueprint, Team::Blue, at)
+        })
+        .collect()
+}
+
+/// The furthest any unit is from the group's middle, in whole units.
+fn spread(world: &SimWorld, units: &[sim_engine::sim::components::SimId]) -> i32 {
+    let positions: Vec<(i64, i64)> = units
+        .iter()
+        .filter_map(|id| world.unit_position(*id))
+        .map(|position| (i64::from(position.x.to_num::<i32>()), i64::from(position.y.to_num::<i32>())))
+        .collect();
+    let count = positions.len() as i64;
+    let middle = positions.iter().fold((0, 0), |sum, p| (sum.0 + p.0, sum.1 + p.1));
+    let middle = (middle.0 / count, middle.1 / count);
+    positions.iter().map(|p| ((p.0 - middle.0).pow(2) + (p.1 - middle.1).pow(2)).isqrt() as i32).max().unwrap_or(0)
+}
+
+/// Gives the order, then returns the widest the group got on the way and when everyone had arrived.
+fn travel(world: &mut SimWorld, units: &[sim_engine::sim::components::SimId], order: SimCommand) -> (i32, u32) {
+    world.advance_tick(&[order]);
+    let mut widest = 0;
+    for tick in 1..2_000 {
+        world.advance_tick(&[]);
+        // Forming up at the start takes a few seconds.
+        if tick > 100 {
+            widest = widest.max(spread(world, units));
+        }
+        if units.iter().all(|unit| world.unit_order(*unit).unwrap().kind == OrderKind::Idle) {
+            return (widest, tick);
+        }
+    }
+    panic!("the group never arrived");
+}
+
+#[test]
+fn a_formation_move_keeps_a_mixed_group_together_at_the_slowest_pace() {
+    let goal = point(2_000, 1_200);
+    let mut plain = flat_world();
+    let units = mixed_group(&mut plain);
+    let (plain_spread, plain_ticks) = travel(&mut plain, &units, SimCommand::Move { units: units.clone(), goal });
+
+    let mut world = flat_world();
+    let units = mixed_group(&mut world);
+    let (formation_spread, formation_ticks) =
+        travel(&mut world, &units, SimCommand::FormationMove { units: units.clone(), goal, attack: false, queued: false });
+
+    // Bots at 5.5 a tick leave artillery at 3.5 behind on a plain move.
+    assert!(plain_spread > 250, "a plain move spread only {plain_spread}");
+    assert!(formation_spread < 100, "the formation spread out to {formation_spread}");
+    // A little slower overall, since everyone keeps the artillery's pace.
+    assert!(formation_ticks < plain_ticks * 3 / 2, "{formation_ticks} ticks against {plain_ticks}");
+    assert!(world.formations.is_empty(), "a finished formation is forgotten");
+    assert_eq!(world.flow_field.route_count(), 0);
+}
+
+#[test]
+fn a_formation_goes_round_a_wall_and_everyone_arrives() {
+    let mut world = flat_world();
+    world.add_box_obstacle(RectRange::new(point(1_000, 200), point(1_040, 1_400)));
+    world.prepare_map();
+    let units = mixed_group(&mut world);
+    let goal = point(1_600, 700);
+    world.advance_tick(&[SimCommand::FormationMove { units: units.clone(), goal, attack: false, queued: false }]);
+    for tick in 0..2_500 {
+        world.advance_tick(&[]);
+        for &unit in &units {
+            assert!(world.terrain.is_passable(world.unit_position(unit).unwrap().xy()), "a unit went into the wall on tick {tick}");
+        }
+    }
+    let still_moving = units.iter().filter(|unit| world.unit_order(**unit).unwrap().kind != OrderKind::Idle).count();
+    assert_eq!(still_moving, 0);
+    for &unit in &units {
+        let at = world.unit_position(unit).unwrap().xy();
+        assert!(sqrt_wide(at.distance_squared(&goal)) < fp_int(150), "{unit:?} ended at {at:?}");
+    }
+}
+
+#[test]
+fn a_formation_attack_move_stops_the_whole_group_to_fight() {
+    let mut world = flat_world();
+    let units = mixed_group(&mut world);
+    // A tough enemy that does not fire back, ahead and to one side of the route.
+    let enemy = world.spawn_unit(UnitSpawn { health: fp_int(1_000_000), range: Fp::ZERO, ..standard_unit(Team::Red, point(1_100, 1_200)) });
+    world.advance_tick(&[SimCommand::FormationMove { units: units.clone(), goal: point(3_000, 2_000), attack: true, queued: false }]);
+    // Two minutes: far longer than a formation waits for stragglers, so only the fight can hold it.
+    for _ in 0..1_200 {
+        world.advance_tick(&[]);
+    }
+    let fighting = units.iter().filter(|unit| {
+        let entity = world.unit_entity(**unit).unwrap();
+        world.ecs.get::<&sim_engine::sim::components::Combat>(entity).unwrap().target == Some(enemy)
+    });
+    assert!(fighting.count() > 0, "nobody is fighting");
+    let leader = world.formations.values().next().expect("still on its way").leader;
+    let enemy_at = world.unit_position(enemy).unwrap().xy();
+    assert!(sqrt_wide(leader.distance_squared(&enemy_at)) < fp_int(600), "the group went on without the fight: {leader:?}");
+}
+
+#[test]
+fn a_queued_formation_waits_for_everyone_to_finish_first() {
+    let mut world = flat_world();
+    let units = mixed_group(&mut world);
+    let (early, late) = units.split_at(6);
+    // Half the group has a long walk to do first.
+    world.advance_tick(&[
+        SimCommand::Move { units: early.to_vec(), goal: point(600, 600) },
+        SimCommand::Move { units: late.to_vec(), goal: point(600, 1_600) },
+    ]);
+    world.advance_tick(&[SimCommand::FormationMove { units: units.clone(), goal: point(2_000, 1_000), attack: false, queued: true }]);
+    let start = world.formations.values().next().expect("a formation was planned").leader;
+    for _ in 0..100 {
+        world.advance_tick(&[]);
+    }
+    assert_eq!(world.formations.values().next().unwrap().leader, start, "the leader set off without half the group");
+    assert_eq!(run_until_idle(&mut world, &units, 3_000), 0);
+}
+
+#[test]
+fn a_formation_move_for_one_unit_is_a_plain_move() {
+    let mut world = flat_world();
+    let unit = world.spawn_unit(standard_unit(Team::Blue, point(100, 100)));
+    world.advance_tick(&[SimCommand::FormationMove { units: vec![unit], goal: point(300, 100), attack: false, queued: false }]);
+    assert!(world.formations.is_empty());
+    // A standard unit walks one unit a tick.
+    assert_eq!(run_until_idle(&mut world, &[unit], 400), 0);
+}
+
+#[test]
+fn a_new_order_takes_a_unit_out_of_its_formation() {
+    let mut world = flat_world();
+    let units = mixed_group(&mut world);
+    world.advance_tick(&[SimCommand::FormationMove { units: units.clone(), goal: point(2_000, 1_200), attack: false, queued: false }]);
+    world.advance_tick(&[SimCommand::Stop { units: units[..11].to_vec() }]);
+    world.advance_tick(&[]);
+    // One member is not a formation.
+    assert!(world.formations.is_empty());
+    assert_eq!(run_until_idle(&mut world, &units, 2_000), 0);
+}
+
+#[test]
+fn formation_moves_replay_identically() {
+    let build = || {
+        let mut world = flat_world();
+        world.add_box_obstacle(RectRange::new(point(1_000, 200), point(1_040, 1_400)));
+        world.prepare_map();
+        let units = mixed_group(&mut world);
+        (world, units)
+    };
+    let (mut first, units) = build();
+    let (mut second, _) = build();
+    let orders = [SimCommand::FormationMove { units, goal: point(1_600, 700), attack: true, queued: false }];
+    first.advance_tick(&orders);
+    second.advance_tick(&orders);
+    for _ in 0..600 {
+        first.advance_tick(&[]);
+        second.advance_tick(&[]);
+        assert_eq!(first.compute_checksum(), second.compute_checksum());
+    }
+}

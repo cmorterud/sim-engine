@@ -83,6 +83,16 @@ pub fn describe(command: &SimCommand, blueprints: &BlueprintDb) -> Option<(Marke
         SimCommand::Build { blueprint, .. } => (MarkerKind::Build, format!("Build: {}", blueprints.get(*blueprint).name), None),
         SimCommand::QueueMove { units, attack: false, .. } => (MarkerKind::Move, format!("Queued move: {}", unit_count(units)), None),
         SimCommand::QueueMove { units, attack: true, .. } => (MarkerKind::AttackMove, format!("Queued attack-move: {}", unit_count(units)), None),
+        SimCommand::FormationMove { units, attack, queued, .. } => {
+            let kind = if *attack { MarkerKind::AttackMove } else { MarkerKind::Move };
+            let order = match (*queued, *attack) {
+                (false, false) => "Formation move",
+                (false, true) => "Formation attack-move",
+                (true, false) => "Queued formation move",
+                (true, true) => "Queued formation attack-move",
+            };
+            (kind, format!("{order}: {}", unit_count(units)), None)
+        }
         SimCommand::MoveOrder { units, .. } | SimCommand::MoveBuild { units, .. } => (MarkerKind::Build, format!("Order moved: {}", unit_count(units)), None),
         SimCommand::QueueTask { units, .. } => (MarkerKind::Support, format!("Queued: {}", unit_count(units)), None),
         SimCommand::Stop { .. } | SimCommand::QueueUnit { .. } | SimCommand::ClearQueue { .. } | SimCommand::CancelTask { .. } | SimCommand::RemoveQueued { .. } | SimCommand::SetPaused { .. } | SimCommand::SetRepeat { .. } => return None,
