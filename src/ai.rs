@@ -12,13 +12,19 @@ use crate::sim::config::TERRAIN_CELL_UNITS;
 use crate::sim::scenario::skirmish_start;
 use crate::sim::world::{MatchResult, SimWorld};
 
-/// The AI decides once per second. The teams take turns, half a second apart.
+/// The AI decides once per second. Both teams decide on the same tick, from the same world:
+/// a team that always decided later would always be that far behind.
 const THINK_INTERVAL: u32 = 10;
 const SEARCH_RINGS: i32 = 60;
 const COMMANDER_LEASH_UNITS: i32 = 900;
 const DEFEND_RADIUS_UNITS: i32 = 1_400;
+/// Enemy deposits farther than this from the enemy's start are raided rather than its base.
+const RAID_DISTANCE_UNITS: i32 = 2_000;
 const FIRST_WAVE: usize = 10;
 const LARGEST_WAVE: usize = 50;
+/// An army that has not grown for this long attacks with what it has, rather than wait
+/// for a wave its economy can no longer field.
+const WAVE_PATIENCE_TICKS: u32 = 600;
 const MAX_ENGINEERS: usize = 6;
 const MAX_FACTORIES: usize = 4;
 const MAX_POINT_DEFENSES: usize = 4;
@@ -97,10 +103,12 @@ pub struct AiBrain {
     team: Team,
     home: Vec2Fp,
     enemy_home: Vec2Fp,
-    /// +1 or -1. Red scans mirrored from Blue, so that neither gets a better layout.
+    /// +1 for Blue, -1 for Red, whose plan is Blue's turned about the map's center.
     side: i32,
     rng: SimRng,
     wave_size: usize,
+    /// The most idle combat units seen since the last wave, and when that was first reached.
+    gathered: (usize, u32),
     deposit_attempts: Vec<((u32, u32), u32)>,
     roster: Option<Roster>,
     rally_set_on: Vec<SimId>,
@@ -114,8 +122,10 @@ impl AiBrain {
             home: skirmish_start(team),
             enemy_home: skirmish_start(team.enemy()),
             side: if team == Team::Blue { 1 } else { -1 },
-            rng: SimRng::new(seed ^ (team.index() as u64 + 1).wrapping_mul(0xA5A5_5A5A)),
+            // Both teams draw the same numbers, so that on a mirrored map they make mirrored choices.
+            rng: SimRng::new(seed ^ 0xA5A5_5A5A),
             wave_size: FIRST_WAVE,
+            gathered: (0, 0),
             deposit_attempts: Vec::new(),
             roster: None,
             rally_set_on: Vec::new(),
@@ -129,8 +139,7 @@ impl AiBrain {
 
     /// Decides this tick's orders. Returns nothing on ticks when it is not this team's turn.
     pub fn think(&mut self, world: &SimWorld) -> Vec<SimCommand> {
-        let turn = if self.team == Team::Blue { 0 } else { THINK_INTERVAL / 2 };
-        if world.current_tick % THINK_INTERVAL != turn || world.match_result.is_some() {
+        if !world.current_tick.is_multiple_of(THINK_INTERVAL) || world.match_result.is_some() {
             return Vec::new();
         }
         if self.roster.is_none() {
@@ -345,11 +354,14 @@ impl AiBrain {
     /// north and south sides stay clear, because that is where units come out.
     fn generator_site(&self, world: &SimWorld, forces: &Forces, planned: &[(u32, u32)]) -> Option<(u32, u32)> {
         let generator = self.roster().generator;
+        let size = footprint(world, generator);
         for factory in forces.factories.iter().filter(|factory| factory.finished) {
-            let (x, y) = factory.cell;
+            let (x, y) = self.flip_site(world, cell_i32(factory.cell), footprint(world, factory.blueprint));
             for offset in 0..3 {
-                for cell_x in [x.wrapping_sub(1), x + 3] {
-                    let cell = (cell_x, y + offset);
+                for cell_x in [x - 1, x + 3] {
+                    let Some(cell) = self.world_site(world, (cell_x, y + offset), size) else {
+                        continue;
+                    };
                     if world.can_place(generator, cell.0, cell.1) && !planned.contains(&cell) {
                         return Some(cell);
                     }
@@ -362,8 +374,13 @@ impl AiBrain {
     /// Storage goes on an extractor's edges, for its output bonus.
     fn storage_site(&self, world: &SimWorld, forces: &Forces, planned: &[(u32, u32)]) -> Option<(u32, u32)> {
         let storage = self.roster().storage;
-        for &(x, y) in &forces.extractors {
-            for cell in [(x.wrapping_sub(1), y), (x + 1, y), (x, y.wrapping_sub(1)), (x, y + 1)] {
+        let size = footprint(world, storage);
+        for &extractor in &forces.extractors {
+            let (x, y) = self.flip_site(world, cell_i32(extractor), 1);
+            for site in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] {
+                let Some(cell) = self.world_site(world, site, size) else {
+                    continue;
+                };
                 if world.can_place(storage, cell.0, cell.1) && !planned.contains(&cell) {
                     return Some(cell);
                 }
@@ -373,31 +390,34 @@ impl AiBrain {
     }
 
     fn site_near_home(&self, world: &SimWorld, blueprint: BlueprintId, gap: i32, planned: &[(u32, u32)]) -> Option<(u32, u32)> {
-        self.search_site(world, blueprint, gap, cell_of(self.home), planned)
+        let home = self.plan_position(world, self.home);
+        self.search_site(world, blueprint, gap, cell_i32(cell_of(home)), planned)
     }
 
+    /// On the plan, the enemy is always up and to the right.
     fn site_towards_enemy(&self, world: &SimWorld, blueprint: BlueprintId, planned: &[(u32, u32)]) -> Option<(u32, u32)> {
-        let forward = fp_int(400 * self.side);
-        let spot = Vec2Fp::new(self.home.x + forward, self.home.y + forward);
-        self.search_site(world, blueprint, 1, cell_of(spot), planned)
+        let home = self.plan_position(world, self.home);
+        let spot = Vec2Fp::new(home.x + fp_int(400), home.y + fp_int(400));
+        self.search_site(world, blueprint, 1, cell_i32(cell_of(spot)), planned)
     }
 
-    /// Scans square rings around a cell for a spot with a clear gap around it, so that
-    /// the base never walls itself in.
-    fn search_site(&self, world: &SimWorld, blueprint: BlueprintId, gap: i32, center: (u32, u32), planned: &[(u32, u32)]) -> Option<(u32, u32)> {
-        let size = i32::from(world.blueprints.get(blueprint).footprint);
-        let (center_x, center_y) = (center.0 as i32, center.1 as i32);
+    /// Scans square rings around a cell of the plan for a spot with a clear gap around it,
+    /// so that the base never walls itself in.
+    fn search_site(&self, world: &SimWorld, blueprint: BlueprintId, gap: i32, center: (i32, i32), planned: &[(u32, u32)]) -> Option<(u32, u32)> {
+        let size = footprint(world, blueprint);
         for ring in 4..SEARCH_RINGS {
             for dy in -ring..=ring {
                 for dx in -ring..=ring {
                     if dx.abs() != ring && dy.abs() != ring {
                         continue;
                     }
-                    let (x, y) = (center_x + dx * self.side, center_y + dy * self.side);
+                    let Some(cell) = self.world_site(world, (center.0 + dx, center.1 + dy), size) else {
+                        continue;
+                    };
+                    let (x, y) = cell_i32(cell);
                     if x < gap || y < gap {
                         continue;
                     }
-                    let cell = (x as u32, y as u32);
                     let clear = (y - gap..y + size + gap).all(|row| {
                         (x - gap..x + size + gap).all(|column| {
                             let spot = (column as u32, row as u32);
@@ -411,6 +431,32 @@ impl AiBrain {
             }
         }
         None
+    }
+
+    /// The AI lays out its base on a plan drawn from Blue's side of the map. Red's plan is
+    /// Blue's turned 180 degrees about the map's center, with each footprint turned too, so
+    /// that on a mirrored map both teams get the same layout. Turning is its own inverse.
+    fn flip_site(&self, world: &SimWorld, cell: (i32, i32), size: i32) -> (i32, i32) {
+        if self.side > 0 {
+            return cell;
+        }
+        let last = world.terrain.map_units() / TERRAIN_CELL_UNITS - 1;
+        (last - cell.0 - size + 1, last - cell.1 - size + 1)
+    }
+
+    /// Where a site of the plan lands on the map, if it is on the map at all.
+    fn world_site(&self, world: &SimWorld, cell: (i32, i32), size: i32) -> Option<(u32, u32)> {
+        let (x, y) = self.flip_site(world, cell, size);
+        (x >= 0 && y >= 0).then_some((x as u32, y as u32))
+    }
+
+    /// A map position, as seen on the plan.
+    fn plan_position(&self, world: &SimWorld, position: Vec2Fp) -> Vec2Fp {
+        if self.side > 0 {
+            return position;
+        }
+        let map = fp_int(world.terrain.map_units());
+        Vec2Fp::new(map - position.x, map - position.y)
     }
 
     fn command_factories(&mut self, world: &SimWorld, forces: &Forces, commands: &mut Vec<SimCommand>) {
@@ -473,7 +519,12 @@ impl AiBrain {
             commands.push(SimCommand::AttackMove { units: forces.idle_combat.clone(), goal: enemy.position });
             return;
         }
-        if forces.idle_combat.len() < self.wave_size {
+        let gathered = forces.idle_combat.len();
+        if gathered > self.gathered.0 {
+            self.gathered = (gathered, world.current_tick);
+        }
+        let stopped_growing = world.current_tick - self.gathered.1 >= WAVE_PATIENCE_TICKS;
+        if gathered < self.wave_size && !(stopped_growing && gathered >= FIRST_WAVE) {
             return;
         }
         // Send a wave at what can be seen, then the enemy's base, then search their deposits.
@@ -484,28 +535,48 @@ impl AiBrain {
             .or_else(|| sightings.iter().find(|enemy| enemy.is_structure))
             .or_else(|| sightings.first())
             .map(|enemy| enemy.position);
-        let goal = target.unwrap_or_else(|| self.search_point(world));
+        let full_strength = gathered >= LARGEST_WAVE;
+        let goal = target.unwrap_or_else(|| self.search_point(world, full_strength));
         commands.push(SimCommand::AttackMove { units: forces.idle_combat.clone(), goal });
-        self.wave_size = (self.wave_size + self.wave_size / 4 + 1).min(LARGEST_WAVE);
+        if gathered >= self.wave_size {
+            self.wave_size = (self.wave_size + self.wave_size / 4 + 1).min(LARGEST_WAVE);
+        }
+        self.gathered = (0, world.current_tick);
     }
 
-    /// Where to look when no enemy is in sight. The enemy's start is public knowledge,
-    /// as on any RTS map, and after that its side of the map is searched at random.
-    fn search_point(&mut self, world: &SimWorld) -> Vec2Fp {
-        if self.rng.below(2) == 0 {
+    /// Where to look when no enemy is in sight. The enemy's start is public knowledge, as on
+    /// any RTS map. Smaller waves mostly raid the enemy's outlying deposits instead.
+    fn search_point(&mut self, world: &SimWorld, full_strength: bool) -> Vec2Fp {
+        // A full-size wave goes for the base, to finish a lead that raids have opened up.
+        if full_strength || self.rng.below(4) == 0 {
             return self.enemy_home;
         }
+        // Outlying extractors are worth more than the base: they are far from its defenses,
+        // and every one lost widens a lead that would otherwise stay even.
+        let outlying = fp_int(RAID_DISTANCE_UNITS);
         let enemy_side: Vec<(u32, u32)> = world
             .deposits
             .iter()
             .copied()
-            .filter(|&cell| cell_center(cell).distance_squared(&self.enemy_home) < cell_center(cell).distance_squared(&self.home))
+            .filter(|&cell| {
+                let center = cell_center(cell);
+                let from_enemy = center.distance_squared(&self.enemy_home);
+                from_enemy < center.distance_squared(&self.home) && from_enemy > wide_mul(outlying, outlying)
+            })
             .collect();
         match enemy_side.len() as u32 {
             0 => self.enemy_home,
             count => cell_center(enemy_side[self.rng.below(count) as usize]),
         }
     }
+}
+
+fn footprint(world: &SimWorld, blueprint: BlueprintId) -> i32 {
+    i32::from(world.blueprints.get(blueprint).footprint)
+}
+
+const fn cell_i32(cell: (u32, u32)) -> (i32, i32) {
+    (cell.0 as i32, cell.1 as i32)
 }
 
 fn cell_of(position: Vec2Fp) -> (u32, u32) {

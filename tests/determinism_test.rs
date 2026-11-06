@@ -180,6 +180,20 @@ fn every_hashed_field_changes_the_checksum() {
         &|w| w.ecs.get::<&mut Combat>(entity).unwrap().ticks_until_ready += 1,
         &|w| w.ecs.get::<&mut Combat>(entity).unwrap().ticks_until_ready -= 1,
     );
+    // Nothing is blocked yet, which hashes as no target until tick 0. Each part must count alone.
+    assert_eq!(world.ecs.get::<&Combat>(entity).unwrap().blocked, None);
+    assert_changes(
+        "blocked target",
+        &mut world,
+        &|w| w.ecs.get::<&mut Combat>(entity).unwrap().blocked = Some((SimId(7), 0)),
+        &|w| w.ecs.get::<&mut Combat>(entity).unwrap().blocked = None,
+    );
+    assert_changes(
+        "blocked until",
+        &mut world,
+        &|w| w.ecs.get::<&mut Combat>(entity).unwrap().blocked = Some((SimId(u32::MAX), 1)),
+        &|w| w.ecs.get::<&mut Combat>(entity).unwrap().blocked = None,
+    );
     let state = world.rng.state();
     assert_changes(
         "RNG state",

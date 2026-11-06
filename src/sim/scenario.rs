@@ -169,7 +169,10 @@ pub fn navigation(seed: u64, count: usize) -> (Scenario, NavigationLayout) {
 
 /// Where each commander starts on the skirmish map. Red's start mirrors Blue's.
 pub const SKIRMISH_MAP_UNITS: i32 = 10_240;
-pub const SKIRMISH_BLUE_START: (i32, i32) = (1_600, 1_600);
+/// The center of a terrain cell. A point on a cell edge would belong to the cell above and to
+/// the right of it, so its mirror image would not be in the mirror of its cell. No cell center
+/// is on an edge of the terrain, spatial or visibility grids.
+pub const SKIRMISH_BLUE_START: (i32, i32) = (1_610, 1_610);
 const SKIRMISH_START_MASS: i64 = 650;
 const SKIRMISH_START_ENERGY: i64 = 4_000;
 

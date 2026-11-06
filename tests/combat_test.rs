@@ -145,6 +145,56 @@ fn units_acquire_the_nearest_enemy_and_kill_it() {
     assert!(world.unit_position(shooter).is_some());
 }
 
+/// A shooter with an enemy in range on the far side of a wall too high for its shells.
+fn enemy_behind_a_wall() -> (SimWorld, SimId, SimId) {
+    let mut world = flat_world(false);
+    // One terrain cell thick, with the target just in range on the far side.
+    world.add_box_obstacle(RectFp::new(point(120, 60), point(140, 140)));
+    world.prepare_map();
+    let shooter = world.spawn_unit(standard_unit(Team::Blue, point(112, 100)));
+    let target = passive_unit(&mut world, Team::Red, point(141, 100));
+    (world, shooter, target)
+}
+
+#[test]
+fn a_unit_does_not_shell_a_wall_in_front_of_its_target() {
+    let (mut world, shooter, target) = enemy_behind_a_wall();
+    for _ in 0..100 {
+        world.advance_tick(&[]);
+        assert!(world.projectiles.is_empty(), "the wall would stop every shell");
+    }
+    assert_eq!(world.unit_health(target), Some(fp_int(100)));
+    let combat = *world.ecs.get::<&Combat>(world.unit_entity(shooter).unwrap()).unwrap();
+    assert_eq!(combat.blocked.map(|(blocked, _)| blocked), Some(target));
+}
+
+#[test]
+fn an_attack_move_walks_on_past_a_target_it_cannot_hit() {
+    // It used to stop for the target in range and stay there for good.
+    let (mut world, shooter, _) = enemy_behind_a_wall();
+    let goal = point(110, 300);
+    world.advance_tick(&[SimCommand::AttackMove { units: vec![shooter], goal }]);
+    for _ in 0..400 {
+        world.advance_tick(&[]);
+    }
+    let position = world.unit_position(shooter).unwrap();
+    let (dx, dy) = ((position.x - goal.x).to_num::<i32>(), (position.y - goal.y).to_num::<i32>());
+    assert!(dx.abs() < 20 && dy.abs() < 20, "stuck at {position:?}");
+}
+
+#[test]
+fn an_ordered_attack_fires_even_into_a_wall() {
+    // The player chose this target, so the shells go where they were told.
+    let (mut world, shooter, target) = enemy_behind_a_wall();
+    world.advance_tick(&[SimCommand::Attack { units: vec![shooter], target }]);
+    let mut fired = false;
+    for _ in 0..60 {
+        world.advance_tick(&[]);
+        fired |= !world.projectiles.is_empty();
+    }
+    assert!(fired);
+}
+
 #[test]
 fn projectile_leaving_the_map_is_removed() {
     let mut world = flat_world(false);

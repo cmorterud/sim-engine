@@ -123,6 +123,23 @@ fn fp_to_res(value: Fp) -> Res {
     Res::from_bits(i64::from(value.to_bits()) << 12)
 }
 
+/// A factory's four exits, best first: the side facing `toward` first. When two sides face it
+/// equally, the one clockwise of it wins. Both measures turn with the map, so a factory on a
+/// mirrored map picks the mirrored exit.
+fn exit_order(center: Vec2Fp, toward: Vec2Fp) -> [(i32, i32); 4] {
+    let (dx, dy) = (toward.x - center.x, toward.y - center.y);
+    let mut exits = [(0, -1), (1, 0), (0, 1), (-1, 0)];
+    // With unit sides, the dot and cross products need no multiplication.
+    let pick = |x: i32, y: i32, along_x: Fp, along_y: Fp| match (x, y) {
+        (1, _) => along_x,
+        (-1, _) => -along_x,
+        (_, 1) => along_y,
+        _ => -along_y,
+    };
+    exits.sort_by_key(|&(x, y)| (std::cmp::Reverse(pick(x, y, dx, dy)), std::cmp::Reverse(pick(x, y, dy, -dx))));
+    exits
+}
+
 pub(super) fn cell_center(cell_x: u32, cell_y: u32, size: u32) -> Vec2Fp {
     let half_cells = |cell: u32| fp_int(cell as i32 * TERRAIN_CELL_UNITS) + fp_int(size as i32 * TERRAIN_CELL_UNITS) / 2;
     Vec2Fp::new(half_cells(cell_x), half_cells(cell_y))
@@ -894,10 +911,13 @@ impl SimWorld {
         let center = self.ecs.get::<&Position>(entity).expect("units have positions").0.xy();
         let factory_radius = self.ecs.get::<&UnitStats>(entity).expect("units have stats").radius;
         let reach = factory_radius + unit.radius + fp_int(6);
-        let exits = [Vec2Fp::new(Fp::ZERO, -reach), Vec2Fp::new(reach, Fp::ZERO), Vec2Fp::new(Fp::ZERO, reach), Vec2Fp::new(-reach, Fp::ZERO)];
+        let exits = exit_order(center, rally.unwrap_or_else(|| {
+            let middle = fp_int(self.terrain.map_units() / 2);
+            Vec2Fp::new(middle, middle)
+        }));
         let exit = exits
             .iter()
-            .map(|offset| center + *offset)
+            .map(|&(x, y)| center + Vec2Fp::new(reach * x, reach * y))
             .find(|point| self.terrain.in_bounds(*point) && self.terrain.is_passable(*point))
             .or_else(|| {
                 nearest_passable_cell(&self.terrain, center).map(|(x, y)| cell_center(x as u32, y as u32, 1))

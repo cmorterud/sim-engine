@@ -4,7 +4,7 @@ use std::sync::Arc;
 use twox_hash::XxHash64;
 
 use super::blueprints::{BlueprintDb, Res};
-use super::combat::{entry_hit, firing_solution, probe_terrain, GRAVITY};
+use super::combat::{entry_hit, firing_solution, probe_terrain, shot_is_clear, GRAVITY};
 use super::commands::SimCommand;
 use super::components::{BuildTask, 
     Blueprinted, Builder, Combat, Construction, Factory, Footprint, Health, MoveClass, Order, OrderKind, OrderQueue, Patrol,
@@ -27,6 +27,8 @@ const CROWD_SETTLE_RADII: i32 = 30;
 /// The gap between formation spots, in halves of the largest unit's radius.
 const FORMATION_SPACING_RADII: i32 = 5;
 const SLOT_EXTRA_TICKS: i64 = 40;
+/// How long a unit passes over a target that the ground stops its shots at.
+const BLOCKED_TARGET_TICKS: u32 = 50;
 
 /// Settings for spawning a unit.
 #[derive(Copy, Clone, Debug)]
@@ -398,6 +400,7 @@ impl SimWorld {
                 projectile_splash: spawn.projectile_splash,
                 target: None,
                 forced_target: None,
+                blocked: None,
                 enabled: true,
             },
             Order::IDLE,
@@ -1099,6 +1102,7 @@ impl SimWorld {
         let tick = self.current_tick;
         let units = &self.units;
         let grid = &self.spatial_grid;
+        let terrain = &self.terrain;
         let visibility = &self.visibility;
         let fog = self.config.fog_of_war;
         let shots = &mut self.pending_shots;
@@ -1142,6 +1146,10 @@ impl SimWorld {
                     }
                 }
             } else {
+                if combat.blocked.is_some_and(|(_, until)| tick >= until) {
+                    combat.blocked = None;
+                }
+                let blocked = combat.blocked.map(|(target, _)| target);
                 // Drop a target that has died, moved out of range, or gone out of sight.
                 if let Some(target) = combat.target {
                     if !locate(target).is_some_and(can_engage) {
@@ -1159,7 +1167,8 @@ impl SimWorld {
                         let mut consider = |other: &super::spatial::GridEntry| {
                             let distance = squared_distance(other.x, other.y);
                             let reach = radius + i64::from(other.radius);
-                            if distance <= reach * reach && (!fog || visibility.is_visible(stats.team, other.x, other.y)) {
+                            let visible = !fog || visibility.is_visible(stats.team, other.x, other.y);
+                            if distance <= reach * reach && visible && blocked != Some(other.id) {
                                 let candidate = (other.is_structure, distance, other.id);
                                 if best.is_none_or(|current| candidate < current) {
                                     best = Some(candidate);
@@ -1239,17 +1248,25 @@ impl SimWorld {
                 if let Some(target) = combat.target {
                     let entry = locate(target).expect("target was just validated or found");
                     let raw = |x: i32, y: i32, z: i32| Vec3Fp::new(Fp::from_bits(x), Fp::from_bits(y), Fp::from_bits(z));
-                    shots.push(PendingShot {
-                        source: id,
-                        team: stats.team,
-                        from: raw(me.x, me.y, me.z),
-                        to: raw(entry.x, entry.y, entry.z),
-                        speed: combat.projectile_speed,
-                        damage: combat.projectile_damage,
-                        splash: combat.projectile_splash,
-                        overcharge: None,
-                    });
-                    combat.ticks_until_ready = combat.reload_ticks;
+                    let (from, to) = (raw(me.x, me.y, me.z), raw(entry.x, entry.y, entry.z));
+                    // A target picked by the unit itself is passed over for a while if the ground
+                    // would stop the shot. One the player ordered is fired at regardless.
+                    if combat.forced_target.is_none() && !shot_is_clear(terrain, from, to, combat.projectile_speed) {
+                        combat.blocked = Some((target, tick + BLOCKED_TARGET_TICKS));
+                        combat.target = None;
+                    } else {
+                        shots.push(PendingShot {
+                            source: id,
+                            team: stats.team,
+                            from,
+                            to,
+                            speed: combat.projectile_speed,
+                            damage: combat.projectile_damage,
+                            splash: combat.projectile_splash,
+                            overcharge: None,
+                        });
+                        combat.ticks_until_ready = combat.reload_ticks;
+                    }
                 }
             }
         }
@@ -1623,6 +1640,9 @@ impl SimWorld {
         write_fp(hasher, combat.projectile_splash);
         hasher.write(&combat.target.map_or(u32::MAX, |target| target.0).to_le_bytes());
         hasher.write(&combat.forced_target.map_or(u32::MAX, |target| target.0).to_le_bytes());
+        let (blocked, blocked_until) = combat.blocked.map_or((u32::MAX, 0), |(target, until)| (target.0, until));
+        hasher.write(&blocked.to_le_bytes());
+        hasher.write(&blocked_until.to_le_bytes());
         hasher.write(&[u8::from(combat.enabled), order.kind as u8]);
         hasher.write(&order.route.to_le_bytes());
         if let Some(slot) = order.slot {

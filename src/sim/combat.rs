@@ -92,6 +92,22 @@ pub fn probe_terrain(terrain: &Terrain, start: Vec3Fp, step: Vec3Fp) -> TerrainP
     TerrainProbe { hit: None, highest_ground }
 }
 
+/// Whether a shell fired from `from` at `to` gets there before the ground stops it. It flies
+/// the same arc as a real shell. Ground in the last step does not count, because a target on a
+/// slope is hit before its shell lands.
+pub fn shot_is_clear(terrain: &Terrain, from: Vec3Fp, to: Vec3Fp, horizontal_speed: Fp) -> bool {
+    let solution = firing_solution(from, to, horizontal_speed);
+    let (mut position, mut velocity) = (from, solution.velocity);
+    for _ in 1..solution.flight_ticks {
+        if probe_terrain(terrain, position, velocity).hit.is_some() {
+            return false;
+        }
+        position = position + velocity;
+        velocity.z -= GRAVITY;
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
