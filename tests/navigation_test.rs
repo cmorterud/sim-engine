@@ -524,3 +524,19 @@ fn formation_moves_replay_identically() {
         assert_eq!(first.compute_checksum(), second.compute_checksum());
     }
 }
+
+#[test]
+fn dragging_a_formation_move_somewhere_else_keeps_it_a_formation() {
+    let mut world = flat_world();
+    let units = mixed_group(&mut world);
+    world.advance_tick(&[SimCommand::FormationMove { units: units.clone(), goal: point(2_000, 1_200), attack: false, queued: false }]);
+    let order = world.unit_order(units[0]).unwrap();
+    let task = sim_engine::sim::components::BuildTask::Walk { order, started: true };
+    let goal = point(600, 2_000);
+    world.advance_tick(&[SimCommand::MoveOrder { units: units.clone(), task, goal }]);
+    let routes: Vec<u32> = world.formations.keys().copied().collect();
+    assert_eq!(routes.len(), 1, "one formation, not two: {routes:?}");
+    assert_ne!(routes[0], order.route, "the formation follows the new route");
+    assert_eq!(world.flow_field.goal(routes[0]), Some(goal));
+    assert_eq!(run_until_idle(&mut world, &units, 2_000), 0);
+}
