@@ -10,6 +10,8 @@ pub enum SimCommand {
     /// Move towards a unit, re-routing as it travels.
     Follow { units: Vec<SimId>, target: SimId },
     Stop { units: Vec<SimId> },
+    /// Fire the commander's Overcharge at one enemy, closing in first if need be.
+    Overcharge { unit: SimId, target: SimId },
     /// Close on one enemy and fire only at it.
     Attack { units: Vec<SimId>, target: SimId },
     /// Repeat a route. Combat units attack-move along it; engineers also reclaim and repair.

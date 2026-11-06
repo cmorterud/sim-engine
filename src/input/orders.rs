@@ -144,6 +144,20 @@ pub fn queued_commands(commands: Vec<SimCommand>, units: &[UnitView]) -> Vec<Sim
         .collect()
 }
 
+/// Overcharge the enemy under the cursor with each selected unit that has it.
+pub fn overcharge_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
+    let Some(target) = nearest_unit(click.units, click.camera, click.team.enemy(), click.cursor) else {
+        return Vec::new();
+    };
+    click
+        .selected
+        .iter()
+        .filter_map(|id| click.units.binary_search_by_key(id, |unit| unit.id).ok().map(|index| &click.units[index]))
+        .filter(|unit| unit.blueprint != u16::MAX && click.blueprints.get(BlueprintId(unit.blueprint)).overcharge.is_some())
+        .map(|unit| SimCommand::Overcharge { unit: unit.id, target })
+        .collect()
+}
+
 /// The selected units that can walk.
 pub fn mobile_units(selected: &[SimId], units: &[UnitView], blueprints: &BlueprintDb) -> Vec<SimId> {
     sort_selection(selected, units, blueprints).mobile
@@ -395,6 +409,21 @@ mod tests {
     fn click_for<'a>(selected: &'a [SimId], units: &'a [UnitView], db: &'a BlueprintDb, camera: &'a Camera, world: [f64; 2]) -> RightClick<'a> {
         let cursor = camera.world_to_screen([world[0], world[1], 8.0]).unwrap();
         RightClick { selected, units, wrecks: &[], blueprints: db, team: Team::Blue, camera, cursor, ground: Some(world), attack_move: false }
+    }
+
+    #[test]
+    fn overcharge_goes_from_the_commander_to_the_enemy_under_the_cursor() {
+        let db = db();
+        let units = [
+            view(1, Team::Blue, db.id("acu"), &db, 2_000.0, 1_950.0),
+            view(2, Team::Blue, db.id("t1_light_bot"), &db, 2_040.0, 1_950.0),
+            view(3, Team::Red, db.id("t2_heavy_tank"), &db, 2_000.0, 2_050.0),
+        ];
+        let camera = camera();
+        let orders = overcharge_orders(&click_for(&[SimId(1), SimId(2)], &units, &db, &camera, [2_000.0, 2_050.0]));
+        assert_eq!(orders, [SimCommand::Overcharge { unit: SimId(1), target: SimId(3) }], "only the commander has Overcharge");
+        assert!(overcharge_orders(&click_for(&[SimId(2)], &units, &db, &camera, [2_000.0, 2_050.0])).is_empty());
+        assert!(overcharge_orders(&click_for(&[SimId(1)], &units, &db, &camera, [2_000.0, 1_950.0])).is_empty(), "a friend is not a target");
     }
 
     #[test]

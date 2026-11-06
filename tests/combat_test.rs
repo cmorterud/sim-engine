@@ -2,9 +2,10 @@
 
 use sim_engine::math::fp::{fp_int, Fp, Vec2Fp, Vec3Fp};
 use sim_engine::math::rect::RectFp;
+use sim_engine::sim::blueprints::Res;
 use sim_engine::sim::commands::SimCommand;
 use sim_engine::sim::combat::firing_solution;
-use sim_engine::sim::components::{Combat, Position, Projectile, SimId, Team, Turning, Turret};
+use sim_engine::sim::components::{Combat, Health, OverchargeOrder, Position, Projectile, SimId, Team, Turning, Turret};
 use sim_engine::sim::config::{SimConfig, TerrainStyle};
 use sim_engine::sim::scenario::{self, standard_unit};
 use sim_engine::sim::world::SimWorld;
@@ -225,4 +226,91 @@ fn run_ticks(world: &mut SimWorld, ticks: u32) {
     for _ in 0..ticks {
         world.advance_tick(&[]);
     }
+}
+
+/// A Blue commander with plenty of energy, facing a Red unit in range that does not shoot back.
+fn commander_facing(enemy: &str, energy: i64) -> (SimWorld, SimId, SimId) {
+    let config = SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: false, ..SimConfig::default() };
+    let mut world = SimWorld::new(config, 1);
+    let (acu, enemy_blueprint) = (world.blueprints.id("acu"), world.blueprints.id(enemy));
+    let commander = world.spawn_mobile(acu, Team::Blue, point(1_000, 1_000));
+    // Its normal gun is out of the picture, so that only Overcharge does damage.
+    world.ecs.get::<&mut Combat>(world.unit_entity(commander).unwrap()).unwrap().projectile_damage = Fp::ZERO;
+    let target = if world.blueprints.get(enemy_blueprint).is_structure() {
+        world.spawn_finished_structure(enemy_blueprint, Team::Red, 60, 50).unwrap()
+    } else {
+        world.spawn_mobile(enemy_blueprint, Team::Red, point(1_200, 1_000))
+    };
+    world.ecs.get::<&mut Combat>(world.unit_entity(target).unwrap()).unwrap().range = Fp::ZERO;
+    let economy = &mut world.economies[0];
+    economy.energy_capacity = Res::from_num(10_000);
+    economy.base_energy_capacity = Res::from_num(10_000);
+    economy.energy = Res::from_num(energy);
+    (world, commander, target)
+}
+
+#[test]
+fn overcharge_destroys_a_heavy_tank_in_one_shot_and_costs_its_energy() {
+    let (mut world, commander, target) = commander_facing("t2_heavy_tank", 9_000);
+    world.advance_tick(&[SimCommand::Overcharge { unit: commander, target }]);
+    // The commander also earns a little energy every tick, so look at the tick it fires.
+    let mut biggest_drop = 0.0_f64;
+    for _ in 0..120 {
+        let before = world.economies[0].energy.to_num::<f64>();
+        world.advance_tick(&[]);
+        biggest_drop = biggest_drop.max(before - world.economies[0].energy.to_num::<f64>());
+        if world.unit_entity(target).is_none() {
+            break;
+        }
+    }
+    assert!(world.unit_entity(target).is_none(), "one shot should destroy a heavy tank");
+    assert!((2_990.0..=3_000.0).contains(&biggest_drop), "it should cost 3,000 energy, not {biggest_drop}");
+    assert!(world.ecs.get::<&OverchargeOrder>(world.unit_entity(commander).unwrap()).is_err(), "the order is done");
+}
+
+#[test]
+fn overcharge_waits_for_the_energy_and_then_fires() {
+    let (mut world, commander, target) = commander_facing("t2_heavy_tank", 1_000);
+    world.advance_tick(&[SimCommand::Overcharge { unit: commander, target }]);
+    run_ticks(&mut world, 60);
+    assert!(world.unit_entity(target).is_some(), "it cannot fire without the energy");
+    assert!(world.ecs.get::<&OverchargeOrder>(world.unit_entity(commander).unwrap()).is_ok(), "it keeps waiting");
+    world.economies[0].energy = Res::from_num(4_000);
+    run_ticks(&mut world, 60);
+    assert!(world.unit_entity(target).is_none(), "it fires once the energy is there");
+}
+
+#[test]
+fn overcharge_does_little_to_a_structure() {
+    let (mut world, commander, target) = commander_facing("t1_point_defense", 9_000);
+    let full = world.ecs.get::<&Health>(world.unit_entity(target).unwrap()).unwrap().current;
+    world.advance_tick(&[SimCommand::Overcharge { unit: commander, target }]);
+    let mut lost = Fp::ZERO;
+    for _ in 0..120 {
+        world.advance_tick(&[]);
+        lost = full - world.ecs.get::<&Health>(world.unit_entity(target).unwrap()).unwrap().current;
+        if lost > Fp::ZERO {
+            break;
+        }
+    }
+    assert_eq!(lost, fp_int(800), "a structure takes at most 800 from one shot");
+}
+
+#[test]
+fn overcharge_is_refused_at_a_friend_and_ends_when_the_target_dies() {
+    let (mut world, commander, target) = commander_facing("t2_heavy_tank", 9_000);
+    let bot = world.blueprints.id("t1_light_bot");
+    let friend = world.spawn_mobile(bot, Team::Blue, point(1_100, 1_000));
+    world.advance_tick(&[SimCommand::Overcharge { unit: commander, target: friend }]);
+    assert!(world.ecs.get::<&OverchargeOrder>(world.unit_entity(commander).unwrap()).is_err(), "a friend is not a target");
+
+    world.economies[0].energy = Res::ZERO;
+    world.advance_tick(&[SimCommand::Overcharge { unit: commander, target }]);
+    world.ecs.get::<&mut Health>(world.unit_entity(target).unwrap()).unwrap().current = Fp::ZERO;
+    world.ecs.get::<&mut Health>(world.unit_entity(target).unwrap()).unwrap().current = Fp::ONE;
+    let enemy_killer = world.spawn_mobile(world.blueprints.id("acu"), Team::Blue, point(1_250, 1_000));
+    let _ = enemy_killer;
+    run_ticks(&mut world, 80);
+    assert!(world.unit_entity(target).is_none(), "the test needs the target dead");
+    assert!(world.ecs.get::<&OverchargeOrder>(world.unit_entity(commander).unwrap()).is_err(), "there is nothing left to Overcharge");
 }

@@ -70,6 +70,7 @@ pub fn describe(command: &SimCommand, blueprints: &BlueprintDb) -> Option<(Marke
     Some(match command {
         SimCommand::Move { units, .. } => (MarkerKind::Move, format!("Move: {}", unit_count(units)), None),
         SimCommand::AttackMove { units, .. } => (MarkerKind::AttackMove, format!("Attack-move: {}", unit_count(units)), None),
+        SimCommand::Overcharge { target, .. } => (MarkerKind::Attack, "Overcharge".to_string(), Some(*target)),
         SimCommand::Attack { units, target } => (MarkerKind::Attack, format!("Attack: {}", unit_count(units)), Some(*target)),
         SimCommand::Follow { units, target } => (MarkerKind::Support, format!("Follow: {}", unit_count(units)), Some(*target)),
         SimCommand::Assist { units, target } => (MarkerKind::Support, format!("Assist: {}", unit_count(units)), Some(*target)),

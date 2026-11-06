@@ -272,6 +272,28 @@ impl Turning {
     }
 }
 
+/// The commander's Overcharge weapon, ready to fire again after its own reload.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct OverchargeWeapon {
+    pub energy: Res,
+    pub damage: Fp,
+    pub structure_damage: Fp,
+    pub reload_ticks: u32,
+    pub ticks_until_ready: u32,
+}
+
+/// An order to Overcharge one enemy, as soon as it is in range and there is the energy.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct OverchargeOrder {
+    pub target: SimId,
+}
+
+/// Marks an Overcharge shell. It does at most this much to a structure.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Overcharged {
+    pub structure_damage: Fp,
+}
+
 /// Marks a factory or a construction site that the player has paused. It spends nothing and
 /// makes no progress until resumed, and keeps its queue and progress meanwhile.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

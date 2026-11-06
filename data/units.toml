@@ -23,6 +23,7 @@ build_power = 10
 build_range = 200
 builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense"]
 weapon = { range = 440, reload_ticks = 7, projectile_speed = 50, damage = 70, turn_rate = 180 }
+overcharge = { energy = 3000, damage = 12000, structure_damage = 800, reload_ticks = 50 }
 mass_income = 1
 energy_income = 20
 mass_storage = 650

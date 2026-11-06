@@ -21,6 +21,8 @@ const BLUE: [f32; 3] = [0.20, 0.50, 1.00];
 const RED: [f32; 3] = [1.00, 0.27, 0.22];
 const SELECTED: [f32; 3] = [0.25, 1.00, 0.35];
 const SHELL: [f32; 3] = [1.00, 0.85, 0.35];
+const OVERCHARGE_SHELL: [f32; 3] = [0.75, 0.95, 1.00];
+const OVERCHARGE_SIZE: f32 = 2.4;
 const OBSTACLE: [f32; 3] = [0.42, 0.40, 0.38];
 const WRECK: [f32; 3] = [0.24, 0.23, 0.22];
 const DEPOSIT: [f32; 3] = [0.10, 0.75, 0.62];
@@ -294,7 +296,8 @@ pub fn build_projectile_instances(previous: &[ProjectileView], current: &[Projec
     merge_by_id(previous, current, |projectile| projectile.id, |before, projectile| {
         let now = [projectile.x, projectile.y, projectile.z];
         let from = before.map_or(now, |before| [before.x, before.y, before.z]);
-        out.push(Shape::Shell, instance(interpolate(from, now, alpha), [PROJECTILE_SIZE; 3], NORTH, SHELL, PROJECTILE_ICON_PX, eye));
+        let (size, color, icon) = if projectile.overcharge { (OVERCHARGE_SIZE, OVERCHARGE_SHELL, UNIT_ICON_PX) } else { (PROJECTILE_SIZE, SHELL, PROJECTILE_ICON_PX) };
+        out.push(Shape::Shell, instance(interpolate(from, now, alpha), [size; 3], NORTH, color, icon, eye));
     });
 }
 

@@ -7,7 +7,7 @@ use std::hash::Hasher;
 use super::blueprints::{BlueprintId, Res, TICKS_PER_SECOND};
 use super::commands::SimCommand;
 use super::components::{
-    Adjacency, Blueprinted, BuildTask, Builder, Paused, Turning, Turret, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, OrderQueue, Patrol,
+    Adjacency, Blueprinted, BuildTask, Builder, OverchargeOrder, OverchargeWeapon, Paused, Turning, Turret, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, OrderQueue, Patrol,
     Position, SimId, Team, UnitStats, Wreck,
 };
 use super::config::{PATROL_SEARCH_INTERVAL, PATROL_SEARCH_RADIUS_UNITS, RECLAIM_MASS_PER_POWER, TERRAIN_CELL_UNITS};
@@ -257,6 +257,16 @@ impl SimWorld {
             let radius = fp_int(unit.turn_radius as i32);
             self.ecs.insert_one(entity, Turning::new(facing, rate, radius)).expect("entity was just spawned");
         }
+        if let Some(overcharge) = unit.overcharge {
+            let weapon = OverchargeWeapon {
+                energy: overcharge.energy,
+                damage: overcharge.damage,
+                structure_damage: overcharge.structure_damage,
+                reload_ticks: overcharge.reload_ticks,
+                ticks_until_ready: 0,
+            };
+            self.ecs.insert_one(entity, weapon).expect("entity was just spawned");
+        }
         if let Some(rate) = unit.weapon.and_then(|weapon| weapon.turn_rate) {
             self.ecs.insert_one(entity, Turret::new(facing, rate)).expect("entity was just spawned");
         }
@@ -456,6 +466,7 @@ impl SimWorld {
             SimCommand::Move { .. }
             | SimCommand::AttackMove { .. }
             | SimCommand::QueueMove { .. }
+            | SimCommand::Overcharge { .. }
             | SimCommand::MoveOrder { .. }
             | SimCommand::Follow { .. }
             | SimCommand::Stop { .. }
@@ -1336,6 +1347,14 @@ impl SimWorld {
         }
         if self.ecs.get::<&Paused>(entity).is_ok() {
             hasher.write(&[11]);
+        }
+        if let Ok(weapon) = self.ecs.get::<&OverchargeWeapon>(entity) {
+            hasher.write(&[12]);
+            hasher.write(&weapon.ticks_until_ready.to_le_bytes());
+        }
+        if let Ok(order) = self.ecs.get::<&OverchargeOrder>(entity) {
+            hasher.write(&[13]);
+            hasher.write(&order.target.0.to_le_bytes());
         }
         if let Ok(turret) = self.ecs.get::<&Turret>(entity) {
             hasher.write(&[10]);

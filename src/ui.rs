@@ -65,10 +65,11 @@ pub enum ArmedOrder {
     AttackMove,
     Patrol,
     Assist,
+    Overcharge,
 }
 
 impl ArmedOrder {
-    const ALL: [Self; 4] = [Self::Move, Self::AttackMove, Self::Patrol, Self::Assist];
+    const ALL: [Self; 5] = [Self::Move, Self::AttackMove, Self::Patrol, Self::Assist, Self::Overcharge];
 
     const fn letter(self) -> char {
         match self {
@@ -76,6 +77,7 @@ impl ArmedOrder {
             Self::AttackMove => hotkeys::ATTACK_MOVE,
             Self::Patrol => hotkeys::PATROL,
             Self::Assist => hotkeys::ASSIST,
+            Self::Overcharge => hotkeys::OVERCHARGE,
         }
     }
 
@@ -85,6 +87,7 @@ impl ArmedOrder {
             Self::AttackMove => "Attack-move",
             Self::Patrol => "Patrol",
             Self::Assist => "Assist",
+            Self::Overcharge => "Overcharge",
         }
     }
 
@@ -94,6 +97,7 @@ impl ArmedOrder {
             Self::AttackMove => "Walk there, stopping to fire when enemies are in range.",
             Self::Patrol => "Repeat a route. Combat units fight along it, and engineers also reclaim and repair.",
             Self::Assist => "Stay with a friendly unit and protect it. Builders also help it build.",
+            Self::Overcharge => "Spend stored energy on one shot that destroys almost any unit. Weak against structures.",
         }
     }
 
@@ -104,6 +108,7 @@ impl ArmedOrder {
             Self::AttackMove => "Attack-move: left-click a destination. Right-click or Esc to cancel.",
             Self::Patrol => "Patrol: left-click each point, then right-click or press P to start. Esc to cancel.",
             Self::Assist => "Assist: left-click a friendly unit. Right-click or Esc to cancel.",
+            Self::Overcharge => "Overcharge: left-click an enemy. Right-click or Esc to cancel.",
         }
     }
 }
@@ -146,9 +151,17 @@ pub fn has_mobile_units(snapshot: &SimSnapshot, selected: &[SimId]) -> bool {
     selected.iter().filter_map(|id| find_unit(snapshot, *id)).any(|unit| !unit.is_structure)
 }
 
-fn unit_order_row(ui: &mut egui::Ui, armed: Option<ArmedOrder>, actions: &mut Vec<UiAction>) {
+/// Whether anything selected has Overcharge.
+pub fn has_overcharge(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb) -> bool {
+    selected
+        .iter()
+        .filter_map(|id| find_unit(snapshot, *id))
+        .any(|unit| unit.blueprint != u16::MAX && db.get(BlueprintId(unit.blueprint)).overcharge.is_some())
+}
+
+fn unit_order_row(ui: &mut egui::Ui, armed: Option<ArmedOrder>, overcharge: bool, actions: &mut Vec<UiAction>) {
     ui.horizontal_wrapped(|ui| {
-        for order in ArmedOrder::ALL {
+        for order in ArmedOrder::ALL.into_iter().filter(|order| overcharge || *order != ArmedOrder::Overcharge) {
             let button = egui::Button::new(format!("[{}] {}", order.letter(), order.name())).selected(armed == Some(order));
             if ui.add(button).on_hover_text(order.description()).clicked() {
                 actions.push(UiAction::Arm(order));
@@ -217,6 +230,7 @@ pub fn hotkey_action(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintD
             hotkeys::MOVE => return Some(UiAction::Arm(ArmedOrder::Move)),
             hotkeys::ATTACK_MOVE => return Some(UiAction::Arm(ArmedOrder::AttackMove)),
             hotkeys::ASSIST => return Some(UiAction::Arm(ArmedOrder::Assist)),
+            hotkeys::OVERCHARGE if has_overcharge(snapshot, selected, db) => return Some(UiAction::Arm(ArmedOrder::Overcharge)),
             hotkeys::STOP => return Some(UiAction::Stop),
             _ => {}
         }
@@ -815,7 +829,7 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
         });
 
         if has_mobile_units(snapshot, selected) {
-            unit_order_row(ui, armed, actions);
+            unit_order_row(ui, armed, has_overcharge(snapshot, selected, db), actions);
         }
         if let Some(action) = pause_action(snapshot, selected, db) {
             let UiAction::SetPaused { paused, .. } = &action else {
@@ -2344,6 +2358,15 @@ mod tests {
         current.paused = vec![SimId(1), SimId(2), SimId(3)];
         assert_eq!(press(&current), Some(UiAction::SetPaused { units: vec![SimId(1), SimId(2), SimId(3)], paused: false }));
         assert_eq!(hotkey_action(&current, &[SimId(4)], &db, 'O'), None);
+    }
+
+    #[test]
+    fn only_a_selection_with_a_commander_can_overcharge() {
+        let db = BlueprintDb::standard();
+        let current = commander_and_engineer(&db);
+        assert_eq!(hotkey_action(&current, &[SimId(10)], &db, 'L'), Some(UiAction::Arm(ArmedOrder::Overcharge)));
+        assert_eq!(hotkey_action(&current, &[SimId(10), SimId(12)], &db, 'L'), Some(UiAction::Arm(ArmedOrder::Overcharge)));
+        assert_eq!(hotkey_action(&current, &[SimId(11), SimId(12)], &db, 'L'), None, "engineers and bots have none");
     }
 
     #[test]

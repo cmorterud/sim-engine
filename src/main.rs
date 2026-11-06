@@ -11,7 +11,7 @@ use sim_engine::audio::{self, AttackAlarm, SoundEngine, SoundSettings};
 use sim_engine::input::feedback::{MarkerKind, OrderFeedback};
 use sim_engine::input::hotkeys;
 use sim_engine::input::orders::{
-    assist_orders, deposit_position, free_deposits, line_cells, mobile_units, move_orders, pending_builds, queued_commands, PendingBuild, placement_cell, placement_is_valid, placement_target, right_click_orders, PlacementMap, RightClick,
+    assist_orders, deposit_position, free_deposits, line_cells, mobile_units, move_orders, overcharge_orders, pending_builds, queued_commands, PendingBuild, placement_cell, placement_is_valid, placement_target, right_click_orders, PlacementMap, RightClick,
 };
 use sim_engine::input::selection::{ControlGroups, Selection};
 use sim_engine::math::fp::{Fp, Vec2Fp};
@@ -87,6 +87,7 @@ Controls:
   P, then left-clicks  Add patrol points, then right-click or press P to start
   P + right-click      Hold P and add patrol points, then release P
   X                    Stop
+  L, then left-click   Overcharge an enemy with the commander
   O                    Pause or resume the selected factories and construction sites
   Ctrl + 1 to 0        Save the selection as a group, or clear it if nothing is selected.
                        Command works too
@@ -755,6 +756,18 @@ fn run_windowed(seed: u64, options: Options) {
                                     }
                                     ArmedOrder::Patrol => {
                                         add_patrol_point(&selection, &camera, &map, &mut feedback, &mut patrol_points, "right-click or press P to start");
+                                    }
+                                    ArmedOrder::Overcharge => {
+                                        if issue_planned_orders(&session, &selection, &camera, &map, &mut feedback, false, false, "Click an enemy to Overcharge", overcharge_orders) {
+                                            if !shift_held {
+                                                armed = None;
+                                            }
+                                            // It waits for the energy, so say so.
+                                            let cost = map.blueprints.iter().find_map(|unit| unit.overcharge).map_or(0, |overcharge| overcharge.energy.to_num::<i64>());
+                                            if session.current.economy.energy < cost {
+                                                feedback.show_rejected(None, &format!("Overcharge is waiting for {cost} energy"));
+                                            }
+                                        }
                                     }
                                     ArmedOrder::Assist => {
                                         // Stays armed after a miss, so that the player can try again.

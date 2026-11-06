@@ -8,7 +8,7 @@ use super::combat::{entry_hit, firing_solution, probe_terrain, GRAVITY};
 use super::commands::SimCommand;
 use super::components::{BuildTask, 
     Blueprinted, Builder, Combat, Construction, Factory, Footprint, Health, MoveClass, Order, OrderKind, OrderQueue, Patrol,
-    Position, Projectile, SimId, Team, Turning, Turret, UnitStats, Velocity, Wreck,
+    Overcharged, OverchargeOrder, OverchargeWeapon, Position, Projectile, SimId, Team, Turning, Turret, UnitStats, Velocity, Wreck,
 };
 use super::config::{SimConfig, TARGET_SEARCH_INTERVAL, TERRAIN_CELL_UNITS, WRECK_MASS_PERMILLE};
 use super::flowfield::{nearest_passable_cell, FlowField, FlowSample};
@@ -184,6 +184,8 @@ pub struct ProjectileView {
     pub x: i32,
     pub y: i32,
     pub z: i32,
+    /// An Overcharge shell, drawn larger and brighter.
+    pub overcharge: bool,
 }
 
 /// A copy of the state the renderer needs from one tick, sorted by `SimId`.
@@ -231,6 +233,8 @@ struct PendingShot {
     speed: Fp,
     damage: Fp,
     splash: Fp,
+    /// For an Overcharge shell, the most it does to a structure.
+    overcharge: Option<Fp>,
 }
 
 pub struct SimWorld {
@@ -458,6 +462,7 @@ impl SimWorld {
                     }
                 }
                 SimCommand::Attack { units, target } => self.command_attack(units, *target),
+                SimCommand::Overcharge { unit, target } => self.command_overcharge(*unit, *target),
                 SimCommand::QueueMove { units, goal, attack } => self.queue_move(units, *goal, *attack),
                 SimCommand::MoveOrder { units, task, goal } => self.move_order(units, *task, *goal),
                 other => self.apply_production_command(other),
@@ -617,12 +622,31 @@ impl SimWorld {
             if let Ok(mut combat) = self.ecs.get::<&mut Combat>(entity) {
                 combat.forced_target = None;
             }
+            let _ = self.ecs.remove_one::<OverchargeOrder>(entity);
             self.release_waiting_orders(id, entity);
             if let Ok(mut builder) = self.ecs.get::<&mut Builder>(entity) {
                 builder.tasks.clear();
             }
             self.end_patrol(id, entity);
         }
+    }
+
+    fn command_overcharge(&mut self, unit: SimId, target: SimId) {
+        let Some((_, entity)) = self.find_unit(unit) else {
+            return;
+        };
+        let Some((_, target_entity)) = self.find_unit(target) else {
+            return;
+        };
+        let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team;
+        let is_enemy = self.ecs.get::<&UnitStats>(target_entity).is_ok_and(|stats| stats.team != team);
+        if self.ecs.get::<&OverchargeWeapon>(entity).is_err() || !is_enemy {
+            return;
+        }
+        self.clear_unit_plans(&[unit]);
+        self.ecs.insert_one(entity, OverchargeOrder { target }).expect("unit is live");
+        let position = self.unit_position(target).expect("just found").xy();
+        self.assign_route(&[unit], OrderKind::Move, position, Some(target));
     }
 
     fn command_attack(&mut self, units: &[SimId], target: SimId) {
@@ -1008,14 +1032,19 @@ impl SimWorld {
         let visibility = &self.visibility;
         let fog = self.config.fog_of_war;
         let shots = &mut self.pending_shots;
+        let economies = &mut self.economies;
         let (max_mobile, max_structure) = (self.max_mobile_radius, self.max_structure_radius);
         shots.clear();
         let mut finished_attacks: Vec<SimId> = Vec::new();
-        let mut query = self.ecs.query_mut::<(&UnitStats, &mut Combat, Option<&mut Turret>, Option<&Turning>)>();
+        let mut finished_overcharges: Vec<SimId> = Vec::new();
+        let mut query = self.ecs.query_mut::<(&UnitStats, &mut Combat, Option<&mut Turret>, Option<&Turning>, Option<&mut OverchargeWeapon>, Option<&OverchargeOrder>)>();
         let mut view = query.view();
         for (index, &(id, entity)) in units.iter().enumerate() {
-            let (stats, combat, turret, turning) = view.get_mut(entity).expect("unit list only holds live units");
+            let (stats, combat, turret, turning, mut overcharge, overcharge_order) = view.get_mut(entity).expect("unit list only holds live units");
             combat.ticks_until_ready = combat.ticks_until_ready.saturating_sub(1);
+            if let Some(weapon) = overcharge.as_mut() {
+                weapon.ticks_until_ready = weapon.ticks_until_ready.saturating_sub(1);
+            }
             if !combat.enabled || combat.range == Fp::ZERO {
                 continue;
             }
@@ -1084,6 +1113,15 @@ impl SimWorld {
                 }
             }
 
+            // An Overcharge order takes over the gun, until it fires or its target is gone.
+            let overcharge_target = overcharge_order.map(|order| order.target);
+            if let Some(target) = overcharge_target {
+                if locate(target).is_none() {
+                    finished_overcharges.push(id);
+                }
+            }
+            let aim_at = overcharge_target.filter(|target| locate(*target).is_some()).or(combat.target);
+
             // A turret swivels to its target, or back to the front without one, and only fires once it points there.
             let aimed = match turret {
                 None => true,
@@ -1092,7 +1130,7 @@ impl SimWorld {
                         let away = Vec2Fp::new(Fp::from_bits(entry.x - me.x), Fp::from_bits(entry.y - me.y));
                         (away != Vec2Fp::ZERO).then(|| away.normalized())
                     };
-                    match combat.target.and_then(locate) {
+                    match aim_at.and_then(locate) {
                         Some(entry) => toward(entry).is_none_or(|toward| turret.aim(toward)),
                         None => {
                             if let Some(front) = turning.map(|turning| turning.facing) {
@@ -1103,7 +1141,31 @@ impl SimWorld {
                     }
                 }
             };
-            if combat.ticks_until_ready == 0 && aimed {
+            // Overcharge fires in range, once aimed and reloaded, if the team has the energy stored.
+            if let (Some(target), Some(weapon)) = (overcharge_target, overcharge.as_mut()) {
+                let economy = &mut economies[stats.team.index()];
+                if let Some(entry) = locate(target).filter(|entry| can_engage(entry)) {
+                    if aimed && weapon.ticks_until_ready == 0 && economy.energy >= weapon.energy {
+                        economy.energy -= weapon.energy;
+                        let raw = |x: i32, y: i32, z: i32| Vec3Fp::new(Fp::from_bits(x), Fp::from_bits(y), Fp::from_bits(z));
+                        shots.push(PendingShot {
+                            source: id,
+                            team: stats.team,
+                            from: raw(me.x, me.y, me.z),
+                            to: raw(entry.x, entry.y, entry.z),
+                            speed: combat.projectile_speed,
+                            damage: weapon.damage,
+                            splash: Fp::ZERO,
+                            overcharge: Some(weapon.structure_damage),
+                        });
+                        weapon.ticks_until_ready = weapon.reload_ticks;
+                        finished_overcharges.push(id);
+                    }
+                }
+            }
+            // While aiming an Overcharge elsewhere, the gun does not fire at anything else.
+            let gun_free = overcharge_target.is_none_or(|target| combat.target == Some(target));
+            if combat.ticks_until_ready == 0 && aimed && gun_free {
                 if let Some(target) = combat.target {
                     let entry = locate(target).expect("target was just validated or found");
                     let raw = |x: i32, y: i32, z: i32| Vec3Fp::new(Fp::from_bits(x), Fp::from_bits(y), Fp::from_bits(z));
@@ -1115,6 +1177,7 @@ impl SimWorld {
                         speed: combat.projectile_speed,
                         damage: combat.projectile_damage,
                         splash: combat.projectile_splash,
+                        overcharge: None,
                     });
                     combat.ticks_until_ready = combat.reload_ticks;
                 }
@@ -1124,10 +1187,15 @@ impl SimWorld {
         for id in finished_attacks {
             self.set_order(id, Order::IDLE);
         }
+        for id in finished_overcharges {
+            let (_, entity) = self.find_unit(id).expect("it just fired");
+            let _ = self.ecs.remove_one::<OverchargeOrder>(entity);
+            self.set_order(id, Order::IDLE);
+        }
         let friendly_fire = self.config.friendly_fire;
         for shot in std::mem::take(&mut self.pending_shots) {
             let solution = firing_solution(shot.from, shot.to, shot.speed);
-            self.spawn_projectile(
+            let projectile = self.spawn_projectile(
                 shot.from,
                 Projectile {
                     velocity: solution.velocity,
@@ -1140,6 +1208,10 @@ impl SimWorld {
                     allied_safe_ticks: if friendly_fire { solution.flight_ticks } else { 0 },
                 },
             );
+            if let Some(structure_damage) = shot.overcharge {
+                let entity = self.projectiles.last().filter(|last| last.0 == projectile).expect("just spawned").1;
+                self.ecs.insert_one(entity, Overcharged { structure_damage }).expect("just spawned");
+            }
         }
     }
 
@@ -1153,10 +1225,10 @@ impl SimWorld {
         let (max_mobile, max_structure) = (self.max_mobile_radius, self.max_structure_radius);
         hits.clear();
         dead.clear();
-        let mut query = self.ecs.query_mut::<(&mut Position, &mut Projectile)>();
+        let mut query = self.ecs.query_mut::<(&mut Position, &mut Projectile, Option<&Overcharged>)>();
         let mut view = query.view();
         for &(id, entity) in &self.projectiles {
-            let (position, projectile) = view.get_mut(entity).expect("projectile list only holds live projectiles");
+            let (position, projectile, overcharged) = view.get_mut(entity).expect("projectile list only holds live projectiles");
             let start = position.0;
             let step = projectile.velocity;
             let end = start + step;
@@ -1171,7 +1243,7 @@ impl SimWorld {
             // Shells far above the ground cannot touch a unit, which spares most grid queries.
             let lowest = start.z.min(end.z);
             let reach = Fp::from_bits(max_mobile.max(max_structure) * 2);
-            let mut best: Option<(i32, SimId, hecs::Entity)> = None;
+            let mut best: Option<(i32, SimId, hecs::Entity, bool)> = None;
             if lowest <= probe.highest_ground + reach {
                 let half = (step.x.to_bits().abs() + step.y.to_bits().abs()) / 2;
                 let center_x = start.x.to_bits() + step.x.to_bits() / 2;
@@ -1183,7 +1255,7 @@ impl SimWorld {
                         return;
                     }
                     if let Some(along) = entry_hit(other, start, step) {
-                        let candidate = (along, other.id, other.entity);
+                        let candidate = (along, other.id, other.entity, other.is_structure);
                         if best.is_none_or(|current| (candidate.0, candidate.1) < (current.0, current.1)) {
                             best = Some(candidate);
                         }
@@ -1200,11 +1272,16 @@ impl SimWorld {
             let blast = Explosion { x: end.x.to_bits(), y: end.y.to_bits(), radius: projectile.splash_radius, damage: projectile.damage };
 
             match (best, probe.hit) {
-                (Some((along, _, target)), terrain_hit) if terrain_hit.is_none_or(|ground| along <= ground) => {
+                (Some((along, _, target, is_structure)), terrain_hit) if terrain_hit.is_none_or(|ground| along <= ground) => {
                     if splash {
                         explosions.push(blast);
                     } else {
-                        hits.push((target, projectile.damage));
+                        // Overcharge does little to structures.
+                        let damage = match overcharged {
+                            Some(overcharged) if is_structure => projectile.damage.min(overcharged.structure_damage),
+                            _ => projectile.damage,
+                        };
+                        hits.push((target, damage));
                     }
                     dead.push(id);
                 }
@@ -1477,9 +1554,13 @@ impl SimWorld {
     fn hash_projectile(&self, entity: hecs::Entity, hasher: &mut impl Hasher) {
         let mut query = self
             .ecs
-            .query_one::<(&Position, &Projectile)>(entity)
+            .query_one::<(&Position, &Projectile, Option<&Overcharged>)>(entity)
             .expect("projectile list only holds live projectiles");
-        let (position, projectile) = query.get().expect("projectiles have every component");
+        let (position, projectile, overcharged) = query.get().expect("projectiles have every component");
+        if let Some(overcharged) = overcharged {
+            hasher.write(&[1]);
+            write_fp(hasher, overcharged.structure_damage);
+        }
         write_vec3(hasher, position.0);
         write_vec3(hasher, projectile.velocity);
         write_fp(hasher, projectile.damage);
@@ -1528,15 +1609,15 @@ impl SimWorld {
                 })
             })
             .collect();
-        let mut projectile_query = self.ecs.query::<(&Position, &Projectile)>();
+        let mut projectile_query = self.ecs.query::<(&Position, &Projectile, Option<&Overcharged>)>();
         let projectile_view = projectile_query.view();
         let projectiles = self
             .projectiles
             .iter()
             .filter_map(|&(id, entity)| {
-                let (position, projectile) = projectile_view.get(entity).expect("projectile list only holds live projectiles");
+                let (position, projectile, overcharged) = projectile_view.get(entity).expect("projectile list only holds live projectiles");
                 let (x, y, z) = (position.0.x.to_bits(), position.0.y.to_bits(), position.0.z.to_bits());
-                seen(projectile.source_team, x, y).then_some(ProjectileView { id, team: projectile.source_team, x, y, z })
+                seen(projectile.source_team, x, y).then_some(ProjectileView { id, team: projectile.source_team, x, y, z, overcharge: overcharged.is_some() })
             })
             .collect();
         let wrecks = self

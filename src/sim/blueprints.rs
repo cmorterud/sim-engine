@@ -40,6 +40,17 @@ pub struct WeaponDef {
     pub turn_rate: Option<u32>,
 }
 
+/// The commander's Overcharge: a shot paid for from stored energy, that destroys almost any
+/// mobile unit but does little to structures.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct OverchargeDef {
+    pub energy: Res,
+    pub damage: Fp,
+    /// The most one shot does to a structure.
+    pub structure_damage: Fp,
+    pub reload_ticks: u32,
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct ExplosionDef {
     pub damage: Fp,
@@ -81,6 +92,7 @@ pub struct Blueprint {
     pub mass_storage: Res,
     pub energy_storage: Res,
     pub death_explosion: Option<ExplosionDef>,
+    pub overcharge: Option<OverchargeDef>,
 }
 
 impl Blueprint {
@@ -145,6 +157,15 @@ struct RawWeapon {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct RawOvercharge {
+    energy: Number,
+    damage: Number,
+    structure_damage: Number,
+    reload_ticks: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawExplosion {
     damage: Number,
     radius: Number,
@@ -182,6 +203,7 @@ struct RawUnit {
     mass_storage: Option<Number>,
     energy_storage: Option<Number>,
     death_explosion: Option<RawExplosion>,
+    overcharge: Option<RawOvercharge>,
 }
 
 #[derive(Deserialize)]
@@ -254,6 +276,15 @@ impl BlueprintDb {
                     radius: explosion.radius.fp().map_err(context)?,
                 }),
             };
+            let overcharge = match &unit.overcharge {
+                None => None,
+                Some(overcharge) => Some(OverchargeDef {
+                    energy: overcharge.energy.res().map_err(context)?,
+                    damage: overcharge.damage.fp().map_err(context)?,
+                    structure_damage: overcharge.structure_damage.fp().map_err(context)?,
+                    reload_ticks: overcharge.reload_ticks,
+                }),
+            };
             blueprints.push(Blueprint {
                 id: BlueprintId(index as u16),
                 key: unit.id.clone(),
@@ -291,6 +322,7 @@ impl BlueprintDb {
                 mass_storage: total(&unit.mass_storage)?,
                 energy_storage: total(&unit.energy_storage)?,
                 death_explosion,
+                overcharge,
             });
         }
         // Line endings can differ by checkout, and must not change the checksum.
