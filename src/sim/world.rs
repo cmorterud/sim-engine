@@ -9,7 +9,7 @@ use super::commands::SimCommand;
 use super::components::{BuildTask, 
     Blueprinted, Builder, Combat, Construction, Factory, Footprint, Health, MoveClass, Order, OrderKind, OrderQueue, Patrol,
     Overcharged, OverchargeOrder, OverchargeWeapon, Position, Projectile, SimId, Team, Turning, Turret, UnitStats, Velocity, Veterancy,
-    Wreck, rotate_toward,
+    Wreck, WreckKind, rotate_toward,
 };
 use super::config::{SimConfig, TARGET_SEARCH_INTERVAL, TERRAIN_CELL_UNITS, WRECK_MASS_PERMILLE};
 use super::flowfield::{nearest_passable_cell, FlowField, FlowSample};
@@ -164,6 +164,8 @@ pub struct WreckView {
     pub z: i32,
     pub radius: i32,
     pub mass: i32,
+    pub energy: i32,
+    pub kind: WreckKind,
 }
 
 /// The viewer's economy, in whole units and per-second rates.
@@ -1655,7 +1657,7 @@ impl SimWorld {
         self.ecs.despawn(entity).expect("dead units are live until now");
         if let Some(mass) = wreck_mass.filter(|mass| *mass > Res::ZERO) {
             let wreck_id = self.next_id();
-            let wreck = self.ecs.spawn((wreck_id, Wreck { mass, position: position.xy(), radius }));
+            let wreck = self.ecs.spawn((wreck_id, Wreck { mass, energy: Res::ZERO, position: position.xy(), radius, kind: WreckKind::Debris }));
             self.wrecks.push((wreck_id, wreck));
         }
     }
@@ -1715,8 +1717,11 @@ impl SimWorld {
             hasher.write(&id.0.to_le_bytes());
             let wreck = self.ecs.get::<&Wreck>(entity).expect("wreck list only holds live wrecks");
             hasher.write(&wreck.mass.to_bits().to_le_bytes());
+            hasher.write(&wreck.energy.to_bits().to_le_bytes());
             write_fp(&mut hasher, wreck.position.x);
             write_fp(&mut hasher, wreck.position.y);
+            write_fp(&mut hasher, wreck.radius);
+            hasher.write(&[wreck.kind as u8]);
         }
         self.flow_field.hash_state(&mut hasher);
         // Nothing is written without formations, so checksums from before they existed still hold.
@@ -1841,8 +1846,9 @@ impl SimWorld {
             .filter_map(|&(id, entity)| {
                 let wreck = self.ecs.get::<&Wreck>(entity).expect("wreck list only holds live wrecks");
                 let (x, y) = (wreck.position.x.to_bits(), wreck.position.y.to_bits());
-                // Wrecks belong to no one, so use the viewer's own sight for both cases.
-                let visible = viewer.is_none_or(|viewer| !self.config.fog_of_war || self.visibility.is_visible(viewer, x, y));
+                // Wrecks belong to no one, so use the viewer's own sight for both cases. Trees and
+                // rocks are part of the map, and show through fog like the terrain.
+                let visible = wreck.kind.is_scenery() || viewer.is_none_or(|viewer| !self.config.fog_of_war || self.visibility.is_visible(viewer, x, y));
                 visible.then(|| WreckView {
                     id,
                     x,
@@ -1850,6 +1856,8 @@ impl SimWorld {
                     z: (self.terrain.height_at(wreck.position) + wreck.radius / 2).to_bits(),
                     radius: wreck.radius.to_bits(),
                     mass: wreck.mass.to_num::<i32>(),
+                    energy: wreck.energy.to_num::<i32>(),
+                    kind: wreck.kind,
                 })
             })
             .collect();

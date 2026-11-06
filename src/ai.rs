@@ -18,6 +18,8 @@ const THINK_INTERVAL: u32 = 10;
 const SEARCH_RINGS: i32 = 60;
 const COMMANDER_LEASH_UNITS: i32 = 900;
 const DEFEND_RADIUS_UNITS: i32 = 1_400;
+/// After 35 minutes, the commander goes with full-size waves.
+const COMMANDER_PUSH_TICKS: u32 = 21_000;
 /// Enemy deposits farther than this from the enemy's start are raided rather than its base.
 const RAID_DISTANCE_UNITS: i32 = 2_000;
 const FIRST_WAVE: usize = 10;
@@ -539,7 +541,13 @@ impl AiBrain {
         let goal = target.unwrap_or_else(|| self.search_point(world, full_strength));
         // Not in formation: waves at the slowest unit's pace arrived late enough that, in 200
         // AI-vs-AI matches, 6 went past the time limit, against none with each at its own speed.
-        commands.push(SimCommand::AttackMove { units: forces.idle_combat.clone(), goal });
+        let mut wave = forces.idle_combat.clone();
+        // A long, even game is one a defended base keeps winning. The commander joins a
+        // full-size wave, which either breaks the enemy's base or loses the commander.
+        if full_strength && world.current_tick >= COMMANDER_PUSH_TICKS {
+            wave.extend(forces.commander);
+        }
+        commands.push(SimCommand::AttackMove { units: wave, goal });
         if gathered >= self.wave_size {
             self.wave_size = (self.wave_size + self.wave_size / 4 + 1).min(LARGEST_WAVE);
         }
@@ -614,7 +622,8 @@ fn nearest_visible_wreck(world: &SimWorld, team: Team, position: Vec2Fp, home: V
         let wreck = world.ecs.get::<&crate::sim::components::Wreck>(entity).ok()?;
         let (x, y) = (wreck.position.x.to_bits(), wreck.position.y.to_bits());
         let safe = wreck.position.distance_squared(&home) <= wreck.position.distance_squared(&enemy_home);
-        if safe && world.visibility.is_visible(team, x, y) {
+        // Trees and rocks show through fog, for the AI as for the player.
+        if safe && (wreck.kind.is_scenery() || world.visibility.is_visible(team, x, y)) {
             let distance = wreck.position.distance_squared(&position);
             if best.is_none_or(|(closest, _)| distance < closest) {
                 best = Some((distance, id));

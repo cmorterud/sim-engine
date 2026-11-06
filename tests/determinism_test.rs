@@ -93,6 +93,36 @@ fn full_ai_match_matches_its_golden_checksums() {
     check_golden("ai_match", &record.checksums);
 }
 
+/// Wrecks, trees, and rocks, and what reclaim brings in.
+#[test]
+fn every_wreck_and_reclaim_field_changes_the_checksum() {
+    use sim_engine::sim::components::{Wreck, WreckKind};
+    let (_, mut world) = run(scenario::battle(SEED, 20, small_config()), 10, 10);
+    let at = world.unit_position(world.units[0].0).unwrap().xy();
+    world.spawn_scenery(WreckKind::Rock, at, Fp::from_num(6));
+    let entity = world.wrecks[0].1;
+    let baseline = world.compute_checksum();
+    let one_bit = Fp::from_bits(1);
+    let wide_bit = sim_engine::sim::blueprints::Res::from_bits(1);
+    type Edit = Box<dyn Fn(&mut SimWorld, bool)>;
+    let edits: Vec<(&str, Edit)> = vec![
+        ("wreck mass", Box::new(move |w, undo| w.ecs.get::<&mut Wreck>(entity).unwrap().mass += if undo { -wide_bit } else { wide_bit })),
+        ("wreck energy", Box::new(move |w, undo| w.ecs.get::<&mut Wreck>(entity).unwrap().energy += if undo { -wide_bit } else { wide_bit })),
+        ("wreck x", Box::new(move |w, undo| w.ecs.get::<&mut Wreck>(entity).unwrap().position.x += if undo { -one_bit } else { one_bit })),
+        ("wreck y", Box::new(move |w, undo| w.ecs.get::<&mut Wreck>(entity).unwrap().position.y += if undo { -one_bit } else { one_bit })),
+        ("wreck radius", Box::new(move |w, undo| w.ecs.get::<&mut Wreck>(entity).unwrap().radius += if undo { -one_bit } else { one_bit })),
+        ("wreck kind", Box::new(move |w, undo| w.ecs.get::<&mut Wreck>(entity).unwrap().kind = if undo { WreckKind::Rock } else { WreckKind::Tree })),
+        ("mass reclaimed", Box::new(move |w, undo| w.economies[0].mass_reclaimed += if undo { -wide_bit } else { wide_bit })),
+        ("energy reclaimed", Box::new(move |w, undo| w.economies[0].energy_reclaimed += if undo { -wide_bit } else { wide_bit })),
+    ];
+    for (name, edit) in edits {
+        edit(&mut world, false);
+        assert_ne!(world.compute_checksum(), baseline, "{name} is not covered by the checksum");
+        edit(&mut world, true);
+        assert_eq!(world.compute_checksum(), baseline, "undoing {name} did not restore the checksum");
+    }
+}
+
 /// A formation's state is hashed only while there is one, so it has a test of its own.
 #[test]
 fn every_formation_field_changes_the_checksum() {

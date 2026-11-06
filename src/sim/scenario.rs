@@ -228,6 +228,7 @@ pub fn skirmish(seed: u64) -> Scenario {
         world.deposits.push((x, y));
         world.deposits.push((last_cell - x, last_cell - y));
     }
+    scatter_scenery(&mut world, start_cell);
 
     let commander = world.blueprints.id("acu");
     world.spawn_mobile(commander, Team::Blue, skirmish_start(Team::Blue));
@@ -235,6 +236,80 @@ pub fn skirmish(seed: u64) -> Scenario {
     world.start_economy(SKIRMISH_START_MASS, SKIRMISH_START_ENERGY);
     world.prepare_map();
     Scenario { world, opening_commands: Vec::new() }
+}
+
+const FORESTS_PER_SIDE: usize = 10;
+const TREES_PER_FOREST: usize = 30;
+const FOREST_RADIUS_UNITS: i32 = 140;
+const ROCK_FIELDS_PER_SIDE: usize = 8;
+const ROCKS_PER_FIELD: usize = 5;
+const ROCK_FIELD_RADIUS_UNITS: i32 = 60;
+/// Scenery stays this many cells from a start, so that bases have room, and from deposits.
+const SCENERY_BASE_CLEARANCE_CELLS: u32 = 22;
+const SCENERY_DEPOSIT_CLEARANCE_CELLS: u32 = 3;
+
+/// Forests and rock fields on Blue's half of the skirmish map, each with its mirror image on
+/// Red's, clear of the bases, the deposits, and the walls.
+fn scatter_scenery(world: &mut SimWorld, start_cell: u32) {
+    use super::components::WreckKind;
+    let map = world.terrain.map_units();
+    let last_cell = (map / super::config::TERRAIN_CELL_UNITS) as u32 - 1;
+    let mirror = |point: Vec2Fp| Vec2Fp::new(fp_int(map) - point.x, fp_int(map) - point.y);
+    let allowed = |world: &SimWorld, point: Vec2Fp| {
+        // On Blue's half, well short of the middle, so that it and its mirror never meet.
+        if point.y >= fp_int(map / 2 - 200) || !world.terrain.in_bounds(point) {
+            return false;
+        }
+        let (x, y) = world.terrain.cell_of(point);
+        let (x, y) = (x as u32, y as u32);
+        let near = |a: u32, b: u32, cells: u32| a.abs_diff(b) <= cells;
+        let clear_of_bases = [start_cell, last_cell - start_cell]
+            .iter()
+            .all(|&start| !(near(x, start, SCENERY_BASE_CLEARANCE_CELLS) && near(y, start, SCENERY_BASE_CLEARANCE_CELLS)));
+        let clear_of_deposits = world
+            .deposits
+            .iter()
+            .all(|&(dx, dy)| !(near(x, dx, SCENERY_DEPOSIT_CLEARANCE_CELLS) && near(y, dy, SCENERY_DEPOSIT_CLEARANCE_CELLS)));
+        clear_of_bases && clear_of_deposits && world.terrain.is_passable(point) && world.terrain.is_passable(mirror(point))
+    };
+    let groups = [
+        (WreckKind::Tree, FORESTS_PER_SIDE, TREES_PER_FOREST, FOREST_RADIUS_UNITS),
+        (WreckKind::Rock, ROCK_FIELDS_PER_SIDE, ROCKS_PER_FIELD, ROCK_FIELD_RADIUS_UNITS),
+    ];
+    for (kind, group_count, per_group, spread) in groups {
+        let mut placed_groups = 0;
+        // Bounded, so that a crowded map cannot loop forever.
+        for _ in 0..group_count * 50 {
+            if placed_groups == group_count {
+                break;
+            }
+            let center = Vec2Fp::new(world.rng.range_fp(fp_int(400), fp_int(map - 400)), world.rng.range_fp(fp_int(400), fp_int(map / 2)));
+            if !allowed(world, center) {
+                continue;
+            }
+            placed_groups += 1;
+            let mut placed = 0;
+            for _ in 0..per_group * 4 {
+                if placed == per_group {
+                    break;
+                }
+                let offset = |rng: &mut crate::math::rng::SimRng| rng.range_fp(fp_int(-spread), fp_int(spread));
+                let (dx, dy) = (offset(&mut world.rng), offset(&mut world.rng));
+                // Round clumps rather than square ones.
+                if i64::from(dx.to_num::<i32>()).pow(2) + i64::from(dy.to_num::<i32>()).pow(2) > i64::from(spread).pow(2) {
+                    continue;
+                }
+                let point = Vec2Fp::new(center.x + dx, center.y + dy);
+                if !allowed(world, point) {
+                    continue;
+                }
+                let radius = world.rng.range_fp(fp_int(5), fp_int(10));
+                world.spawn_scenery(kind, point, radius);
+                world.spawn_scenery(kind, mirror(point), radius);
+                placed += 1;
+            }
+        }
+    }
 }
 
 /// Advances a world one tick with its opening commands (on tick 0) and scripted orders.

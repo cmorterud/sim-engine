@@ -8,9 +8,11 @@ use super::blueprints::{BlueprintId, Res, TICKS_PER_SECOND};
 use super::commands::SimCommand;
 use super::components::{
     Adjacency, Blueprinted, BuildTask, Builder, OverchargeOrder, OverchargeWeapon, Paused, Turning, Turret, Veterancy, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, OrderQueue, Patrol,
-    Position, SimId, Team, UnitStats, Wreck,
+    Position, SimId, Team, UnitStats, Wreck, WreckKind,
 };
-use super::config::{PATROL_SEARCH_INTERVAL, PATROL_SEARCH_RADIUS_UNITS, RECLAIM_MASS_PER_POWER, TERRAIN_CELL_UNITS};
+use super::config::{
+    PATROL_SEARCH_INTERVAL, PATROL_SEARCH_RADIUS_UNITS, RECLAIM_ENERGY_PER_POWER, RECLAIM_MASS_PER_POWER, ROCK_MASS_PER_RADIUS, TERRAIN_CELL_UNITS, TREE_ENERGY, TREE_MASS, TREE_RADIUS_UNITS,
+};
 use super::flowfield::nearest_passable_cell;
 use super::spatial::{GridEntry, Layer};
 use super::world::{BuildQueueView, EconomyView, OrderStopView, PlanStep, UnitRatesView, PlanStepKind, SimWorld, UnitPlanView, UnitSpawn, WorkLinkView};
@@ -38,8 +40,9 @@ pub struct Economy {
     /// Production from finished structures and commanders, updated when they change.
     pub mass_income: Res,
     pub energy_income: Res,
-    /// This tick's mass from reclaim.
+    /// This tick's mass and energy from reclaim.
     pub mass_reclaimed: Res,
+    pub energy_reclaimed: Res,
     pub mass_demand: Res,
     pub energy_demand: Res,
     /// The share of demand that was met, from 0 to 1.
@@ -58,6 +61,7 @@ impl Economy {
             self.mass_income,
             self.energy_income,
             self.mass_reclaimed,
+            self.energy_reclaimed,
             self.mass_demand,
             self.energy_demand,
             self.satisfaction,
@@ -74,7 +78,7 @@ impl Economy {
             mass_capacity: self.mass_capacity.to_num(),
             energy_capacity: self.energy_capacity.to_num(),
             mass_income: per_second(self.mass_income + self.mass_reclaimed),
-            energy_income: per_second(self.energy_income),
+            energy_income: per_second(self.energy_income + self.energy_reclaimed),
             mass_demand: per_second(self.mass_demand),
             energy_demand: per_second(self.energy_demand),
             satisfaction_permille: (self.satisfaction.to_bits() * 1000 / Res::ONE.to_bits()).clamp(0, 1000) as u16,
@@ -215,6 +219,44 @@ impl SimWorld {
         true
     }
 
+    /// Adds a tree or a rock to the map. A tree is always the same size, and a rock holds
+    /// mass in proportion to its radius.
+    pub fn spawn_scenery(&mut self, kind: WreckKind, position: Vec2Fp, rock_radius: Fp) -> SimId {
+        let (mass, energy, radius) = match kind {
+            WreckKind::Tree => (Res::from_num(TREE_MASS), Res::from_num(TREE_ENERGY), fp_int(TREE_RADIUS_UNITS)),
+            WreckKind::Rock => (fp_to_res(rock_radius) * ROCK_MASS_PER_RADIUS, Res::ZERO, rock_radius),
+            WreckKind::Debris => panic!("debris comes from destroyed units"),
+        };
+        let id = self.next_id();
+        let entity = self.ecs.spawn((id, Wreck { mass, energy, position, radius, kind }));
+        self.wrecks.push((id, entity));
+        id
+    }
+
+    /// Trees and rocks on a new structure's ground are cleared, and the team gets what they
+    /// held, as though its builder had reclaimed them first. Debris stays where it is.
+    fn clear_scenery(&mut self, team: Team, cell_x: u32, cell_y: u32, size: u32) {
+        let low = cell_center(cell_x, cell_y, 1) - Vec2Fp::new(fp_int(TERRAIN_CELL_UNITS / 2), fp_int(TERRAIN_CELL_UNITS / 2));
+        let high = low + Vec2Fp::new(fp_int(TERRAIN_CELL_UNITS * size as i32), fp_int(TERRAIN_CELL_UNITS * size as i32));
+        let mut cleared = Vec::new();
+        for &(id, entity) in &self.wrecks {
+            let wreck = *self.ecs.get::<&Wreck>(entity).expect("wreck list only holds wrecks");
+            let inside = |value: Fp, low: Fp, high: Fp| value + wreck.radius > low && value - wreck.radius < high;
+            if wreck.kind.is_scenery() && inside(wreck.position.x, low.x, high.x) && inside(wreck.position.y, low.y, high.y) {
+                cleared.push((id, entity, wreck));
+            }
+        }
+        let economy = &mut self.economies[team.index()];
+        for &(_, _, wreck) in &cleared {
+            economy.mass = (economy.mass + wreck.mass).min(economy.mass_capacity);
+            economy.energy = (economy.energy + wreck.energy).min(economy.energy_capacity);
+        }
+        for (id, entity, _) in cleared {
+            self.ecs.despawn(entity).expect("wreck list only holds live wrecks");
+            self.wrecks.retain(|wreck| wreck.0 != id);
+        }
+    }
+
     /// Starts a structure at a cell. It occupies the ground right away.
     pub fn spawn_site(&mut self, blueprint: BlueprintId, team: Team, cell_x: u32, cell_y: u32) -> Option<SimId> {
         self.place_structure(blueprint, team, cell_x, cell_y, false)
@@ -230,6 +272,7 @@ impl SimWorld {
             return None;
         }
         let size = u32::from(self.blueprints.get(blueprint).footprint);
+        self.clear_scenery(team, cell_x, cell_y, size);
         let center = cell_center(cell_x, cell_y, size);
         let spawn = self.blueprint_spawn(blueprint, team, center);
         let id = self.spawn_unit(spawn);
@@ -588,6 +631,7 @@ impl SimWorld {
 
         for economy in &mut self.economies {
             economy.mass_reclaimed = Res::ZERO;
+            economy.energy_reclaimed = Res::ZERO;
         }
         let mut power_by_target: BTreeMap<(SimId, WorkKind), Fp> = BTreeMap::new();
         for index in 0..self.builders.len() {
@@ -628,7 +672,7 @@ impl SimWorld {
         for (team_index, economy) in self.economies.iter_mut().enumerate() {
             let (mass_demand, energy_demand) = demand[team_index];
             let mass_supply = economy.mass + economy.mass_income + economy.mass_reclaimed;
-            let energy_supply = economy.energy + economy.energy_income;
+            let energy_supply = economy.energy + economy.energy_income + economy.energy_reclaimed;
             let share = |supply: Res, wanted: Res| {
                 if wanted <= supply || wanted == Res::ZERO {
                     Res::ONE
@@ -655,7 +699,7 @@ impl SimWorld {
         }
         for (team_index, economy) in self.economies.iter_mut().enumerate() {
             let mass = economy.mass + economy.mass_income + economy.mass_reclaimed - spent[team_index].0;
-            let energy = economy.energy + economy.energy_income - spent[team_index].1;
+            let energy = economy.energy + economy.energy_income + economy.energy_reclaimed - spent[team_index].1;
             economy.mass = mass.clamp(Res::ZERO, economy.mass_capacity);
             economy.energy = energy.clamp(Res::ZERO, economy.energy_capacity);
         }
@@ -704,13 +748,17 @@ impl SimWorld {
             TaskStep::Reclaim { target, entity: wreck_entity } => {
                 self.halt(id, entity);
                 self.work_links.push(WorkLink { builder: id, target, reclaim: true });
-                let wanted = fp_to_res(power) * RECLAIM_MASS_PER_POWER / TICKS_PER_SECOND;
+                let per_tick = |rate: i64| fp_to_res(power) * rate / TICKS_PER_SECOND;
                 let mut wreck = self.ecs.get::<&mut Wreck>(wreck_entity).expect("task checked the wreck");
-                let taken = wanted.min(wreck.mass);
-                wreck.mass -= taken;
-                let finished = wreck.mass <= Res::ZERO;
+                let mass = per_tick(RECLAIM_MASS_PER_POWER).min(wreck.mass);
+                let energy = per_tick(RECLAIM_ENERGY_PER_POWER).min(wreck.energy);
+                wreck.mass -= mass;
+                wreck.energy -= energy;
+                let finished = wreck.mass <= Res::ZERO && wreck.energy <= Res::ZERO;
                 drop(wreck);
-                self.economies[team.index()].mass_reclaimed += taken;
+                let economy = &mut self.economies[team.index()];
+                economy.mass_reclaimed += mass;
+                economy.energy_reclaimed += energy;
                 if finished {
                     self.ecs.despawn(wreck_entity).expect("task checked the wreck");
                     self.wrecks.retain(|wreck| wreck.0 != target);

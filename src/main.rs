@@ -74,7 +74,7 @@ Controls:
   Shift (hold)         Show every unit's pending orders
   Shift + drag         Add a box of units to the selection
   Right-click          Attack an enemy, assist or repair a friend, reclaim a wreck,
-                       move to the ground, or set a factory's rally point
+                       tree, or rock, move to the ground, or set a factory's rally point
   Shift + a factory unit  Queue 5 at a time, by button or key
   Shift + drag an icon Move an order or rally point somewhere else
   Shift + right-click  Queue the order after what the selection is already doing
@@ -84,6 +84,9 @@ Controls:
   F, then left-click   Attack-move
   Y, then left-click   Assist a friendly unit: stay with it and protect it
   Alt + right-click    Attack-move
+  Ctrl + right-click   Formation move: travel together at the slowest unit's pace.
+                       Add Alt to attack-move. Command works too
+  J, then left-click   Formation move. Hold Alt when clicking to attack-move
   P, then left-clicks  Add patrol points, then right-click or press P to start
   P + right-click      Hold P and add patrol points, then release P
   X                    Stop
@@ -1275,7 +1278,12 @@ fn run_windowed(seed: u64, options: Options) {
                         }
                         for wreck in &current.wrecks {
                             let center = [raw_to_world(wreck.x), raw_to_world(wreck.y), raw_to_world(wreck.z)];
-                            scene_instances.push(Shape::Wreck, instances::wreck_instance(center, raw_to_world(wreck.radius), eye));
+                            if wreck.kind.is_scenery() {
+                                let (shape, instance) = instances::scenery_instance(wreck.kind, center, raw_to_world(wreck.radius), eye);
+                                scene_instances.push(shape, instance);
+                            } else {
+                                scene_instances.push(Shape::Wreck, instances::wreck_instance(center, raw_to_world(wreck.radius), eye));
+                            }
                         }
                         if let Some(blueprint) = placing {
                             if let Some(spot) = placement_spot {

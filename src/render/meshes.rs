@@ -32,6 +32,10 @@ pub enum Shape {
     PointDefenseBase,
     Shell,
     Wreck,
+    /// A conifer: a thin trunk under a cone.
+    Tree,
+    /// A squat, many-sided boulder.
+    Rock,
     /// Flat, around the feet of a selected mobile unit.
     SelectionRing,
     /// Flat, around the footprint of a selected structure.
@@ -39,7 +43,7 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 23] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -59,6 +63,8 @@ impl Shape {
         Self::PointDefenseBase,
         Self::Shell,
         Self::Wreck,
+        Self::Tree,
+        Self::Rock,
         Self::SelectionRing,
         Self::SelectionBox,
     ];
@@ -275,6 +281,14 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.block([-0.5, -0.5, -0.5], [0.5, 0.5, -0.25]);
             mesh.beam([-0.4, -0.35, -0.2], [0.35, -0.1, 0.3], 0.14, 0.1);
             mesh.beam([0.25, 0.35, -0.2], [-0.2, 0.05, 0.15], 0.12, 0.09);
+        }
+        Shape::Tree => {
+            mesh.frustum([0.0, 0.0], [-0.5, -0.2], [0.09, 0.07], 6);
+            mesh.frustum([0.0, 0.0], [-0.3, 0.5], [0.5, 0.0], 7);
+        }
+        Shape::Rock => {
+            mesh.frustum([0.0, 0.0], [-0.5, 0.15], [0.5, 0.36], 5);
+            mesh.frustum([0.04, -0.03], [0.15, 0.5], [0.36, 0.08], 5);
         }
         Shape::SelectionRing => {
             const SEGMENTS: usize = 24;

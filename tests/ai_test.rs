@@ -196,3 +196,25 @@ fn ai_cannot_see_through_fog() {
     };
     assert_eq!(run(false), run(true), "Blue's orders changed because of something it could not see");
 }
+
+#[test]
+fn late_in_a_long_game_the_commander_joins_a_full_size_wave() {
+    let wave_with = |minute: u32| {
+        let mut world = scenario::skirmish(41).world;
+        let home = scenario::skirmish_start(Team::Blue);
+        let tank = world.blueprints.id("t2_heavy_tank");
+        for index in 0..50 {
+            world.spawn_mobile(tank, Team::Blue, Vec2Fp::new(home.x + fp_int(300 + index % 10 * 20), home.y + fp_int(300 + index / 10 * 20)));
+        }
+        world.current_tick = minute * 600;
+        let orders = AiBrain::new(Team::Blue, 41).think(&world);
+        let wave = orders.iter().find_map(|command| match command {
+            SimCommand::AttackMove { units, .. } => Some(units.clone()),
+            _ => None,
+        });
+        let wave = wave.expect("a full-size wave sets out");
+        (wave.len(), wave.contains(&world.commanders[Team::Blue.index()].unwrap()))
+    };
+    assert_eq!(wave_with(20), (50, false), "the commander stays home early on");
+    assert_eq!(wave_with(36), (51, true), "and joins the wave after 35 minutes");
+}

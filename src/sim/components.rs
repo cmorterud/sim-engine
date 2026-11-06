@@ -342,12 +342,32 @@ pub struct Patrol {
     pub next: u32,
 }
 
-/// Battlefield debris that engineers can reclaim for mass.
+/// What builders can reclaim: battlefield debris, or the trees and rocks that come with the map.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum WreckKind {
+    Debris,
+    /// Mostly energy, and quick to reclaim.
+    Tree,
+    /// Pure mass.
+    Rock,
+}
+
+impl WreckKind {
+    /// Trees and rocks are part of the map, so they show through fog of war, like the terrain.
+    pub const fn is_scenery(self) -> bool {
+        !matches!(self, Self::Debris)
+    }
+}
+
+/// Something builders can reclaim, for mass and energy.
 #[derive(Copy, Clone, Debug)]
 pub struct Wreck {
     pub mass: Res,
+    pub energy: Res,
     pub position: Vec2Fp,
     pub radius: Fp,
+    pub kind: WreckKind,
 }
 
 #[cfg(test)]

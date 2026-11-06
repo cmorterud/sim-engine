@@ -638,7 +638,7 @@ mod tests {
         hurt.health_permille = 400;
         let units = [view(1, Team::Blue, db.id("t1_engineer"), &db, 2_000.0, 1_950.0), hurt];
         let raw = |value: f64| (value * 4096.0) as i32;
-        let wrecks = [WreckView { id: SimId(9), x: raw(1_900.0), y: raw(2_050.0), z: raw(8.0), radius: raw(8.0), mass: 10 }];
+        let wrecks = [WreckView { id: SimId(9), x: raw(1_900.0), y: raw(2_050.0), z: raw(8.0), radius: raw(8.0), mass: 10, energy: 0, kind: crate::sim::components::WreckKind::Debris }];
         let camera = camera();
         assert_eq!(
             click_at(&[SimId(1)], &units, &wrecks, &db, &camera, [2_100.0, 2_050.0]),

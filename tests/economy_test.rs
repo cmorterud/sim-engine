@@ -1774,3 +1774,111 @@ fn only_factories_and_sites_can_be_paused() {
     world.advance_tick(&[SimCommand::SetPaused { units: vec![power, engineer], paused: true }]);
     assert!(world.snapshot_for(Some(Team::Blue)).paused.is_empty());
 }
+
+fn scenery_kind(world: &SimWorld, wreck: SimId) -> Option<sim_engine::sim::components::WreckKind> {
+    let index = world.wrecks.binary_search_by_key(&wreck, |entry| entry.0).ok()?;
+    world.ecs.get::<&sim_engine::sim::components::Wreck>(world.wrecks[index].1).ok().map(|wreck| wreck.kind)
+}
+
+#[test]
+fn a_tree_gives_quick_energy_and_a_little_mass() {
+    use sim_engine::sim::components::WreckKind;
+    let mut world = test_world();
+    set_resources(&mut world, Team::Blue, 1_000, 1_000);
+    (world.economies[0].mass, world.economies[0].energy) = (Res::ZERO, Res::ZERO);
+    let engineer = world.spawn_mobile(id(&world, "t1_engineer"), Team::Blue, point(1_000, 1_000));
+    let tree = world.spawn_scenery(WreckKind::Tree, point(1_010, 1_000), Fp::ZERO);
+    world.advance_tick(&[SimCommand::Reclaim { units: vec![engineer], target: tree }]);
+    // 20 energy at 10 a second for each of the engineer's 5 build power: under half a second.
+    run(&mut world, 10);
+    assert_eq!(scenery_kind(&world, tree), None, "the tree should be gone");
+    let (mass, energy) = (world.economies[0].mass.to_num::<f64>(), world.economies[0].energy.to_num::<f64>());
+    assert!((0.99..=1.01).contains(&mass), "reclaimed {mass} mass");
+    assert!((19.9..=20.1).contains(&energy), "reclaimed {energy} energy");
+}
+
+#[test]
+fn a_rock_gives_mass_by_its_size_and_no_energy() {
+    use sim_engine::sim::components::WreckKind;
+    let mut world = test_world();
+    set_resources(&mut world, Team::Blue, 1_000, 1_000);
+    (world.economies[0].mass, world.economies[0].energy) = (Res::ZERO, Res::ZERO);
+    let engineer = world.spawn_mobile(id(&world, "t1_engineer"), Team::Blue, point(1_000, 1_000));
+    let rock = world.spawn_scenery(WreckKind::Rock, point(1_015, 1_000), fp_int(8));
+    world.advance_tick(&[SimCommand::Reclaim { units: vec![engineer], target: rock }]);
+    // 5 mass for each unit of radius, so 40, at 10 a second.
+    run(&mut world, 30);
+    assert_eq!(scenery_kind(&world, rock), Some(WreckKind::Rock), "half eaten after 3 seconds");
+    run(&mut world, 20);
+    assert_eq!(scenery_kind(&world, rock), None, "gone after 5");
+    let mass = world.economies[0].mass.to_num::<f64>();
+    assert!((39.9..=40.1).contains(&mass), "reclaimed {mass} mass");
+    assert_eq!(world.economies[0].energy, Res::ZERO);
+}
+
+#[test]
+fn building_over_trees_and_rocks_clears_them_for_what_they_held_but_leaves_debris() {
+    use sim_engine::sim::components::{Wreck, WreckKind};
+    let mut world = test_world();
+    set_resources(&mut world, Team::Blue, 1_000, 1_000);
+    (world.economies[0].mass, world.economies[0].energy) = (Res::from_num(500), Res::ZERO);
+    // A generator is one cell, from (1000, 1000) to (1020, 1020).
+    let tree = world.spawn_scenery(WreckKind::Tree, point(1_010, 1_010), Fp::ZERO);
+    let rock = world.spawn_scenery(WreckKind::Rock, point(1_018, 1_002), fp_int(6));
+    let outside = world.spawn_scenery(WreckKind::Tree, point(1_040, 1_010), Fp::ZERO);
+    let debris_id = world.spawn_scenery(WreckKind::Rock, point(1_005, 1_015), fp_int(5));
+    let index = world.wrecks.binary_search_by_key(&debris_id, |entry| entry.0).unwrap();
+    world.ecs.get::<&mut Wreck>(world.wrecks[index].1).unwrap().kind = WreckKind::Debris;
+    let generator = id(&world, "power_generator");
+    assert!(world.spawn_site(generator, Team::Blue, 50, 50).is_some(), "trees and rocks do not stop a building");
+    assert_eq!(scenery_kind(&world, tree), None);
+    assert_eq!(scenery_kind(&world, rock), None);
+    assert_eq!(scenery_kind(&world, outside), Some(WreckKind::Tree));
+    assert_eq!(scenery_kind(&world, debris_id), Some(WreckKind::Debris), "debris has to be reclaimed");
+    assert_eq!(world.economies[0].mass, Res::from_num(500 + 1 + 30));
+    assert_eq!(world.economies[0].energy, Res::from_num(20));
+}
+
+#[test]
+fn trees_and_rocks_show_through_fog_but_debris_does_not() {
+    use sim_engine::sim::components::{Wreck, WreckKind};
+    let mut world = scenario::skirmish(3).world;
+    let hidden = Vec2Fp::new(fp_int(5_000), fp_int(9_000));
+    let tree = world.spawn_scenery(WreckKind::Tree, hidden, Fp::ZERO);
+    let debris = world.spawn_scenery(WreckKind::Rock, hidden + point(30, 0), fp_int(5));
+    let index = world.wrecks.binary_search_by_key(&debris, |entry| entry.0).unwrap();
+    world.ecs.get::<&mut Wreck>(world.wrecks[index].1).unwrap().kind = WreckKind::Debris;
+    world.advance_tick(&[]);
+    let seen: Vec<SimId> = world.snapshot_for(Some(Team::Blue)).wrecks.iter().map(|wreck| wreck.id).collect();
+    assert!(seen.contains(&tree));
+    assert!(!seen.contains(&debris));
+}
+
+#[test]
+fn the_skirmish_map_has_mirrored_forests_and_rocks_clear_of_bases_and_deposits() {
+    use sim_engine::sim::components::{Wreck, WreckKind};
+    let world = scenario::skirmish(5).world;
+    let map = fp_int(scenario::SKIRMISH_MAP_UNITS);
+    let scenery: Vec<Wreck> = world.wrecks.iter().map(|(_, entity)| *world.ecs.get::<&Wreck>(*entity).unwrap()).collect();
+    let trees = scenery.iter().filter(|wreck| wreck.kind == WreckKind::Tree).count();
+    let rocks = scenery.iter().filter(|wreck| wreck.kind == WreckKind::Rock).count();
+    assert!(trees >= 400 && rocks >= 50, "{trees} trees and {rocks} rocks");
+    // Each comes with its mirror image straight after it.
+    for pair in scenery.chunks(2) {
+        let (first, second) = (pair[0], pair[1]);
+        assert_eq!(second.position, Vec2Fp::new(map - first.position.x, map - first.position.y));
+        assert_eq!((first.kind, first.mass, first.energy, first.radius), (second.kind, second.mass, second.energy, second.radius));
+    }
+    for wreck in &scenery {
+        assert!(world.terrain.is_passable(wreck.position), "scenery in a wall at {:?}", wreck.position);
+        for team in [Team::Blue, Team::Red] {
+            let start = skirmish_start(team);
+            let far = |a: Fp, b: Fp| (a - b).abs() > fp_int(20 * CELL);
+            assert!(far(wreck.position.x, start.x) || far(wreck.position.y, start.y), "scenery in a base at {:?}", wreck.position);
+        }
+        let (x, y) = world.terrain.cell_of(wreck.position);
+        for &(deposit_x, deposit_y) in &world.deposits {
+            assert!((x as u32).abs_diff(deposit_x) > 2 || (y as u32).abs_diff(deposit_y) > 2, "scenery on a deposit at {:?}", wreck.position);
+        }
+    }
+}

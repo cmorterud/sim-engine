@@ -58,8 +58,16 @@ impl Default for SimConfig {
 
 /// Fog of war resolution.
 pub const VISIBILITY_CELL_UNITS: i32 = 80;
-/// One unit of build power reclaims this much mass per second.
+/// One unit of build power reclaims this much mass, and this much energy, per second. Both go
+/// at once, so a tree's energy comes in quickly.
 pub const RECLAIM_MASS_PER_POWER: i64 = 2;
+pub const RECLAIM_ENERGY_PER_POWER: i64 = 10;
+/// What a tree holds, and its size, in units.
+pub const TREE_MASS: i64 = 1;
+pub const TREE_ENERGY: i64 = 20;
+pub const TREE_RADIUS_UNITS: i32 = 4;
+/// A rock holds this much mass for each unit of its radius.
+pub const ROCK_MASS_PER_RADIUS: i64 = 5;
 /// Wrecks keep this share of a unit's mass cost, in thousandths (GAME_SPECIFICATION.md §6.1).
 pub const WRECK_MASS_PERMILLE: i64 = 810;
 /// How often idle patrolling engineers look for work, in ticks.

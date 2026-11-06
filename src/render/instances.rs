@@ -5,7 +5,7 @@ use std::f32::consts::FRAC_1_SQRT_2;
 
 use super::meshes::Shape;
 use crate::sim::blueprints::BlueprintDb;
-use crate::sim::components::{SimId, Team};
+use crate::sim::components::{SimId, Team, WreckKind};
 use crate::sim::world::{ProjectileView, UnitView, WorkLinkView};
 
 const RAW_TO_WORLD: f64 = 1.0 / 4096.0;
@@ -25,6 +25,8 @@ const OVERCHARGE_SHELL: [f32; 3] = [0.75, 0.95, 1.00];
 const OVERCHARGE_SIZE: f32 = 2.4;
 const OBSTACLE: [f32; 3] = [0.42, 0.40, 0.38];
 const WRECK: [f32; 3] = [0.24, 0.23, 0.22];
+const TREE: [f32; 3] = [0.13, 0.36, 0.17];
+const ROCK: [f32; 3] = [0.47, 0.44, 0.40];
 const DEPOSIT: [f32; 3] = [0.10, 0.75, 0.62];
 const GHOST_VALID: [f32; 3] = [0.35, 0.95, 0.45];
 const GHOST_INVALID: [f32; 3] = [0.95, 0.25, 0.20];
@@ -312,6 +314,18 @@ pub fn obstacle_instance(min: [f64; 2], max: [f64; 2], base: f64, height: f64, e
 pub fn wreck_instance(center: [f64; 3], radius: f64, eye: [f64; 3]) -> UnitInstanceRaw {
     let width = (radius * 1.6) as f32;
     instance(center, [width, width, width * 0.5], NORTH, WRECK, PROJECTILE_ICON_PX, eye)
+}
+
+/// A tree or rock, standing on the ground under `center`, which is where wrecks are reported:
+/// half their radius up. They keep their true size at every zoom, like the terrain.
+pub fn scenery_instance(kind: WreckKind, center: [f64; 3], radius: f64, eye: [f64; 3]) -> (Shape, UnitInstanceRaw) {
+    let ground = center[2] - radius * 0.5;
+    let (shape, width, height, color) = match kind {
+        WreckKind::Tree => (Shape::Tree, radius * 2.4, radius * 4.5, TREE),
+        _ => (Shape::Rock, radius * 2.0, radius * 1.1, ROCK),
+    };
+    let at = [center[0], center[1], ground + height * 0.5];
+    (shape, instance(at, [width as f32, width as f32, height as f32], NORTH, color, NO_ICON, eye))
 }
 
 /// A mass deposit: a flat marker that stays visible at every zoom.
