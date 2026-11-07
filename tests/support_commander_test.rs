@@ -97,8 +97,9 @@ fn a_support_commander_builds_t3_structures_and_earns_its_keep() {
 
     // Destroyed, it takes them with it.
     world.ecs.get::<&mut sim_engine::sim::components::Health>(world.unit_entity(support).unwrap()).unwrap().current = Fp::from_bits(1);
+    world.ecs.get::<&mut Combat>(world.unit_entity(support).unwrap()).unwrap().range = Fp::ZERO;
     let tank = spawn(&mut world, "t2_heavy_tank", Team::Red, point(1_200, 1_000));
-    run(&mut world, 60);
+    run(&mut world, 100);
     assert!(world.unit_entity(support).is_none());
     assert_eq!(world.economies[0].mass_income, mass);
     let _ = tank;
@@ -137,10 +138,10 @@ fn support_commander_enhancements_change_its_gun_building_and_sensors() {
     assert_eq!(world.ecs.get::<&Builder>(entity).unwrap().power, fp_int(98));
     install(&mut world, support, "sensor_system");
     assert_eq!(world.ecs.get::<&Builder>(entity).unwrap().power, fp_int(56), "one left-arm enhancement at a time");
-    assert_eq!(world.ecs.get::<&UnitStats>(entity).unwrap().vision, fp_int(1_730));
+    assert_eq!(world.ecs.get::<&UnitStats>(entity).unwrap().vision, fp_int(900));
     run(&mut world, 2);
     let sensors = world.snapshot_for(Some(Team::Blue)).sensor_ranges;
-    assert_eq!(sensors.iter().find(|sensor| sensor.center[0] == fp_int(1_000).to_bits()).map(|sensor| sensor.omni), Some(fp_int(1_300).to_bits()));
+    assert_eq!(sensors.iter().find(|sensor| sensor.center[0] == fp_int(1_000).to_bits()).map(|sensor| sensor.omni), Some(fp_int(1_600).to_bits()));
 
     // The commander's enhancements are not the support commander's.
     let heavy_cannon = world.blueprints.enhancement_id("heavy_cannon");

@@ -19,10 +19,9 @@ balance, taken from its unit blueprint files in <https://github.com/FAForever/fa
 starting point, not something kept in step with FAF: they change freely with this game's own
 testing. `data/units.toml` notes where a value came from, and how it was scaled, next to the value.
 The original's map unit is 20 of ours, one terrain cell: its 10 km map, 512 across, is our 10 km
-skirmish map, 10,240 across. A few values converted early on used 10 instead, and are to be
-corrected: the teleport cost's distances, the nuclear blast's rings, the support commander's
-jammer, shield field, and sensor ranges, and the commander's shield field. Weapon ranges keep the
-slice's own proportions.
+skirmish map, 10,240 across. Every range and radius uses that scale: sight, intel, shields,
+weapon ranges and blasts, missile defense, and build ranges, the slice's own units included.
+Movement speeds, projectile speeds, and unit sizes keep the slice's values for now.
 
 Taken so far:
 

@@ -410,7 +410,7 @@ fn veterans_heal_over_time_and_ranks_stop_at_five() {
     // Destroying ten heavy tanks' worth is far past rank 5.
     let entity = world.unit_entity(hunter).unwrap();
     let _ = entity;
-    let prey: Vec<SimId> = (0..10).map(|index| world.spawn_mobile(world.blueprints.id("t2_heavy_tank"), Team::Red, point(1_150 + index * 20, 1_200))).collect();
+    let prey: Vec<SimId> = (0..10).map(|index| world.spawn_mobile(world.blueprints.id("t2_heavy_tank"), Team::Red, point(1_050 + index * 15, 1_150))).collect();
     for target in &prey {
         let target_entity = world.unit_entity(*target).unwrap();
         world.ecs.get::<&mut Combat>(target_entity).unwrap().range = Fp::ZERO;
@@ -597,8 +597,8 @@ fn a_ground_attack_walks_into_range_and_fires_into_the_fog_at_nothing_else() {
     }
     let here = world.unit_position(bot).unwrap().xy();
     let distance = (here.x - spot.x).to_num::<f64>().hypot((here.y - spot.y).to_num::<f64>());
-    // A light bot reaches 340, and stops once the spot is in range instead of walking on to it.
-    assert!((300.0..=340.0).contains(&distance), "it stopped {distance} from the spot");
+    // A light bot reaches 280, and stops once the spot is in range instead of walking on to it.
+    assert!((240.0..=280.0).contains(&distance), "it stopped {distance} from the spot");
     assert!(shots > 0, "it should fire at the spot");
     assert_eq!(world.unit_health(enemy), Some(enemy_health), "it fires at the spot and nothing else");
 }

@@ -129,9 +129,10 @@ fn a_missile_defense_shoots_down_one_missile_at_a_time() {
     assert_eq!(intercepted, 1, "one missile, shot down once");
     assert!(alive(&world, target), "the defense should have stopped it");
 
-    // Two launchers fire together, and the defense, reloading after the first, misses the second.
+    // Three launchers fire together. A missile crosses the defense's 620 in about 34 ticks,
+    // time for two shots 3 seconds apart, so the third gets through.
     let mut world = open_world();
-    let launchers: Vec<SimId> = [20, 22].into_iter().map(|cell_y| loaded(&mut world, "tactical_missile_launcher", Team::Blue, 20, cell_y, 1)).collect();
+    let launchers: Vec<SimId> = [18, 20, 22].into_iter().map(|cell_y| loaded(&mut world, "tactical_missile_launcher", Team::Blue, 20, cell_y, 1)).collect();
     let target = structure(&mut world, "power_generator", Team::Red, 100, 21);
     structure(&mut world, "tactical_missile_defense", Team::Red, 102, 21);
     world.advance_tick(&[SimCommand::Attack { units: launchers, target }]);
@@ -190,7 +191,7 @@ fn nuclear_standoff() -> (SimWorld, SimId, Vec<SimId>, SimId) {
         structure(&mut world, "power_generator", Team::Red, 176, 20),
         structure(&mut world, "mass_storage", Team::Red, 170, 26),
     ];
-    let far = structure(&mut world, "power_generator", Team::Red, 210, 20);
+    let far = structure(&mut world, "power_generator", Team::Red, 240, 20);
     (world, silo, base, far)
 }
 
@@ -206,11 +207,11 @@ fn a_nuclear_missile_flattens_everything_in_its_blast_once_per_order() {
     structure(&mut world, "shield_generator", Team::Red, 172, 24);
     // Nothing is fired until it is ordered.
     assert!(run_until(&mut world, 30, |world| missiles_from(world, silo) > 0).is_none());
-    // 330 away: outside the inner ring of 300, inside the outer one of 400.
-    let edge = structure(&mut world, "power_generator", Team::Red, 188, 22);
+    // 710 away: outside the inner ring of 600, inside the outer one of 800.
+    let edge = structure(&mut world, "power_generator", Team::Red, 207, 22);
     world.advance_tick(&[SimCommand::AttackGround { units: vec![silo], point: ground_zero() }]);
     assert!(run_until(&mut world, 500, |world| base.iter().all(|id| !alive(world, *id))).is_some(), "the inner ring should flatten the base");
-    assert!(alive(&world, far), "800 away is outside the blast");
+    assert!(alive(&world, far), "1,370 away is outside the blast");
     assert_eq!(health(&world, edge), fp_int(100), "the outer ring does 500");
     let entity = world.unit_entity(silo).unwrap();
     assert_eq!(world.ecs.get::<&Launcher>(entity).unwrap().stock, 1, "one order, one missile");

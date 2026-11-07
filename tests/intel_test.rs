@@ -72,7 +72,7 @@ fn radar_shows_an_enemy_out_of_sight_as_a_blip() {
     assert_eq!(blips(&world, Team::Blue).len(), 1, "but on radar");
     let sensors = world.snapshot_for(Some(Team::Blue)).sensor_ranges;
     assert_eq!(sensors.len(), 1);
-    assert_eq!(sensors[0].radar, fp_int(1_600).to_bits());
+    assert_eq!(sensors[0].radar, fp_int(2_320).to_bits());
     assert!(world.snapshot_for(Some(Team::Red)).sensor_ranges.is_empty(), "only the viewer's own sensors");
 
     // In sight it is a unit, not a blip.
@@ -209,5 +209,5 @@ fn a_radar_upgrades_in_place_to_an_omni_sensor() {
     assert_eq!(world.blueprints.get(blueprint).key, "omni_sensor");
     run(&mut world, 10);
     let sensors = world.snapshot_for(Some(Team::Blue)).sensor_ranges;
-    assert_eq!((sensors[0].radar, sensors[0].omni), (fp_int(2_400).to_bits(), fp_int(800).to_bits()));
+    assert_eq!((sensors[0].radar, sensors[0].omni), (fp_int(12_000).to_bits(), fp_int(4_000).to_bits()));
 }

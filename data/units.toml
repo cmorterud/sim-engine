@@ -18,7 +18,7 @@ health = 11000
 speed = 4
 turn_rate = 180
 radius = 16
-vision = 1000
+vision = 520
 build_power = 10
 build_range = 200
 # Its engineering suites (the enhancements below) unlock the T2 and T3 structures on its list.
@@ -30,7 +30,7 @@ energy_income = 20
 mass_storage = 650
 energy_storage = 4000
 death_explosion = { damage = 15000, radius = 300 }
-omni = 400
+omni = 480
 
 [[unit]]
 id = "t1_engineer"
@@ -45,9 +45,9 @@ speed = 4
 turn_rate = 240
 turn_radius = 10
 radius = 8
-vision = 500
+vision = 360
 build_power = 5
-build_range = 120
+build_range = 100
 builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "radar"]
 
 [[unit]]
@@ -62,8 +62,8 @@ health = 200
 speed = "5.5"
 turn_rate = 360
 radius = 7
-vision = 500
-weapon = { range = 340, reload_ticks = 10, projectile_speed = 40, damage = 18, turn_rate = 300 }
+vision = 360
+weapon = { range = 280, reload_ticks = 10, projectile_speed = 40, damage = 18, turn_rate = 300 }
 
 [[unit]]
 id = "t1_light_artillery"
@@ -78,8 +78,8 @@ speed = "3.5"
 turn_rate = 120
 turn_radius = 30
 radius = 8
-vision = 500
-weapon = { range = 600, reload_ticks = 40, projectile_speed = 12, damage = 90, splash_radius = 40, turn_rate = 90 }
+vision = 360
+weapon = { range = 600, reload_ticks = 40, projectile_speed = 12, damage = 90, splash_radius = 20, turn_rate = 90 }
 
 [[unit]]
 id = "t2_heavy_tank"
@@ -94,8 +94,8 @@ speed = "4.5"
 turn_rate = 90
 turn_radius = 40
 radius = 11
-vision = 600
-weapon = { range = 460, reload_ticks = 12, projectile_speed = 60, damage = 70, turn_rate = 60 }
+vision = 400
+weapon = { range = 440, reload_ticks = 12, projectile_speed = 60, damage = 70, turn_rate = 60 }
 
 [[unit]]
 id = "land_factory_t1"
@@ -177,7 +177,7 @@ energy = 2000
 build_time = 360
 health = 1400
 footprint = 1
-vision = 700
+vision = 480
 weapon = { range = 520, reload_ticks = 8, projectile_speed = 70, damage = 60, turn_rate = 120 }
 
 # A dome that stops enemy shells from outside, while those under it fire out freely
@@ -193,7 +193,7 @@ build_time = 400
 health = 900
 footprint = 2
 vision = 400
-shield = { radius = 180, health = 5000, regen = 50, recharge_seconds = 30, upkeep = 30 }
+shield = { radius = 260, health = 5000, regen = 50, recharge_seconds = 30, upkeep = 30 }
 
 # Missiles (GAME_SPECIFICATION.md §8). The launchers and defenses are tier 2 and 3: T2 and T3
 # engineers build them, and so does the commander once it has the engineering upgrade. A launcher
@@ -208,11 +208,11 @@ energy = 4500
 build_time = 500
 health = 1200
 footprint = 1
-vision = 300
+vision = 480
 build_power = 10
 builds = ["tactical_missile"]
 max_stock = 6
-weapon = { range = 2400, reload_ticks = 150, projectile_speed = 18, damage = 1500, splash_radius = 30, kind = "tactical_missile", cruise_height = 60 }
+weapon = { range = 5120, reload_ticks = 150, projectile_speed = 18, damage = 1500, splash_radius = 40, kind = "tactical_missile", cruise_height = 60 }
 
 # 30 seconds at the launcher's own build power.
 [[unit]]
@@ -238,7 +238,7 @@ build_time = 250
 health = 800
 footprint = 1
 vision = 400
-missile_defense = { kind = "tactical", range = 450, reload_ticks = 30 }
+missile_defense = { kind = "tactical", range = 620, reload_ticks = 30 }
 
 # Builds nuclear missiles, one at a time, and fires one each time it is ordered to.
 [[unit]]
@@ -251,12 +251,12 @@ energy = 25000
 build_time = 1600
 health = 4000
 footprint = 3
-vision = 300
+vision = 560
 build_power = 20
 builds = ["strategic_missile"]
 max_stock = 5
-# The original's two rings: 70,000 within 30 of its units and 500 within 40, at ten of ours to one.
-weapon = { range = 20000, reload_ticks = 100, projectile_speed = 25, damage = 500, splash_radius = 400, inner_damage = 70000, inner_radius = 300, kind = "strategic_missile", cruise_height = 500 }
+# The original's two rings: 70,000 within 30 of its units and 500 within 40, at twenty of ours to one.
+weapon = { range = 20000, reload_ticks = 100, projectile_speed = 25, damage = 500, splash_radius = 800, inner_damage = 70000, inner_radius = 600, kind = "strategic_missile", cruise_height = 500 }
 
 [[unit]]
 id = "strategic_missile"
@@ -285,7 +285,7 @@ vision = 400
 build_power = 20
 builds = ["anti_nuke"]
 max_stock = 7
-missile_defense = { kind = "strategic", range = 1000 }
+missile_defense = { kind = "strategic", range = 1800 }
 
 [[unit]]
 id = "anti_nuke"
@@ -327,9 +327,9 @@ speed = 4
 turn_rate = 240
 turn_radius = 10
 radius = 9
-vision = 550
+vision = 400
 build_power = 12
-build_range = 130
+build_range = 120
 builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "radar", "stealth_field_generator"]
 
 [[unit]]
@@ -345,7 +345,7 @@ speed = 4
 turn_rate = 240
 turn_radius = 10
 radius = 10
-vision = 600
+vision = 520
 build_power = 30
 build_range = 140
 builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway"]
@@ -363,8 +363,8 @@ energy = 600
 build_time = 90
 health = 300
 footprint = 1
-vision = 300
-radar = 1600
+vision = 400
+radar = 2320
 upkeep = 10
 # Drives its own upgrade to an Omni Sensor.
 build_power = 10
@@ -381,9 +381,9 @@ energy = 18000
 build_time = 1500
 health = 1200
 footprint = 1
-vision = 400
-radar = 2400
-omni = 800
+vision = 600
+radar = 12000
+omni = 4000
 upkeep = 50
 
 # Hides friendly units in its field from enemy radar, and puts decoy blips on it.
@@ -397,9 +397,9 @@ energy = 3000
 build_time = 300
 health = 600
 footprint = 1
-vision = 300
-stealth_field = 350
-jammer = { radius = 450, decoys = 8 }
+vision = 400
+stealth_field = 480
+jammer = { radius = 620, decoys = 8 }
 upkeep = 25
 
 # Support commanders (GAME_SPECIFICATION.md §2.2), with Forged Alliance Forever's numbers for its
@@ -431,7 +431,7 @@ health = 16000
 speed = 5
 turn_rate = 180
 radius = 14
-vision = 1000
+vision = 520
 build_power = 56
 build_range = 200
 builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway"]
@@ -441,8 +441,8 @@ mass_income = 1
 energy_income = 20
 mass_storage = 275
 energy_storage = 500
-death_explosion = { damage = 1000, radius = 100 }
-omni = 260
+death_explosion = { damage = 1000, radius = 200 }
+omni = 320
 
 # Field enhancements (GAME_SPECIFICATION.md §2.1), with Forged Alliance Forever's numbers for its
 # commander. A commander has three slots, and one enhancement in each: a new one replaces what is
@@ -505,7 +505,7 @@ slot = "back"
 mass = 2300
 energy = 112500
 build_time = 2100
-shield = { radius = 24, health = 19000, regen = 30, recharge_seconds = 140, upkeep = 250 }
+shield = { radius = 30, health = 19000, regen = 30, recharge_seconds = 140, upkeep = 250 }
 
 [[enhancement]]
 id = "shield_field"
@@ -515,7 +515,7 @@ slot = "back"
 mass = 1400
 energy = 40000
 build_time = 1400
-shield = { radius = 100, health = 5000, regen = 60, recharge_seconds = 45, upkeep = 200 }
+shield = { radius = 200, health = 5000, regen = 60, recharge_seconds = 45, upkeep = 200 }
 
 [[enhancement]]
 id = "personal_stealth"
@@ -606,9 +606,9 @@ slot = "left_arm"
 mass = 600
 energy = 20000
 build_time = 3000
-# The original's 45 sight for 26, and 80 omni for 16.
-vision = 1730
-omni = 1300
+# The original's 45 sight and 80 omni.
+vision = 900
+omni = 1600
 
 [[enhancement]]
 id = "support_shield"
@@ -618,7 +618,7 @@ slot = "back"
 mass = 2000
 energy = 100200
 build_time = 7200
-shield = { radius = 22, health = 26000, regen = 50, recharge_seconds = 170, upkeep = 500 }
+shield = { radius = 30, health = 26000, regen = 50, recharge_seconds = 170, upkeep = 500 }
 
 [[enhancement]]
 id = "support_shield_field"
@@ -629,7 +629,7 @@ requires = "support_shield"
 mass = 3500
 energy = 360800
 build_time = 10800
-shield = { radius = 100, health = 52000, regen = 150, recharge_seconds = 215, upkeep = 1000 }
+shield = { radius = 200, health = 52000, regen = 150, recharge_seconds = 215, upkeep = 1000 }
 
 [[enhancement]]
 id = "radar_jammer"
@@ -639,7 +639,7 @@ slot = "back"
 mass = 300
 energy = 8000
 build_time = 2500
-jammer = { radius = 260, decoys = 5 }
+jammer = { radius = 520, decoys = 5 }
 jammer_upkeep = 100
 
 [[enhancement]]

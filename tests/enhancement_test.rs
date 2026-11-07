@@ -130,7 +130,7 @@ fn a_personal_shield_goes_where_the_commander_goes() {
     run(&mut world, 2);
     let dome = |world: &SimWorld| world.snapshot_for(Some(Team::Blue)).shields.iter().find(|shield| shield.id == acu).map(|shield| (shield.center, shield.radius));
     let (center, radius) = dome(&world).expect("a dome over the commander");
-    assert_eq!(radius, fp_int(24).to_bits());
+    assert_eq!(radius, fp_int(30).to_bits());
     assert_eq!([center[0], center[1]], [fp_int(1_000).to_bits(), fp_int(1_000).to_bits()]);
     world.advance_tick(&[SimCommand::Move { units: vec![acu], goal: point(1_400, 1_000) }]);
     run(&mut world, 60);
@@ -226,8 +226,8 @@ fn a_teleport_aborts_when_the_energy_runs_out_and_needs_a_spot_it_can_sense() {
     world.advance_tick(&[SimCommand::Teleport { units: vec![acu], point: point(4_000, 4_000) }]);
     assert!(world.ecs.get::<&Teleporting>(entity).is_err(), "it cannot jump somewhere it cannot sense");
 
-    // In sight, but with too little energy to finish.
-    world.advance_tick(&[SimCommand::Teleport { units: vec![acu], point: point(1_600, 1_000) }]);
+    // In sight, 400 away within its 520, but with too little energy to finish.
+    world.advance_tick(&[SimCommand::Teleport { units: vec![acu], point: point(1_400, 1_000) }]);
     assert!(world.ecs.get::<&Teleporting>(entity).is_ok());
     world.economies[0].energy = Res::from_num(10_000);
     run(&mut world, 50);

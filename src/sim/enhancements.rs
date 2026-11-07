@@ -15,8 +15,9 @@ use crate::math::fp::{sqrt_wide, Fp, Vec2Fp, Vec3Fp};
 /// Ctrl+K gives five seconds to change one's mind.
 pub const SELF_DESTRUCT_TICKS: u32 = 5 * TICKS_PER_SECOND as u32;
 
-/// Forged Alliance's distances are a tenth of ours, and its teleport costs are worked out in them.
-const UNITS_PER_ORIGINAL_UNIT: i64 = 10;
+/// One of Forged Alliance's map units is one of our terrain cells, and its teleport costs are
+/// worked out in its units.
+const UNITS_PER_ORIGINAL_UNIT: i64 = super::config::TERRAIN_CELL_UNITS as i64;
 
 /// `distance` to the power 2.1, for a whole number of the original game's units, as its
 /// teleport costs use. Worked out in whole numbers, so that every machine agrees: the tenth
@@ -468,7 +469,7 @@ mod tests {
     fn teleports_cost_more_and_take_longer_the_farther_they_go() {
         let teleporter = TeleporterDef { flat_energy: Res::from_num(100_000), max_energy: Res::from_num(2_500_000), min_ticks: 200, max_ticks: 500 };
         let (near, near_ticks) = teleport_cost(&teleporter, Fp::from_num(100));
-        let (far, far_ticks) = teleport_cost(&teleporter, Fp::from_num(5_000));
+        let (far, far_ticks) = teleport_cost(&teleporter, Fp::from_num(10_000));
         assert!(near < far && near_ticks <= far_ticks);
         // 500 of the original's units: 100,000 + 0.5 * 500^2.1, and 20 + 0.00001 * 500^2.1 seconds.
         assert_eq!(far.to_num::<i64>() / 1000, 332);

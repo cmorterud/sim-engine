@@ -736,11 +736,12 @@ impl SimWorld {
         if !self.self_destructing.is_empty() {
             self.step_self_destructs();
         }
-        if self.builders.is_empty() && self.factories.is_empty() && self.structures.is_empty() && self.patrols.is_empty() {
-            return;
-        }
+        // Before anything else: the last builder dying still takes its income with it.
         if self.economy_dirty {
             self.recompute_economy();
+        }
+        if self.builders.is_empty() && self.factories.is_empty() && self.structures.is_empty() && self.patrols.is_empty() {
+            return;
         }
         self.step_patrols();
 
