@@ -147,6 +147,8 @@ pub fn unit_look(key: &str) -> UnitLook {
         "land_factory_t1" => look(Shape::Factory, Some([0.35, 0.35, 0.45]), 0.55),
         "land_factory_t2" => look(Shape::Factory, Some([0.20, 0.20, 0.30]), 0.7),
         "mass_extractor" => look(Shape::Extractor, Some([0.10, 0.95, 0.75]), 0.8),
+        "mass_extractor_t2" => look(Shape::Extractor, Some([0.10, 0.75, 0.95]), 1.0),
+        "mass_extractor_t3" => look(Shape::Extractor, Some([0.55, 0.40, 1.00]), 1.2),
         "power_generator" => look(Shape::Generator, Some([1.00, 0.85, 0.20]), 1.2),
         "mass_storage" => look(Shape::Storage, Some([0.60, 0.90, 0.60]), 0.65),
         "radar" => look(Shape::Radar, Some([0.40, 0.90, 0.55]), 1.3),
@@ -479,7 +481,7 @@ mod tests {
         }
         // Higher tiers of the factory and the engineer, the radar's omni upgrade, and the support
         // commander share the shape they come from, and everything else is unique.
-        let shared = ["land_factory_t2", "land_factory_t3", "t2_engineer", "t3_engineer", "omni_sensor", "support_commander"];
+        let shared = ["land_factory_t2", "land_factory_t3", "t2_engineer", "t3_engineer", "omni_sensor", "support_commander", "mass_extractor_t2", "mass_extractor_t3"];
         let shapes: Vec<Shape> = drawn().filter(|unit| !shared.contains(&unit.key.as_str())).map(|unit| unit_look(&unit.key).shape).collect();
         for (index, shape) in shapes.iter().enumerate() {
             assert!(!shapes[index + 1..].contains(shape), "{shape:?} is used twice");

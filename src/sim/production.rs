@@ -47,6 +47,12 @@ pub struct Economy {
     pub energy_demand: Res,
     /// The share of demand that was met, from 0 to 1.
     pub satisfaction: Res,
+    /// Mass extractors' share of `mass_income`, and the energy they need to make it, per tick.
+    pub extractor_income: Res,
+    pub extractor_upkeep: Res,
+    /// The share of that energy paid this tick, from 0 to 1. Extractors make that share of
+    /// their mass, so an energy stall slows them all alike, as in the original.
+    pub extractor_efficiency: Res,
 }
 
 impl Economy {
@@ -65,9 +71,17 @@ impl Economy {
             self.mass_demand,
             self.energy_demand,
             self.satisfaction,
+            self.extractor_income,
+            self.extractor_upkeep,
+            self.extractor_efficiency,
         ] {
             hasher.write(&value.to_bits().to_le_bytes());
         }
+    }
+
+    /// The mass the extractors are not making this tick for want of energy.
+    pub fn extractor_shortfall(&self) -> Res {
+        self.extractor_income - self.extractor_income * self.extractor_efficiency
     }
 
     pub fn view(&self) -> EconomyView {
@@ -77,7 +91,7 @@ impl Economy {
             energy: self.energy.to_num(),
             mass_capacity: self.mass_capacity.to_num(),
             energy_capacity: self.energy_capacity.to_num(),
-            mass_income: per_second(self.mass_income + self.mass_reclaimed),
+            mass_income: per_second(self.mass_income - self.extractor_shortfall() + self.mass_reclaimed),
             energy_income: per_second(self.energy_income + self.energy_reclaimed),
             mass_demand: per_second(self.mass_demand),
             energy_demand: per_second(self.energy_demand),
@@ -509,6 +523,8 @@ impl SimWorld {
                     } else {
                         let _ = self.ecs.remove_one::<Paused>(entity);
                     }
+                    // A paused extractor makes nothing.
+                    self.economy_dirty = true;
                 }
             }
             SimCommand::CancelTask { units, task } => {
@@ -754,6 +770,7 @@ impl SimWorld {
         let upkeep = self.step_shields();
         let upkeep = self.step_intel_upkeep(upkeep);
         let upkeep = if self.teleporting.is_empty() { upkeep } else { self.step_teleports(upkeep) };
+        let upkeep = self.pay_extractors(upkeep);
         let mut power_by_target: BTreeMap<(SimId, WorkKind), Fp> = BTreeMap::new();
         for index in 0..self.builders.len() {
             let (id, entity) = self.builders[index];
@@ -798,7 +815,7 @@ impl SimWorld {
         let mut satisfaction = [Res::ONE; 2];
         for (team_index, economy) in self.economies.iter_mut().enumerate() {
             let (mass_demand, energy_demand) = demand[team_index];
-            let mass_supply = economy.mass + economy.mass_income + economy.mass_reclaimed;
+            let mass_supply = economy.mass + economy.mass_income - economy.extractor_shortfall() + economy.mass_reclaimed;
             let energy_supply = economy.energy + economy.energy_income + economy.energy_reclaimed - upkeep[team_index];
             let share = |supply: Res, wanted: Res| {
                 if wanted <= supply || wanted == Res::ZERO {
@@ -825,11 +842,27 @@ impl SimWorld {
             self.apply_work(item, item.step * share);
         }
         for (team_index, economy) in self.economies.iter_mut().enumerate() {
-            let mass = economy.mass + economy.mass_income + economy.mass_reclaimed - spent[team_index].0;
+            let mass = economy.mass + economy.mass_income - economy.extractor_shortfall() + economy.mass_reclaimed - spent[team_index].0;
             let energy = economy.energy + economy.energy_income + economy.energy_reclaimed - spent[team_index].1 - upkeep[team_index];
             economy.mass = mass.clamp(Res::ZERO, economy.mass_capacity);
             economy.energy = energy.clamp(Res::ZERO, economy.energy_capacity);
         }
+    }
+
+    /// Pays the extractors' energy, after shields, intel, and teleports, out of what is stored and
+    /// coming in. What cannot be paid slows every extractor of the team by the same share.
+    /// Returns what each team has paid, everything before included.
+    fn pay_extractors(&mut self, mut paid: [Res; 2]) -> [Res; 2] {
+        for (team, economy) in self.economies.iter_mut().enumerate() {
+            if economy.extractor_upkeep == Res::ZERO {
+                economy.extractor_efficiency = Res::ONE;
+                continue;
+            }
+            let available = (economy.energy + economy.energy_income + economy.energy_reclaimed - paid[team]).max(Res::ZERO);
+            economy.extractor_efficiency = (available / economy.extractor_upkeep).min(Res::ONE);
+            paid[team] += economy.extractor_upkeep * economy.extractor_efficiency;
+        }
+        paid
     }
 
     /// Counts down collapsed domes, and for those that are up, takes their upkeep and lets them
@@ -1247,6 +1280,8 @@ impl SimWorld {
             economy.energy_capacity = economy.base_energy_capacity;
             economy.mass_income = Res::ZERO;
             economy.energy_income = Res::ZERO;
+            economy.extractor_income = Res::ZERO;
+            economy.extractor_upkeep = Res::ZERO;
         }
         let mut adjacency_updates = Vec::with_capacity(self.structures.len());
         for &(id, entity) in &self.structures {
@@ -1259,11 +1294,22 @@ impl SimWorld {
             let bonus = self.adjacency_of(id, blueprint, footprint, team);
             adjacency_updates.push((entity, bonus));
             let unit = self.blueprints.get(blueprint);
+            // An extractor makes mass for energy, and a paused one makes nothing and needs nothing.
+            let extractor = unit.mass_income > Res::ZERO && unit.upkeep > Res::ZERO;
+            let paused = extractor && self.ecs.get::<&Paused>(entity).is_ok();
             let economy = &mut self.economies[team.index()];
             economy.mass_capacity += unit.mass_storage;
             economy.energy_capacity += unit.energy_storage;
-            economy.mass_income += unit.mass_income + unit.mass_income * i64::from(bonus.mass_output_bonus) / 1000;
+            if paused {
+                continue;
+            }
+            let mass = unit.mass_income + unit.mass_income * i64::from(bonus.mass_output_bonus) / 1000;
+            economy.mass_income += mass;
             economy.energy_income += unit.energy_income;
+            if extractor {
+                economy.extractor_income += mass;
+                economy.extractor_upkeep += unit.upkeep * i64::from(1000 - bonus.energy_cost_discount) / 1000;
+            }
         }
         for (entity, bonus) in adjacency_updates {
             *self.ecs.get::<&mut Adjacency>(entity).expect("structures have adjacency") = bonus;
@@ -1530,8 +1576,22 @@ impl SimWorld {
             .filter_map(|(id, entity)| {
                 let unit = self.blueprints.get(self.ecs.get::<&Blueprinted>(entity).ok()?.0);
                 let bonus = self.ecs.get::<&Adjacency>(entity).map_or(0, |adjacency| adjacency.mass_output_bonus);
-                let mass = unit.mass_income + unit.mass_income * i64::from(bonus) / 1000;
+                let mut mass = unit.mass_income + unit.mass_income * i64::from(bonus) / 1000;
                 let spent = self.factory_spending.iter().find(|spending| spending.0 == id);
+                // An extractor makes, and pays for, the share of its mass its team can power.
+                let extractor_use = if unit.mass_income > Res::ZERO && unit.upkeep > Res::ZERO {
+                    let efficiency = self.economies[team.index()].extractor_efficiency;
+                    if self.ecs.get::<&Paused>(entity).is_ok() {
+                        mass = Res::ZERO;
+                        Res::ZERO
+                    } else {
+                        mass *= efficiency;
+                        let discount = self.ecs.get::<&Adjacency>(entity).map_or(0, |adjacency| adjacency.energy_cost_discount);
+                        unit.upkeep * i64::from(1000 - discount) / 1000 * efficiency
+                    }
+                } else {
+                    Res::ZERO
+                };
                 // A dome that is up costs its upkeep, less the discount from neighbors.
                 let upkeep = self.ecs.get::<&Shield>(entity).ok().filter(|shield| shield.is_up() && self.ecs.get::<&Paused>(entity).is_err()).map_or(Res::ZERO, |shield| {
                     let discount = self.ecs.get::<&Adjacency>(entity).map_or(0, |adjacency| adjacency.energy_cost_discount);
@@ -1548,7 +1608,7 @@ impl SimWorld {
                     mass_income: tenths_per_second(mass),
                     energy_income: tenths_per_second(unit.energy_income),
                     mass_use: spent.map_or(0, |spending| tenths_per_second(spending.1)),
-                    energy_use: spent.map_or(0, |spending| tenths_per_second(spending.2)) + tenths_per_second(upkeep + intel),
+                    energy_use: spent.map_or(0, |spending| tenths_per_second(spending.2)) + tenths_per_second(upkeep + intel + extractor_use),
                 })
             })
             .collect();

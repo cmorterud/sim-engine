@@ -248,7 +248,7 @@ pub struct Blueprint {
     pub jammer: Option<JammerDef>,
     /// Energy per tick while cloaked, for a unit that can cloak.
     pub cloak_upkeep: Option<Res>,
-    /// Energy per tick while running, for intel structures. Zero for none.
+    /// Energy per tick while running, for intel structures and mass extractors. Zero for none.
     pub upkeep: Res,
     /// For a silo, the most missiles it keeps. It builds no more until it fires one. Zero for no limit.
     pub max_stock: u32,

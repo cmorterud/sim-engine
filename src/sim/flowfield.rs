@@ -65,8 +65,17 @@ impl Portal {
         }
     }
 
-    fn mid(&self, sector: u32) -> (usize, usize) {
-        self.side_cell(sector, self.length / 2)
+    /// The span's middle cell. A span an even number of cells long has two, and it takes the
+    /// one nearer the middle of the map, so that a span and its image turned 180 degrees about
+    /// the map's center pick cells that are images of each other, and paths mirror.
+    fn mid(&self, sector: u32, cells: usize) -> (usize, usize) {
+        let half = self.length / 2;
+        if self.length % 2 == 1 || half == 0 {
+            return self.side_cell(sector, half);
+        }
+        let low = (self.start + half - 1) as usize;
+        let toward_center = if 2 * low + 1 < cells - 1 { half } else { half - 1 };
+        self.side_cell(sector, toward_center)
     }
 
     /// The `NEIGHBORS` index for stepping out of `sector` through this portal.
@@ -335,16 +344,16 @@ impl FlowField {
                 // Open, uniform sectors are the vast majority, and have an exact closed form.
                 for (i, &a) in members.iter().enumerate() {
                     for &b in &members[i + 1..] {
-                        let walk = octile(self.portals[a as usize].mid(sector), self.portals[b as usize].mid(sector));
+                        let walk = octile(self.portals[a as usize].mid(sector, self.cells), self.portals[b as usize].mid(sector, self.cells));
                         self.link(a, b, sector, walk * u32::from(uniform));
                     }
                 }
             } else {
                 let mut links = Vec::new();
                 for (i, &a) in members.iter().enumerate() {
-                    let start = local_index(self.portals[a as usize].mid(sector), origin) as u16;
+                    let start = local_index(self.portals[a as usize].mid(sector, self.cells), origin) as u16;
                     let targets: Vec<(u32, u16)> =
-                        members[i + 1..].iter().map(|&b| (b, local_index(self.portals[b as usize].mid(sector), origin) as u16)).collect();
+                        members[i + 1..].iter().map(|&b| (b, local_index(self.portals[b as usize].mid(sector, self.cells), origin) as u16)).collect();
                     let cache = &mut self.link_cache[sector as usize];
                     // One search from this point finds every distance it is missing.
                     if targets.iter().any(|&(_, target)| !cache.contains_key(&(start, target))) {
@@ -451,7 +460,7 @@ impl FlowField {
         self.search.seed(local_index(goal_cell, origin), 0, DIR_NONE);
         self.search.run(cost, cells, origin);
         for &portal in &self.sector_portals[goal_sector as usize] {
-            let walk = self.search.values[local_index(self.portals[portal as usize].mid(goal_sector), origin)];
+            let walk = self.search.values[local_index(self.portals[portal as usize].mid(goal_sector, self.cells), origin)];
             if walk != UNREACHED {
                 distance[portal as usize] = walk + 10;
                 onward[portal as usize] = goal_sector;
@@ -642,7 +651,7 @@ impl FlowField {
                     for edge in &self.adjacency[index] {
                         let next = edge.to as usize;
                         if edge.sector == onward && route.portal_distance[next] < distance {
-                            let ahead = route.portal_distance[next] + octile(there, self.portals[next].mid(onward)) + 10;
+                            let ahead = route.portal_distance[next] + octile(there, self.portals[next].mid(onward, self.cells)) + 10;
                             value = value.min(ahead);
                         }
                     }

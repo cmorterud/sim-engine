@@ -536,7 +536,7 @@ pub fn pausable_units(snapshot: &SimSnapshot, selected: &[SimId], db: &Blueprint
             find_unit(snapshot, *id).is_some_and(|unit| {
                 unit.blueprint != u16::MAX && {
                     let blueprint = db.get(BlueprintId(unit.blueprint));
-                    blueprint.is_factory() || blueprint.shield.is_some() || unit.built_permille < 1000
+                    blueprint.is_factory() || blueprint.shield.is_some() || blueprint.upkeep > crate::sim::blueprints::Res::ZERO || unit.built_permille < 1000
                 }
             })
         })

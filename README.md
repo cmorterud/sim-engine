@@ -52,7 +52,7 @@ Destroy the enemy commander to win. Yours explodes if it dies, and your whole te
 | ', \\ | With a T2 or T3 land factory selected: build a T2 or T3 engineer |
 | [, ] | With a builder selected: Radar (T1), Stealth Field Generator (T2) |
 | O, with a cloaking commander selected | Switch its cloak on or off, when nothing selected can be paused |
-| U | Upgrade a factory to its next tier, or a radar to an omni sensor |
+| U | Upgrade a factory or a mass extractor to its next tier, or a radar to an omni sensor |
 | Ctrl (or Cmd) + T, then left-click | Teleport a commander that has a teleporter, to open ground you can see or have on radar |
 | N | With a T3 builder selected: build a Quantum Gateway, which builds support commanders (Z). Mutes the sound otherwise |
 | Ctrl (or Cmd) + K | Self-destruct the selected units in 5 seconds, leaving no debris. Press again to stop |

@@ -135,11 +135,15 @@ tier = 1
 mass = 36
 energy = 360
 build_time = 60
-health = 600
+health = 400
 footprint = 1
 vision = 300
 requires_deposit = true
 mass_income = 2
+# FAF's: 2 energy a second to run, and it upgrades in place, at its own build power of 10.
+upkeep = 2
+build_power = 10
+upgrades_to = "mass_extractor_t2"
 
 [[unit]]
 id = "power_generator"
@@ -443,6 +447,41 @@ mass_storage = 275
 energy_storage = 500
 death_explosion = { damage = 1000, radius = 200 }
 omni = 320
+
+# Mass extractor upgrades, with FAF's UEF numbers. Each is reached only by upgrading the one
+# below in place, which keeps making mass at its old rate meanwhile: its cost and build time here
+# are the upgrade's, built at the lower tier's own build power.
+[[unit]]
+id = "mass_extractor_t2"
+name = "Mass Extractor (T2)"
+class = "economy"
+tier = 2
+mass = 900
+energy = 5400
+build_time = 900
+health = 2000
+footprint = 1
+vision = 300
+requires_deposit = true
+mass_income = 6
+upkeep = 9
+build_power = 15
+upgrades_to = "mass_extractor_t3"
+
+[[unit]]
+id = "mass_extractor_t3"
+name = "Mass Extractor (T3)"
+class = "economy"
+tier = 3
+mass = 4600
+energy = 31625
+build_time = 2875
+health = 7000
+footprint = 1
+vision = 300
+requires_deposit = true
+mass_income = 18
+upkeep = 54
 
 # Field enhancements (GAME_SPECIFICATION.md §2.1), with Forged Alliance Forever's numbers for its
 # commander. A commander has three slots, and one enhancement in each: a new one replaces what is
