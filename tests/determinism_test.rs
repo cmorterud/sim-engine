@@ -112,6 +112,7 @@ fn every_wreck_and_reclaim_field_changes_the_checksum() {
         ("wreck y", Box::new(move |w, undo| w.ecs.get::<&mut Wreck>(entity).unwrap().position.y += if undo { -one_bit } else { one_bit })),
         ("wreck radius", Box::new(move |w, undo| w.ecs.get::<&mut Wreck>(entity).unwrap().radius += if undo { -one_bit } else { one_bit })),
         ("wreck kind", Box::new(move |w, undo| w.ecs.get::<&mut Wreck>(entity).unwrap().kind = if undo { WreckKind::Rock } else { WreckKind::Tree })),
+        ("wreck health", Box::new(move |w, undo| w.ecs.get::<&mut Wreck>(entity).unwrap().health += if undo { -one_bit } else { one_bit })),
         ("mass reclaimed", Box::new(move |w, undo| w.economies[0].mass_reclaimed += if undo { -wide_bit } else { wide_bit })),
         ("energy reclaimed", Box::new(move |w, undo| w.economies[0].energy_reclaimed += if undo { -wide_bit } else { wide_bit })),
     ];
@@ -263,6 +264,14 @@ fn every_hashed_field_changes_the_checksum() {
         &|w| w.ecs.get::<&mut Combat>(entity).unwrap().blocked = Some((SimId(u32::MAX), 1)),
         &|w| w.ecs.get::<&mut Combat>(entity).unwrap().blocked = None,
     );
+    for (name, spot) in [("ground target", Vec2Fp::ZERO), ("ground target x", Vec2Fp::new(one_bit, Fp::ZERO)), ("ground target y", Vec2Fp::new(Fp::ZERO, one_bit))] {
+        assert_changes(
+            name,
+            &mut world,
+            &move |w| w.ecs.get::<&mut Combat>(entity).unwrap().ground_target = Some(spot),
+            &|w| w.ecs.get::<&mut Combat>(entity).unwrap().ground_target = None,
+        );
+    }
     let state = world.rng.state();
     assert_changes(
         "RNG state",

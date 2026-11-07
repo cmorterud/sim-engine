@@ -14,6 +14,9 @@ pub enum SimCommand {
     Overcharge { unit: SimId, target: SimId },
     /// Close on one enemy and fire only at it.
     Attack { units: Vec<SimId>, target: SimId },
+    /// Fire at a spot on the ground, walking into range first, until given another order.
+    /// Shells that land on debris destroy it, and the mass in it with it.
+    AttackGround { units: Vec<SimId>, point: Vec2Fp },
     /// Repeat a route. Combat units attack-move along it; engineers also reclaim and repair.
     Patrol { units: Vec<SimId>, points: Vec<Vec2Fp> },
     /// Go there after finishing what is already ordered. A group shares one route, and ends

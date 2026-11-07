@@ -228,7 +228,7 @@ impl SimWorld {
             WreckKind::Debris => panic!("debris comes from destroyed units"),
         };
         let id = self.next_id();
-        let entity = self.ecs.spawn((id, Wreck { mass, energy, position, radius, kind }));
+        let entity = self.ecs.spawn((id, Wreck { mass, energy, position, radius, kind, health: Fp::ZERO }));
         self.wrecks.push((id, entity));
         id
     }
@@ -527,6 +527,7 @@ impl SimWorld {
             | SimCommand::AttackMove { .. }
             | SimCommand::QueueMove { .. }
             | SimCommand::FormationMove { .. }
+            | SimCommand::AttackGround { .. }
             | SimCommand::Overcharge { .. }
             | SimCommand::MoveOrder { .. }
             | SimCommand::Follow { .. }
@@ -1318,7 +1319,9 @@ impl SimWorld {
         let goal = order.slot.or_else(|| self.flow_field.goal(order.route))?;
         let kind = match order.kind {
             OrderKind::AttackMove => PlanStepKind::AttackMove,
-            OrderKind::Attack => PlanStepKind::Attack,
+            // An attack on a unit follows it. One that does not is aimed at the ground.
+            OrderKind::Attack if self.flow_field.is_following(order.route) => PlanStepKind::Attack,
+            OrderKind::Attack => PlanStepKind::AttackGround,
             OrderKind::Move | OrderKind::Idle => PlanStepKind::Move,
         };
         Some(self.plan_step(kind, goal, 0))

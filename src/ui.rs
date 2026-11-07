@@ -65,19 +65,21 @@ pub enum ArmedOrder {
     Move,
     AttackMove,
     Formation,
+    AttackGround,
     Patrol,
     Assist,
     Overcharge,
 }
 
 impl ArmedOrder {
-    const ALL: [Self; 6] = [Self::Move, Self::AttackMove, Self::Formation, Self::Patrol, Self::Assist, Self::Overcharge];
+    const ALL: [Self; 7] = [Self::Move, Self::AttackMove, Self::Formation, Self::AttackGround, Self::Patrol, Self::Assist, Self::Overcharge];
 
     const fn letter(self) -> char {
         match self {
             Self::Move => hotkeys::MOVE,
             Self::AttackMove => hotkeys::ATTACK_MOVE,
             Self::Formation => hotkeys::FORMATION,
+            Self::AttackGround => hotkeys::ATTACK_GROUND,
             Self::Patrol => hotkeys::PATROL,
             Self::Assist => hotkeys::ASSIST,
             Self::Overcharge => hotkeys::OVERCHARGE,
@@ -89,6 +91,7 @@ impl ArmedOrder {
             Self::Move => "Move",
             Self::AttackMove => "Attack-move",
             Self::Formation => "Formation move",
+            Self::AttackGround => "Attack ground",
             Self::Patrol => "Patrol",
             Self::Assist => "Assist",
             Self::Overcharge => "Overcharge",
@@ -100,6 +103,7 @@ impl ArmedOrder {
             Self::Move => "Walk there, ignoring what is under the cursor. Units still fire at what comes into range.",
             Self::AttackMove => "Walk there, stopping to fire when enemies are in range.",
             Self::Formation => "Travel together at the pace of the slowest unit, keeping the formation all the way. Hold Alt to attack-move, which stops the whole group to fight. Also Ctrl+right-click.",
+            Self::AttackGround => "Keep firing at a spot, even out of sight, until given another order. Shells that land on debris destroy it, so the enemy cannot reclaim it.",
             Self::Patrol => "Repeat a route. Combat units fight along it, and engineers also reclaim and repair.",
             Self::Assist => "Stay with a friendly unit and protect it. Builders also help it build.",
             Self::Overcharge => "Spend stored energy on one shot that destroys almost any unit. Weak against structures.",
@@ -112,6 +116,7 @@ impl ArmedOrder {
             Self::Move => "Move: left-click a destination. Right-click or Esc to cancel.",
             Self::AttackMove => "Attack-move: left-click a destination. Right-click or Esc to cancel.",
             Self::Formation => "Formation move: left-click a destination, holding Alt to attack-move. Right-click or Esc to cancel.",
+            Self::AttackGround => "Attack ground: left-click a spot or some debris. Right-click or Esc to cancel.",
             Self::Patrol => "Patrol: left-click each point, then right-click or press P to start. Esc to cancel.",
             Self::Assist => "Assist: left-click a friendly unit. Right-click or Esc to cancel.",
             Self::Overcharge => "Overcharge: left-click an enemy. Right-click or Esc to cancel.",
@@ -165,9 +170,22 @@ pub fn has_overcharge(snapshot: &SimSnapshot, selected: &[SimId], db: &Blueprint
         .any(|unit| unit.blueprint != u16::MAX && db.get(BlueprintId(unit.blueprint)).overcharge.is_some())
 }
 
-fn unit_order_row(ui: &mut egui::Ui, armed: Option<ArmedOrder>, overcharge: bool, actions: &mut Vec<UiAction>) {
+/// Whether anything selected has a gun, and so can attack the ground.
+pub fn has_weapons(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb) -> bool {
+    selected
+        .iter()
+        .filter_map(|id| find_unit(snapshot, *id))
+        .any(|unit| unit.blueprint == u16::MAX || db.get(BlueprintId(unit.blueprint)).weapon.is_some())
+}
+
+fn unit_order_row(ui: &mut egui::Ui, armed: Option<ArmedOrder>, overcharge: bool, weapons: bool, actions: &mut Vec<UiAction>) {
     ui.horizontal_wrapped(|ui| {
-        for order in ArmedOrder::ALL.into_iter().filter(|order| overcharge || *order != ArmedOrder::Overcharge) {
+        let offered = |order: &ArmedOrder| match order {
+            ArmedOrder::Overcharge => overcharge,
+            ArmedOrder::AttackGround => weapons,
+            _ => true,
+        };
+        for order in ArmedOrder::ALL.into_iter().filter(offered) {
             let button = egui::Button::new(format!("[{}] {}", order.letter(), order.name())).selected(armed == Some(order));
             if ui.add(button).on_hover_text(order.description()).clicked() {
                 actions.push(UiAction::Arm(order));
@@ -236,6 +254,7 @@ pub fn hotkey_action(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintD
             hotkeys::MOVE => return Some(UiAction::Arm(ArmedOrder::Move)),
             hotkeys::ATTACK_MOVE => return Some(UiAction::Arm(ArmedOrder::AttackMove)),
             hotkeys::FORMATION => return Some(UiAction::Arm(ArmedOrder::Formation)),
+            hotkeys::ATTACK_GROUND if has_weapons(snapshot, selected, db) => return Some(UiAction::Arm(ArmedOrder::AttackGround)),
             hotkeys::ASSIST => return Some(UiAction::Arm(ArmedOrder::Assist)),
             hotkeys::OVERCHARGE if has_overcharge(snapshot, selected, db) => return Some(UiAction::Arm(ArmedOrder::Overcharge)),
             hotkeys::STOP => return Some(UiAction::Stop),
@@ -843,7 +862,7 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
         });
 
         if has_mobile_units(snapshot, selected) {
-            unit_order_row(ui, armed, has_overcharge(snapshot, selected, db), actions);
+            unit_order_row(ui, armed, has_overcharge(snapshot, selected, db), has_weapons(snapshot, selected, db), actions);
         }
         if let Some(action) = pause_action(snapshot, selected, db) {
             let UiAction::SetPaused { paused, .. } = &action else {
@@ -1198,7 +1217,7 @@ fn trail_marker_kind(kind: PlanStepKind) -> MarkerKind {
     match kind {
         PlanStepKind::Move => MarkerKind::Move,
         PlanStepKind::AttackMove => MarkerKind::AttackMove,
-        PlanStepKind::Attack => MarkerKind::Attack,
+        PlanStepKind::Attack | PlanStepKind::AttackGround => MarkerKind::Attack,
         PlanStepKind::Build => MarkerKind::Build,
         PlanStepKind::Support => MarkerKind::Support,
         PlanStepKind::Patrol => MarkerKind::Patrol,
@@ -1914,6 +1933,17 @@ mod tests {
             assert_eq!(hotkey_action(&current, &[selected], &db, 'X'), Some(UiAction::Stop));
         }
         assert_eq!(hotkey_action(&current, &[], &db, 'M'), None, "nothing is selected");
+    }
+
+    #[test]
+    fn attack_ground_is_only_offered_to_a_selection_with_a_gun() {
+        let db = BlueprintDb::standard();
+        let current = commander_and_engineer(&db);
+        let armed: Vec<SimId> = current.units.iter().filter(|unit| db.get(BlueprintId(unit.blueprint)).weapon.is_some()).map(|unit| unit.id).collect();
+        let unarmed: Vec<SimId> = current.units.iter().filter(|unit| db.get(BlueprintId(unit.blueprint)).weapon.is_none()).map(|unit| unit.id).collect();
+        assert!(!armed.is_empty() && !unarmed.is_empty());
+        assert_eq!(hotkey_action(&current, &armed[..1], &db, 'I'), Some(UiAction::Arm(ArmedOrder::AttackGround)));
+        assert_eq!(hotkey_action(&current, &unarmed[..1], &db, 'I'), None);
     }
 
     #[test]

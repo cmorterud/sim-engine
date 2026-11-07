@@ -11,7 +11,7 @@ use sim_engine::audio::{self, AttackAlarm, SoundEngine, SoundSettings};
 use sim_engine::input::feedback::{MarkerKind, OrderFeedback};
 use sim_engine::input::hotkeys;
 use sim_engine::input::orders::{
-    assist_orders, deposit_position, formation_commands, free_deposits, line_cells, mobile_units, move_orders, overcharge_orders, pending_builds, queued_commands, PendingBuild, placement_cell, placement_is_valid, placement_target, right_click_orders, PlacementMap, RightClick,
+    assist_orders, attack_ground_orders, deposit_position, formation_commands, free_deposits, line_cells, mobile_units, move_orders, overcharge_orders, pending_builds, queued_commands, PendingBuild, placement_cell, placement_is_valid, placement_target, right_click_orders, PlacementMap, RightClick,
 };
 use sim_engine::input::selection::{ControlGroups, Selection};
 use sim_engine::math::fp::{Fp, Vec2Fp};
@@ -87,6 +87,8 @@ Controls:
   Ctrl + right-click   Formation move: travel together at the slowest unit's pace.
                        Add Alt to attack-move. Command works too
   J, then left-click   Formation move. Hold Alt when clicking to attack-move
+  I, then left-click   Attack ground: keep firing at a spot, even out of sight.
+                       Shells that land on debris destroy it, and its mass
   P, then left-clicks  Add patrol points, then right-click or press P to start
   P + right-click      Hold P and add patrol points, then release P
   X                    Stop
@@ -767,6 +769,11 @@ fn run_windowed(seed: u64, options: Options) {
                                         }
                                         let plan = if alt_held { right_click_orders } else { move_orders };
                                         issue_planned_orders(&session, &selection, &camera, &map, &mut feedback, alt_held, shift_held, true, "The selected units cannot move", plan);
+                                    }
+                                    ArmedOrder::AttackGround => {
+                                        if issue_planned_orders(&session, &selection, &camera, &map, &mut feedback, false, false, false, "The selected units have no guns", attack_ground_orders) && !shift_held {
+                                            armed = None;
+                                        }
                                     }
                                     ArmedOrder::Patrol => {
                                         add_patrol_point(&selection, &camera, &map, &mut feedback, &mut patrol_points, "right-click or press P to start");

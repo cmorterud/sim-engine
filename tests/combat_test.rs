@@ -459,3 +459,168 @@ fn units_without_a_blueprint_earn_nothing() {
     assert_eq!(veterancy_of(&world, shooter), None);
     assert!(world.veterans.is_empty());
 }
+
+fn flat_map(fog_of_war: bool) -> SimWorld {
+    SimWorld::new(SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war, ..SimConfig::default() }, 1)
+}
+
+/// A Blue unit of this kind at (1,000, 1,000), facing east.
+fn spawn_gunner(world: &mut SimWorld, kind: &str) -> SimId {
+    let blueprint = world.blueprints.id(kind);
+    let id = world.spawn_mobile(blueprint, Team::Blue, point(1_000, 1_000));
+    if let Ok(mut turret) = world.ecs.get::<&mut Turret>(world.unit_entity(id).unwrap()) {
+        turret.facing = Vec2Fp::new(Fp::ONE, Fp::ZERO);
+    }
+    id
+}
+
+/// Leaves the debris of a Red unit at a spot, and returns the wreck. A shell from a unit off to
+/// the side finishes it, so nothing else is disturbed.
+fn debris_at(world: &mut SimWorld, kind: &str, at: Vec2Fp) -> SimId {
+    let blueprint = world.blueprints.id(kind);
+    let victim = world.spawn_mobile(blueprint, Team::Red, at);
+    let entity = world.unit_entity(victim).unwrap();
+    world.ecs.get::<&mut Combat>(entity).unwrap().range = Fp::ZERO;
+    world.ecs.get::<&mut Health>(entity).unwrap().current = Fp::from_bits(1);
+    let from = Vec2Fp::new(at.x, at.y + fp_int(60));
+    let source = passive_unit(world, Team::Blue, from);
+    shoot(world, from, at, fp_int(20), source, Team::Blue);
+    run_until_projectiles_gone(world, 40);
+    assert!(world.unit_entity(victim).is_none(), "the victim should be destroyed");
+    world.ecs.despawn(world.unit_entity(source).unwrap()).unwrap();
+    world.units.retain(|unit| unit.0 != source);
+    world.wrecks.last().expect("it left debris").0
+}
+
+fn wreck(world: &SimWorld, id: SimId) -> Option<sim_engine::sim::components::Wreck> {
+    let index = world.wrecks.binary_search_by_key(&id, |wreck| wreck.0).ok()?;
+    world.ecs.get::<&sim_engine::sim::components::Wreck>(world.wrecks[index].1).ok().map(|wreck| *wreck)
+}
+
+#[test]
+fn a_ground_attack_destroys_debris_and_the_mass_in_it() {
+    let mut world = flat_map(false);
+    let debris = debris_at(&mut world, "t2_heavy_tank", point(1_300, 1_000));
+    let tank = spawn_gunner(&mut world, "t2_heavy_tank");
+    let start = wreck(&world, debris).unwrap();
+    // Half of a heavy tank's 900 health, and 81% of its mass.
+    assert_eq!(start.health, fp_int(450));
+    assert_eq!(start.mass, Res::from_num(198) * 810 / 1000);
+    let mass_before = world.economies[0].mass;
+    world.advance_tick(&[SimCommand::AttackGround { units: vec![tank], point: start.position }]);
+
+    // Each 70-damage shell takes away the same share of the mass as of the health.
+    let mut first_hit = None;
+    let mut gone_at = None;
+    for tick in 0..400 {
+        world.advance_tick(&[]);
+        match wreck(&world, debris) {
+            Some(now) if first_hit.is_none() && now.health < start.health => first_hit = Some(now),
+            None => {
+                gone_at = Some(tick);
+                break;
+            }
+            _ => {}
+        }
+    }
+    let hit = first_hit.expect("a shell should land on the debris");
+    assert_eq!(hit.health, fp_int(380));
+    let expected = start.mass * 380 / 450;
+    assert!((hit.mass - expected).abs() < Res::from_num(0.001), "{} left, not {expected}", hit.mass);
+    // Seven shells at a reload of 12 ticks, after the first has flown.
+    let gone_at = gone_at.expect("the debris should be destroyed");
+    assert!(gone_at < 7 * 12 + 30, "it took {gone_at} ticks");
+    assert_eq!(world.economies[0].mass_reclaimed, Res::ZERO);
+    assert!(world.economies[0].mass <= mass_before + Res::from_num(1), "nobody got the mass");
+
+    // It keeps firing at the spot until given another order.
+    let fired = |world: &mut SimWorld, ticks: u32| {
+        let mut fired = false;
+        for _ in 0..ticks {
+            world.advance_tick(&[]);
+            fired |= world.projectiles.iter().any(|&(_, entity)| world.ecs.get::<&Projectile>(entity).unwrap().source == tank);
+        }
+        fired
+    };
+    assert!(fired(&mut world, 30), "it should still be firing at the ground");
+    world.advance_tick(&[SimCommand::Stop { units: vec![tank] }]);
+    assert_eq!(world.ecs.get::<&Combat>(world.unit_entity(tank).unwrap()).unwrap().ground_target, None);
+    run_until_projectiles_gone(&mut world, 40);
+    assert!(!fired(&mut world, 30), "Stop should end the ground attack");
+}
+
+#[test]
+fn artillery_blasts_all_the_debris_it_lands_among_but_not_trees_or_rocks() {
+    use sim_engine::sim::components::WreckKind;
+    let mut world = flat_map(false);
+    let spot = point(1_400, 1_000);
+    let near = [debris_at(&mut world, "t1_light_bot", spot), debris_at(&mut world, "t1_light_bot", point(1_425, 1_010))];
+    let far = debris_at(&mut world, "t1_light_bot", point(1_500, 1_000));
+    let far_mass = wreck(&world, far).unwrap().mass;
+    let tree = world.spawn_scenery(WreckKind::Tree, point(1_405, 995), Fp::ZERO);
+    let rock = world.spawn_scenery(WreckKind::Rock, point(1_395, 1_008), fp_int(8));
+    let (tree_before, rock_before) = (wreck(&world, tree).unwrap(), wreck(&world, rock).unwrap());
+    let artillery = spawn_gunner(&mut world, "t1_light_artillery");
+
+    world.advance_tick(&[SimCommand::AttackGround { units: vec![artillery], point: spot }]);
+    // A bot's debris has 100 health, so two 90-damage blasts finish it.
+    run_ticks(&mut world, 200);
+    for id in near {
+        assert!(wreck(&world, id).is_none(), "debris inside the blast should be gone");
+    }
+    assert_eq!(wreck(&world, far).unwrap().mass, far_mass, "debris outside the blast is untouched");
+    let (tree_after, rock_after) = (wreck(&world, tree).unwrap(), wreck(&world, rock).unwrap());
+    assert_eq!((tree_after.mass, tree_after.energy), (tree_before.mass, tree_before.energy));
+    assert_eq!(rock_after.mass, rock_before.mass);
+}
+
+#[test]
+fn a_ground_attack_walks_into_range_and_fires_into_the_fog_at_nothing_else() {
+    let mut world = flat_map(true);
+    let bot = spawn_gunner(&mut world, "t1_light_bot");
+    // An enemy right behind, which it would otherwise turn and shoot.
+    let enemy = passive_unit(&mut world, Team::Red, point(900, 1_000));
+    let enemy_health = world.unit_health(enemy).unwrap();
+    let spot = point(2_000, 1_000);
+    world.advance_tick(&[SimCommand::AttackGround { units: vec![bot], point: spot }]);
+    assert!(!world.visibility.is_visible(Team::Blue, spot.x.to_bits(), spot.y.to_bits()), "the spot should start out of sight");
+
+    // The player's own target shows in the plan, even out of sight.
+    let plan = world.snapshot_for(Some(Team::Blue)).plans.into_iter().find(|plan| plan.id == bot).expect("a plan");
+    assert_eq!(plan.steps.len(), 1);
+    assert_eq!(plan.steps[0].kind, sim_engine::sim::world::PlanStepKind::AttackGround);
+
+    let mut shots = 0;
+    for _ in 0..400 {
+        world.advance_tick(&[]);
+        shots += world.projectiles.iter().filter(|&&(_, entity)| world.ecs.get::<&Projectile>(entity).unwrap().source == bot).count();
+    }
+    let here = world.unit_position(bot).unwrap().xy();
+    let distance = (here.x - spot.x).to_num::<f64>().hypot((here.y - spot.y).to_num::<f64>());
+    // A light bot reaches 340, and stops once the spot is in range instead of walking on to it.
+    assert!((300.0..=340.0).contains(&distance), "it stopped {distance} from the spot");
+    assert!(shots > 0, "it should fire at the spot");
+    assert_eq!(world.unit_health(enemy), Some(enemy_health), "it fires at the spot and nothing else");
+}
+
+#[test]
+fn ground_attack_shells_land_on_the_smallest_debris_at_any_range() {
+    for (gunner, distances) in [("t2_heavy_tank", [60, 250, 455]), ("t1_light_artillery", [100, 350, 595])] {
+        for distance in distances {
+            let mut world = flat_map(false);
+            let debris = debris_at(&mut world, "t1_light_bot", point(1_000 + distance, 1_000));
+            let unit = spawn_gunner(&mut world, gunner);
+            let spot = wreck(&world, debris).unwrap().position;
+            world.advance_tick(&[SimCommand::AttackGround { units: vec![unit], point: spot }]);
+            let mut hit = false;
+            for _ in 0..80 {
+                world.advance_tick(&[]);
+                if wreck(&world, debris).is_none_or(|now| now.health < fp_int(100)) {
+                    hit = true;
+                    break;
+                }
+            }
+            assert!(hit, "{gunner} missed debris {distance} away");
+        }
+    }
+}

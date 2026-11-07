@@ -11,7 +11,7 @@ use super::components::{BuildTask,
     Overcharged, OverchargeOrder, OverchargeWeapon, Position, Projectile, SimId, Team, Turning, Turret, UnitStats, Velocity, Veterancy,
     Wreck, WreckKind, rotate_toward,
 };
-use super::config::{SimConfig, TARGET_SEARCH_INTERVAL, TERRAIN_CELL_UNITS, WRECK_MASS_PERMILLE};
+use super::config::{SimConfig, TARGET_SEARCH_INTERVAL, TERRAIN_CELL_UNITS, WRECK_HEALTH_PERMILLE, WRECK_MASS_PERMILLE};
 use super::flowfield::{nearest_passable_cell, FlowField, FlowSample};
 use super::formation::{plan_formation, within, Travel};
 use super::production::{Economy, WorkLink};
@@ -31,6 +31,8 @@ const SLOT_EXTRA_TICKS: i64 = 40;
 const FORMATION_PATIENCE_TICKS: u32 = 100;
 /// How long a unit passes over a target that the ground stops its shots at.
 const BLOCKED_TARGET_TICKS: u32 = 50;
+/// How far below the ground a ground attack aims: a sixteenth of a unit.
+const GROUND_AIM_DEPTH: Fp = Fp::from_bits(256);
 
 /// Settings for spawning a unit.
 #[derive(Copy, Clone, Debug)]
@@ -94,6 +96,8 @@ pub enum PlanStepKind {
     Move,
     AttackMove,
     Attack,
+    /// Firing at a spot on the ground. The player chose it, so fog of war does not hide it.
+    AttackGround,
     Build,
     Support,
     Patrol,
@@ -309,6 +313,8 @@ pub struct SimWorld {
     /// Each hit, and who caused it.
     pending_hits: Vec<(hecs::Entity, Fp, Option<SimId>)>,
     pending_explosions: Vec<Explosion>,
+    /// Blasts and shells that land on the ground this tick, which also hit debris.
+    pending_wreck_blasts: Vec<Explosion>,
     dead_units: Vec<SimId>,
     dead_projectiles: Vec<SimId>,
 }
@@ -357,6 +363,7 @@ impl SimWorld {
             pending_shots: Vec::new(),
             pending_hits: Vec::new(),
             pending_explosions: Vec::new(),
+            pending_wreck_blasts: Vec::new(),
             dead_units: Vec::new(),
             dead_projectiles: Vec::new(),
         }
@@ -408,6 +415,7 @@ impl SimWorld {
                 target: None,
                 forced_target: None,
                 blocked: None,
+                ground_target: None,
                 enabled: true,
             },
             Order::IDLE,
@@ -490,6 +498,7 @@ impl SimWorld {
                     }
                 }
                 SimCommand::Attack { units, target } => self.command_attack(units, *target),
+                SimCommand::AttackGround { units, point } => self.command_attack_ground(units, *point),
                 SimCommand::Overcharge { unit, target } => self.command_overcharge(*unit, *target),
                 SimCommand::QueueMove { units, goal, attack } => self.queue_move(units, *goal, *attack, false),
                 SimCommand::FormationMove { units, goal, attack, queued: true } => self.queue_move(units, *goal, *attack, true),
@@ -659,6 +668,7 @@ impl SimWorld {
             };
             if let Ok(mut combat) = self.ecs.get::<&mut Combat>(entity) {
                 combat.forced_target = None;
+                combat.ground_target = None;
             }
             let _ = self.ecs.remove_one::<OverchargeOrder>(entity);
             self.release_waiting_orders(id, entity);
@@ -707,6 +717,33 @@ impl SimWorld {
             self.ecs.get::<&mut Combat>(entity).expect("just checked").forced_target = Some(target);
         }
         self.assign_route(&armed, OrderKind::Attack, position.xy(), Some(target));
+    }
+
+    /// Armed units fire at a spot until told otherwise, and those that can walk go into range.
+    /// The spot can be anywhere on the map, even out of sight.
+    fn command_attack_ground(&mut self, units: &[SimId], point: Vec2Fp) {
+        if !self.terrain.in_bounds(point) {
+            return;
+        }
+        let armed: Vec<SimId> = units
+            .iter()
+            .copied()
+            .filter(|id| self.find_unit(*id).is_some_and(|(_, entity)| self.ecs.get::<&Combat>(entity).is_ok_and(|combat| combat.range > Fp::ZERO)))
+            .collect();
+        self.clear_unit_plans(&armed);
+        let mut walkers = Vec::with_capacity(armed.len());
+        for &id in &armed {
+            let (_, entity) = self.find_unit(id).expect("just checked");
+            let mut combat = self.ecs.get::<&mut Combat>(entity).expect("just checked");
+            combat.ground_target = Some(point);
+            combat.target = None;
+            drop(combat);
+            if self.ecs.get::<&UnitStats>(entity).expect("units have stats").is_structure {
+                continue;
+            }
+            walkers.push(id);
+        }
+        self.assign_route(&walkers, OrderKind::Attack, point, None);
     }
 
     pub(super) fn set_order(&mut self, id: SimId, order: Order) {
@@ -965,7 +1002,9 @@ impl SimWorld {
                     let speed = speed.min(sqrt_wide(here.distance_squared(&goal)));
                     Vec2Fp::new(direction.x * speed, direction.y * speed)
                 };
-                let may_walk = order.kind == OrderKind::Move || combat.target.is_none();
+                // A ground attack stops as soon as its spot is in range.
+                let shelling_ground = combat.ground_target.is_some_and(|spot| within(here, spot, combat.range));
+                let may_walk = (order.kind == OrderKind::Move || combat.target.is_none()) && !shelling_ground;
                 if let Some(slot) = order.slot {
                     // Close enough to the group's goal to leave the route and walk to its own spot.
                     if arrived {
@@ -1124,6 +1163,7 @@ impl SimWorld {
             let (_, entity) = self.find_unit(id).expect("the unit just moved");
             if let Ok(mut combat) = self.ecs.get::<&mut Combat>(entity) {
                 combat.forced_target = None;
+                combat.ground_target = None;
             }
             self.end_patrol(id, entity);
             let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team;
@@ -1242,7 +1282,11 @@ impl SimWorld {
             };
             let locate = |target: SimId| units.binary_search_by_key(&target, |unit| unit.0).ok().map(|i| grid.entry(i));
 
-            if let Some(forced) = combat.forced_target {
+            // A ground attack takes over the gun, so the unit looks for nothing else.
+            let ground = combat.ground_target;
+            if ground.is_some() {
+                combat.target = None;
+            } else if let Some(forced) = combat.forced_target {
                 match locate(forced) {
                     Some(entry) => combat.target = can_engage(entry).then_some(forced),
                     None => {
@@ -1306,17 +1350,21 @@ impl SimWorld {
                 }
             }
             let aim_at = overcharge_target.filter(|target| locate(*target).is_some()).or(combat.target);
+            let aim_point = match ground {
+                Some(spot) => Some((spot.x.to_bits(), spot.y.to_bits())),
+                None => aim_at.and_then(locate).map(|entry| (entry.x, entry.y)),
+            };
 
             // A turret swivels to its target, or back to the front without one, and only fires once it points there.
             let aimed = match turret {
                 None => true,
                 Some(turret) => {
-                    let toward = |entry: &super::spatial::GridEntry| {
-                        let away = Vec2Fp::new(Fp::from_bits(entry.x - me.x), Fp::from_bits(entry.y - me.y));
+                    let toward = |(x, y): (i32, i32)| {
+                        let away = Vec2Fp::new(Fp::from_bits(x - me.x), Fp::from_bits(y - me.y));
                         (away != Vec2Fp::ZERO).then(|| away.normalized())
                     };
-                    match aim_at.and_then(locate) {
-                        Some(entry) => toward(entry).is_none_or(|toward| turret.aim(toward)),
+                    match aim_point {
+                        Some(point) => toward(point).is_none_or(|toward| turret.aim(toward)),
                         None => {
                             if let Some(front) = turning.map(|turning| turning.facing) {
                                 turret.aim(front);
@@ -1375,6 +1423,24 @@ impl SimWorld {
                     }
                 }
             }
+            // A ground attack aims a hair below the ground, so that rounding cannot leave the shell
+            // just above it at the spot, to skim on past. Any deeper, and a flat shot lands short.
+            if let Some(spot) = ground {
+                if combat.ticks_until_ready == 0 && aimed && squared_distance(spot.x.to_bits(), spot.y.to_bits()) <= range * range {
+                    let from = Vec3Fp::new(Fp::from_bits(me.x), Fp::from_bits(me.y), Fp::from_bits(me.z));
+                    shots.push(PendingShot {
+                        source: id,
+                        team: stats.team,
+                        from,
+                        to: Vec3Fp::new(spot.x, spot.y, terrain.height_at(spot) - GROUND_AIM_DEPTH),
+                        speed: combat.projectile_speed,
+                        damage: combat.projectile_damage,
+                        splash: combat.projectile_splash,
+                        overcharge: None,
+                    });
+                    combat.ticks_until_ready = combat.reload_ticks;
+                }
+            }
         }
 
         for id in finished_attacks {
@@ -1413,6 +1479,7 @@ impl SimWorld {
         let grid = &self.spatial_grid;
         let hits = &mut self.pending_hits;
         let explosions = &mut self.pending_explosions;
+        let wreck_blasts = &mut self.pending_wreck_blasts;
         let dead = &mut self.dead_projectiles;
         let friendly_fire = self.config.friendly_fire;
         let (max_mobile, max_structure) = (self.max_mobile_radius, self.max_structure_radius);
@@ -1478,9 +1545,14 @@ impl SimWorld {
                     }
                     dead.push(id);
                 }
-                (_, Some(_)) => {
+                (_, Some(ground)) => {
                     if splash {
                         explosions.push(blast);
+                    } else {
+                        // A shell that comes down on bare ground hits any debris lying there.
+                        let along = |value: Fp| ((i64::from(value.to_bits()) * i64::from(ground)) >> FP_FRAC_BITS) as i32;
+                        let (x, y) = (start.x.to_bits() + along(step.x), start.y.to_bits() + along(step.y));
+                        wreck_blasts.push(Explosion { x, y, radius: Fp::ZERO, ..blast });
                     }
                     dead.push(id);
                 }
@@ -1494,8 +1566,9 @@ impl SimWorld {
 
     }
 
-    /// Queues a hit on every unit within a blast, friend or foe.
+    /// Queues a hit on every unit within a blast, friend or foe, and on the debris there.
     fn apply_explosion(&mut self, blast: Explosion) {
+        self.pending_wreck_blasts.push(blast);
         let (grid, hits) = (&self.spatial_grid, &mut self.pending_hits);
         let radius = i64::from(blast.radius.to_bits());
         let mut consider = |other: &super::spatial::GridEntry| {
@@ -1548,6 +1621,7 @@ impl SimWorld {
                 }
             }
         }
+        self.blast_wrecks();
         self.pending_explosions.clear();
         self.pending_hits.clear();
         for (killer, victim_team, mass) in kills {
@@ -1592,6 +1666,53 @@ impl SimWorld {
             });
             self.dead_projectiles.clear();
         }
+    }
+
+    /// Wears down debris that this tick's blasts and shells landed on. Debris loses its mass in
+    /// proportion to the health it loses, and is gone when that runs out (GAME_SPECIFICATION.md §6.2).
+    /// Trees and rocks are not harmed. Each wreck adds up everything that hit it, so the order
+    /// of the hits makes no difference.
+    fn blast_wrecks(&mut self) {
+        let blasts = std::mem::take(&mut self.pending_wreck_blasts);
+        if blasts.is_empty() {
+            return;
+        }
+        let mut destroyed = Vec::new();
+        for &(id, entity) in &self.wrecks {
+            let mut wreck = self.ecs.get::<&mut Wreck>(entity).expect("wreck list only holds live wrecks");
+            if wreck.kind.is_scenery() {
+                continue;
+            }
+            let (x, y, radius) = (wreck.position.x.to_bits(), wreck.position.y.to_bits(), i64::from(wreck.radius.to_bits()));
+            let mut damage = Fp::ZERO;
+            for blast in &blasts {
+                let (dx, dy) = (i64::from(blast.x - x), i64::from(blast.y - y));
+                let reach = i64::from(blast.radius.to_bits()) + radius;
+                if dx * dx + dy * dy <= reach * reach {
+                    damage = damage.saturating_add(blast.damage);
+                }
+            }
+            if damage <= Fp::ZERO {
+                continue;
+            }
+            let left = wreck.health.saturating_sub(damage);
+            if left <= Fp::ZERO {
+                destroyed.push(id);
+            } else {
+                let share = Res::from_num(left) / Res::from_num(wreck.health);
+                wreck.mass *= share;
+                wreck.energy *= share;
+                wreck.health = left;
+            }
+        }
+        if destroyed.is_empty() {
+            return;
+        }
+        for &id in &destroyed {
+            let index = self.wrecks.binary_search_by_key(&id, |wreck| wreck.0).expect("just found");
+            self.ecs.despawn(self.wrecks[index].1).expect("wreck list only holds live wrecks");
+        }
+        self.wrecks.retain(|wreck| destroyed.binary_search(&wreck.0).is_err());
     }
 
     /// A team whose commander died is eliminated, and everything it owns goes with it.
@@ -1650,14 +1771,16 @@ impl SimWorld {
             self.clear_footprint(footprint);
             self.economy_dirty = true;
         }
-        let wreck_mass = self.ecs.get::<&Blueprinted>(entity).ok().map(|blueprint| {
+        let wreck = self.ecs.get::<&Blueprinted>(entity).ok().map(|blueprint| {
             let built = self.ecs.get::<&Construction>(entity).map_or(Res::ONE, |construction| construction.progress);
-            self.blueprints.get(blueprint.0).mass * WRECK_MASS_PERMILLE / 1000 * built
+            let unit = self.blueprints.get(blueprint.0);
+            let health = Fp::from_num(Res::from_num(unit.health) * WRECK_HEALTH_PERMILLE / 1000 * built).max(Fp::from_bits(1));
+            (unit.mass * WRECK_MASS_PERMILLE / 1000 * built, health)
         });
         self.ecs.despawn(entity).expect("dead units are live until now");
-        if let Some(mass) = wreck_mass.filter(|mass| *mass > Res::ZERO) {
+        if let Some((mass, health)) = wreck.filter(|(mass, _)| *mass > Res::ZERO) {
             let wreck_id = self.next_id();
-            let wreck = self.ecs.spawn((wreck_id, Wreck { mass, energy: Res::ZERO, position: position.xy(), radius, kind: WreckKind::Debris }));
+            let wreck = self.ecs.spawn((wreck_id, Wreck { mass, energy: Res::ZERO, position: position.xy(), radius, kind: WreckKind::Debris, health }));
             self.wrecks.push((wreck_id, wreck));
         }
     }
@@ -1722,6 +1845,7 @@ impl SimWorld {
             write_fp(&mut hasher, wreck.position.y);
             write_fp(&mut hasher, wreck.radius);
             hasher.write(&[wreck.kind as u8]);
+            write_fp(&mut hasher, wreck.health);
         }
         self.flow_field.hash_state(&mut hasher);
         // Nothing is written without formations, so checksums from before they existed still hold.
@@ -1760,6 +1884,12 @@ impl SimWorld {
         let (blocked, blocked_until) = combat.blocked.map_or((u32::MAX, 0), |(target, until)| (target.0, until));
         hasher.write(&blocked.to_le_bytes());
         hasher.write(&blocked_until.to_le_bytes());
+        // Nothing is written without a ground attack, so checksums from before it existed still hold.
+        if let Some(spot) = combat.ground_target {
+            hasher.write(&[2]);
+            write_fp(hasher, spot.x);
+            write_fp(hasher, spot.y);
+        }
         hasher.write(&[u8::from(combat.enabled), order.kind as u8]);
         hasher.write(&order.route.to_le_bytes());
         if let Some(slot) = order.slot {

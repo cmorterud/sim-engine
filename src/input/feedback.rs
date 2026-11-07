@@ -72,6 +72,7 @@ pub fn describe(command: &SimCommand, blueprints: &BlueprintDb) -> Option<(Marke
         SimCommand::AttackMove { units, .. } => (MarkerKind::AttackMove, format!("Attack-move: {}", unit_count(units)), None),
         SimCommand::Overcharge { target, .. } => (MarkerKind::Attack, "Overcharge".to_string(), Some(*target)),
         SimCommand::Attack { units, target } => (MarkerKind::Attack, format!("Attack: {}", unit_count(units)), Some(*target)),
+        SimCommand::AttackGround { units, .. } => (MarkerKind::Attack, format!("Attack ground: {}", unit_count(units)), None),
         SimCommand::Follow { units, target } => (MarkerKind::Support, format!("Follow: {}", unit_count(units)), Some(*target)),
         SimCommand::Assist { units, target } => (MarkerKind::Support, format!("Assist: {}", unit_count(units)), Some(*target)),
         SimCommand::Repair { units, target } => (MarkerKind::Support, format!("Repair: {}", unit_count(units)), Some(*target)),

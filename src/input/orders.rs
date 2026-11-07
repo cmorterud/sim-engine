@@ -212,6 +212,27 @@ pub fn assist_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
     commands
 }
 
+/// Fire at the ground under the cursor with everything selected that has a gun, structures
+/// included. On debris, it aims at the middle of it, which is what the shells must land on.
+pub fn attack_ground_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
+    let armed: Vec<SimId> = click
+        .selected
+        .iter()
+        .filter_map(|id| click.units.binary_search_by_key(id, |unit| unit.id).ok().map(|index| &click.units[index]))
+        .filter(|unit| unit.team == click.team && (unit.blueprint == u16::MAX || click.blueprints.get(BlueprintId(unit.blueprint)).weapon.is_some()))
+        .map(|unit| unit.id)
+        .collect();
+    let debris = wreck_under_cursor(click)
+        .and_then(|id| click.wrecks.iter().find(|wreck| wreck.id == id))
+        .filter(|wreck| !wreck.kind.is_scenery())
+        .map(|wreck| Vec2Fp::new(Fp::from_bits(wreck.x), Fp::from_bits(wreck.y)));
+    let point = debris.or_else(|| click.ground.map(|ground| Vec2Fp::new(Fp::from_num(ground[0]), Fp::from_num(ground[1]))));
+    match point {
+        Some(point) if !armed.is_empty() => vec![SimCommand::AttackGround { units: armed, point }],
+        _ => Vec::new(),
+    }
+}
+
 fn wreck_under_cursor(click: &RightClick<'_>) -> Option<SimId> {
     let mut best: Option<(f64, SimId)> = None;
     for wreck in click.wrecks {
@@ -438,6 +459,34 @@ mod tests {
         assert_eq!(orders, [SimCommand::Overcharge { unit: SimId(1), target: SimId(3) }], "only the commander has Overcharge");
         assert!(overcharge_orders(&click_for(&[SimId(2)], &units, &db, &camera, [2_000.0, 2_050.0])).is_empty());
         assert!(overcharge_orders(&click_for(&[SimId(1)], &units, &db, &camera, [2_000.0, 1_950.0])).is_empty(), "a friend is not a target");
+    }
+
+    #[test]
+    fn attack_ground_takes_everything_with_a_gun_and_aims_at_the_middle_of_debris() {
+        use crate::sim::components::WreckKind;
+        let db = db();
+        let units = [
+            view(1, Team::Blue, db.id("t1_light_artillery"), &db, 2_000.0, 1_950.0),
+            view(2, Team::Blue, db.id("t1_engineer"), &db, 2_040.0, 1_950.0),
+            view(3, Team::Blue, db.id("t1_point_defense"), &db, 1_960.0, 1_950.0),
+            view(4, Team::Red, db.id("t1_light_bot"), &db, 2_300.0, 2_300.0),
+        ];
+        let raw = |value: f64| (value * 4096.0) as i32;
+        let wreck = |id: u32, x: f64, kind: WreckKind| WreckView { id: SimId(id), x: raw(x), y: raw(2_050.0), z: raw(8.0), radius: raw(8.0), mass: 10, energy: 0, kind };
+        let wrecks = [wreck(8, 1_900.0, WreckKind::Debris), wreck(9, 2_100.0, WreckKind::Tree)];
+        let camera = camera();
+        let selected = [SimId(1), SimId(2), SimId(3), SimId(4)];
+        let at = |world: [f64; 2]| {
+            let cursor = camera.world_to_screen([world[0], world[1], 8.0]).unwrap();
+            attack_ground_orders(&RightClick { selected: &selected, units: &units, wrecks: &wrecks, blueprints: &db, team: Team::Blue, camera: &camera, cursor, ground: Some(world), attack_move: false })
+        };
+        let point = |x: f64, y: f64| Vec2Fp::new(Fp::from_num(x), Fp::from_num(y));
+        let armed = vec![SimId(1), SimId(3)];
+        // Close to debris snaps to its middle. A tree cannot be blasted, so it aims at the ground there.
+        assert_eq!(at([1_902.0, 2_052.0]), [SimCommand::AttackGround { units: armed.clone(), point: point(1_900.0, 2_050.0) }]);
+        assert_eq!(at([2_102.0, 2_052.0]), [SimCommand::AttackGround { units: armed.clone(), point: point(2_102.0, 2_052.0) }]);
+        let engineer_only = attack_ground_orders(&click_for(&[SimId(2)], &units, &db, &camera, [2_000.0, 2_000.0]));
+        assert!(engineer_only.is_empty(), "an engineer has no gun");
     }
 
     #[test]

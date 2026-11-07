@@ -10,6 +10,8 @@ pub const PATROL: char = 'P';
 pub const ASSIST: char = 'Y';
 /// Off to the right, because every letter on the left is taken.
 pub const FORMATION: char = 'J';
+/// The last letter left, beside J.
+pub const ATTACK_GROUND: char = 'I';
 pub const STOP: char = 'X';
 pub const PAUSE: char = 'O';
 pub const OVERCHARGE: char = 'L';
@@ -53,6 +55,7 @@ pub const fn letter_for(code: KeyCode) -> Option<char> {
         KeyCode::KeyF => ATTACK_MOVE,
         KeyCode::KeyY => ASSIST,
         KeyCode::KeyJ => FORMATION,
+        KeyCode::KeyI => ATTACK_GROUND,
         KeyCode::KeyX => STOP,
         KeyCode::KeyO => PAUSE,
         KeyCode::KeyL => OVERCHARGE,
@@ -85,7 +88,9 @@ mod tests {
     use super::*;
     use crate::sim::blueprints::BlueprintDb;
 
-    const ALL_KEYS: [KeyCode; 18] = [
+    const ALL_KEYS: [KeyCode; 20] = [
+        KeyCode::KeyJ,
+        KeyCode::KeyI,
         KeyCode::KeyO,
         KeyCode::KeyL,
         KeyCode::KeyM,
@@ -106,7 +111,7 @@ mod tests {
         KeyCode::KeyK,
     ];
 
-    const PANEL_LETTERS: [char; 9] = [MOVE, ATTACK_MOVE, ASSIST, STOP, PAUSE, OVERCHARGE, UPGRADE, REPEAT, CLEAR_QUEUE];
+    const PANEL_LETTERS: [char; 11] = [MOVE, ATTACK_MOVE, FORMATION, ATTACK_GROUND, ASSIST, STOP, PAUSE, OVERCHARGE, UPGRADE, REPEAT, CLEAR_QUEUE];
 
     /// Everything that can appear in a build menu, from the real data.
     fn buildable(db: &BlueprintDb) -> Vec<String> {

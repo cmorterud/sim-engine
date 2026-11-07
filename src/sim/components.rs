@@ -72,6 +72,8 @@ pub struct Combat {
     /// A target the ground stops this unit's shots at, and the tick until which it is passed
     /// over, so that the unit looks elsewhere or walks on instead of shelling a hill.
     pub blocked: Option<(SimId, u32)>,
+    /// Set by a ground attack: fire at this spot, and at nothing else, until given another order.
+    pub ground_target: Option<Vec2Fp>,
     /// False while a structure is under construction.
     pub enabled: bool,
 }
@@ -368,6 +370,9 @@ pub struct Wreck {
     pub position: Vec2Fp,
     pub radius: Fp,
     pub kind: WreckKind,
+    /// What it takes to destroy debris. Shells that land on it wear it down, and it loses mass
+    /// and energy in proportion. Zero for trees and rocks, which shells leave alone.
+    pub health: Fp,
 }
 
 #[cfg(test)]
