@@ -403,7 +403,7 @@ Terrain is simulation state, because it affects line of fire, unit height, and m
 
 * **Height Map:** 4,097 × 4,097 `i16` samples at maximum map size (about 32 MiB), in steps of 1/16 unit at 20-unit spacing. Sampling is bilinear in fixed-point.
 * **Water Level:** A single `Fp` value per map, stored for later naval and seabed movement. The PoC scenarios keep it below the terrain.
-* **PoC Maps:** Generated from `SimRng` and the map seed, using hills and box obstacles. No map file format is needed yet.
+* **PoC Maps:** Generated from `SimRng` and the map seed, using hills and box obstacles. Maps made for *Forged Alliance* can also be loaded from a player's own files (GAME_SPECIFICATION.md §18.4, Maps From Files).
 * **Structures:** Placing or destroying a structure changes the cost grid and rebuilds the portal graph and every route. On the 10 km skirmish map, this costs about 8–15 ms for that one tick. It affects about 0.3% of ticks and runs on the simulation's own thread, so it does not delay frames, but larger maps would need an incremental rebuild.
 
 ---

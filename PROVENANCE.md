@@ -18,8 +18,11 @@ To save a great deal of early playtesting, unit and enhancement numbers start fr
 balance, taken from its unit blueprint files in <https://github.com/FAForever/fa>. They are a
 starting point, not something kept in step with FAF: they change freely with this game's own
 testing. `data/units.toml` notes where a value came from, and how it was scaled, next to the value.
-Distances are scaled to ten of our units to one of the original's, except weapon ranges, which keep
-the slice's own proportions.
+The original's map unit is 20 of ours, one terrain cell: its 10 km map, 512 across, is our 10 km
+skirmish map, 10,240 across. A few values converted early on used 10 instead, and are to be
+corrected: the teleport cost's distances, the nuclear blast's rings, the support commander's
+jammer, shield field, and sensor ranges, and the commander's shield field. Weapon ranges keep the
+slice's own proportions.
 
 Taken so far:
 
@@ -29,6 +32,13 @@ Taken so far:
   enhancements (§2.2), from FAF's UEF units, with the support commander's teleporter and Rapid
   Fabricator from its Aeon one.
 * How one enhancement's effects replace another's of the same kind, as FAF's commander scripts do.
+
+## Maps from other games
+
+`src/map_import.rs` reads maps made for *Forged Alliance*, from the unzipped folder a player gives:
+the heightmap, water, and props from the `.scmap`, and the deposits and starts from the
+`_save.lua`. The reader was written for this project from the files' layout. No map is shipped or
+committed, and the tests build small map files of their own in code.
 
 ## Formulas
 

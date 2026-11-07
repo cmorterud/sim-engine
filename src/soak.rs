@@ -6,7 +6,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::ai::{play_match, replay_match, CHECKSUM_INTERVAL};
+use crate::ai::{play_match_on, replay_match_on, CHECKSUM_INTERVAL};
+use crate::sim::scenario::MapSource;
 use crate::sim::components::Team;
 use crate::sim::world::MatchResult;
 
@@ -28,13 +29,13 @@ pub struct SoakReport {
 }
 
 /// Plays and replays one match per seed, on several threads. A panic in any match is a failure.
-pub fn run_soak(first_seed: u64, count: u64, threads: usize) -> SoakReport {
+pub fn run_soak(first_seed: u64, count: u64, threads: usize, map: &MapSource) -> SoakReport {
     let next = Arc::new(AtomicU64::new(0));
     let summaries = Arc::new(Mutex::new(Vec::new()));
     let times = Arc::new(Mutex::new(Vec::new()));
     let workers: Vec<_> = (0..threads.max(1))
         .map(|_| {
-            let (next, summaries, times) = (Arc::clone(&next), Arc::clone(&summaries), Arc::clone(&times));
+            let (next, summaries, times, map) = (Arc::clone(&next), Arc::clone(&summaries), Arc::clone(&times), map.clone());
             thread::spawn(move || loop {
                 let index = next.fetch_add(1, Ordering::Relaxed);
                 if index >= count {
@@ -43,7 +44,7 @@ pub fn run_soak(first_seed: u64, count: u64, threads: usize) -> SoakReport {
                 let seed = first_seed + index;
                 let mut local_times = Vec::with_capacity(20_000);
                 let mut last = Instant::now();
-                let record = play_match(seed, MATCH_TICK_LIMIT, |world| {
+                let record = play_match_on(&map, seed, MATCH_TICK_LIMIT, |world| {
                     let now = Instant::now();
                     // Ticks that also compute a checksum would inflate the 99th percentile.
                     if !world.current_tick.is_multiple_of(CHECKSUM_INTERVAL) {
@@ -51,7 +52,7 @@ pub fn run_soak(first_seed: u64, count: u64, threads: usize) -> SoakReport {
                     }
                     last = Instant::now();
                 });
-                let replay_matches = replay_match(seed, &record.log) == record.checksums;
+                let replay_matches = replay_match_on(&map, seed, &record.log) == record.checksums;
                 summaries.lock().expect("no worker panicked").push(MatchSummary {
                     seed,
                     ticks: record.ticks,

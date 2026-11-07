@@ -60,6 +60,23 @@ impl Terrain {
         terrain
     }
 
+    /// Terrain from a map file: its heights, in sixteenths of a unit, one per cell corner, and
+    /// the cells too steep or too deep for land units. Panics if the sizes do not fit the map.
+    pub fn from_heights(map_units: i32, heights: Vec<i16>, blocked: &[bool], water_level: Fp) -> Self {
+        assert!(
+            map_units > 0 && map_units % SECTOR_UNITS == 0,
+            "map size must be a multiple of {SECTOR_UNITS} units"
+        );
+        let cells = (map_units / TERRAIN_CELL_UNITS) as usize;
+        let samples = cells + 1;
+        assert_eq!(heights.len(), samples * samples, "one height per cell corner");
+        assert_eq!(blocked.len(), cells * cells, "one flag per cell");
+        let land_cost = blocked.iter().map(|&blocked| if blocked { COST_IMPASSABLE } else { COST_OPEN }).collect();
+        let mut terrain = Self { map_units, cells, samples, heights, water_level, land_cost, content_hash: 0 };
+        terrain.update_content_hash();
+        terrain
+    }
+
     fn update_content_hash(&mut self) {
         let mut hasher = XxHash64::with_seed(0);
         for height in &self.heights {

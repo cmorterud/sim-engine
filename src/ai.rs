@@ -9,7 +9,7 @@ use crate::sim::blueprints::{BlueprintId, Res, UnitClass};
 use crate::sim::commands::SimCommand;
 use crate::sim::components::{Blueprinted, BuildTask, Builder, Construction, Factory, Order, OrderKind, Position, SimId, Team, UnitStats};
 use crate::sim::config::TERRAIN_CELL_UNITS;
-use crate::sim::scenario::skirmish_start;
+use crate::sim::scenario::MapSource;
 use crate::sim::world::{MatchResult, SimWorld};
 
 /// The AI decides once per second. Both teams decide on the same tick, from the same world:
@@ -118,11 +118,12 @@ pub struct AiBrain {
 }
 
 impl AiBrain {
-    pub fn new(team: Team, seed: u64) -> Self {
+    /// A brain for one team, with both teams' starts from the map.
+    pub fn new(team: Team, seed: u64, starts: [Vec2Fp; 2]) -> Self {
         Self {
             team,
-            home: skirmish_start(team),
-            enemy_home: skirmish_start(team.enemy()),
+            home: starts[team.index()],
+            enemy_home: starts[team.enemy().index()],
             side: if team == Team::Blue { 1 } else { -1 },
             // Both teams draw the same numbers, so that on a mirrored map they make mirrored choices.
             rng: SimRng::new(seed ^ 0xA5A5_5A5A),
@@ -505,9 +506,10 @@ impl AiBrain {
         }
     }
 
+    /// A little way from home toward the enemy, on each axis.
     fn rally_point(&self) -> Vec2Fp {
-        let forward = fp_int(500 * self.side);
-        Vec2Fp::new(self.home.x + forward, self.home.y + forward)
+        let toward = |home: Fp, enemy: Fp| fp_int(500 * if enemy > home { 1 } else if enemy < home { -1 } else { self.side });
+        Vec2Fp::new(self.home.x + toward(self.home.x, self.enemy_home.x), self.home.y + toward(self.home.y, self.enemy_home.y))
     }
 
     fn command_army(&mut self, world: &SimWorld, forces: &Forces, sightings: &[Sighting], commands: &mut Vec<SimCommand>) {
@@ -661,9 +663,14 @@ pub struct MatchRecord {
 pub const CHECKSUM_INTERVAL: u32 = 100;
 
 /// Plays a full AI-vs-AI skirmish, calling `observe` after each tick.
-pub fn play_match(seed: u64, max_ticks: u32, mut observe: impl FnMut(&SimWorld)) -> MatchRecord {
-    let mut world = crate::sim::scenario::skirmish(seed).world;
-    let mut brains = [AiBrain::new(Team::Blue, seed), AiBrain::new(Team::Red, seed)];
+pub fn play_match(seed: u64, max_ticks: u32, observe: impl FnMut(&SimWorld)) -> MatchRecord {
+    play_match_on(&MapSource::Skirmish, seed, max_ticks, observe)
+}
+
+/// Plays a full AI-vs-AI match on a map, calling `observe` after each tick.
+pub fn play_match_on(map: &MapSource, seed: u64, max_ticks: u32, mut observe: impl FnMut(&SimWorld)) -> MatchRecord {
+    let mut world = map.scenario(seed).world;
+    let mut brains = [AiBrain::new(Team::Blue, seed, world.starts), AiBrain::new(Team::Red, seed, world.starts)];
     let mut record = MatchRecord { seed, ticks: 0, result: None, checksums: Vec::new(), log: Vec::new(), units_built_peak: 0 };
     while world.current_tick < max_ticks && world.match_result.is_none() {
         let commands = advance_ai_vs_ai(&mut world, &mut brains);
@@ -682,7 +689,12 @@ pub fn play_match(seed: u64, max_ticks: u32, mut observe: impl FnMut(&SimWorld))
 
 /// Replays a recorded match with no AI and returns its checksums, which must match the original's.
 pub fn replay_match(seed: u64, log: &CommandLog) -> Vec<u64> {
-    let mut world = crate::sim::scenario::skirmish(seed).world;
+    replay_match_on(&MapSource::Skirmish, seed, log)
+}
+
+/// Replays a recorded match on a map with no AI, and returns its checksums.
+pub fn replay_match_on(map: &MapSource, seed: u64, log: &CommandLog) -> Vec<u64> {
+    let mut world = map.scenario(seed).world;
     let mut checksums = Vec::new();
     for commands in log {
         world.advance_tick(commands);

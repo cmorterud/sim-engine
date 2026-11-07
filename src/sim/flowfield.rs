@@ -206,6 +206,12 @@ pub struct FlowField {
     sector_portals: Vec<Vec<u32>>,
     adjacency: Vec<Vec<PortalEdge>>,
     graph_dirty: bool,
+    /// For each sector, walking distances found between points on its borders, by their
+    /// places in the sector. They depend only on the sector's own cells, so they stay good
+    /// until one of those changes, and rebuilding the graph after a structure goes up only
+    /// searches the sectors it touched. Worked out again from the cost grid whenever missing,
+    /// so it is never hashed and never changes a result.
+    link_cache: Vec<BTreeMap<(u16, u16), u32>>,
     routes: BTreeMap<u32, Route>,
     next_route: u32,
     queue: VecDeque<(u32, u32)>,
@@ -225,6 +231,7 @@ impl FlowField {
             sector_portals: Vec::new(),
             adjacency: Vec::new(),
             graph_dirty: true,
+            link_cache: vec![BTreeMap::new(); (cells / SECTOR_CELLS) * (cells / SECTOR_CELLS)],
             routes: BTreeMap::new(),
             next_route: 1,
             queue: VecDeque::new(),
@@ -238,6 +245,23 @@ impl FlowField {
     /// Call after any cost grid change. The graph and existing routes rebuild on next use.
     pub fn invalidate(&mut self) {
         self.graph_dirty = true;
+        for links in &mut self.link_cache {
+            links.clear();
+        }
+    }
+
+    /// Call after the cost of a square of cells changes, as when a structure goes up or comes
+    /// down. Only the sectors it touches forget their distances.
+    pub fn invalidate_cells(&mut self, cell_x: u32, cell_y: u32, size: u32) {
+        self.graph_dirty = true;
+        let last = self.cells.saturating_sub(1);
+        let corners = [(cell_x as usize, cell_y as usize), ((cell_x + size - 1) as usize, (cell_y + size - 1) as usize)];
+        let [(low_x, low_y), (high_x, high_y)] = corners.map(|(x, y)| (x.min(last) / SECTOR_CELLS, y.min(last) / SECTOR_CELLS));
+        for sy in low_y..=high_y {
+            for sx in low_x..=high_x {
+                self.link_cache[sy * self.sectors_per_side + sx].clear();
+            }
+        }
     }
 
     pub fn portal_count(&self) -> usize {
@@ -316,18 +340,30 @@ impl FlowField {
                     }
                 }
             } else {
+                let mut links = Vec::new();
                 for (i, &a) in members.iter().enumerate() {
-                    self.search.reset();
-                    let start = self.portals[a as usize].mid(sector);
-                    self.search.seed(local_index(start, origin), 0, DIR_NONE);
-                    self.search.run(cost, cells, origin);
-                    for &b in &members[i + 1..] {
-                        let target = self.portals[b as usize].mid(sector);
-                        let walk = self.search.values[local_index(target, origin)];
-                        if walk != UNREACHED {
-                            self.link(a, b, sector, walk);
+                    let start = local_index(self.portals[a as usize].mid(sector), origin) as u16;
+                    let targets: Vec<(u32, u16)> =
+                        members[i + 1..].iter().map(|&b| (b, local_index(self.portals[b as usize].mid(sector), origin) as u16)).collect();
+                    let cache = &mut self.link_cache[sector as usize];
+                    // One search from this point finds every distance it is missing.
+                    if targets.iter().any(|&(_, target)| !cache.contains_key(&(start, target))) {
+                        self.search.reset();
+                        self.search.seed(usize::from(start), 0, DIR_NONE);
+                        self.search.run(cost, cells, origin);
+                        for &(_, target) in &targets {
+                            cache.insert((start, target), self.search.values[usize::from(target)]);
                         }
                     }
+                    for (b, target) in targets {
+                        let walk = cache[&(start, target)];
+                        if walk != UNREACHED {
+                            links.push((a, b, walk));
+                        }
+                    }
+                }
+                for (a, b, walk) in links {
+                    self.link(a, b, sector, walk);
                 }
             }
         }
@@ -797,6 +833,30 @@ mod tests {
 
     fn flat(map_units: i32) -> Terrain {
         Terrain::generate(map_units, TerrainStyle::Flat, &mut SimRng::new(0))
+    }
+
+    /// Every edge of the portal graph, as plain numbers, to compare two graphs.
+    fn edges(flow: &FlowField) -> Vec<Vec<(u32, u32, u32)>> {
+        flow.adjacency.iter().map(|edges| edges.iter().map(|edge| (edge.to, edge.cost, edge.sector)).collect()).collect()
+    }
+
+    #[test]
+    fn a_graph_rebuilt_from_cached_distances_matches_one_built_from_scratch() {
+        // Walls across several sectors, so that their distances need searches.
+        let mut terrain = flat(SECTOR_UNITS * 3);
+        terrain.add_box_obstacle(rect(300, 0, 340, 2_000));
+        terrain.add_box_obstacle(rect(1_500, 900, 2_600, 940));
+        let mut flow = FlowField::new(&terrain);
+        flow.prepare(&terrain);
+        // Structures go up and come down in one sector, and the graph is rebuilt each time.
+        for (x, y, size, blocked) in [(70, 70, 3, true), (100, 20, 2, true), (70, 70, 3, false), (130, 130, 4, true)] {
+            terrain.set_structure_cells(x, y, size, blocked);
+            flow.invalidate_cells(x, y, size);
+            flow.prepare(&terrain);
+            let mut fresh = FlowField::new(&terrain);
+            fresh.prepare(&terrain);
+            assert_eq!(edges(&flow), edges(&fresh), "after a change at {x}, {y}");
+        }
     }
 
     /// Walks a single point along a route, building fields on demand, until it

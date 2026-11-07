@@ -100,7 +100,7 @@ fn main() {
     let ticks: u32 = args.next().and_then(|s| s.parse().ok()).unwrap_or(6000);
     let tolerance: f64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(4.0);
     let mut world = skirmish(seed).world;
-    let mut brains = [AiBrain::new(Team::Blue, seed), AiBrain::new(Team::Red, seed)];
+    let mut brains = [AiBrain::new(Team::Blue, seed, world.starts), AiBrain::new(Team::Red, seed, world.starts)];
     let (mut order_reports, mut unit_reports) = (0, 0);
     while world.current_tick < ticks && world.match_result.is_none() {
         let blue = brains[0].think(&world);

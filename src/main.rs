@@ -23,7 +23,7 @@ use sim_engine::sim::blueprints::{BlueprintDb, BlueprintId};
 use sim_engine::sim::commands::SimCommand;
 use sim_engine::sim::components::{SimId, Team};
 use sim_engine::sim::config::TERRAIN_CELL_UNITS;
-use sim_engine::sim::scenario::{self, advance_scripted, skirmish_start, Scenario};
+use sim_engine::sim::scenario::{self, advance_scripted, MapSource, Scenario};
 use sim_engine::sim::terrain::HEIGHT_FRAC_BITS;
 use sim_engine::sim::world::{PlanStep, PlanStepKind, SensorRangeView, ShieldView, SimSnapshot, UnitPlanView};
 use sim_engine::soak::run_soak;
@@ -66,6 +66,9 @@ Usage: sim-engine [options]
   --threads <n>        Threads for --soak (default 6)
   --seed <number>      Scenario seed
   --sound-check        Play each sound in turn, and exit
+  --map <folder>       Play on a Forged Alliance map from your own files (the unzipped folder
+                       with its .scmap and _save.lua), for any of the modes above
+  --starts <a>,<b>     With --map, which armies' starts Blue and Red take (default 1,2)
 
 Controls:
   Left-drag or click   Select your units
@@ -122,6 +125,8 @@ struct Options {
     threads: Option<usize>,
     seed: Option<u64>,
     sound_check: bool,
+    map: Option<PathBuf>,
+    starts: Option<(usize, usize)>,
 }
 
 fn parse_options() -> Result<Options, String> {
@@ -140,6 +145,12 @@ fn parse_options() -> Result<Options, String> {
             "--threads" => options.threads = Some(number("--threads", value("--threads")?)? as usize),
             "--seed" => options.seed = Some(number("--seed", value("--seed")?)?),
             "--sound-check" => options.sound_check = true,
+            "--map" => options.map = Some(PathBuf::from(value("--map")?)),
+            "--starts" => {
+                let text = value("--starts")?;
+                let pair = text.split_once(',').and_then(|(a, b)| Some((a.trim().parse().ok()?, b.trim().parse().ok()?)));
+                options.starts = Some(pair.ok_or("--starts needs two army numbers, like 1,2")?);
+            }
             "--help" | "-h" => return Err(USAGE.to_string()),
             other => return Err(format!("unknown option {other}\n\n{USAGE}")),
         }
@@ -157,37 +168,50 @@ fn main() {
         }
     };
     let seed = options.seed.unwrap_or(DEFAULT_SEED);
+    let map_source = match &options.map {
+        None => MapSource::Skirmish,
+        Some(path) => match sim_engine::map_import::import(path, options.starts.unwrap_or((1, 2))) {
+            Ok(imported) => {
+                println!("map {}: {}", imported.map.name, imported.notes.join("; "));
+                MapSource::Imported(Arc::new(imported.map))
+            }
+            Err(message) => {
+                println!("cannot load the map: {message}");
+                std::process::exit(1);
+            }
+        },
+    };
     if options.sound_check {
         sound_check();
         return;
     }
     if let Some(matches) = options.soak {
-        let mut report = run_soak(options.seed.unwrap_or(1), matches, options.threads.unwrap_or(6));
+        let mut report = run_soak(options.seed.unwrap_or(1), matches, options.threads.unwrap_or(6), &map_source);
         if !report.print() {
             std::process::exit(1);
         }
         return;
     }
     if let Some(ticks) = options.headless_ticks {
-        run_headless(seed, ticks, options.battle);
+        run_headless(seed, ticks, options.battle, &map_source);
         return;
     }
-    run_windowed(seed, options);
+    run_windowed(seed, options, map_source);
 }
 
-fn make_scenario(seed: u64, battle: bool) -> Scenario {
+fn make_scenario(seed: u64, battle: bool, map: &MapSource) -> Scenario {
     if battle {
         scenario::default_battle(seed)
     } else {
-        scenario::skirmish(seed)
+        map.scenario(seed)
     }
 }
 
-fn run_headless(seed: u64, ticks: u32, battle: bool) {
-    let scenario = make_scenario(seed, battle);
+fn run_headless(seed: u64, ticks: u32, battle: bool, map: &MapSource) {
+    let scenario = make_scenario(seed, battle, map);
     let opening = scenario.opening_commands;
     let mut world = scenario.world;
-    let mut brains = [AiBrain::new(Team::Blue, seed), AiBrain::new(Team::Red, seed)];
+    let mut brains = [AiBrain::new(Team::Blue, seed, world.starts), AiBrain::new(Team::Red, seed, world.starts)];
     let started = Instant::now();
     while world.current_tick < ticks && world.match_result.is_none() {
         if battle {
@@ -613,9 +637,10 @@ fn ground_point(ground: Option<[f64; 2]>, heights: &HeightField) -> Option<[f64;
     ground.map(|ground| [ground[0], ground[1], heights.height_at(ground[0], ground[1])])
 }
 
-fn run_windowed(seed: u64, options: Options) {
+fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
     let battle = options.battle;
-    let scenario = make_scenario(seed, battle);
+    let scenario = make_scenario(seed, battle, &map_source);
+    let player_start = scenario.world.starts[PLAYER_TEAM.index()];
     let map = read_map(&scenario);
     let is_match = !battle;
     let autotest_seconds = options.autotest_seconds;
@@ -644,8 +669,7 @@ fn run_windowed(seed: u64, options: Options) {
     let mut camera = Camera::new(map.map_units, [f64::from(size.width), f64::from(size.height)]);
     if is_match {
         camera.set_min_altitude(SKIRMISH_MIN_ALTITUDE);
-        let start = skirmish_start(PLAYER_TEAM);
-        camera.look_at(raw_to_world(start.x.to_bits()), raw_to_world(start.y.to_bits()), STARTING_ALTITUDE);
+        camera.look_at(raw_to_world(player_start.x.to_bits()), raw_to_world(player_start.y.to_bits()), STARTING_ALTITUDE);
     }
 
     let egui_context = egui::Context::default();
@@ -1343,7 +1367,7 @@ fn run_windowed(seed: u64, options: Options) {
                                     attack_alarm = AttackAlarm::default();
                                     control_groups = ControlGroups::default();
                                     order_drag = None;
-                                    session = Session::start(scenario::skirmish(seed), CommandSource::PlayerVsAi { seed }, driver_options);
+                                    session = Session::start(map_source.scenario(seed), CommandSource::PlayerVsAi { seed }, driver_options);
                                     selection.clear();
                                     placing = None;
                                     line_start = None;

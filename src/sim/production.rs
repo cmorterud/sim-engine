@@ -285,7 +285,7 @@ impl SimWorld {
             .expect("entity was just spawned");
         self.structures.push((id, entity));
         self.terrain.set_structure_cells(cell_x, cell_y, size, true);
-        self.flow_field.invalidate();
+        self.flow_field.invalidate_cells(cell_x, cell_y, size);
         for y in cell_y..cell_y + size {
             for x in cell_x..cell_x + size {
                 let cell = self.cell_index(x, y);
@@ -380,7 +380,7 @@ impl SimWorld {
     pub(super) fn clear_footprint(&mut self, footprint: Footprint) {
         let Footprint { cell_x, cell_y, size } = footprint;
         self.terrain.set_structure_cells(cell_x, cell_y, size, false);
-        self.flow_field.invalidate();
+        self.flow_field.invalidate_cells(cell_x, cell_y, size);
         for y in cell_y..cell_y + size {
             for x in cell_x..cell_x + size {
                 let cell = self.cell_index(x, y);

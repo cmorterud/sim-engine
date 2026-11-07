@@ -128,7 +128,7 @@ fn run(
         CommandSource::PlayerVsAi { seed } | CommandSource::AiVsAi { seed, .. } => seed,
         CommandSource::Player | CommandSource::Script { .. } => 0,
     };
-    let mut brains = [AiBrain::new(Team::Blue, seed), AiBrain::new(Team::Red, seed)];
+    let mut brains = [AiBrain::new(Team::Blue, seed, world.starts), AiBrain::new(Team::Red, seed, world.starts)];
     for _ in 0..options.fast_forward_ticks {
         if world.match_result.is_some() {
             break;

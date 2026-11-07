@@ -4,6 +4,7 @@ pub mod ai;
 pub mod audio;
 pub mod driver;
 pub mod input;
+pub mod map_import;
 pub mod math;
 pub mod render;
 pub mod sim;

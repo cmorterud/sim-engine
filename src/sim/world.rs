@@ -399,6 +399,9 @@ pub struct SimWorld {
     pub formations: BTreeMap<u32, Travel>,
     pub commanders: [Option<SimId>; 2],
     pub match_result: Option<MatchResult>,
+    /// Where each team's commander started, for the AI's plans and the camera. Fixed for the
+    /// match, and set from the map, so it is not hashed: the map's terrain is.
+    pub starts: [Vec2Fp; 2],
     pub(super) economy_dirty: bool,
     /// Who worked on what this tick. Rebuilt every tick and only used for drawing,
     /// so it is not part of the checksum.
@@ -429,6 +432,16 @@ impl SimWorld {
     pub fn new(config: SimConfig, seed: u64) -> Self {
         let mut rng = SimRng::new(seed);
         let terrain = Terrain::generate(config.map_units, config.terrain, &mut rng);
+        Self::build(config, rng, terrain)
+    }
+
+    /// A world on terrain from a map file rather than generated.
+    pub fn with_terrain(config: SimConfig, seed: u64, terrain: Terrain) -> Self {
+        assert_eq!(config.map_units, terrain.map_units(), "the terrain must fill the map");
+        Self::build(config, SimRng::new(seed), terrain)
+    }
+
+    fn build(config: SimConfig, rng: SimRng, terrain: Terrain) -> Self {
         let spatial_grid = SpatialGrid::new(config.map_units);
         let flow_field = FlowField::new(&terrain);
         let visibility = Visibility::new(config.map_units);
@@ -469,6 +482,7 @@ impl SimWorld {
             interceptions: Vec::new(),
             formations: BTreeMap::new(),
             commanders: [None, None],
+            starts: [Vec2Fp::ZERO; 2],
             match_result: None,
             economy_dirty: false,
             work_links: Vec::new(),

@@ -1,7 +1,7 @@
 //! Fixed scenarios shared by the tests, benchmarks, and interactive app.
 
 use super::commands::SimCommand;
-use super::components::{SimId, Team};
+use super::components::{SimId, Team, WreckKind};
 use super::config::{SimConfig, TerrainStyle, MAX_MAP_UNITS};
 use super::world::{SimWorld, UnitSpawn};
 use crate::math::fp::{fp_int, Fp, Vec2Fp};
@@ -231,11 +231,66 @@ pub fn skirmish(seed: u64) -> Scenario {
     scatter_scenery(&mut world, start_cell);
 
     let commander = world.blueprints.id("acu");
+    world.starts = [skirmish_start(Team::Blue), skirmish_start(Team::Red)];
     world.spawn_mobile(commander, Team::Blue, skirmish_start(Team::Blue));
     world.spawn_mobile(commander, Team::Red, skirmish_start(Team::Red));
     world.start_economy(SKIRMISH_START_MASS, SKIRMISH_START_ENERGY);
     world.prepare_map();
     Scenario { world, opening_commands: Vec::new() }
+}
+
+/// A map loaded from a file, already turned into whole numbers, so that every instance builds
+/// the same world from it. The simulation never reads files: the importer does, outside it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MapData {
+    pub name: String,
+    pub map_units: i32,
+    /// One per cell corner, row by row, in sixteenths of a unit.
+    pub heights: Vec<i16>,
+    /// One per cell: too steep, or under water, for land units.
+    pub blocked: Vec<bool>,
+    /// Below this, land is under water. Far below the map if it has none.
+    pub water_level: Fp,
+    pub deposits: Vec<(u32, u32)>,
+    /// Blue's start, then Red's.
+    pub starts: [Vec2Fp; 2],
+    pub scenery: Vec<(WreckKind, Vec2Fp)>,
+}
+
+/// A 1v1 on a map from a file: its terrain, deposits, scenery, and two of its starts.
+pub fn from_map(map: &MapData, seed: u64) -> Scenario {
+    let config = SimConfig { map_units: map.map_units, friendly_fire: true, fog_of_war: true, ..SimConfig::default() };
+    let terrain = super::terrain::Terrain::from_heights(map.map_units, map.heights.clone(), &map.blocked, map.water_level);
+    let mut world = SimWorld::with_terrain(config, seed, terrain);
+    world.deposits.clone_from(&map.deposits);
+    for &(kind, position) in &map.scenery {
+        // Rocks vary in size as the skirmish's do. Trees are all one size.
+        let radius = world.rng.range_fp(fp_int(5), fp_int(10));
+        world.spawn_scenery(kind, position, radius);
+    }
+    let commander = world.blueprints.id("acu");
+    world.starts = map.starts;
+    world.spawn_mobile(commander, Team::Blue, map.starts[0]);
+    world.spawn_mobile(commander, Team::Red, map.starts[1]);
+    world.start_economy(SKIRMISH_START_MASS, SKIRMISH_START_ENERGY);
+    world.prepare_map();
+    Scenario { world, opening_commands: Vec::new() }
+}
+
+/// Where a match is played: the generated skirmish map, or one from a file.
+#[derive(Clone, Debug)]
+pub enum MapSource {
+    Skirmish,
+    Imported(std::sync::Arc<MapData>),
+}
+
+impl MapSource {
+    pub fn scenario(&self, seed: u64) -> Scenario {
+        match self {
+            Self::Skirmish => skirmish(seed),
+            Self::Imported(map) => from_map(map, seed),
+        }
+    }
 }
 
 const FORESTS_PER_SIDE: usize = 10;

@@ -24,7 +24,7 @@ fn count_owned(world: &SimWorld, team: Team, key: &str) -> usize {
 #[test]
 fn ai_builds_an_economy_and_an_army() {
     let mut world = scenario::skirmish(11).world;
-    let mut brain = AiBrain::new(Team::Blue, 11);
+    let mut brain = AiBrain::new(Team::Blue, 11, world.starts);
     // Five minutes, with nobody playing Red.
     for _ in 0..3_000 {
         let commands = brain.think(&world);
@@ -43,7 +43,7 @@ fn ai_builds_an_economy_and_an_army() {
 #[test]
 fn ai_commands_only_its_own_units() {
     let mut world = scenario::skirmish(12).world;
-    let mut brains = [AiBrain::new(Team::Blue, 12), AiBrain::new(Team::Red, 12)];
+    let mut brains = [AiBrain::new(Team::Blue, 12, world.starts), AiBrain::new(Team::Red, 12, world.starts)];
     for _ in 0..4_000 {
         for brain in &mut brains {
             let commands = brain.think(&world);
@@ -143,7 +143,7 @@ fn ai_teams_play_mirror_images_until_they_meet() {
     };
     for seed in [1, 2, 3, 4, 5, 6, 7, 8] {
         let mut world = scenario::skirmish(seed).world;
-        let mut brains = [AiBrain::new(Team::Blue, seed), AiBrain::new(Team::Red, seed)];
+        let mut brains = [AiBrain::new(Team::Blue, seed, world.starts), AiBrain::new(Team::Red, seed, world.starts)];
         let (mut blue_units, mut red_units) = (Vec::new(), Vec::new());
         // Five minutes, well before the first wave sets out.
         for tick in 0..3_000 {
@@ -178,7 +178,7 @@ fn ai_cannot_see_through_fog() {
             let cells = world.terrain.cells_per_side() as u32;
             world.spawn_finished_structure(generator, Team::Red, cells - 30, cells - 30).unwrap();
         }
-        let mut brain = AiBrain::new(Team::Blue, 21);
+        let mut brain = AiBrain::new(Team::Blue, 21, world.starts);
         let mut orders = Vec::new();
         for _ in 0..1_200 {
             let commands = brain.think(&world);
@@ -207,7 +207,7 @@ fn late_in_a_long_game_the_commander_joins_a_full_size_wave() {
             world.spawn_mobile(tank, Team::Blue, Vec2Fp::new(home.x + fp_int(300 + index % 10 * 20), home.y + fp_int(300 + index / 10 * 20)));
         }
         world.current_tick = minute * 600;
-        let orders = AiBrain::new(Team::Blue, 41).think(&world);
+        let orders = AiBrain::new(Team::Blue, 41, world.starts).think(&world);
         let wave = orders.iter().find_map(|command| match command {
             SimCommand::AttackMove { units, .. } => Some(units.clone()),
             _ => None,
