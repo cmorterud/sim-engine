@@ -2,6 +2,8 @@
 name = "sim-engine"
 version = "0.1.0"
 edition = "2021"
+# The game. `cargo run --bin map-download` fetches maps to play with --map.
+default-run = "sim-engine"
 
 [dependencies]
 # Deterministic Fixed-Point Math
