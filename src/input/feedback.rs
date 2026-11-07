@@ -99,6 +99,9 @@ pub fn describe(command: &SimCommand, blueprints: &BlueprintDb) -> Option<(Marke
         SimCommand::Upgrade { units } => (MarkerKind::Build, format!("Upgrading: {}", unit_count(units)), None),
         SimCommand::SetCloak { units, on: true } => (MarkerKind::Support, format!("Cloaked: {}", unit_count(units)), None),
         SimCommand::SetCloak { units, on: false } => (MarkerKind::Support, format!("Uncloaked: {}", unit_count(units)), None),
+        SimCommand::Enhance { enhancement, .. } => (MarkerKind::Build, format!("Enhancing: {}", blueprints.enhancement(*enhancement).name), None),
+        SimCommand::Teleport { units, .. } => (MarkerKind::Move, format!("Teleport charging: {}", unit_count(units)), None),
+        SimCommand::SelfDestruct { units } => (MarkerKind::Attack, format!("Self-destruct: {} (Ctrl+K again to cancel)", unit_count(units)), None),
         SimCommand::Stop { .. } | SimCommand::QueueUnit { .. } | SimCommand::ClearQueue { .. } | SimCommand::CancelTask { .. } | SimCommand::RemoveQueued { .. } | SimCommand::SetPaused { .. } | SimCommand::SetRepeat { .. } => return None,
     })
 }

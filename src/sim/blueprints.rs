@@ -17,6 +17,91 @@ pub const TICKS_PER_SECOND: i64 = 10;
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BlueprintId(pub u16);
 
+/// One of the commanders' field enhancements (GAME_SPECIFICATION.md §2.1).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct EnhancementId(pub u16);
+
+/// Where an enhancement fits. A unit has one of each, so a new one replaces what is there.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Slot {
+    /// Offensive upgrades.
+    RightArm,
+    /// Construction upgrades.
+    LeftArm,
+    /// Strategic utility.
+    Back,
+}
+
+impl Slot {
+    pub const ALL: [Self; 3] = [Self::RightArm, Self::LeftArm, Self::Back];
+
+    pub const fn index(self) -> usize {
+        self as usize
+    }
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::RightArm => "Right arm",
+            Self::LeftArm => "Left arm",
+            Self::Back => "Back",
+        }
+    }
+}
+
+/// A personal teleporter (GAME_SPECIFICATION.md §2.1): its charge costs energy and time that
+/// grow with the distance, as in Forged Alliance Forever.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct TeleporterDef {
+    /// Energy for a jump of no distance.
+    pub flat_energy: Res,
+    pub max_energy: Res,
+    /// Charge time for a jump of no distance.
+    pub min_ticks: u32,
+    pub max_ticks: u32,
+}
+
+/// What an enhancement does. Each is a total over the unit's own blueprint, not a step over
+/// the enhancement it replaces.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub struct EnhancementEffects {
+    /// The new build power, if it changes.
+    pub build_power: Option<Fp>,
+    /// The tier of structures it can build, if higher than its own.
+    pub build_tier: u8,
+    /// Added to maximum health.
+    pub health: Fp,
+    /// Health per tick.
+    pub regen_per_tick: Fp,
+    /// The gun's new range and damage, if they change.
+    pub weapon_range: Option<Fp>,
+    pub weapon_damage: Option<Fp>,
+    pub shield: Option<ShieldDef>,
+    /// Energy per tick while cloaked. A cloak hides from sight and radar both.
+    pub cloak_upkeep: Option<Res>,
+    /// Energy per tick to stay hidden from enemy radar.
+    pub stealth_upkeep: Option<Res>,
+    pub teleporter: Option<TeleporterDef>,
+    /// Per tick.
+    pub mass_income: Res,
+    pub energy_income: Res,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Enhancement {
+    pub id: EnhancementId,
+    pub key: String,
+    pub name: String,
+    /// The units that can take it.
+    pub units: Vec<BlueprintId>,
+    pub slot: Slot,
+    /// The enhancement it builds on, which must be in the slot already, and which it replaces.
+    pub requires: Option<EnhancementId>,
+    pub mass: Res,
+    pub energy: Res,
+    pub build_time: Res,
+    pub effects: EnhancementEffects,
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum UnitClass {
     Commander,
@@ -327,15 +412,128 @@ struct RawUnit {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct RawTeleporter {
+    flat_energy: Number,
+    max_energy: Number,
+    min_seconds: u32,
+    max_seconds: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawEnhancement {
+    id: String,
+    name: String,
+    units: Vec<String>,
+    /// "right_arm", "left_arm", or "back".
+    slot: String,
+    requires: Option<String>,
+    mass: Number,
+    energy: Number,
+    build_time: Number,
+    build_power: Option<Number>,
+    build_tier: Option<u8>,
+    health: Option<Number>,
+    /// Health per second.
+    regen: Option<Number>,
+    weapon_range: Option<Number>,
+    weapon_damage: Option<Number>,
+    shield: Option<RawShield>,
+    cloak: Option<RawCloak>,
+    /// Energy per second to stay off enemy radar.
+    stealth_upkeep: Option<Number>,
+    teleporter: Option<RawTeleporter>,
+    /// Per second.
+    mass_income: Option<Number>,
+    energy_income: Option<Number>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawFile {
     version: u32,
     unit: Vec<RawUnit>,
+    #[serde(default)]
+    enhancement: Vec<RawEnhancement>,
 }
 
 #[derive(Debug)]
 pub struct BlueprintDb {
     blueprints: Vec<Blueprint>,
+    enhancements: Vec<Enhancement>,
     content_hash: u64,
+}
+
+fn parse_shield(shield: &RawShield) -> Result<ShieldDef, String> {
+    Ok(ShieldDef {
+        radius: shield.radius.fp()?,
+        health: shield.health.fp()?,
+        regen_per_tick: shield.regen.fp()? / TICKS_PER_SECOND as i32,
+        recharge_ticks: shield.recharge_seconds * TICKS_PER_SECOND as u32,
+        upkeep: shield.upkeep.res()? / TICKS_PER_SECOND,
+    })
+}
+
+fn parse_enhancements(raw: &[RawEnhancement], lookup: impl Fn(&str) -> Result<BlueprintId, String>) -> Result<Vec<Enhancement>, String> {
+    let keys: Vec<&str> = raw.iter().map(|enhancement| enhancement.id.as_str()).collect();
+    let mut enhancements = Vec::with_capacity(raw.len());
+    for (index, enhancement) in raw.iter().enumerate() {
+        let context = |error: String| format!("{}: {error}", enhancement.id);
+        let whole = |value: &Option<Number>| value.as_ref().map(Number::fp).transpose().map_err(context);
+        let per_tick = |value: &Option<Number>| value.as_ref().map(|number| number.res().map(|per_second| per_second / TICKS_PER_SECOND)).transpose().map_err(context);
+        let slot = match enhancement.slot.as_str() {
+            "right_arm" => Slot::RightArm,
+            "left_arm" => Slot::LeftArm,
+            "back" => Slot::Back,
+            other => return Err(context(format!("unknown slot {other:?}"))),
+        };
+        let requires = match &enhancement.requires {
+            None => None,
+            Some(key) => {
+                let found = keys.iter().position(|candidate| candidate == key).ok_or_else(|| context(format!("unknown enhancement {key:?}")))?;
+                if raw[found].slot != enhancement.slot {
+                    return Err(context(format!("{key:?} is in another slot")));
+                }
+                Some(EnhancementId(found as u16))
+            }
+        };
+        let teleporter = match &enhancement.teleporter {
+            None => None,
+            Some(teleporter) => Some(TeleporterDef {
+                flat_energy: teleporter.flat_energy.res().map_err(context)?,
+                max_energy: teleporter.max_energy.res().map_err(context)?,
+                min_ticks: teleporter.min_seconds * TICKS_PER_SECOND as u32,
+                max_ticks: teleporter.max_seconds * TICKS_PER_SECOND as u32,
+            }),
+        };
+        let effects = EnhancementEffects {
+            build_power: whole(&enhancement.build_power)?,
+            build_tier: enhancement.build_tier.unwrap_or(0),
+            health: whole(&enhancement.health)?.unwrap_or(Fp::ZERO),
+            regen_per_tick: whole(&enhancement.regen)?.map_or(Fp::ZERO, |per_second| per_second / TICKS_PER_SECOND as i32),
+            weapon_range: whole(&enhancement.weapon_range)?,
+            weapon_damage: whole(&enhancement.weapon_damage)?,
+            shield: enhancement.shield.as_ref().map(parse_shield).transpose().map_err(context)?,
+            cloak_upkeep: enhancement.cloak.as_ref().map(|cloak| cloak.upkeep.res().map(|per_second| per_second / TICKS_PER_SECOND)).transpose().map_err(context)?,
+            stealth_upkeep: per_tick(&enhancement.stealth_upkeep)?,
+            teleporter,
+            mass_income: per_tick(&enhancement.mass_income)?.unwrap_or(Res::ZERO),
+            energy_income: per_tick(&enhancement.energy_income)?.unwrap_or(Res::ZERO),
+        };
+        enhancements.push(Enhancement {
+            id: EnhancementId(index as u16),
+            key: enhancement.id.clone(),
+            name: enhancement.name.clone(),
+            units: enhancement.units.iter().map(|key| lookup(key)).collect::<Result<_, _>>().map_err(context)?,
+            slot,
+            requires,
+            mass: enhancement.mass.res().map_err(context)?,
+            energy: enhancement.energy.res().map_err(context)?,
+            build_time: enhancement.build_time.res().map_err(context)?,
+            effects,
+        });
+    }
+    Ok(enhancements)
 }
 
 impl BlueprintDb {
@@ -413,16 +611,7 @@ impl BlueprintDb {
                     reload_ticks: overcharge.reload_ticks,
                 }),
             };
-            let shield = match &unit.shield {
-                None => None,
-                Some(shield) => Some(ShieldDef {
-                    radius: shield.radius.fp().map_err(context)?,
-                    health: shield.health.fp().map_err(context)?,
-                    regen_per_tick: shield.regen.fp().map_err(context)? / TICKS_PER_SECOND as i32,
-                    recharge_ticks: shield.recharge_seconds * TICKS_PER_SECOND as u32,
-                    upkeep: shield.upkeep.res().map_err(context)? / TICKS_PER_SECOND,
-                }),
-            };
+            let shield = unit.shield.as_ref().map(parse_shield).transpose().map_err(context)?;
             let missile_defense = match &unit.missile_defense {
                 None => None,
                 Some(defense) => Some(MissileDefenseDef {
@@ -496,10 +685,47 @@ impl BlueprintDb {
                 max_stock: unit.max_stock.unwrap_or(0),
             });
         }
+        let enhancements = parse_enhancements(&raw.enhancement, lookup)?;
         // Line endings can differ by checkout, and must not change the checksum.
         let mut hasher = XxHash64::with_seed(0);
         hasher.write(text.replace('\r', "").as_bytes());
-        Ok(Self { blueprints, content_hash: hasher.finish() })
+        Ok(Self { blueprints, enhancements, content_hash: hasher.finish() })
+    }
+
+    pub fn enhancement(&self, id: EnhancementId) -> &Enhancement {
+        &self.enhancements[id.0 as usize]
+    }
+
+    pub fn find_enhancement(&self, key: &str) -> Option<EnhancementId> {
+        self.enhancements.iter().find(|enhancement| enhancement.key == key).map(|enhancement| enhancement.id)
+    }
+
+    /// Looks up an enhancement that the caller knows exists.
+    pub fn enhancement_id(&self, key: &str) -> EnhancementId {
+        self.find_enhancement(key).unwrap_or_else(|| panic!("no enhancement named {key}"))
+    }
+
+    /// Whether `later` builds on `earlier`, directly or through others, and so includes it.
+    pub fn builds_on(&self, later: EnhancementId, earlier: EnhancementId) -> bool {
+        let mut next = self.enhancement(later).requires;
+        while let Some(id) = next {
+            if id == earlier {
+                return true;
+            }
+            next = self.enhancement(id).requires;
+        }
+        false
+    }
+
+    /// Whether a slot holding `current` already has `enhancement`: it is there, or what is
+    /// there builds on it, as the T3 suite does on the T2 one.
+    pub fn slot_has(&self, current: Option<EnhancementId>, enhancement: EnhancementId) -> bool {
+        current.is_some_and(|current| current == enhancement || self.builds_on(current, enhancement))
+    }
+
+    /// The enhancements a unit can take, in the order of the data.
+    pub fn enhancements_for(&self, blueprint: BlueprintId) -> impl Iterator<Item = &Enhancement> {
+        self.enhancements.iter().filter(move |enhancement| enhancement.units.contains(&blueprint))
     }
 
     pub fn get(&self, id: BlueprintId) -> &Blueprint {

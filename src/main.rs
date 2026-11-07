@@ -93,12 +93,16 @@ Controls:
   P + right-click      Hold P and add patrol points, then release P
   X                    Stop
   L, then left-click   Overcharge an enemy with the commander
-  O                    Pause or resume the selected factories and construction sites
+  O                    Pause or resume the selected factories and construction sites,
+                       or switch a cloak on and off
+  Ctrl + T, then click Teleport a commander with a teleporter. Command works too
+  Ctrl + K             Self-destruct the selection in 5 seconds, or stop counting.
+                       Command works too
   Ctrl + 1 to 0        Save the selection as a group, or clear it if nothing is selected.
                        Command works too
   1 to 0               Select that group
   N                    Mute or unmute
-  - and =              Sound quieter and louder
+  - and =              Sound quieter and louder, unless a missile silo is selected
   Space                Jump to your commander
   Scroll               Zoom, towards the cursor
   WASD or arrow keys   Pan
@@ -790,6 +794,21 @@ fn run_windowed(seed: u64, options: Options) {
                                             }
                                         }
                                     }
+                                    ArmedOrder::Teleport => {
+                                        let units = ui::teleporters(&session.current, selection.selected(), &map.blueprints);
+                                        let ground = camera.screen_to_ground(selection.cursor(), &map.heights);
+                                        match ground {
+                                            _ if units.is_empty() => feedback.show_rejected(None, "No units selected that can teleport"),
+                                            Some(point) if ui::senses_spot(&session.current, point) => {
+                                                armed = None;
+                                                let order = SimCommand::Teleport { units, point: Vec2Fp::new(Fp::from_num(point[0]), Fp::from_num(point[1])) };
+                                                feedback.show_orders(std::slice::from_ref(&order), ground_point(ground, &map.heights), &map.blueprints, "");
+                                                session.send(order);
+                                            }
+                                            // Stays armed, so that the player can try again.
+                                            _ => feedback.show_rejected(None, "Can't teleport there: out of sight and radar"),
+                                        }
+                                    }
                                     ArmedOrder::Assist => {
                                         // Stays armed after a miss, so that the player can try again.
                                         if issue_planned_orders(&session, &selection, &camera, &map, &mut feedback, false, shift_held, false, "Click a friendly unit to assist", assist_orders) && !shift_held {
@@ -930,9 +949,42 @@ fn run_windowed(seed: u64, options: Options) {
                                     }
                                 }
                             }
+                            // Ctrl+T arms a teleport, and Ctrl+K starts or stops a self-destruct.
+                            PhysicalKey::Code(KeyCode::KeyT) if pressed && !event.repeat && command_held && is_match => {
+                                if ui::teleporters(&session.current, selection.selected(), &map.blueprints).is_empty() {
+                                    feedback.show_rejected(None, "No units selected that can teleport");
+                                } else {
+                                    armed = Some(ArmedOrder::Teleport);
+                                    placing = None;
+                                    line_start = None;
+                                    patrol_points.clear();
+                                }
+                            }
+                            PhysicalKey::Code(KeyCode::KeyK) if pressed && !event.repeat && command_held && is_match => {
+                                let own: Vec<SimId> = selection
+                                    .selected()
+                                    .iter()
+                                    .copied()
+                                    .filter(|id| session.current.units.binary_search_by_key(id, |unit| unit.id).is_ok_and(|index| session.current.units[index].team == PLAYER_TEAM))
+                                    .collect();
+                                if own.is_empty() {
+                                    feedback.show_rejected(None, "No units selected");
+                                } else {
+                                    let order = SimCommand::SelfDestruct { units: own };
+                                    feedback.show_orders(std::slice::from_ref(&order), None, &map.blueprints, "");
+                                    session.send(order);
+                                }
+                            }
                             PhysicalKey::Code(KeyCode::KeyN) if pressed && !event.repeat && !command_held => sound_settings.toggle_mute(),
-                            PhysicalKey::Code(KeyCode::Minus) if pressed && !command_held => sound_settings.quieter(),
-                            PhysicalKey::Code(KeyCode::Equal) if pressed && !command_held => sound_settings.louder(),
+                            // - and = build missiles when a launcher is selected, and set the volume otherwise.
+                            PhysicalKey::Code(code @ (KeyCode::Minus | KeyCode::Equal)) if pressed && !command_held => {
+                                let letter = hotkeys::letter_for(code).expect("both are panel keys");
+                                match ui::hotkey_action(&session.current, selection.selected(), &map.blueprints, letter) {
+                                    Some(action) => hotkey_actions.push(ui::with_shift(action, shift_held, &map.blueprints)),
+                                    None if code == KeyCode::Minus => sound_settings.quieter(),
+                                    None => sound_settings.louder(),
+                                }
+                            }
                             // Command and Control belong to the system: Command-Q must not start a factory.
                             PhysicalKey::Code(code) if pressed && !event.repeat && !command_held => {
                                 if let Some(letter) = hotkeys::letter_for(code) {
@@ -1157,6 +1209,7 @@ fn run_windowed(seed: u64, options: Options) {
                             ui::distant_selection_markers(ctx, &camera, &snapshot, &selected, pixels_per_point);
                             ui::draw_work_beams(ctx, &camera, &beams, beam_time, pixels_per_point);
                             ui::draw_interceptions(ctx, &camera, &snapshot.interceptions, pixels_per_point);
+                            ui::draw_teleports(ctx, &camera, &map.heights, &snapshot.teleports, pixels_per_point);
                             ui::draw_sensor_coverage(ctx, &camera, &map.heights, &snapshot.sensor_ranges, pixels_per_point);
                             ui::draw_blips(ctx, &camera, &snapshot.blips, pixels_per_point);
                             ui::order_trails(ctx, &camera, &trails, pixels_per_point);
@@ -1243,6 +1296,11 @@ fn run_windowed(seed: u64, options: Options) {
                                     let word = if on { "Cloaked" } else { "Uncloaked" };
                                     feedback.set_label(MarkerKind::Support, format!("{word}: {}", units.len()));
                                     session.send(SimCommand::SetCloak { units, on });
+                                }
+                                UiAction::Enhance { units, enhancement } => {
+                                    let order = SimCommand::Enhance { units, enhancement };
+                                    feedback.show_orders(std::slice::from_ref(&order), None, &map.blueprints, "");
+                                    session.send(order);
                                 }
                                 UiAction::Upgrade { units } => {
                                     feedback.set_label(MarkerKind::Build, format!("Upgrading: {}", units.len()));

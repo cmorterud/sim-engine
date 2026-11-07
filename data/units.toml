@@ -21,8 +21,8 @@ radius = 16
 vision = 1000
 build_power = 10
 build_range = 200
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "radar"]
-upgrades_to = "acu_t2"
+# Its engineering suites (the enhancements below) unlock the T2 and T3 structures on its list.
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "radar", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "stealth_field_generator", "strategic_missile_launcher", "strategic_missile_defense"]
 weapon = { range = 440, reload_ticks = 7, projectile_speed = 50, damage = 70, turn_rate = 180 }
 overcharge = { energy = 3000, damage = 12000, structure_damage = 800, reload_ticks = 50 }
 mass_income = 1
@@ -31,7 +31,6 @@ mass_storage = 650
 energy_storage = 4000
 death_explosion = { damage = 15000, radius = 300 }
 omni = 400
-cloak = { upkeep = 50 }
 
 [[unit]]
 id = "t1_engineer"
@@ -299,62 +298,8 @@ build_time = 1200
 health = 1
 vision = 0
 
-# Tech tiers (GAME_SPECIFICATION.md §15). The commander upgrades in place, in two steps: its
-# mass, energy, and build time here are what each upgrade costs. It stands still while it
-# upgrades, and a new order cancels the upgrade.
-[[unit]]
-id = "acu_t2"
-name = "Armored Command Unit (T2 Engineering)"
-class = "commander"
-tier = 2
-mass = 800
-energy = 12000
-build_time = 1000
-health = 11000
-speed = 4
-turn_rate = 180
-radius = 16
-vision = 1000
-build_power = 20
-build_range = 200
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "radar", "stealth_field_generator"]
-upgrades_to = "acu_t3"
-weapon = { range = 440, reload_ticks = 7, projectile_speed = 50, damage = 70, turn_rate = 180 }
-overcharge = { energy = 3000, damage = 12000, structure_damage = 800, reload_ticks = 50 }
-mass_income = 1
-energy_income = 20
-mass_storage = 650
-energy_storage = 4000
-death_explosion = { damage = 15000, radius = 300 }
-omni = 400
-cloak = { upkeep = 50 }
-
-[[unit]]
-id = "acu_t3"
-name = "Armored Command Unit (T3 Engineering)"
-class = "commander"
-tier = 3
-mass = 2400
-energy = 36000
-build_time = 3000
-health = 11000
-speed = 4
-turn_rate = 180
-radius = 16
-vision = 1000
-build_power = 40
-build_range = 200
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator"]
-weapon = { range = 440, reload_ticks = 7, projectile_speed = 50, damage = 70, turn_rate = 180 }
-overcharge = { energy = 3000, damage = 12000, structure_damage = 800, reload_ticks = 50 }
-mass_income = 1
-energy_income = 20
-mass_storage = 650
-energy_storage = 4000
-death_explosion = { damage = 15000, radius = 300 }
-omni = 400
-cloak = { upkeep = 50 }
-
+# Tech tiers (GAME_SPECIFICATION.md §15). The T2 factory upgrades in its queue to the T3 one, and
+# each makes engineers of its tier. The commander's tiers are engineering suites, below.
 [[unit]]
 id = "land_factory_t3"
 name = "Land Factory (T3)"
@@ -456,3 +401,121 @@ vision = 300
 stealth_field = 350
 jammer = { radius = 450, decoys = 8 }
 upkeep = 25
+
+# Field enhancements (GAME_SPECIFICATION.md §2.1), with Forged Alliance Forever's numbers for its
+# commander. A commander has three slots, and one enhancement in each: a new one replaces what is
+# there, unless it builds on it. Its effects are totals over the commander's own, not steps.
+[[enhancement]]
+id = "heavy_cannon"
+name = "Heavy Cannon"
+units = ["acu"]
+slot = "right_arm"
+mass = 800
+energy = 24000
+build_time = 800
+# The original's 30 range for 22, and double the damage.
+weapon_range = 600
+weapon_damage = 140
+
+[[enhancement]]
+id = "advanced_engineering"
+name = "T2 Engineering Suite"
+units = ["acu"]
+slot = "left_arm"
+mass = 800
+energy = 21000
+build_time = 1000
+build_power = 42
+build_tier = 2
+health = 2000
+regen = 10
+
+[[enhancement]]
+id = "t3_engineering"
+name = "T3 Engineering Suite"
+units = ["acu"]
+slot = "left_arm"
+requires = "advanced_engineering"
+mass = 2400
+energy = 50000
+build_time = 8400
+build_power = 100
+build_tier = 3
+health = 3000
+regen = 20
+
+[[enhancement]]
+id = "nano_repair"
+name = "Nano-Repair System"
+units = ["acu"]
+slot = "left_arm"
+mass = 800
+energy = 24000
+build_time = 800
+health = 1500
+regen = 40
+
+[[enhancement]]
+id = "personal_shield"
+name = "Personal Shield"
+units = ["acu"]
+slot = "back"
+mass = 2300
+energy = 112500
+build_time = 2100
+shield = { radius = 24, health = 19000, regen = 30, recharge_seconds = 140, upkeep = 250 }
+
+[[enhancement]]
+id = "shield_field"
+name = "Shield Generator Field"
+units = ["acu"]
+slot = "back"
+mass = 1400
+energy = 40000
+build_time = 1400
+shield = { radius = 100, health = 5000, regen = 60, recharge_seconds = 45, upkeep = 200 }
+
+[[enhancement]]
+id = "personal_stealth"
+name = "Personal Stealth"
+units = ["acu"]
+slot = "back"
+mass = 650
+energy = 14000
+build_time = 800
+health = 2000
+stealth_upkeep = 50
+
+[[enhancement]]
+id = "personal_cloak"
+name = "Personal Cloak"
+units = ["acu"]
+slot = "back"
+requires = "personal_stealth"
+mass = 6000
+energy = 750000
+build_time = 4200
+health = 12000
+stealth_upkeep = 50
+cloak = { upkeep = 3000 }
+
+[[enhancement]]
+id = "teleporter"
+name = "Personal Teleporter"
+units = ["acu"]
+slot = "back"
+mass = 15000
+energy = 1500000
+build_time = 4200
+teleporter = { flat_energy = 100000, max_energy = 2500000, min_seconds = 20, max_seconds = 50 }
+
+[[enhancement]]
+id = "resource_allocation"
+name = "Resource Allocation System"
+units = ["acu"]
+slot = "back"
+mass = 5000
+energy = 175000
+build_time = 2800
+mass_income = 14
+energy_income = 2500

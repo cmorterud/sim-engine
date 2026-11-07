@@ -10,7 +10,7 @@ use crate::input::feedback::{Marker, MarkerKind, OrderFeedback, LABEL_SECONDS};
 use crate::input::hotkeys::{self, blueprint_hotkey};
 use crate::input::orders::PendingBuild;
 use crate::render::camera::Camera;
-use crate::sim::blueprints::{BlueprintDb, BlueprintId, UnitClass};
+use crate::sim::blueprints::{BlueprintDb, BlueprintId, Enhancement, EnhancementId, Slot, UnitClass, TICKS_PER_SECOND};
 use crate::sim::components::{BuildTask, OrderKind, SimId, Team};
 use crate::sim::world::{MatchResult, PlanStepKind, SimSnapshot, UnitRatesView, UnitView};
 
@@ -69,6 +69,8 @@ pub enum ArmedOrder {
     Patrol,
     Assist,
     Overcharge,
+    /// Not on a letter: Ctrl+T, and only for units with a teleporter.
+    Teleport,
 }
 
 impl ArmedOrder {
@@ -83,6 +85,7 @@ impl ArmedOrder {
             Self::Patrol => hotkeys::PATROL,
             Self::Assist => hotkeys::ASSIST,
             Self::Overcharge => hotkeys::OVERCHARGE,
+            Self::Teleport => 'T',
         }
     }
 
@@ -95,6 +98,7 @@ impl ArmedOrder {
             Self::Patrol => "Patrol",
             Self::Assist => "Assist",
             Self::Overcharge => "Overcharge",
+            Self::Teleport => "Teleport",
         }
     }
 
@@ -107,6 +111,7 @@ impl ArmedOrder {
             Self::Patrol => "Repeat a route. Combat units fight along it, and engineers also reclaim and repair.",
             Self::Assist => "Stay with a friendly unit and protect it. Builders also help it build.",
             Self::Overcharge => "Spend stored energy on one shot that destroys almost any unit. Weak against structures.",
+            Self::Teleport => "Charge up, standing still, and jump to a spot you can see or have on radar. Costs a great deal of energy, more the farther it goes, and aborts if the energy runs out. Lands on enemy units destroy them.",
         }
     }
 
@@ -120,6 +125,7 @@ impl ArmedOrder {
             Self::Patrol => "Patrol: left-click each point, then right-click or press P to start. Esc to cancel.",
             Self::Assist => "Assist: left-click a friendly unit. Right-click or Esc to cancel.",
             Self::Overcharge => "Overcharge: left-click an enemy. Right-click or Esc to cancel.",
+            Self::Teleport => "Teleport: left-click open ground you can see or have on radar. Right-click or Esc to cancel.",
         }
     }
 }
@@ -147,6 +153,8 @@ pub enum UiAction {
     Upgrade { units: Vec<SimId> },
     /// Switch these units' cloaks on or off.
     SetCloak { units: Vec<SimId>, on: bool },
+    /// Start a field enhancement on these units.
+    Enhance { units: Vec<SimId>, enhancement: EnhancementId },
     Restart,
 }
 
@@ -215,7 +223,7 @@ pub fn has_weapons(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb)
         .any(|unit| unit.blueprint == u16::MAX || db.get(BlueprintId(unit.blueprint)).weapon.is_some())
 }
 
-fn unit_order_row(ui: &mut egui::Ui, armed: Option<ArmedOrder>, overcharge: bool, weapons: bool, actions: &mut Vec<UiAction>) {
+fn unit_order_row(ui: &mut egui::Ui, armed: Option<ArmedOrder>, overcharge: bool, weapons: bool, teleport: bool, actions: &mut Vec<UiAction>) {
     ui.horizontal_wrapped(|ui| {
         let offered = |order: &ArmedOrder| match order {
             ArmedOrder::Overcharge => overcharge,
@@ -230,6 +238,182 @@ fn unit_order_row(ui: &mut egui::Ui, armed: Option<ArmedOrder>, overcharge: bool
         }
         if ui.button(format!("[{}] Stop", hotkeys::STOP)).on_hover_text("Drop all orders.").clicked() {
             actions.push(UiAction::Stop);
+        }
+        if teleport {
+            let button = egui::Button::new("[Ctrl+T] Teleport").selected(armed == Some(ArmedOrder::Teleport));
+            if ui.add(button).on_hover_text(ArmedOrder::Teleport.description()).clicked() {
+                actions.push(UiAction::Arm(ArmedOrder::Teleport));
+            }
+        }
+    });
+}
+
+/// Whether the viewer can sense a spot, and so teleport there: it is in sight, or within the
+/// radar or omni of one of its sensors.
+pub fn senses_spot(snapshot: &SimSnapshot, point: [f64; 2]) -> bool {
+    let Some(fog) = &snapshot.fog else {
+        return true;
+    };
+    let side = (fog.len() as f64).sqrt() as usize;
+    let cell = |value: f64| ((value / f64::from(crate::sim::config::VISIBILITY_CELL_UNITS)).floor().max(0.0) as usize).min(side.saturating_sub(1));
+    if fog.get(cell(point[1]) * side + cell(point[0])) == Some(&255) {
+        return true;
+    }
+    snapshot.sensor_ranges.iter().any(|sensor| {
+        let (dx, dy) = (point[0] - f64::from(sensor.center[0]) / 4096.0, point[1] - f64::from(sensor.center[1]) / 4096.0);
+        let reach = f64::from(sensor.radar.max(sensor.omni)) / 4096.0;
+        dx * dx + dy * dy <= reach * reach
+    })
+}
+
+/// The enhancement in each of a unit's slots.
+pub fn installed_enhancements(snapshot: &SimSnapshot, id: SimId) -> [Option<EnhancementId>; 3] {
+    snapshot
+        .enhancements
+        .iter()
+        .find(|(unit, _)| *unit == id)
+        .map_or([None; 3], |(_, slots)| slots.map(|slot| (slot != u16::MAX).then_some(EnhancementId(slot))))
+}
+
+/// The tier of structures a builder can build: its own, or its engineering suite's.
+fn unit_build_tier(snapshot: &SimSnapshot, unit: &UnitView, db: &BlueprintDb) -> u8 {
+    let suites = installed_enhancements(snapshot, unit.id).into_iter().flatten().map(|id| db.enhancement(id).effects.build_tier);
+    suites.fold(db.get(BlueprintId(unit.blueprint)).tier, u8::max)
+}
+
+/// The selected units that have a teleporter.
+pub fn teleporters(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb) -> Vec<SimId> {
+    selected
+        .iter()
+        .copied()
+        .filter(|id| installed_enhancements(snapshot, *id).into_iter().flatten().any(|enhancement| db.enhancement(enhancement).effects.teleporter.is_some()))
+        .collect()
+}
+
+/// One enhancement button: which units would start it, and whether all of them have it already.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnhancementOffer {
+    pub enhancement: EnhancementId,
+    pub units: Vec<SimId>,
+    pub installed: bool,
+    /// What it would remove from the slot, for the first unit that would start it.
+    pub replaces: Option<EnhancementId>,
+}
+
+/// The enhancements the selection can take, slot by slot, for the first selected unit that
+/// can take any. A unit is offered one if it is not there already, and what it builds on is.
+pub fn enhancement_offers(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb) -> Vec<(Slot, Vec<EnhancementOffer>)> {
+    let units: Vec<&UnitView> = selected
+        .iter()
+        .filter_map(|id| find_unit(snapshot, *id))
+        .filter(|unit| unit.blueprint != u16::MAX && unit.built_permille == 1000 && db.enhancements_for(BlueprintId(unit.blueprint)).next().is_some())
+        .collect();
+    let Some(first) = units.first() else {
+        return Vec::new();
+    };
+    let enhancing = |id: SimId| snapshot.enhancing.iter().find(|(unit, _, _)| *unit == id).map(|(_, enhancement, _)| EnhancementId(*enhancement));
+    Slot::ALL
+        .into_iter()
+        .map(|slot| {
+            let offers = db
+                .enhancements_for(BlueprintId(first.blueprint))
+                .filter(|enhancement| enhancement.slot == slot)
+                .map(|enhancement| {
+                    let mut offer = EnhancementOffer { enhancement: enhancement.id, units: Vec::new(), installed: true, replaces: None };
+                    for unit in units.iter().filter(|unit| enhancement.units.contains(&BlueprintId(unit.blueprint))) {
+                        let current = installed_enhancements(snapshot, unit.id)[slot.index()];
+                        // The T3 suite includes the T2 one, so with it, the T2 one shows as there.
+                        let has = db.slot_has(current, enhancement.id);
+                        offer.installed &= has;
+                        let able = !has && enhancing(unit.id) != Some(enhancement.id) && enhancement.requires.is_none_or(|needed| current == Some(needed));
+                        if able {
+                            if offer.units.is_empty() {
+                                offer.replaces = current;
+                            }
+                            offer.units.push(unit.id);
+                        }
+                    }
+                    offer
+                })
+                .collect();
+            (slot, offers)
+        })
+        .collect()
+}
+
+/// What an enhancement does, in words.
+pub fn enhancement_description(enhancement: &Enhancement, db: &BlueprintDb) -> String {
+    let effects = &enhancement.effects;
+    let per_second = |per_tick: i64| per_tick * TICKS_PER_SECOND;
+    let mut parts = Vec::new();
+    if let Some(range) = effects.weapon_range {
+        parts.push(format!("gun range {}", range.to_num::<i32>()));
+    }
+    if let Some(damage) = effects.weapon_damage {
+        parts.push(format!("gun damage {}", damage.to_num::<i32>()));
+    }
+    if let Some(power) = effects.build_power {
+        parts.push(format!("build power {}", power.to_num::<i32>()));
+    }
+    if effects.build_tier > 0 {
+        parts.push(format!("builds T{} structures", effects.build_tier));
+    }
+    if effects.health > crate::math::fp::Fp::ZERO {
+        parts.push(format!("{} more health", effects.health.to_num::<i32>()));
+    }
+    if effects.regen_per_tick > crate::math::fp::Fp::ZERO {
+        parts.push(format!("heals {} a second", (effects.regen_per_tick * TICKS_PER_SECOND as i32).to_num::<i32>()));
+    }
+    if let Some(shield) = effects.shield {
+        parts.push(format!(
+            "a {}-health shield of radius {}, for {} energy a second",
+            shield.health.to_num::<i32>(),
+            shield.radius.to_num::<i32>(),
+            per_second(shield.upkeep.to_num::<i64>())
+        ));
+    }
+    if let Some(upkeep) = effects.stealth_upkeep {
+        parts.push(format!("hidden from enemy radar, for {} energy a second", per_second(upkeep.to_num::<i64>())));
+    }
+    if let Some(upkeep) = effects.cloak_upkeep {
+        parts.push(format!("a cloak, switched with O, for {} energy a second", per_second(upkeep.to_num::<i64>())));
+    }
+    if effects.teleporter.is_some() {
+        parts.push("teleporting, with Ctrl+T".to_string());
+    }
+    if effects.mass_income > crate::sim::blueprints::Res::ZERO || effects.energy_income > crate::sim::blueprints::Res::ZERO {
+        parts.push(format!("{} mass and {} energy a second", per_second(effects.mass_income.to_num::<i64>()), per_second(effects.energy_income.to_num::<i64>())));
+    }
+    let mut text = format!("{}: {}.", enhancement.name, parts.join(", "));
+    if let Some(needed) = enhancement.requires {
+        text.push_str(&format!(" Builds on {}.", db.enhancement(needed).name));
+    }
+    text.push_str(&format!(" Build time {}. It stands still meanwhile, and a new order cancels it.", enhancement.build_time.to_num::<i64>()));
+    text
+}
+
+fn enhancement_rows(ui: &mut egui::Ui, snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb, actions: &mut Vec<UiAction>) {
+    let rows = enhancement_offers(snapshot, selected, db);
+    if rows.is_empty() {
+        return;
+    }
+    egui::CollapsingHeader::new("Enhancements").id_source("enhancements").show(ui, |ui| {
+        for (slot, offers) in rows {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(format!("{}:", slot.name()));
+                for offer in offers {
+                    let enhancement = db.enhancement(offer.enhancement);
+                    let label = format!("{}\n{} mass  {} energy", enhancement.name, enhancement.mass.to_num::<i64>(), enhancement.energy.to_num::<i64>());
+                    let mut hint = enhancement_description(enhancement, db);
+                    if let Some(replaced) = offer.replaces.filter(|replaced| Some(*replaced) != enhancement.requires) {
+                        hint.push_str(&format!(" Removes {}, which is lost.", db.enhancement(replaced).name));
+                    }
+                    let button = egui::Button::new(label).selected(offer.installed);
+                    if ui.add_enabled(!offer.units.is_empty(), button).on_hover_text(hint).on_disabled_hover_text(enhancement_description(enhancement, db)).clicked() {
+                        actions.push(UiAction::Enhance { units: offer.units.clone(), enhancement: offer.enhancement });
+                    }
+                }
+            });
         }
     });
 }
@@ -253,7 +437,7 @@ fn builder_options(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb)
         .builds
         .iter()
         .copied()
-        .filter(|option| builders.iter().all(|unit| db.get(BlueprintId(unit.blueprint)).builds.contains(option)))
+        .filter(|option| builders.iter().all(|unit| db.get(BlueprintId(unit.blueprint)).builds.contains(option) && db.get(*option).tier <= unit_build_tier(snapshot, unit, db)))
         .collect()
 }
 
@@ -944,7 +1128,8 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
         });
 
         if has_mobile_units(snapshot, selected) {
-            unit_order_row(ui, armed, has_overcharge(snapshot, selected, db), has_weapons(snapshot, selected, db), actions);
+            let teleport = !teleporters(snapshot, selected, db).is_empty();
+            unit_order_row(ui, armed, has_overcharge(snapshot, selected, db), has_weapons(snapshot, selected, db), teleport, actions);
         }
         if let Some(action) = cloak_action(snapshot, selected) {
             let UiAction::SetCloak { on, .. } = &action else {
@@ -953,7 +1138,7 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
             // O pauses first, when there is something to pause.
             let key = if pause_action(snapshot, selected, db).is_none() { format!("[{}] ", hotkeys::PAUSE) } else { String::new() };
             let label = if *on { format!("{key}Cloak") } else { format!("{key}Uncloak") };
-            let hint = "Hidden from sight and radar, except from enemies within 100 or with omni on it. Costs 50 energy a second.";
+            let hint = "Hidden from sight and radar, except from enemies within 100 or with omni on it. Costs energy while on.";
             if ui.button(label).on_hover_text(hint).clicked() {
                 actions.push(action);
             }
@@ -989,6 +1174,20 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
                 let into = db.get(BlueprintId(unit.blueprint)).upgrades_to.map_or("", |into| db.get(into).name.as_str());
                 ui.colored_label(SPENDING, format!("Upgrading to {into}: {}%", permille / 10));
             }
+        }
+
+        enhancement_rows(ui, snapshot, selected, db, actions);
+        for &(id, enhancement, permille) in snapshot.enhancing.iter().filter(|(id, _, _)| selected.contains(id)) {
+            if find_unit(snapshot, id).is_some() {
+                ui.colored_label(SPENDING, format!("Enhancing: {} {}%", db.enhancement(EnhancementId(enhancement)).name, permille / 10));
+            }
+        }
+        for &(_, _, permille) in snapshot.teleports.iter().filter(|(id, _, _)| selected.contains(id)) {
+            ui.colored_label(SPENDING, format!("Teleport charging: {}%", permille / 10));
+        }
+        for &(_, ticks) in snapshot.self_destructs.iter().filter(|(id, _)| selected.contains(id)) {
+            let seconds = (i64::from(ticks) + TICKS_PER_SECOND - 1) / TICKS_PER_SECOND;
+            ui.colored_label(Color32::from_rgb(255, 90, 70), format!("Self-destruct in {seconds} s (Ctrl+K to cancel)"));
         }
 
         let options = builder_options(snapshot, selected, db);
@@ -1599,6 +1798,21 @@ pub fn draw_interceptions(ctx: &egui::Context, camera: &Camera, interceptions: &
     }
 }
 
+/// Rings where the viewer's teleports will land, filling as they charge.
+pub fn draw_teleports(ctx: &egui::Context, camera: &Camera, heights: &crate::render::camera::HeightField, teleports: &[(SimId, [i32; 2], u16)], pixels_per_point: f32) {
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    let color = Color32::from_rgb(120, 220, 255);
+    for &(_, [x, y], permille) in teleports {
+        let (x, y) = (f64::from(x) / 4096.0, f64::from(y) / 4096.0);
+        let Some(pixels) = camera.world_to_screen([x, y, heights.height_at(x, y)]) else {
+            continue;
+        };
+        let center = Pos2::new(pixels[0] as f32 / pixels_per_point, pixels[1] as f32 / pixels_per_point);
+        painter.circle_stroke(center, 16.0, Stroke::new(2.0_f32, color));
+        painter.circle_filled(center, 16.0 * f32::from(permille) / 1000.0, color.gamma_multiply(0.35));
+    }
+}
+
 /// Marks where an extractor can go while placing one, since deposits are small from far away.
 pub fn deposit_highlights(ctx: &egui::Context, camera: &Camera, free: &[[f64; 3]], target: Option<[f64; 3]>, pixels_per_point: f32) {
     let painter = ctx.layer_painter(egui::LayerId::background());
@@ -2074,6 +2288,73 @@ mod tests {
                 assert_eq!(hotkey_action(&current, &selected, &db, letter), Some(UiAction::BeginPlacement(db.id(key))), "{letter} for {selected:?}");
             }
         }
+    }
+
+    #[test]
+    fn a_commander_builds_higher_tiers_only_with_its_engineering_suites() {
+        let db = BlueprintDb::standard();
+        let mut current = commander_and_engineer(&db);
+        let (shield, nuke) = (db.id("shield_generator"), db.id("strategic_missile_launcher"));
+        assert!(!builder_options(&current, &[SimId(10)], &db).contains(&shield), "T1 only at first");
+        current.enhancements = vec![(SimId(10), [u16::MAX, db.enhancement_id("advanced_engineering").0, u16::MAX])];
+        let options = builder_options(&current, &[SimId(10)], &db);
+        assert!(options.contains(&shield) && !options.contains(&nuke), "T2 with the T2 suite");
+        current.enhancements = vec![(SimId(10), [u16::MAX, db.enhancement_id("t3_engineering").0, u16::MAX])];
+        assert!(builder_options(&current, &[SimId(10)], &db).contains(&nuke), "T3 with the T3 suite");
+        // With an engineer selected too, only what both can build.
+        assert!(!builder_options(&current, &[SimId(10), SimId(11)], &db).contains(&shield));
+    }
+
+    #[test]
+    fn enhancements_are_offered_slot_by_slot_once_what_they_build_on_is_there() {
+        let db = BlueprintDb::standard();
+        let mut current = commander_and_engineer(&db);
+        assert!(enhancement_offers(&current, &[SimId(11)], &db).is_empty(), "an engineer has none");
+        let rows = enhancement_offers(&current, &[SimId(10), SimId(11)], &db);
+        assert_eq!(rows.iter().map(|(slot, _)| *slot).collect::<Vec<_>>(), Slot::ALL);
+        let offer = |rows: &[(Slot, Vec<EnhancementOffer>)], key: &str| {
+            rows.iter().flat_map(|(_, offers)| offers).find(|offer| offer.enhancement == db.enhancement_id(key)).cloned().expect("listed")
+        };
+        assert_eq!(offer(&rows, "advanced_engineering").units, [SimId(10)]);
+        assert!(offer(&rows, "t3_engineering").units.is_empty(), "it needs the T2 suite first");
+
+        current.enhancements = vec![(SimId(10), [u16::MAX, db.enhancement_id("advanced_engineering").0, u16::MAX])];
+        let rows = enhancement_offers(&current, &[SimId(10)], &db);
+        let installed = offer(&rows, "advanced_engineering");
+        assert!(installed.installed && installed.units.is_empty());
+        assert_eq!(offer(&rows, "t3_engineering").units, [SimId(10)]);
+        assert_eq!(offer(&rows, "nano_repair").replaces, Some(db.enhancement_id("advanced_engineering")), "it would take the suite's place");
+        assert!(enhancement_description(db.enhancement(db.enhancement_id("t3_engineering")), &db).contains("Builds on T2 Engineering Suite"));
+
+        // With the T3 suite, the T2 one is part of it: shown as there, and not offered again.
+        current.enhancements = vec![(SimId(10), [u16::MAX, db.enhancement_id("t3_engineering").0, db.enhancement_id("personal_cloak").0])];
+        let rows = enhancement_offers(&current, &[SimId(10)], &db);
+        for (key, included) in [("t3_engineering", true), ("advanced_engineering", true), ("nano_repair", false), ("personal_cloak", true), ("personal_stealth", true)] {
+            let offer = offer(&rows, key);
+            assert_eq!((offer.installed, offer.units.is_empty()), (included, included), "{key}");
+        }
+    }
+
+    #[test]
+    fn only_commanders_with_a_teleporter_can_teleport() {
+        let db = BlueprintDb::standard();
+        let mut current = commander_and_engineer(&db);
+        assert!(teleporters(&current, &[SimId(10), SimId(11)], &db).is_empty());
+        current.enhancements = vec![(SimId(10), [u16::MAX, u16::MAX, db.enhancement_id("teleporter").0])];
+        assert_eq!(teleporters(&current, &[SimId(10), SimId(11)], &db), [SimId(10)]);
+    }
+
+    #[test]
+    fn a_teleport_needs_a_spot_in_sight_or_on_radar() {
+        let mut current = snapshot(vec![], vec![]);
+        assert!(senses_spot(&current, [100.0, 100.0]), "without fog, anywhere");
+        // Four cells of 80 a side, with only the first in sight.
+        current.fog = Some(std::sync::Arc::new(vec![255, 90, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
+        assert!(senses_spot(&current, [40.0, 40.0]));
+        assert!(!senses_spot(&current, [120.0, 40.0]), "explored is not in sight");
+        current.sensor_ranges = vec![crate::sim::world::SensorRangeView { center: [200 * 4096, 200 * 4096], radar: 100 * 4096, omni: 0 }];
+        assert!(senses_spot(&current, [250.0, 250.0]), "on radar");
+        assert!(!senses_spot(&current, [300.0, 300.0]));
     }
 
     #[test]

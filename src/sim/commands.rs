@@ -1,4 +1,4 @@
-use super::blueprints::BlueprintId;
+use super::blueprints::{BlueprintId, EnhancementId};
 use super::components::{BuildTask, SimId};
 use crate::math::fp::Vec2Fp;
 
@@ -56,6 +56,13 @@ pub enum SimCommand {
     SetRepeat { factory: SimId, repeat: bool },
     /// Switch cloaks on or off, for the units that have one.
     SetCloak { units: Vec<SimId>, on: bool },
+    /// Start a field enhancement on each of these that can take it (GAME_SPECIFICATION.md §2.1).
+    /// One in the same slot that it does not build on is removed first.
+    Enhance { units: Vec<SimId>, enhancement: EnhancementId },
+    /// Charge a teleport to a spot the team can sense, for each of these with a teleporter.
+    Teleport { units: Vec<SimId>, point: Vec2Fp },
+    /// Start counting down to blowing up, or stop counting for those that already are.
+    SelfDestruct { units: Vec<SimId> },
     /// Pause or resume factories and construction sites. Anything else is left alone.
     SetPaused { units: Vec<SimId>, paused: bool },
     SetRally { factory: SimId, point: Vec2Fp },

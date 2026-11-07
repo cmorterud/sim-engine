@@ -6,6 +6,7 @@ pub mod combat;
 pub mod commands;
 pub mod components;
 pub mod config;
+pub mod enhancements;
 pub mod flowfield;
 pub mod formation;
 pub mod production;

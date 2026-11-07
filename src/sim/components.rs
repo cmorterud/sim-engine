@@ -1,4 +1,4 @@
-use super::blueprints::{BlueprintId, Res};
+use super::blueprints::{BlueprintId, EnhancementId, Res};
 use crate::math::fp::{cos_sin_radians, radians_from_tenths_of_degree, sqrt_wide, wide_mul, Fp, FpWide, Vec2Fp, Vec3Fp};
 
 /// Assigned from a counter on spawn and never reused. The stable identity for
@@ -394,6 +394,37 @@ pub struct Intel {
     pub cloak_on: bool,
     /// The cloak is on and paid for this tick, so it hides the unit.
     pub cloaked: bool,
+    /// A personal stealth enhancement is paid for this tick, so the unit is off enemy radar.
+    pub stealthed: bool,
+}
+
+/// The field enhancements a unit has, one for each slot (GAME_SPECIFICATION.md §2.1).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub struct Enhancements(pub [Option<EnhancementId>; 3]);
+
+/// An enhancement under way. The unit stands still and puts all its build power into it,
+/// and a new order cancels it, losing what was spent.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Enhancing {
+    pub enhancement: EnhancementId,
+    /// From 0 to 1.
+    pub progress: Res,
+}
+
+/// A teleport charging up. It costs energy every tick, aborts if that cannot be paid, and
+/// jumps when the charge is done. The unit stands still meanwhile, and a new order cancels it.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Teleporting {
+    pub destination: Vec2Fp,
+    pub ticks_left: u32,
+    pub total_ticks: u32,
+    pub energy_per_tick: Res,
+}
+
+/// Counting down to blowing itself up, leaving no debris.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct SelfDestructing {
+    pub ticks_left: u32,
 }
 
 /// Marks a factory or a construction site that the player has paused. It spends nothing and

@@ -39,6 +39,14 @@ fn passive(world: &mut SimWorld, key: &str, team: Team, at: Vec2Fp) -> SimId {
     id
 }
 
+/// A commander with the cloaking enhancement on its back.
+fn cloaking_commander(world: &mut SimWorld, at: Vec2Fp) -> SimId {
+    let acu = world.blueprints.id("acu");
+    let commander = world.spawn_mobile(acu, Team::Blue, at);
+    world.install_enhancement(commander, world.blueprints.enhancement_id("personal_cloak"));
+    commander
+}
+
 fn run(world: &mut SimWorld, ticks: u32) {
     for _ in 0..ticks {
         world.advance_tick(&[]);
@@ -141,8 +149,7 @@ fn decoys_stay_in_range_and_move_from_time_to_time() {
 #[test]
 fn a_cloaked_commander_cannot_be_seen_or_shot_until_an_enemy_comes_close() {
     let mut world = foggy_world();
-    let acu = world.blueprints.id("acu");
-    let commander = world.spawn_mobile(acu, Team::Blue, point(1_000, 1_000));
+    let commander = cloaking_commander(&mut world, point(1_000, 1_000));
     world.ecs.get::<&mut Combat>(world.unit_entity(commander).unwrap()).unwrap().range = Fp::ZERO;
     // A Red bot 300 away: within its sight and its 340 of range.
     let bot = world.blueprints.id("t1_light_bot");
@@ -153,10 +160,10 @@ fn a_cloaked_commander_cannot_be_seen_or_shot_until_an_enemy_comes_close() {
     assert_eq!(world.unit_health(commander), Some(full), "nothing should fire at it");
     assert!(!shown(&world, Team::Red, commander), "and Red should not see it");
     assert!(blips(&world, Team::Red).is_empty(), "nor have it on radar");
-    // It costs 50 energy a second, on top of nothing else.
+    // It costs 3,000 energy a second, and its stealth 50 more, on top of nothing else.
     let stored = world.economies[0].energy;
     world.advance_tick(&[]);
-    assert_eq!(stored - world.economies[0].energy, Res::from_num(5) - world.economies[0].energy_income);
+    assert_eq!(stored - world.economies[0].energy, Res::from_num(305) - world.economies[0].energy_income);
 
     // Within 100 of the bot, it is found.
     world.ecs.get::<&mut sim_engine::sim::components::Position>(world.unit_entity(bot).unwrap()).unwrap().0.x = fp_int(1_080);
@@ -167,8 +174,7 @@ fn a_cloaked_commander_cannot_be_seen_or_shot_until_an_enemy_comes_close() {
 #[test]
 fn a_cloak_drops_when_it_cannot_be_paid_for() {
     let mut world = foggy_world();
-    let acu = world.blueprints.id("acu");
-    let commander = world.spawn_mobile(acu, Team::Blue, point(1_000, 1_000));
+    let commander = cloaking_commander(&mut world, point(1_000, 1_000));
     world.advance_tick(&[SimCommand::SetCloak { units: vec![commander], on: true }]);
     assert!(world.ecs.get::<&Intel>(world.unit_entity(commander).unwrap()).unwrap().cloaked);
     world.economies[0].energy = Res::ZERO;
@@ -176,13 +182,14 @@ fn a_cloak_drops_when_it_cannot_be_paid_for() {
     world.advance_tick(&[]);
     let intel = *world.ecs.get::<&Intel>(world.unit_entity(commander).unwrap()).unwrap();
     assert!(!intel.cloaked && !intel.cloak_on, "out of energy, the cloak switches off");
+    assert!(!intel.stealthed, "and so does its stealth");
 }
 
 #[test]
 fn an_enemy_commanders_omni_finds_a_cloaked_one() {
     let mut world = foggy_world();
     let acu = world.blueprints.id("acu");
-    let blue = world.spawn_mobile(acu, Team::Blue, point(1_000, 1_000));
+    let blue = cloaking_commander(&mut world, point(1_000, 1_000));
     // 300 away: inside the Red commander's 400 of omni, but well beyond 100.
     let red = world.spawn_mobile(acu, Team::Red, point(1_300, 1_000));
     world.ecs.get::<&mut Combat>(world.unit_entity(red).unwrap()).unwrap().range = Fp::ZERO;

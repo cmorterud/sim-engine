@@ -271,6 +271,14 @@ pub struct SimSnapshot {
     pub unpowered: Vec<SimId>,
     /// How far along the viewer's upgrades in place are, in thousandths, sorted by `SimId`.
     pub upgrades: Vec<(SimId, u16)>,
+    /// The viewer's units' field enhancements, one for each slot, `u16::MAX` for none.
+    pub enhancements: Vec<(SimId, [u16; 3])>,
+    /// The viewer's enhancements under way: which, and how far along, in thousandths.
+    pub enhancing: Vec<(SimId, u16, u16)>,
+    /// The viewer's teleports charging: to where, and how far along, in thousandths.
+    pub teleports: Vec<(SimId, [i32; 2], u16)>,
+    /// The viewer's units counting down to blowing up, and the ticks left.
+    pub self_destructs: Vec<(SimId, u32)>,
     pub factories: Vec<FactoryView>,
     /// Sorted by `SimId`.
     pub plans: Vec<UnitPlanView>,
@@ -308,7 +316,7 @@ struct Explosion {
 /// The highest veteran rank.
 pub const MAX_RANK: u8 = 5;
 /// Each rank adds this share of a unit's base health, so rank 5 doubles it.
-const RANK_HEALTH_PERMILLE: i64 = 200;
+pub(super) const RANK_HEALTH_PERMILLE: i64 = 200;
 /// Reaching a rank heals this share of the new maximum health at once.
 const PROMOTION_HEAL_PERMILLE: i64 = 250;
 /// Each rank regenerates this share of maximum health per second, in tenths of a permille.
@@ -376,6 +384,12 @@ pub struct SimWorld {
     pub upgrading: Vec<(SimId, hecs::Entity)>,
     /// Units with sensors, stealth fields, jamming, or cloaks, sorted by `SimId`.
     pub intel: Vec<(SimId, hecs::Entity)>,
+    /// Units with field enhancements, and those with one under way, sorted by `SimId`.
+    pub enhanced: Vec<(SimId, hecs::Entity)>,
+    pub enhancing: Vec<(SimId, hecs::Entity)>,
+    /// Units charging a teleport, and those counting down to blowing up, sorted by `SimId`.
+    pub teleporting: Vec<(SimId, hecs::Entity)>,
+    pub self_destructing: Vec<(SimId, hecs::Entity)>,
     /// For each team, the cloaked enemies it cannot see this tick, sorted by `SimId`. Worked out
     /// again every tick from what is hashed, so it is not hashed itself.
     concealed: [Vec<SimId>; 2],
@@ -401,7 +415,7 @@ pub struct SimWorld {
     max_structure_radius: i32,
     pending_shots: Vec<PendingShot>,
     /// Each hit, and who caused it.
-    pending_hits: Vec<(hecs::Entity, Fp, Option<SimId>)>,
+    pub(super) pending_hits: Vec<(hecs::Entity, Fp, Option<SimId>)>,
     pending_explosions: Vec<Explosion>,
     /// Shells that came down on a shield this tick, and what they do to it.
     pending_shield_hits: Vec<(SimId, Fp)>,
@@ -447,6 +461,10 @@ impl SimWorld {
             missile_defenses: Vec::new(),
             upgrading: Vec::new(),
             intel: Vec::new(),
+            enhanced: Vec::new(),
+            enhancing: Vec::new(),
+            teleporting: Vec::new(),
+            self_destructing: Vec::new(),
             concealed: [Vec::new(), Vec::new()],
             interceptions: Vec::new(),
             formations: BTreeMap::new(),
@@ -610,6 +628,13 @@ impl SimWorld {
                     }
                 }
                 SimCommand::MoveOrder { units, task, goal } => self.move_order(units, *task, *goal),
+                SimCommand::Enhance { units, enhancement } => {
+                    for &id in units {
+                        self.start_enhancement(id, *enhancement);
+                    }
+                }
+                SimCommand::Teleport { units, point } => self.command_teleport(units, *point),
+                SimCommand::SelfDestruct { units } => self.command_self_destruct(units),
                 other => self.apply_production_command(other),
             }
         }
@@ -771,10 +796,12 @@ impl SimWorld {
                 combat.ground_target = None;
             }
             let _ = self.ecs.remove_one::<OverchargeOrder>(entity);
-            // A new order cancels a commander's upgrade, and what was spent on it is lost.
+            // A new order cancels a commander's upgrade, enhancement, or teleport, and what was
+            // spent on it is lost.
             if self.ecs.remove_one::<Upgrading>(entity).is_ok() {
                 self.upgrading.retain(|unit| unit.0 != id);
             }
+            self.cancel_enhancement(id, entity);
             self.release_waiting_orders(id, entity);
             if let Ok(mut builder) = self.ecs.get::<&mut Builder>(entity) {
                 builder.tasks.clear();
@@ -1305,7 +1332,7 @@ impl SimWorld {
                 let at = self.veterans.partition_point(|veteran| veteran.0 < killer);
                 self.veterans.insert(at, (killer, entity));
             }
-            let base = i64::from(unit.health.to_bits());
+            let base = i64::from((unit.health + self.enhancement_effects(entity).health).to_bits());
             let new_max = Fp::from_bits((base * (1_000 + RANK_HEALTH_PERMILLE * i64::from(rank)) / 1_000) as i32);
             let mut health = self.ecs.get::<&mut Health>(entity).expect("units have health");
             let gained = new_max - health.max;
@@ -1962,6 +1989,7 @@ impl SimWorld {
             self.award_experience(killer, victim_team, mass);
         }
         self.regenerate_veterans();
+        self.regenerate_enhanced();
         self.resolve_match_end();
 
         if !self.dead_units.is_empty() {
@@ -1986,6 +2014,10 @@ impl SimWorld {
             self.missile_defenses.retain(alive);
             self.upgrading.retain(alive);
             self.intel.retain(alive);
+            self.enhanced.retain(alive);
+            self.enhancing.retain(alive);
+            self.teleporting.retain(alive);
+            self.self_destructing.retain(alive);
             self.dead_units.clear();
         }
         if !self.dead_projectiles.is_empty() {
@@ -2130,7 +2162,8 @@ impl SimWorld {
             self.clear_footprint(footprint);
             self.economy_dirty = true;
         }
-        let wreck = self.ecs.get::<&Blueprinted>(entity).ok().map(|blueprint| {
+        // A unit that blew itself up leaves nothing to reclaim.
+        let wreck = self.ecs.get::<&Blueprinted>(entity).ok().filter(|_| !self.blew_itself_up(entity)).map(|blueprint| {
             let built = self.ecs.get::<&Construction>(entity).map_or(Res::ONE, |construction| construction.progress);
             let unit = self.blueprints.get(blueprint.0);
             let health = Fp::from_num(Res::from_num(unit.health) * WRECK_HEALTH_PERMILLE / 1000 * built).max(Fp::from_bits(1));
@@ -2416,6 +2449,38 @@ impl SimWorld {
                 })
                 .collect()
         });
+        let own = |list: &[(SimId, hecs::Entity)]| -> Vec<(SimId, hecs::Entity)> {
+            viewer.map_or_else(Vec::new, |viewer| {
+                list.iter().copied().filter(|&(_, entity)| self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team == viewer)).collect()
+            })
+        };
+        let permille = |done: i64, of: i64| (done * 1000 / of.max(1)).clamp(0, 1000) as u16;
+        let enhancements = own(&self.enhanced)
+            .into_iter()
+            .filter_map(|(id, entity)| {
+                let installed = *self.ecs.get::<&super::components::Enhancements>(entity).ok()?;
+                Some((id, installed.0.map(|slot| slot.map_or(u16::MAX, |enhancement| enhancement.0))))
+            })
+            .collect();
+        let enhancing = own(&self.enhancing)
+            .into_iter()
+            .filter_map(|(id, entity)| {
+                let under_way = *self.ecs.get::<&super::components::Enhancing>(entity).ok()?;
+                Some((id, under_way.enhancement.0, permille(under_way.progress.to_bits(), Res::ONE.to_bits())))
+            })
+            .collect();
+        let teleports = own(&self.teleporting)
+            .into_iter()
+            .filter_map(|(id, entity)| {
+                let charge = *self.ecs.get::<&super::components::Teleporting>(entity).ok()?;
+                let done = i64::from(charge.total_ticks - charge.ticks_left);
+                Some((id, [charge.destination.x.to_bits(), charge.destination.y.to_bits()], permille(done, i64::from(charge.total_ticks))))
+            })
+            .collect();
+        let self_destructs = own(&self.self_destructing)
+            .into_iter()
+            .filter_map(|(id, entity)| Some((id, self.ecs.get::<&super::components::SelfDestructing>(entity).ok()?.ticks_left)))
+            .collect();
         let blips = match viewer {
             Some(viewer) if self.config.fog_of_war => self.blips_for(viewer),
             _ => Vec::new(),
@@ -2436,7 +2501,7 @@ impl SimWorld {
                 .filter_map(|&(id, entity)| {
                     let unit = self.blueprints.get(self.ecs.get::<&Blueprinted>(entity).ok()?.0);
                     let intel = *self.ecs.get::<&Intel>(entity).ok()?;
-                    unit.cloak_upkeep.is_some().then_some((id, intel.cloak_on, intel.cloaked))
+                    (unit.cloak_upkeep.is_some() || self.cloak_upkeep(entity).is_some()).then_some((id, intel.cloak_on, intel.cloaked))
                 })
                 .collect()
         });
@@ -2496,6 +2561,10 @@ impl SimWorld {
             cloaks,
             unpowered,
             upgrades,
+            enhancements,
+            enhancing,
+            teleports,
+            self_destructs,
             factories,
             plans,
             work_links,
@@ -2568,7 +2637,7 @@ impl SimWorld {
                     let (dx, dy) = (i64::from(x - fx), i64::from(y - fy));
                     dx * dx + dy * dy <= radius * radius
                 });
-                let cloaked = self.intel.binary_search_by_key(&id, |unit| unit.0).is_ok() && self.ecs.get::<&Intel>(entity).is_ok_and(|intel| intel.cloaked);
+                let cloaked = self.intel.binary_search_by_key(&id, |unit| unit.0).is_ok() && self.ecs.get::<&Intel>(entity).is_ok_and(|intel| intel.cloaked || intel.stealthed);
                 if stealthed || cloaked {
                     continue;
                 }

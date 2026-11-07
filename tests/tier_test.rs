@@ -1,9 +1,9 @@
-//! Tech tiers (GAME_SPECIFICATION.md §15): who can build what, and the commander's upgrades.
+//! Tech tiers (GAME_SPECIFICATION.md §15): who can build what, and the commander's engineering suites.
 
 use sim_engine::math::fp::{fp_int, Vec2Fp};
 use sim_engine::sim::blueprints::Res;
 use sim_engine::sim::commands::SimCommand;
-use sim_engine::sim::components::{Blueprinted, BuildTask, Builder, Position, SimId, Team, Upgrading};
+use sim_engine::sim::components::{Blueprinted, BuildTask, Builder, Enhancements, Enhancing, Position, SimId, Team};
 use sim_engine::sim::config::{SimConfig, TerrainStyle};
 use sim_engine::sim::world::SimWorld;
 
@@ -39,6 +39,17 @@ fn tasks(world: &SimWorld, id: SimId) -> Vec<BuildTask> {
     world.ecs.get::<&Builder>(world.unit_entity(id).unwrap()).unwrap().tasks.clone()
 }
 
+/// The commander's left-arm enhancement, if it has one.
+fn left_arm(world: &SimWorld, id: SimId) -> Option<String> {
+    let installed = world.ecs.get::<&Enhancements>(world.unit_entity(id).unwrap()).ok()?.0[1]?;
+    Some(world.blueprints.enhancement(installed).key.clone())
+}
+
+fn enhance(world: &mut SimWorld, id: SimId, key: &str) {
+    let enhancement = world.blueprints.enhancement_id(key);
+    world.advance_tick(&[SimCommand::Enhance { units: vec![id], enhancement }]);
+}
+
 fn order_build(world: &mut SimWorld, units: Vec<SimId>, key: &str, cell_x: u32) {
     let blueprint = world.blueprints.id(key);
     world.advance_tick(&[SimCommand::Build { units, blueprint, cell_x, cell_y: 50, queued: false }]);
@@ -61,65 +72,70 @@ fn each_tier_of_builder_builds_only_up_to_its_tier() {
 }
 
 #[test]
-fn the_commander_upgrades_in_place_standing_still_and_then_builds_the_next_tier() {
+fn the_commander_takes_an_engineering_suite_standing_still_and_then_builds_the_next_tier() {
     let mut world = rich_world();
     let commander = spawn(&mut world, "acu", point(1_000, 1_000));
     let entity = world.unit_entity(commander).unwrap();
     let here = world.ecs.get::<&Position>(entity).unwrap().0;
     let mass_before = world.economies[0].mass;
-    world.advance_tick(&[SimCommand::Upgrade { units: vec![commander] }]);
-    assert!(world.ecs.get::<&Upgrading>(entity).is_ok());
-    // An order to build waits until the upgrade is done.
+    let health_before = world.unit_health(commander).unwrap();
+    enhance(&mut world, commander, "advanced_engineering");
+    assert!(world.ecs.get::<&Enhancing>(entity).is_ok());
+    // An order to build waits until the enhancement is done.
     world.advance_tick(&[SimCommand::QueueTask { units: vec![commander], task: BuildTask::Assist { target: commander } }]);
     // 1,000 build time at 10 build power is 100 seconds.
     let mut done_at = None;
     for tick in 0..1_100 {
         world.advance_tick(&[]);
-        assert_eq!(world.ecs.get::<&Position>(entity).unwrap().0, here, "it stands still while it upgrades");
-        if blueprint_key(&world, commander) == "acu_t2" {
+        assert_eq!(world.ecs.get::<&Position>(entity).unwrap().0, here, "it stands still while it works");
+        if left_arm(&world, commander).as_deref() == Some("advanced_engineering") {
             done_at = Some(tick);
             break;
         }
     }
-    let done_at = done_at.expect("the upgrade should finish");
+    let done_at = done_at.expect("the enhancement should finish");
     assert!((990..=1_010).contains(&done_at), "it took {done_at} ticks");
-    // 800 mass for the upgrade, less the commander's own 1 a second over the 100 seconds.
+    // 800 mass, less the commander's own 1 a second over the 100 seconds.
     let spent = (mass_before - world.economies[0].mass).to_num::<f64>();
     assert!((695.0..=705.0).contains(&spent), "it cost {spent} mass");
-    assert_eq!(world.ecs.get::<&Builder>(entity).unwrap().power, fp_int(20), "with more build power");
-    assert!(world.ecs.get::<&Upgrading>(entity).is_err());
+    assert_eq!(world.ecs.get::<&Builder>(entity).unwrap().power, fp_int(42), "with more build power");
+    assert_eq!(world.unit_health(commander).unwrap(), health_before + fp_int(2_000), "and more health");
+    assert_eq!(blueprint_key(&world, commander), "acu", "the commander keeps its own blueprint");
     world.advance_tick(&[SimCommand::Stop { units: vec![commander] }]);
     order_build(&mut world, vec![commander], "tactical_missile_launcher", 70);
     assert!(!tasks(&world, commander).is_empty(), "now it can build T2 structures");
-    // And it can go on to T3.
-    world.advance_tick(&[SimCommand::Upgrade { units: vec![commander] }]);
-    assert_eq!(world.ecs.get::<&Upgrading>(entity).unwrap().into, world.blueprints.id("acu_t3"));
+    world.advance_tick(&[SimCommand::Stop { units: vec![commander] }]);
+    order_build(&mut world, vec![commander], "strategic_missile_launcher", 80);
+    assert!(tasks(&world, commander).is_empty(), "but not T3 ones");
+    // And it can go on to T3, which builds on T2.
+    enhance(&mut world, commander, "t3_engineering");
+    assert_eq!(world.ecs.get::<&Enhancing>(entity).unwrap().enhancement, world.blueprints.enhancement_id("t3_engineering"));
 }
 
 #[test]
-fn engineers_can_assist_an_upgrade_and_a_new_order_cancels_it() {
+fn engineers_can_assist_an_enhancement_and_a_new_order_cancels_it() {
     let mut world = rich_world();
     let commander = spawn(&mut world, "acu", point(1_000, 1_000));
     let helper = spawn(&mut world, "t1_engineer", point(1_060, 1_000));
-    world.advance_tick(&[SimCommand::Upgrade { units: vec![commander] }]);
+    enhance(&mut world, commander, "advanced_engineering");
     world.advance_tick(&[SimCommand::Assist { units: vec![helper], target: commander }]);
     // 10 and 5 build power together take two thirds of the time.
     let took = (0..1_000).position(|_| {
         world.advance_tick(&[]);
-        blueprint_key(&world, commander) == "acu_t2"
+        left_arm(&world, commander).is_some()
     });
-    let took = took.expect("the upgrade should finish");
+    let took = took.expect("the enhancement should finish");
     assert!((640..=700).contains(&took), "it took {took} ticks");
 
     let entity = world.unit_entity(commander).unwrap();
-    world.advance_tick(&[SimCommand::Upgrade { units: vec![commander] }]);
+    enhance(&mut world, commander, "t3_engineering");
     for _ in 0..100 {
         world.advance_tick(&[]);
     }
-    assert!(world.ecs.get::<&Upgrading>(entity).unwrap().progress > Res::ZERO);
+    assert!(world.ecs.get::<&Enhancing>(entity).unwrap().progress > Res::ZERO);
     world.advance_tick(&[SimCommand::Move { units: vec![commander], goal: point(1_500, 1_000) }]);
-    assert!(world.ecs.get::<&Upgrading>(entity).is_err(), "moving cancels the upgrade");
-    assert_eq!(blueprint_key(&world, commander), "acu_t2");
+    assert!(world.ecs.get::<&Enhancing>(entity).is_err(), "moving cancels the enhancement");
+    assert_eq!(left_arm(&world, commander).as_deref(), Some("advanced_engineering"), "and what it built on stays");
 }
 
 #[test]

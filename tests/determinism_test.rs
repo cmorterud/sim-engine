@@ -167,10 +167,11 @@ fn every_intel_field_changes_the_checksum() {
     let baseline = world.compute_checksum();
     assert_ne!(baseline, before_sensors);
     type Edit = fn(&mut Intel);
-    let edits: [(&str, Edit); 3] = [
+    let edits: [(&str, Edit); 4] = [
         ("running", |i| i.running = !i.running),
         ("cloak switched on", |i| i.cloak_on = !i.cloak_on),
         ("cloaked", |i| i.cloaked = !i.cloaked),
+        ("stealthed", |i| i.stealthed = !i.stealthed),
     ];
     for (name, edit) in edits {
         edit(&mut world.ecs.get::<&mut Intel>(entity).unwrap());
@@ -197,11 +198,10 @@ fn every_upgrade_field_changes_the_checksum() {
     use sim_engine::sim::components::{Team, Upgrading};
     use sim_engine::sim::blueprints::BlueprintId;
     let (_, mut world) = run(scenario::battle(SEED, 20, small_config()), 10, 10);
-    let at = world.unit_position(world.units[0].0).unwrap().xy();
-    let acu = world.blueprints.id("acu");
-    let commander = world.spawn_mobile(acu, Team::Blue, at);
-    world.advance_tick(&[SimCommand::Upgrade { units: vec![commander] }]);
-    let entity = world.unit_entity(commander).unwrap();
+    let radar = world.blueprints.id("radar");
+    let radar = (4..200).find_map(|cell| world.spawn_finished_structure(radar, Team::Blue, cell, 8)).expect("room");
+    world.advance_tick(&[SimCommand::Upgrade { units: vec![radar] }]);
+    let entity = world.unit_entity(radar).unwrap();
     let baseline = world.compute_checksum();
     let bit = Res::from_bits(1);
     type Edit = fn(&mut Upgrading, bool, Res);
@@ -213,6 +213,53 @@ fn every_upgrade_field_changes_the_checksum() {
         edit(&mut world.ecs.get::<&mut Upgrading>(entity).unwrap(), false, bit);
         assert_ne!(world.compute_checksum(), baseline, "{name} is not covered by the checksum");
         edit(&mut world.ecs.get::<&mut Upgrading>(entity).unwrap(), true, bit);
+        assert_eq!(world.compute_checksum(), baseline, "undoing {name} did not restore the checksum");
+    }
+}
+
+/// Enhancements, teleports, and self-destructs are hashed only where they exist.
+#[test]
+fn every_enhancement_field_changes_the_checksum() {
+    use sim_engine::sim::blueprints::EnhancementId;
+    use sim_engine::sim::commands::SimCommand;
+    use sim_engine::sim::components::{Enhancements, Enhancing, SelfDestructing, Team, Teleporting};
+    let (_, mut world) = run(scenario::battle(SEED, 20, small_config()), 10, 10);
+    let at = world.unit_position(world.units[0].0).unwrap().xy();
+    let acu = world.blueprints.id("acu");
+    let (installed, building, jumping) = (world.spawn_mobile(acu, Team::Blue, at), world.spawn_mobile(acu, Team::Blue, at), world.spawn_mobile(acu, Team::Blue, at));
+    world.install_enhancement(installed, world.blueprints.enhancement_id("heavy_cannon"));
+    world.install_enhancement(jumping, world.blueprints.enhancement_id("teleporter"));
+    for economy in &mut world.economies {
+        economy.energy_capacity = Res::from_num(1_000_000);
+        economy.energy = Res::from_num(1_000_000);
+    }
+    let enhancement = world.blueprints.enhancement_id("advanced_engineering");
+    world.advance_tick(&[
+        SimCommand::Enhance { units: vec![building], enhancement },
+        SimCommand::Teleport { units: vec![jumping], point: at + Vec2Fp::new(Fp::from_num(200), Fp::ZERO) },
+        SimCommand::SelfDestruct { units: vec![installed] },
+    ]);
+    let (installed, building, jumping) = (world.unit_entity(installed).unwrap(), world.unit_entity(building).unwrap(), world.unit_entity(jumping).unwrap());
+    assert!(world.ecs.get::<&Teleporting>(jumping).is_ok(), "the teleport should be charging");
+    let baseline = world.compute_checksum();
+    let (bit, res_bit) = (Fp::from_bits(1), Res::from_bits(1));
+    type Edit = Box<dyn Fn(&mut SimWorld, bool)>;
+    let step = |undo: bool| if undo { -1 } else { 1 };
+    let edits: Vec<(&str, Edit)> = vec![
+        ("installed enhancement", Box::new(move |w, undo| { let mut e = w.ecs.get::<&mut Enhancements>(installed).unwrap(); e.0[2] = if undo { None } else { Some(EnhancementId(0)) }; })),
+        ("enhancement under way", Box::new(move |w, undo| { let mut e = w.ecs.get::<&mut Enhancing>(building).unwrap(); e.enhancement.0 = (i32::from(e.enhancement.0) + step(undo)) as u16; })),
+        ("enhancement progress", Box::new(move |w, undo| w.ecs.get::<&mut Enhancing>(building).unwrap().progress += if undo { -res_bit } else { res_bit })),
+        ("teleport destination x", Box::new(move |w, undo| w.ecs.get::<&mut Teleporting>(jumping).unwrap().destination.x += if undo { -bit } else { bit })),
+        ("teleport destination y", Box::new(move |w, undo| w.ecs.get::<&mut Teleporting>(jumping).unwrap().destination.y += if undo { -bit } else { bit })),
+        ("teleport ticks left", Box::new(move |w, undo| { let mut t = w.ecs.get::<&mut Teleporting>(jumping).unwrap(); t.ticks_left = (t.ticks_left as i32 + step(undo)) as u32; })),
+        ("teleport total", Box::new(move |w, undo| { let mut t = w.ecs.get::<&mut Teleporting>(jumping).unwrap(); t.total_ticks = (t.total_ticks as i32 + step(undo)) as u32; })),
+        ("teleport energy", Box::new(move |w, undo| w.ecs.get::<&mut Teleporting>(jumping).unwrap().energy_per_tick += if undo { -res_bit } else { res_bit })),
+        ("self-destruct countdown", Box::new(move |w, undo| { let mut c = w.ecs.get::<&mut SelfDestructing>(installed).unwrap(); c.ticks_left = (c.ticks_left as i32 + step(undo)) as u32; })),
+    ];
+    for (name, edit) in edits {
+        edit(&mut world, false);
+        assert_ne!(world.compute_checksum(), baseline, "{name} is not covered by the checksum");
+        edit(&mut world, true);
         assert_eq!(world.compute_checksum(), baseline, "undoing {name} did not restore the checksum");
     }
 }

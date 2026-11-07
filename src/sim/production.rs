@@ -101,6 +101,7 @@ enum WorkKind {
     FactoryItem,
     Repair,
     Upgrade,
+    Enhance,
 }
 
 /// The result of looking at a builder's first task.
@@ -343,7 +344,7 @@ impl SimWorld {
         }
         if unit.has_intel() {
             // Without upkeep, it works from the start. With upkeep, once it is first paid for.
-            let intel = Intel { running: unit.upkeep == Res::ZERO, cloak_on: false, cloaked: false };
+            let intel = Intel { running: unit.upkeep == Res::ZERO, cloak_on: false, cloaked: false, stealthed: false };
             self.ecs.insert_one(entity, intel).expect("entity was just spawned");
             self.intel.push((id, entity));
         }
@@ -577,6 +578,9 @@ impl SimWorld {
                 }
             }
             SimCommand::Move { .. }
+            | SimCommand::Enhance { .. }
+            | SimCommand::Teleport { .. }
+            | SimCommand::SelfDestruct { .. }
             | SimCommand::AttackMove { .. }
             | SimCommand::QueueMove { .. }
             | SimCommand::FormationMove { .. }
@@ -692,8 +696,7 @@ impl SimWorld {
             .copied()
             .filter(|id| {
                 self.find_unit(*id).is_some_and(|(_, entity)| {
-                    self.ecs.get::<&Builder>(entity).is_ok()
-                        && self.ecs.get::<&Blueprinted>(entity).is_ok_and(|unit| self.blueprints.get(unit.0).builds.contains(&blueprint))
+                    self.ecs.get::<&Builder>(entity).is_ok() && self.can_build(entity, blueprint)
                 })
             })
             .collect()
@@ -730,6 +733,9 @@ impl SimWorld {
     pub fn step_production(&mut self) {
         self.work_links.clear();
         self.factory_spending.clear();
+        if !self.self_destructing.is_empty() {
+            self.step_self_destructs();
+        }
         if self.builders.is_empty() && self.factories.is_empty() && self.structures.is_empty() && self.patrols.is_empty() {
             return;
         }
@@ -746,6 +752,7 @@ impl SimWorld {
         // building gets the rest.
         let upkeep = self.step_shields();
         let upkeep = self.step_intel_upkeep(upkeep);
+        let upkeep = if self.teleporting.is_empty() { upkeep } else { self.step_teleports(upkeep) };
         let mut power_by_target: BTreeMap<(SimId, WorkKind), Fp> = BTreeMap::new();
         for index in 0..self.builders.len() {
             let (id, entity) = self.builders[index];
@@ -753,6 +760,9 @@ impl SimWorld {
         }
         for &(id, entity) in &self.upgrading {
             *power_by_target.entry((id, WorkKind::Upgrade)).or_insert(Fp::ZERO) += self.upgrade_power(entity);
+        }
+        for &(id, entity) in &self.enhancing {
+            *power_by_target.entry((id, WorkKind::Enhance)).or_insert(Fp::ZERO) += self.upgrade_power(entity);
         }
         for &(id, entity) in &self.factories {
             let has_item = self.ecs.get::<&Factory>(entity).is_ok_and(|factory| !factory.queue.is_empty());
@@ -859,7 +869,8 @@ impl SimWorld {
     fn step_intel_upkeep(&mut self, mut paid: [Res; 2]) -> [Res; 2] {
         for &(_, entity) in &self.intel {
             let blueprint = self.blueprints.get(self.ecs.get::<&Blueprinted>(entity).expect("intel units have blueprints").0);
-            let (upkeep, cloak_upkeep) = (blueprint.upkeep, blueprint.cloak_upkeep.unwrap_or(Res::ZERO));
+            let (upkeep, cloak_upkeep) = (blueprint.upkeep, self.cloak_upkeep(entity).unwrap_or(Res::ZERO));
+            let stealth_upkeep = if self.enhanced.is_empty() { None } else { self.enhancement_effects(entity).stealth_upkeep };
             let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team.index();
             let switched_off = self.ecs.get::<&Construction>(entity).is_ok() || self.ecs.get::<&Paused>(entity).is_ok();
             let discount = self.ecs.get::<&Adjacency>(entity).map_or(0, |adjacency| adjacency.energy_cost_discount);
@@ -879,13 +890,16 @@ impl SimWorld {
                 intel.cloaked = afford(cloak_upkeep);
                 intel.cloak_on = intel.cloaked;
             }
+            if let Some(cost) = stealth_upkeep {
+                intel.stealthed = afford(cost);
+            }
         }
         paid
     }
 
     fn step_builder(&mut self, id: SimId, entity: hecs::Entity, power_by_target: &mut BTreeMap<(SimId, WorkKind), Fp>) {
-        // Upgrading takes all of its build power, and its other work waits.
-        if self.ecs.get::<&Upgrading>(entity).is_ok() {
+        // Upgrading takes all of its build power, and its other work waits, as does a teleport.
+        if self.is_busy_in_place(entity) {
             return;
         }
         let (task, power, range) = {
@@ -1013,6 +1027,9 @@ impl SimWorld {
                 if self.ecs.get::<&Upgrading>(target_entity).is_ok() {
                     return TaskStep::Work { target, kind: WorkKind::Upgrade };
                 }
+                if self.ecs.get::<&super::components::Enhancing>(target_entity).is_ok() {
+                    return TaskStep::Work { target, kind: WorkKind::Enhance };
+                }
                 if let Ok(factory) = self.ecs.get::<&Factory>(target_entity) {
                     return if factory.queue.is_empty() {
                         TaskStep::Wait
@@ -1063,7 +1080,13 @@ impl SimWorld {
         let (_, entity) = self.find_unit(target)?;
         let team = self.ecs.get::<&UnitStats>(entity).ok()?.team;
         let adjacency = self.ecs.get::<&Adjacency>(entity).map_or(Adjacency::default(), |adjacency| *adjacency);
+        if kind == WorkKind::Enhance {
+            let enhancement = self.blueprints.enhancement(self.ecs.get::<&super::components::Enhancing>(entity).ok()?.enhancement);
+            let step = fp_to_res(power) / (enhancement.build_time * TICKS_PER_SECOND);
+            return Some(WorkItem { target, entity, kind, team, step, mass: enhancement.mass * step, energy: enhancement.energy * step });
+        }
         let blueprint = match kind {
+            WorkKind::Enhance => unreachable!("worked out above"),
             WorkKind::FactoryItem => {
                 let factory = self.ecs.get::<&Factory>(entity).ok()?;
                 *factory.queue.first()?
@@ -1108,6 +1131,17 @@ impl SimWorld {
                 }
             }
             WorkKind::Repair => self.heal(item.entity, amount),
+            WorkKind::Enhance => {
+                let Ok(mut under_way) = self.ecs.get::<&mut super::components::Enhancing>(item.entity) else {
+                    return;
+                };
+                under_way.progress += amount;
+                let finished = under_way.progress >= Res::ONE;
+                drop(under_way);
+                if finished {
+                    self.finish_enhancement(item.target, item.entity);
+                }
+            }
             WorkKind::Upgrade => {
                 let Ok(mut upgrading) = self.ecs.get::<&mut Upgrading>(item.entity) else {
                     return;
@@ -1235,11 +1269,12 @@ impl SimWorld {
             };
             let blueprint = self.ecs.get::<&Blueprinted>(entity).expect("commanders have blueprints").0;
             let unit = self.blueprints.get(blueprint);
+            let effects = self.enhancement_effects(entity);
             let economy = &mut self.economies[team.index()];
             economy.mass_capacity += unit.mass_storage;
             economy.energy_capacity += unit.energy_storage;
-            economy.mass_income += unit.mass_income;
-            economy.energy_income += unit.energy_income;
+            economy.mass_income += unit.mass_income + effects.mass_income;
+            economy.energy_income += unit.energy_income + effects.energy_income;
         }
         for economy in &mut self.economies {
             economy.mass = economy.mass.min(economy.mass_capacity);
@@ -1683,7 +1718,11 @@ impl SimWorld {
         }
         if let Ok(intel) = self.ecs.get::<&Intel>(entity) {
             hasher.write(&[19, u8::from(intel.running), u8::from(intel.cloak_on), u8::from(intel.cloaked)]);
+            if intel.stealthed {
+                hasher.write(&[1]);
+            }
         }
+        self.hash_enhancement_state(entity, hasher);
         if let Ok(upgrading) = self.ecs.get::<&Upgrading>(entity) {
             hasher.write(&[18]);
             hasher.write(&upgrading.into.0.to_le_bytes());

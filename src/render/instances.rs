@@ -129,7 +129,6 @@ pub fn unit_look(key: &str) -> UnitLook {
     let look = |shape, tint, height_share| UnitLook { shape, tint, height_share, base: None };
     match key {
         "acu" => UnitLook { base: Some(Shape::CommanderLegs), ..look(Shape::Commander, Some([1.00, 1.00, 1.00]), 1.0) },
-        "acu_t2" | "acu_t3" => unit_look("acu"),
         "t2_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([0.95, 0.65, 0.25]), 1.0) },
         "t3_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([0.95, 0.50, 0.20]), 1.0) },
         "land_factory_t3" => look(Shape::Factory, Some([0.10, 0.10, 0.20]), 0.85),
@@ -472,7 +471,7 @@ mod tests {
         }
         // Higher tiers of the factory, the engineer, and the commander, and the radar's omni
         // upgrade, share their first tier's shape, and everything else is unique.
-        let shared = ["land_factory_t2", "land_factory_t3", "t2_engineer", "t3_engineer", "acu_t2", "acu_t3", "omni_sensor"];
+        let shared = ["land_factory_t2", "land_factory_t3", "t2_engineer", "t3_engineer", "omni_sensor"];
         let shapes: Vec<Shape> = drawn().filter(|unit| !shared.contains(&unit.key.as_str())).map(|unit| unit_look(&unit.key).shape).collect();
         for (index, shape) in shapes.iter().enumerate() {
             assert!(!shapes[index + 1..].contains(shape), "{shape:?} is used twice");
