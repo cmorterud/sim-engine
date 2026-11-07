@@ -51,6 +51,18 @@ pub struct OverchargeDef {
     pub reload_ticks: u32,
 }
 
+/// A shield generator's dome (GAME_SPECIFICATION.md §8.1).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct ShieldDef {
+    pub radius: Fp,
+    pub health: Fp,
+    pub regen_per_tick: Fp,
+    /// How long a dome that has collapsed stays down before it comes back at full strength.
+    pub recharge_ticks: u32,
+    /// Energy per tick while the dome is up, before any discount from neighbors.
+    pub upkeep: Res,
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct ExplosionDef {
     pub damage: Fp,
@@ -93,6 +105,7 @@ pub struct Blueprint {
     pub energy_storage: Res,
     pub death_explosion: Option<ExplosionDef>,
     pub overcharge: Option<OverchargeDef>,
+    pub shield: Option<ShieldDef>,
 }
 
 impl Blueprint {
@@ -166,6 +179,18 @@ struct RawOvercharge {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct RawShield {
+    radius: Number,
+    health: Number,
+    /// Health per second.
+    regen: Number,
+    recharge_seconds: u32,
+    /// Energy per second.
+    upkeep: Number,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawExplosion {
     damage: Number,
     radius: Number,
@@ -204,6 +229,7 @@ struct RawUnit {
     energy_storage: Option<Number>,
     death_explosion: Option<RawExplosion>,
     overcharge: Option<RawOvercharge>,
+    shield: Option<RawShield>,
 }
 
 #[derive(Deserialize)]
@@ -285,6 +311,19 @@ impl BlueprintDb {
                     reload_ticks: overcharge.reload_ticks,
                 }),
             };
+            let shield = match &unit.shield {
+                None => None,
+                Some(shield) => Some(ShieldDef {
+                    radius: shield.radius.fp().map_err(context)?,
+                    health: shield.health.fp().map_err(context)?,
+                    regen_per_tick: shield.regen.fp().map_err(context)? / TICKS_PER_SECOND as i32,
+                    recharge_ticks: shield.recharge_seconds * TICKS_PER_SECOND as u32,
+                    upkeep: shield.upkeep.res().map_err(context)? / TICKS_PER_SECOND,
+                }),
+            };
+            if shield.is_some() && footprint == 0 {
+                return Err(context("only structures can have shields".into()));
+            }
             blueprints.push(Blueprint {
                 id: BlueprintId(index as u16),
                 key: unit.id.clone(),
@@ -323,6 +362,7 @@ impl BlueprintDb {
                 energy_storage: total(&unit.energy_storage)?,
                 death_explosion,
                 overcharge,
+                shield,
             });
         }
         // Line endings can differ by checkout, and must not change the checksum.
@@ -387,6 +427,7 @@ mod tests {
             "power_generator",
             "mass_storage",
             "t1_point_defense",
+            "shield_generator",
         ] {
             assert!(db.find(key).is_some(), "{key} is missing");
         }

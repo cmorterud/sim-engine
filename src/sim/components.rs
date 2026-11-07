@@ -308,6 +308,33 @@ pub struct Veterancy {
     pub rank: u8,
 }
 
+/// A shield generator's dome: a sphere around the generator's base that stops enemy shells
+/// coming in from outside, while shells from inside fly out freely (GAME_SPECIFICATION.md §8.1).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Shield {
+    pub radius: Fp,
+    pub health: Fp,
+    pub max_health: Fp,
+    pub regen_per_tick: Fp,
+    /// Ticks until a collapsed dome comes back at full strength. Zero while it is up.
+    pub recharging: u32,
+    pub recharge_ticks: u32,
+    /// Energy per tick while up, before any discount from neighbors.
+    pub upkeep: Res,
+}
+
+impl Shield {
+    pub const fn is_up(&self) -> bool {
+        self.recharging == 0
+    }
+
+    /// Knocks the dome down, to come back at full strength after its recharge time.
+    pub fn collapse(&mut self) {
+        self.health = Fp::ZERO;
+        self.recharging = self.recharge_ticks.max(1);
+    }
+}
+
 /// Marks a factory or a construction site that the player has paused. It spends nothing and
 /// makes no progress until resumed, and keeps its queue and progress meanwhile.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

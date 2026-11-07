@@ -170,6 +170,18 @@ pub fn has_overcharge(snapshot: &SimSnapshot, selected: &[SimId], db: &Blueprint
         .any(|unit| unit.blueprint != u16::MAX && db.get(BlueprintId(unit.blueprint)).overcharge.is_some())
 }
 
+/// A shield generator's dome, in words: how strong it is, or how long until it is back.
+pub fn shield_status(snapshot: &SimSnapshot, id: SimId) -> Option<String> {
+    let shield = snapshot.shields.iter().find(|shield| shield.id == id)?;
+    Some(if shield.up {
+        format!("shield {}%", shield.health_permille / 10)
+    } else if shield.recharging > 0 {
+        format!("shield down, back in {} s", shield.recharging.div_ceil(10))
+    } else {
+        "shield off".to_string()
+    })
+}
+
 /// Whether anything selected has a gun, and so can attack the ground.
 pub fn has_weapons(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb) -> bool {
     selected
@@ -289,7 +301,10 @@ pub fn pausable_units(snapshot: &SimSnapshot, selected: &[SimId], db: &Blueprint
         .copied()
         .filter(|id| {
             find_unit(snapshot, *id).is_some_and(|unit| {
-                unit.blueprint != u16::MAX && (db.get(BlueprintId(unit.blueprint)).is_factory() || unit.built_permille < 1000)
+                unit.blueprint != u16::MAX && {
+                    let blueprint = db.get(BlueprintId(unit.blueprint));
+                    blueprint.is_factory() || blueprint.shield.is_some() || unit.built_permille < 1000
+                }
             })
         })
         .collect()
@@ -329,7 +344,11 @@ pub fn selection_rates(snapshot: &SimSnapshot, selected: &[SimId], db: &Blueprin
         total.energy_income += rates.energy_income;
         total.mass_use += rates.mass_use;
         total.energy_use += rates.energy_use;
-        factories += usize::from(find_unit(snapshot, id).is_some_and(|unit| unit.blueprint != u16::MAX && db.get(BlueprintId(unit.blueprint)).is_factory()));
+        // Factories and shields spend, so they say so even when they are spending nothing.
+        factories += usize::from(find_unit(snapshot, id).is_some_and(|unit| unit.blueprint != u16::MAX && {
+            let blueprint = db.get(BlueprintId(unit.blueprint));
+            blueprint.is_factory() || blueprint.shield.is_some()
+        }));
     }
     let mut output = Vec::new();
     if total.mass_income > 0 {
@@ -844,7 +863,8 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
             let unit = db.get(BlueprintId(first.blueprint));
             let rank = rank_of(snapshot, first.id);
             let veteran = if rank > 0 { format!(", veteran rank {rank}") } else { String::new() };
-            format!("{}: {}% health{veteran}", unit.name, first.health_permille / 10)
+            let shield = shield_status(snapshot, first.id).map_or(String::new(), |status| format!(", {status}"));
+            format!("{}: {}% health{veteran}{shield}", unit.name, first.health_permille / 10)
         } else {
             format!("{} units selected", units.len())
         };
@@ -1933,6 +1953,18 @@ mod tests {
             assert_eq!(hotkey_action(&current, &[selected], &db, 'X'), Some(UiAction::Stop));
         }
         assert_eq!(hotkey_action(&current, &[], &db, 'M'), None, "nothing is selected");
+    }
+
+    #[test]
+    fn a_shield_says_how_strong_it_is_or_when_it_will_be_back() {
+        use crate::sim::components::Team;
+        use crate::sim::world::ShieldView;
+        let view = |up: bool, recharging: u32| ShieldView { id: SimId(5), team: Team::Blue, center: [0; 3], radius: 0, health_permille: 640, up, recharging };
+        let with = |shield: ShieldView| SimSnapshot { shields: vec![shield], ..SimSnapshot::default() };
+        assert_eq!(shield_status(&with(view(true, 0)), SimId(5)).as_deref(), Some("shield 64%"));
+        assert_eq!(shield_status(&with(view(false, 291)), SimId(5)).as_deref(), Some("shield down, back in 30 s"));
+        assert_eq!(shield_status(&with(view(false, 0)), SimId(5)).as_deref(), Some("shield off"));
+        assert_eq!(shield_status(&with(view(true, 0)), SimId(6)), None, "only a shield generator has one");
     }
 
     #[test]

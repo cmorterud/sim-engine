@@ -25,7 +25,7 @@ use sim_engine::sim::components::{SimId, Team};
 use sim_engine::sim::config::TERRAIN_CELL_UNITS;
 use sim_engine::sim::scenario::{self, advance_scripted, skirmish_start, Scenario};
 use sim_engine::sim::terrain::HEIGHT_FRAC_BITS;
-use sim_engine::sim::world::{PlanStep, PlanStepKind, SimSnapshot, UnitPlanView};
+use sim_engine::sim::world::{PlanStep, PlanStepKind, ShieldView, SimSnapshot, UnitPlanView};
 use sim_engine::soak::run_soak;
 use sim_engine::sim::components::BuildTask;
 use sim_engine::ui::{self, ArmedOrder, DraggableOrder, OrderHandle, QuickSelectState, UiAction};
@@ -1050,6 +1050,10 @@ fn run_windowed(seed: u64, options: Options) {
                                     snapshot.plans.retain(|plan| plan.id != commander);
                                     let at = snapshot.plans.partition_point(|plan| plan.id < commander);
                                     snapshot.plans.insert(at, UnitPlanView { id: commander, steps });
+                                    // And a shield dome over the commander, at two-thirds strength.
+                                    let radius = map.blueprints.get(map.blueprints.id("shield_generator")).shield.map_or(0, |shield| shield.radius.to_bits());
+                                    let ground = z - snapshot.units[index].radius;
+                                    snapshot.shields.push(ShieldView { id: commander, team: PLAYER_TEAM, center: [x, y, ground], radius, health_permille: 660, up: true, recharging: 0 });
                                 }
                                 // Early screenshots show true colors, and later ones the selection's trails.
                                 if fraction >= 0.2 {
@@ -1291,6 +1295,9 @@ fn run_windowed(seed: u64, options: Options) {
                             } else {
                                 scene_instances.push(Shape::Wreck, instances::wreck_instance(center, raw_to_world(wreck.radius), eye));
                             }
+                        }
+                        for shield in snapshot.shields.iter().filter(|shield| shield.up) {
+                            scene_instances.push(Shape::Dome, instances::dome_instance(shield, eye));
                         }
                         if let Some(blueprint) = placing {
                             if let Some(spot) = placement_spot {

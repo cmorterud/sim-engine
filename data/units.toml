@@ -21,7 +21,7 @@ radius = 16
 vision = 1000
 build_power = 10
 build_range = 200
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator"]
 weapon = { range = 440, reload_ticks = 7, projectile_speed = 50, damage = 70, turn_rate = 180 }
 overcharge = { energy = 3000, damage = 12000, structure_damage = 800, reload_ticks = 50 }
 mass_income = 1
@@ -46,7 +46,7 @@ radius = 8
 vision = 500
 build_power = 5
 build_range = 120
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator"]
 
 [[unit]]
 id = "t1_light_bot"
@@ -176,3 +176,19 @@ health = 1400
 footprint = 1
 vision = 700
 weapon = { range = 520, reload_ticks = 8, projectile_speed = 70, damage = 60, turn_rate = 120 }
+
+# A dome that stops enemy shells from outside, while those under it fire out freely
+# (GAME_SPECIFICATION.md §8.1). Tier 2, but built by the commander and T1 engineers, as the
+# slice has no T2 engineer. Upkeep is energy per second while the dome is up.
+[[unit]]
+id = "shield_generator"
+name = "Shield Generator"
+class = "defense"
+tier = 2
+mass = 300
+energy = 3000
+build_time = 400
+health = 900
+footprint = 2
+vision = 400
+shield = { radius = 180, health = 5000, regen = 50, recharge_seconds = 30, upkeep = 30 }

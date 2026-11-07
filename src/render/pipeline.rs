@@ -101,6 +101,7 @@ pub struct Renderer {
     unit_pipeline: wgpu::RenderPipeline,
     terrain_pipeline: wgpu::RenderPipeline,
     box_pipeline: wgpu::RenderPipeline,
+    dome_pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     globals_buffer: wgpu::Buffer,
     mesh_vertices: wgpu::Buffer,
@@ -395,6 +396,40 @@ impl Renderer {
             multiview: None,
         });
 
+        // See-through, so drawn last, tested against the scene but leaving its depth alone.
+        let blended = [Some(wgpu::ColorTargetState { format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })];
+        let dome_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("shield domes"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_dome",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<MeshVertex>() as u64,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &mesh_attributes,
+                    },
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<UnitInstanceRaw>() as u64,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &instance_attributes,
+                    },
+                ],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_dome",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &blended,
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: depth(false, wgpu::CompareFunction::Greater),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        });
+
         let meshes = MeshSet::build();
         let mesh_vertices = device.create_buffer_init(&BufferInitDescriptor {
             label: Some("mesh vertices"),
@@ -424,6 +459,7 @@ impl Renderer {
             unit_pipeline,
             terrain_pipeline,
             box_pipeline,
+            dome_pipeline,
             bind_group,
             globals_buffer,
             mesh_vertices,
@@ -583,10 +619,15 @@ impl Renderer {
         pass.set_vertex_buffer(0, self.mesh_vertices.slice(..));
         pass.set_vertex_buffer(1, self.instance_buffer.buffer.slice(..));
         pass.set_index_buffer(self.mesh_indices.slice(..), wgpu::IndexFormat::Uint16);
-        for (indices, instances) in self.shape_indices.iter().zip(&self.shape_instances) {
-            if !instances.is_empty() {
+        for ((indices, instances), shape) in self.shape_indices.iter().zip(&self.shape_instances).zip(Shape::ALL) {
+            if !instances.is_empty() && shape != Shape::Dome {
                 pass.draw_indexed(indices.clone(), 0, instances.clone());
             }
+        }
+        let domes = &self.shape_instances[Shape::Dome as usize];
+        if !domes.is_empty() {
+            pass.set_pipeline(&self.dome_pipeline);
+            pass.draw_indexed(self.shape_indices[Shape::Dome as usize].clone(), 0, domes.clone());
         }
 
         if self.draw_box {

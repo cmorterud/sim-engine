@@ -4,11 +4,11 @@ use std::sync::Arc;
 use twox_hash::XxHash64;
 
 use super::blueprints::{BlueprintDb, Res};
-use super::combat::{entry_hit, firing_solution, probe_terrain, shot_is_clear, GRAVITY};
+use super::combat::{entry_hit, firing_solution, probe_terrain, shot_is_clear, sphere_entry, GRAVITY};
 use super::commands::SimCommand;
 use super::components::{BuildTask, 
     Blueprinted, Builder, Combat, Construction, Factory, Footprint, Health, MoveClass, Order, OrderKind, OrderQueue, Patrol,
-    Overcharged, OverchargeOrder, OverchargeWeapon, Position, Projectile, SimId, Team, Turning, Turret, UnitStats, Velocity, Veterancy,
+    Overcharged, OverchargeOrder, OverchargeWeapon, Paused, Position, Projectile, Shield, SimId, Team, Turning, Turret, UnitStats, Velocity, Veterancy,
     Wreck, WreckKind, rotate_toward,
 };
 use super::config::{SimConfig, TARGET_SEARCH_INTERVAL, TERRAIN_CELL_UNITS, WRECK_HEALTH_PERMILLE, WRECK_MASS_PERMILLE};
@@ -199,6 +199,31 @@ pub struct ProjectileView {
     pub overcharge: bool,
 }
 
+/// A shield generator's dome, for drawing and for the command panel. Values are raw `Fp` bits.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct ShieldView {
+    /// The generator.
+    pub id: SimId,
+    pub team: Team,
+    /// The middle of the dome, on the ground.
+    pub center: [i32; 3],
+    pub radius: i32,
+    pub health_permille: u16,
+    /// Whether the dome is standing. Not while it recharges, is paused, or is still being built.
+    pub up: bool,
+    /// Ticks until a collapsed dome comes back. Zero otherwise.
+    pub recharging: u32,
+}
+
+/// A dome that can stop shells this tick.
+#[derive(Copy, Clone, Debug)]
+struct Dome {
+    id: SimId,
+    team: Team,
+    center: [i32; 3],
+    radius: i32,
+}
+
 /// A copy of the state the renderer needs from one tick, sorted by `SimId`.
 #[derive(Clone, Debug, Default)]
 pub struct SimSnapshot {
@@ -206,6 +231,8 @@ pub struct SimSnapshot {
     pub units: Vec<UnitView>,
     pub projectiles: Vec<ProjectileView>,
     pub wrecks: Vec<WreckView>,
+    /// The shields of generators the viewer can see.
+    pub shields: Vec<ShieldView>,
     pub factories: Vec<FactoryView>,
     /// Sorted by `SimId`.
     pub plans: Vec<UnitPlanView>,
@@ -291,6 +318,8 @@ pub struct SimWorld {
     pub order_queues: Vec<(SimId, hecs::Entity)>,
     /// Units with a veteran rank, sorted by `SimId`.
     pub veterans: Vec<(SimId, hecs::Entity)>,
+    /// Shield generators, sorted by `SimId`.
+    pub shields: Vec<(SimId, hecs::Entity)>,
     /// Groups on a formation move, by the route they share.
     pub formations: BTreeMap<u32, Travel>,
     pub commanders: [Option<SimId>; 2],
@@ -313,6 +342,8 @@ pub struct SimWorld {
     /// Each hit, and who caused it.
     pending_hits: Vec<(hecs::Entity, Fp, Option<SimId>)>,
     pending_explosions: Vec<Explosion>,
+    /// Shells that came down on a shield this tick, and what they do to it.
+    pending_shield_hits: Vec<(SimId, Fp)>,
     /// Blasts and shells that land on the ground this tick, which also hit debris.
     pending_wreck_blasts: Vec<Explosion>,
     dead_units: Vec<SimId>,
@@ -350,6 +381,7 @@ impl SimWorld {
             patrols: Vec::new(),
             order_queues: Vec::new(),
             veterans: Vec::new(),
+            shields: Vec::new(),
             formations: BTreeMap::new(),
             commanders: [None, None],
             match_result: None,
@@ -364,6 +396,7 @@ impl SimWorld {
             pending_hits: Vec::new(),
             pending_explosions: Vec::new(),
             pending_wreck_blasts: Vec::new(),
+            pending_shield_hits: Vec::new(),
             dead_units: Vec::new(),
             dead_projectiles: Vec::new(),
         }
@@ -1474,7 +1507,27 @@ impl SimWorld {
         }
     }
 
+    /// The shields that are standing: finished, switched on, and not recharging.
+    fn standing_domes(&self) -> Vec<Dome> {
+        self.shields
+            .iter()
+            .filter_map(|&(id, entity)| {
+                let shield = self.ecs.get::<&Shield>(entity).ok()?;
+                if !shield.is_up() || self.ecs.get::<&Construction>(entity).is_ok() || self.ecs.get::<&Paused>(entity).is_ok() {
+                    return None;
+                }
+                let base = self.ecs.get::<&Position>(entity).ok()?.0.xy();
+                let team = self.ecs.get::<&UnitStats>(entity).ok()?.team;
+                let center = [base.x.to_bits(), base.y.to_bits(), self.terrain.height_at(base).to_bits()];
+                Some(Dome { id, team, center, radius: shield.radius.to_bits() })
+            })
+            .collect()
+    }
+
     pub fn step_projectiles(&mut self) {
+        self.pending_shield_hits.clear();
+        let domes = if self.shields.is_empty() { Vec::new() } else { self.standing_domes() };
+        let shield_hits = &mut self.pending_shield_hits;
         let terrain = &self.terrain;
         let grid = &self.spatial_grid;
         let hits = &mut self.pending_hits;
@@ -1525,6 +1578,33 @@ impl SimWorld {
                 if max_structure > 0 {
                     grid.for_each_candidate(team_filter, Layer::Structure, center_x, center_y, half + max_structure, &mut consider);
                 }
+            }
+
+            // An enemy dome stops a shell coming in from outside before it reaches anything
+            // beneath. A splash shell also bleeds into every other enemy dome its blast reaches.
+            let dome_hit = domes
+                .iter()
+                .enumerate()
+                .filter(|(_, dome)| dome.team != projectile.source_team)
+                .filter_map(|(index, dome)| sphere_entry(start, step, dome.center, dome.radius).map(|along| (along, index)))
+                .min();
+            let first = |along: i32| best.is_none_or(|unit| along <= unit.0) && probe.hit.is_none_or(|ground| along <= ground);
+            if let Some((along, struck)) = dome_hit.filter(|(along, _)| first(*along)) {
+                let damage = overcharged.map_or(projectile.damage, |overcharged| projectile.damage.min(overcharged.structure_damage));
+                shield_hits.push((domes[struck].id, damage));
+                if projectile.splash_radius > Fp::ZERO {
+                    let part = |value: Fp| (i128::from(value.to_bits()) * i128::from(along)) >> FP_FRAC_BITS;
+                    let point = [i128::from(start.x.to_bits()) + part(step.x), i128::from(start.y.to_bits()) + part(step.y), i128::from(start.z.to_bits()) + part(step.z)];
+                    for (index, dome) in domes.iter().enumerate() {
+                        let reach = i128::from(dome.radius) + i128::from(projectile.splash_radius.to_bits());
+                        let (dx, dy, dz) = (point[0] - i128::from(dome.center[0]), point[1] - i128::from(dome.center[1]), point[2] - i128::from(dome.center[2]));
+                        if index != struck && dome.team != projectile.source_team && dx * dx + dy * dy + dz * dz <= reach * reach {
+                            shield_hits.push((dome.id, damage));
+                        }
+                    }
+                }
+                dead.push(id);
+                continue;
             }
 
             // Splash shells detonate where they stop, and damage everything nearby.
@@ -1622,6 +1702,7 @@ impl SimWorld {
             }
         }
         self.blast_wrecks();
+        self.damage_shields();
         self.pending_explosions.clear();
         self.pending_hits.clear();
         for (killer, victim_team, mass) in kills {
@@ -1648,6 +1729,7 @@ impl SimWorld {
             self.patrols.retain(alive);
             self.order_queues.retain(alive);
             self.veterans.retain(alive);
+            self.shields.retain(alive);
             self.dead_units.clear();
         }
         if !self.dead_projectiles.is_empty() {
@@ -1665,6 +1747,24 @@ impl SimWorld {
                 }
             });
             self.dead_projectiles.clear();
+        }
+    }
+
+    /// Takes this tick's hits off the shields they landed on. A dome that runs out collapses,
+    /// and comes back at full strength after its recharge time.
+    fn damage_shields(&mut self) {
+        for (id, damage) in std::mem::take(&mut self.pending_shield_hits) {
+            let Ok(index) = self.shields.binary_search_by_key(&id, |shield| shield.0) else {
+                continue;
+            };
+            let mut shield = self.ecs.get::<&mut Shield>(self.shields[index].1).expect("shield list only holds shields");
+            if !shield.is_up() {
+                continue;
+            }
+            shield.health = shield.health.saturating_sub(damage);
+            if shield.health <= Fp::ZERO {
+                shield.collapse();
+            }
         }
     }
 
@@ -1991,6 +2091,29 @@ impl SimWorld {
                 })
             })
             .collect();
+        let shields = self
+            .shields
+            .iter()
+            .filter_map(|&(id, entity)| {
+                let shield = self.ecs.get::<&Shield>(entity).ok()?;
+                let base = self.ecs.get::<&Position>(entity).ok()?.0.xy();
+                let team = self.ecs.get::<&UnitStats>(entity).ok()?.team;
+                let (x, y) = (base.x.to_bits(), base.y.to_bits());
+                if !seen(team, x, y) {
+                    return None;
+                }
+                let switched_on = self.ecs.get::<&Construction>(entity).is_err() && self.ecs.get::<&Paused>(entity).is_err();
+                Some(ShieldView {
+                    id,
+                    team,
+                    center: [x, y, self.terrain.height_at(base).to_bits()],
+                    radius: shield.radius.to_bits(),
+                    health_permille: permille(i64::from(shield.health.to_bits()), i64::from(shield.max_health.to_bits())),
+                    up: switched_on && shield.is_up(),
+                    recharging: shield.recharging,
+                })
+            })
+            .collect();
         let factories = viewer.map_or_else(Vec::new, |viewer| {
             self.factories
                 .iter()
@@ -2027,6 +2150,7 @@ impl SimWorld {
             units,
             projectiles,
             wrecks,
+            shields,
             factories,
             plans,
             work_links,

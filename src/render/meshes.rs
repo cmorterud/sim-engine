@@ -36,6 +36,10 @@ pub enum Shape {
     Tree,
     /// A squat, many-sided boulder.
     Rock,
+    /// A pylon with an emitter on top.
+    ShieldGenerator,
+    /// A shield's dome: an open half-sphere, drawn see-through.
+    Dome,
     /// Flat, around the feet of a selected mobile unit.
     SelectionRing,
     /// Flat, around the footprint of a selected structure.
@@ -43,7 +47,7 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub const ALL: [Self; 23] = [
+    pub const ALL: [Self; 25] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -65,6 +69,8 @@ impl Shape {
         Self::Wreck,
         Self::Tree,
         Self::Rock,
+        Self::ShieldGenerator,
+        Self::Dome,
         Self::SelectionRing,
         Self::SelectionBox,
     ];
@@ -289,6 +295,34 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         Shape::Rock => {
             mesh.frustum([0.0, 0.0], [-0.5, 0.15], [0.5, 0.36], 5);
             mesh.frustum([0.04, -0.03], [0.15, 0.5], [0.36, 0.08], 5);
+        }
+        Shape::ShieldGenerator => {
+            mesh.frustum([0.0, 0.0], [-0.5, -0.3], [0.5, 0.42], 8);
+            mesh.frustum([0.0, 0.0], [-0.3, 0.2], [0.16, 0.12], 6);
+            mesh.frustum([0.0, 0.0], [0.2, 0.35], [0.12, 0.3], 8);
+            mesh.frustum([0.0, 0.0], [0.35, 0.5], [0.3, 0.1], 8);
+        }
+        // Rings from the rim at the bottom of the box up to a point at the top, with no base,
+        // so that it can be drawn over whatever it covers.
+        Shape::Dome => {
+            const SIDES: usize = 32;
+            const RINGS: usize = 10;
+            let at = |ring: usize, side: usize| {
+                let up = ring as f32 / RINGS as f32 * std::f32::consts::FRAC_PI_2;
+                let around = 0.1 + side as f32 / SIDES as f32 * std::f32::consts::TAU;
+                Vec3::new(0.5 * up.cos() * around.cos(), 0.5 * up.cos() * around.sin(), -0.5 + up.sin())
+            };
+            let center = Vec3::new(0.0, 0.0, -0.5);
+            for ring in 0..RINGS {
+                for side in 0..SIDES {
+                    let next = (side + 1) % SIDES;
+                    if ring + 1 == RINGS {
+                        mesh.face(&[at(ring, side), at(ring, next), Vec3::new(0.0, 0.0, 0.5)], center);
+                    } else {
+                        mesh.face(&[at(ring, side), at(ring, next), at(ring + 1, next), at(ring + 1, side)], center);
+                    }
+                }
+            }
         }
         Shape::SelectionRing => {
             const SEGMENTS: usize = 24;

@@ -74,6 +74,41 @@ fn fs_unit(input: UnitOutput) -> @location(0) vec4<f32> {
     return vec4<f32>(input.color, 1.0);
 }
 
+// ---- Shield domes ----
+
+struct DomeOutput {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) color: vec4<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) relative: vec3<f32>,
+};
+
+// Domes never shrink to dots, and their color's last component is how opaque they are.
+@vertex
+fn vs_dome(
+    @location(0) position: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    instance: InstanceInput,
+) -> DomeOutput {
+    let model = mat4x4<f32>(instance.m0, instance.m1, instance.m2, instance.m3);
+    let relative = (model * vec4<f32>(position, 1.0)).xyz;
+    var out: DomeOutput;
+    out.clip = globals.view_proj * vec4<f32>(relative, 1.0);
+    out.color = instance.color;
+    out.normal = normalize((model * vec4<f32>(normal, 0.0)).xyz);
+    out.relative = relative;
+    return out;
+}
+
+@fragment
+fn fs_dome(input: DomeOutput) -> @location(0) vec4<f32> {
+    // Faint where it is seen face on, and bright at the rim, as a bubble looks.
+    let facing = abs(dot(normalize(input.normal), normalize(-input.relative)));
+    let rim = 1.0 - facing;
+    let alpha = input.color.a * (0.2 + 1.6 * rim * rim);
+    return vec4<f32>(input.color.rgb, clamp(alpha, 0.0, 0.85));
+}
+
 // ---- Terrain ----
 
 struct TerrainOutput {

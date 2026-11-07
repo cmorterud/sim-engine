@@ -7,7 +7,7 @@ use std::hash::Hasher;
 use super::blueprints::{BlueprintId, Res, TICKS_PER_SECOND};
 use super::commands::SimCommand;
 use super::components::{
-    Adjacency, Blueprinted, BuildTask, Builder, OverchargeOrder, OverchargeWeapon, Paused, Turning, Turret, Veterancy, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, OrderQueue, Patrol,
+    Adjacency, Blueprinted, BuildTask, Builder, OverchargeOrder, OverchargeWeapon, Paused, Shield, Turning, Turret, Veterancy, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, OrderQueue, Patrol,
     Position, SimId, Team, UnitStats, Wreck, WreckKind,
 };
 use super::config::{
@@ -330,6 +330,19 @@ impl SimWorld {
         if let Some(rate) = unit.weapon.and_then(|weapon| weapon.turn_rate) {
             self.ecs.insert_one(entity, Turret::new(facing, rate)).expect("entity was just spawned");
         }
+        if let Some(def) = unit.shield {
+            let shield = Shield {
+                radius: def.radius,
+                health: def.health,
+                max_health: def.health,
+                regen_per_tick: def.regen_per_tick,
+                recharging: 0,
+                recharge_ticks: def.recharge_ticks,
+                upkeep: def.upkeep,
+            };
+            self.ecs.insert_one(entity, shield).expect("entity was just spawned");
+            self.shields.push((id, entity));
+        }
         if is_factory {
             let factory = Factory { power, queue: Vec::new(), repeat: false, progress: Res::ZERO, rally: None };
             self.ecs.insert_one(entity, factory).expect("entity was just spawned");
@@ -462,7 +475,7 @@ impl SimWorld {
                     let Some((_, entity)) = self.find_unit(id) else {
                         continue;
                     };
-                    let pausable = self.ecs.get::<&Factory>(entity).is_ok() || self.ecs.get::<&Construction>(entity).is_ok();
+                    let pausable = self.ecs.get::<&Factory>(entity).is_ok() || self.ecs.get::<&Construction>(entity).is_ok() || self.ecs.get::<&Shield>(entity).is_ok();
                     if !pausable {
                         continue;
                     }
@@ -634,6 +647,8 @@ impl SimWorld {
             economy.mass_reclaimed = Res::ZERO;
             economy.energy_reclaimed = Res::ZERO;
         }
+        // Shields are paid for first, out of what is stored and coming in, and building gets the rest.
+        let upkeep = self.step_shields();
         let mut power_by_target: BTreeMap<(SimId, WorkKind), Fp> = BTreeMap::new();
         for index in 0..self.builders.len() {
             let (id, entity) = self.builders[index];
@@ -673,7 +688,7 @@ impl SimWorld {
         for (team_index, economy) in self.economies.iter_mut().enumerate() {
             let (mass_demand, energy_demand) = demand[team_index];
             let mass_supply = economy.mass + economy.mass_income + economy.mass_reclaimed;
-            let energy_supply = economy.energy + economy.energy_income + economy.energy_reclaimed;
+            let energy_supply = economy.energy + economy.energy_income + economy.energy_reclaimed - upkeep[team_index];
             let share = |supply: Res, wanted: Res| {
                 if wanted <= supply || wanted == Res::ZERO {
                     Res::ONE
@@ -683,7 +698,7 @@ impl SimWorld {
             };
             satisfaction[team_index] = share(mass_supply, mass_demand).min(share(energy_supply, energy_demand));
             economy.mass_demand = mass_demand;
-            economy.energy_demand = energy_demand;
+            economy.energy_demand = energy_demand + upkeep[team_index];
             economy.satisfaction = satisfaction[team_index];
         }
 
@@ -700,10 +715,42 @@ impl SimWorld {
         }
         for (team_index, economy) in self.economies.iter_mut().enumerate() {
             let mass = economy.mass + economy.mass_income + economy.mass_reclaimed - spent[team_index].0;
-            let energy = economy.energy + economy.energy_income + economy.energy_reclaimed - spent[team_index].1;
+            let energy = economy.energy + economy.energy_income + economy.energy_reclaimed - spent[team_index].1 - upkeep[team_index];
             economy.mass = mass.clamp(Res::ZERO, economy.mass_capacity);
             economy.energy = energy.clamp(Res::ZERO, economy.energy_capacity);
         }
+    }
+
+    /// Counts down collapsed domes, and for those that are up, takes their upkeep and lets them
+    /// heal. A team that cannot pay for a dome loses it, so its shields fail one by one, in
+    /// `SimId` order, as its energy runs out. Paused generators and sites neither pay nor heal.
+    /// Returns what each team paid this tick.
+    fn step_shields(&mut self) -> [Res; 2] {
+        let mut paid = [Res::ZERO; 2];
+        for &(_, entity) in &self.shields {
+            if self.ecs.get::<&Construction>(entity).is_ok() || self.ecs.get::<&Paused>(entity).is_ok() {
+                continue;
+            }
+            let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team.index();
+            let discount = self.ecs.get::<&Adjacency>(entity).map_or(0, |adjacency| adjacency.energy_cost_discount);
+            let mut shield = self.ecs.get::<&mut Shield>(entity).expect("shield list only holds shields");
+            if !shield.is_up() {
+                shield.recharging -= 1;
+                if shield.is_up() {
+                    shield.health = shield.max_health;
+                }
+                continue;
+            }
+            let cost = shield.upkeep * i64::from(1000 - discount) / 1000;
+            let economy = &self.economies[team];
+            if economy.energy + economy.energy_income - paid[team] < cost {
+                shield.collapse();
+                continue;
+            }
+            paid[team] += cost;
+            shield.health = (shield.health + shield.regen_per_tick).min(shield.max_health);
+        }
+        paid
     }
 
     fn step_builder(&mut self, id: SimId, entity: hecs::Entity, power_by_target: &mut BTreeMap<(SimId, WorkKind), Fp>) {
@@ -1070,7 +1117,7 @@ impl SimWorld {
         if unit.requires_deposit {
             adjacency.mass_output_bonus = (storages * MEX_STORAGE_BONUS).min(MEX_STORAGE_BONUS_MAX);
         }
-        if unit.is_factory() {
+        if unit.is_factory() || unit.shield.is_some() {
             adjacency.energy_cost_discount = (generators * FACTORY_ENERGY_DISCOUNT).min(FACTORY_ENERGY_DISCOUNT_MAX);
             adjacency.mass_cost_discount = (storages * FACTORY_MASS_DISCOUNT).min(FACTORY_MASS_DISCOUNT_MAX);
         }
@@ -1268,12 +1315,17 @@ impl SimWorld {
                 let bonus = self.ecs.get::<&Adjacency>(entity).map_or(0, |adjacency| adjacency.mass_output_bonus);
                 let mass = unit.mass_income + unit.mass_income * i64::from(bonus) / 1000;
                 let spent = self.factory_spending.iter().find(|spending| spending.0 == id);
+                // A dome that is up costs its upkeep, less the discount from neighbors.
+                let upkeep = self.ecs.get::<&Shield>(entity).ok().filter(|shield| shield.is_up() && self.ecs.get::<&Paused>(entity).is_err()).map_or(Res::ZERO, |shield| {
+                    let discount = self.ecs.get::<&Adjacency>(entity).map_or(0, |adjacency| adjacency.energy_cost_discount);
+                    shield.upkeep * i64::from(1000 - discount) / 1000
+                });
                 Some(UnitRatesView {
                     id,
                     mass_income: tenths_per_second(mass),
                     energy_income: tenths_per_second(unit.energy_income),
                     mass_use: spent.map_or(0, |spending| tenths_per_second(spending.1)),
-                    energy_use: spent.map_or(0, |spending| tenths_per_second(spending.2)),
+                    energy_use: spent.map_or(0, |spending| tenths_per_second(spending.2)) + tenths_per_second(upkeep),
                 })
             })
             .collect();
@@ -1450,6 +1502,15 @@ impl SimWorld {
                 hasher.write(&order.slot_ticks.to_le_bytes());
                 hash_slot(hasher, order.slot);
             }
+        }
+        if let Ok(shield) = self.ecs.get::<&Shield>(entity) {
+            hasher.write(&[15]);
+            for value in [shield.radius, shield.health, shield.max_health, shield.regen_per_tick] {
+                hasher.write(&value.to_bits().to_le_bytes());
+            }
+            hasher.write(&shield.recharging.to_le_bytes());
+            hasher.write(&shield.recharge_ticks.to_le_bytes());
+            hasher.write(&shield.upkeep.to_bits().to_le_bytes());
         }
         if let Ok(patrol) = self.ecs.get::<&Patrol>(entity) {
             hasher.write(&[7]);

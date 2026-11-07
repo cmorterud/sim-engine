@@ -124,6 +124,33 @@ fn every_wreck_and_reclaim_field_changes_the_checksum() {
     }
 }
 
+/// A shield is hashed only on a generator, so it has a test of its own.
+#[test]
+fn every_shield_field_changes_the_checksum() {
+    use sim_engine::sim::components::{Shield, Team};
+    let (_, mut world) = run(scenario::battle(SEED, 20, small_config()), 10, 10);
+    let blueprint = world.blueprints.id("shield_generator");
+    let generator = (4..200).find_map(|cell| world.spawn_finished_structure(blueprint, Team::Blue, cell, 4)).expect("room for a generator");
+    let entity = world.unit_entity(generator).unwrap();
+    let baseline = world.compute_checksum();
+    type Edit = fn(&mut Shield, bool);
+    let edits: [(&str, Edit); 7] = [
+        ("radius", |s, undo| s.radius += if undo { -Fp::from_bits(1) } else { Fp::from_bits(1) }),
+        ("health", |s, undo| s.health += if undo { -Fp::from_bits(1) } else { Fp::from_bits(1) }),
+        ("max health", |s, undo| s.max_health += if undo { -Fp::from_bits(1) } else { Fp::from_bits(1) }),
+        ("regeneration", |s, undo| s.regen_per_tick += if undo { -Fp::from_bits(1) } else { Fp::from_bits(1) }),
+        ("recharging", |s, undo| s.recharging = if undo { s.recharging - 1 } else { s.recharging + 1 }),
+        ("recharge time", |s, undo| s.recharge_ticks = if undo { s.recharge_ticks - 1 } else { s.recharge_ticks + 1 }),
+        ("upkeep", |s, undo| s.upkeep += if undo { -Res::from_bits(1) } else { Res::from_bits(1) }),
+    ];
+    for (name, edit) in edits {
+        edit(&mut world.ecs.get::<&mut Shield>(entity).unwrap(), false);
+        assert_ne!(world.compute_checksum(), baseline, "{name} is not covered by the checksum");
+        edit(&mut world.ecs.get::<&mut Shield>(entity).unwrap(), true);
+        assert_eq!(world.compute_checksum(), baseline, "undoing {name} did not restore the checksum");
+    }
+}
+
 /// A formation's state is hashed only while there is one, so it has a test of its own.
 #[test]
 fn every_formation_field_changes_the_checksum() {

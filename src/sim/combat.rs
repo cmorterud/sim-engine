@@ -57,6 +57,31 @@ pub fn segment_hit(start: Vec3Fp, step: Vec3Fp, x: i32, y: i32, z: i32, radius: 
     (ax * ax + ay * ay + az * az <= radius * radius).then_some(t as i32)
 }
 
+/// Where a segment first enters a sphere around `center`, as raw `Fp` from 0 to 1. Only a
+/// segment that starts outside can enter, which is what lets shells fired from inside a shield
+/// dome fly out. Exact, in integers: the smaller root of |start + t * step - center| = radius.
+pub fn sphere_entry(start: Vec3Fp, step: Vec3Fp, center: [i32; 3], radius: i32) -> Option<i32> {
+    let away = [
+        i128::from(start.x.to_bits()) - i128::from(center[0]),
+        i128::from(start.y.to_bits()) - i128::from(center[1]),
+        i128::from(start.z.to_bits()) - i128::from(center[2]),
+    ];
+    let step = [i128::from(step.x.to_bits()), i128::from(step.y.to_bits()), i128::from(step.z.to_bits())];
+    let dot = |a: [i128; 3], b: [i128; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let outside = dot(away, away) - i128::from(radius) * i128::from(radius);
+    let toward = dot(away, step);
+    let length_squared = dot(step, step);
+    if outside <= 0 || toward >= 0 || length_squared == 0 {
+        return None;
+    }
+    let discriminant = toward * toward - length_squared * outside;
+    if discriminant < 0 {
+        return None;
+    }
+    let along = -toward - discriminant.isqrt();
+    (along <= length_squared).then(|| ((along << FP_FRAC_BITS) / length_squared) as i32)
+}
+
 /// Whether a grid entry can be hit by this segment, and how far along. Only used
 /// for entries that have already passed the team and source filters.
 pub fn entry_hit(entry: &GridEntry, start: Vec3Fp, step: Vec3Fp) -> Option<i32> {
@@ -171,6 +196,21 @@ mod tests {
     fn segment_does_not_reach_sphere_beyond_its_end() {
         let hit = segment_hit(v(0, 0, 0), v(10, 0, 0), fp_int(25).to_bits(), 0, 0, fp_int(1).to_bits());
         assert_eq!(hit, None);
+    }
+
+    #[test]
+    fn a_segment_enters_a_sphere_where_it_crosses_the_surface() {
+        let raw = |value: i32| fp_int(value).to_bits();
+        let center = [raw(100), 0, 0];
+        // From 0 to 100 along x, into a sphere of radius 30 around x = 100: in at x = 70.
+        assert_eq!(sphere_entry(v(0, 0, 0), v(100, 0, 0), center, raw(30)), Some(2_867));
+        // Stopping short of it, passing beside it, or going away from it does not enter.
+        assert_eq!(sphere_entry(v(0, 0, 0), v(60, 0, 0), center, raw(30)), None);
+        assert_eq!(sphere_entry(v(0, 40, 0), v(200, 0, 0), center, raw(30)), None);
+        assert_eq!(sphere_entry(v(200, 0, 0), v(100, 0, 0), center, raw(30)), None);
+        // Starting inside never enters, whichever way it goes.
+        assert_eq!(sphere_entry(v(90, 0, 0), v(100, 0, 0), center, raw(30)), None);
+        assert_eq!(sphere_entry(v(90, 0, 0), v(-100, 0, 0), center, raw(30)), None);
     }
 
     #[test]

@@ -6,7 +6,7 @@ use std::f32::consts::FRAC_1_SQRT_2;
 use super::meshes::Shape;
 use crate::sim::blueprints::BlueprintDb;
 use crate::sim::components::{SimId, Team, WreckKind};
-use crate::sim::world::{ProjectileView, UnitView, WorkLinkView};
+use crate::sim::world::{ProjectileView, ShieldView, UnitView, WorkLinkView};
 
 const RAW_TO_WORLD: f64 = 1.0 / 4096.0;
 const PROJECTILE_SIZE: f32 = 0.6;
@@ -136,6 +136,7 @@ pub fn unit_look(key: &str) -> UnitLook {
         "mass_extractor" => look(Shape::Extractor, Some([0.10, 0.95, 0.75]), 0.8),
         "power_generator" => look(Shape::Generator, Some([1.00, 0.85, 0.20]), 1.2),
         "mass_storage" => look(Shape::Storage, Some([0.60, 0.90, 0.60]), 0.65),
+        "shield_generator" => look(Shape::ShieldGenerator, Some([0.55, 0.85, 1.00]), 1.0),
         "t1_point_defense" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::PointDefense, Some([0.75, 0.25, 0.85]), 0.9) },
         _ => look(Shape::Cube, None, 0.6),
     }
@@ -326,6 +327,23 @@ pub fn scenery_instance(kind: WreckKind, center: [f64; 3], radius: f64, eye: [f6
     };
     let at = [center[0], center[1], ground + height * 0.5];
     (shape, instance(at, [width as f32, width as f32, height as f32], NORTH, color, NO_ICON, eye))
+}
+
+/// A shield's dome over its generator. The last component of the color is how opaque it is,
+/// which fades as the shield wears down. Use with `Shape::Dome`, in its own see-through pass.
+pub fn dome_instance(shield: &ShieldView, eye: [f64; 3]) -> UnitInstanceRaw {
+    let radius = f64::from(shield.radius) * RAW_TO_WORLD;
+    let ground = f64::from(shield.center[2]) * RAW_TO_WORLD;
+    let center = [f64::from(shield.center[0]) * RAW_TO_WORLD, f64::from(shield.center[1]) * RAW_TO_WORLD, ground + radius * 0.5];
+    let team = match shield.team {
+        Team::Blue => BLUE,
+        Team::Red => RED,
+    };
+    let color: [f32; 3] = std::array::from_fn(|channel| team[channel] * 0.5 + 0.5);
+    let health = f32::from(shield.health_permille) / 1000.0;
+    let mut dome = instance(center, [(radius * 2.0) as f32, (radius * 2.0) as f32, radius as f32], NORTH, color, NO_ICON, eye);
+    dome.color[3] = 0.12 + 0.28 * health;
+    dome
 }
 
 /// A mass deposit: a flat marker that stays visible at every zoom.
