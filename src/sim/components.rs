@@ -335,6 +335,39 @@ impl Shield {
     }
 }
 
+/// A weapon that fires missiles instead of shells (GAME_SPECIFICATION.md §8).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Launcher {
+    /// Nuclear: fired only on order, using up a missile that its silo built.
+    pub strategic: bool,
+    pub cruise_height: Fp,
+    /// Missiles built and waiting. Only strategic launchers use it.
+    pub stock: u32,
+}
+
+/// A defense that destroys enemy missiles in flight.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct MissileDefense {
+    /// Stops nuclear missiles, one interceptor each. Otherwise stops cruise missiles.
+    pub strategic: bool,
+    pub range: Fp,
+    pub reload_ticks: u32,
+    pub ticks_until_ready: u32,
+    /// Interceptors built and waiting. Only strategic defenses use it.
+    pub stock: u32,
+}
+
+/// A projectile that flies itself to a spot: up to its cruise height above the ground, along
+/// the ground at that height, and down onto the spot.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Missile {
+    pub target: Vec2Fp,
+    /// Units per tick, along the ground.
+    pub speed: Fp,
+    pub cruise_height: Fp,
+    pub strategic: bool,
+}
+
 /// Marks a factory or a construction site that the player has paused. It spends nothing and
 /// makes no progress until resumed, and keeps its queue and progress meanwhile.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

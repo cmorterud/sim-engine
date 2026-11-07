@@ -31,6 +31,8 @@ pub enum Shape {
     PointDefense,
     PointDefenseBase,
     Shell,
+    /// A body with fins, pointing along +Y.
+    Missile,
     Wreck,
     /// A conifer: a thin trunk under a cone.
     Tree,
@@ -38,6 +40,14 @@ pub enum Shape {
     Rock,
     /// A pylon with an emitter on top.
     ShieldGenerator,
+    /// A box with a launch rail tilted up.
+    MissileLauncher,
+    /// A low base with a tall laser mast.
+    MissileDefense,
+    /// A wide, low block with a hatch on top.
+    NukeSilo,
+    /// A drum with a ring of launch tubes.
+    AntiNukeSilo,
     /// A shield's dome: an open half-sphere, drawn see-through.
     Dome,
     /// Flat, around the feet of a selected mobile unit.
@@ -47,7 +57,7 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub const ALL: [Self; 25] = [
+    pub const ALL: [Self; 30] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -66,10 +76,15 @@ impl Shape {
         Self::PointDefense,
         Self::PointDefenseBase,
         Self::Shell,
+        Self::Missile,
         Self::Wreck,
         Self::Tree,
         Self::Rock,
         Self::ShieldGenerator,
+        Self::MissileLauncher,
+        Self::MissileDefense,
+        Self::NukeSilo,
+        Self::AntiNukeSilo,
         Self::Dome,
         Self::SelectionRing,
         Self::SelectionBox,
@@ -282,6 +297,12 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.frustum([0.0, 0.0], [0.0, 0.5], [0.5, 0.0], 4);
             mesh.frustum([0.0, 0.0], [0.0, -0.5], [0.5, 0.0], 4);
         }
+        Shape::Missile => {
+            mesh.beam([0.0, -0.5, 0.0], [0.0, 0.3, 0.0], 0.12, 0.12);
+            mesh.beam([0.0, 0.3, 0.0], [0.0, 0.5, 0.0], 0.06, 0.06);
+            mesh.block([-0.3, -0.5, -0.04], [0.3, -0.3, 0.04]);
+            mesh.block([-0.04, -0.5, -0.3], [0.04, -0.3, 0.3]);
+        }
         // A broken pile: a few tilted slabs.
         Shape::Wreck => {
             mesh.block([-0.5, -0.5, -0.5], [0.5, 0.5, -0.25]);
@@ -301,6 +322,26 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.frustum([0.0, 0.0], [-0.3, 0.2], [0.16, 0.12], 6);
             mesh.frustum([0.0, 0.0], [0.2, 0.35], [0.12, 0.3], 8);
             mesh.frustum([0.0, 0.0], [0.35, 0.5], [0.3, 0.1], 8);
+        }
+        Shape::MissileLauncher => {
+            mesh.block([-0.5, -0.5, -0.5], [0.5, 0.5, -0.15]);
+            mesh.beam([0.0, -0.3, -0.1], [0.0, 0.36, 0.36], 0.18, 0.1);
+        }
+        Shape::MissileDefense => {
+            mesh.frustum([0.0, 0.0], [-0.5, -0.25], [0.5, 0.4], 6);
+            mesh.frustum([0.0, 0.0], [-0.25, 0.3], [0.1, 0.07], 6);
+            mesh.block([-0.22, -0.15, 0.3], [0.22, 0.15, 0.5]);
+        }
+        Shape::NukeSilo => {
+            mesh.block([-0.5, -0.5, -0.5], [0.5, 0.5, 0.1]);
+            mesh.block([-0.25, -0.25, 0.1], [0.25, 0.25, 0.25]);
+            mesh.frustum([0.3, 0.3], [0.1, 0.5], [0.12, 0.08], 6);
+        }
+        Shape::AntiNukeSilo => {
+            mesh.frustum([0.0, 0.0], [-0.5, 0.15], [0.5, 0.48], 10);
+            for (x, y) in [(-0.22_f32, -0.22_f32), (0.22, -0.22), (-0.22, 0.22), (0.22, 0.22)] {
+                mesh.frustum([x, y], [0.15, 0.5], [0.12, 0.12], 6);
+            }
         }
         // Rings from the rim at the bottom of the box up to a point at the top, with no base,
         // so that it can be drawn over whatever it covers.

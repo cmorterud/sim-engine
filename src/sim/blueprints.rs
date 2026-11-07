@@ -27,6 +27,19 @@ pub enum UnitClass {
     Factory,
     Economy,
     Defense,
+    /// A missile that a silo builds and keeps until it is fired. Never a unit on the map.
+    Ammo,
+}
+
+/// What a weapon fires.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum WeaponKind {
+    /// A ballistic shell.
+    Shell,
+    /// A cruise missile that flies low over the ground to a structure (GAME_SPECIFICATION.md §8).
+    TacticalMissile,
+    /// A nuclear missile, fired only on order, one for each missile built.
+    StrategicMissile,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -38,6 +51,19 @@ pub struct WeaponDef {
     pub splash_radius: Fp,
     /// How fast the weapon swivels, in degrees per second. `None` fires in any direction at once.
     pub turn_rate: Option<u32>,
+    pub kind: WeaponKind,
+    /// How high a missile flies above the ground. Zero for shells.
+    pub cruise_height: Fp,
+}
+
+/// A defense that destroys enemy missiles in flight.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct MissileDefenseDef {
+    /// Strategic defenses stop nuclear missiles, using one interceptor each, which their silo
+    /// builds. Tactical ones stop cruise missiles, one at a time, as often as they reload.
+    pub strategic: bool,
+    pub range: Fp,
+    pub reload_ticks: u32,
 }
 
 /// The commander's Overcharge: a shot paid for from stored energy, that destroys almost any
@@ -106,6 +132,7 @@ pub struct Blueprint {
     pub death_explosion: Option<ExplosionDef>,
     pub overcharge: Option<OverchargeDef>,
     pub shield: Option<ShieldDef>,
+    pub missile_defense: Option<MissileDefenseDef>,
 }
 
 impl Blueprint {
@@ -166,6 +193,18 @@ struct RawWeapon {
     splash_radius: Option<Number>,
     /// How fast the weapon swivels, in degrees per second. Without one, it fires in any direction at once.
     turn_rate: Option<u32>,
+    /// "shell", the default, "tactical_missile", or "strategic_missile".
+    kind: Option<String>,
+    cruise_height: Option<Number>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawMissileDefense {
+    /// "tactical" or "strategic".
+    kind: String,
+    range: Number,
+    reload_ticks: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -230,6 +269,7 @@ struct RawUnit {
     death_explosion: Option<RawExplosion>,
     overcharge: Option<RawOvercharge>,
     shield: Option<RawShield>,
+    missile_defense: Option<RawMissileDefense>,
 }
 
 #[derive(Deserialize)]
@@ -293,6 +333,13 @@ impl BlueprintDb {
                     damage: weapon.damage.fp().map_err(context)?,
                     splash_radius: whole(&weapon.splash_radius)?,
                     turn_rate: weapon.turn_rate,
+                    kind: match weapon.kind.as_deref() {
+                        None | Some("shell") => WeaponKind::Shell,
+                        Some("tactical_missile") => WeaponKind::TacticalMissile,
+                        Some("strategic_missile") => WeaponKind::StrategicMissile,
+                        Some(other) => return Err(context(format!("unknown weapon kind {other:?}"))),
+                    },
+                    cruise_height: whole(&weapon.cruise_height)?,
                 }),
             };
             let death_explosion = match &unit.death_explosion {
@@ -321,6 +368,18 @@ impl BlueprintDb {
                     upkeep: shield.upkeep.res().map_err(context)? / TICKS_PER_SECOND,
                 }),
             };
+            let missile_defense = match &unit.missile_defense {
+                None => None,
+                Some(defense) => Some(MissileDefenseDef {
+                    strategic: match defense.kind.as_str() {
+                        "tactical" => false,
+                        "strategic" => true,
+                        other => return Err(context(format!("unknown missile defense {other:?}"))),
+                    },
+                    range: defense.range.fp().map_err(context)?,
+                    reload_ticks: defense.reload_ticks.unwrap_or(0),
+                }),
+            };
             if shield.is_some() && footprint == 0 {
                 return Err(context("only structures can have shields".into()));
             }
@@ -337,6 +396,7 @@ impl BlueprintDb {
                     "factory" => UnitClass::Factory,
                     "economy" => UnitClass::Economy,
                     "defense" => UnitClass::Defense,
+                    "ammo" => UnitClass::Ammo,
                     other => return Err(context(format!("unknown class {other:?}"))),
                 },
                 tier: unit.tier,
@@ -363,6 +423,7 @@ impl BlueprintDb {
                 death_explosion,
                 overcharge,
                 shield,
+                missile_defense,
             });
         }
         // Line endings can differ by checkout, and must not change the checksum.
@@ -428,6 +489,12 @@ mod tests {
             "mass_storage",
             "t1_point_defense",
             "shield_generator",
+            "tactical_missile_launcher",
+            "tactical_missile_defense",
+            "strategic_missile_launcher",
+            "strategic_missile",
+            "strategic_missile_defense",
+            "anti_nuke",
         ] {
             assert!(db.find(key).is_some(), "{key} is missing");
         }

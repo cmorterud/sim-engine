@@ -33,6 +33,13 @@ pub fn blueprint_hotkey(key: &str) -> Option<char> {
         "t1_point_defense" => 'C',
         // Every letter is taken, so the key above Tab, beside 1.
         "shield_generator" => '`',
+        // Missiles go on the keys right of M, and the silos' missiles beside 0.
+        "tactical_missile_launcher" => ',',
+        "tactical_missile_defense" => '.',
+        "strategic_missile_launcher" => '/',
+        "strategic_missile_defense" => ';',
+        "strategic_missile" => '-',
+        "anti_nuke" => '=',
         "t1_engineer" => 'Z',
         "t1_light_bot" => 'B',
         "t1_light_artillery" => 'V',
@@ -50,6 +57,12 @@ pub const fn letter_for(code: KeyCode) -> Option<char> {
         KeyCode::KeyT => 'T',
         KeyCode::KeyC => 'C',
         KeyCode::Backquote => '`',
+        KeyCode::Comma => ',',
+        KeyCode::Period => '.',
+        KeyCode::Slash => '/',
+        KeyCode::Semicolon => ';',
+        KeyCode::Minus => '-',
+        KeyCode::Equal => '=',
         KeyCode::KeyZ => 'Z',
         KeyCode::KeyB => 'B',
         KeyCode::KeyV => 'V',
@@ -91,8 +104,14 @@ mod tests {
     use super::*;
     use crate::sim::blueprints::BlueprintDb;
 
-    const ALL_KEYS: [KeyCode; 21] = [
+    const ALL_KEYS: [KeyCode; 27] = [
         KeyCode::Backquote,
+        KeyCode::Comma,
+        KeyCode::Period,
+        KeyCode::Slash,
+        KeyCode::Semicolon,
+        KeyCode::Minus,
+        KeyCode::Equal,
         KeyCode::KeyJ,
         KeyCode::KeyI,
         KeyCode::KeyO,
@@ -129,7 +148,7 @@ mod tests {
     fn everything_that_can_be_built_has_a_key() {
         let db = BlueprintDb::standard();
         let keys = buildable(&db);
-        assert_eq!(keys.len(), 10);
+        assert_eq!(keys.len(), 16);
         for key in keys {
             assert!(blueprint_hotkey(&key).is_some(), "{key} has no hotkey");
         }

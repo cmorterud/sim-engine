@@ -200,7 +200,8 @@ impl AiBrain {
                         forces.idle_combat.push(id);
                     }
                 }
-                UnitClass::Factory => {
+                // Only land factories: the AI builds no missile silos, and must never queue in one.
+                UnitClass::Factory if blueprint == roster.factory_t1 || blueprint == roster.factory_t2 => {
                     let factory = world.ecs.get::<&Factory>(entity).expect("factories have factory parts");
                     let half = i32::from(unit.footprint) / 2;
                     forces.factories.push(FactoryInfo {
@@ -212,6 +213,7 @@ impl AiBrain {
                         upgrading: factory.queue.first().is_some_and(|item| world.blueprints.get(*item).is_factory()),
                     });
                 }
+                UnitClass::Factory | UnitClass::Ammo => {}
                 UnitClass::Economy | UnitClass::Defense => {
                     if blueprint == roster.extractor {
                         forces.extractors.push(cell);

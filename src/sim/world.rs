@@ -4,11 +4,11 @@ use std::sync::Arc;
 use twox_hash::XxHash64;
 
 use super::blueprints::{BlueprintDb, Res};
-use super::combat::{entry_hit, firing_solution, probe_terrain, shot_is_clear, sphere_entry, GRAVITY};
+use super::combat::{entry_hit, firing_solution, missile_velocity, probe_terrain, shot_is_clear, sphere_entry, GRAVITY};
 use super::commands::SimCommand;
 use super::components::{BuildTask, 
     Blueprinted, Builder, Combat, Construction, Factory, Footprint, Health, MoveClass, Order, OrderKind, OrderQueue, Patrol,
-    Overcharged, OverchargeOrder, OverchargeWeapon, Paused, Position, Projectile, Shield, SimId, Team, Turning, Turret, UnitStats, Velocity, Veterancy,
+    Launcher, Missile, MissileDefense, Overcharged, OverchargeOrder, OverchargeWeapon, Paused, Position, Projectile, Shield, SimId, Team, Turning, Turret, UnitStats, Velocity, Veterancy,
     Wreck, WreckKind, rotate_toward,
 };
 use super::config::{SimConfig, TARGET_SEARCH_INTERVAL, TERRAIN_CELL_UNITS, WRECK_HEALTH_PERMILLE, WRECK_MASS_PERMILLE};
@@ -195,8 +195,17 @@ pub struct ProjectileView {
     pub x: i32,
     pub y: i32,
     pub z: i32,
-    /// An Overcharge shell, drawn larger and brighter.
-    pub overcharge: bool,
+    pub kind: ProjectileKind,
+}
+
+/// What a projectile is, for drawing it.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ProjectileKind {
+    Shell,
+    /// Drawn larger and brighter.
+    Overcharge,
+    TacticalMissile,
+    StrategicMissile,
 }
 
 /// A shield generator's dome, for drawing and for the command panel. Values are raw `Fp` bits.
@@ -233,6 +242,10 @@ pub struct SimSnapshot {
     pub wrecks: Vec<WreckView>,
     /// The shields of generators the viewer can see.
     pub shields: Vec<ShieldView>,
+    /// Missiles shot down this tick: from the defense that fired, to the missile.
+    pub interceptions: Vec<[[i32; 3]; 2]>,
+    /// Missiles built and waiting in the viewer's silos, by silo, sorted by `SimId`.
+    pub stocks: Vec<(SimId, u32)>,
     pub factories: Vec<FactoryView>,
     /// Sorted by `SimId`.
     pub plans: Vec<UnitPlanView>,
@@ -286,6 +299,8 @@ struct PendingShot {
     splash: Fp,
     /// For an Overcharge shell, the most it does to a structure.
     overcharge: Option<Fp>,
+    /// For a missile, its cruise height and whether it is nuclear.
+    missile: Option<(Fp, bool)>,
 }
 
 pub struct SimWorld {
@@ -320,6 +335,12 @@ pub struct SimWorld {
     pub veterans: Vec<(SimId, hecs::Entity)>,
     /// Shield generators, sorted by `SimId`.
     pub shields: Vec<(SimId, hecs::Entity)>,
+    /// Projectiles that are missiles, sorted by `SimId`.
+    pub missiles: Vec<(SimId, hecs::Entity)>,
+    /// Missile defenses, sorted by `SimId`.
+    pub missile_defenses: Vec<(SimId, hecs::Entity)>,
+    /// Missiles shot down this tick, from where to where. Only for drawing, so not in the checksum.
+    interceptions: Vec<[[i32; 3]; 2]>,
     /// Groups on a formation move, by the route they share.
     pub formations: BTreeMap<u32, Travel>,
     pub commanders: [Option<SimId>; 2],
@@ -382,6 +403,9 @@ impl SimWorld {
             order_queues: Vec::new(),
             veterans: Vec::new(),
             shields: Vec::new(),
+            missiles: Vec::new(),
+            missile_defenses: Vec::new(),
+            interceptions: Vec::new(),
             formations: BTreeMap::new(),
             commanders: [None, None],
             match_result: None,
@@ -1290,10 +1314,11 @@ impl SimWorld {
         shots.clear();
         let mut finished_attacks: Vec<SimId> = Vec::new();
         let mut finished_overcharges: Vec<SimId> = Vec::new();
-        let mut query = self.ecs.query_mut::<(&UnitStats, &mut Combat, Option<&mut Turret>, Option<&Turning>, Option<&mut OverchargeWeapon>, Option<&OverchargeOrder>)>();
+        let mut fired_nukes: Vec<SimId> = Vec::new();
+        let mut query = self.ecs.query_mut::<(&UnitStats, &mut Combat, Option<&mut Turret>, Option<&Turning>, Option<&mut OverchargeWeapon>, Option<&OverchargeOrder>, Option<&mut Launcher>)>();
         let mut view = query.view();
         for (index, &(id, entity)) in units.iter().enumerate() {
-            let (stats, combat, turret, turning, mut overcharge, overcharge_order) = view.get_mut(entity).expect("unit list only holds live units");
+            let (stats, combat, turret, turning, mut overcharge, overcharge_order, mut launcher) = view.get_mut(entity).expect("unit list only holds live units");
             combat.ticks_until_ready = combat.ticks_until_ready.saturating_sub(1);
             if let Some(weapon) = overcharge.as_mut() {
                 weapon.ticks_until_ready = weapon.ticks_until_ready.saturating_sub(1);
@@ -1314,6 +1339,11 @@ impl SimWorld {
                     && (!fog || visibility.is_visible(stats.team, entry.x, entry.y))
             };
             let locate = |target: SimId| units.binary_search_by_key(&target, |unit| unit.0).ok().map(|i| grid.entry(i));
+            // A tactical launcher picks only structures, and a nuclear one picks nothing itself.
+            let structures_only = launcher.is_some();
+            let picks_targets = launcher.as_ref().is_none_or(|launcher| !launcher.strategic);
+            let missile = launcher.as_ref().map(|launcher| (launcher.cruise_height, launcher.strategic));
+            let loaded = launcher.as_ref().is_none_or(|launcher| !launcher.strategic || launcher.stock > 0);
 
             // A ground attack takes over the gun, so the unit looks for nothing else.
             let ground = combat.ground_target;
@@ -1342,7 +1372,7 @@ impl SimWorld {
 
                 // Searches are spread across ticks. Rings grow outward, so units at the
                 // front of a battle stop early with the nearest enemy. Mobile units come first.
-                if combat.target.is_none() && id.0.wrapping_add(tick) % TARGET_SEARCH_INTERVAL == 0 {
+                if combat.target.is_none() && picks_targets && id.0.wrapping_add(tick) % TARGET_SEARCH_INTERVAL == 0 {
                     let mut ring = (8i64 << FP_FRAC_BITS).max(range / 8);
                     loop {
                         let radius = ring.min(range);
@@ -1351,7 +1381,7 @@ impl SimWorld {
                             let distance = squared_distance(other.x, other.y);
                             let reach = radius + i64::from(other.radius);
                             let visible = !fog || visibility.is_visible(stats.team, other.x, other.y);
-                            if distance <= reach * reach && visible && blocked != Some(other.id) {
+                            if distance <= reach * reach && visible && blocked != Some(other.id) && (other.is_structure || !structures_only) {
                                 let candidate = (other.is_structure, distance, other.id);
                                 if best.is_none_or(|current| candidate < current) {
                                     best = Some(candidate);
@@ -1423,6 +1453,7 @@ impl SimWorld {
                             damage: weapon.damage,
                             splash: Fp::ZERO,
                             overcharge: Some(weapon.structure_damage),
+                            missile: None,
                         });
                         weapon.ticks_until_ready = weapon.reload_ticks;
                         finished_overcharges.push(id);
@@ -1431,14 +1462,15 @@ impl SimWorld {
             }
             // While aiming an Overcharge elsewhere, the gun does not fire at anything else.
             let gun_free = overcharge_target.is_none_or(|target| combat.target == Some(target));
-            if combat.ticks_until_ready == 0 && aimed && gun_free {
+            if combat.ticks_until_ready == 0 && aimed && gun_free && loaded {
                 if let Some(target) = combat.target {
                     let entry = locate(target).expect("target was just validated or found");
                     let raw = |x: i32, y: i32, z: i32| Vec3Fp::new(Fp::from_bits(x), Fp::from_bits(y), Fp::from_bits(z));
                     let (from, to) = (raw(me.x, me.y, me.z), raw(entry.x, entry.y, entry.z));
                     // A target picked by the unit itself is passed over for a while if the ground
                     // would stop the shot. One the player ordered is fired at regardless.
-                    if combat.forced_target.is_none() && !shot_is_clear(terrain, from, to, combat.projectile_speed) {
+                    // Missiles fly over the ground, so they are never blocked.
+                    if combat.forced_target.is_none() && missile.is_none() && !shot_is_clear(terrain, from, to, combat.projectile_speed) {
                         combat.blocked = Some((target, tick + BLOCKED_TARGET_TICKS));
                         combat.target = None;
                     } else {
@@ -1451,15 +1483,20 @@ impl SimWorld {
                             damage: combat.projectile_damage,
                             splash: combat.projectile_splash,
                             overcharge: None,
+                            missile,
                         });
                         combat.ticks_until_ready = combat.reload_ticks;
+                        if let Some(launcher) = launcher.as_mut().filter(|launcher| launcher.strategic) {
+                            launcher.stock -= 1;
+                            fired_nukes.push(id);
+                        }
                     }
                 }
             }
             // A ground attack aims a hair below the ground, so that rounding cannot leave the shell
             // just above it at the spot, to skim on past. Any deeper, and a flat shot lands short.
             if let Some(spot) = ground {
-                if combat.ticks_until_ready == 0 && aimed && squared_distance(spot.x.to_bits(), spot.y.to_bits()) <= range * range {
+                if combat.ticks_until_ready == 0 && aimed && loaded && squared_distance(spot.x.to_bits(), spot.y.to_bits()) <= range * range {
                     let from = Vec3Fp::new(Fp::from_bits(me.x), Fp::from_bits(me.y), Fp::from_bits(me.z));
                     shots.push(PendingShot {
                         source: id,
@@ -1470,13 +1507,26 @@ impl SimWorld {
                         damage: combat.projectile_damage,
                         splash: combat.projectile_splash,
                         overcharge: None,
+                        missile,
                     });
                     combat.ticks_until_ready = combat.reload_ticks;
+                    if let Some(launcher) = launcher.as_mut().filter(|launcher| launcher.strategic) {
+                        launcher.stock -= 1;
+                        fired_nukes.push(id);
+                    }
                 }
             }
         }
 
         for id in finished_attacks {
+            self.set_order(id, Order::IDLE);
+        }
+        // Each order to fire a nuclear missile fires one.
+        for id in fired_nukes {
+            let (_, entity) = self.find_unit(id).expect("it just fired");
+            let mut combat = self.ecs.get::<&mut Combat>(entity).expect("units have combat");
+            (combat.ground_target, combat.forced_target, combat.target) = (None, None, None);
+            drop(combat);
             self.set_order(id, Order::IDLE);
         }
         for id in finished_overcharges {
@@ -1486,6 +1536,26 @@ impl SimWorld {
         }
         let friendly_fire = self.config.friendly_fire;
         for shot in std::mem::take(&mut self.pending_shots) {
+            if let Some((cruise_height, strategic)) = shot.missile {
+                // Plenty of time for the climb, the cruise, and the dive, and it never hits a friend.
+                let distance = sqrt_wide((shot.to - shot.from).xy().length_squared());
+                let lifetime = (distance / shot.speed.max(Fp::ONE)).to_num::<u32>() * 2 + 100;
+                let projectile = Projectile {
+                    velocity: Vec3Fp::ZERO,
+                    damage: shot.damage,
+                    source: shot.source,
+                    source_team: shot.team,
+                    lifetime_ticks: lifetime,
+                    splash_radius: shot.splash,
+                    allied_safe_ticks: lifetime,
+                };
+                let id = self.spawn_projectile(shot.from, projectile);
+                let entity = self.projectiles.last().filter(|last| last.0 == id).expect("just spawned").1;
+                let missile = Missile { target: shot.to.xy(), speed: shot.speed, cruise_height, strategic };
+                self.ecs.insert_one(entity, missile).expect("just spawned");
+                self.missiles.push((id, entity));
+                continue;
+            }
             let solution = firing_solution(shot.from, shot.to, shot.speed);
             let projectile = self.spawn_projectile(
                 shot.from,
@@ -1524,8 +1594,71 @@ impl SimWorld {
             .collect()
     }
 
+    /// Missile defenses that are ready shoot down enemy missiles in range, before anything
+    /// moves. A tactical defense destroys the nearest cruise missile, then reloads. A strategic
+    /// one spends an interceptor on a nuclear missile that is in its range and heading for
+    /// somewhere in its range. Defenses go in `SimId` order, and no missile is shot down twice.
+    /// Returns the missiles destroyed, sorted by `SimId`.
+    fn intercept_missiles(&mut self) -> Vec<SimId> {
+        self.interceptions.clear();
+        let mut destroyed: Vec<SimId> = Vec::new();
+        for index in 0..self.missile_defenses.len() {
+            let entity = self.missile_defenses[index].1;
+            let mut defense = *self.ecs.get::<&MissileDefense>(entity).expect("defense list only holds defenses");
+            defense.ticks_until_ready = defense.ticks_until_ready.saturating_sub(1);
+            let working = self.ecs.get::<&Construction>(entity).is_err();
+            let ready = if defense.strategic { defense.stock > 0 } else { defense.ticks_until_ready == 0 };
+            if working && ready && !self.missiles.is_empty() {
+                let here = self.ecs.get::<&Position>(entity).expect("units have positions").0;
+                let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team;
+                let range = i128::from(defense.range.to_bits());
+                let within = |dx: i32, dy: i32, dz: i32| {
+                    let (dx, dy, dz) = (i128::from(dx), i128::from(dy), i128::from(dz));
+                    dx * dx + dy * dy + dz * dz <= range * range
+                };
+                let mut best: Option<(i128, SimId, Vec3Fp)> = None;
+                for &(id, missile_entity) in &self.missiles {
+                    let (Ok(missile), Ok(projectile), Ok(position)) =
+                        (self.ecs.get::<&Missile>(missile_entity), self.ecs.get::<&Projectile>(missile_entity), self.ecs.get::<&Position>(missile_entity))
+                    else {
+                        continue;
+                    };
+                    let at = position.0;
+                    if missile.strategic != defense.strategic || projectile.source_team == team || destroyed.contains(&id) {
+                        continue;
+                    }
+                    let (dx, dy, dz) = (at.x.to_bits() - here.x.to_bits(), at.y.to_bits() - here.y.to_bits(), at.z.to_bits() - here.z.to_bits());
+                    let in_reach = if defense.strategic {
+                        let (tx, ty) = (missile.target.x.to_bits() - here.x.to_bits(), missile.target.y.to_bits() - here.y.to_bits());
+                        within(dx, dy, 0) && within(tx, ty, 0)
+                    } else {
+                        within(dx, dy, dz)
+                    };
+                    let distance = i128::from(dx) * i128::from(dx) + i128::from(dy) * i128::from(dy) + i128::from(dz) * i128::from(dz);
+                    if in_reach && best.is_none_or(|(closest, _, _)| distance < closest) {
+                        best = Some((distance, id, at));
+                    }
+                }
+                if let Some((_, id, at)) = best {
+                    destroyed.push(id);
+                    self.interceptions.push([[here.x.to_bits(), here.y.to_bits(), here.z.to_bits()], [at.x.to_bits(), at.y.to_bits(), at.z.to_bits()]]);
+                    if defense.strategic {
+                        defense.stock -= 1;
+                    } else {
+                        defense.ticks_until_ready = defense.reload_ticks;
+                    }
+                }
+            }
+            *self.ecs.get::<&mut MissileDefense>(entity).expect("defense list only holds defenses") = defense;
+        }
+        destroyed.sort_unstable();
+        destroyed
+    }
+
     pub fn step_projectiles(&mut self) {
         self.pending_shield_hits.clear();
+        self.dead_projectiles.clear();
+        let shot_down = if self.missile_defenses.is_empty() { Vec::new() } else { self.intercept_missiles() };
         let domes = if self.shields.is_empty() { Vec::new() } else { self.standing_domes() };
         let shield_hits = &mut self.pending_shield_hits;
         let terrain = &self.terrain;
@@ -1537,16 +1670,26 @@ impl SimWorld {
         let friendly_fire = self.config.friendly_fire;
         let (max_mobile, max_structure) = (self.max_mobile_radius, self.max_structure_radius);
         hits.clear();
-        dead.clear();
-        let mut query = self.ecs.query_mut::<(&mut Position, &mut Projectile, Option<&Overcharged>)>();
+        let mut query = self.ecs.query_mut::<(&mut Position, &mut Projectile, Option<&Overcharged>, Option<&Missile>)>();
         let mut view = query.view();
         for &(id, entity) in &self.projectiles {
-            let (position, projectile, overcharged) = view.get_mut(entity).expect("projectile list only holds live projectiles");
+            if shot_down.binary_search(&id).is_ok() {
+                dead.push(id);
+                continue;
+            }
+            let (position, projectile, overcharged, missile) = view.get_mut(entity).expect("projectile list only holds live projectiles");
             let start = position.0;
+            // A missile steers itself, and a shell falls.
+            if let Some(missile) = missile {
+                projectile.velocity = missile_velocity(terrain, start, missile);
+            }
             let step = projectile.velocity;
             let end = start + step;
             position.0 = end;
-            projectile.velocity.z -= GRAVITY;
+            if missile.is_none() {
+                projectile.velocity.z -= GRAVITY;
+            }
+            let strategic = missile.is_some_and(|missile| missile.strategic);
             projectile.lifetime_ticks = projectile.lifetime_ticks.saturating_sub(1);
             let allies_are_safe = projectile.allied_safe_ticks > 0;
             projectile.allied_safe_ticks = projectile.allied_safe_ticks.saturating_sub(1);
@@ -1585,7 +1728,8 @@ impl SimWorld {
             let dome_hit = domes
                 .iter()
                 .enumerate()
-                .filter(|(_, dome)| dome.team != projectile.source_team)
+                // A nuclear missile is not stopped by shields.
+                .filter(|(_, dome)| dome.team != projectile.source_team && !strategic)
                 .filter_map(|(index, dome)| sphere_entry(start, step, dome.center, dome.radius).map(|along| (along, index)))
                 .min();
             let first = |along: i32| best.is_none_or(|unit| along <= unit.0) && probe.hit.is_none_or(|ground| along <= ground);
@@ -1730,6 +1874,7 @@ impl SimWorld {
             self.order_queues.retain(alive);
             self.veterans.retain(alive);
             self.shields.retain(alive);
+            self.missile_defenses.retain(alive);
             self.dead_units.clear();
         }
         if !self.dead_projectiles.is_empty() {
@@ -1746,6 +1891,9 @@ impl SimWorld {
                     true
                 }
             });
+            if !self.missiles.is_empty() {
+                self.missiles.retain(|missile| dead.binary_search(&missile.0).is_err());
+            }
             self.dead_projectiles.clear();
         }
     }
@@ -2011,6 +2159,7 @@ impl SimWorld {
             hasher.write(&[1]);
             write_fp(hasher, overcharged.structure_damage);
         }
+
         write_vec3(hasher, position.0);
         write_vec3(hasher, projectile.velocity);
         write_fp(hasher, projectile.damage);
@@ -2019,6 +2168,15 @@ impl SimWorld {
         hasher.write(&projectile.lifetime_ticks.to_le_bytes());
         write_fp(hasher, projectile.splash_radius);
         hasher.write(&projectile.allied_safe_ticks.to_le_bytes());
+        drop(query);
+        // Last, so that nothing is written for a shell.
+        if let Ok(missile) = self.ecs.get::<&Missile>(entity) {
+            hasher.write(&[2, u8::from(missile.strategic)]);
+            write_fp(hasher, missile.target.x);
+            write_fp(hasher, missile.target.y);
+            write_fp(hasher, missile.speed);
+            write_fp(hasher, missile.cruise_height);
+        }
     }
 
     /// Copies everything, with no fog of war. For the stress-test scenarios.
@@ -2059,15 +2217,21 @@ impl SimWorld {
                 })
             })
             .collect();
-        let mut projectile_query = self.ecs.query::<(&Position, &Projectile, Option<&Overcharged>)>();
+        let mut projectile_query = self.ecs.query::<(&Position, &Projectile, Option<&Overcharged>, Option<&Missile>)>();
         let projectile_view = projectile_query.view();
         let projectiles = self
             .projectiles
             .iter()
             .filter_map(|&(id, entity)| {
-                let (position, projectile, overcharged) = projectile_view.get(entity).expect("projectile list only holds live projectiles");
+                let (position, projectile, overcharged, missile) = projectile_view.get(entity).expect("projectile list only holds live projectiles");
                 let (x, y, z) = (position.0.x.to_bits(), position.0.y.to_bits(), position.0.z.to_bits());
-                seen(projectile.source_team, x, y).then_some(ProjectileView { id, team: projectile.source_team, x, y, z, overcharge: overcharged.is_some() })
+                let kind = match (overcharged, missile) {
+                    (Some(_), _) => ProjectileKind::Overcharge,
+                    (None, Some(missile)) if missile.strategic => ProjectileKind::StrategicMissile,
+                    (None, Some(_)) => ProjectileKind::TacticalMissile,
+                    (None, None) => ProjectileKind::Shell,
+                };
+                seen(projectile.source_team, x, y).then_some(ProjectileView { id, team: projectile.source_team, x, y, z, kind })
             })
             .collect();
         let wrecks = self
@@ -2114,6 +2278,18 @@ impl SimWorld {
                 })
             })
             .collect();
+        let interceptions = self.interceptions.iter().copied().filter(|[from, to]| viewer.is_none_or(|viewer| seen(viewer.enemy(), from[0], from[1]) || seen(viewer.enemy(), to[0], to[1]))).collect();
+        let stocks = viewer.map_or_else(Vec::new, |viewer| {
+            self.factories
+                .iter()
+                .filter(|&&(_, entity)| self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team == viewer))
+                .filter_map(|&(id, entity)| {
+                    let launcher = self.ecs.get::<&Launcher>(entity).ok().map(|launcher| launcher.stock);
+                    let defense = self.ecs.get::<&MissileDefense>(entity).ok().map(|defense| defense.stock);
+                    launcher.or(defense).map(|stock| (id, stock))
+                })
+                .collect()
+        });
         let factories = viewer.map_or_else(Vec::new, |viewer| {
             self.factories
                 .iter()
@@ -2151,6 +2327,8 @@ impl SimWorld {
             projectiles,
             wrecks,
             shields,
+            interceptions,
+            stocks,
             factories,
             plans,
             work_links,

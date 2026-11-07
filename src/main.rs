@@ -1147,6 +1147,7 @@ fn run_windowed(seed: u64, options: Options) {
                             ui::pending_build_outlines(ctx, &camera, &pending, pixels_per_point);
                             ui::distant_selection_markers(ctx, &camera, &snapshot, &selected, pixels_per_point);
                             ui::draw_work_beams(ctx, &camera, &beams, beam_time, pixels_per_point);
+                            ui::draw_interceptions(ctx, &camera, &snapshot.interceptions, pixels_per_point);
                             ui::order_trails(ctx, &camera, &trails, pixels_per_point);
                             match &order_drag {
                                 Some((handle, _)) => {

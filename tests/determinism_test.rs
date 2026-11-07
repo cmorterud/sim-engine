@@ -151,6 +151,48 @@ fn every_shield_field_changes_the_checksum() {
     }
 }
 
+/// Launchers, missile defenses, and missiles are hashed only where they exist.
+#[test]
+fn every_missile_field_changes_the_checksum() {
+    use sim_engine::sim::commands::SimCommand;
+    use sim_engine::sim::components::{Launcher, Missile, MissileDefense, Team};
+    let (_, mut world) = run(scenario::battle(SEED, 20, small_config()), 10, 10);
+    let place = |world: &mut SimWorld, key: &str| {
+        let blueprint = world.blueprints.id(key);
+        (4..200).find_map(|cell| world.spawn_finished_structure(blueprint, Team::Blue, cell, 8)).expect("room")
+    };
+    let launcher = place(&mut world, "tactical_missile_launcher");
+    let defense = place(&mut world, "tactical_missile_defense");
+    let target = world.unit_position(launcher).unwrap().xy() + Vec2Fp::new(Fp::from_num(300), Fp::ZERO);
+    world.advance_tick(&[SimCommand::AttackGround { units: vec![launcher], point: target }]);
+    let missile = world.missiles.first().expect("a missile in flight").1;
+    let (launcher, defense) = (world.unit_entity(launcher).unwrap(), world.unit_entity(defense).unwrap());
+    let baseline = world.compute_checksum();
+    let bit = Fp::from_bits(1);
+    type Edit = Box<dyn Fn(&mut SimWorld, bool)>;
+    let edits: Vec<(&str, Edit)> = vec![
+        ("launcher kind", Box::new(move |w, _| { let mut l = w.ecs.get::<&mut Launcher>(launcher).unwrap(); l.strategic = !l.strategic; })),
+        ("cruise height", Box::new(move |w, undo| w.ecs.get::<&mut Launcher>(launcher).unwrap().cruise_height += if undo { -bit } else { bit })),
+        ("launcher stock", Box::new(move |w, undo| { let mut l = w.ecs.get::<&mut Launcher>(launcher).unwrap(); l.stock = if undo { l.stock - 1 } else { l.stock + 1 }; })),
+        ("defense kind", Box::new(move |w, _| { let mut d = w.ecs.get::<&mut MissileDefense>(defense).unwrap(); d.strategic = !d.strategic; })),
+        ("defense range", Box::new(move |w, undo| w.ecs.get::<&mut MissileDefense>(defense).unwrap().range += if undo { -bit } else { bit })),
+        ("defense reload", Box::new(move |w, undo| { let mut d = w.ecs.get::<&mut MissileDefense>(defense).unwrap(); d.reload_ticks = if undo { d.reload_ticks - 1 } else { d.reload_ticks + 1 }; })),
+        ("defense timer", Box::new(move |w, undo| { let mut d = w.ecs.get::<&mut MissileDefense>(defense).unwrap(); d.ticks_until_ready = if undo { d.ticks_until_ready - 1 } else { d.ticks_until_ready + 1 }; })),
+        ("defense stock", Box::new(move |w, undo| { let mut d = w.ecs.get::<&mut MissileDefense>(defense).unwrap(); d.stock = if undo { d.stock - 1 } else { d.stock + 1 }; })),
+        ("missile target x", Box::new(move |w, undo| w.ecs.get::<&mut Missile>(missile).unwrap().target.x += if undo { -bit } else { bit })),
+        ("missile target y", Box::new(move |w, undo| w.ecs.get::<&mut Missile>(missile).unwrap().target.y += if undo { -bit } else { bit })),
+        ("missile speed", Box::new(move |w, undo| w.ecs.get::<&mut Missile>(missile).unwrap().speed += if undo { -bit } else { bit })),
+        ("missile cruise height", Box::new(move |w, undo| w.ecs.get::<&mut Missile>(missile).unwrap().cruise_height += if undo { -bit } else { bit })),
+        ("missile kind", Box::new(move |w, _| { let mut m = w.ecs.get::<&mut Missile>(missile).unwrap(); m.strategic = !m.strategic; })),
+    ];
+    for (name, edit) in edits {
+        edit(&mut world, false);
+        assert_ne!(world.compute_checksum(), baseline, "{name} is not covered by the checksum");
+        edit(&mut world, true);
+        assert_eq!(world.compute_checksum(), baseline, "undoing {name} did not restore the checksum");
+    }
+}
+
 /// A formation's state is hashed only while there is one, so it has a test of its own.
 #[test]
 fn every_formation_field_changes_the_checksum() {

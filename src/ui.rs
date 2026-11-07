@@ -182,6 +182,15 @@ pub fn shield_status(snapshot: &SimSnapshot, id: SimId) -> Option<String> {
     })
 }
 
+/// How many missiles a silo has built and is keeping.
+pub fn stock_status(snapshot: &SimSnapshot, id: SimId, db: &BlueprintDb) -> Option<String> {
+    let &(_, stock) = snapshot.stocks.iter().find(|(silo, _)| *silo == id)?;
+    let unit = find_unit(snapshot, id)?;
+    let blueprint = db.get(BlueprintId(unit.blueprint));
+    let word = if blueprint.missile_defense.is_some() { "interceptor" } else { "missile" };
+    Some(format!("{stock} {word}{} ready", if stock == 1 { "" } else { "s" }))
+}
+
 /// Whether anything selected has a gun, and so can attack the ground.
 pub fn has_weapons(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb) -> bool {
     selected
@@ -864,7 +873,8 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
             let rank = rank_of(snapshot, first.id);
             let veteran = if rank > 0 { format!(", veteran rank {rank}") } else { String::new() };
             let shield = shield_status(snapshot, first.id).map_or(String::new(), |status| format!(", {status}"));
-            format!("{}: {}% health{veteran}{shield}", unit.name, first.health_permille / 10)
+            let stock = stock_status(snapshot, first.id, db).map_or(String::new(), |status| format!(", {status}"));
+            format!("{}: {}% health{veteran}{shield}{stock}", unit.name, first.health_permille / 10)
         } else {
             format!("{} units selected", units.len())
         };
@@ -1412,6 +1422,24 @@ pub fn draw_work_beams(ctx: &egui::Context, camera: &Camera, beams: &[WorkBeam],
     }
 }
 
+/// Flashes a line from each missile defense to the missile it shot down this tick.
+pub fn draw_interceptions(ctx: &egui::Context, camera: &Camera, interceptions: &[[[i32; 3]; 2]], pixels_per_point: f32) {
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    let to_points = |raw: [i32; 3]| {
+        let world = [f64::from(raw[0]) / 4096.0, f64::from(raw[1]) / 4096.0, f64::from(raw[2]) / 4096.0];
+        camera.world_to_screen(world).map(|pixels| Pos2::new(pixels[0] as f32 / pixels_per_point, pixels[1] as f32 / pixels_per_point))
+    };
+    let color = Color32::from_rgb(255, 120, 90);
+    for &[from, to] in interceptions {
+        let (Some(from), Some(to)) = (to_points(from), to_points(to)) else {
+            continue;
+        };
+        painter.line_segment([from, to], Stroke::new(6.0_f32, color.gamma_multiply(0.25)));
+        painter.line_segment([from, to], Stroke::new(2.0_f32, Color32::WHITE));
+        painter.circle_filled(to, 6.0, Color32::from_rgb(255, 230, 160));
+    }
+}
+
 /// Marks where an extractor can go while placing one, since deposits are small from far away.
 pub fn deposit_highlights(ctx: &egui::Context, camera: &Camera, free: &[[f64; 3]], target: Option<[f64; 3]>, pixels_per_point: f32) {
     let painter = ctx.layer_painter(egui::LayerId::background());
@@ -1594,6 +1622,8 @@ fn draw_icon(painter: &egui::Painter, center: Pos2, class: UnitClass, color: Col
             painter.line_segment([corner(0.0, -1.0), corner(0.0, 1.0)], stroke);
             painter.line_segment([corner(-1.0, 0.0), corner(1.0, 0.0)], stroke);
         }
+        // Never on the map.
+        UnitClass::Ammo => {}
     }
 }
 

@@ -6,7 +6,7 @@ use std::f32::consts::FRAC_1_SQRT_2;
 use super::meshes::Shape;
 use crate::sim::blueprints::BlueprintDb;
 use crate::sim::components::{SimId, Team, WreckKind};
-use crate::sim::world::{ProjectileView, ShieldView, UnitView, WorkLinkView};
+use crate::sim::world::{ProjectileKind, ProjectileView, ShieldView, UnitView, WorkLinkView};
 
 const RAW_TO_WORLD: f64 = 1.0 / 4096.0;
 const PROJECTILE_SIZE: f32 = 0.6;
@@ -23,6 +23,8 @@ const SELECTED: [f32; 3] = [0.25, 1.00, 0.35];
 const SHELL: [f32; 3] = [1.00, 0.85, 0.35];
 const OVERCHARGE_SHELL: [f32; 3] = [0.75, 0.95, 1.00];
 const OVERCHARGE_SIZE: f32 = 2.4;
+const MISSILE: [f32; 3] = [0.92, 0.92, 0.88];
+const NUKE: [f32; 3] = [1.00, 0.95, 0.30];
 const OBSTACLE: [f32; 3] = [0.42, 0.40, 0.38];
 const WRECK: [f32; 3] = [0.24, 0.23, 0.22];
 const TREE: [f32; 3] = [0.13, 0.36, 0.17];
@@ -137,6 +139,10 @@ pub fn unit_look(key: &str) -> UnitLook {
         "power_generator" => look(Shape::Generator, Some([1.00, 0.85, 0.20]), 1.2),
         "mass_storage" => look(Shape::Storage, Some([0.60, 0.90, 0.60]), 0.65),
         "shield_generator" => look(Shape::ShieldGenerator, Some([0.55, 0.85, 1.00]), 1.0),
+        "tactical_missile_launcher" => look(Shape::MissileLauncher, Some([0.85, 0.85, 0.80]), 0.9),
+        "tactical_missile_defense" => look(Shape::MissileDefense, Some([1.00, 0.55, 0.45]), 1.2),
+        "strategic_missile_launcher" => look(Shape::NukeSilo, Some([1.00, 0.90, 0.30]), 0.5),
+        "strategic_missile_defense" => look(Shape::AntiNukeSilo, Some([0.95, 0.95, 0.95]), 0.7),
         "t1_point_defense" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::PointDefense, Some([0.75, 0.25, 0.85]), 0.9) },
         _ => look(Shape::Cube, None, 0.6),
     }
@@ -299,8 +305,19 @@ pub fn build_projectile_instances(previous: &[ProjectileView], current: &[Projec
     merge_by_id(previous, current, |projectile| projectile.id, |before, projectile| {
         let now = [projectile.x, projectile.y, projectile.z];
         let from = before.map_or(now, |before| [before.x, before.y, before.z]);
-        let (size, color, icon) = if projectile.overcharge { (OVERCHARGE_SIZE, OVERCHARGE_SHELL, UNIT_ICON_PX) } else { (PROJECTILE_SIZE, SHELL, PROJECTILE_ICON_PX) };
-        out.push(Shape::Shell, instance(interpolate(from, now, alpha), [size; 3], NORTH, color, icon, eye));
+        let center = interpolate(from, now, alpha);
+        // A missile points the way it is flying along the ground.
+        let heading = {
+            let (dx, dy) = (f64::from(now[0] - from[0]), f64::from(now[1] - from[1]));
+            let length = dx.hypot(dy);
+            if length > 0.0 { [(dx / length) as f32, (dy / length) as f32] } else { NORTH }
+        };
+        match projectile.kind {
+            ProjectileKind::Shell => out.push(Shape::Shell, instance(center, [PROJECTILE_SIZE; 3], NORTH, SHELL, PROJECTILE_ICON_PX, eye)),
+            ProjectileKind::Overcharge => out.push(Shape::Shell, instance(center, [OVERCHARGE_SIZE; 3], NORTH, OVERCHARGE_SHELL, UNIT_ICON_PX, eye)),
+            ProjectileKind::TacticalMissile => out.push(Shape::Missile, instance(center, [3.0, 9.0, 3.0], heading, MISSILE, UNIT_ICON_PX, eye)),
+            ProjectileKind::StrategicMissile => out.push(Shape::Missile, instance(center, [7.0, 20.0, 7.0], heading, NUKE, UNIT_ICON_PX * 1.6, eye)),
+        }
     });
 }
 
@@ -441,11 +458,13 @@ mod tests {
     #[test]
     fn every_blueprint_has_its_own_look() {
         let db = BlueprintDb::standard();
-        for unit in db.iter() {
+        // Missiles a silo keeps are never on the map.
+        let drawn = || db.iter().filter(|unit| unit.class != crate::sim::blueprints::UnitClass::Ammo);
+        for unit in drawn() {
             assert_ne!(unit_look(&unit.key).shape, Shape::Cube, "{} has no shape of its own", unit.key);
         }
         // The T1 and T2 factory share a shape, and everything else is unique.
-        let shapes: Vec<Shape> = db.iter().filter(|unit| unit.key != "land_factory_t2").map(|unit| unit_look(&unit.key).shape).collect();
+        let shapes: Vec<Shape> = drawn().filter(|unit| unit.key != "land_factory_t2").map(|unit| unit_look(&unit.key).shape).collect();
         for (index, shape) in shapes.iter().enumerate() {
             assert!(!shapes[index + 1..].contains(shape), "{shape:?} is used twice");
         }

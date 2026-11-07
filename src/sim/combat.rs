@@ -3,6 +3,7 @@
 use crate::math::fp::{Fp, Vec3Fp, FP_FRAC_BITS};
 
 use super::config::{GRAVITY_RAW, TERRAIN_CELL_UNITS};
+use super::components::Missile;
 use super::spatial::GridEntry;
 use super::terrain::Terrain;
 use crate::math::fp::{sqrt_wide, Vec2Fp};
@@ -55,6 +56,31 @@ pub fn segment_hit(start: Vec3Fp, step: Vec3Fp, x: i32, y: i32, z: i32, radius: 
     let (ax, ay, az) = (mx - ((dx * t) >> FP_FRAC_BITS), my - ((dy * t) >> FP_FRAC_BITS), mz - ((dz * t) >> FP_FRAC_BITS));
     let radius = i64::from(radius);
     (ax * ax + ay * ay + az * az <= radius * radius).then_some(t as i32)
+}
+
+/// A missile's velocity for the next tick: towards its target at its speed, at its cruise
+/// height above the ground, and over the last three cruise heights, down a straight line to just
+/// below the target, so that it lands on it. It climbs no steeper than 45 degrees and dives no
+/// steeper than about 63, and once over the target it drops straight down.
+pub fn missile_velocity(terrain: &Terrain, from: Vec3Fp, missile: &Missile) -> Vec3Fp {
+    let here = from.xy();
+    let away = missile.target - here;
+    let distance = sqrt_wide(away.length_squared());
+    let along = missile.speed.min(distance);
+    let flat = if distance > Fp::ZERO {
+        let direction = away.normalized();
+        Vec2Fp::new(direction.x * along, direction.y * along)
+    } else {
+        Vec2Fp::ZERO
+    };
+    let next = here + flat;
+    let left = distance - along;
+    let dive = missile.cruise_height * 3;
+    let landing = terrain.height_at(missile.target) - Fp::ONE;
+    let cruise = terrain.height_at(here).max(terrain.height_at(next)) + missile.cruise_height;
+    let wanted = if left >= dive || dive == Fp::ZERO { cruise } else { landing + (cruise.max(landing) - landing) * (left / dive) };
+    let climb = missile.speed;
+    Vec3Fp::new(flat.x, flat.y, (wanted - from.z).clamp(-climb * 2, climb))
 }
 
 /// Where a segment first enters a sphere around `center`, as raw `Fp` from 0 to 1. Only a

@@ -4,10 +4,10 @@
 use std::collections::BTreeMap;
 use std::hash::Hasher;
 
-use super::blueprints::{BlueprintId, Res, TICKS_PER_SECOND};
+use super::blueprints::{BlueprintId, Res, UnitClass, WeaponKind, TICKS_PER_SECOND};
 use super::commands::SimCommand;
 use super::components::{
-    Adjacency, Blueprinted, BuildTask, Builder, OverchargeOrder, OverchargeWeapon, Paused, Shield, Turning, Turret, Veterancy, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, OrderQueue, Patrol,
+    Adjacency, Blueprinted, BuildTask, Builder, Launcher, MissileDefense, OverchargeOrder, OverchargeWeapon, Paused, Shield, Turning, Turret, Veterancy, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, OrderQueue, Patrol,
     Position, SimId, Team, UnitStats, Wreck, WreckKind,
 };
 use super::config::{
@@ -329,6 +329,15 @@ impl SimWorld {
         }
         if let Some(rate) = unit.weapon.and_then(|weapon| weapon.turn_rate) {
             self.ecs.insert_one(entity, Turret::new(facing, rate)).expect("entity was just spawned");
+        }
+        if let Some(weapon) = unit.weapon.filter(|weapon| weapon.kind != WeaponKind::Shell) {
+            let launcher = Launcher { strategic: weapon.kind == WeaponKind::StrategicMissile, cruise_height: weapon.cruise_height, stock: 0 };
+            self.ecs.insert_one(entity, launcher).expect("entity was just spawned");
+        }
+        if let Some(def) = unit.missile_defense {
+            let defense = MissileDefense { strategic: def.strategic, range: def.range, reload_ticks: def.reload_ticks, ticks_until_ready: 0, stock: 0 };
+            self.ecs.insert_one(entity, defense).expect("entity was just spawned");
+            self.missile_defenses.push((id, entity));
         }
         if let Some(def) = unit.shield {
             let shield = Shield {
@@ -993,6 +1002,15 @@ impl SimWorld {
 
     fn finish_factory_item(&mut self, entity: hecs::Entity, team: Team, finished: BlueprintId, rally: Option<Vec2Fp>) {
         let unit = self.blueprints.get(finished);
+        // A silo keeps the missiles it builds, until it fires them.
+        if unit.class == UnitClass::Ammo {
+            if let Ok(mut launcher) = self.ecs.get::<&mut Launcher>(entity) {
+                launcher.stock += 1;
+            } else if let Ok(mut defense) = self.ecs.get::<&mut MissileDefense>(entity) {
+                defense.stock += 1;
+            }
+            return;
+        }
         if unit.is_factory() {
             // An upgrade: the same structure takes on its new stats, at the same share of health.
             let (power, max_health, vision) = (unit.build_power, unit.health, unit.vision);
@@ -1501,6 +1519,18 @@ impl SimWorld {
                 hasher.write(&order.route.to_le_bytes());
                 hasher.write(&order.slot_ticks.to_le_bytes());
                 hash_slot(hasher, order.slot);
+            }
+        }
+        if let Ok(launcher) = self.ecs.get::<&Launcher>(entity) {
+            hasher.write(&[16, u8::from(launcher.strategic)]);
+            hasher.write(&launcher.cruise_height.to_bits().to_le_bytes());
+            hasher.write(&launcher.stock.to_le_bytes());
+        }
+        if let Ok(defense) = self.ecs.get::<&MissileDefense>(entity) {
+            hasher.write(&[17, u8::from(defense.strategic)]);
+            hasher.write(&defense.range.to_bits().to_le_bytes());
+            for value in [defense.reload_ticks, defense.ticks_until_ready, defense.stock] {
+                hasher.write(&value.to_le_bytes());
             }
         }
         if let Ok(shield) = self.ecs.get::<&Shield>(entity) {
