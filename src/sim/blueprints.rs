@@ -37,8 +37,9 @@ pub enum WeaponKind {
     /// A ballistic shell.
     Shell,
     /// A cruise missile that flies low over the ground to a structure (GAME_SPECIFICATION.md §8).
+    /// A cruise missile, fired only on order, one for each missile built.
     TacticalMissile,
-    /// A nuclear missile, fired only on order, one for each missile built.
+    /// A nuclear missile, fired only on order, one for each missile built, and once per order.
     StrategicMissile,
 }
 
@@ -54,6 +55,9 @@ pub struct WeaponDef {
     pub kind: WeaponKind,
     /// How high a missile flies above the ground. Zero for shells.
     pub cruise_height: Fp,
+    /// A nuclear blast's inner ring, on top of `damage` over all of `splash_radius`. Zero for none.
+    pub inner_radius: Fp,
+    pub inner_damage: Fp,
 }
 
 /// A defense that destroys enemy missiles in flight.
@@ -151,6 +155,8 @@ pub struct Blueprint {
     pub cloak_upkeep: Option<Res>,
     /// Energy per tick while running, for intel structures. Zero for none.
     pub upkeep: Res,
+    /// For a silo, the most missiles it keeps. It builds no more until it fires one. Zero for no limit.
+    pub max_stock: u32,
 }
 
 impl Blueprint {
@@ -219,6 +225,8 @@ struct RawWeapon {
     /// "shell", the default, "tactical_missile", or "strategic_missile".
     kind: Option<String>,
     cruise_height: Option<Number>,
+    inner_radius: Option<Number>,
+    inner_damage: Option<Number>,
 }
 
 #[derive(Deserialize)]
@@ -314,6 +322,7 @@ struct RawUnit {
     cloak: Option<RawCloak>,
     /// Energy per second while running.
     upkeep: Option<Number>,
+    max_stock: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -384,6 +393,8 @@ impl BlueprintDb {
                         Some(other) => return Err(context(format!("unknown weapon kind {other:?}"))),
                     },
                     cruise_height: whole(&weapon.cruise_height)?,
+                    inner_radius: whole(&weapon.inner_radius)?,
+                    inner_damage: whole(&weapon.inner_damage)?,
                 }),
             };
             let death_explosion = match &unit.death_explosion {
@@ -482,6 +493,7 @@ impl BlueprintDb {
                 jammer,
                 cloak_upkeep,
                 upkeep: rate(&unit.upkeep)?,
+                max_stock: unit.max_stock.unwrap_or(0),
             });
         }
         // Line endings can differ by checkout, and must not change the checksum.
@@ -549,6 +561,7 @@ mod tests {
             "shield_generator",
             "tactical_missile_launcher",
             "tactical_missile_defense",
+            "tactical_missile",
             "strategic_missile_launcher",
             "strategic_missile",
             "strategic_missile_defense",

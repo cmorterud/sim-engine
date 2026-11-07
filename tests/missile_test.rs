@@ -48,6 +48,17 @@ fn run_until(world: &mut SimWorld, limit: u32, mut done: impl FnMut(&SimWorld) -
     None
 }
 
+/// A finished launcher with missiles already built.
+fn loaded(world: &mut SimWorld, key: &str, team: Team, cell_x: u32, cell_y: u32, stock: u32) -> SimId {
+    let id = structure(world, key, team, cell_x, cell_y);
+    world.ecs.get::<&mut Launcher>(world.unit_entity(id).unwrap()).unwrap().stock = stock;
+    id
+}
+
+fn health(world: &SimWorld, id: SimId) -> Fp {
+    world.unit_health(id).unwrap()
+}
+
 fn missiles_from(world: &SimWorld, source: SimId) -> usize {
     world
         .missiles
@@ -57,27 +68,46 @@ fn missiles_from(world: &SimWorld, source: SimId) -> usize {
 }
 
 #[test]
-fn a_tactical_launcher_destroys_an_enemy_structure_it_can_see_but_ignores_units() {
+fn a_tactical_launcher_fires_only_on_order_and_only_missiles_it_has_built() {
     let mut world = open_world();
     let launcher = structure(&mut world, "tactical_missile_launcher", Team::Blue, 20, 20);
-    // A bot in range is no target for it.
-    let bot = world.blueprints.id("t1_light_bot");
-    let bot = world.spawn_mobile(bot, Team::Red, point(800, 410));
-    world.ecs.get::<&mut Combat>(world.unit_entity(bot).unwrap()).unwrap().range = Fp::ZERO;
-    assert!(run_until(&mut world, 60, |world| missiles_from(world, launcher) > 0).is_none(), "it fired at a unit");
-
-    // A power generator 1,600 away is, and one 1,500-damage missile is enough.
+    // A power generator 1,600 away, in range and in plain sight, is no target until ordered.
     let target = structure(&mut world, "power_generator", Team::Red, 100, 20);
+    world.ecs.get::<&mut Launcher>(world.unit_entity(launcher).unwrap()).unwrap().stock = 1;
+    assert!(run_until(&mut world, 60, |world| missiles_from(world, launcher) > 0).is_none(), "it fired without an order");
+
+    // Ordered, it fires, and one 1,500-damage missile is enough.
+    world.advance_tick(&[SimCommand::Attack { units: vec![launcher], target }]);
     let took = run_until(&mut world, 300, |world| !alive(world, target)).expect("the missile should destroy it");
-    // About 90 ticks of flight at 18 a tick, plus the climb, and the search.
+    // About 90 ticks of flight at 18 a tick, plus the climb.
     assert!(took > 60, "it arrived after only {took} ticks");
-    assert!(alive(&world, bot));
+
+    // With none left, an order waits for one to be built.
+    let next = structure(&mut world, "power_generator", Team::Red, 100, 30);
+    world.advance_tick(&[SimCommand::Attack { units: vec![launcher], target: next }]);
+    assert!(run_until(&mut world, 200, |world| missiles_from(world, launcher) > 0).is_none(), "it has no missile");
+    let missile = world.blueprints.id("tactical_missile");
+    world.advance_tick(&[SimCommand::QueueUnit { factory: launcher, blueprint: missile, count: 1 }]);
+    // 300 build time at its own 10 build power is 30 seconds, then the flight.
+    let took = run_until(&mut world, 600, |world| !alive(world, next)).expect("the built missile should destroy it");
+    assert!(took > 300, "it fired after only {took} ticks");
+}
+
+#[test]
+fn a_launcher_keeps_firing_at_its_target_while_it_has_missiles() {
+    let mut world = open_world();
+    let launcher = loaded(&mut world, "tactical_missile_launcher", Team::Blue, 20, 20, 3);
+    // A land factory takes three missiles.
+    let target = structure(&mut world, "land_factory_t1", Team::Red, 100, 20);
+    world.advance_tick(&[SimCommand::Attack { units: vec![launcher], target }]);
+    assert!(run_until(&mut world, 600, |world| !alive(world, target)).is_some(), "three missiles should destroy it");
+    assert_eq!(world.ecs.get::<&Launcher>(world.unit_entity(launcher).unwrap()).unwrap().stock, 0);
 }
 
 #[test]
 fn a_missile_flies_over_a_wall_that_would_stop_a_shell() {
     let mut world = open_world();
-    let launcher = structure(&mut world, "tactical_missile_launcher", Team::Blue, 20, 20);
+    let launcher = loaded(&mut world, "tactical_missile_launcher", Team::Blue, 20, 20, 1);
     world.add_box_obstacle(RectFp::new(point(900, 0), point(940, 1_200)));
     let target = structure(&mut world, "power_generator", Team::Red, 60, 20);
     world.advance_tick(&[SimCommand::Attack { units: vec![launcher], target }]);
@@ -87,9 +117,10 @@ fn a_missile_flies_over_a_wall_that_would_stop_a_shell() {
 #[test]
 fn a_missile_defense_shoots_down_one_missile_at_a_time() {
     let mut world = open_world();
-    let first = structure(&mut world, "tactical_missile_launcher", Team::Blue, 20, 20);
+    let first = loaded(&mut world, "tactical_missile_launcher", Team::Blue, 20, 20, 1);
     let target = structure(&mut world, "power_generator", Team::Red, 100, 20);
     structure(&mut world, "tactical_missile_defense", Team::Red, 102, 20);
+    world.advance_tick(&[SimCommand::Attack { units: vec![first], target }]);
     let mut intercepted = 0;
     for _ in 0..200 {
         world.advance_tick(&[]);
@@ -97,27 +128,25 @@ fn a_missile_defense_shoots_down_one_missile_at_a_time() {
     }
     assert_eq!(intercepted, 1, "one missile, shot down once");
     assert!(alive(&world, target), "the defense should have stopped it");
-    // The launcher has reloaded by now, and its second missile is on its way.
-    assert!(missiles_from(&world, first) <= 1);
 
     // Two launchers fire together, and the defense, reloading after the first, misses the second.
     let mut world = open_world();
-    for cell_y in [20, 22] {
-        structure(&mut world, "tactical_missile_launcher", Team::Blue, 20, cell_y);
-    }
+    let launchers: Vec<SimId> = [20, 22].into_iter().map(|cell_y| loaded(&mut world, "tactical_missile_launcher", Team::Blue, 20, cell_y, 1)).collect();
     let target = structure(&mut world, "power_generator", Team::Red, 100, 21);
     structure(&mut world, "tactical_missile_defense", Team::Red, 102, 21);
+    world.advance_tick(&[SimCommand::Attack { units: launchers, target }]);
     assert!(run_until(&mut world, 300, |world| !alive(world, target)).is_some(), "a volley should get one through");
 }
 
 #[test]
 fn a_shield_stops_a_tactical_missile() {
     let mut world = open_world();
-    structure(&mut world, "tactical_missile_launcher", Team::Blue, 20, 20);
+    let launcher = loaded(&mut world, "tactical_missile_launcher", Team::Blue, 20, 20, 1);
     let target = structure(&mut world, "power_generator", Team::Red, 100, 20);
     let generator = structure(&mut world, "shield_generator", Team::Red, 101, 22);
     // No healing, so that the dome's loss is exactly what hit it.
     world.ecs.get::<&mut Shield>(world.unit_entity(generator).unwrap()).unwrap().regen_per_tick = Fp::ZERO;
+    world.advance_tick(&[SimCommand::Attack { units: vec![launcher], target }]);
     run_until(&mut world, 140, |_| false);
     assert!(alive(&world, target));
     let shield = *world.ecs.get::<&Shield>(world.unit_entity(generator).unwrap()).unwrap();
@@ -138,6 +167,17 @@ fn a_silo_builds_missiles_and_keeps_them() {
     assert_eq!(world.ecs.get::<&Launcher>(entity).unwrap().stock, 2);
     assert_eq!(world.units.len(), units_before, "a missile is not a unit");
     assert_eq!(world.snapshot_for(Some(Team::Blue)).stocks, [(silo, 2)]);
+
+    // It keeps five at most, and spends nothing on a sixth until it fires one.
+    world.advance_tick(&[SimCommand::QueueUnit { factory: silo, blueprint: missile, count: 4 }]);
+    run_until(&mut world, 100, |_| false);
+    assert_eq!(world.ecs.get::<&Launcher>(entity).unwrap().stock, 5);
+    let mass = world.economies[0].mass;
+    run_until(&mut world, 20, |_| false);
+    assert!(world.economies[0].mass >= mass, "a full silo should spend nothing");
+    world.ecs.get::<&mut Launcher>(entity).unwrap().stock = 4;
+    run_until(&mut world, 20, |_| false);
+    assert_eq!(world.ecs.get::<&Launcher>(entity).unwrap().stock, 5, "with room again, it builds the last one");
 }
 
 /// A Blue silo with two missiles built, and a Red base 3,000 away.
@@ -154,6 +194,11 @@ fn nuclear_standoff() -> (SimWorld, SimId, Vec<SimId>, SimId) {
     (world, silo, base, far)
 }
 
+/// Where the standoff's missiles are aimed: the middle of the Red base.
+fn ground_zero() -> Vec2Fp {
+    point(3_440, 450)
+}
+
 #[test]
 fn a_nuclear_missile_flattens_everything_in_its_blast_once_per_order() {
     let (mut world, silo, base, far) = nuclear_standoff();
@@ -161,10 +206,12 @@ fn a_nuclear_missile_flattens_everything_in_its_blast_once_per_order() {
     structure(&mut world, "shield_generator", Team::Red, 172, 24);
     // Nothing is fired until it is ordered.
     assert!(run_until(&mut world, 30, |world| missiles_from(world, silo) > 0).is_none());
-    let spot = point(3_440, 450);
-    world.advance_tick(&[SimCommand::AttackGround { units: vec![silo], point: spot }]);
-    assert!(run_until(&mut world, 500, |world| base.iter().all(|id| !alive(world, *id))).is_some(), "the blast should flatten the base");
+    // 330 away: outside the inner ring of 300, inside the outer one of 400.
+    let edge = structure(&mut world, "power_generator", Team::Red, 188, 22);
+    world.advance_tick(&[SimCommand::AttackGround { units: vec![silo], point: ground_zero() }]);
+    assert!(run_until(&mut world, 500, |world| base.iter().all(|id| !alive(world, *id))).is_some(), "the inner ring should flatten the base");
     assert!(alive(&world, far), "800 away is outside the blast");
+    assert_eq!(health(&world, edge), fp_int(100), "the outer ring does 500");
     let entity = world.unit_entity(silo).unwrap();
     assert_eq!(world.ecs.get::<&Launcher>(entity).unwrap().stock, 1, "one order, one missile");
     assert_eq!(world.ecs.get::<&Combat>(entity).unwrap().ground_target, None);
@@ -172,29 +219,37 @@ fn a_nuclear_missile_flattens_everything_in_its_blast_once_per_order() {
 }
 
 #[test]
-fn a_strategic_defense_spends_an_interceptor_on_a_missile_aimed_inside_its_range() {
+fn a_strategic_defense_spends_an_interceptor_on_a_missile_in_its_range() {
     let (mut world, silo, base, _) = nuclear_standoff();
     let defense = structure(&mut world, "strategic_missile_defense", Team::Red, 165, 30);
     let defense_entity = world.unit_entity(defense).unwrap();
     world.ecs.get::<&mut MissileDefense>(defense_entity).unwrap().stock = 1;
-    let spot = point(3_440, 450);
-    world.advance_tick(&[SimCommand::AttackGround { units: vec![silo], point: spot }]);
+    world.advance_tick(&[SimCommand::AttackGround { units: vec![silo], point: ground_zero() }]);
     run_until(&mut world, 500, |_| false);
     assert!(base.iter().all(|id| alive(&world, *id)), "the interceptor should have stopped it");
     assert_eq!(world.ecs.get::<&MissileDefense>(defense_entity).unwrap().stock, 0);
 
     // With no interceptor left, the second one lands.
-    world.advance_tick(&[SimCommand::AttackGround { units: vec![silo], point: spot }]);
+    world.advance_tick(&[SimCommand::AttackGround { units: vec![silo], point: ground_zero() }]);
     assert!(run_until(&mut world, 500, |world| base.iter().all(|id| !alive(world, *id))).is_some());
 }
 
 #[test]
-fn a_strategic_defense_lets_a_missile_aimed_elsewhere_fly_past() {
+fn a_strategic_defense_stops_a_missile_flying_over_it_to_somewhere_else() {
     let (mut world, silo, _, far) = nuclear_standoff();
-    // On the way to the far generator, but more than its range from where that missile lands.
+    // On the way to the far generator, and well over 1,000 from where that missile lands.
     let defense = structure(&mut world, "strategic_missile_defense", Team::Red, 120, 20);
     world.ecs.get::<&mut MissileDefense>(world.unit_entity(defense).unwrap()).unwrap().stock = 1;
     world.advance_tick(&[SimCommand::Attack { units: vec![silo], target: far }]);
-    assert!(run_until(&mut world, 500, |world| !alive(world, far)).is_some(), "it should not be intercepted");
-    assert_eq!(world.ecs.get::<&MissileDefense>(world.unit_entity(defense).unwrap()).unwrap().stock, 1);
+    run_until(&mut world, 500, |_| false);
+    assert!(alive(&world, far), "it should have been shot down on the way");
+    assert_eq!(world.ecs.get::<&MissileDefense>(world.unit_entity(defense).unwrap()).unwrap().stock, 0);
+
+    // One far off to the side never sees it.
+    let (mut world, silo, _, far) = nuclear_standoff();
+    let aside = structure(&mut world, "strategic_missile_defense", Team::Red, 120, 200);
+    world.ecs.get::<&mut MissileDefense>(world.unit_entity(aside).unwrap()).unwrap().stock = 1;
+    world.advance_tick(&[SimCommand::Attack { units: vec![silo], target: far }]);
+    assert!(run_until(&mut world, 500, |world| !alive(world, far)).is_some(), "out of its range, it should land");
+    assert_eq!(world.ecs.get::<&MissileDefense>(world.unit_entity(aside).unwrap()).unwrap().stock, 1);
 }

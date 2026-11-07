@@ -4,7 +4,7 @@
 use super::selection::{nearest_unit, order_command};
 use crate::math::fp::{Fp, Vec2Fp};
 use crate::render::camera::{Camera, HeightField};
-use crate::sim::blueprints::{BlueprintDb, BlueprintId};
+use crate::sim::blueprints::{BlueprintDb, BlueprintId, WeaponKind};
 use crate::sim::commands::SimCommand;
 use crate::sim::components::{BuildTask, SimId, Team};
 use crate::sim::config::TERRAIN_CELL_UNITS;
@@ -35,6 +35,10 @@ fn sort_selection(selected: &[SimId], units: &[UnitView], blueprints: &Blueprint
             continue;
         }
         let blueprint = blueprints.get(BlueprintId(unit.blueprint));
+        // A missile launcher fires only on order, so a right-click on an enemy is one.
+        if blueprint.weapon.is_some_and(|weapon| weapon.kind != WeaponKind::Shell) {
+            parts.armed.push(*id);
+        }
         if blueprint.is_factory() {
             parts.factories.push(*id);
             continue;
@@ -715,6 +719,19 @@ mod tests {
                 SimCommand::SetRally { factory: SimId(2), point },
             ]
         );
+    }
+
+    #[test]
+    fn right_clicking_an_enemy_orders_missile_launchers_to_fire_but_not_point_defenses() {
+        let db = db();
+        let units = [
+            view(1, Team::Blue, db.id("tactical_missile_launcher"), &db, 1_000.0, 1_000.0),
+            view(2, Team::Blue, db.id("strategic_missile_launcher"), &db, 1_100.0, 1_000.0),
+            view(3, Team::Blue, db.id("t1_point_defense"), &db, 1_200.0, 1_000.0),
+            view(4, Team::Red, db.id("power_generator"), &db, 2_000.0, 2_000.0),
+        ];
+        let orders = click_at(&[SimId(1), SimId(2), SimId(3)], &units, &[], &db, &camera(), [2_000.0, 2_000.0]);
+        assert_eq!(orders, [SimCommand::Attack { units: vec![SimId(1), SimId(2)], target: SimId(4) }]);
     }
 
     #[test]

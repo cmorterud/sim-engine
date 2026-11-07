@@ -324,8 +324,16 @@ struct PendingShot {
     splash: Fp,
     /// For an Overcharge shell, the most it does to a structure.
     overcharge: Option<Fp>,
-    /// For a missile, its cruise height and whether it is nuclear.
-    missile: Option<(Fp, bool)>,
+    missile: Option<MissileShot>,
+}
+
+/// What a launcher gives the missile it fires.
+#[derive(Copy, Clone)]
+struct MissileShot {
+    cruise_height: Fp,
+    strategic: bool,
+    inner_radius: Fp,
+    inner_damage: Fp,
 }
 
 pub struct SimWorld {
@@ -1434,11 +1442,15 @@ impl SimWorld {
                     && !hidden(entry.id)
             };
             let locate = |target: SimId| units.binary_search_by_key(&target, |unit| unit.0).ok().map(|i| grid.entry(i));
-            // A tactical launcher picks only structures, and a nuclear one picks nothing itself.
-            let structures_only = launcher.is_some();
-            let picks_targets = launcher.as_ref().is_none_or(|launcher| !launcher.strategic);
-            let missile = launcher.as_ref().map(|launcher| (launcher.cruise_height, launcher.strategic));
-            let loaded = launcher.as_ref().is_none_or(|launcher| !launcher.strategic || launcher.stock > 0);
+            // A missile launcher picks no targets itself, and fires only the missiles it has built.
+            let picks_targets = launcher.is_none();
+            let missile = launcher.as_ref().map(|launcher| MissileShot {
+                cruise_height: launcher.cruise_height,
+                strategic: launcher.strategic,
+                inner_radius: launcher.inner_radius,
+                inner_damage: launcher.inner_damage,
+            });
+            let loaded = launcher.as_ref().is_none_or(|launcher| launcher.stock > 0);
 
             // A ground attack takes over the gun, so the unit looks for nothing else.
             let ground = combat.ground_target;
@@ -1476,7 +1488,7 @@ impl SimWorld {
                             let distance = squared_distance(other.x, other.y);
                             let reach = radius + i64::from(other.radius);
                             let visible = (!fog || visibility.is_visible(stats.team, other.x, other.y)) && !hidden(other.id);
-                            if distance <= reach * reach && visible && blocked != Some(other.id) && (other.is_structure || !structures_only) {
+                            if distance <= reach * reach && visible && blocked != Some(other.id) {
                                 let candidate = (other.is_structure, distance, other.id);
                                 if best.is_none_or(|current| candidate < current) {
                                     best = Some(candidate);
@@ -1581,9 +1593,11 @@ impl SimWorld {
                             missile,
                         });
                         combat.ticks_until_ready = combat.reload_ticks;
-                        if let Some(launcher) = launcher.as_mut().filter(|launcher| launcher.strategic) {
+                        if let Some(launcher) = launcher.as_mut() {
                             launcher.stock -= 1;
-                            fired_nukes.push(id);
+                            if launcher.strategic {
+                                fired_nukes.push(id);
+                            }
                         }
                     }
                 }
@@ -1605,9 +1619,11 @@ impl SimWorld {
                         missile,
                     });
                     combat.ticks_until_ready = combat.reload_ticks;
-                    if let Some(launcher) = launcher.as_mut().filter(|launcher| launcher.strategic) {
+                    if let Some(launcher) = launcher.as_mut() {
                         launcher.stock -= 1;
-                        fired_nukes.push(id);
+                        if launcher.strategic {
+                            fired_nukes.push(id);
+                        }
                     }
                 }
             }
@@ -1631,7 +1647,7 @@ impl SimWorld {
         }
         let friendly_fire = self.config.friendly_fire;
         for shot in std::mem::take(&mut self.pending_shots) {
-            if let Some((cruise_height, strategic)) = shot.missile {
+            if let Some(MissileShot { cruise_height, strategic, inner_radius, inner_damage }) = shot.missile {
                 // Plenty of time for the climb, the cruise, and the dive, and it never hits a friend.
                 let distance = sqrt_wide((shot.to - shot.from).xy().length_squared());
                 let lifetime = (distance / shot.speed.max(Fp::ONE)).to_num::<u32>() * 2 + 100;
@@ -1646,7 +1662,7 @@ impl SimWorld {
                 };
                 let id = self.spawn_projectile(shot.from, projectile);
                 let entity = self.projectiles.last().filter(|last| last.0 == id).expect("just spawned").1;
-                let missile = Missile { target: shot.to.xy(), speed: shot.speed, cruise_height, strategic };
+                let missile = Missile { target: shot.to.xy(), speed: shot.speed, cruise_height, strategic, inner_radius, inner_damage };
                 self.ecs.insert_one(entity, missile).expect("just spawned");
                 self.missiles.push((id, entity));
                 continue;
@@ -1723,12 +1739,8 @@ impl SimWorld {
                         continue;
                     }
                     let (dx, dy, dz) = (at.x.to_bits() - here.x.to_bits(), at.y.to_bits() - here.y.to_bits(), at.z.to_bits() - here.z.to_bits());
-                    let in_reach = if defense.strategic {
-                        let (tx, ty) = (missile.target.x.to_bits() - here.x.to_bits(), missile.target.y.to_bits() - here.y.to_bits());
-                        within(dx, dy, 0) && within(tx, ty, 0)
-                    } else {
-                        within(dx, dy, dz)
-                    };
+                    // A nuclear missile flies high, so only how far it is across the ground counts.
+                    let in_reach = if defense.strategic { within(dx, dy, 0) } else { within(dx, dy, dz) };
                     let distance = i128::from(dx) * i128::from(dx) + i128::from(dy) * i128::from(dy) + i128::from(dz) * i128::from(dz);
                     if in_reach && best.is_none_or(|(closest, _, _)| distance < closest) {
                         best = Some((distance, id, at));
@@ -1849,11 +1861,13 @@ impl SimWorld {
             // Splash shells detonate where they stop, and damage everything nearby.
             let splash = projectile.splash_radius > Fp::ZERO;
             let blast = Explosion { x: end.x.to_bits(), y: end.y.to_bits(), radius: projectile.splash_radius, damage: projectile.damage, source: Some(projectile.source) };
+            // A nuclear blast also has an inner ring, that does far more.
+            let core = missile.filter(|missile| missile.inner_radius > Fp::ZERO).map(|missile| Explosion { radius: missile.inner_radius, damage: missile.inner_damage, ..blast });
 
             match (best, probe.hit) {
                 (Some((along, _, target, is_structure)), terrain_hit) if terrain_hit.is_none_or(|ground| along <= ground) => {
                     if splash {
-                        explosions.push(blast);
+                        explosions.extend([Some(blast), core].into_iter().flatten());
                     } else {
                         // Overcharge does little to structures.
                         let damage = match overcharged {
@@ -1866,7 +1880,7 @@ impl SimWorld {
                 }
                 (_, Some(ground)) => {
                     if splash {
-                        explosions.push(blast);
+                        explosions.extend([Some(blast), core].into_iter().flatten());
                     } else {
                         // A shell that comes down on bare ground hits any debris lying there.
                         let along = |value: Fp| ((i64::from(value.to_bits()) * i64::from(ground)) >> FP_FRAC_BITS) as i32;
@@ -2273,6 +2287,10 @@ impl SimWorld {
             write_fp(hasher, missile.target.y);
             write_fp(hasher, missile.speed);
             write_fp(hasher, missile.cruise_height);
+            if missile.inner_radius > Fp::ZERO {
+                write_fp(hasher, missile.inner_radius);
+                write_fp(hasher, missile.inner_damage);
+            }
         }
     }
 

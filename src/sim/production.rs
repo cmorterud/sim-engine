@@ -332,7 +332,13 @@ impl SimWorld {
             self.ecs.insert_one(entity, Turret::new(facing, rate)).expect("entity was just spawned");
         }
         if let Some(weapon) = unit.weapon.filter(|weapon| weapon.kind != WeaponKind::Shell) {
-            let launcher = Launcher { strategic: weapon.kind == WeaponKind::StrategicMissile, cruise_height: weapon.cruise_height, stock: 0 };
+            let launcher = Launcher {
+                strategic: weapon.kind == WeaponKind::StrategicMissile,
+                cruise_height: weapon.cruise_height,
+                stock: 0,
+                inner_radius: weapon.inner_radius,
+                inner_damage: weapon.inner_damage,
+            };
             self.ecs.insert_one(entity, launcher).expect("entity was just spawned");
         }
         if unit.has_intel() {
@@ -1066,6 +1072,10 @@ impl SimWorld {
             WorkKind::Upgrade => self.ecs.get::<&Upgrading>(entity).ok()?.into,
         };
         let unit = self.blueprints.get(blueprint);
+        // A full silo builds no more, and takes nothing, until it fires.
+        if kind == WorkKind::FactoryItem && unit.class == UnitClass::Ammo && self.silo_is_full(entity) {
+            return None;
+        }
         let step = fp_to_res(power) / (unit.build_time * TICKS_PER_SECOND);
         let (mass_discount, energy_discount) = if kind == WorkKind::FactoryItem {
             (adjacency.mass_cost_discount, adjacency.energy_cost_discount)
@@ -1132,6 +1142,16 @@ impl SimWorld {
         let mut health = self.ecs.get::<&mut Health>(entity).expect("units have health");
         let gain = Fp::from_bits(((i64::from(health.max.to_bits()) * share.to_bits()) >> 24) as i32);
         health.current = health.current.saturating_add(gain).min(health.max);
+    }
+
+    fn silo_is_full(&self, entity: hecs::Entity) -> bool {
+        let Ok(blueprint) = self.ecs.get::<&Blueprinted>(entity) else {
+            return false;
+        };
+        let limit = self.blueprints.get(blueprint.0).max_stock;
+        let launcher = self.ecs.get::<&Launcher>(entity).ok().map(|launcher| launcher.stock);
+        let stock = launcher.or_else(|| self.ecs.get::<&MissileDefense>(entity).ok().map(|defense| defense.stock)).unwrap_or(0);
+        limit > 0 && stock >= limit
     }
 
     fn finish_factory_item(&mut self, entity: hecs::Entity, team: Team, finished: BlueprintId, rally: Option<Vec2Fp>) {
@@ -1673,6 +1693,10 @@ impl SimWorld {
             hasher.write(&[16, u8::from(launcher.strategic)]);
             hasher.write(&launcher.cruise_height.to_bits().to_le_bytes());
             hasher.write(&launcher.stock.to_le_bytes());
+            if launcher.inner_radius > Fp::ZERO {
+                hasher.write(&launcher.inner_radius.to_bits().to_le_bytes());
+                hasher.write(&launcher.inner_damage.to_bits().to_le_bytes());
+            }
         }
         if let Ok(defense) = self.ecs.get::<&MissileDefense>(entity) {
             hasher.write(&[17, u8::from(defense.strategic)]);

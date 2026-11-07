@@ -38,7 +38,8 @@ pub fn blueprint_hotkey(key: &str) -> Option<char> {
         "tactical_missile_defense" => '.',
         "strategic_missile_launcher" => '/',
         "strategic_missile_defense" => ';',
-        "strategic_missile" => '-',
+        // Building a missile is the same key in every silo, as no silo builds two kinds.
+        "strategic_missile" | "tactical_missile" => '-',
         "radar" => '[',
         "stealth_field_generator" => ']',
         "t2_engineer" => '\'',
@@ -160,7 +161,7 @@ mod tests {
     fn everything_that_can_be_built_has_a_key() {
         let db = BlueprintDb::standard();
         let keys = buildable(&db);
-        assert_eq!(keys.len(), 20);
+        assert_eq!(keys.len(), 21);
         for key in keys {
             assert!(blueprint_hotkey(&key).is_some(), "{key} has no hotkey");
         }
@@ -169,7 +170,9 @@ mod tests {
     #[test]
     fn no_two_options_share_a_key_or_take_one_already_in_use() {
         let db = BlueprintDb::standard();
-        let mut letters: Vec<char> = buildable(&db).iter().filter_map(|key| blueprint_hotkey(key)).collect();
+        // The two silos' missiles share a key, as no menu has both. Nothing else does.
+        let mut letters: Vec<char> = buildable(&db).iter().filter(|key| *key != "tactical_missile").filter_map(|key| blueprint_hotkey(key)).collect();
+        assert_eq!(blueprint_hotkey("tactical_missile"), blueprint_hotkey("strategic_missile"));
         letters.extend(PANEL_LETTERS);
         let count = letters.len();
         for letter in &letters {
@@ -178,6 +181,14 @@ mod tests {
         letters.sort_unstable();
         letters.dedup();
         assert_eq!(letters.len(), count, "two options share a key");
+        // And no one menu has two options on one key.
+        for unit in db.iter() {
+            let mut menu: Vec<char> = unit.builds.iter().filter_map(|option| blueprint_hotkey(&db.get(*option).key)).collect();
+            let count = menu.len();
+            menu.sort_unstable();
+            menu.dedup();
+            assert_eq!(menu.len(), count, "two options in {}'s menu share a key", unit.key);
+        }
     }
 
     #[test]

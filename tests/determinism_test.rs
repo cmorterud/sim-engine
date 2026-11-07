@@ -230,9 +230,13 @@ fn every_missile_field_changes_the_checksum() {
     let launcher = place(&mut world, "tactical_missile_launcher");
     let defense = place(&mut world, "tactical_missile_defense");
     let target = world.unit_position(launcher).unwrap().xy() + Vec2Fp::new(Fp::from_num(300), Fp::ZERO);
+    world.ecs.get::<&mut Launcher>(world.unit_entity(launcher).unwrap()).unwrap().stock = 1;
     world.advance_tick(&[SimCommand::AttackGround { units: vec![launcher], point: target }]);
     let missile = world.missiles.first().expect("a missile in flight").1;
     let (launcher, defense) = (world.unit_entity(launcher).unwrap(), world.unit_entity(defense).unwrap());
+    // An inner ring is hashed only where there is one, so give these one.
+    world.ecs.get::<&mut Launcher>(launcher).unwrap().inner_radius = Fp::from_num(300);
+    world.ecs.get::<&mut Missile>(missile).unwrap().inner_radius = Fp::from_num(300);
     let baseline = world.compute_checksum();
     let bit = Fp::from_bits(1);
     type Edit = Box<dyn Fn(&mut SimWorld, bool)>;
@@ -250,6 +254,10 @@ fn every_missile_field_changes_the_checksum() {
         ("missile speed", Box::new(move |w, undo| w.ecs.get::<&mut Missile>(missile).unwrap().speed += if undo { -bit } else { bit })),
         ("missile cruise height", Box::new(move |w, undo| w.ecs.get::<&mut Missile>(missile).unwrap().cruise_height += if undo { -bit } else { bit })),
         ("missile kind", Box::new(move |w, _| { let mut m = w.ecs.get::<&mut Missile>(missile).unwrap(); m.strategic = !m.strategic; })),
+        ("launcher inner radius", Box::new(move |w, undo| w.ecs.get::<&mut Launcher>(launcher).unwrap().inner_radius += if undo { -bit } else { bit })),
+        ("launcher inner damage", Box::new(move |w, undo| w.ecs.get::<&mut Launcher>(launcher).unwrap().inner_damage += if undo { -bit } else { bit })),
+        ("missile inner radius", Box::new(move |w, undo| w.ecs.get::<&mut Missile>(missile).unwrap().inner_radius += if undo { -bit } else { bit })),
+        ("missile inner damage", Box::new(move |w, undo| w.ecs.get::<&mut Missile>(missile).unwrap().inner_damage += if undo { -bit } else { bit })),
     ];
     for (name, edit) in edits {
         edit(&mut world, false);

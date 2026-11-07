@@ -338,11 +338,14 @@ impl Shield {
 /// A weapon that fires missiles instead of shells (GAME_SPECIFICATION.md §8).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Launcher {
-    /// Nuclear: fired only on order, using up a missile that its silo built.
+    /// Nuclear: one missile for each order. Otherwise it fires at its target until told to stop.
     pub strategic: bool,
     pub cruise_height: Fp,
-    /// Missiles built and waiting. Only strategic launchers use it.
+    /// Missiles built and waiting. It fires only these, and only on order.
     pub stock: u32,
+    /// A nuclear blast's inner ring. Zero for none.
+    pub inner_radius: Fp,
+    pub inner_damage: Fp,
 }
 
 /// A defense that destroys enemy missiles in flight.
@@ -366,6 +369,9 @@ pub struct Missile {
     pub speed: Fp,
     pub cruise_height: Fp,
     pub strategic: bool,
+    /// A nuclear blast's inner ring, on top of the projectile's own damage and splash. Zero for none.
+    pub inner_radius: Fp,
+    pub inner_damage: Fp,
 }
 
 /// An upgrade in place, to the blueprint the unit's own one upgrades to. A commander stands

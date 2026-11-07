@@ -197,12 +197,12 @@ vision = 400
 shield = { radius = 180, health = 5000, regen = 50, recharge_seconds = 30, upkeep = 30 }
 
 # Missiles (GAME_SPECIFICATION.md §8). The launchers and defenses are tier 2 and 3: T2 and T3
-# engineers build them, and so does the commander once it has the engineering upgrade. A tactical
-# launcher fires on its own at enemy structures it can see, and on order anywhere in range.
+# engineers build them, and so does the commander once it has the engineering upgrade. A launcher
+# builds its missiles, keeps up to its stock, and fires them only on order, as in the original.
 [[unit]]
 id = "tactical_missile_launcher"
 name = "Tactical Missile Launcher"
-class = "defense"
+class = "factory"
 tier = 2
 mass = 450
 energy = 4500
@@ -210,7 +210,22 @@ build_time = 500
 health = 1200
 footprint = 1
 vision = 300
+build_power = 10
+builds = ["tactical_missile"]
+max_stock = 6
 weapon = { range = 2400, reload_ticks = 150, projectile_speed = 18, damage = 1500, splash_radius = 30, kind = "tactical_missile", cruise_height = 60 }
+
+# 30 seconds at the launcher's own build power.
+[[unit]]
+id = "tactical_missile"
+name = "Tactical Missile"
+class = "ammo"
+tier = 2
+mass = 140
+energy = 2000
+build_time = 300
+health = 1
+vision = 0
 
 # Shoots down one enemy cruise missile in range each time it reloads.
 [[unit]]
@@ -240,7 +255,9 @@ footprint = 3
 vision = 300
 build_power = 20
 builds = ["strategic_missile"]
-weapon = { range = 20000, reload_ticks = 100, projectile_speed = 25, damage = 25000, splash_radius = 350, kind = "strategic_missile", cruise_height = 500 }
+max_stock = 5
+# The original's two rings: 70,000 within 30 of its units and 500 within 40, at ten of ours to one.
+weapon = { range = 20000, reload_ticks = 100, projectile_speed = 25, damage = 500, splash_radius = 400, inner_damage = 70000, inner_radius = 300, kind = "strategic_missile", cruise_height = 500 }
 
 [[unit]]
 id = "strategic_missile"
@@ -253,8 +270,8 @@ build_time = 4000
 health = 1
 vision = 0
 
-# Builds interceptors, and spends one on each enemy nuclear missile that flies into its range
-# on its way to somewhere in its range.
+# Builds interceptors, and spends one on each enemy nuclear missile that flies into its range,
+# wherever it is headed.
 [[unit]]
 id = "strategic_missile_defense"
 name = "Strategic Missile Defense"
@@ -268,6 +285,7 @@ footprint = 2
 vision = 400
 build_power = 20
 builds = ["anti_nuke"]
+max_stock = 7
 missile_defense = { kind = "strategic", range = 1000 }
 
 [[unit]]
