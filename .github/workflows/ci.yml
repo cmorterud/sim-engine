@@ -10,6 +10,12 @@ permissions:
 env:
   # Pinned so that a new compiler release cannot break the build unexpectedly.
   RUST_VERSION: "1.99.1"
+  # Disk space on the runners is tight, and the unoptimized test binaries, each with the whole
+  # graphics stack and full debug information, ran it out mid-link (the linker died with a bus
+  # error). Line tables keep file and line in panics at a fraction of the size, and incremental
+  # caches are no use on a fresh runner.
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
   # Compiling takes nearly all of the time, and each profile compiles everything separately,
@@ -31,6 +37,13 @@ jobs:
             flags: ""
     steps:
       - uses: actions/checkout@v7
+
+      # The runner comes with toolchains this project never uses; removing them frees many
+      # gigabytes for the build.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /opt/hostedtoolcache/CodeQL
+          df -h /
 
       # The audio library needs the system's sound headers to compile.
       - name: Install audio headers
@@ -56,6 +69,11 @@ jobs:
 
       - name: Test
         run: cargo test --locked ${{ matrix.flags }}
+
+      # So that a failure from a full disk says so.
+      - name: Disk space left
+        if: always()
+        run: df -h / && du -sh target
 
       # Compiled but not run: timing limits would give false failures on shared runners.
       - name: Check that benchmarks compile
