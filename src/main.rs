@@ -66,7 +66,8 @@ Usage: sim-engine [options]
   --threads <n>        Threads for --soak (default 6)
   --seed <number>      Scenario seed
   --sound-check        Play each sound in turn, and exit
-  --map <folder>       Play on a Forged Alliance map from your own files (the unzipped folder
+  --map <name>         Play on a map that comes with the game: highland or twin_passes
+  --map <folder>       Or on a Forged Alliance map from your own files (the unzipped folder
                        with its .scmap and _save.lua), for any of the modes above
   --starts <a>,<b>     With --map, which armies' starts Blue and Red take (default 1,2)
 
@@ -168,8 +169,15 @@ fn main() {
         }
     };
     let seed = options.seed.unwrap_or(DEFAULT_SEED);
+    let bundled = options.map.as_ref().and_then(|name| name.to_str()).and_then(sim_engine::sim::maps::bundled);
     let map_source = match &options.map {
         None => MapSource::Skirmish,
+        Some(_) if bundled.is_some() => {
+            let map = bundled.expect("just checked");
+            let trees = map.scenery.iter().filter(|(kind, _)| *kind == sim_engine::sim::components::WreckKind::Tree).count();
+            println!("map {}: {} km, {} mass deposits, {} trees and {} rocks", map.name, map.map_units / 1024, map.deposits.len(), trees, map.scenery.len() - trees);
+            MapSource::Imported(Arc::new(map))
+        }
         Some(path) => match sim_engine::map_import::import(path, options.starts.unwrap_or((1, 2))) {
             Ok(imported) => {
                 println!("map {}: {}", imported.map.name, imported.notes.join("; "));
@@ -327,6 +335,8 @@ struct MapInfo {
     deposits: Vec<(u32, u32)>,
     blueprints: Arc<BlueprintDb>,
     fog_side: Option<usize>,
+    /// Below this height, ground is drawn as water.
+    water_level: f32,
 }
 
 fn read_map(scenario: &Scenario) -> MapInfo {
@@ -355,8 +365,19 @@ fn read_map(scenario: &Scenario) -> MapInfo {
             y += 1.0;
         }
     }
+    // Ground too steep or too deep to build on, from maps that have it.
+    let cells = world.terrain.cells_per_side() as u32;
+    for y in 0..cells {
+        for x in 0..cells {
+            if !world.terrain.cell_is_open(x, y) {
+                blocked_cells.push((y, x));
+            }
+        }
+    }
     blocked_cells.sort_unstable();
+    blocked_cells.dedup();
     MapInfo {
+        water_level: world.terrain.water_level().to_num::<f32>(),
         map_units: f64::from(world.terrain.map_units()),
         cells_per_side: world.terrain.cells_per_side() as u32,
         wall_cells,
@@ -666,6 +687,7 @@ fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
     );
     let size = window.inner_size();
     let mut renderer = Renderer::new(Arc::clone(&window), &map.heights, map.fog_side);
+    renderer.set_water_level(map.water_level);
     let mut camera = Camera::new(map.map_units, [f64::from(size.width), f64::from(size.height)]);
     if is_match {
         camera.set_min_altitude(SKIRMISH_MIN_ALTITUDE);

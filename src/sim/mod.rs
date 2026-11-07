@@ -9,6 +9,7 @@ pub mod config;
 pub mod enhancements;
 pub mod flowfield;
 pub mod formation;
+pub mod maps;
 pub mod production;
 pub mod scenario;
 pub mod spatial;

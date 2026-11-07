@@ -116,6 +116,8 @@ pub struct Renderer {
     samples_per_side: i32,
     cell_units: f64,
     height_scale: f32,
+    /// Ground below this height is drawn as water.
+    water_level: f32,
     icon_scale: f32,
     fog_texture: wgpu::Texture,
     fog_side: u32,
@@ -141,6 +143,11 @@ fn create_depth_view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Te
 }
 
 impl Renderer {
+    /// Draws ground below this height as water.
+    pub fn set_water_level(&mut self, level: f32) {
+        self.water_level = level;
+    }
+
     /// `fog_side` is the size of the fog of war grid, if the session has fog.
     pub fn new(window: Arc<Window>, heights: &HeightField, fog_side: Option<usize>) -> Self {
         let size = window.inner_size();
@@ -473,6 +480,7 @@ impl Renderer {
             samples_per_side: heights.samples() as i32,
             cell_units: heights.cell_units(),
             height_scale: heights.units_per_step() as f32,
+            water_level: -1.0e6,
             icon_scale,
             fog_texture,
             fog_side: fog_extent,
@@ -579,7 +587,7 @@ impl Renderer {
             ],
             terrain_grid: [first[0], first[1], step, self.samples_per_side],
             selection_box,
-            terrain_scale: [self.height_scale, self.icon_scale, self.fog_scale, 0.0],
+            terrain_scale: [self.height_scale, self.icon_scale, self.fog_scale, self.water_level],
         };
         self.queue.write_buffer(&self.globals_buffer, 0, bytemuck::bytes_of(&globals));
         self.flat_instances.clear();

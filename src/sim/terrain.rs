@@ -200,7 +200,7 @@ impl Terrain {
 
 /// Adds smooth value noise with lattice points every `spacing` samples.
 /// `amplitude` is in height steps. Integer math only.
-fn add_noise_octave(heights: &mut [i16], samples: usize, spacing: usize, amplitude: i32, rng: &mut SimRng) {
+pub(super) fn add_noise_octave(heights: &mut [i16], samples: usize, spacing: usize, amplitude: i32, rng: &mut SimRng) {
     let lattice_side = samples / spacing + 2;
     let lattice: Vec<i32> = (0..lattice_side * lattice_side)
         .map(|_| rng.below(amplitude as u32 * 2 + 1) as i32 - amplitude)

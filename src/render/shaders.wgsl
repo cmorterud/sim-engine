@@ -154,7 +154,14 @@ fn fs_terrain(input: TerrainOutput) -> @location(0) vec4<f32> {
     let line = 1.0 - clamp(contour / width, 0.0, 1.0);
     // Ground that has never been seen is dark, and ground seen before is dim.
     let sight = 0.18 + 0.82 * textureSample(fog_texture, fog_sampler, input.fog_coordinates).r;
-    return vec4<f32>(base * light * (1.0 - 0.18 * line) * sight, 1.0);
+    var color = base * light * (1.0 - 0.18 * line);
+    // Under the water level, ground shows through water, less the deeper it lies.
+    let depth = globals.terrain_scale.w - input.height;
+    if (depth > 0.0) {
+        let murk = clamp(0.6 + depth / 80.0, 0.6, 0.92);
+        color = mix(base * light, vec3<f32>(0.08, 0.22, 0.36), murk);
+    }
+    return vec4<f32>(color * sight, 1.0);
 }
 
 // ---- Selection box ----
