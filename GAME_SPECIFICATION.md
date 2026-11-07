@@ -450,3 +450,10 @@ These are starting points for tuning, recorded because they interpret or adjust 
 ## 20. Naming & Licensing
 
 Faction, unit, and structure names in §2 and §14 are working references taken from *Supreme Commander: Forged Alliance*. They must be replaced with original names, and designs reviewed for similarity, before any public release. Code and data files use neutral identifiers (for example `faction_a`, `t2_heavy_tank`) so that renaming does not touch game logic.
+
+This is a non-commercial, open-source game, inspired by *Forged Alliance* but its own game. The rules, kept in [PROVENANCE.md](PROVENANCE.md):
+
+* **No borrowed code.** Everything is written for this project. A formula taken from elsewhere is credited where it is used and in PROVENANCE.md.
+* **No borrowed content.** No art, models, textures, sounds, maps, scripts, or blueprint files from *Forged Alliance* or Forged Alliance Forever are shipped or committed. Maps from other games load only from a player's own files.
+* **Starting numbers.** Balance numbers may start from Forged Alliance Forever's published values, to save early playtesting. They are a starting point, not kept in step: they change freely with this game's own testing, and the data notes where each came from.
+* **Neutral names for new content.** Display names that come from *Forged Alliance* are listed in PROVENANCE.md for replacement, and new content does not add more.

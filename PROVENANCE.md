@@ -1,0 +1,50 @@
+# Provenance
+
+This is a non-commercial, open-source game inspired by *Supreme Commander: Forged Alliance*. It is
+its own game: its own engine, written from scratch, and, before any public release, its own names
+and look (GAME_SPECIFICATION.md §20). This file records what was taken from elsewhere, so that it
+stays deliberate and easy to replace.
+
+## What the game never contains
+
+* No code from *Forged Alliance*, Forged Alliance Forever (FAF), or any other game. Everything here
+  is written for this project.
+* No art, models, textures, sounds, maps, scripts, or blueprint files from either. Maps from other
+  games are only ever loaded from a player's own files, and never shipped or committed.
+
+## Starting numbers
+
+To save a great deal of early playtesting, unit and enhancement numbers start from FAF's published
+balance, taken from its unit blueprint files in <https://github.com/FAForever/fa>. They are a
+starting point, not something kept in step with FAF: they change freely with this game's own
+testing. `data/units.toml` notes where a value came from, and how it was scaled, next to the value.
+Distances are scaled to ten of our units to one of the original's, except weapon ranges, which keep
+the slice's own proportions.
+
+Taken so far:
+
+* Missiles and their defenses (§8): stock limits, the nuclear blast's two rings, and the tactical
+  missile's build time, scaled to our launcher's cost.
+* The commander's field enhancements (§2.1), and the support commander, its gateway, and its
+  enhancements (§2.2), from FAF's UEF units, with the support commander's teleporter and Rapid
+  Fabricator from its Aeon one.
+* How one enhancement's effects replace another's of the same kind, as FAF's commander scripts do.
+
+## Formulas
+
+* Teleport cost and charge time (`src/sim/enhancements.rs`): a flat cost plus half the distance to
+  the power 2.1, and a delay plus a hundred-thousandth of it, each capped. The formula comes from
+  FAF's `lua/shared/teleport.lua`, Copyright (c) 2022 clyf, under the MIT license. No code was
+  copied: the formula is worked out here in whole numbers.
+
+## Names to replace before release
+
+Ids in code and data are neutral (`acu`, `support_commander`, `quantum_gateway`). Display names
+that come from *Forged Alliance* and must change before any public release:
+
+* Units and structures: Armored Command Unit, Support Commander, Quantum Gateway.
+* Enhancements: Resource Allocation System, Nano-Repair System, Heavy Plasma Refractor, Energy
+  Accelerator, Rapid Fabricator, Enhanced Sensor System, Shield Generator Field.
+* The faction names and iconic units in GAME_SPECIFICATION.md §2 and §14.
+
+New content uses neutral names from the start.
