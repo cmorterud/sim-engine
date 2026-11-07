@@ -97,6 +97,8 @@ pub fn describe(command: &SimCommand, blueprints: &BlueprintDb) -> Option<(Marke
         SimCommand::MoveOrder { units, .. } | SimCommand::MoveBuild { units, .. } => (MarkerKind::Build, format!("Order moved: {}", unit_count(units)), None),
         SimCommand::QueueTask { units, .. } => (MarkerKind::Support, format!("Queued: {}", unit_count(units)), None),
         SimCommand::Upgrade { units } => (MarkerKind::Build, format!("Upgrading: {}", unit_count(units)), None),
+        SimCommand::SetCloak { units, on: true } => (MarkerKind::Support, format!("Cloaked: {}", unit_count(units)), None),
+        SimCommand::SetCloak { units, on: false } => (MarkerKind::Support, format!("Uncloaked: {}", unit_count(units)), None),
         SimCommand::Stop { .. } | SimCommand::QueueUnit { .. } | SimCommand::ClearQueue { .. } | SimCommand::CancelTask { .. } | SimCommand::RemoveQueued { .. } | SimCommand::SetPaused { .. } | SimCommand::SetRepeat { .. } => return None,
     })
 }

@@ -377,6 +377,19 @@ pub struct Upgrading {
     pub progress: Res,
 }
 
+/// What a unit does for intel: its sensors, stealth field, jamming, and cloak, all from its
+/// blueprint (GAME_SPECIFICATION.md §9).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Intel {
+    /// Built, not paused, and paid for this tick, so that its sensors, field, and jamming work.
+    /// Always for a unit with no upkeep, such as the commander's built-in omni sensor.
+    pub running: bool,
+    /// The player has switched its cloak on.
+    pub cloak_on: bool,
+    /// The cloak is on and paid for this tick, so it hides the unit.
+    pub cloaked: bool,
+}
+
 /// Marks a factory or a construction site that the player has paused. It spends nothing and
 /// makes no progress until resumed, and keeps its queue and progress meanwhile.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

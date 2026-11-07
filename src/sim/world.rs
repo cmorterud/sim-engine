@@ -8,7 +8,7 @@ use super::combat::{entry_hit, firing_solution, missile_velocity, probe_terrain,
 use super::commands::SimCommand;
 use super::components::{BuildTask, 
     Blueprinted, Builder, Combat, Construction, Factory, Footprint, Health, MoveClass, Order, OrderKind, OrderQueue, Patrol,
-    Launcher, Missile, MissileDefense, Upgrading, Overcharged, OverchargeOrder, OverchargeWeapon, Paused, Position, Projectile, Shield, SimId, Team, Turning, Turret, UnitStats, Velocity, Veterancy,
+    Intel, Launcher, Missile, MissileDefense, Upgrading, Overcharged, OverchargeOrder, OverchargeWeapon, Paused, Position, Projectile, Shield, SimId, Team, Turning, Turret, UnitStats, Velocity, Veterancy,
     Wreck, WreckKind, rotate_toward,
 };
 use super::config::{SimConfig, TARGET_SEARCH_INTERVAL, TERRAIN_CELL_UNITS, WRECK_HEALTH_PERMILLE, WRECK_MASS_PERMILLE};
@@ -17,8 +17,8 @@ use super::formation::{plan_formation, within, Travel};
 use super::production::{Economy, WorkLink};
 use super::spatial::{GridUnit, Layer, SpatialGrid};
 use super::terrain::Terrain;
-use super::visibility::{Visibility, VISION_REFRESH_TICKS};
-use crate::math::fp::{sqrt_wide, wide_mul, Fp, Vec2Fp, Vec3Fp, FP_FRAC_BITS};
+use super::visibility::{Sense, Visibility, VISION_REFRESH_TICKS};
+use crate::math::fp::{fp_int, sqrt_wide, wide_mul, Fp, Vec2Fp, Vec3Fp, FP_FRAC_BITS};
 use crate::math::rect::RectFp;
 use crate::math::rng::SimRng;
 
@@ -224,6 +224,20 @@ pub struct ShieldView {
     pub recharging: u32,
 }
 
+/// One of the viewer's working sensors, for drawing what they cover. Values are raw `Fp` bits.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct SensorRangeView {
+    pub center: [i32; 2],
+    /// Zero for none.
+    pub radar: i32,
+    pub omni: i32,
+}
+
+/// How close, in units, an enemy must come to see a cloaked unit without omni.
+pub const CLOAK_REVEAL_UNITS: i32 = 100;
+/// How often decoy blips move, in ticks.
+const DECOY_SHUFFLE_TICKS: u32 = 50;
+
 /// A dome that can stop shells this tick.
 #[derive(Copy, Clone, Debug)]
 struct Dome {
@@ -246,6 +260,15 @@ pub struct SimSnapshot {
     pub interceptions: Vec<[[i32; 3]; 2]>,
     /// Missiles built and waiting in the viewer's silos, by silo, sorted by `SimId`.
     pub stocks: Vec<(SimId, u32)>,
+    /// Enemy contacts on the viewer's radar that it cannot see, real and decoy alike, as raw
+    /// `Fp` positions. Nothing says which is which.
+    pub blips: Vec<[i32; 3]>,
+    /// The viewer's working sensors, for drawing their coverage.
+    pub sensor_ranges: Vec<SensorRangeView>,
+    /// The viewer's units with a cloak: whether it is switched on, and whether it is hiding them.
+    pub cloaks: Vec<(SimId, bool, bool)>,
+    /// The viewer's finished, unpaused intel structures that are not running for want of energy.
+    pub unpowered: Vec<SimId>,
     /// How far along the viewer's upgrades in place are, in thousandths, sorted by `SimId`.
     pub upgrades: Vec<(SimId, u16)>,
     pub factories: Vec<FactoryView>,
@@ -343,6 +366,11 @@ pub struct SimWorld {
     pub missile_defenses: Vec<(SimId, hecs::Entity)>,
     /// Commanders and structures upgrading in place, sorted by `SimId`.
     pub upgrading: Vec<(SimId, hecs::Entity)>,
+    /// Units with sensors, stealth fields, jamming, or cloaks, sorted by `SimId`.
+    pub intel: Vec<(SimId, hecs::Entity)>,
+    /// For each team, the cloaked enemies it cannot see this tick, sorted by `SimId`. Worked out
+    /// again every tick from what is hashed, so it is not hashed itself.
+    concealed: [Vec<SimId>; 2],
     /// Missiles shot down this tick, from where to where. Only for drawing, so not in the checksum.
     interceptions: Vec<[[i32; 3]; 2]>,
     /// Groups on a formation move, by the route they share.
@@ -410,6 +438,8 @@ impl SimWorld {
             missiles: Vec::new(),
             missile_defenses: Vec::new(),
             upgrading: Vec::new(),
+            intel: Vec::new(),
+            concealed: [Vec::new(), Vec::new()],
             interceptions: Vec::new(),
             formations: BTreeMap::new(),
             commanders: [None, None],
@@ -1308,6 +1338,58 @@ impl SimWorld {
             let entry = self.spatial_grid.entry(index);
             self.visibility.stamp_disc(stats.team, entry.x, entry.y, stats.vision);
         }
+        drop(query);
+        if !self.intel.is_empty() {
+            self.step_sensors(tick);
+        }
+    }
+
+    /// Radar and omni sensors take their turns with sight, and cloaks are worked out every tick.
+    /// A cloaked unit is hidden from a team unless that team has omni on it, or a unit of its
+    /// own within `CLOAK_REVEAL_UNITS`.
+    fn step_sensors(&mut self, tick: u32) {
+        for index in 0..self.intel.len() {
+            let (id, entity) = self.intel[index];
+            if tick >= VISION_REFRESH_TICKS && id.0.wrapping_add(tick) % VISION_REFRESH_TICKS != 0 {
+                continue;
+            }
+            let running = self.ecs.get::<&Intel>(entity).is_ok_and(|intel| intel.running) && self.ecs.get::<&Construction>(entity).is_err();
+            if !running {
+                continue;
+            }
+            let unit = self.blueprints.get(self.ecs.get::<&Blueprinted>(entity).expect("intel units have blueprints").0);
+            let (radar, omni) = (unit.radar, unit.omni);
+            let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team;
+            let at = self.ecs.get::<&Position>(entity).expect("units have positions").0;
+            for (sense, range) in [(Sense::Radar, radar), (Sense::Omni, omni)] {
+                if range > Fp::ZERO {
+                    self.visibility.stamp(sense, team, at.x.to_bits(), at.y.to_bits(), range);
+                }
+            }
+        }
+        let mut concealed = [Vec::new(), Vec::new()];
+        let reach = i64::from(fp_int(CLOAK_REVEAL_UNITS).to_bits());
+        for &(id, entity) in &self.intel {
+            if !self.ecs.get::<&Intel>(entity).is_ok_and(|intel| intel.cloaked) {
+                continue;
+            }
+            let enemy = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team.enemy();
+            let at = self.ecs.get::<&Position>(entity).expect("units have positions").0;
+            let (x, y) = (at.x.to_bits(), at.y.to_bits());
+            let mut revealed = self.visibility.senses(Sense::Omni, enemy, x, y);
+            if !revealed {
+                let mut near = |other: &super::spatial::GridEntry| {
+                    let (dx, dy) = (i64::from(other.x - x), i64::from(other.y - y));
+                    revealed |= dx * dx + dy * dy <= reach * reach;
+                };
+                self.spatial_grid.for_each_candidate(Some(enemy), Layer::Mobile, x, y, reach as i32, &mut near);
+                self.spatial_grid.for_each_candidate(Some(enemy), Layer::Structure, x, y, reach as i32 + self.max_structure_radius, &mut near);
+            }
+            if !revealed {
+                concealed[enemy.index()].push(id);
+            }
+        }
+        self.concealed = concealed;
     }
 
     pub fn step_combat(&mut self) {
@@ -1316,6 +1398,7 @@ impl SimWorld {
         let grid = &self.spatial_grid;
         let terrain = &self.terrain;
         let visibility = &self.visibility;
+        let concealed = &self.concealed;
         let fog = self.config.fog_of_war;
         let shots = &mut self.pending_shots;
         let economies = &mut self.economies;
@@ -1342,10 +1425,13 @@ impl SimWorld {
                 dx * dx + dy * dy
             };
             // Range reaches the edge of a target, so that large structures can be hit from their range.
+            // A cloaked enemy it cannot see is no target, even in plain sight.
+            let hidden = |id: SimId| concealed[stats.team.index()].binary_search(&id).is_ok();
             let can_engage = |entry: &super::spatial::GridEntry| {
                 let reach = range + i64::from(entry.radius);
                 squared_distance(entry.x, entry.y) <= reach * reach
                     && (!fog || visibility.is_visible(stats.team, entry.x, entry.y))
+                    && !hidden(entry.id)
             };
             let locate = |target: SimId| units.binary_search_by_key(&target, |unit| unit.0).ok().map(|i| grid.entry(i));
             // A tactical launcher picks only structures, and a nuclear one picks nothing itself.
@@ -1389,7 +1475,7 @@ impl SimWorld {
                         let mut consider = |other: &super::spatial::GridEntry| {
                             let distance = squared_distance(other.x, other.y);
                             let reach = radius + i64::from(other.radius);
-                            let visible = !fog || visibility.is_visible(stats.team, other.x, other.y);
+                            let visible = (!fog || visibility.is_visible(stats.team, other.x, other.y)) && !hidden(other.id);
                             if distance <= reach * reach && visible && blocked != Some(other.id) && (other.is_structure || !structures_only) {
                                 let candidate = (other.is_structure, distance, other.id);
                                 if best.is_none_or(|current| candidate < current) {
@@ -1885,6 +1971,7 @@ impl SimWorld {
             self.shields.retain(alive);
             self.missile_defenses.retain(alive);
             self.upgrading.retain(alive);
+            self.intel.retain(alive);
             self.dead_units.clear();
         }
         if !self.dead_projectiles.is_empty() {
@@ -2209,7 +2296,8 @@ impl SimWorld {
             .filter_map(|&(id, entity)| {
                 let (position, stats, health, blueprint, construction, turning, turret) = unit_view.get(entity).expect("unit list only holds live units");
                 let (x, y, z) = (position.0.x.to_bits(), position.0.y.to_bits(), position.0.z.to_bits());
-                seen(stats.team, x, y).then(|| UnitView {
+                let cloaked_away = viewer.is_some_and(|viewer| self.concealed[viewer.index()].binary_search(&id).is_ok());
+                (seen(stats.team, x, y) && !cloaked_away).then(|| UnitView {
                     id,
                     team: stats.team,
                     x,
@@ -2310,6 +2398,42 @@ impl SimWorld {
                 })
                 .collect()
         });
+        let blips = match viewer {
+            Some(viewer) if self.config.fog_of_war => self.blips_for(viewer),
+            _ => Vec::new(),
+        };
+        let own_intel = |viewer: Team| self.intel.iter().filter(move |&&(_, entity)| self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team == viewer));
+        let sensor_ranges = viewer.map_or_else(Vec::new, |viewer| {
+            own_intel(viewer)
+                .filter(|&&(_, entity)| self.ecs.get::<&Intel>(entity).is_ok_and(|intel| intel.running) && self.ecs.get::<&Construction>(entity).is_err())
+                .filter_map(|&(_, entity)| {
+                    let unit = self.blueprints.get(self.ecs.get::<&Blueprinted>(entity).ok()?.0);
+                    let at = self.ecs.get::<&Position>(entity).ok()?.0;
+                    (unit.radar > Fp::ZERO || unit.omni > Fp::ZERO).then(|| SensorRangeView { center: [at.x.to_bits(), at.y.to_bits()], radar: unit.radar.to_bits(), omni: unit.omni.to_bits() })
+                })
+                .collect()
+        });
+        let cloaks = viewer.map_or_else(Vec::new, |viewer| {
+            own_intel(viewer)
+                .filter_map(|&(id, entity)| {
+                    let unit = self.blueprints.get(self.ecs.get::<&Blueprinted>(entity).ok()?.0);
+                    let intel = *self.ecs.get::<&Intel>(entity).ok()?;
+                    unit.cloak_upkeep.is_some().then_some((id, intel.cloak_on, intel.cloaked))
+                })
+                .collect()
+        });
+        let unpowered = viewer.map_or_else(Vec::new, |viewer| {
+            own_intel(viewer)
+                .filter(|&&(_, entity)| {
+                    let has_upkeep = self.ecs.get::<&Blueprinted>(entity).is_ok_and(|unit| self.blueprints.get(unit.0).upkeep > Res::ZERO);
+                    has_upkeep
+                        && self.ecs.get::<&Intel>(entity).is_ok_and(|intel| !intel.running)
+                        && self.ecs.get::<&Construction>(entity).is_err()
+                        && self.ecs.get::<&Paused>(entity).is_err()
+                })
+                .map(|&(id, _)| id)
+                .collect()
+        });
         let factories = viewer.map_or_else(Vec::new, |viewer| {
             self.factories
                 .iter()
@@ -2349,6 +2473,10 @@ impl SimWorld {
             shields,
             interceptions,
             stocks,
+            blips,
+            sensor_ranges,
+            cloaks,
+            unpowered,
             upgrades,
             factories,
             plans,
@@ -2373,6 +2501,94 @@ impl SimWorld {
             match_result: self.match_result,
         }
     }
+}
+
+impl SimWorld {
+    /// What the viewer's radar shows that it cannot see: enemies on its radar or omni, except
+    /// those hidden by a stealth field or a cloak where it has no omni, and decoys from enemy
+    /// jammers, except where its omni or its sight shows there is nothing there.
+    fn blips_for(&self, viewer: Team) -> Vec<[i32; 3]> {
+        let visibility = &self.visibility;
+        if !visibility.has_any(Sense::Radar, viewer) && !visibility.has_any(Sense::Omni, viewer) {
+            return Vec::new();
+        }
+        let enemy = viewer.enemy();
+        let on_radar = |x: i32, y: i32| visibility.senses(Sense::Radar, viewer, x, y) || visibility.senses(Sense::Omni, viewer, x, y);
+        // The enemy's working stealth fields and jammers.
+        let mut fields: Vec<(i32, i32, i64)> = Vec::new();
+        let mut jammers: Vec<(SimId, i32, i32, i32, u32)> = Vec::new();
+        for &(id, entity) in &self.intel {
+            let running = self.ecs.get::<&Intel>(entity).is_ok_and(|intel| intel.running) && self.ecs.get::<&Construction>(entity).is_err();
+            if !running || self.ecs.get::<&UnitStats>(entity).map_or(true, |stats| stats.team != enemy) {
+                continue;
+            }
+            let unit = self.blueprints.get(self.ecs.get::<&Blueprinted>(entity).expect("intel units have blueprints").0);
+            let at = self.ecs.get::<&Position>(entity).expect("units have positions").0;
+            if unit.stealth_field > Fp::ZERO {
+                fields.push((at.x.to_bits(), at.y.to_bits(), i64::from(unit.stealth_field.to_bits())));
+            }
+            if let Some(jammer) = unit.jammer {
+                jammers.push((id, at.x.to_bits(), at.y.to_bits(), jammer.radius.to_num::<i32>(), jammer.decoys));
+            }
+        }
+        let mut blips = Vec::new();
+        for &(id, entity) in &self.units {
+            let Ok(stats) = self.ecs.get::<&UnitStats>(entity) else {
+                continue;
+            };
+            if stats.team != enemy {
+                continue;
+            }
+            let at = self.ecs.get::<&Position>(entity).expect("units have positions").0;
+            let (x, y) = (at.x.to_bits(), at.y.to_bits());
+            let shown = visibility.is_visible(viewer, x, y) && self.concealed[viewer.index()].binary_search(&id).is_err();
+            if shown || !on_radar(x, y) {
+                continue;
+            }
+            if !visibility.senses(Sense::Omni, viewer, x, y) {
+                let stealthed = fields.iter().any(|&(fx, fy, radius)| {
+                    let (dx, dy) = (i64::from(x - fx), i64::from(y - fy));
+                    dx * dx + dy * dy <= radius * radius
+                });
+                let cloaked = self.intel.binary_search_by_key(&id, |unit| unit.0).is_ok() && self.ecs.get::<&Intel>(entity).is_ok_and(|intel| intel.cloaked);
+                if stealthed || cloaked {
+                    continue;
+                }
+            }
+            blips.push([x, y, at.z.to_bits()]);
+        }
+        let period = self.current_tick / DECOY_SHUFFLE_TICKS;
+        for (id, jx, jy, radius, decoys) in jammers {
+            for decoy in 0..decoys {
+                let spot = decoy_spot(id, period, decoy, radius);
+                let (x, y) = (jx + (spot.0 << FP_FRAC_BITS), jy + (spot.1 << FP_FRAC_BITS));
+                let point = Vec2Fp::new(Fp::from_bits(x), Fp::from_bits(y));
+                if !self.terrain.in_bounds(point) || !on_radar(x, y) || visibility.senses(Sense::Omni, viewer, x, y) || visibility.is_visible(viewer, x, y) {
+                    continue;
+                }
+                blips.push([x, y, (self.terrain.height_at(point) + fp_int(8)).to_bits()]);
+            }
+        }
+        blips
+    }
+}
+
+/// Where a jammer's decoy is for a while, as whole units from the jammer, within its radius.
+/// From a hash, not the simulation's random numbers, since decoys are only ever shown.
+pub fn decoy_spot(jammer: SimId, period: u32, decoy: u32, radius: i32) -> (i32, i32) {
+    let mut value = (u64::from(jammer.0) << 40) ^ (u64::from(period) << 8) ^ u64::from(decoy);
+    // SplitMix64.
+    value = value.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    value = (value ^ (value >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    value ^= value >> 31;
+    let span = (2 * radius + 1).max(1) as u64;
+    let (mut dx, mut dy) = ((value % span) as i32 - radius, ((value >> 32) % span) as i32 - radius);
+    // Pulled in from the corners, so that every decoy is within the radius.
+    while i64::from(dx) * i64::from(dx) + i64::from(dy) * i64::from(dy) > i64::from(radius) * i64::from(radius) {
+        (dx, dy) = (dx / 2, dy / 2);
+    }
+    (dx, dy)
 }
 
 fn permille(value: i64, max: i64) -> u16 {

@@ -21,7 +21,7 @@ radius = 16
 vision = 1000
 build_power = 10
 build_range = 200
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "radar"]
 upgrades_to = "acu_t2"
 weapon = { range = 440, reload_ticks = 7, projectile_speed = 50, damage = 70, turn_rate = 180 }
 overcharge = { energy = 3000, damage = 12000, structure_damage = 800, reload_ticks = 50 }
@@ -30,6 +30,8 @@ energy_income = 20
 mass_storage = 650
 energy_storage = 4000
 death_explosion = { damage = 15000, radius = 300 }
+omni = 400
+cloak = { upkeep = 50 }
 
 [[unit]]
 id = "t1_engineer"
@@ -47,7 +49,7 @@ radius = 8
 vision = 500
 build_power = 5
 build_range = 120
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "radar"]
 
 [[unit]]
 id = "t1_light_bot"
@@ -297,7 +299,7 @@ radius = 16
 vision = 1000
 build_power = 20
 build_range = 200
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "radar", "stealth_field_generator"]
 upgrades_to = "acu_t3"
 weapon = { range = 440, reload_ticks = 7, projectile_speed = 50, damage = 70, turn_rate = 180 }
 overcharge = { energy = 3000, damage = 12000, structure_damage = 800, reload_ticks = 50 }
@@ -306,6 +308,8 @@ energy_income = 20
 mass_storage = 650
 energy_storage = 4000
 death_explosion = { damage = 15000, radius = 300 }
+omni = 400
+cloak = { upkeep = 50 }
 
 [[unit]]
 id = "acu_t3"
@@ -322,7 +326,7 @@ radius = 16
 vision = 1000
 build_power = 40
 build_range = 200
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator"]
 weapon = { range = 440, reload_ticks = 7, projectile_speed = 50, damage = 70, turn_rate = 180 }
 overcharge = { energy = 3000, damage = 12000, structure_damage = 800, reload_ticks = 50 }
 mass_income = 1
@@ -330,6 +334,8 @@ energy_income = 20
 mass_storage = 650
 energy_storage = 4000
 death_explosion = { damage = 15000, radius = 300 }
+omni = 400
+cloak = { upkeep = 50 }
 
 [[unit]]
 id = "land_factory_t3"
@@ -361,7 +367,7 @@ radius = 9
 vision = 550
 build_power = 12
 build_range = 130
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "radar", "stealth_field_generator"]
 
 [[unit]]
 id = "t3_engineer"
@@ -379,4 +385,56 @@ radius = 10
 vision = 600
 build_power = 30
 build_range = 140
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator"]
+
+# Intel (GAME_SPECIFICATION.md §9). Ranges are in units, and upkeep is energy per second
+# while running: a team that cannot pay switches its sensors off until it can. The commander
+# has a short-range omni sensor built in, and can cloak.
+[[unit]]
+id = "radar"
+name = "Radar"
+class = "economy"
+tier = 1
+mass = 60
+energy = 600
+build_time = 90
+health = 300
+footprint = 1
+vision = 300
+radar = 1600
+upkeep = 10
+# Drives its own upgrade to an Omni Sensor.
+build_power = 10
+upgrades_to = "omni_sensor"
+
+# Upgraded from a Radar: its mass, energy, and build time are what the upgrade costs.
+[[unit]]
+id = "omni_sensor"
+name = "Omni Sensor"
+class = "economy"
+tier = 3
+mass = 1200
+energy = 18000
+build_time = 1500
+health = 1200
+footprint = 1
+vision = 400
+radar = 2400
+omni = 800
+upkeep = 50
+
+# Hides friendly units in its field from enemy radar, and puts decoy blips on it.
+[[unit]]
+id = "stealth_field_generator"
+name = "Stealth Field Generator"
+class = "economy"
+tier = 2
+mass = 300
+energy = 3000
+build_time = 300
+health = 600
+footprint = 1
+vision = 300
+stealth_field = 350
+jammer = { radius = 450, decoys = 8 }
+upkeep = 25

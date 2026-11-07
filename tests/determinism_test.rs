@@ -151,6 +151,45 @@ fn every_shield_field_changes_the_checksum() {
     }
 }
 
+/// Intel state is hashed only for units that have it, and sensor coverage only once a team
+/// has had a sensor.
+#[test]
+fn every_intel_field_changes_the_checksum() {
+    use sim_engine::sim::components::{Intel, Team};
+    let (_, mut world) = run(scenario::battle(SEED, 20, small_config()), 10, 10);
+    let at = world.unit_position(world.units[0].0).unwrap().xy();
+    let acu = world.blueprints.id("acu");
+    let commander = world.spawn_mobile(acu, Team::Blue, at);
+    let entity = world.unit_entity(commander).unwrap();
+    let before_sensors = world.compute_checksum();
+    world.advance_tick(&[]);
+    world.advance_tick(&[]);
+    let baseline = world.compute_checksum();
+    assert_ne!(baseline, before_sensors);
+    type Edit = fn(&mut Intel);
+    let edits: [(&str, Edit); 3] = [
+        ("running", |i| i.running = !i.running),
+        ("cloak switched on", |i| i.cloak_on = !i.cloak_on),
+        ("cloaked", |i| i.cloaked = !i.cloaked),
+    ];
+    for (name, edit) in edits {
+        edit(&mut world.ecs.get::<&mut Intel>(entity).unwrap());
+        assert_ne!(world.compute_checksum(), baseline, "{name} is not covered by the checksum");
+        edit(&mut world.ecs.get::<&mut Intel>(entity).unwrap());
+        assert_eq!(world.compute_checksum(), baseline, "undoing {name} did not restore the checksum");
+    }
+    // The commander's omni coverage counts too: moving it changes what it covers.
+    let shifted = {
+        let mut moved = run(scenario::battle(SEED, 20, small_config()), 10, 10).1;
+        let commander = moved.spawn_mobile(acu, Team::Blue, at + Vec2Fp::new(Fp::from_num(600), Fp::ZERO));
+        moved.ecs.get::<&mut sim_engine::sim::components::Position>(moved.unit_entity(commander).unwrap()).unwrap().0 = world.ecs.get::<&sim_engine::sim::components::Position>(entity).unwrap().0;
+        moved.advance_tick(&[]);
+        moved.advance_tick(&[]);
+        moved.compute_checksum()
+    };
+    assert_ne!(shifted, baseline, "where the omni was last tick is part of the state");
+}
+
 /// An upgrade in place is hashed only while it is under way.
 #[test]
 fn every_upgrade_field_changes_the_checksum() {

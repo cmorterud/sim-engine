@@ -145,6 +145,8 @@ pub enum UiAction {
     RemoveQueued { factories: Vec<SimId>, blueprint: BlueprintId },
     /// Upgrade these commanders or structures in place.
     Upgrade { units: Vec<SimId> },
+    /// Switch these units' cloaks on or off.
+    SetCloak { units: Vec<SimId>, on: bool },
     Restart,
 }
 
@@ -181,6 +183,18 @@ pub fn shield_status(snapshot: &SimSnapshot, id: SimId) -> Option<String> {
         format!("shield down, back in {} s", shield.recharging.div_ceil(10))
     } else {
         "shield off".to_string()
+    })
+}
+
+/// Whether an intel structure is short of energy, or how a cloak is doing.
+pub fn intel_status(snapshot: &SimSnapshot, id: SimId) -> Option<String> {
+    if snapshot.unpowered.contains(&id) {
+        return Some("off: no energy".to_string());
+    }
+    snapshot.cloaks.iter().find(|(unit, _, _)| *unit == id).and_then(|&(_, on, cloaked)| match (on, cloaked) {
+        (true, true) => Some("cloaked".to_string()),
+        (true, false) => Some("cloak waiting for energy".to_string()),
+        _ => None,
     })
 }
 
@@ -269,8 +283,9 @@ fn clear_action(menu: &FactoryMenu) -> UiAction {
 /// What a command panel key does for this selection: the same as its button, or `None`
 /// if the panel has no such option right now.
 pub fn hotkey_action(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb, letter: char) -> Option<UiAction> {
+    // O switches things off and on: it pauses what can be paused, or else toggles a cloak.
     if letter == hotkeys::PAUSE {
-        return pause_action(snapshot, selected, db);
+        return pause_action(snapshot, selected, db).or_else(|| cloak_action(snapshot, selected));
     }
     if has_mobile_units(snapshot, selected) {
         match letter {
@@ -342,6 +357,17 @@ pub fn upgradable_units(snapshot: &SimSnapshot, selected: &[SimId], db: &Bluepri
             }) && snapshot.upgrades.iter().all(|(upgrading, _)| upgrading != id)
         })
         .collect()
+}
+
+/// Cloaks the selected units that can cloak, unless they all are already, in which case it
+/// uncloaks them.
+pub fn cloak_action(snapshot: &SimSnapshot, selected: &[SimId]) -> Option<UiAction> {
+    let able: Vec<&(SimId, bool, bool)> = snapshot.cloaks.iter().filter(|(id, _, _)| selected.contains(id)).collect();
+    if able.is_empty() {
+        return None;
+    }
+    let all_on = able.iter().all(|(_, on, _)| *on);
+    Some(UiAction::SetCloak { units: able.iter().map(|(id, _, _)| *id).collect(), on: !all_on })
 }
 
 /// Pauses them all, unless they are all paused already, in which case it resumes them.
@@ -899,7 +925,8 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
             let veteran = if rank > 0 { format!(", veteran rank {rank}") } else { String::new() };
             let shield = shield_status(snapshot, first.id).map_or(String::new(), |status| format!(", {status}"));
             let stock = stock_status(snapshot, first.id, db).map_or(String::new(), |status| format!(", {status}"));
-            format!("{}: {}% health{veteran}{shield}{stock}", unit.name, first.health_permille / 10)
+            let intel = intel_status(snapshot, first.id).map_or(String::new(), |status| format!(", {status}"));
+            format!("{}: {}% health{veteran}{shield}{stock}{intel}", unit.name, first.health_permille / 10)
         } else {
             format!("{} units selected", units.len())
         };
@@ -918,6 +945,18 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
 
         if has_mobile_units(snapshot, selected) {
             unit_order_row(ui, armed, has_overcharge(snapshot, selected, db), has_weapons(snapshot, selected, db), actions);
+        }
+        if let Some(action) = cloak_action(snapshot, selected) {
+            let UiAction::SetCloak { on, .. } = &action else {
+                unreachable!("cloak_action only returns a cloak");
+            };
+            // O pauses first, when there is something to pause.
+            let key = if pause_action(snapshot, selected, db).is_none() { format!("[{}] ", hotkeys::PAUSE) } else { String::new() };
+            let label = if *on { format!("{key}Cloak") } else { format!("{key}Uncloak") };
+            let hint = "Hidden from sight and radar, except from enemies within 100 or with omni on it. Costs 50 energy a second.";
+            if ui.button(label).on_hover_text(hint).clicked() {
+                actions.push(action);
+            }
         }
         if let Some(action) = pause_action(snapshot, selected, db) {
             let UiAction::SetPaused { paused, .. } = &action else {
@@ -1467,6 +1506,78 @@ pub fn draw_work_beams(ctx: &egui::Context, camera: &Camera, beams: &[WorkBeam],
             painter.circle_stroke(to, 5.0 + 6.0 * breath, Stroke::new(2.0_f32, color.gamma_multiply(1.0 - 0.6 * breath)));
             painter.circle_filled(to, 2.5, color);
         }
+    }
+}
+
+/// The outer edge of where any of these circles reach, as short straight pieces: each circle's
+/// rim, less what lies inside another circle. Circles are `(center, radius)` in world units.
+pub fn coverage_outline(circles: &[([f64; 2], f64)]) -> Vec<[[f64; 2]; 2]> {
+    let mut pieces = Vec::new();
+    for (index, &(center, radius)) in circles.iter().enumerate() {
+        if radius <= 0.0 {
+            continue;
+        }
+        // About 40 units a piece, which looks round from anywhere it is drawn.
+        let count = (std::f64::consts::TAU * radius / 40.0).clamp(32.0, 512.0) as usize;
+        let at = |angle: f64| [center[0] + radius * angle.cos(), center[1] + radius * angle.sin()];
+        let inside_another = |point: [f64; 2]| {
+            circles.iter().enumerate().any(|(other, &(middle, reach))| {
+                if other == index {
+                    false
+                } else if middle == center && reach == radius {
+                    // Of two identical circles, only the first draws the rim they share.
+                    other < index
+                } else {
+                    (point[0] - middle[0]).hypot(point[1] - middle[1]) < reach - 1e-6
+                }
+            })
+        };
+        for piece in 0..count {
+            let (from, to) = (piece as f64 / count as f64 * std::f64::consts::TAU, (piece + 1) as f64 / count as f64 * std::f64::consts::TAU);
+            if !inside_another(at((from + to) * 0.5)) {
+                pieces.push([at(from), at(to)]);
+            }
+        }
+    }
+    pieces
+}
+
+/// When zoomed out, outlines what the viewer's radar covers, and within that, its omni.
+pub fn draw_sensor_coverage(ctx: &egui::Context, camera: &Camera, heights: &crate::render::camera::HeightField, ranges: &[crate::sim::world::SensorRangeView], pixels_per_point: f32) {
+    // Fades in from about halfway out, so that it never clutters play up close.
+    let strength = ((camera.zoom_from_closest() - 0.45) / 0.15).clamp(0.0, 1.0) as f32;
+    if strength <= 0.0 || ranges.is_empty() {
+        return;
+    }
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    let to_points = |point: [f64; 2]| {
+        let world = [point[0], point[1], heights.height_at(point[0], point[1]) + 2.0];
+        camera.world_to_screen(world).map(|pixels| Pos2::new(pixels[0] as f32 / pixels_per_point, pixels[1] as f32 / pixels_per_point))
+    };
+    let world = |raw: i32| f64::from(raw) / 4096.0;
+    for (pick, color) in [(0usize, Color32::from_rgb(120, 230, 140)), (1, Color32::from_rgb(200, 140, 255))] {
+        let circles: Vec<([f64; 2], f64)> =
+            ranges.iter().map(|range| ([world(range.center[0]), world(range.center[1])], world(if pick == 0 { range.radar } else { range.omni }))).filter(|circle| circle.1 > 0.0).collect();
+        for [from, to] in coverage_outline(&circles) {
+            if let (Some(from), Some(to)) = (to_points(from), to_points(to)) {
+                painter.line_segment([from, to], Stroke::new(1.5_f32, color.gamma_multiply(0.8 * strength)));
+            }
+        }
+    }
+}
+
+/// Radar contacts the viewer cannot see, as small triangles that say nothing of what they are.
+pub fn draw_blips(ctx: &egui::Context, camera: &Camera, blips: &[[i32; 3]], pixels_per_point: f32) {
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    let color = Color32::from_rgb(255, 190, 80);
+    for blip in blips {
+        let world = [f64::from(blip[0]) / 4096.0, f64::from(blip[1]) / 4096.0, f64::from(blip[2]) / 4096.0];
+        let Some(pixels) = camera.world_to_screen(world) else {
+            continue;
+        };
+        let center = Pos2::new(pixels[0] as f32 / pixels_per_point, pixels[1] as f32 / pixels_per_point);
+        let corners = vec![center + Vec2::new(0.0, -6.0), center + Vec2::new(5.5, 4.0), center + Vec2::new(-5.5, 4.0)];
+        painter.add(egui::Shape::convex_polygon(corners, color.gamma_multiply(0.35), Stroke::new(1.5_f32, color)));
     }
 }
 
@@ -2032,6 +2143,40 @@ mod tests {
             assert_eq!(hotkey_action(&current, &[selected], &db, 'X'), Some(UiAction::Stop));
         }
         assert_eq!(hotkey_action(&current, &[], &db, 'M'), None, "nothing is selected");
+    }
+
+    #[test]
+    fn coverage_outline_follows_the_outer_edge_of_overlapping_circles() {
+        let length = |pieces: &[[[f64; 2]; 2]]| pieces.iter().map(|[a, b]| (a[0] - b[0]).hypot(a[1] - b[1])).sum::<f64>();
+        let tau = std::f64::consts::TAU;
+        // One circle: its whole rim.
+        let one = coverage_outline(&[([0.0, 0.0], 1_000.0)]);
+        assert!((length(&one) - tau * 1_000.0).abs() < 20.0);
+        // A circle inside another adds nothing.
+        let nested = coverage_outline(&[([0.0, 0.0], 1_000.0), ([200.0, 0.0], 300.0)]);
+        assert!((length(&nested) - length(&one)).abs() < 1.0, "the inner circle should not show");
+        // Two the same draw one rim, not two.
+        let twins = coverage_outline(&[([0.0, 0.0], 1_000.0), ([0.0, 0.0], 1_000.0)]);
+        assert!((length(&twins) - length(&one)).abs() < 1.0);
+        // Two overlapping by half a radius lose the arcs inside each other: a third of each rim.
+        let pair = coverage_outline(&[([0.0, 0.0], 1_000.0), ([1_000.0, 0.0], 1_000.0)]);
+        let expected = 2.0 * tau * 1_000.0 * (2.0 / 3.0);
+        assert!((length(&pair) - expected).abs() < 60.0, "{} against {expected}", length(&pair));
+        for [a, b] in &pair {
+            let middle = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+            assert!(middle[0].hypot(middle[1]) > 990.0 && (middle[0] - 1_000.0).hypot(middle[1]) > 990.0, "a piece inside the other circle");
+        }
+    }
+
+    #[test]
+    fn o_toggles_a_cloak_when_there_is_nothing_to_pause() {
+        let db = BlueprintDb::standard();
+        let mut current = commander_and_engineer(&db);
+        current.cloaks = vec![(SimId(10), false, false)];
+        assert_eq!(hotkey_action(&current, &[SimId(10)], &db, 'O'), Some(UiAction::SetCloak { units: vec![SimId(10)], on: true }));
+        current.cloaks = vec![(SimId(10), true, true)];
+        assert_eq!(hotkey_action(&current, &[SimId(10)], &db, 'O'), Some(UiAction::SetCloak { units: vec![SimId(10)], on: false }));
+        assert_eq!(hotkey_action(&current, &[SimId(12)], &db, 'O'), None, "a bot has no cloak");
     }
 
     #[test]

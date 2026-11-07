@@ -142,6 +142,9 @@ pub fn unit_look(key: &str) -> UnitLook {
         "mass_extractor" => look(Shape::Extractor, Some([0.10, 0.95, 0.75]), 0.8),
         "power_generator" => look(Shape::Generator, Some([1.00, 0.85, 0.20]), 1.2),
         "mass_storage" => look(Shape::Storage, Some([0.60, 0.90, 0.60]), 0.65),
+        "radar" => look(Shape::Radar, Some([0.40, 0.90, 0.55]), 1.3),
+        "omni_sensor" => look(Shape::Radar, Some([0.75, 0.55, 1.00]), 1.6),
+        "stealth_field_generator" => look(Shape::StealthGenerator, Some([0.30, 0.30, 0.35]), 1.2),
         "shield_generator" => look(Shape::ShieldGenerator, Some([0.55, 0.85, 1.00]), 1.0),
         "tactical_missile_launcher" => look(Shape::MissileLauncher, Some([0.85, 0.85, 0.80]), 0.9),
         "tactical_missile_defense" => look(Shape::MissileDefense, Some([1.00, 0.55, 0.45]), 1.2),
@@ -467,9 +470,9 @@ mod tests {
         for unit in drawn() {
             assert_ne!(unit_look(&unit.key).shape, Shape::Cube, "{} has no shape of its own", unit.key);
         }
-        // Higher tiers of the factory, the engineer, and the commander share their first tier's
-        // shape, and everything else is unique.
-        let shared = ["land_factory_t2", "land_factory_t3", "t2_engineer", "t3_engineer", "acu_t2", "acu_t3"];
+        // Higher tiers of the factory, the engineer, and the commander, and the radar's omni
+        // upgrade, share their first tier's shape, and everything else is unique.
+        let shared = ["land_factory_t2", "land_factory_t3", "t2_engineer", "t3_engineer", "acu_t2", "acu_t3", "omni_sensor"];
         let shapes: Vec<Shape> = drawn().filter(|unit| !shared.contains(&unit.key.as_str())).map(|unit| unit_look(&unit.key).shape).collect();
         for (index, shape) in shapes.iter().enumerate() {
             assert!(!shapes[index + 1..].contains(shape), "{shape:?} is used twice");

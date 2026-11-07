@@ -9,17 +9,67 @@ const CELL_RAW: i32 = VISIBILITY_CELL_UNITS << FP_FRAC_BITS;
 /// Stamps are refreshed in a rotation, so a stamp this recent still counts as visible.
 pub const VISION_REFRESH_TICKS: u32 = 5;
 
+/// A kind of sighting, each with its own cells.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Sense {
+    Sight,
+    Radar,
+    Omni,
+}
+
 pub struct Visibility {
     side: usize,
     /// Per team and cell, the tick after the last sighting. Zero means never seen.
     stamps: [Vec<u32>; 2],
+    /// The same, for radar and omni coverage. Empty until a team first has such a sensor.
+    radar: [Vec<u32>; 2],
+    omni: [Vec<u32>; 2],
     current_tick: u32,
 }
 
 impl Visibility {
     pub fn new(map_units: i32) -> Self {
         let side = (map_units / VISIBILITY_CELL_UNITS) as usize + 1;
-        Self { side, stamps: [vec![0; side * side], vec![0; side * side]], current_tick: 0 }
+        Self { side, stamps: [vec![0; side * side], vec![0; side * side]], radar: [Vec::new(), Vec::new()], omni: [Vec::new(), Vec::new()], current_tick: 0 }
+    }
+
+    fn cells_mut(&mut self, sense: Sense, team: Team) -> &mut Vec<u32> {
+        let side = self.side;
+        let cells = match sense {
+            Sense::Sight => &mut self.stamps[team.index()],
+            Sense::Radar => &mut self.radar[team.index()],
+            Sense::Omni => &mut self.omni[team.index()],
+        };
+        if cells.is_empty() {
+            cells.resize(side * side, 0);
+        }
+        cells
+    }
+
+    fn cells(&self, sense: Sense, team: Team) -> &[u32] {
+        match sense {
+            Sense::Sight => &self.stamps[team.index()],
+            Sense::Radar => &self.radar[team.index()],
+            Sense::Omni => &self.omni[team.index()],
+        }
+    }
+
+    /// Whether a team has a recent sighting of this kind at a point.
+    pub fn senses(&self, sense: Sense, team: Team, x: i32, y: i32) -> bool {
+        let cells = self.cells(sense, team);
+        if cells.is_empty() {
+            return false;
+        }
+        let last = self.side as i32 - 1;
+        let cell_x = (x / CELL_RAW).clamp(0, last) as usize;
+        let cell_y = (y / CELL_RAW).clamp(0, last) as usize;
+        let stamp = cells[cell_y * self.side + cell_x];
+        stamp != 0 && stamp + VISION_REFRESH_TICKS > self.current_tick + 1
+    }
+
+    /// Whether a team has ever had a sensor of this kind.
+    pub fn has_any(&self, sense: Sense, team: Team) -> bool {
+        !self.cells(sense, team).is_empty()
     }
 
     pub const fn side(&self) -> usize {
@@ -32,12 +82,18 @@ impl Visibility {
 
     /// Marks a disc as seen by a team this tick.
     pub fn stamp_disc(&mut self, team: Team, x: i32, y: i32, radius: Fp) {
+        self.stamp(Sense::Sight, team, x, y, radius);
+    }
+
+    /// Marks a disc as sensed, in one way or another, by a team this tick.
+    pub fn stamp(&mut self, sense: Sense, team: Team, x: i32, y: i32, radius: Fp) {
         let radius = i64::from(radius.to_bits());
         let cell = i64::from(CELL_RAW);
         let last = self.side as i64 - 1;
         let (x, y) = (i64::from(x), i64::from(y));
         let stamp = self.current_tick + 1;
-        let cells = &mut self.stamps[team.index()];
+        let side = self.side;
+        let cells = self.cells_mut(sense, team);
         let min_y = ((y - radius) / cell).clamp(0, last);
         let max_y = ((y + radius) / cell).clamp(0, last);
         for row in min_y..=max_y {
@@ -51,7 +107,7 @@ impl Visibility {
             let span = (span_squared as u64).isqrt() as i64;
             let min_x = ((x - span) / cell).clamp(0, last);
             let max_x = ((x + span) / cell).clamp(0, last);
-            let start = row as usize * self.side;
+            let start = row as usize * side;
             cells[start + min_x as usize..=start + max_x as usize].fill(stamp);
         }
     }
@@ -80,6 +136,15 @@ impl Visibility {
         for team in &self.stamps {
             for stamp in team {
                 hasher.write(&stamp.to_le_bytes());
+            }
+        }
+        // Nothing is written for sensors nobody has had, so checksums from before they existed hold.
+        for (tag, cells) in [(1u8, &self.radar[0]), (2, &self.radar[1]), (3, &self.omni[0]), (4, &self.omni[1])] {
+            if !cells.is_empty() {
+                hasher.write(&[tag]);
+                for stamp in cells {
+                    hasher.write(&stamp.to_le_bytes());
+                }
             }
         }
     }

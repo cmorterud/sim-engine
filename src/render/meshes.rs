@@ -48,6 +48,10 @@ pub enum Shape {
     NukeSilo,
     /// A drum with a ring of launch tubes.
     AntiNukeSilo,
+    /// A mast with a tilted dish.
+    Radar,
+    /// A cone wrapped in rings.
+    StealthGenerator,
     /// A shield's dome: an open half-sphere, drawn see-through.
     Dome,
     /// Flat, around the feet of a selected mobile unit.
@@ -57,7 +61,7 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub const ALL: [Self; 30] = [
+    pub const ALL: [Self; 32] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -85,6 +89,8 @@ impl Shape {
         Self::MissileDefense,
         Self::NukeSilo,
         Self::AntiNukeSilo,
+        Self::Radar,
+        Self::StealthGenerator,
         Self::Dome,
         Self::SelectionRing,
         Self::SelectionBox,
@@ -341,6 +347,21 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.frustum([0.0, 0.0], [-0.5, 0.15], [0.5, 0.48], 10);
             for (x, y) in [(-0.22_f32, -0.22_f32), (0.22, -0.22), (-0.22, 0.22), (0.22, 0.22)] {
                 mesh.frustum([x, y], [0.15, 0.5], [0.12, 0.12], 6);
+            }
+        }
+        Shape::Radar => {
+            mesh.frustum([0.0, 0.0], [-0.5, -0.35], [0.4, 0.32], 6);
+            mesh.frustum([0.0, 0.0], [-0.35, 0.15], [0.07, 0.05], 6);
+            mesh.cuboid(
+                [Vec3::new(-0.45, -0.1, 0.1), Vec3::new(0.45, -0.1, 0.1), Vec3::new(0.45, 0.05, 0.1), Vec3::new(-0.45, 0.05, 0.1)],
+                [Vec3::new(-0.45, 0.1, 0.5), Vec3::new(0.45, 0.1, 0.5), Vec3::new(0.45, 0.25, 0.5), Vec3::new(-0.45, 0.25, 0.5)],
+            );
+        }
+        Shape::StealthGenerator => {
+            mesh.frustum([0.0, 0.0], [-0.5, 0.5], [0.3, 0.0], 8);
+            for z in [-0.35_f32, -0.05, 0.25] {
+                let radius = 0.5 - (z + 0.5) * 0.4;
+                mesh.frustum([0.0, 0.0], [z, z + 0.06], [radius, radius], 12);
             }
         }
         // Rings from the rim at the bottom of the box up to a point at the top, with no base,

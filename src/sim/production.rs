@@ -7,7 +7,7 @@ use std::hash::Hasher;
 use super::blueprints::{BlueprintId, Res, UnitClass, WeaponKind, TICKS_PER_SECOND};
 use super::commands::SimCommand;
 use super::components::{
-    Adjacency, Blueprinted, BuildTask, Builder, Launcher, Upgrading, MissileDefense, OverchargeOrder, OverchargeWeapon, Paused, Shield, Turning, Turret, Veterancy, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, OrderQueue, Patrol,
+    Adjacency, Blueprinted, BuildTask, Builder, Intel, Launcher, Upgrading, MissileDefense, OverchargeOrder, OverchargeWeapon, Paused, Shield, Turning, Turret, Veterancy, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, OrderQueue, Patrol,
     Position, SimId, Team, UnitStats, Wreck, WreckKind,
 };
 use super::config::{
@@ -335,6 +335,12 @@ impl SimWorld {
             let launcher = Launcher { strategic: weapon.kind == WeaponKind::StrategicMissile, cruise_height: weapon.cruise_height, stock: 0 };
             self.ecs.insert_one(entity, launcher).expect("entity was just spawned");
         }
+        if unit.has_intel() {
+            // Without upkeep, it works from the start. With upkeep, once it is first paid for.
+            let intel = Intel { running: unit.upkeep == Res::ZERO, cloak_on: false, cloaked: false };
+            self.ecs.insert_one(entity, intel).expect("entity was just spawned");
+            self.intel.push((id, entity));
+        }
         if let Some(def) = unit.missile_defense {
             let defense = MissileDefense { strategic: def.strategic, range: def.range, reload_ticks: def.reload_ticks, ticks_until_ready: 0, stock: 0 };
             self.ecs.insert_one(entity, defense).expect("entity was just spawned");
@@ -486,7 +492,8 @@ impl SimWorld {
                     let Some((_, entity)) = self.find_unit(id) else {
                         continue;
                     };
-                    let pausable = self.ecs.get::<&Factory>(entity).is_ok() || self.ecs.get::<&Construction>(entity).is_ok() || self.ecs.get::<&Shield>(entity).is_ok();
+                    let has_upkeep = self.ecs.get::<&Blueprinted>(entity).is_ok_and(|unit| self.blueprints.get(unit.0).upkeep > Res::ZERO);
+                    let pausable = self.ecs.get::<&Factory>(entity).is_ok() || self.ecs.get::<&Construction>(entity).is_ok() || self.ecs.get::<&Shield>(entity).is_ok() || has_upkeep;
                     if !pausable {
                         continue;
                     }
@@ -534,6 +541,17 @@ impl SimWorld {
                             let builds = &self.blueprints.get(current).builds;
                             factory.queue.retain(|item| builds.contains(item));
                         }
+                    }
+                }
+            }
+            SimCommand::SetCloak { units, on } => {
+                for &id in units {
+                    let Some((_, entity)) = self.find_unit(id) else {
+                        continue;
+                    };
+                    if let Ok(mut intel) = self.ecs.get::<&mut Intel>(entity) {
+                        intel.cloak_on = *on;
+                        intel.cloaked &= *on;
                     }
                 }
             }
@@ -718,8 +736,10 @@ impl SimWorld {
             economy.mass_reclaimed = Res::ZERO;
             economy.energy_reclaimed = Res::ZERO;
         }
-        // Shields are paid for first, out of what is stored and coming in, and building gets the rest.
+        // Shields are paid for first, then intel, out of what is stored and coming in, and
+        // building gets the rest.
         let upkeep = self.step_shields();
+        let upkeep = self.step_intel_upkeep(upkeep);
         let mut power_by_target: BTreeMap<(SimId, WorkKind), Fp> = BTreeMap::new();
         for index in 0..self.builders.len() {
             let (id, entity) = self.builders[index];
@@ -823,6 +843,36 @@ impl SimWorld {
             }
             paid[team] += cost;
             shield.health = (shield.health + shield.regen_per_tick).min(shield.max_health);
+        }
+        paid
+    }
+
+    /// Pays for intel, in `SimId` order, after shields: a structure's sensors, field, and
+    /// jamming run while paid for, and a cloak that cannot be paid for switches off. Paused and
+    /// unfinished structures neither pay nor run. Returns what each team has paid, shields included.
+    fn step_intel_upkeep(&mut self, mut paid: [Res; 2]) -> [Res; 2] {
+        for &(_, entity) in &self.intel {
+            let blueprint = self.blueprints.get(self.ecs.get::<&Blueprinted>(entity).expect("intel units have blueprints").0);
+            let (upkeep, cloak_upkeep) = (blueprint.upkeep, blueprint.cloak_upkeep.unwrap_or(Res::ZERO));
+            let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team.index();
+            let switched_off = self.ecs.get::<&Construction>(entity).is_ok() || self.ecs.get::<&Paused>(entity).is_ok();
+            let discount = self.ecs.get::<&Adjacency>(entity).map_or(0, |adjacency| adjacency.energy_cost_discount);
+            let mut intel = self.ecs.get::<&mut Intel>(entity).expect("intel list only holds intel units");
+            let economy = &self.economies[team];
+            let mut afford = |cost: Res| {
+                let ok = economy.energy + economy.energy_income - paid[team] >= cost;
+                if ok {
+                    paid[team] += cost;
+                }
+                ok
+            };
+            if upkeep > Res::ZERO {
+                intel.running = !switched_off && afford(upkeep * i64::from(1000 - discount) / 1000);
+            }
+            if intel.cloak_on {
+                intel.cloaked = afford(cloak_upkeep);
+                intel.cloak_on = intel.cloaked;
+            }
         }
         paid
     }
@@ -1219,7 +1269,7 @@ impl SimWorld {
         if unit.requires_deposit {
             adjacency.mass_output_bonus = (storages * MEX_STORAGE_BONUS).min(MEX_STORAGE_BONUS_MAX);
         }
-        if unit.is_factory() || unit.shield.is_some() {
+        if unit.is_factory() || unit.shield.is_some() || unit.upkeep > Res::ZERO {
             adjacency.energy_cost_discount = (generators * FACTORY_ENERGY_DISCOUNT).min(FACTORY_ENERGY_DISCOUNT_MAX);
             adjacency.mass_cost_discount = (storages * FACTORY_MASS_DISCOUNT).min(FACTORY_MASS_DISCOUNT_MAX);
         }
@@ -1422,12 +1472,18 @@ impl SimWorld {
                     let discount = self.ecs.get::<&Adjacency>(entity).map_or(0, |adjacency| adjacency.energy_cost_discount);
                     shield.upkeep * i64::from(1000 - discount) / 1000
                 });
+                // So does running intel, and a cloak.
+                let intel = self.ecs.get::<&Intel>(entity).ok().map_or(Res::ZERO, |intel| {
+                    let discount = self.ecs.get::<&Adjacency>(entity).map_or(0, |adjacency| adjacency.energy_cost_discount);
+                    let running = if intel.running { unit.upkeep * i64::from(1000 - discount) / 1000 } else { Res::ZERO };
+                    running + if intel.cloaked { unit.cloak_upkeep.unwrap_or(Res::ZERO) } else { Res::ZERO }
+                });
                 Some(UnitRatesView {
                     id,
                     mass_income: tenths_per_second(mass),
                     energy_income: tenths_per_second(unit.energy_income),
                     mass_use: spent.map_or(0, |spending| tenths_per_second(spending.1)),
-                    energy_use: spent.map_or(0, |spending| tenths_per_second(spending.2)) + tenths_per_second(upkeep),
+                    energy_use: spent.map_or(0, |spending| tenths_per_second(spending.2)) + tenths_per_second(upkeep + intel),
                 })
             })
             .collect();
@@ -1604,6 +1660,9 @@ impl SimWorld {
                 hasher.write(&order.slot_ticks.to_le_bytes());
                 hash_slot(hasher, order.slot);
             }
+        }
+        if let Ok(intel) = self.ecs.get::<&Intel>(entity) {
+            hasher.write(&[19, u8::from(intel.running), u8::from(intel.cloak_on), u8::from(intel.cloaked)]);
         }
         if let Ok(upgrading) = self.ecs.get::<&Upgrading>(entity) {
             hasher.write(&[18]);

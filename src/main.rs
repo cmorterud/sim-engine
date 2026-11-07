@@ -25,7 +25,7 @@ use sim_engine::sim::components::{SimId, Team};
 use sim_engine::sim::config::TERRAIN_CELL_UNITS;
 use sim_engine::sim::scenario::{self, advance_scripted, skirmish_start, Scenario};
 use sim_engine::sim::terrain::HEIGHT_FRAC_BITS;
-use sim_engine::sim::world::{PlanStep, PlanStepKind, ShieldView, SimSnapshot, UnitPlanView};
+use sim_engine::sim::world::{PlanStep, PlanStepKind, SensorRangeView, ShieldView, SimSnapshot, UnitPlanView};
 use sim_engine::soak::run_soak;
 use sim_engine::sim::components::BuildTask;
 use sim_engine::ui::{self, ArmedOrder, DraggableOrder, OrderHandle, QuickSelectState, UiAction};
@@ -1054,6 +1054,15 @@ fn run_windowed(seed: u64, options: Options) {
                                     let radius = map.blueprints.get(map.blueprints.id("shield_generator")).shield.map_or(0, |shield| shield.radius.to_bits());
                                     let ground = z - snapshot.units[index].radius;
                                     snapshot.shields.push(ShieldView { id: commander, team: PLAYER_TEAM, center: [x, y, ground], radius, health_permille: 660, up: true, recharging: 0 });
+                                    // Two overlapping radars and an omni sensor, for the coverage outline far out, and
+                                    // a few blips beyond them.
+                                    let unit = |value: i32| value << 12;
+                                    snapshot.sensor_ranges = vec![
+                                        SensorRangeView { center: [x, y], radar: unit(1_600), omni: unit(400) },
+                                        SensorRangeView { center: [x + unit(1_800), y + unit(600)], radar: unit(1_600), omni: 0 },
+                                        SensorRangeView { center: [x + unit(900), y - unit(900)], radar: unit(2_400), omni: unit(800) },
+                                    ];
+                                    snapshot.blips = (0..6).map(|index| [x + unit(2_600 + 120 * index), y + unit(300 * (index % 3)), ground]).collect();
                                 }
                                 // Early screenshots show true colors, and later ones the selection's trails.
                                 if fraction >= 0.2 {
@@ -1148,6 +1157,8 @@ fn run_windowed(seed: u64, options: Options) {
                             ui::distant_selection_markers(ctx, &camera, &snapshot, &selected, pixels_per_point);
                             ui::draw_work_beams(ctx, &camera, &beams, beam_time, pixels_per_point);
                             ui::draw_interceptions(ctx, &camera, &snapshot.interceptions, pixels_per_point);
+                            ui::draw_sensor_coverage(ctx, &camera, &map.heights, &snapshot.sensor_ranges, pixels_per_point);
+                            ui::draw_blips(ctx, &camera, &snapshot.blips, pixels_per_point);
                             ui::order_trails(ctx, &camera, &trails, pixels_per_point);
                             match &order_drag {
                                 Some((handle, _)) => {
@@ -1228,6 +1239,11 @@ fn run_windowed(seed: u64, options: Options) {
                                     patrol_points.clear();
                                 }
                                 UiAction::Stop => stop_selection(&session, &selection, &mut feedback),
+                                UiAction::SetCloak { units, on } => {
+                                    let word = if on { "Cloaked" } else { "Uncloaked" };
+                                    feedback.set_label(MarkerKind::Support, format!("{word}: {}", units.len()));
+                                    session.send(SimCommand::SetCloak { units, on });
+                                }
                                 UiAction::Upgrade { units } => {
                                     feedback.set_label(MarkerKind::Build, format!("Upgrading: {}", units.len()));
                                     session.send(SimCommand::Upgrade { units });

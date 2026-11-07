@@ -39,6 +39,8 @@ pub fn blueprint_hotkey(key: &str) -> Option<char> {
         "strategic_missile_launcher" => '/',
         "strategic_missile_defense" => ';',
         "strategic_missile" => '-',
+        "radar" => '[',
+        "stealth_field_generator" => ']',
         "t2_engineer" => '\'',
         "t3_engineer" => '\\',
         "anti_nuke" => '=',
@@ -66,6 +68,8 @@ pub const fn letter_for(code: KeyCode) -> Option<char> {
         KeyCode::Minus => '-',
         KeyCode::Equal => '=',
         KeyCode::Quote => '\'',
+        KeyCode::BracketLeft => '[',
+        KeyCode::BracketRight => ']',
         KeyCode::Backslash => '\\',
         KeyCode::KeyZ => 'Z',
         KeyCode::KeyB => 'B',
@@ -108,7 +112,9 @@ mod tests {
     use super::*;
     use crate::sim::blueprints::BlueprintDb;
 
-    const ALL_KEYS: [KeyCode; 29] = [
+    const ALL_KEYS: [KeyCode; 31] = [
+        KeyCode::BracketLeft,
+        KeyCode::BracketRight,
         KeyCode::Backquote,
         KeyCode::Quote,
         KeyCode::Backslash,
@@ -154,7 +160,7 @@ mod tests {
     fn everything_that_can_be_built_has_a_key() {
         let db = BlueprintDb::standard();
         let keys = buildable(&db);
-        assert_eq!(keys.len(), 18);
+        assert_eq!(keys.len(), 20);
         for key in keys {
             assert!(blueprint_hotkey(&key).is_some(), "{key} has no hotkey");
         }

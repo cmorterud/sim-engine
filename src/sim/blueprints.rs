@@ -89,6 +89,14 @@ pub struct ShieldDef {
     pub upkeep: Res,
 }
 
+/// Decoy blips on enemy radar (GAME_SPECIFICATION.md §9).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct JammerDef {
+    /// How far from the jammer the decoys appear.
+    pub radius: Fp,
+    pub decoys: u32,
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct ExplosionDef {
     pub damage: Fp,
@@ -133,9 +141,24 @@ pub struct Blueprint {
     pub overcharge: Option<OverchargeDef>,
     pub shield: Option<ShieldDef>,
     pub missile_defense: Option<MissileDefenseDef>,
+    /// Sensor ranges (GAME_SPECIFICATION.md §9). Zero for none.
+    pub radar: Fp,
+    pub omni: Fp,
+    /// Friendly units within this range of it make no radar blip. Zero for none.
+    pub stealth_field: Fp,
+    pub jammer: Option<JammerDef>,
+    /// Energy per tick while cloaked, for a unit that can cloak.
+    pub cloak_upkeep: Option<Res>,
+    /// Energy per tick while running, for intel structures. Zero for none.
+    pub upkeep: Res,
 }
 
 impl Blueprint {
+    /// Whether it does anything for intel: sensors, stealth, jamming, or cloaking.
+    pub fn has_intel(&self) -> bool {
+        self.radar > Fp::ZERO || self.omni > Fp::ZERO || self.stealth_field > Fp::ZERO || self.jammer.is_some() || self.cloak_upkeep.is_some()
+    }
+
     pub const fn is_structure(&self) -> bool {
         self.footprint > 0
     }
@@ -230,6 +253,20 @@ struct RawShield {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct RawJammer {
+    radius: Number,
+    decoys: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawCloak {
+    /// Energy per second while cloaked.
+    upkeep: Number,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawExplosion {
     damage: Number,
     radius: Number,
@@ -270,6 +307,13 @@ struct RawUnit {
     overcharge: Option<RawOvercharge>,
     shield: Option<RawShield>,
     missile_defense: Option<RawMissileDefense>,
+    radar: Option<Number>,
+    omni: Option<Number>,
+    stealth_field: Option<Number>,
+    jammer: Option<RawJammer>,
+    cloak: Option<RawCloak>,
+    /// Energy per second while running.
+    upkeep: Option<Number>,
 }
 
 #[derive(Deserialize)]
@@ -380,6 +424,14 @@ impl BlueprintDb {
                     reload_ticks: defense.reload_ticks.unwrap_or(0),
                 }),
             };
+            let jammer = match &unit.jammer {
+                None => None,
+                Some(jammer) => Some(JammerDef { radius: jammer.radius.fp().map_err(context)?, decoys: jammer.decoys }),
+            };
+            let cloak_upkeep = match &unit.cloak {
+                None => None,
+                Some(cloak) => Some(cloak.upkeep.res().map_err(context)? / TICKS_PER_SECOND),
+            };
             if shield.is_some() && footprint == 0 {
                 return Err(context("only structures can have shields".into()));
             }
@@ -424,6 +476,12 @@ impl BlueprintDb {
                 overcharge,
                 shield,
                 missile_defense,
+                radar: whole(&unit.radar)?,
+                omni: whole(&unit.omni)?,
+                stealth_field: whole(&unit.stealth_field)?,
+                jammer,
+                cloak_upkeep,
+                upkeep: rate(&unit.upkeep)?,
             });
         }
         // Line endings can differ by checkout, and must not change the checksum.
@@ -495,6 +553,9 @@ mod tests {
             "strategic_missile",
             "strategic_missile_defense",
             "anti_nuke",
+            "radar",
+            "omni_sensor",
+            "stealth_field_generator",
         ] {
             assert!(db.find(key).is_some(), "{key} is missing");
         }
