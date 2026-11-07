@@ -291,8 +291,15 @@ fn convert(name: &str, scmap: &Scmap, markers: &[Marker], starts: (usize, usize)
     notes.push(format!("starts {} (Blue) and {} (Red), of the map's {armies}", starts.0, starts.1));
 
     let mut scenery = Vec::new();
-    let mut skipped = 0;
+    let (mut skipped, mut drowned) = (0, 0);
     for (path, position) in &scmap.props {
+        // Land units can never reach what lies under water, so it is left out until naval units.
+        let (x, y) = cell_of(f64::from(position[0]), f64::from(position[2]));
+        let corners = [corner(x, y), corner(x + 1, y), corner(x, y + 1), corner(x + 1, y + 1)];
+        if water_height.is_some_and(|water| corners.iter().all(|&height| height < water)) {
+            drowned += 1;
+            continue;
+        }
         let path = path.to_ascii_lowercase();
         let kind = if path.contains("/trees/") {
             WreckKind::Tree
@@ -308,6 +315,9 @@ fn convert(name: &str, scmap: &Scmap, markers: &[Marker], starts: (usize, usize)
     notes.push(format!("{trees} trees and {} rocks, with this game's reclaim values", scenery.len() - trees));
     if skipped > 0 {
         notes.push(format!("{skipped} other props left out"));
+    }
+    if drowned > 0 {
+        notes.push(format!("{drowned} props under water left out"));
     }
 
     let map = MapData { name: name.to_string(), map_units, heights, blocked, water_level, deposits, starts: chosen, scenery };

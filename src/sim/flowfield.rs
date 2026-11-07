@@ -770,21 +770,32 @@ pub fn nearest_passable_cell(terrain: &Terrain, point: Vec2Fp) -> Option<(usize,
     let cells = terrain.cells_per_side() as i64;
     let (cx, cy) = terrain.cell_of(point);
     let (cx, cy) = (cx as i64, cy as i64);
+    // Square rings outward, visiting only each ring's own cells. The nearest on a ring wins,
+    // and of equals the first in row order, the lowest row and then the lowest column.
     for ring in 0..cells {
-        let mut best: Option<(i64, (usize, usize))> = None;
-        for y in (cy - ring).max(0)..=(cy + ring).min(cells - 1) {
-            for x in (cx - ring).max(0)..=(cx + ring).min(cells - 1) {
-                let on_ring = (x - cx).abs() == ring || (y - cy).abs() == ring;
-                if on_ring && cost[(y * cells + x) as usize] != COST_IMPASSABLE {
-                    let distance = (x - cx).pow(2) + (y - cy).pow(2);
-                    if best.is_none_or(|(closest, _)| distance < closest) {
-                        best = Some((distance, (x as usize, y as usize)));
-                    }
+        let mut best: Option<(i64, i64, i64)> = None;
+        let mut consider = |x: i64, y: i64| {
+            if (0..cells).contains(&x) && (0..cells).contains(&y) && cost[(y * cells + x) as usize] != COST_IMPASSABLE {
+                let candidate = ((x - cx).pow(2) + (y - cy).pow(2), y, x);
+                if best.is_none_or(|current| candidate < current) {
+                    best = Some(candidate);
                 }
             }
+        };
+        if ring == 0 {
+            consider(cx, cy);
+        } else {
+            for x in cx - ring..=cx + ring {
+                consider(x, cy - ring);
+                consider(x, cy + ring);
+            }
+            for y in cy - ring + 1..cy + ring {
+                consider(cx - ring, y);
+                consider(cx + ring, y);
+            }
         }
-        if let Some((_, cell)) = best {
-            return Some(cell);
+        if let Some((_, y, x)) = best {
+            return Some((x as usize, y as usize));
         }
     }
     None
@@ -847,6 +858,49 @@ mod tests {
     /// Every edge of the portal graph, as plain numbers, to compare two graphs.
     fn edges(flow: &FlowField) -> Vec<Vec<(u32, u32, u32)>> {
         flow.adjacency.iter().map(|edges| edges.iter().map(|edge| (edge.to, edge.cost, edge.sector)).collect()).collect()
+    }
+
+    /// The search as it was, scanning each whole square: slow, and the reference.
+    fn nearest_by_squares(terrain: &Terrain, point: Vec2Fp) -> Option<(usize, usize)> {
+        let cost = land_cost(terrain);
+        let cells = terrain.cells_per_side() as i64;
+        let (cx, cy) = terrain.cell_of(point);
+        let (cx, cy) = (cx as i64, cy as i64);
+        for ring in 0..cells {
+            let mut best: Option<(i64, (usize, usize))> = None;
+            for y in (cy - ring).max(0)..=(cy + ring).min(cells - 1) {
+                for x in (cx - ring).max(0)..=(cx + ring).min(cells - 1) {
+                    let on_ring = (x - cx).abs() == ring || (y - cy).abs() == ring;
+                    if on_ring && cost[(y * cells + x) as usize] != COST_IMPASSABLE {
+                        let distance = (x - cx).pow(2) + (y - cy).pow(2);
+                        if best.is_none_or(|(closest, _)| distance < closest) {
+                            best = Some((distance, (x as usize, y as usize)));
+                        }
+                    }
+                }
+            }
+            if let Some((_, cell)) = best {
+                return Some(cell);
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn the_nearest_passable_cell_is_the_one_a_full_square_scan_finds() {
+        let mut terrain = flat(SECTOR_UNITS * 2);
+        // Walls and a big block, with points inside, beside, and at the edge of the map.
+        terrain.add_box_obstacle(rect(300, 300, 900, 900));
+        terrain.add_box_obstacle(rect(1_200, 0, 1_240, 2_000));
+        terrain.add_box_obstacle(rect(0, 1_500, 700, 2_560));
+        let mut rng = SimRng::new(9);
+        for _ in 0..400 {
+            let point = Vec2Fp::new(rng.range_fp(fp_int(0), fp_int(2_559)), rng.range_fp(fp_int(0), fp_int(2_559)));
+            assert_eq!(nearest_passable_cell(&terrain, point), nearest_by_squares(&terrain, point), "at {point:?}");
+        }
+        for point in [point(600, 600), point(0, 2_559), point(1_220, 1_000)] {
+            assert_eq!(nearest_passable_cell(&terrain, point), nearest_by_squares(&terrain, point));
+        }
     }
 
     #[test]
