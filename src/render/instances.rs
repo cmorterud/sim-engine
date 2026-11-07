@@ -66,9 +66,15 @@ fn instance(center: [f64; 3], size: [f32; 3], heading: [f32; 2], color: [f32; 3]
 }
 
 /// Instances grouped by shape, ready for one draw per shape.
-#[derive(Default)]
 pub struct InstanceBatches {
     by_shape: [Vec<UnitInstanceRaw>; Shape::COUNT],
+}
+
+// Arrays only derive `Default` up to 32 long.
+impl Default for InstanceBatches {
+    fn default() -> Self {
+        Self { by_shape: std::array::from_fn(|_| Vec::new()) }
+    }
 }
 
 impl InstanceBatches {
@@ -129,6 +135,8 @@ pub fn unit_look(key: &str) -> UnitLook {
     let look = |shape, tint, height_share| UnitLook { shape, tint, height_share, base: None };
     match key {
         "acu" => UnitLook { base: Some(Shape::CommanderLegs), ..look(Shape::Commander, Some([1.00, 1.00, 1.00]), 1.0) },
+        "support_commander" => UnitLook { base: Some(Shape::CommanderLegs), ..look(Shape::Commander, Some([0.70, 0.75, 0.85]), 1.0) },
+        "quantum_gateway" => look(Shape::Gateway, Some([0.55, 0.60, 1.00]), 0.6),
         "t2_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([0.95, 0.65, 0.25]), 1.0) },
         "t3_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([0.95, 0.50, 0.20]), 1.0) },
         "land_factory_t3" => look(Shape::Factory, Some([0.10, 0.10, 0.20]), 0.85),
@@ -469,9 +477,9 @@ mod tests {
         for unit in drawn() {
             assert_ne!(unit_look(&unit.key).shape, Shape::Cube, "{} has no shape of its own", unit.key);
         }
-        // Higher tiers of the factory, the engineer, and the commander, and the radar's omni
-        // upgrade, share their first tier's shape, and everything else is unique.
-        let shared = ["land_factory_t2", "land_factory_t3", "t2_engineer", "t3_engineer", "omni_sensor"];
+        // Higher tiers of the factory and the engineer, the radar's omni upgrade, and the support
+        // commander share the shape they come from, and everything else is unique.
+        let shared = ["land_factory_t2", "land_factory_t3", "t2_engineer", "t3_engineer", "omni_sensor", "support_commander"];
         let shapes: Vec<Shape> = drawn().filter(|unit| !shared.contains(&unit.key.as_str())).map(|unit| unit_look(&unit.key).shape).collect();
         for (index, shape) in shapes.iter().enumerate() {
             assert!(!shapes[index + 1..].contains(shape), "{shape:?} is used twice");

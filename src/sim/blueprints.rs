@@ -72,9 +72,17 @@ pub struct EnhancementEffects {
     pub health: Fp,
     /// Health per tick.
     pub regen_per_tick: Fp,
-    /// The gun's new range and damage, if they change.
+    /// The gun's new range, damage, reload, and blast, if they change.
     pub weapon_range: Option<Fp>,
     pub weapon_damage: Option<Fp>,
+    pub weapon_reload_ticks: Option<u32>,
+    pub weapon_splash: Option<Fp>,
+    /// New sight and omni ranges, if they change.
+    pub vision: Option<Fp>,
+    pub omni: Option<Fp>,
+    /// Decoy blips on enemy radar, and the energy per tick they cost.
+    pub jammer: Option<JammerDef>,
+    pub jammer_upkeep: Option<Res>,
     pub shield: Option<ShieldDef>,
     /// Energy per tick while cloaked. A cloak hides from sight and radar both.
     pub cloak_upkeep: Option<Res>,
@@ -105,6 +113,8 @@ pub struct Enhancement {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum UnitClass {
     Commander,
+    /// Built at a Quantum Gateway (GAME_SPECIFICATION.md §2.2). Its death does not end the match.
+    SupportCommander,
     Engineer,
     Bot,
     Artillery,
@@ -438,6 +448,13 @@ struct RawEnhancement {
     regen: Option<Number>,
     weapon_range: Option<Number>,
     weapon_damage: Option<Number>,
+    weapon_reload_ticks: Option<u32>,
+    weapon_splash: Option<Number>,
+    vision: Option<Number>,
+    omni: Option<Number>,
+    jammer: Option<RawJammer>,
+    /// Energy per second while jamming.
+    jammer_upkeep: Option<Number>,
     shield: Option<RawShield>,
     cloak: Option<RawCloak>,
     /// Energy per second to stay off enemy radar.
@@ -513,6 +530,15 @@ fn parse_enhancements(raw: &[RawEnhancement], lookup: impl Fn(&str) -> Result<Bl
             regen_per_tick: whole(&enhancement.regen)?.map_or(Fp::ZERO, |per_second| per_second / TICKS_PER_SECOND as i32),
             weapon_range: whole(&enhancement.weapon_range)?,
             weapon_damage: whole(&enhancement.weapon_damage)?,
+            weapon_reload_ticks: enhancement.weapon_reload_ticks,
+            weapon_splash: whole(&enhancement.weapon_splash)?,
+            vision: whole(&enhancement.vision)?,
+            omni: whole(&enhancement.omni)?,
+            jammer: match &enhancement.jammer {
+                None => None,
+                Some(jammer) => Some(JammerDef { radius: jammer.radius.fp().map_err(context)?, decoys: jammer.decoys }),
+            },
+            jammer_upkeep: per_tick(&enhancement.jammer_upkeep)?,
             shield: enhancement.shield.as_ref().map(parse_shield).transpose().map_err(context)?,
             cloak_upkeep: enhancement.cloak.as_ref().map(|cloak| cloak.upkeep.res().map(|per_second| per_second / TICKS_PER_SECOND)).transpose().map_err(context)?,
             stealth_upkeep: per_tick(&enhancement.stealth_upkeep)?,
@@ -641,6 +667,7 @@ impl BlueprintDb {
                 name: unit.name.clone(),
                 class: match unit.class.as_str() {
                     "commander" => UnitClass::Commander,
+                    "support_commander" => UnitClass::SupportCommander,
                     "engineer" => UnitClass::Engineer,
                     "bot" => UnitClass::Bot,
                     "artillery" => UnitClass::Artillery,

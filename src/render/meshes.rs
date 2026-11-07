@@ -52,6 +52,8 @@ pub enum Shape {
     Radar,
     /// A cone wrapped in rings.
     StealthGenerator,
+    /// A slab with four pillars around a glowing core, under a ring.
+    Gateway,
     /// A shield's dome: an open half-sphere, drawn see-through.
     Dome,
     /// Flat, around the feet of a selected mobile unit.
@@ -61,7 +63,7 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub const ALL: [Self; 32] = [
+    pub const ALL: [Self; 33] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -91,6 +93,7 @@ impl Shape {
         Self::AntiNukeSilo,
         Self::Radar,
         Self::StealthGenerator,
+        Self::Gateway,
         Self::Dome,
         Self::SelectionRing,
         Self::SelectionBox,
@@ -363,6 +366,14 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 let radius = 0.5 - (z + 0.5) * 0.4;
                 mesh.frustum([0.0, 0.0], [z, z + 0.06], [radius, radius], 12);
             }
+        }
+        Shape::Gateway => {
+            mesh.block([-0.5, -0.5, -0.5], [0.5, 0.5, -0.35]);
+            for (x, y) in [(-0.38_f32, -0.38_f32), (0.38, -0.38), (-0.38, 0.38), (0.38, 0.38)] {
+                mesh.frustum([x, y], [-0.35, 0.3], [0.09, 0.07], 6);
+            }
+            mesh.frustum([0.0, 0.0], [-0.35, -0.05], [0.26, 0.18], 12);
+            mesh.frustum([0.0, 0.0], [0.3, 0.4], [0.48, 0.42], 16);
         }
         // Rings from the rim at the bottom of the box up to a point at the top, with no base,
         // so that it can be drawn over whatever it covers.

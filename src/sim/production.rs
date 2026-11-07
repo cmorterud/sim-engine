@@ -344,7 +344,7 @@ impl SimWorld {
         }
         if unit.has_intel() {
             // Without upkeep, it works from the start. With upkeep, once it is first paid for.
-            let intel = Intel { running: unit.upkeep == Res::ZERO, cloak_on: false, cloaked: false, stealthed: false };
+            let intel = Intel { running: unit.upkeep == Res::ZERO, cloak_on: false, cloaked: false, stealthed: false, jamming: false };
             self.ecs.insert_one(entity, intel).expect("entity was just spawned");
             self.intel.push((id, entity));
         }
@@ -870,7 +870,8 @@ impl SimWorld {
         for &(_, entity) in &self.intel {
             let blueprint = self.blueprints.get(self.ecs.get::<&Blueprinted>(entity).expect("intel units have blueprints").0);
             let (upkeep, cloak_upkeep) = (blueprint.upkeep, self.cloak_upkeep(entity).unwrap_or(Res::ZERO));
-            let stealth_upkeep = if self.enhanced.is_empty() { None } else { self.enhancement_effects(entity).stealth_upkeep };
+            let effects = if self.enhanced.is_empty() { None } else { Some(self.enhancement_effects(entity)) };
+            let (stealth_upkeep, jammer_upkeep) = effects.map_or((None, None), |effects| (effects.stealth_upkeep, effects.jammer.and(effects.jammer_upkeep.or(Some(Res::ZERO)))));
             let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team.index();
             let switched_off = self.ecs.get::<&Construction>(entity).is_ok() || self.ecs.get::<&Paused>(entity).is_ok();
             let discount = self.ecs.get::<&Adjacency>(entity).map_or(0, |adjacency| adjacency.energy_cost_discount);
@@ -892,6 +893,9 @@ impl SimWorld {
             }
             if let Some(cost) = stealth_upkeep {
                 intel.stealthed = afford(cost);
+            }
+            if let Some(cost) = jammer_upkeep {
+                intel.jamming = afford(cost);
             }
         }
         paid
@@ -1263,14 +1267,19 @@ impl SimWorld {
         for (entity, bonus) in adjacency_updates {
             *self.ecs.get::<&mut Adjacency>(entity).expect("structures have adjacency") = bonus;
         }
-        for team in [Team::Blue, Team::Red] {
-            let Some((_, entity)) = self.commanders[team.index()].and_then(|id| self.find_unit(id)) else {
+        // Commanders and support commanders make and store resources of their own.
+        for &(_, entity) in &self.builders {
+            let Ok(blueprint) = self.ecs.get::<&Blueprinted>(entity).map(|unit| unit.0) else {
                 continue;
             };
-            let blueprint = self.ecs.get::<&Blueprinted>(entity).expect("commanders have blueprints").0;
             let unit = self.blueprints.get(blueprint);
+            let stats = *self.ecs.get::<&UnitStats>(entity).expect("units have stats");
+            let earns = unit.mass_income > Res::ZERO || unit.energy_income > Res::ZERO || unit.mass_storage > Res::ZERO || unit.energy_storage > Res::ZERO;
+            if stats.is_structure || !(earns || self.ecs.get::<&super::components::Enhancements>(entity).is_ok()) || self.ecs.get::<&Construction>(entity).is_ok() {
+                continue;
+            }
             let effects = self.enhancement_effects(entity);
-            let economy = &mut self.economies[team.index()];
+            let economy = &mut self.economies[stats.team.index()];
             economy.mass_capacity += unit.mass_storage;
             economy.energy_capacity += unit.energy_storage;
             economy.mass_income += unit.mass_income + effects.mass_income;
@@ -1718,8 +1727,8 @@ impl SimWorld {
         }
         if let Ok(intel) = self.ecs.get::<&Intel>(entity) {
             hasher.write(&[19, u8::from(intel.running), u8::from(intel.cloak_on), u8::from(intel.cloaked)]);
-            if intel.stealthed {
-                hasher.write(&[1]);
+            if intel.stealthed || intel.jamming {
+                hasher.write(&[1, u8::from(intel.jamming)]);
             }
         }
         self.hash_enhancement_state(entity, hasher);

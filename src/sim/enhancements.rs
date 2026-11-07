@@ -68,6 +68,12 @@ impl SimWorld {
             total.regen_per_tick += effects.regen_per_tick;
             total.weapon_range = effects.weapon_range.or(total.weapon_range);
             total.weapon_damage = effects.weapon_damage.or(total.weapon_damage);
+            total.weapon_reload_ticks = effects.weapon_reload_ticks.or(total.weapon_reload_ticks);
+            total.weapon_splash = effects.weapon_splash.or(total.weapon_splash);
+            total.vision = total.vision.max(effects.vision);
+            total.omni = total.omni.max(effects.omni);
+            total.jammer = effects.jammer.or(total.jammer);
+            total.jammer_upkeep = effects.jammer_upkeep.or(total.jammer_upkeep);
             total.shield = effects.shield.or(total.shield);
             total.cloak_upkeep = effects.cloak_upkeep.or(total.cloak_upkeep);
             total.stealth_upkeep = effects.stealth_upkeep.or(total.stealth_upkeep);
@@ -173,7 +179,7 @@ impl SimWorld {
     /// Sets what enhancements change from the unit's blueprint and its enhancements together.
     fn refresh_enhanced_stats(&mut self, id: SimId, entity: hecs::Entity) {
         let blueprint = self.blueprints.get(self.ecs.get::<&super::components::Blueprinted>(entity).expect("enhanced units have blueprints").0);
-        let (base_power, base_health, weapon) = (blueprint.build_power, blueprint.health, blueprint.weapon);
+        let (base_power, base_health, weapon, base_vision) = (blueprint.build_power, blueprint.health, blueprint.weapon, blueprint.vision);
         let effects = self.enhancement_effects(entity);
         if let Ok(mut builder) = self.ecs.get::<&mut Builder>(entity) {
             builder.power = effects.build_power.unwrap_or(base_power);
@@ -181,7 +187,10 @@ impl SimWorld {
         if let (Ok(mut combat), Some(weapon)) = (self.ecs.get::<&mut Combat>(entity), weapon) {
             combat.range = effects.weapon_range.unwrap_or(weapon.range);
             combat.projectile_damage = effects.weapon_damage.unwrap_or(weapon.damage);
+            combat.reload_ticks = effects.weapon_reload_ticks.unwrap_or(weapon.reload_ticks);
+            combat.projectile_splash = effects.weapon_splash.unwrap_or(weapon.splash_radius);
         }
+        self.ecs.get::<&mut UnitStats>(entity).expect("units have stats").vision = effects.vision.unwrap_or(base_vision);
         // Veterancy adds its share on top.
         let rank = self.ecs.get::<&Veterancy>(entity).map_or(0, |veterancy| veterancy.rank);
         let max = Fp::from_bits((i64::from((base_health + effects.health).to_bits()) * (1_000 + RANK_HEALTH_PERMILLE * i64::from(rank)) / 1_000) as i32);
@@ -218,8 +227,9 @@ impl SimWorld {
                 }
             }
         }
-        if (effects.cloak_upkeep.is_some() || effects.stealth_upkeep.is_some()) && self.ecs.get::<&Intel>(entity).is_err() {
-            let intel = Intel { running: true, cloak_on: false, cloaked: false, stealthed: false };
+        let needs_intel = effects.cloak_upkeep.is_some() || effects.stealth_upkeep.is_some() || effects.jammer.is_some() || effects.omni.is_some();
+        if needs_intel && self.ecs.get::<&Intel>(entity).is_err() {
+            let intel = Intel { running: true, cloak_on: false, cloaked: false, stealthed: false, jamming: false };
             self.ecs.insert_one(entity, intel).expect("unit is live");
             let at = self.intel.partition_point(|unit| unit.0 < id);
             self.intel.insert(at, (id, entity));
@@ -233,8 +243,18 @@ impl SimWorld {
             if effects.stealth_upkeep.is_none() {
                 intel.stealthed = false;
             }
+            if effects.jammer.is_none() {
+                intel.jamming = false;
+            }
         }
         self.economy_dirty = true;
+    }
+
+    /// A unit's radar and omni ranges: its blueprint's, or an enhancement's omni.
+    pub(super) fn sensor_ranges(&self, entity: hecs::Entity) -> (Fp, Fp) {
+        let unit = self.blueprints.get(self.ecs.get::<&super::components::Blueprinted>(entity).expect("sensor units have blueprints").0);
+        let omni = if self.enhanced.is_empty() { None } else { self.enhancement_effects(entity).omni };
+        (unit.radar, omni.unwrap_or(unit.omni))
     }
 
     /// What a unit pays to stay cloaked: from its blueprint, or else from an enhancement.

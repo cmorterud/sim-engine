@@ -396,6 +396,8 @@ pub struct Intel {
     pub cloaked: bool,
     /// A personal stealth enhancement is paid for this tick, so the unit is off enemy radar.
     pub stealthed: bool,
+    /// A jammer enhancement is paid for this tick, so its decoys show on enemy radar.
+    pub jamming: bool,
 }
 
 /// The field enhancements a unit has, one for each slot (GAME_SPECIFICATION.md §2.1).

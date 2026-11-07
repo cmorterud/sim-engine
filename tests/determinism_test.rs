@@ -167,11 +167,12 @@ fn every_intel_field_changes_the_checksum() {
     let baseline = world.compute_checksum();
     assert_ne!(baseline, before_sensors);
     type Edit = fn(&mut Intel);
-    let edits: [(&str, Edit); 4] = [
+    let edits: [(&str, Edit); 5] = [
         ("running", |i| i.running = !i.running),
         ("cloak switched on", |i| i.cloak_on = !i.cloak_on),
         ("cloaked", |i| i.cloaked = !i.cloaked),
         ("stealthed", |i| i.stealthed = !i.stealthed),
+        ("jamming", |i| i.jamming = !i.jamming),
     ];
     for (name, edit) in edits {
         edit(&mut world.ecs.get::<&mut Intel>(entity).unwrap());

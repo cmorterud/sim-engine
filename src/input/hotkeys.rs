@@ -21,7 +21,7 @@ pub const REPEAT: char = 'R';
 pub const CLEAR_QUEUE: char = 'K';
 
 /// Letters handled on their own: panning, patrol, which also works by holding the key, and mute.
-pub const RESERVED: [char; 6] = ['W', 'A', 'S', 'D', PATROL, 'N'];
+pub const RESERVED: [char; 5] = ['W', 'A', 'S', 'D', PATROL];
 
 /// The key for building a blueprint, by its key in the blueprint data.
 pub fn blueprint_hotkey(key: &str) -> Option<char> {
@@ -45,7 +45,11 @@ pub fn blueprint_hotkey(key: &str) -> Option<char> {
         "t2_engineer" => '\'',
         "t3_engineer" => '\\',
         "anti_nuke" => '=',
-        "t1_engineer" => 'Z',
+        // N mutes the sound when nothing selected can build a gateway.
+        "quantum_gateway" => 'N',
+        // The gateway's support commander shares the engineer's key: a key queues every option
+        // on it in the selected factories' menu.
+        "t1_engineer" | "support_commander" => 'Z',
         "t1_light_bot" => 'B',
         "t1_light_artillery" => 'V',
         "t2_heavy_tank" => 'H',
@@ -73,6 +77,7 @@ pub const fn letter_for(code: KeyCode) -> Option<char> {
         KeyCode::BracketRight => ']',
         KeyCode::Backslash => '\\',
         KeyCode::KeyZ => 'Z',
+        KeyCode::KeyN => 'N',
         KeyCode::KeyB => 'B',
         KeyCode::KeyV => 'V',
         KeyCode::KeyH => 'H',
@@ -113,7 +118,8 @@ mod tests {
     use super::*;
     use crate::sim::blueprints::BlueprintDb;
 
-    const ALL_KEYS: [KeyCode; 31] = [
+    const ALL_KEYS: [KeyCode; 32] = [
+        KeyCode::KeyN,
         KeyCode::BracketLeft,
         KeyCode::BracketRight,
         KeyCode::Backquote,
@@ -161,7 +167,7 @@ mod tests {
     fn everything_that_can_be_built_has_a_key() {
         let db = BlueprintDb::standard();
         let keys = buildable(&db);
-        assert_eq!(keys.len(), 21);
+        assert_eq!(keys.len(), 23);
         for key in keys {
             assert!(blueprint_hotkey(&key).is_some(), "{key} has no hotkey");
         }
@@ -170,9 +176,12 @@ mod tests {
     #[test]
     fn no_two_options_share_a_key_or_take_one_already_in_use() {
         let db = BlueprintDb::standard();
-        // The two silos' missiles share a key, as no menu has both. Nothing else does.
-        let mut letters: Vec<char> = buildable(&db).iter().filter(|key| *key != "tactical_missile").filter_map(|key| blueprint_hotkey(key)).collect();
+        // Factory items may share a key, as a key queues all of them: the two silos' missiles,
+        // and the engineer and the support commander. Structures never do, nor panel orders.
+        let shared = ["tactical_missile", "support_commander"];
+        let mut letters: Vec<char> = buildable(&db).iter().filter(|key| !shared.contains(&key.as_str())).filter_map(|key| blueprint_hotkey(key)).collect();
         assert_eq!(blueprint_hotkey("tactical_missile"), blueprint_hotkey("strategic_missile"));
+        assert_eq!(blueprint_hotkey("support_commander"), blueprint_hotkey("t1_engineer"));
         letters.extend(PANEL_LETTERS);
         let count = letters.len();
         for letter in &letters {

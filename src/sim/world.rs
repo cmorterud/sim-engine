@@ -1392,8 +1392,7 @@ impl SimWorld {
             if !running {
                 continue;
             }
-            let unit = self.blueprints.get(self.ecs.get::<&Blueprinted>(entity).expect("intel units have blueprints").0);
-            let (radar, omni) = (unit.radar, unit.omni);
+            let (radar, omni) = self.sensor_ranges(entity);
             let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team;
             let at = self.ecs.get::<&Position>(entity).expect("units have positions").0;
             for (sense, range) in [(Sense::Radar, radar), (Sense::Omni, omni)] {
@@ -2162,6 +2161,13 @@ impl SimWorld {
             self.clear_footprint(footprint);
             self.economy_dirty = true;
         }
+        // A commander or support commander takes its income and storage with it.
+        if let Ok(blueprint) = self.ecs.get::<&Blueprinted>(entity) {
+            let unit = self.blueprints.get(blueprint.0);
+            if unit.mass_income > Res::ZERO || unit.energy_income > Res::ZERO || unit.mass_storage > Res::ZERO || unit.energy_storage > Res::ZERO {
+                self.economy_dirty = true;
+            }
+        }
         // A unit that blew itself up leaves nothing to reclaim.
         let wreck = self.ecs.get::<&Blueprinted>(entity).ok().filter(|_| !self.blew_itself_up(entity)).map(|blueprint| {
             let built = self.ecs.get::<&Construction>(entity).map_or(Res::ONE, |construction| construction.progress);
@@ -2490,9 +2496,9 @@ impl SimWorld {
             own_intel(viewer)
                 .filter(|&&(_, entity)| self.ecs.get::<&Intel>(entity).is_ok_and(|intel| intel.running) && self.ecs.get::<&Construction>(entity).is_err())
                 .filter_map(|&(_, entity)| {
-                    let unit = self.blueprints.get(self.ecs.get::<&Blueprinted>(entity).ok()?.0);
+                    let (radar, omni) = self.sensor_ranges(entity);
                     let at = self.ecs.get::<&Position>(entity).ok()?.0;
-                    (unit.radar > Fp::ZERO || unit.omni > Fp::ZERO).then(|| SensorRangeView { center: [at.x.to_bits(), at.y.to_bits()], radar: unit.radar.to_bits(), omni: unit.omni.to_bits() })
+                    (radar > Fp::ZERO || omni > Fp::ZERO).then(|| SensorRangeView { center: [at.x.to_bits(), at.y.to_bits()], radar: radar.to_bits(), omni: omni.to_bits() })
                 })
                 .collect()
         });
@@ -2616,6 +2622,12 @@ impl SimWorld {
             }
             if let Some(jammer) = unit.jammer {
                 jammers.push((id, at.x.to_bits(), at.y.to_bits(), jammer.radius.to_num::<i32>(), jammer.decoys));
+            }
+            // A jammer enhancement, while it is paid for.
+            if self.ecs.get::<&Intel>(entity).is_ok_and(|intel| intel.jamming) {
+                if let Some(jammer) = self.enhancement_effects(entity).jammer {
+                    jammers.push((id, at.x.to_bits(), at.y.to_bits(), jammer.radius.to_num::<i32>(), jammer.decoys));
+                }
             }
         }
         let mut blips = Vec::new();

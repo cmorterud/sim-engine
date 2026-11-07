@@ -101,7 +101,7 @@ Controls:
   Ctrl + 1 to 0        Save the selection as a group, or clear it if nothing is selected.
                        Command works too
   1 to 0               Select that group
-  N                    Mute or unmute
+  N                    Mute or unmute, unless a builder that can build a gateway is selected
   - and =              Sound quieter and louder, unless a missile silo is selected
   Space                Jump to your commander
   Scroll               Zoom, towards the cursor
@@ -975,7 +975,13 @@ fn run_windowed(seed: u64, options: Options) {
                                     session.send(order);
                                 }
                             }
-                            PhysicalKey::Code(KeyCode::KeyN) if pressed && !event.repeat && !command_held => sound_settings.toggle_mute(),
+                            // N builds a gateway when a builder that can is selected, and mutes otherwise.
+                            PhysicalKey::Code(KeyCode::KeyN) if pressed && !event.repeat && !command_held => {
+                                match ui::hotkey_action(&session.current, selection.selected(), &map.blueprints, 'N') {
+                                    Some(action) => hotkey_actions.push(action),
+                                    None => sound_settings.toggle_mute(),
+                                }
+                            }
                             // - and = build missiles when a launcher is selected, and set the volume otherwise.
                             PhysicalKey::Code(code @ (KeyCode::Minus | KeyCode::Equal)) if pressed && !command_held => {
                                 let letter = hotkeys::letter_for(code).expect("both are panel keys");
@@ -1255,7 +1261,7 @@ fn run_windowed(seed: u64, options: Options) {
                                 pixels_per_point: output.pixels_per_point,
                             },
                         };
-                        for action in actions {
+                        for action in actions.into_iter().flat_map(UiAction::flatten) {
                             match action {
                                 UiAction::BeginPlacement(blueprint) => {
                                     placing = Some(blueprint);
@@ -1332,6 +1338,7 @@ fn run_windowed(seed: u64, options: Options) {
                                         session.send(SimCommand::RemoveQueued { factory, blueprint });
                                     }
                                 }
+                                UiAction::Batch(_) => unreachable!("batches were flattened above"),
                                 UiAction::Restart => {
                                     attack_alarm = AttackAlarm::default();
                                     control_groups = ControlGroups::default();

@@ -155,6 +155,8 @@ pub enum UiAction {
     SetCloak { units: Vec<SimId>, on: bool },
     /// Start a field enhancement on these units.
     Enhance { units: Vec<SimId>, enhancement: EnhancementId },
+    /// Several at once, from one key that several options share.
+    Batch(Vec<UiAction>),
     Restart,
 }
 
@@ -447,7 +449,18 @@ pub fn with_shift(action: UiAction, shift: bool, db: &BlueprintDb) -> UiAction {
         UiAction::Queue { factories, blueprint, selected_count, .. } if shift && !db.get(blueprint).is_factory() => {
             UiAction::Queue { factories, blueprint, selected_count, count: SHIFT_QUEUE_COUNT }
         }
+        UiAction::Batch(actions) => UiAction::Batch(actions.into_iter().map(|action| with_shift(action, shift, db)).collect()),
         other => other,
+    }
+}
+
+impl UiAction {
+    /// The actions in a batch, or this one alone.
+    pub fn flatten(self) -> Vec<Self> {
+        match self {
+            Self::Batch(actions) => actions.into_iter().flat_map(Self::flatten).collect(),
+            other => vec![other],
+        }
     }
 }
 
@@ -494,8 +507,12 @@ pub fn hotkey_action(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintD
         }
     }
     let menu = factory_menu(snapshot, selected, db)?;
-    if let Some((option, able)) = menu.options.iter().find(|(option, _)| is_key(*option)) {
-        return Some(queue_action(&menu, able, *option));
+    // Options in different factories may share a key, and then it queues each in its own.
+    let mut matching: Vec<UiAction> = menu.options.iter().filter(|(option, _)| is_key(*option)).map(|(option, able)| queue_action(&menu, able, *option)).collect();
+    match matching.len() {
+        0 => {}
+        1 => return matching.pop(),
+        _ => return Some(UiAction::Batch(matching)),
     }
     match letter {
         hotkeys::UPGRADE => menu.upgrade.as_ref().map(|(upgrade, able)| queue_action(&menu, able, *upgrade)),
@@ -1984,6 +2001,10 @@ fn draw_icon(painter: &egui::Painter, center: Pos2, class: UnitClass, color: Col
             painter.circle_stroke(center, 4.0, stroke);
             painter.circle_filled(center, 1.5, stroke.color);
         }
+        // The commander's ring, without its dot.
+        UnitClass::SupportCommander => {
+            painter.circle_stroke(center, 3.5, stroke);
+        }
         UnitClass::Factory => {
             painter.rect_filled(Rect::from_center_size(center, Vec2::new(half_width, half_height)), Rounding::ZERO, stroke.color);
         }
@@ -2120,6 +2141,39 @@ mod tests {
         );
         current.factories = vec![factory_view(1, vec![], false, 0), factory_view(2, vec![], false, 0), factory_view(3, vec![], false, 0)];
         current
+    }
+
+    #[test]
+    fn a_shared_key_queues_each_option_in_its_own_factories() {
+        let db = BlueprintDb::standard();
+        let structure = |id: u32, key: &str| {
+            let mut view = unit(id, 0.0);
+            view.blueprint = db.id(key).0;
+            view.is_structure = true;
+            view
+        };
+        let mut current = snapshot(vec![structure(1, "land_factory_t1"), structure(2, "quantum_gateway"), structure(3, "tactical_missile_launcher"), structure(4, "strategic_missile_launcher")], vec![]);
+        current.factories = (1..=4).map(|id| factory_view(id, vec![], false, 0)).collect();
+        let queue = |factory: u32, key: &str, selected_count: usize| UiAction::Queue { factories: vec![SimId(factory)], blueprint: db.id(key), selected_count, count: 1 };
+        assert_eq!(
+            hotkey_action(&current, &[SimId(1), SimId(2)], &db, 'Z'),
+            Some(UiAction::Batch(vec![queue(1, "t1_engineer", 2), queue(2, "support_commander", 2)])),
+            "an engineer in the factory and a support commander in the gateway"
+        );
+        assert_eq!(hotkey_action(&current, &[SimId(2)], &db, 'Z'), Some(queue(2, "support_commander", 1)));
+        let both = hotkey_action(&current, &[SimId(3), SimId(4)], &db, '-').expect("missiles");
+        assert_eq!(both.clone().flatten(), [queue(3, "tactical_missile", 2), queue(4, "strategic_missile", 2)]);
+        let UiAction::Batch(shifted) = with_shift(both, true, &db) else { panic!("still a batch") };
+        assert!(shifted.iter().all(|action| matches!(action, UiAction::Queue { count: SHIFT_QUEUE_COUNT, .. })));
+    }
+
+    #[test]
+    fn n_places_a_gateway_only_for_a_builder_that_can_build_one() {
+        let db = BlueprintDb::standard();
+        let mut current = commander_and_engineer(&db);
+        assert_eq!(hotkey_action(&current, &[SimId(10)], &db, 'N'), None, "so it mutes instead");
+        current.enhancements = vec![(SimId(10), [u16::MAX, db.enhancement_id("t3_engineering").0, u16::MAX])];
+        assert_eq!(hotkey_action(&current, &[SimId(10)], &db, 'N'), Some(UiAction::BeginPlacement(db.id("quantum_gateway"))));
     }
 
     #[test]
