@@ -8,7 +8,7 @@ use super::combat::{entry_hit, firing_solution, missile_velocity, probe_terrain,
 use super::commands::SimCommand;
 use super::components::{BuildTask, 
     Blueprinted, Builder, Combat, Construction, Factory, Footprint, Health, MoveClass, Order, OrderKind, OrderQueue, Patrol,
-    Launcher, Missile, MissileDefense, Overcharged, OverchargeOrder, OverchargeWeapon, Paused, Position, Projectile, Shield, SimId, Team, Turning, Turret, UnitStats, Velocity, Veterancy,
+    Launcher, Missile, MissileDefense, Upgrading, Overcharged, OverchargeOrder, OverchargeWeapon, Paused, Position, Projectile, Shield, SimId, Team, Turning, Turret, UnitStats, Velocity, Veterancy,
     Wreck, WreckKind, rotate_toward,
 };
 use super::config::{SimConfig, TARGET_SEARCH_INTERVAL, TERRAIN_CELL_UNITS, WRECK_HEALTH_PERMILLE, WRECK_MASS_PERMILLE};
@@ -246,6 +246,8 @@ pub struct SimSnapshot {
     pub interceptions: Vec<[[i32; 3]; 2]>,
     /// Missiles built and waiting in the viewer's silos, by silo, sorted by `SimId`.
     pub stocks: Vec<(SimId, u32)>,
+    /// How far along the viewer's upgrades in place are, in thousandths, sorted by `SimId`.
+    pub upgrades: Vec<(SimId, u16)>,
     pub factories: Vec<FactoryView>,
     /// Sorted by `SimId`.
     pub plans: Vec<UnitPlanView>,
@@ -339,6 +341,8 @@ pub struct SimWorld {
     pub missiles: Vec<(SimId, hecs::Entity)>,
     /// Missile defenses, sorted by `SimId`.
     pub missile_defenses: Vec<(SimId, hecs::Entity)>,
+    /// Commanders and structures upgrading in place, sorted by `SimId`.
+    pub upgrading: Vec<(SimId, hecs::Entity)>,
     /// Missiles shot down this tick, from where to where. Only for drawing, so not in the checksum.
     interceptions: Vec<[[i32; 3]; 2]>,
     /// Groups on a formation move, by the route they share.
@@ -405,6 +409,7 @@ impl SimWorld {
             shields: Vec::new(),
             missiles: Vec::new(),
             missile_defenses: Vec::new(),
+            upgrading: Vec::new(),
             interceptions: Vec::new(),
             formations: BTreeMap::new(),
             commanders: [None, None],
@@ -728,6 +733,10 @@ impl SimWorld {
                 combat.ground_target = None;
             }
             let _ = self.ecs.remove_one::<OverchargeOrder>(entity);
+            // A new order cancels a commander's upgrade, and what was spent on it is lost.
+            if self.ecs.remove_one::<Upgrading>(entity).is_ok() {
+                self.upgrading.retain(|unit| unit.0 != id);
+            }
             self.release_waiting_orders(id, entity);
             if let Ok(mut builder) = self.ecs.get::<&mut Builder>(entity) {
                 builder.tasks.clear();
@@ -1875,6 +1884,7 @@ impl SimWorld {
             self.veterans.retain(alive);
             self.shields.retain(alive);
             self.missile_defenses.retain(alive);
+            self.upgrading.retain(alive);
             self.dead_units.clear();
         }
         if !self.dead_projectiles.is_empty() {
@@ -2290,6 +2300,16 @@ impl SimWorld {
                 })
                 .collect()
         });
+        let upgrades = viewer.map_or_else(Vec::new, |viewer| {
+            self.upgrading
+                .iter()
+                .filter(|&&(_, entity)| self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team == viewer))
+                .filter_map(|&(id, entity)| {
+                    let progress = self.ecs.get::<&Upgrading>(entity).ok()?.progress;
+                    Some((id, (progress.to_bits() * 1000 / Res::ONE.to_bits()).clamp(0, 1000) as u16))
+                })
+                .collect()
+        });
         let factories = viewer.map_or_else(Vec::new, |viewer| {
             self.factories
                 .iter()
@@ -2329,6 +2349,7 @@ impl SimWorld {
             shields,
             interceptions,
             stocks,
+            upgrades,
             factories,
             plans,
             work_links,

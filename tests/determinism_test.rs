@@ -151,6 +151,33 @@ fn every_shield_field_changes_the_checksum() {
     }
 }
 
+/// An upgrade in place is hashed only while it is under way.
+#[test]
+fn every_upgrade_field_changes_the_checksum() {
+    use sim_engine::sim::commands::SimCommand;
+    use sim_engine::sim::components::{Team, Upgrading};
+    use sim_engine::sim::blueprints::BlueprintId;
+    let (_, mut world) = run(scenario::battle(SEED, 20, small_config()), 10, 10);
+    let at = world.unit_position(world.units[0].0).unwrap().xy();
+    let acu = world.blueprints.id("acu");
+    let commander = world.spawn_mobile(acu, Team::Blue, at);
+    world.advance_tick(&[SimCommand::Upgrade { units: vec![commander] }]);
+    let entity = world.unit_entity(commander).unwrap();
+    let baseline = world.compute_checksum();
+    let bit = Res::from_bits(1);
+    type Edit = fn(&mut Upgrading, bool, Res);
+    let edits: [(&str, Edit); 2] = [
+        ("upgrade target", |u, undo, _| u.into = BlueprintId(if undo { u.into.0 - 1 } else { u.into.0 + 1 })),
+        ("upgrade progress", |u, undo, bit| u.progress += if undo { -bit } else { bit }),
+    ];
+    for (name, edit) in edits {
+        edit(&mut world.ecs.get::<&mut Upgrading>(entity).unwrap(), false, bit);
+        assert_ne!(world.compute_checksum(), baseline, "{name} is not covered by the checksum");
+        edit(&mut world.ecs.get::<&mut Upgrading>(entity).unwrap(), true, bit);
+        assert_eq!(world.compute_checksum(), baseline, "undoing {name} did not restore the checksum");
+    }
+}
+
 /// Launchers, missile defenses, and missiles are hashed only where they exist.
 #[test]
 fn every_missile_field_changes_the_checksum() {

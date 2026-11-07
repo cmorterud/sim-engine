@@ -368,6 +368,15 @@ pub struct Missile {
     pub strategic: bool,
 }
 
+/// An upgrade in place, to the blueprint the unit's own one upgrades to. A commander stands
+/// still meanwhile. Factories upgrade through their queue instead.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Upgrading {
+    pub into: BlueprintId,
+    /// From 0 to 1.
+    pub progress: Res,
+}
+
 /// Marks a factory or a construction site that the player has paused. It spends nothing and
 /// makes no progress until resumed, and keeps its queue and progress meanwhile.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

@@ -40,6 +40,10 @@ pub enum SimCommand {
     /// Add to a factory's queue. An item that is a factory is an upgrade. With an upgrade in
     /// its queue, a factory also takes what the upgrade will let it build, which waits behind it.
     QueueUnit { factory: SimId, blueprint: BlueprintId, count: u32 },
+    /// Upgrade in place: a factory adds the upgrade to its queue, and a commander or structure
+    /// starts upgrading, the commander standing still until it is done. A new order for a
+    /// commander cancels its upgrade, losing what was spent on it.
+    Upgrade { units: Vec<SimId> },
     /// Clear a factory's queue, keeping nothing in progress.
     ClearQueue { factory: SimId },
     /// Remove one order from builders' queues, wherever it has got to by now. The order is

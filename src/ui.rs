@@ -143,6 +143,8 @@ pub enum UiAction {
     CancelTask { units: Vec<SimId>, task: BuildTask },
     /// Remove one of an item from each of these factories' queues.
     RemoveQueued { factories: Vec<SimId>, blueprint: BlueprintId },
+    /// Upgrade these commanders or structures in place.
+    Upgrade { units: Vec<SimId> },
     Restart,
 }
 
@@ -286,6 +288,12 @@ pub fn hotkey_action(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintD
     if let Some(option) = builder_options(snapshot, selected, db).into_iter().find(|option| is_key(*option)) {
         return Some(UiAction::BeginPlacement(option));
     }
+    if letter == hotkeys::UPGRADE {
+        let units = upgradable_units(snapshot, selected, db);
+        if !units.is_empty() {
+            return Some(UiAction::Upgrade { units });
+        }
+    }
     let menu = factory_menu(snapshot, selected, db)?;
     if let Some((option, able)) = menu.options.iter().find(|(option, _)| is_key(*option)) {
         return Some(queue_action(&menu, able, *option));
@@ -315,6 +323,23 @@ pub fn pausable_units(snapshot: &SimSnapshot, selected: &[SimId], db: &Blueprint
                     blueprint.is_factory() || blueprint.shield.is_some() || unit.built_permille < 1000
                 }
             })
+        })
+        .collect()
+}
+
+/// The selected commanders and structures that can upgrade in place now: finished, not
+/// upgrading already, and with somewhere to go. Factories upgrade through their queue instead.
+pub fn upgradable_units(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb) -> Vec<SimId> {
+    selected
+        .iter()
+        .copied()
+        .filter(|id| {
+            find_unit(snapshot, *id).is_some_and(|unit| {
+                unit.blueprint != u16::MAX && unit.built_permille == 1000 && {
+                    let blueprint = db.get(BlueprintId(unit.blueprint));
+                    blueprint.upgrades_to.is_some() && !blueprint.is_factory()
+                }
+            }) && snapshot.upgrades.iter().all(|(upgrading, _)| upgrading != id)
         })
         .collect()
 }
@@ -910,6 +935,23 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
             });
         }
 
+        // An upgrade in place: what it costs, or how far along it is.
+        let upgradable = upgradable_units(snapshot, selected, db);
+        if let Some(first) = upgradable.first().and_then(|id| find_unit(snapshot, *id)) {
+            let into = db.get(db.get(BlueprintId(first.blueprint)).upgrades_to.expect("only upgradable units are listed"));
+            let label = format!("[{}] Upgrade: {}\n{} mass  {} energy", hotkeys::UPGRADE, into.name, into.mass.to_num::<i64>(), into.energy.to_num::<i64>());
+            let hint = "A commander stands still while it upgrades, and a new order cancels it.";
+            if ui.button(label).on_hover_text(hint).clicked() {
+                actions.push(UiAction::Upgrade { units: upgradable });
+            }
+        }
+        for &(id, permille) in snapshot.upgrades.iter().filter(|(id, _)| selected.contains(id)) {
+            if let Some(unit) = find_unit(snapshot, id) {
+                let into = db.get(BlueprintId(unit.blueprint)).upgrades_to.map_or("", |into| db.get(into).name.as_str());
+                ui.colored_label(SPENDING, format!("Upgrading to {into}: {}%", permille / 10));
+            }
+        }
+
         let options = builder_options(snapshot, selected, db);
         if !options.is_empty() {
             ui.horizontal_wrapped(|ui| {
@@ -993,8 +1035,14 @@ pub fn factory_menu(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb
                 None => menu.options.push((option, vec![id])),
             }
         }
+        // Factories of different tiers upgrade to different things, so the button is for the
+        // lowest tier selected, and only the factories that upgrade to the same thing take it.
         if let Some(upgrade) = blueprint.upgrades_to.filter(|upgrade| !factory.queue.contains(&upgrade.0)) {
-            menu.upgrade.get_or_insert_with(|| (upgrade, Vec::new())).1.push(id);
+            match &mut menu.upgrade {
+                Some((offered, able)) if *offered == upgrade => able.push(id),
+                Some((offered, _)) if db.get(*offered).tier <= db.get(upgrade).tier => {}
+                _ => menu.upgrade = Some((upgrade, vec![id])),
+            }
         }
         for &item in &factory.queue {
             let item = BlueprintId(item);
@@ -1059,7 +1107,7 @@ fn factory_controls(ui: &mut egui::Ui, menu: &FactoryMenu, db: &BlueprintDb, act
         }
         if let Some((upgrade, able)) = &menu.upgrade {
             let cost = cost_label(db, *upgrade);
-            let label = format!("[{}] Upgrade to T2\n{}{}", hotkeys::UPGRADE, cost.lines().nth(1).unwrap_or(""), partial(able.len()));
+            let label = format!("[{}] Upgrade to T{}\n{}{}", hotkeys::UPGRADE, db.get(*upgrade).tier, cost.lines().nth(1).unwrap_or(""), partial(able.len()));
             if ui.button(label).clicked() {
                 actions.push(queue_action(menu, able, *upgrade));
             }
@@ -1784,7 +1832,7 @@ mod tests {
         let menu = factory_menu(&current, &[SimId(1), SimId(2)], &db).unwrap();
         assert_eq!(menu.queue, [(upgrade, 1), (bot, 3)]);
         assert_eq!(menu.progress_permille, Some(300));
-        assert_eq!(menu.upgrade, None);
+        assert_eq!(menu.upgrade, Some((db.id("land_factory_t3"), vec![SimId(2)])), "only the T2 factory, to T3");
     }
 
     #[test]
@@ -1928,7 +1976,6 @@ mod tests {
         let factories = mixed_factories(&db);
         assert_eq!(hotkey_action(&factories, &[SimId(1)], &db, 'H'), None, "a T1 factory cannot build tanks");
         assert_eq!(hotkey_action(&factories, &[SimId(1)], &db, 'E'), None, "a factory does not place structures");
-        assert_eq!(hotkey_action(&factories, &[SimId(2)], &db, 'U'), None, "a T2 factory has no upgrade");
     }
 
     #[test]
@@ -1941,7 +1988,9 @@ mod tests {
         assert_eq!(hotkey_action(&current, &selected, &db, 'B'), Some(queue("t1_light_bot", selected.to_vec())));
         assert_eq!(hotkey_action(&current, &selected, &db, 'V'), Some(queue("t1_light_artillery", selected.to_vec())));
         assert_eq!(hotkey_action(&current, &selected, &db, 'H'), Some(queue("t2_heavy_tank", vec![SimId(2)])));
-        assert_eq!(hotkey_action(&current, &selected, &db, 'U'), Some(queue("land_factory_t2", vec![SimId(1), SimId(3)])));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'U'), Some(queue("land_factory_t2", vec![SimId(1), SimId(3)])), "the lowest tier goes first");
+        let to_t3 = UiAction::Queue { factories: vec![SimId(2)], blueprint: db.id("land_factory_t3"), selected_count: 1, count: 1 };
+        assert_eq!(hotkey_action(&current, &[SimId(2)], &db, 'U'), Some(to_t3));
         assert_eq!(hotkey_action(&current, &selected, &db, 'K'), Some(UiAction::ClearQueue { factories: selected.to_vec() }));
     }
 

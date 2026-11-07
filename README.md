@@ -47,8 +47,10 @@ Destroy the enemy commander to win. Yours explodes if it dies, and your whole te
 | 1 to 0, or click it in the bar on the left | Select that group. Hold Shift on the bar to add it to the selection |
 | N | Mute or unmute |
 | - and = | Sound quieter and louder |
-| Q, E, G, T, C, `, `,` `.` `/` `;` | With a builder selected: Land Factory, Mass Extractor, Power Generator, Mass Storage, Point Defense, Shield Generator, Tactical Missile Launcher, Tactical Missile Defense, Strategic Missile Launcher, Strategic Missile Defense. ` is the key above Tab |
+| Q, E, G, T, C, `, `,` `.` `/` `;` | With a builder selected: Land Factory, Mass Extractor, Power Generator, Mass Storage, Point Defense; with T2 engineers or T2 Engineering, also Shield Generator, Tactical Missile Launcher, Tactical Missile Defense; with T3, also Strategic Missile Launcher, Strategic Missile Defense. ` is the key above Tab |
 | -, = | With a missile silo selected: build a nuclear missile, or an anti-nuke interceptor |
+| ', \\ | With a T2 or T3 land factory selected: build a T2 or T3 engineer |
+| U | Upgrade: a factory to its next tier, or the commander to T2 and then T3 Engineering, which it needs to build higher-tier structures. It stands still while upgrading, and a new order cancels it |
 | Z, B, V, H | With a factory selected: queue an Engineer, Light Bot, Light Artillery, Heavy Tank. Hold Shift, on the key or the button, to queue 5 |
 | U, R, K | With a factory selected: Upgrade, Repeat, Clear queue |
 | Space | Jump to your commander and select it |

@@ -1228,6 +1228,10 @@ fn run_windowed(seed: u64, options: Options) {
                                     patrol_points.clear();
                                 }
                                 UiAction::Stop => stop_selection(&session, &selection, &mut feedback),
+                                UiAction::Upgrade { units } => {
+                                    feedback.set_label(MarkerKind::Build, format!("Upgrading: {}", units.len()));
+                                    session.send(SimCommand::Upgrade { units });
+                                }
                                 UiAction::SetPaused { units, paused } => {
                                     let word = if paused { "Paused" } else { "Resumed" };
                                     feedback.set_label(MarkerKind::Build, format!("{word}: {}", units.len()));

@@ -7,7 +7,7 @@ use std::hash::Hasher;
 use super::blueprints::{BlueprintId, Res, UnitClass, WeaponKind, TICKS_PER_SECOND};
 use super::commands::SimCommand;
 use super::components::{
-    Adjacency, Blueprinted, BuildTask, Builder, Launcher, MissileDefense, OverchargeOrder, OverchargeWeapon, Paused, Shield, Turning, Turret, Veterancy, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, OrderQueue, Patrol,
+    Adjacency, Blueprinted, BuildTask, Builder, Launcher, Upgrading, MissileDefense, OverchargeOrder, OverchargeWeapon, Paused, Shield, Turning, Turret, Veterancy, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, OrderQueue, Patrol,
     Position, SimId, Team, UnitStats, Wreck, WreckKind,
 };
 use super::config::{
@@ -100,6 +100,7 @@ enum WorkKind {
     Construct,
     FactoryItem,
     Repair,
+    Upgrade,
 }
 
 /// The result of looking at a builder's first task.
@@ -356,7 +357,8 @@ impl SimWorld {
             let factory = Factory { power, queue: Vec::new(), repeat: false, progress: Res::ZERO, rally: None };
             self.ecs.insert_one(entity, factory).expect("entity was just spawned");
             self.factories.push((id, entity));
-        } else if power > Fp::ZERO {
+        } else if power > Fp::ZERO && !unit.is_structure() {
+            // A structure's build power only drives its own upgrades.
             self.ecs.insert_one(entity, Builder { power, range, tasks: Vec::new() }).expect("entity was just spawned");
             self.builders.push((id, entity));
         }
@@ -535,6 +537,11 @@ impl SimWorld {
                     }
                 }
             }
+            SimCommand::Upgrade { units } => {
+                for &id in units {
+                    self.start_upgrade(id);
+                }
+            }
             SimCommand::SetRepeat { factory, repeat } => {
                 if let Some(entity) = self.factory_entity(*factory) {
                     self.ecs.get::<&mut Factory>(entity).expect("factory list only holds factories").repeat = *repeat;
@@ -560,6 +567,61 @@ impl SimWorld {
 
     /// Keeps a builder's current walk as the first thing in its queue, so that what is queued
     /// next waits for it, even if the next job happens to be within reach already.
+    /// Starts a unit upgrading to what its blueprint upgrades to, if it can and is not already.
+    fn start_upgrade(&mut self, id: SimId) {
+        let Some((_, entity)) = self.find_unit(id) else {
+            return;
+        };
+        let Ok(current) = self.ecs.get::<&Blueprinted>(entity).map(|unit| unit.0) else {
+            return;
+        };
+        let Some(into) = self.blueprints.get(current).upgrades_to else {
+            return;
+        };
+        if self.ecs.get::<&Factory>(entity).is_ok() {
+            self.apply_production_command(&SimCommand::QueueUnit { factory: id, blueprint: into, count: 1 });
+            return;
+        }
+        if self.ecs.get::<&Construction>(entity).is_ok() || self.ecs.get::<&Upgrading>(entity).is_ok() {
+            return;
+        }
+        // A commander drops what it was doing, and stands still.
+        if self.ecs.get::<&Builder>(entity).is_ok() {
+            self.clear_unit_plans(&[id]);
+            self.set_order(id, Order::IDLE);
+        }
+        self.ecs.insert_one(entity, Upgrading { into, progress: Res::ZERO }).expect("unit is live");
+        let at = self.upgrading.partition_point(|unit| unit.0 < id);
+        self.upgrading.insert(at, (id, entity));
+    }
+
+    /// The build power a unit puts into its own upgrade.
+    fn upgrade_power(&self, entity: hecs::Entity) -> Fp {
+        match self.ecs.get::<&Builder>(entity) {
+            Ok(builder) => builder.power,
+            Err(_) => self.ecs.get::<&Blueprinted>(entity).map_or(Fp::ZERO, |unit| self.blueprints.get(unit.0).build_power),
+        }
+    }
+
+    /// Takes on the upgraded blueprint, at the same share of health.
+    fn finish_upgrade(&mut self, id: SimId, entity: hecs::Entity, into: BlueprintId) {
+        let unit = self.blueprints.get(into);
+        let (power, max_health, vision) = (unit.build_power, unit.health, unit.vision);
+        self.ecs.get::<&mut Blueprinted>(entity).expect("upgrades have blueprints").0 = into;
+        if let Ok(mut builder) = self.ecs.get::<&mut Builder>(entity) {
+            builder.power = power;
+        }
+        self.ecs.get::<&mut UnitStats>(entity).expect("units have stats").vision = vision;
+        let mut health = self.ecs.get::<&mut Health>(entity).expect("units have health");
+        let share = i64::from(health.current.to_bits()) * i64::from(max_health.to_bits()) / i64::from(health.max.to_bits().max(1));
+        health.current = Fp::from_bits(share as i32);
+        health.max = max_health;
+        drop(health);
+        self.ecs.remove_one::<Upgrading>(entity).expect("it was upgrading");
+        self.upgrading.retain(|unit| unit.0 != id);
+        self.economy_dirty = true;
+    }
+
     pub(super) fn adopt_current_order(&mut self, id: SimId) {
         let Some((_, entity)) = self.find_unit(id) else {
             return;
@@ -663,6 +725,9 @@ impl SimWorld {
             let (id, entity) = self.builders[index];
             self.step_builder(id, entity, &mut power_by_target);
         }
+        for &(id, entity) in &self.upgrading {
+            *power_by_target.entry((id, WorkKind::Upgrade)).or_insert(Fp::ZERO) += self.upgrade_power(entity);
+        }
         for &(id, entity) in &self.factories {
             let has_item = self.ecs.get::<&Factory>(entity).is_ok_and(|factory| !factory.queue.is_empty());
             if has_item && self.ecs.get::<&Construction>(entity).is_err() {
@@ -763,6 +828,10 @@ impl SimWorld {
     }
 
     fn step_builder(&mut self, id: SimId, entity: hecs::Entity, power_by_target: &mut BTreeMap<(SimId, WorkKind), Fp>) {
+        // Upgrading takes all of its build power, and its other work waits.
+        if self.ecs.get::<&Upgrading>(entity).is_ok() {
+            return;
+        }
         let (task, power, range) = {
             let builder = self.ecs.get::<&Builder>(entity).expect("builder list only holds builders");
             let Some(&task) = builder.tasks.first() else {
@@ -885,6 +954,9 @@ impl SimWorld {
                 if self.ecs.get::<&Construction>(target_entity).is_ok() {
                     return TaskStep::Work { target, kind: WorkKind::Construct };
                 }
+                if self.ecs.get::<&Upgrading>(target_entity).is_ok() {
+                    return TaskStep::Work { target, kind: WorkKind::Upgrade };
+                }
                 if let Ok(factory) = self.ecs.get::<&Factory>(target_entity) {
                     return if factory.queue.is_empty() {
                         TaskStep::Wait
@@ -941,6 +1013,7 @@ impl SimWorld {
                 *factory.queue.first()?
             }
             WorkKind::Construct | WorkKind::Repair => self.ecs.get::<&Blueprinted>(entity).ok()?.0,
+            WorkKind::Upgrade => self.ecs.get::<&Upgrading>(entity).ok()?.into,
         };
         let unit = self.blueprints.get(blueprint);
         let step = fp_to_res(power) / (unit.build_time * TICKS_PER_SECOND);
@@ -975,6 +1048,17 @@ impl SimWorld {
                 }
             }
             WorkKind::Repair => self.heal(item.entity, amount),
+            WorkKind::Upgrade => {
+                let Ok(mut upgrading) = self.ecs.get::<&mut Upgrading>(item.entity) else {
+                    return;
+                };
+                upgrading.progress += amount;
+                let (finished, into) = (upgrading.progress >= Res::ONE, upgrading.into);
+                drop(upgrading);
+                if finished {
+                    self.finish_upgrade(item.target, item.entity, into);
+                }
+            }
             WorkKind::FactoryItem => {
                 let mut factory = self.ecs.get::<&mut Factory>(item.entity).expect("work item checked the factory");
                 factory.progress += amount;
@@ -1520,6 +1604,11 @@ impl SimWorld {
                 hasher.write(&order.slot_ticks.to_le_bytes());
                 hash_slot(hasher, order.slot);
             }
+        }
+        if let Ok(upgrading) = self.ecs.get::<&Upgrading>(entity) {
+            hasher.write(&[18]);
+            hasher.write(&upgrading.into.0.to_le_bytes());
+            hasher.write(&upgrading.progress.to_bits().to_le_bytes());
         }
         if let Ok(launcher) = self.ecs.get::<&Launcher>(entity) {
             hasher.write(&[16, u8::from(launcher.strategic)]);
