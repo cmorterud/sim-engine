@@ -5,9 +5,9 @@
 
 use crate::math::fp::{fp_int, wide_mul, Fp, FpWide, Vec2Fp};
 use crate::math::rng::SimRng;
-use crate::sim::blueprints::{BlueprintId, Res, UnitClass};
+use crate::sim::blueprints::{BlueprintId, FactoryKind, Res, UnitClass};
 use crate::sim::commands::SimCommand;
-use crate::sim::components::{Blueprinted, BuildTask, Builder, Construction, Factory, Order, OrderKind, Position, SimId, Team, UnitStats};
+use crate::sim::components::{Blueprinted, BuildTask, Builder, Construction, Factory, Order, OrderKind, Position, SimId, Team, UnitStats, Upgrading};
 use crate::sim::config::TERRAIN_CELL_UNITS;
 use crate::sim::scenario::MapSource;
 use crate::sim::world::{MatchResult, SimWorld};
@@ -27,8 +27,24 @@ const LARGEST_WAVE: usize = 50;
 /// An army that has not grown for this long attacks with what it has, rather than wait
 /// for a wave its economy can no longer field.
 const WAVE_PATIENCE_TICKS: u32 = 600;
-const MAX_ENGINEERS: usize = 6;
-const MAX_FACTORIES: usize = 4;
+const MAX_ENGINEERS: usize = 10;
+const MAX_FACTORIES: usize = 6;
+/// Mass income, a second, at which the AI takes each step up the tech tree.
+const T2_INCOME: i64 = 8;
+const T3_INCOME: i64 = 30;
+/// Mass income at which it upgrades its other T1 factories to T2.
+const SECOND_T2_INCOME: i64 = 20;
+/// Mass income at which it starts upgrading extractors to T2, and to T3.
+const EXTRACTOR_T2_INCOME: i64 = 10;
+const EXTRACTOR_T3_INCOME: i64 = 40;
+/// Mass income at which new generators are T2, and T3, when a builder can make them.
+const GENERATOR_T2_INCOME: i64 = 15;
+const GENERATOR_T3_INCOME: i64 = 45;
+/// How many higher-tier engineers it keeps, once its factories can build them.
+const T2_ENGINEERS: usize = 3;
+/// A structure being built that costs at least this much mass is worth sending idle builders to.
+const BIG_SITE_MASS: i32 = 500;
+const T3_ENGINEERS: usize = 2;
 /// How far from home the AI goes to build on a hydrocarbon vent.
 const VENT_REACH_UNITS: i32 = 2_500;
 const MAX_POINT_DEFENSES: usize = 4;
@@ -36,14 +52,20 @@ const MAX_POINT_DEFENSES: usize = 4;
 const DEPOSIT_RETRY_TICKS: u32 = 1_500;
 
 struct Roster {
-    engineer: BlueprintId,
+    /// Engineers by tier, T1 first.
+    engineers: [BlueprintId; 3],
     bot: BlueprintId,
     artillery: BlueprintId,
     tank: BlueprintId,
+    amphibious: BlueprintId,
+    missile_launcher: BlueprintId,
+    heavy_artillery: BlueprintId,
     factory_t1: BlueprintId,
-    factory_t2: BlueprintId,
+    /// Support factories, at T2 and T3.
+    support_factories: [BlueprintId; 2],
     extractor: BlueprintId,
-    generator: BlueprintId,
+    /// Generators by tier, T1 first.
+    generators: [BlueprintId; 3],
     storage: BlueprintId,
     point_defense: BlueprintId,
     hydrocarbon: BlueprintId,
@@ -53,18 +75,25 @@ impl Roster {
     fn new(world: &SimWorld) -> Self {
         let id = |key: &str| world.blueprints.id(key);
         Self {
-            engineer: id("t1_engineer"),
+            engineers: [id("t1_engineer"), id("t2_engineer"), id("t3_engineer")],
             bot: id("t1_light_bot"),
             artillery: id("t1_light_artillery"),
             tank: id("t2_heavy_tank"),
+            amphibious: id("t2_amphibious_tank"),
+            missile_launcher: id("t2_mobile_missile_launcher"),
+            heavy_artillery: id("t3_mobile_artillery"),
             factory_t1: id("land_factory_t1"),
-            factory_t2: id("land_factory_t2"),
+            support_factories: [id("land_factory_t2_support"), id("land_factory_t3_support")],
             extractor: id("mass_extractor"),
-            generator: id("power_generator"),
+            generators: [id("power_generator"), id("power_generator_t2"), id("power_generator_t3")],
             storage: id("mass_storage"),
             point_defense: id("t1_point_defense"),
             hydrocarbon: id("hydrocarbon_plant"),
         }
+    }
+
+    fn is_generator(&self, blueprint: BlueprintId) -> bool {
+        self.generators.contains(&blueprint)
     }
 }
 
@@ -72,12 +101,22 @@ impl Roster {
 #[derive(Default)]
 struct Forces {
     commander: Option<SimId>,
-    idle_builders: Vec<(SimId, Vec2Fp)>,
+    idle_builders: Vec<IdleBuilder>,
     engineers: usize,
+    /// Engineers of each tier, T1 first.
+    engineers_by_tier: [usize; 3],
     factories: Vec<FactoryInfo>,
+    /// The team's best finished land headquarters' tier, 1 for none.
+    headquarters_tier: u8,
     idle_combat: Vec<SimId>,
     combat_units: usize,
     extractors: Vec<(u32, u32)>,
+    /// Finished extractors that could upgrade, with their tier and whether they are upgrading.
+    extractor_sites: Vec<ExtractorInfo>,
+    /// Structures still being built that are worth helping with, and where.
+    big_sites: Vec<(SimId, Vec2Fp)>,
+    /// Whether any engineer can build T2, or T3, structures.
+    builder_tier: u8,
     generators: usize,
     generators_building: usize,
     storages: usize,
@@ -94,6 +133,23 @@ struct FactoryInfo {
     cell: (u32, u32),
     finished: bool,
     queue_is_empty: bool,
+    upgrading: bool,
+    tier: u8,
+    support: bool,
+}
+
+#[derive(Copy, Clone)]
+struct IdleBuilder {
+    id: SimId,
+    entity: hecs::Entity,
+    position: Vec2Fp,
+}
+
+#[derive(Copy, Clone)]
+struct ExtractorInfo {
+    id: SimId,
+    position: Vec2Fp,
+    tier: u8,
     upgrading: bool,
 }
 
@@ -157,6 +213,7 @@ impl AiBrain {
         let mut commands = Vec::new();
         self.command_builders(world, &forces, &mut commands);
         self.command_factories(world, &forces, &mut commands);
+        self.command_upgrades(world, &forces, &mut commands);
         self.command_army(world, &forces, &sightings, &mut commands);
         commands
     }
@@ -167,7 +224,7 @@ impl AiBrain {
 
     fn survey(&self, world: &SimWorld) -> Forces {
         let roster = self.roster();
-        let mut forces = Forces::default();
+        let mut forces = Forces { headquarters_tier: world.headquarters_tier(self.team, FactoryKind::Land), ..Forces::default() };
         for &(id, entity) in &world.units {
             let stats = world.ecs.get::<&UnitStats>(entity).expect("units have stats");
             if stats.team != self.team {
@@ -181,16 +238,22 @@ impl AiBrain {
             let finished = world.ecs.get::<&Construction>(entity).is_err();
             let unit = world.blueprints.get(blueprint);
             let cell = cell_of(position);
+            if !finished && unit.is_structure() && unit.mass >= Res::from_num(BIG_SITE_MASS) {
+                forces.big_sites.push((id, position));
+            }
             match unit.class {
                 UnitClass::Commander | UnitClass::Engineer => {
                     if unit.class == UnitClass::Commander {
                         forces.commander = Some(id);
                     } else {
                         forces.engineers += 1;
+                        forces.engineers_by_tier[usize::from(unit.tier.clamp(1, 3) - 1)] += 1;
+                        forces.builder_tier = forces.builder_tier.max(unit.tier);
                     }
                     let builder = world.ecs.get::<&Builder>(entity).expect("builders have builder parts");
-                    if builder.tasks.is_empty() && order.kind == OrderKind::Idle {
-                        forces.idle_builders.push((id, position));
+                    let upgrading = world.ecs.get::<&crate::sim::components::Enhancing>(entity).is_ok();
+                    if builder.tasks.is_empty() && order.kind == OrderKind::Idle && !upgrading {
+                        forces.idle_builders.push(IdleBuilder { id, entity, position });
                     }
                     for task in &builder.tasks {
                         if let BuildTask::Build { blueprint, cell_x, cell_y, site: None } = *task {
@@ -206,7 +269,7 @@ impl AiBrain {
                     }
                 }
                 // Only land factories: the AI builds no missile silos, and must never queue in one.
-                UnitClass::Factory if blueprint == roster.factory_t1 || blueprint == roster.factory_t2 => {
+                UnitClass::Factory if unit.factory_kind == Some(FactoryKind::Land) => {
                     let factory = world.ecs.get::<&Factory>(entity).expect("factories have factory parts");
                     let half = i32::from(unit.footprint) / 2;
                     forces.factories.push(FactoryInfo {
@@ -216,14 +279,20 @@ impl AiBrain {
                         finished,
                         queue_is_empty: factory.queue.is_empty(),
                         upgrading: factory.queue.first().is_some_and(|item| world.blueprints.get(*item).is_factory()),
+                        tier: unit.tier,
+                        support: unit.support,
                     });
                 }
                 // The AI builds neither silos' missiles, support commanders nor aircraft yet.
                 UnitClass::Factory | UnitClass::Ammo | UnitClass::SupportCommander | UnitClass::Air => {}
                 UnitClass::Economy | UnitClass::Defense => {
-                    if blueprint == roster.extractor {
+                    if unit.requires_deposit {
                         forces.extractors.push(cell);
-                    } else if blueprint == roster.generator {
+                        if finished {
+                            let upgrading = world.ecs.get::<&Upgrading>(entity).is_ok();
+                            forces.extractor_sites.push(ExtractorInfo { id, position, tier: unit.tier, upgrading });
+                        }
+                    } else if roster.is_generator(blueprint) {
                         forces.generators += 1;
                         forces.generators_building += usize::from(!finished);
                     } else if blueprint == roster.storage {
@@ -240,9 +309,9 @@ impl AiBrain {
     fn command_builders(&mut self, world: &SimWorld, forces: &Forces, commands: &mut Vec<SimCommand>) {
         let mut planned = forces.planned.clone();
         let mut new_blueprints = forces.planned_blueprints.clone();
-        for &(id, position) in &forces.idle_builders {
+        for &IdleBuilder { id, entity, position } in &forces.idle_builders {
             let is_commander = forces.commander == Some(id);
-            let plan = self.next_structure(world, forces, position, is_commander, &planned, &new_blueprints);
+            let plan = self.next_structure(world, forces, entity, position, is_commander, &planned, &new_blueprints);
             if let Some((blueprint, cell)) = plan {
                 planned.push(cell);
                 new_blueprints.push(blueprint);
@@ -261,8 +330,19 @@ impl AiBrain {
             if is_commander {
                 continue;
             }
-            if let Some(wreck) = nearest_visible_wreck(world, self.team, position, self.home, self.enemy_home) {
+            // An extractor upgrading near home is the best thing to help with: it pays for itself.
+            let upgrade = forces
+                .extractor_sites
+                .iter()
+                .filter(|extractor| extractor.upgrading)
+                .min_by_key(|extractor| (extractor.position.distance_squared(&position), extractor.id));
+            let site = forces.big_sites.iter().min_by_key(|(site, at)| (at.distance_squared(&position), *site));
+            if let Some(&(site, _)) = site {
+                commands.push(SimCommand::Assist { units: vec![id], target: site });
+            } else if let Some(wreck) = nearest_visible_wreck(world, self.team, position, self.home, self.enemy_home) {
                 commands.push(SimCommand::Reclaim { units: vec![id], target: wreck });
+            } else if let Some(extractor) = upgrade {
+                commands.push(SimCommand::Assist { units: vec![id], target: extractor.id });
             } else if let Some(factory) = forces.factories.iter().find(|factory| factory.finished && !factory.queue_is_empty) {
                 commands.push(SimCommand::Assist { units: vec![id], target: factory.id });
             }
@@ -270,10 +350,12 @@ impl AiBrain {
     }
 
     /// Chooses what an idle builder should start next, in priority order.
+    #[allow(clippy::too_many_arguments)]
     fn next_structure(
         &self,
         world: &SimWorld,
         forces: &Forces,
+        builder: hecs::Entity,
         position: Vec2Fp,
         is_commander: bool,
         planned: &[(u32, u32)],
@@ -284,16 +366,33 @@ impl AiBrain {
         let per_second = |value: Res| (value * 10).to_num::<i64>();
         let (mass_income, energy_income) = (per_second(economy.mass_income), per_second(economy.energy_income));
         let count_planned = |blueprint: BlueprintId| planned_blueprints.iter().filter(|item| **item == blueprint).count();
+        // The best generator this builder can make for the income, and the factory: a support
+        // factory once there is a headquarters of its tier, which costs far less.
+        // With income for a bigger generator, and an engineer that can build one, small
+        // builders leave generators to it, and help instead.
+        let wanted_tier = (0..3).rev().find(|&tier| [0, GENERATOR_T2_INCOME, GENERATOR_T3_INCOME][tier] <= mass_income).unwrap_or(0);
+        let wanted_tier = wanted_tier.min(usize::from(forces.builder_tier.max(1)) - 1);
+        let generator = (0..=wanted_tier).rev().map(|tier| roster.generators[tier]).find(|&blueprint| world.can_build(builder, blueprint));
+        let generator_tier = generator.map_or(0, |blueprint| world.blueprints.get(blueprint).tier as usize - 1);
+        let generator = generator.filter(|_| generator_tier == wanted_tier);
+        let factory = (0..2)
+            .rev()
+            .map(|tier| roster.support_factories[tier])
+            .find(|&blueprint| world.can_build(builder, blueprint) && world.support_allowed(self.team, blueprint))
+            .unwrap_or(roster.factory_t1);
+        let factories_planned = count_planned(roster.factory_t1) + roster.support_factories.iter().map(|&blueprint| count_planned(blueprint)).sum::<usize>();
+        let generators_planned: usize = roster.generators.iter().map(|&blueprint| count_planned(blueprint)).sum();
 
-        let factories_total = forces.factories.len() + count_planned(roster.factory_t1);
+        let factories_total = forces.factories.len() + factories_planned;
         if factories_total == 0 {
             return self.site_near_home(world, roster.factory_t1, 1, planned).map(|cell| (roster.factory_t1, cell));
         }
 
-        // Mass limits everything early on, so extractors come before all else unless
-        // energy has actually run short. Generators then keep pace with mass income.
+        // Extractors cost upkeep, so energy limits everything early on: while it is short, every
+        // idle builder makes generators, and a new extractor waits. Generators keep ahead of
+        // mass income, two at a time, before each new extractor.
         let energy_is_low = economy.energy < economy.energy_capacity * 2 / 5 && economy.energy_demand > economy.energy_income;
-        let generators_coming = forces.generators_building + count_planned(roster.generator);
+        let generators_coming = forces.generators_building + generators_planned;
         let energy_lags = energy_income < mass_income * 12;
         // A free vent near home is the cheapest energy there is.
         if energy_is_low || energy_lags {
@@ -301,24 +400,22 @@ impl AiBrain {
                 return Some((roster.hydrocarbon, cell));
             }
         }
-        if energy_is_low && generators_coming < 3 {
-            if let Some(cell) = self.generator_site(world, forces, planned) {
-                return Some((roster.generator, cell));
+        if energy_is_low {
+            return generator.and_then(|generator| self.generator_site(world, forces, generator, planned).map(|cell| (generator, cell)));
+        }
+        if let Some(generator) = generator.filter(|_| energy_lags && generators_coming < 2) {
+            if let Some(cell) = self.generator_site(world, forces, generator, planned) {
+                return Some((generator, cell));
             }
         }
         if let Some(cell) = self.nearest_deposit(world, forces, position, is_commander, planned) {
             return Some((roster.extractor, cell));
         }
-        if energy_lags && generators_coming < 2 {
-            if let Some(cell) = self.generator_site(world, forces, planned) {
-                return Some((roster.generator, cell));
-            }
-        }
 
         let factories_wanted = (1 + mass_income as usize / 10).min(MAX_FACTORIES);
         if factories_total < factories_wanted && economy.mass > Res::from_num(150) {
-            if let Some(cell) = self.site_near_home(world, roster.factory_t1, 1, planned) {
-                return Some((roster.factory_t1, cell));
+            if let Some(cell) = self.site_near_home(world, factory, 1, planned) {
+                return Some((factory, cell));
             }
         }
 
@@ -386,9 +483,12 @@ impl AiBrain {
 
     /// Generators go along a factory's east and west sides, for the discount. The
     /// north and south sides stay clear, because that is where units come out.
-    fn generator_site(&self, world: &SimWorld, forces: &Forces, planned: &[(u32, u32)]) -> Option<(u32, u32)> {
-        let generator = self.roster().generator;
+    /// Larger generators go wherever there is room near home.
+    fn generator_site(&self, world: &SimWorld, forces: &Forces, generator: BlueprintId, planned: &[(u32, u32)]) -> Option<(u32, u32)> {
         let size = footprint(world, generator);
+        if size > 1 {
+            return self.site_near_home(world, generator, 1, planned);
+        }
         for factory in forces.factories.iter().filter(|factory| factory.finished) {
             let (x, y) = self.flip_site(world, cell_i32(factory.cell), footprint(world, factory.blueprint));
             for offset in 0..3 {
@@ -494,14 +594,15 @@ impl AiBrain {
     }
 
     fn command_factories(&mut self, world: &SimWorld, forces: &Forces, commands: &mut Vec<SimCommand>) {
-        let roster = self.roster();
-        let (engineer, bot, artillery, tank, factory_t1, factory_t2) =
-            (roster.engineer, roster.bot, roster.artillery, roster.tank, roster.factory_t1, roster.factory_t2);
         let economy = world.economies[self.team.index()];
         let mass_income = (economy.mass_income * 10).to_num::<i64>();
+        let energy_income = (economy.energy_income * 10).to_num::<i64>();
         let mut upgrade_under_way = forces.factories.iter().any(|factory| factory.upgrading);
         let mut engineers = forces.engineers;
+        let mut by_tier = forces.engineers_by_tier;
+        let engineers_wanted = MAX_ENGINEERS.min(2 + mass_income as usize / 5);
         let rally = self.rally_point();
+        let headquarters = forces.headquarters_tier;
         for factory in forces.factories.iter().filter(|factory| factory.finished) {
             if !self.rally_set_on.contains(&factory.id) {
                 self.rally_set_on.push(factory.id);
@@ -514,23 +615,78 @@ impl AiBrain {
             if economy.satisfaction < Res::ONE / 2 {
                 continue;
             }
-            let item = if engineers < MAX_ENGINEERS.min(2 + mass_income as usize / 5) {
+            // A support factory builds nothing above its headquarters' tier.
+            let tier = if factory.support { factory.tier.min(headquarters) } else { factory.tier };
+            let upgrade = world.blueprints.get(factory.blueprint).upgrades_to;
+            // One upgrade at a time: the first T1 factory to T2, that one to T3, then the rest.
+            let upgrade_wanted = upgrade.is_some_and(|into| {
+                let into = world.blueprints.get(into);
+                let allowed = world.support_allowed(self.team, into.id) && (!into.support || headquarters >= into.tier);
+                let income = match (into.tier, factory.tier < headquarters || factory.support) {
+                    (2, false) => T2_INCOME,
+                    (2, true) => SECOND_T2_INCOME,
+                    _ => T3_INCOME,
+                };
+                // An upgrade draws a great deal of energy, so it waits for an economy that can feed it.
+                let energy_ready = economy.satisfaction >= Res::ONE && energy_income >= mass_income * 10;
+                allowed && energy_ready && mass_income >= income
+            });
+            let roster = self.roster();
+            let engineer_tier = usize::from(tier.clamp(1, 3)) - 1;
+            let item = if engineers < engineers_wanted {
                 engineers += 1;
-                engineer
-            } else if factory.blueprint == factory_t1 && !upgrade_under_way && mass_income >= 8 {
+                by_tier[engineer_tier] += 1;
+                roster.engineers[engineer_tier]
+            } else if tier == 2 && by_tier[1] + by_tier[2] < T2_ENGINEERS {
+                by_tier[1] += 1;
+                roster.engineers[1]
+            } else if tier == 3 && by_tier[2] < T3_ENGINEERS {
+                by_tier[2] += 1;
+                roster.engineers[2]
+            } else if upgrade_wanted && !upgrade_under_way {
                 upgrade_under_way = true;
-                factory_t2
+                upgrade.expect("just checked")
             } else {
                 self.unit_counter += 1;
-                if factory.blueprint == factory_t2 {
-                    if self.unit_counter.is_multiple_of(3) { bot } else { tank }
-                } else if self.unit_counter.is_multiple_of(4) {
-                    artillery
-                } else {
-                    bot
+                let roster = self.roster();
+                let turn = self.unit_counter % 6;
+                match tier {
+                    1 => {
+                        if self.unit_counter.is_multiple_of(4) { roster.artillery } else { roster.bot }
+                    }
+                    2 => [roster.tank, roster.tank, roster.bot, roster.amphibious, roster.tank, roster.missile_launcher][turn as usize],
+                    _ => [roster.tank, roster.heavy_artillery, roster.tank, roster.amphibious, roster.missile_launcher, roster.tank][turn as usize],
                 }
             };
             commands.push(SimCommand::QueueUnit { factory: factory.id, blueprint: item, count: 1 });
+        }
+    }
+
+    /// Extractors near home upgrade first, a few at a time as income grows, unless energy is short.
+    fn command_upgrades(&mut self, world: &SimWorld, forces: &Forces, commands: &mut Vec<SimCommand>) {
+        let economy = world.economies[self.team.index()];
+        let mass_income = (economy.mass_income * 10).to_num::<i64>();
+        // Upgrades pay for themselves, so they go ahead while factories spend all the mass, but
+        // not into a stall, which would slow everything.
+        if mass_income < EXTRACTOR_T2_INCOME || economy.satisfaction < Res::ONE * 9 / 10 {
+            return;
+        }
+        let energy_is_low = economy.energy < economy.energy_capacity * 2 / 5 && economy.energy_demand > economy.energy_income;
+        if energy_is_low {
+            return;
+        }
+        let under_way = forces.extractor_sites.iter().filter(|extractor| extractor.upgrading).count();
+        if under_way > mass_income as usize / 25 {
+            return;
+        }
+        let top = if mass_income >= EXTRACTOR_T3_INCOME { 2 } else { 1 };
+        let next = forces
+            .extractor_sites
+            .iter()
+            .filter(|extractor| !extractor.upgrading && extractor.tier <= top)
+            .min_by_key(|extractor| (extractor.tier, extractor.position.distance_squared(&self.home), extractor.id));
+        if let Some(extractor) = next {
+            commands.push(SimCommand::Upgrade { units: vec![extractor.id] });
         }
     }
 

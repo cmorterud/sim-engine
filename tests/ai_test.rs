@@ -53,6 +53,7 @@ fn ai_commands_only_its_own_units() {
                     | SimCommand::Assist { units, .. }
                     | SimCommand::Reclaim { units, .. }
                     | SimCommand::AttackMove { units, .. }
+                    | SimCommand::Upgrade { units }
                     | SimCommand::FormationMove { units, .. } => units.clone(),
                     SimCommand::QueueUnit { factory, .. } | SimCommand::SetRally { factory, .. } => vec![*factory],
                     other => panic!("unexpected command {other:?}"),
@@ -98,6 +99,7 @@ fn mirrored_order(world: &SimWorld, team: Team, command: &SimCommand) -> String 
         SimCommand::QueueUnit { blueprint, count, .. } => format!("queue {} x{count}", blueprint.0),
         SimCommand::Assist { units, .. } => format!("assist x{}", units.len()),
         SimCommand::Reclaim { units, .. } => format!("reclaim x{}", units.len()),
+        SimCommand::Upgrade { units } => format!("upgrade x{}", units.len()),
         other => panic!("unexpected command {other:?}"),
     }
 }
@@ -217,4 +219,27 @@ fn late_in_a_long_game_the_commander_joins_a_full_size_wave() {
     };
     assert_eq!(wave_with(20), (50, false), "the commander stays home early on");
     assert_eq!(wave_with(36), (51, true), "and joins the wave after 35 minutes");
+}
+
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn ai_climbs_the_tech_tree_and_upgrades_its_economy() {
+    let mut world = scenario::skirmish(11).world;
+    let mut brain = AiBrain::new(Team::Blue, 11, world.starts);
+    // 25 minutes, with nobody playing Red, whose commander is kept alive so the match goes on.
+    for _ in 0..15_000 {
+        let commands = brain.think(&world);
+        world.advance_tick(&commands);
+        let red = world.unit_entity(world.commanders[Team::Red.index()].unwrap()).unwrap();
+        let mut health = world.ecs.get::<&mut sim_engine::sim::components::Health>(red).unwrap();
+        health.current = health.max;
+    }
+    let count = |key: &str| count_owned(&world, Team::Blue, key);
+    assert!(count("land_factory_t3") >= 1, "no T3 factory");
+    assert!(count("t2_engineer") >= 1 && count("t3_engineer") >= 1, "no higher-tier engineers");
+    assert!(count("mass_extractor_t2") + count("mass_extractor_t3") >= 6, "only {} upgraded extractors", count("mass_extractor_t2") + count("mass_extractor_t3"));
+    assert!(count("power_generator_t2") + count("power_generator_t3") >= 1, "no higher-tier generators");
+    assert!(count("t2_heavy_tank") >= 5 && count("t3_mobile_artillery") >= 1, "the army is not keeping up with the tech");
+    let income = (world.economies[0].mass_income * 10).to_num::<i64>();
+    assert!(income >= 60, "mass income is only {income}/s");
 }
