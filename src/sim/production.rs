@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::hash::Hasher;
 
-use super::blueprints::{BlueprintId, Res, Targets, UnitClass, WeaponKind, TICKS_PER_SECOND};
+use super::blueprints::{BlueprintId, Res, Targets, UnitClass, WeaponKind, ADJACENCY_SCALE, TICKS_PER_SECOND};
 use super::commands::SimCommand;
 use super::components::{
     Adjacency, AntiAir, BeingCaptured, BombBay, Flight, MoveClass, Blueprinted, BuildTask, Builder, Intel, Launcher, Upgrading, MissileDefense, OverchargeOrder, OverchargeWeapon, Paused, Shield, Turning, Turret, Veterancy, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, OrderQueue, Patrol,
@@ -18,12 +18,6 @@ use super::spatial::{GridEntry, Layer};
 use super::world::{BuildQueueView, EconomyView, OrderStopView, PlanStep, UnitRatesView, PlanStepKind, SimWorld, UnitPlanView, UnitSpawn, WorkLinkView};
 use crate::math::fp::{fp_int, wide_mul, Fp, Vec2Fp};
 
-const MEX_STORAGE_BONUS: u32 = 125;
-const MEX_STORAGE_BONUS_MAX: u32 = 500;
-const FACTORY_ENERGY_DISCOUNT: u32 = 63;
-const FACTORY_ENERGY_DISCOUNT_MAX: u32 = 250;
-const FACTORY_MASS_DISCOUNT: u32 = 38;
-const FACTORY_MASS_DISCOUNT_MAX: u32 = 150;
 /// A new site starts with this share of its health, so that it exists to be shot at.
 const SITE_STARTING_HEALTH_PERMILLE: i32 = 10;
 
@@ -979,7 +973,7 @@ impl SimWorld {
                 continue;
             }
             let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team.index();
-            let discount = self.ecs.get::<&Adjacency>(entity).map_or(0, |adjacency| adjacency.energy_cost_discount);
+            let discount = self.ecs.get::<&Adjacency>(entity).map_or(0, |adjacency| adjacency.upkeep_discount);
             let mut shield = self.ecs.get::<&mut Shield>(entity).expect("shield list only holds shields");
             if !shield.is_up() {
                 shield.recharging -= 1;
@@ -988,7 +982,7 @@ impl SimWorld {
                 }
                 continue;
             }
-            let cost = shield.upkeep * i64::from(1000 - discount) / 1000;
+            let cost = Adjacency::less(shield.upkeep, discount);
             let economy = &self.economies[team];
             if economy.energy + economy.energy_income - paid[team] < cost {
                 shield.collapse();
@@ -1011,7 +1005,7 @@ impl SimWorld {
             let (stealth_upkeep, jammer_upkeep) = effects.map_or((None, None), |effects| (effects.stealth_upkeep, effects.jammer.and(effects.jammer_upkeep.or(Some(Res::ZERO)))));
             let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team.index();
             let switched_off = self.ecs.get::<&Construction>(entity).is_ok() || self.ecs.get::<&Paused>(entity).is_ok();
-            let discount = self.ecs.get::<&Adjacency>(entity).map_or(0, |adjacency| adjacency.energy_cost_discount);
+            let discount = self.ecs.get::<&Adjacency>(entity).map_or(0, |adjacency| adjacency.upkeep_discount);
             let mut intel = self.ecs.get::<&mut Intel>(entity).expect("intel list only holds intel units");
             let economy = &self.economies[team];
             let mut afford = |cost: Res| {
@@ -1269,13 +1263,14 @@ impl SimWorld {
             return None;
         }
         let step = fp_to_res(power) / (unit.build_time * TICKS_PER_SECOND);
-        let (mass_discount, energy_discount) = if kind == WorkKind::FactoryItem {
+        // What a structure builds, or upgrades to, costs less beside the right neighbors.
+        let (mass_discount, energy_discount) = if matches!(kind, WorkKind::FactoryItem | WorkKind::Upgrade) {
             (adjacency.mass_cost_discount, adjacency.energy_cost_discount)
         } else {
             (0, 0)
         };
-        let mass = unit.mass * step * (1000 - i64::from(mass_discount)) / 1000;
-        let energy = unit.energy * step * (1000 - i64::from(energy_discount)) / 1000;
+        let mass = Adjacency::less(unit.mass * step, mass_discount);
+        let energy = Adjacency::less(unit.energy * step, energy_discount);
         Some(WorkItem { target, entity, kind, team, step, mass, energy })
     }
 
@@ -1500,12 +1495,12 @@ impl SimWorld {
             if paused {
                 continue;
             }
-            let mass = unit.mass_income + unit.mass_income * i64::from(bonus.mass_output_bonus) / 1000;
+            let mass = Adjacency::more(unit.mass_income, bonus.mass_output_bonus);
             economy.mass_income += mass;
-            economy.energy_income += unit.energy_income;
+            economy.energy_income += Adjacency::more(unit.energy_income, bonus.energy_output_bonus);
             if extractor {
                 economy.extractor_income += mass;
-                economy.extractor_upkeep += unit.upkeep * i64::from(1000 - bonus.energy_cost_discount) / 1000;
+                economy.extractor_upkeep += Adjacency::less(unit.upkeep, bonus.upkeep_discount);
             }
         }
         for (entity, bonus) in adjacency_updates {
@@ -1538,7 +1533,6 @@ impl SimWorld {
     /// Finds the finished, friendly structures touching a footprint's edges.
     fn adjacency_of(&self, id: SimId, blueprint: BlueprintId, footprint: Footprint, team: Team) -> Adjacency {
         let unit = self.blueprints.get(blueprint);
-        let (mass_storage, power) = (self.blueprints.id("mass_storage"), self.blueprints.id("power_generator"));
         let Footprint { cell_x, cell_y, size } = footprint;
         let mut neighbors: Vec<SimId> = Vec::new();
         for offset in 0..size {
@@ -1560,7 +1554,9 @@ impl SimWorld {
                 }
             }
         }
-        let (mut storages, mut generators) = (0u32, 0u32);
+        // Each finished neighbor of the team gives its bonuses for this structure's size, and they add up.
+        let size = unit.adjacency_size;
+        let mut adjacency = Adjacency::default();
         for neighbor in neighbors {
             let Some((_, entity)) = self.find_unit(neighbor) else {
                 continue;
@@ -1569,17 +1565,20 @@ impl SimWorld {
             if !same_team || self.ecs.get::<&Construction>(entity).is_ok() {
                 continue;
             }
-            let other = self.ecs.get::<&Blueprinted>(entity).expect("structures have blueprints").0;
-            storages += u32::from(other == mass_storage);
-            generators += u32::from(other == power);
+            let other = self.blueprints.get(self.ecs.get::<&Blueprinted>(entity).expect("structures have blueprints").0);
+            if let Some(giver) = other.adjacency_giver {
+                let bonus = giver.bonus();
+                adjacency.energy_cost_discount += bonus.energy_active[size];
+                adjacency.mass_cost_discount += bonus.mass_active[size];
+                adjacency.upkeep_discount += bonus.upkeep[size];
+                adjacency.mass_output_bonus += bonus.mass_output[size];
+                adjacency.energy_output_bonus += bonus.energy_output[size];
+            }
         }
-        let mut adjacency = Adjacency::default();
-        if unit.requires_deposit {
-            adjacency.mass_output_bonus = (storages * MEX_STORAGE_BONUS).min(MEX_STORAGE_BONUS_MAX);
-        }
-        if unit.is_factory() || unit.shield.is_some() || unit.upkeep > Res::ZERO {
-            adjacency.energy_cost_discount = (generators * FACTORY_ENERGY_DISCOUNT).min(FACTORY_ENERGY_DISCOUNT_MAX);
-            adjacency.mass_cost_discount = (storages * FACTORY_MASS_DISCOUNT).min(FACTORY_MASS_DISCOUNT_MAX);
+        // A discount can never make something free.
+        let most = (ADJACENCY_SCALE * 9 / 10) as i32;
+        for discount in [&mut adjacency.energy_cost_discount, &mut adjacency.mass_cost_discount, &mut adjacency.upkeep_discount] {
+            *discount = (*discount).min(most);
         }
         adjacency
     }
@@ -1776,8 +1775,8 @@ impl SimWorld {
             .filter(|&(_, entity)| self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team == team) && self.ecs.get::<&Construction>(entity).is_err())
             .filter_map(|(id, entity)| {
                 let unit = self.blueprints.get(self.ecs.get::<&Blueprinted>(entity).ok()?.0);
-                let bonus = self.ecs.get::<&Adjacency>(entity).map_or(0, |adjacency| adjacency.mass_output_bonus);
-                let mut mass = unit.mass_income + unit.mass_income * i64::from(bonus) / 1000;
+                let adjacency = self.ecs.get::<&Adjacency>(entity).map_or(Adjacency::default(), |adjacency| *adjacency);
+                let mut mass = Adjacency::more(unit.mass_income, adjacency.mass_output_bonus);
                 let spent = self.factory_spending.iter().find(|spending| spending.0 == id);
                 // An extractor makes, and pays for, the share of its mass its team can power.
                 let extractor_use = if unit.mass_income > Res::ZERO && unit.upkeep > Res::ZERO {
@@ -1787,27 +1786,24 @@ impl SimWorld {
                         Res::ZERO
                     } else {
                         mass *= efficiency;
-                        let discount = self.ecs.get::<&Adjacency>(entity).map_or(0, |adjacency| adjacency.energy_cost_discount);
-                        unit.upkeep * i64::from(1000 - discount) / 1000 * efficiency
+                        Adjacency::less(unit.upkeep, adjacency.upkeep_discount) * efficiency
                     }
                 } else {
                     Res::ZERO
                 };
                 // A dome that is up costs its upkeep, less the discount from neighbors.
                 let upkeep = self.ecs.get::<&Shield>(entity).ok().filter(|shield| shield.is_up() && self.ecs.get::<&Paused>(entity).is_err()).map_or(Res::ZERO, |shield| {
-                    let discount = self.ecs.get::<&Adjacency>(entity).map_or(0, |adjacency| adjacency.energy_cost_discount);
-                    shield.upkeep * i64::from(1000 - discount) / 1000
+                    Adjacency::less(shield.upkeep, adjacency.upkeep_discount)
                 });
                 // So does running intel, and a cloak.
                 let intel = self.ecs.get::<&Intel>(entity).ok().map_or(Res::ZERO, |intel| {
-                    let discount = self.ecs.get::<&Adjacency>(entity).map_or(0, |adjacency| adjacency.energy_cost_discount);
-                    let running = if intel.running { unit.upkeep * i64::from(1000 - discount) / 1000 } else { Res::ZERO };
+                    let running = if intel.running { Adjacency::less(unit.upkeep, adjacency.upkeep_discount) } else { Res::ZERO };
                     running + if intel.cloaked { unit.cloak_upkeep.unwrap_or(Res::ZERO) } else { Res::ZERO }
                 });
                 Some(UnitRatesView {
                     id,
                     mass_income: tenths_per_second(mass),
-                    energy_income: tenths_per_second(unit.energy_income),
+                    energy_income: tenths_per_second(Adjacency::more(unit.energy_income, adjacency.energy_output_bonus)),
                     mass_use: spent.map_or(0, |spending| tenths_per_second(spending.1)),
                     energy_use: spent.map_or(0, |spending| tenths_per_second(spending.2)) + tenths_per_second(upkeep + intel + extractor_use),
                 })
@@ -1914,7 +1910,7 @@ impl SimWorld {
         }
         if let Ok(adjacency) = self.ecs.get::<&Adjacency>(entity) {
             hasher.write(&[4]);
-            for value in [adjacency.mass_output_bonus, adjacency.energy_cost_discount, adjacency.mass_cost_discount] {
+            for value in [adjacency.mass_output_bonus, adjacency.energy_output_bonus, adjacency.energy_cost_discount, adjacency.mass_cost_discount, adjacency.upkeep_discount] {
                 hasher.write(&value.to_le_bytes());
             }
         }

@@ -28,7 +28,7 @@ pub const CYCLE_TIER: char = '`';
 
 /// The keys of a build bar, by slot, in the order the bar shows them. Builders' and factories'
 /// bars use the same keys, since only one bar is shown at a time: a factory's, if one is selected.
-pub const SLOT_KEYS: [char; 15] = ['Q', 'E', 'G', 'T', 'C', 'Z', 'V', 'B', 'H', 'N', ',', '.', '/', ';', '\''];
+pub const SLOT_KEYS: [char; 16] = ['Q', 'E', 'G', 'T', 'C', 'Z', 'V', 'B', 'H', 'N', ',', '.', '/', ';', '\'', '['];
 
 /// Which bar an item is in: a builder's, for structures, or a factory's, for units and missiles.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -59,6 +59,7 @@ pub fn build_slot(key: &str) -> Option<(Bar, usize)> {
         "stealth_field_generator" => (Builder, 12),
         "air_staging" => (Builder, 13),
         "quantum_gateway" => (Builder, 14),
+        "energy_storage" => (Builder, 15),
         // Builders and scouts, then direct fire, then artillery and bombers, then anti-air and gunships.
         "t1_engineer" | "t2_engineer" | "t3_engineer" | "support_commander" | "t1_air_scout" | "t3_spy_plane" => (Factory, 0),
         "tactical_missile" | "strategic_missile" | "anti_nuke" => (Factory, 0),
@@ -97,6 +98,7 @@ pub const fn letter_for(code: KeyCode) -> Option<char> {
         KeyCode::Slash => '/',
         KeyCode::Semicolon => ';',
         KeyCode::Quote => '\'',
+        KeyCode::BracketLeft => '[',
         KeyCode::Backquote => CYCLE_TIER,
         KeyCode::KeyM => MOVE,
         KeyCode::KeyF => ATTACK_MOVE,
@@ -135,7 +137,7 @@ mod tests {
     use super::*;
     use crate::sim::blueprints::BlueprintDb;
 
-    const ALL_KEYS: [KeyCode; 27] = [
+    const ALL_KEYS: [KeyCode; 28] = [
         KeyCode::KeyQ,
         KeyCode::KeyE,
         KeyCode::KeyG,
@@ -151,6 +153,7 @@ mod tests {
         KeyCode::Slash,
         KeyCode::Semicolon,
         KeyCode::Quote,
+        KeyCode::BracketLeft,
         KeyCode::Backquote,
         KeyCode::KeyM,
         KeyCode::KeyF,

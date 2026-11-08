@@ -137,12 +137,29 @@ pub struct Footprint {
     pub size: u32,
 }
 
-/// Bonuses from touching neighbors (GAME_SPECIFICATION.md §4), in thousandths.
+/// Bonuses from touching neighbors (GAME_SPECIFICATION.md §4), in hundred-thousandths, as in
+/// `blueprints::ADJACENCY_SCALE`. Discounts are positive, and never reach the whole cost.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Adjacency {
-    pub mass_output_bonus: u32,
-    pub energy_cost_discount: u32,
-    pub mass_cost_discount: u32,
+    pub mass_output_bonus: i32,
+    pub energy_output_bonus: i32,
+    /// Off what it builds or upgrades to.
+    pub energy_cost_discount: i32,
+    pub mass_cost_discount: i32,
+    /// Off what it needs to keep running.
+    pub upkeep_discount: i32,
+}
+
+impl Adjacency {
+    /// A value less a discount.
+    pub fn less(value: super::blueprints::Res, discount: i32) -> super::blueprints::Res {
+        value * (super::blueprints::ADJACENCY_SCALE - i64::from(discount)) / super::blueprints::ADJACENCY_SCALE
+    }
+
+    /// A value with a bonus on top.
+    pub fn more(value: super::blueprints::Res, bonus: i32) -> super::blueprints::Res {
+        value + value * i64::from(bonus) / super::blueprints::ADJACENCY_SCALE
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

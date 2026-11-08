@@ -184,7 +184,7 @@ fn an_energy_stall_collapses_the_dome_and_pausing_drops_it_without_cost() {
 }
 
 #[test]
-fn power_generators_beside_a_shield_cut_its_upkeep_by_up_to_a_quarter() {
+fn power_generators_beside_a_shield_cut_its_upkeep() {
     let (mut world, generator) = shielded_world();
     let upkeep = |world: &SimWorld| world.snapshot_for(Some(Team::Red)).rates.iter().find(|rates| rates.id == generator).unwrap().energy_use;
     world.advance_tick(&[]);
@@ -194,7 +194,14 @@ fn power_generators_beside_a_shield_cut_its_upkeep_by_up_to_a_quarter() {
         world.spawn_finished_structure(power, Team::Red, x, y).expect("room for it");
     }
     world.advance_tick(&[]);
-    assert_eq!(upkeep(&world), 225, "five neighbors give the most, a quarter off");
+    // A shield is FAF's 3 by 3 size, which a T1 generator takes 2.08% off, five times over.
+    assert!((268..=269).contains(&upkeep(&world)), "five neighbors: {}", upkeep(&world));
+    // A T2 generator takes an eighth.
+    let (mut world, generator) = shielded_world();
+    world.spawn_finished_structure(world.blueprints.id("power_generator_t2"), Team::Red, 47, 50).expect("room for it");
+    world.advance_tick(&[]);
+    let upkeep = |world: &SimWorld| world.snapshot_for(Some(Team::Red)).rates.iter().find(|rates| rates.id == generator).unwrap().energy_use;
+    assert!((262..=263).contains(&upkeep(&world)), "26.25 a second: {}", upkeep(&world));
 }
 
 #[test]

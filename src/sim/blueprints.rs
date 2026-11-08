@@ -142,6 +142,61 @@ pub enum WeaponKind {
     Bomb,
 }
 
+/// What a structure gives the finished structures of its team that touch it (GAME_SPECIFICATION.md
+/// §3.2), as in Forged Alliance Forever's `AdjacencyBuffs.lua`.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum AdjacencyGiver {
+    T1Power,
+    T2Power,
+    T3Power,
+    Hydrocarbon,
+    T1Extractor,
+    T2Extractor,
+    T3Extractor,
+    T1Fabricator,
+    T3Fabricator,
+    MassStorage,
+    EnergyStorage,
+}
+
+/// One neighbor's bonuses to a structure, in hundred-thousandths, by the structure's size class:
+/// FAF's SIZE4, SIZE8, SIZE12, SIZE16, and SIZE20. Discounts are positive.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub struct AdjacencyBonus {
+    /// Off the energy, and the mass, that what it builds or upgrades to costs.
+    pub energy_active: [i32; 5],
+    pub mass_active: [i32; 5],
+    /// Off the energy it needs to keep running.
+    pub upkeep: [i32; 5],
+    /// Onto the mass and the energy it makes.
+    pub mass_output: [i32; 5],
+    pub energy_output: [i32; 5],
+}
+
+/// What adjacency values are measured in: 100,000 is all of it.
+pub const ADJACENCY_SCALE: i64 = 100_000;
+
+impl AdjacencyGiver {
+    /// FAF's numbers, unchanged. Weapon energy and artillery rate of fire are left out, as no
+    /// structure here has an energy weapon or is artillery.
+    pub const fn bonus(self) -> AdjacencyBonus {
+        const NONE: [i32; 5] = [0; 5];
+        let (energy_active, upkeep, mass_active, mass_output, energy_output) = match self {
+            Self::T1Power => ([6_250, 3_125, 2_080, 1_563, 250], [6_250, 3_125, 2_080, 1_563, 1_250], NONE, NONE, NONE),
+            Self::T2Power | Self::Hydrocarbon => ([12_500; 5], [12_500; 5], NONE, NONE, NONE),
+            Self::T3Power => ([18_750, 18_750, 18_750, 15_620, 5_000], [18_750; 5], NONE, NONE, NONE),
+            Self::T1Extractor => (NONE, NONE, [10_000, 5_000, 3_330, 7_500, 7_500], NONE, NONE),
+            Self::T2Extractor => (NONE, NONE, [15_000, 7_500, 5_000, 10_000, 10_000], NONE, NONE),
+            Self::T3Extractor => (NONE, NONE, [20_000, 10_000, 6_670, 12_500, 12_500], NONE, NONE),
+            Self::T1Fabricator => (NONE, NONE, [2_500, 1_250, 833, 1_250, 750], NONE, NONE),
+            Self::T3Fabricator => (NONE, NONE, [20_000, 20_000, 12_500, 20_000, 3_750], NONE, NONE),
+            Self::MassStorage => (NONE, NONE, NONE, [12_500, 6_250, 3_000, 3_125, 2_500], NONE),
+            Self::EnergyStorage => (NONE, NONE, NONE, NONE, [25_000, 12_500, 8_334, 6_250, 5_000]),
+        };
+        AdjacencyBonus { energy_active, mass_active, upkeep, mass_output, energy_output }
+    }
+}
+
 /// What a factory builds: land units or aircraft. Headquarters and support factories of a kind
 /// go together (GAME_SPECIFICATION.md §15).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -300,6 +355,9 @@ pub struct Blueprint {
     pub factory_kind: Option<FactoryKind>,
     /// A support factory: cheaper, and it needs a headquarters of its kind and tier.
     pub support: bool,
+    pub adjacency_giver: Option<AdjacencyGiver>,
+    /// FAF's size class, from 0 for SIZE4 to 4 for SIZE20, which picks the adjacency bonuses it gets.
+    pub adjacency_size: usize,
     /// Sensor ranges (GAME_SPECIFICATION.md §9). Zero for none.
     pub radar: Fp,
     pub omni: Fp,
@@ -514,6 +572,11 @@ struct RawUnit {
     factory_kind: Option<String>,
     #[serde(default)]
     support: bool,
+    /// What it gives its neighbors, such as "t1_power" or "mass_storage".
+    adjacency: Option<String>,
+    /// FAF's size class: 4, 8, 12, 16, or 20. Without one, 16 for factories, and otherwise from
+    /// the footprint: 1 is 4, 2 is 8, 3 is 12, 4 is 16, and larger is 20.
+    adjacency_size: Option<u8>,
     radar: Option<Number>,
     omni: Option<Number>,
     stealth_field: Option<Number>,
@@ -846,6 +909,27 @@ impl BlueprintDb {
                     Some(other) => return Err(context(format!("unknown factory kind {other:?}"))),
                 },
                 support: unit.support,
+                adjacency_giver: match unit.adjacency.as_deref() {
+                    None => None,
+                    Some("t1_power") => Some(AdjacencyGiver::T1Power),
+                    Some("t2_power") => Some(AdjacencyGiver::T2Power),
+                    Some("t3_power") => Some(AdjacencyGiver::T3Power),
+                    Some("hydrocarbon") => Some(AdjacencyGiver::Hydrocarbon),
+                    Some("t1_extractor") => Some(AdjacencyGiver::T1Extractor),
+                    Some("t2_extractor") => Some(AdjacencyGiver::T2Extractor),
+                    Some("t3_extractor") => Some(AdjacencyGiver::T3Extractor),
+                    Some("t1_fabricator") => Some(AdjacencyGiver::T1Fabricator),
+                    Some("t3_fabricator") => Some(AdjacencyGiver::T3Fabricator),
+                    Some("mass_storage") => Some(AdjacencyGiver::MassStorage),
+                    Some("energy_storage") => Some(AdjacencyGiver::EnergyStorage),
+                    Some(other) => return Err(context(format!("unknown adjacency {other:?}"))),
+                },
+                adjacency_size: match (unit.adjacency_size, unit.factory_kind.is_some(), footprint) {
+                    (Some(size @ (4 | 8 | 12 | 16 | 20)), _, _) => usize::from(size / 4 - 1),
+                    (Some(other), _, _) => return Err(context(format!("adjacency size {other} is not 4, 8, 12, 16, or 20"))),
+                    (None, true, _) => 3,
+                    (None, false, size) => usize::from(size.clamp(1, 5) - 1),
+                },
                 radar: whole(&unit.radar)?,
                 omni: whole(&unit.omni)?,
                 stealth_field: whole(&unit.stealth_field)?,

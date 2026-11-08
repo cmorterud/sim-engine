@@ -434,25 +434,58 @@ fn extractor_output_grows_with_each_touching_storage() {
     }
 }
 
-#[test]
-fn adjacent_generators_discount_a_factorys_energy_but_not_mass() {
-    let run_case = |generators: u32| {
-        let mut world = test_world();
-        set_resources(&mut world, Team::Blue, 100_000, 100_000);
-        let (t1, generator, bot) = (id(&world, "land_factory_t1"), id(&world, "power_generator"), id(&world, "t1_light_bot"));
-        let factory = world.spawn_finished_structure(t1, Team::Blue, 50, 50).unwrap();
-        for index in 0..generators {
-            world.spawn_finished_structure(generator, Team::Blue, 49, 50 + index).unwrap();
+/// What a factory building a bot asks for, with these neighbors on its west side.
+fn factory_demand(neighbors: &[&str]) -> (f64, f64) {
+    let mut world = test_world();
+    set_resources(&mut world, Team::Blue, 100_000, 100_000);
+    let (t1, bot) = (id(&world, "land_factory_t1"), id(&world, "t1_light_bot"));
+    let factory = world.spawn_finished_structure(t1, Team::Blue, 50, 50).unwrap();
+    for (index, key) in neighbors.iter().enumerate() {
+        if *key == "mass_extractor" {
+            world.deposits.push((49, 50 + index as u32));
         }
-        world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: bot, count: 1 }]);
-        run(&mut world, 3);
-        let economy = world.economies[0];
-        (economy.mass_demand.to_num::<f64>(), economy.energy_demand.to_num::<f64>())
-    };
-    let (base_mass, base_energy) = run_case(0);
-    let (mass, energy) = run_case(2);
+        world.spawn_finished_structure(id(&world, key), Team::Blue, 49, 50 + index as u32).unwrap();
+    }
+    world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: bot, count: 1 }]);
+    run(&mut world, 3);
+    let economy = world.economies[0];
+    (economy.mass_demand.to_num::<f64>(), economy.energy_demand.to_num::<f64>())
+}
+
+#[test]
+fn neighbors_cut_a_factorys_costs_as_in_faf() {
+    let (base_mass, base_energy) = factory_demand(&[]);
+    // A T1 generator takes 1.563% off a factory's energy, and nothing off its mass.
+    let (mass, energy) = factory_demand(&["power_generator", "power_generator"]);
     assert!((mass - base_mass).abs() < 1e-5, "mass should not change: {mass} against {base_mass}");
-    assert!((energy / base_energy - 0.874).abs() < 0.002, "two generators should cut energy by about 12.6%: {}", energy / base_energy);
+    assert!((energy / base_energy - 0.968_74).abs() < 0.000_2, "two T1 generators: {}", energy / base_energy);
+    // A T1 extractor takes 7.5% off its mass.
+    let (mass, _) = factory_demand(&["mass_extractor"]);
+    assert!((mass / base_mass - 0.925).abs() < 0.000_2, "an extractor: {}", mass / base_mass);
+    // Mass storage gives a factory nothing.
+    let (mass, energy) = factory_demand(&["mass_storage"]);
+    assert!((mass - base_mass).abs() < 1e-5 && (energy - base_energy).abs() < 1e-5);
+}
+
+#[test]
+fn energy_storage_holds_energy_and_adds_to_the_generators_it_touches() {
+    let mut world = test_world();
+    let (generator, storage) = (id(&world, "power_generator"), id(&world, "energy_storage"));
+    world.spawn_finished_structure(generator, Team::Blue, 50, 50).unwrap();
+    world.advance_tick(&[]);
+    let per_second = |world: &SimWorld| (world.economies[0].energy_income * 10).to_num::<f64>();
+    let capacity = world.economies[0].energy_capacity;
+    assert!((per_second(&world) - 20.0).abs() < 0.001);
+    world.spawn_finished_structure(storage, Team::Blue, 51, 50).unwrap();
+    world.advance_tick(&[]);
+    assert!((per_second(&world) - 25.0).abs() < 0.001, "a T1 generator makes a quarter more: {}", per_second(&world));
+    assert_eq!(world.economies[0].energy_capacity - capacity, Res::from_num(10_000));
+    // A T2 generator, of the 3 by 3 size, gets a twelfth more from each.
+    let mut world = test_world();
+    world.spawn_finished_structure(id(&world, "power_generator_t2"), Team::Blue, 50, 50).unwrap();
+    world.spawn_finished_structure(storage, Team::Blue, 53, 50).unwrap();
+    world.advance_tick(&[]);
+    assert!((per_second(&world) - 500.0 * 1.083_34).abs() < 0.01, "{}", per_second(&world));
 }
 
 #[test]

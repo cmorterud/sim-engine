@@ -22,7 +22,7 @@ vision = 520
 build_power = 10
 build_range = 200
 # Its engineering suites (the enhancements below) unlock the T2 and T3 structures on its list.
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "radar", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "stealth_field_generator", "strategic_missile_launcher", "strategic_missile_defense", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "omni_sensor", "land_factory_t3_support", "air_factory_t3_support"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "radar", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "stealth_field_generator", "strategic_missile_launcher", "strategic_missile_defense", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "omni_sensor", "land_factory_t3_support", "air_factory_t3_support"]
 weapon = { range = 440, reload_ticks = 7, projectile_speed = 50, damage = 70, turn_rate = 180 }
 overcharge = { energy = 3000, damage = 12000, structure_damage = 800, reload_ticks = 50 }
 mass_income = 1
@@ -48,7 +48,7 @@ radius = 8
 vision = 360
 build_power = 5
 build_range = 100
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "radar", "hydrocarbon_plant", "air_factory", "t1_aa_turret"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "radar", "hydrocarbon_plant", "air_factory", "t1_aa_turret"]
 
 [[unit]]
 id = "t1_light_bot"
@@ -146,6 +146,7 @@ mass_income = 2
 upkeep = 2
 build_power = 10
 upgrades_to = "mass_extractor_t2"
+adjacency = "t1_extractor"
 
 [[unit]]
 id = "power_generator"
@@ -159,6 +160,7 @@ health = 600
 footprint = 1
 vision = 300
 energy_income = 20
+adjacency = "t1_power"
 
 [[unit]]
 id = "mass_storage"
@@ -172,6 +174,7 @@ health = 1000
 footprint = 1
 vision = 300
 mass_storage = 500
+adjacency = "mass_storage"
 
 [[unit]]
 id = "t1_point_defense"
@@ -204,6 +207,8 @@ shield = { radius = 260, health = 5000, regen = 50, recharge_seconds = 30, upkee
 # Missiles (GAME_SPECIFICATION.md §8). The launchers and defenses are tier 2 and 3: T2 and T3
 # engineers build them, and so does the commander once it has the engineering upgrade. A launcher
 # builds its missiles, keeps up to its stock, and fires them only on order, as in the original.
+adjacency_size = 12
+
 [[unit]]
 id = "tactical_missile_launcher"
 name = "Tactical Missile Launcher"
@@ -337,7 +342,7 @@ radius = 9
 vision = 400
 build_power = 12
 build_range = 120
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "radar", "stealth_field_generator", "hydrocarbon_plant", "mass_fabricator", "air_factory", "t1_aa_turret", "air_staging", "t2_flak", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "radar", "stealth_field_generator", "hydrocarbon_plant", "mass_fabricator", "air_factory", "t1_aa_turret", "air_staging", "t2_flak", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support"]
 
 [[unit]]
 id = "t3_engineer"
@@ -355,7 +360,7 @@ radius = 10
 vision = 520
 build_power = 30
 build_range = 140
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "omni_sensor", "land_factory_t3_support", "air_factory_t3_support"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "omni_sensor", "land_factory_t3_support", "air_factory_t3_support"]
 
 # Intel (GAME_SPECIFICATION.md §9). Ranges are in units, and upkeep is energy per second
 # while running: a team that cannot pay switches its sensors off until it can. The commander
@@ -412,6 +417,8 @@ upkeep = 25
 # Support commanders (GAME_SPECIFICATION.md §2.2), with Forged Alliance Forever's numbers for its
 # UEF ones, and its Quantum Gateway. A support commander is a T3 engineer with heavy armor, a gun,
 # and income of its own, and its death does not end the match.
+adjacency_size = 12
+
 [[unit]]
 id = "quantum_gateway"
 name = "Quantum Gateway"
@@ -425,6 +432,7 @@ footprint = 4
 vision = 400
 build_power = 120
 builds = ["support_commander"]
+adjacency_size = 20
 
 [[unit]]
 id = "support_commander"
@@ -441,7 +449,7 @@ radius = 14
 vision = 520
 build_power = 56
 build_range = 200
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "omni_sensor", "land_factory_t3_support", "air_factory_t3_support"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "omni_sensor", "land_factory_t3_support", "air_factory_t3_support"]
 # Three times the commander's fire: 300 a second for its 100, and a little farther.
 weapon = { range = 500, reload_ticks = 10, projectile_speed = 50, damage = 300, turn_rate = 180 }
 mass_income = 1
@@ -470,6 +478,7 @@ mass_income = 6
 upkeep = 9
 build_power = 15
 upgrades_to = "mass_extractor_t3"
+adjacency = "t2_extractor"
 
 [[unit]]
 id = "mass_extractor_t3"
@@ -488,6 +497,8 @@ upkeep = 54
 
 # Mass fabrication and hydrocarbon power (GAME_SPECIFICATION.md §3.3-3.4), with FAF's UEF numbers.
 # The original's fabricators are T2 and T3, and its plant makes 5 generators' worth of energy.
+adjacency = "t3_extractor"
+
 [[unit]]
 id = "hydrocarbon_plant"
 name = "Hydrocarbon Power Plant"
@@ -503,6 +514,8 @@ requires_vent = true
 energy_income = 100
 
 # Turns 100 energy a second into 1 mass, and blows up if destroyed while running.
+adjacency = "hydrocarbon"
+
 [[unit]]
 id = "mass_fabricator"
 name = "Mass Fabricator"
@@ -517,6 +530,7 @@ vision = 300
 mass_income = 1
 upkeep = 100
 death_explosion = { damage = 370, radius = 100, only_while_running = true }
+adjacency = "t1_fabricator"
 
 [[unit]]
 id = "mass_fabricator_t3"
@@ -536,6 +550,8 @@ death_explosion = { damage = 5000, radius = 200, only_while_running = true }
 # Aircraft (GAME_SPECIFICATION.md §10), with Forged Alliance Forever's numbers for its T1 aircraft.
 # An aircraft's speed is its top air speed. `flight` sets how high it flies, how fast it turns,
 # how far past its target it flies before turning for another pass, and its seconds of fuel.
+adjacency = "t3_fabricator"
+
 [[unit]]
 id = "air_factory"
 name = "Air Factory"
@@ -874,6 +890,7 @@ footprint = 3
 vision = 300
 energy_income = 500
 death_explosion = { damage = 1500, radius = 100 }
+adjacency = "t2_power"
 
 [[unit]]
 id = "power_generator_t3"
@@ -890,6 +907,9 @@ energy_income = 2500
 death_explosion = { damage = 5500, radius = 200 }
 
 # Upgraded from a Radar, or built by T2 builders, and upgrades to an Omni Sensor.
+adjacency = "t3_power"
+adjacency_size = 16
+
 [[unit]]
 id = "radar_t2"
 name = "Radar (T2)"
@@ -934,6 +954,21 @@ health = 500
 footprint = 3
 vision = 400
 air_staging = { slots = 4, repair = 500, repair_energy = 30 }
+
+# Holds 10,000 energy, and adds to the output of the generators it touches.
+[[unit]]
+id = "energy_storage"
+name = "Energy Storage"
+class = "economy"
+tier = 1
+mass = 250
+energy = 1200
+build_time = 200
+health = 500
+footprint = 1
+vision = 300
+energy_storage = 10000
+adjacency = "energy_storage"
 
 # Field enhancements (GAME_SPECIFICATION.md §2.1), with Forged Alliance Forever's numbers for its
 # commander. A commander has three slots, and one enhancement in each: a new one replaces what is
