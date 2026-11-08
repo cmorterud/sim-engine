@@ -1,0 +1,142 @@
+//! Artillery (GAME_SPECIFICATION.md §7): it cannot hit what is too close, its shells scatter, an
+//! installation's shot costs energy, and generators beside one cut that cost and its reload.
+
+use sim_engine::math::fp::{fp_int, Vec2Fp, Vec3Fp};
+use sim_engine::sim::blueprints::Res;
+use sim_engine::sim::commands::SimCommand;
+use sim_engine::sim::components::{Projectile, SimId, Team};
+use sim_engine::sim::config::{SimConfig, TerrainStyle};
+use sim_engine::sim::world::SimWorld;
+
+fn point(x: i32, y: i32) -> Vec2Fp {
+    Vec2Fp::new(fp_int(x), fp_int(y))
+}
+
+fn world(map_units: i32) -> SimWorld {
+    let config = SimConfig { map_units, terrain: TerrainStyle::Flat, fog_of_war: false, ..SimConfig::default() };
+    let mut world = SimWorld::new(config, 1);
+    for economy in &mut world.economies {
+        for value in [&mut economy.base_mass_capacity, &mut economy.mass_capacity, &mut economy.base_energy_capacity, &mut economy.energy_capacity] {
+            *value = Res::from_num(1_000_000);
+        }
+        economy.mass = Res::from_num(500_000);
+        economy.energy = Res::from_num(500_000);
+    }
+    world
+}
+
+fn structure(world: &mut SimWorld, key: &str, team: Team, cell_x: u32, cell_y: u32) -> SimId {
+    world.spawn_finished_structure(world.blueprints.id(key), team, cell_x, cell_y).unwrap()
+}
+
+/// The shells this unit has in the air, with their velocities.
+fn shells(world: &SimWorld, source: SimId) -> Vec<Vec3Fp> {
+    world.projectiles.iter().filter_map(|&(_, entity)| world.ecs.get::<&Projectile>(entity).ok().filter(|shell| shell.source == source).map(|shell| shell.velocity)).collect()
+}
+
+/// Runs until the unit fires, and returns the tick it did.
+fn first_shot(world: &mut SimWorld, source: SimId, limit: u32) -> Option<u32> {
+    (0..limit).find(|_| {
+        world.advance_tick(&[]);
+        !shells(world, source).is_empty()
+    })
+}
+
+#[test]
+fn artillery_cannot_hit_what_is_too_close() {
+    let mut world = world(5_120);
+    let gun = structure(&mut world, "t2_artillery", Team::Blue, 100, 100);
+    // A storage 600 away, inside its least range of 1,000.
+    structure(&mut world, "mass_storage", Team::Red, 130, 100);
+    assert_eq!(first_shot(&mut world, gun, 300), None, "too close to shoot at");
+    // One 1,600 away is in reach.
+    structure(&mut world, "mass_storage", Team::Red, 180, 100);
+    assert!(first_shot(&mut world, gun, 400).is_some());
+}
+
+#[test]
+fn an_installation_waits_for_the_energy_a_shot_costs() {
+    let mut world = world(5_120);
+    let gun = structure(&mut world, "t2_artillery", Team::Blue, 100, 100);
+    structure(&mut world, "mass_storage", Team::Red, 180, 100);
+    world.economies[0].energy = Res::from_num(500);
+    world.economies[0].energy_income = Res::ZERO;
+    assert_eq!(first_shot(&mut world, gun, 300), None, "500 energy is not enough for a shot of 1,000");
+    world.economies[0].energy = Res::from_num(5_000);
+    let before = world.economies[0].energy;
+    assert!(first_shot(&mut world, gun, 300).is_some());
+    let spent = before - world.economies[0].energy;
+    assert!((spent - Res::from_num(1_000)).abs() < Res::from_num(5), "a shot costs 1,000: {spent}");
+}
+
+#[test]
+fn a_t2_generator_beside_an_installation_cheapens_and_speeds_its_shots() {
+    let shot_cost_and_reload = |generator: bool| {
+        let mut world = world(5_120);
+        let gun = structure(&mut world, "t2_artillery", Team::Blue, 100, 100);
+        if generator {
+            structure(&mut world, "power_generator_t2", Team::Blue, 101, 99);
+        }
+        structure(&mut world, "mass_storage", Team::Red, 180, 100);
+        world.advance_tick(&[]);
+        let income = world.economies[0].energy_income;
+        let before = world.economies[0].energy;
+        let first = first_shot(&mut world, gun, 300).expect("it fires");
+        let spent = before - world.economies[0].energy + income * i64::from(first + 1);
+        let ids = |world: &SimWorld| -> Vec<SimId> {
+            world.projectiles.iter().filter(|&&(_, entity)| world.ecs.get::<&Projectile>(entity).is_ok_and(|shell| shell.source == gun)).map(|projectile| projectile.0).collect()
+        };
+        let fired = ids(&world);
+        let second = (0..400).find(|_| {
+            world.advance_tick(&[]);
+            ids(&world).iter().any(|id| !fired.contains(id))
+        });
+        (spent, second.expect("it fires again") + 1)
+    };
+    let (cost, reload) = shot_cost_and_reload(false);
+    let (cheaper, faster) = shot_cost_and_reload(true);
+    assert!((cost - Res::from_num(1_000)).abs() < Res::from_num(5), "{cost}");
+    assert!((cheaper - Res::from_num(950)).abs() < Res::from_num(5), "5% off each shot: {cheaper}");
+    assert_eq!(reload, 200);
+    assert_eq!(faster, 187, "6.25% off the 200 ticks between shots");
+}
+
+#[test]
+fn artillery_shells_scatter_around_their_aim_the_same_way_every_time() {
+    let volleys = || {
+        let mut world = world(5_120);
+        let gun = world.spawn_mobile(world.blueprints.id("t3_mobile_artillery"), Team::Blue, point(1_000, 2_500));
+        world.advance_tick(&[SimCommand::AttackGround { units: vec![gun], point: point(2_200, 2_500) }]);
+        let mut seen: Vec<Vec3Fp> = Vec::new();
+        for _ in 0..500 {
+            world.advance_tick(&[]);
+            for velocity in shells(&world, gun) {
+                if !seen.iter().any(|known| known.x == velocity.x && known.y == velocity.y) {
+                    seen.push(velocity);
+                }
+            }
+        }
+        seen
+    };
+    let first = volleys();
+    assert!(first.len() >= 4, "it should fire again and again: {}", first.len());
+    // Aimed at one spot, the shells go different ways, but not far: within 25 over the 1,200.
+    let directions: Vec<i64> = first.iter().map(|velocity| i64::from(velocity.y.to_bits()) * 1_000 / i64::from(velocity.x.to_bits())).collect();
+    assert!(directions.windows(2).any(|pair| pair[0] != pair[1]), "they should scatter: {directions:?}");
+    assert!(directions.iter().all(|slope| slope.abs() <= 25), "but only a little: {directions:?}");
+    let again: Vec<(i32, i32)> = volleys().iter().map(|velocity| (velocity.x.to_bits(), velocity.y.to_bits())).collect();
+    assert_eq!(first.iter().map(|velocity| (velocity.x.to_bits(), velocity.y.to_bits())).collect::<Vec<_>>(), again, "and the same in every replay");
+}
+
+#[test]
+fn heavy_artillery_reaches_across_the_map() {
+    let mut world = world(20_480);
+    let gun = structure(&mut world, "t3_artillery", Team::Blue, 100, 500);
+    let target = structure(&mut world, "power_generator", Team::Red, 600, 500);
+    assert!(first_shot(&mut world, gun, 200).is_some(), "10,000 away is well within its 16,500");
+    let hit = (0..400).any(|_| {
+        world.advance_tick(&[]);
+        world.unit_health(target).is_none()
+    });
+    assert!(hit, "7,840 damage takes the generator");
+}

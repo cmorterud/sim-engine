@@ -74,6 +74,8 @@ pub enum Shape {
     FlakGun,
     /// A turret carrying a box of missiles raised to the sky, which swivels to aim.
     SamLauncher,
+    /// A heavy gun on a low armored base, its long barrel raised high, which swivels to aim.
+    ArtilleryGun,
     /// A shield's dome: an open half-sphere, drawn see-through.
     Dome,
     /// Flat, around the feet of a selected mobile unit.
@@ -83,7 +85,7 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub const ALL: [Self; 43] = [
+    pub const ALL: [Self; 44] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -124,6 +126,7 @@ impl Shape {
         Self::StrategicBomber,
         Self::FlakGun,
         Self::SamLauncher,
+        Self::ArtilleryGun,
         Self::Dome,
         Self::SelectionRing,
         Self::SelectionBox,
@@ -446,6 +449,11 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 [Vec3::new(-0.3, -0.2, 0.05), Vec3::new(0.3, -0.2, 0.05), Vec3::new(0.3, -0.05, 0.05), Vec3::new(-0.3, -0.05, 0.05)],
                 [Vec3::new(-0.3, 0.2, 0.45), Vec3::new(0.3, 0.2, 0.45), Vec3::new(0.3, 0.35, 0.45), Vec3::new(-0.3, 0.35, 0.45)],
             );
+        }
+        Shape::ArtilleryGun => {
+            mesh.block([-0.3, -0.35, -0.15], [0.3, 0.2, 0.15]);
+            mesh.beam([0.0, -0.1, 0.0], [0.0, 0.42, 0.4], 0.07, 0.07);
+            mesh.block([-0.12, -0.45, 0.0], [0.12, -0.3, 0.12]);
         }
         Shape::AirStaging => {
             mesh.block([-0.5, -0.5, -0.5], [0.5, 0.5, -0.3]);

@@ -171,16 +171,24 @@ pub struct AdjacencyBonus {
     /// Onto the mass and the energy it makes.
     pub mass_output: [i32; 5],
     pub energy_output: [i32; 5],
+    /// For artillery: off the energy each shot costs, and off the time between shots.
+    pub weapon_energy: [i32; 5],
+    pub rate_of_fire: [i32; 5],
 }
 
 /// What adjacency values are measured in: 100,000 is all of it.
 pub const ADJACENCY_SCALE: i64 = 100_000;
 
 impl AdjacencyGiver {
-    /// FAF's numbers, unchanged. Weapon energy and artillery rate of fire are left out, as no
-    /// structure here has an energy weapon or is artillery.
+    /// FAF's numbers, unchanged.
     pub const fn bonus(self) -> AdjacencyBonus {
         const NONE: [i32; 5] = [0; 5];
+        let (weapon_energy, rate_of_fire) = match self {
+            Self::T1Power => ([2_500, 1_250, 830, 625, 500], [4_000, 1_250, 830, 625, 500]),
+            Self::T2Power | Self::Hydrocarbon => ([5_000; 5], [6_250, 6_250, 6_250, 6_250, 2_500]),
+            Self::T3Power => ([7_500; 5], [10_000, 10_000, 10_000, 10_000, 4_000]),
+            _ => (NONE, NONE),
+        };
         let (energy_active, upkeep, mass_active, mass_output, energy_output) = match self {
             Self::T1Power => ([6_250, 3_125, 2_080, 1_563, 250], [6_250, 3_125, 2_080, 1_563, 1_250], NONE, NONE, NONE),
             Self::T2Power | Self::Hydrocarbon => ([12_500; 5], [12_500; 5], NONE, NONE, NONE),
@@ -193,7 +201,7 @@ impl AdjacencyGiver {
             Self::MassStorage => (NONE, NONE, NONE, [12_500, 6_250, 3_000, 3_125, 2_500], NONE),
             Self::EnergyStorage => (NONE, NONE, NONE, NONE, [25_000, 12_500, 8_334, 6_250, 5_000]),
         };
-        AdjacencyBonus { energy_active, mass_active, upkeep, mass_output, energy_output }
+        AdjacencyBonus { energy_active, mass_active, upkeep, mass_output, energy_output, weapon_energy, rate_of_fire }
     }
 }
 
@@ -257,6 +265,12 @@ pub struct WeaponDef {
     /// A nuclear blast's inner ring, on top of `damage` over all of `splash_radius`. Zero for none.
     pub inner_radius: Fp,
     pub inner_damage: Fp,
+    /// Artillery: it cannot hit what is closer than `min_range`, its shells land up to `spread`
+    /// from where they are aimed, and each shot costs `energy_per_shot`, if any.
+    pub artillery: bool,
+    pub min_range: Fp,
+    pub spread: Fp,
+    pub energy_per_shot: Res,
 }
 
 /// A defense that destroys enemy missiles in flight.
@@ -451,6 +465,11 @@ struct RawWeapon {
     targets: Option<String>,
     inner_radius: Option<Number>,
     inner_damage: Option<Number>,
+    #[serde(default)]
+    artillery: bool,
+    min_range: Option<Number>,
+    spread: Option<Number>,
+    energy_per_shot: Option<Number>,
 }
 
 #[derive(Deserialize)]
@@ -793,6 +812,10 @@ impl BlueprintDb {
                     },
                     inner_radius: whole(&weapon.inner_radius)?,
                     inner_damage: whole(&weapon.inner_damage)?,
+                    artillery: weapon.artillery,
+                    min_range: whole(&weapon.min_range)?,
+                    spread: whole(&weapon.spread)?,
+                    energy_per_shot: weapon.energy_per_shot.as_ref().map_or(Ok(Res::ZERO), Number::res).map_err(context)?,
                 }),
             };
             let death_explosion = match &unit.death_explosion {

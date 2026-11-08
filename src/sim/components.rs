@@ -148,6 +148,9 @@ pub struct Adjacency {
     pub mass_cost_discount: i32,
     /// Off what it needs to keep running.
     pub upkeep_discount: i32,
+    /// For artillery: off what each shot costs, and off the time between shots.
+    pub weapon_energy_discount: i32,
+    pub reload_discount: i32,
 }
 
 impl Adjacency {
@@ -242,6 +245,15 @@ impl Flight {
     pub fn out_of_fuel(&self) -> bool {
         self.fuel == 0
     }
+}
+
+/// An artillery piece's weapon (GAME_SPECIFICATION.md §7): it cannot hit what is too close,
+/// its shells scatter, and a shot may cost energy, which the team must have when it fires.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Artillery {
+    pub min_range: Fp,
+    pub spread: Fp,
+    pub energy_per_shot: super::blueprints::Res,
 }
 
 /// A weapon that can aim at aircraft. A weapon without it only hits what is on the ground.

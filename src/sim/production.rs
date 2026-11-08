@@ -379,6 +379,10 @@ impl SimWorld {
         if unit.weapon.is_some_and(|weapon| weapon.kind == WeaponKind::Bomb) {
             self.ecs.insert_one(entity, BombBay).expect("entity was just spawned");
         }
+        if let Some(weapon) = unit.weapon.filter(|weapon| weapon.artillery) {
+            let artillery = super::components::Artillery { min_range: weapon.min_range, spread: weapon.spread, energy_per_shot: weapon.energy_per_shot };
+            self.ecs.insert_one(entity, artillery).expect("entity was just spawned");
+        }
         if let Some(rate) = unit.weapon.and_then(|weapon| weapon.turn_rate) {
             self.ecs.insert_one(entity, Turret::new(facing, rate)).expect("entity was just spawned");
         }
@@ -1556,6 +1560,7 @@ impl SimWorld {
         }
         // Each finished neighbor of the team gives its bonuses for this structure's size, and they add up.
         let size = unit.adjacency_size;
+        let artillery = unit.weapon.is_some_and(|weapon| weapon.artillery);
         let mut adjacency = Adjacency::default();
         for neighbor in neighbors {
             let Some((_, entity)) = self.find_unit(neighbor) else {
@@ -1573,11 +1578,16 @@ impl SimWorld {
                 adjacency.upkeep_discount += bonus.upkeep[size];
                 adjacency.mass_output_bonus += bonus.mass_output[size];
                 adjacency.energy_output_bonus += bonus.energy_output[size];
+                // Weapon energy and rate of fire only matter to artillery, as in FAF.
+                if artillery {
+                    adjacency.weapon_energy_discount += bonus.weapon_energy[size];
+                    adjacency.reload_discount += bonus.rate_of_fire[size];
+                }
             }
         }
         // A discount can never make something free.
         let most = (ADJACENCY_SCALE * 9 / 10) as i32;
-        for discount in [&mut adjacency.energy_cost_discount, &mut adjacency.mass_cost_discount, &mut adjacency.upkeep_discount] {
+        for discount in [&mut adjacency.energy_cost_discount, &mut adjacency.mass_cost_discount, &mut adjacency.upkeep_discount, &mut adjacency.weapon_energy_discount, &mut adjacency.reload_discount] {
             *discount = (*discount).min(most);
         }
         adjacency
@@ -1913,6 +1923,12 @@ impl SimWorld {
             for value in [adjacency.mass_output_bonus, adjacency.energy_output_bonus, adjacency.energy_cost_discount, adjacency.mass_cost_discount, adjacency.upkeep_discount] {
                 hasher.write(&value.to_le_bytes());
             }
+            // Only for structures that have them, so that checksums from before artillery still hold.
+            if adjacency.weapon_energy_discount != 0 || adjacency.reload_discount != 0 {
+                hasher.write(&[1]);
+                hasher.write(&adjacency.weapon_energy_discount.to_le_bytes());
+                hasher.write(&adjacency.reload_discount.to_le_bytes());
+            }
         }
         if let Ok(builder) = self.ecs.get::<&Builder>(entity) {
             hasher.write(&[5]);
@@ -2010,6 +2026,12 @@ impl SimWorld {
         }
         if self.ecs.get::<&BombBay>(entity).is_ok() {
             hasher.write(&[27]);
+        }
+        if let Ok(artillery) = self.ecs.get::<&super::components::Artillery>(entity) {
+            hasher.write(&[28]);
+            hasher.write(&artillery.min_range.to_bits().to_le_bytes());
+            hasher.write(&artillery.spread.to_bits().to_le_bytes());
+            hasher.write(&artillery.energy_per_shot.to_bits().to_le_bytes());
         }
         if let Ok(upgrading) = self.ecs.get::<&Upgrading>(entity) {
             hasher.write(&[18]);

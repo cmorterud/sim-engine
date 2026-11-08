@@ -7,7 +7,7 @@ use super::blueprints::{BlueprintDb, Res};
 use super::air::{bomb_lands_on, BOMB_GRAVITY};
 use super::combat::{entry_hit, firing_solution, missile_velocity, probe_terrain, shot_is_clear, sphere_entry, GRAVITY};
 use super::commands::SimCommand;
-use super::components::{BuildTask, AntiAir, BombBay, Falling, Flight, Homing,
+use super::components::{BuildTask, AntiAir, Artillery, BombBay, Falling, Flight, Homing,
     Blueprinted, Builder, Combat, Construction, Factory, Footprint, Health, MoveClass, Order, OrderKind, OrderQueue, Patrol,
     Intel, Launcher, Missile, MissileDefense, Upgrading, Overcharged, OverchargeOrder, OverchargeWeapon, Paused, Position, Projectile, Shield, SimId, Team, Turning, Turret, UnitStats, Velocity, Veterancy,
     Wreck, WreckKind, rotate_toward,
@@ -345,6 +345,8 @@ struct PendingShot {
     homing: Option<SimId>,
     /// A bomb, with the velocity of the aircraft that dropped it.
     bomb: Option<Vec3Fp>,
+    /// How far from where it is aimed an artillery shell may land.
+    spread: Fp,
 }
 
 /// What a launcher gives the missile it fires.
@@ -1510,10 +1512,12 @@ impl SimWorld {
             Option<&AntiAir>,
             Option<&BombBay>,
             Option<&Flight>,
+            Option<&Artillery>,
+            Option<&super::components::Adjacency>,
         )>();
         let mut view = query.view();
         for (index, &(id, entity)) in units.iter().enumerate() {
-            let (stats, combat, turret, turning, mut overcharge, overcharge_order, mut launcher, anti_air, bomb_bay, flight) =
+            let (stats, combat, turret, turning, mut overcharge, overcharge_order, mut launcher, anti_air, bomb_bay, flight, artillery, adjacency) =
                 view.get_mut(entity).expect("unit list only holds live units");
             combat.ticks_until_ready = combat.ticks_until_ready.saturating_sub(1);
             if let Some(weapon) = overcharge.as_mut() {
@@ -1534,9 +1538,13 @@ impl SimWorld {
             // Only anti-air weapons hit aircraft, and most of them hit nothing else.
             let hits_air = anti_air.is_some();
             let hits_ground = anti_air.is_none_or(|anti_air| anti_air.also_ground);
+            // Artillery cannot hit what is closer than its least range.
+            let least = artillery.map_or(0, |artillery| i64::from(artillery.min_range.to_bits()));
+            let far_enough = |distance: i64| distance >= least * least;
             let can_engage = |entry: &super::spatial::GridEntry| {
                 let reach = range + i64::from(entry.radius);
                 squared_distance(entry.x, entry.y) <= reach * reach
+                    && far_enough(squared_distance(entry.x, entry.y))
                     && (if entry.is_air { hits_air } else { hits_ground })
                     && (!fog || visibility.is_visible(stats.team, entry.x, entry.y))
                     && !hidden(entry.id)
@@ -1588,7 +1596,7 @@ impl SimWorld {
                             let distance = squared_distance(other.x, other.y);
                             let reach = radius + i64::from(other.radius);
                             let visible = (!fog || visibility.is_visible(stats.team, other.x, other.y)) && !hidden(other.id);
-                            if distance <= reach * reach && visible && blocked != Some(other.id) {
+                            if distance <= reach * reach && far_enough(distance) && visible && blocked != Some(other.id) {
                                 let candidate = (other.is_structure, distance, other.id);
                                 if best.is_none_or(|current| candidate < current) {
                                     best = Some(candidate);
@@ -1668,6 +1676,7 @@ impl SimWorld {
                             missile: None,
                             homing: None,
                             bomb: None,
+                            spread: Fp::ZERO,
                         });
                         weapon.ticks_until_ready = weapon.reload_ticks;
                         finished_overcharges.push(id);
@@ -1687,7 +1696,20 @@ impl SimWorld {
                 let reach = (combat.projectile_splash + Fp::from_bits(radius)) / 2;
                 at_height && turning.is_some_and(|turning| bomb_lands_on(raw(me.x, me.y, me.z), turning.facing, speed, to, reach))
             };
-            if combat.ticks_until_ready == 0 && aimed && gun_free && loaded {
+            // Artillery waits for the energy a shot needs, and reloads faster beside generators.
+            let weapon_energy = artillery.map_or(Res::ZERO, |artillery| {
+                super::components::Adjacency::less(artillery.energy_per_shot, adjacency.map_or(0, |adjacency| adjacency.weapon_energy_discount))
+            });
+            let charged = economies[stats.team.index()].energy >= weapon_energy;
+            let reload = match (artillery, adjacency) {
+                (Some(_), Some(adjacency)) => {
+                    let ticks = i64::from(combat.reload_ticks) * (super::blueprints::ADJACENCY_SCALE - i64::from(adjacency.reload_discount)) / super::blueprints::ADJACENCY_SCALE;
+                    ticks.max(1) as u32
+                }
+                _ => combat.reload_ticks,
+            };
+            let spread = artillery.map_or(Fp::ZERO, |artillery| artillery.spread);
+            if combat.ticks_until_ready == 0 && aimed && gun_free && loaded && charged {
                 if let Some(target) = combat.target {
                     let entry = locate(target).expect("target was just validated or found");
                     let (from, to) = (raw(me.x, me.y, me.z), raw(entry.x, entry.y, entry.z));
@@ -1713,8 +1735,10 @@ impl SimWorld {
                             missile,
                             homing,
                             bomb,
+                            spread,
                         });
-                        combat.ticks_until_ready = combat.reload_ticks;
+                        economies[stats.team.index()].energy -= weapon_energy;
+                        combat.ticks_until_ready = reload;
                         if let Some(launcher) = launcher.as_mut() {
                             launcher.stock -= 1;
                             if launcher.strategic {
@@ -1728,8 +1752,10 @@ impl SimWorld {
             // just above it at the spot, to skim on past. Any deeper, and a flat shot lands short.
             if let Some(spot) = ground.filter(|_| hits_ground) {
                 let spot_point = Vec3Fp::new(spot.x, spot.y, terrain.height_at(spot));
-                let in_reach = if bomb.is_some() { bomb_on(spot_point, 0) } else { squared_distance(spot.x.to_bits(), spot.y.to_bits()) <= range * range };
-                if combat.ticks_until_ready == 0 && aimed && loaded && in_reach {
+                let distance = squared_distance(spot.x.to_bits(), spot.y.to_bits());
+                let in_reach = if bomb.is_some() { bomb_on(spot_point, 0) } else { distance <= range * range && far_enough(distance) };
+                let charged = economies[stats.team.index()].energy >= weapon_energy;
+                if combat.ticks_until_ready == 0 && aimed && loaded && in_reach && charged {
                     let from = Vec3Fp::new(Fp::from_bits(me.x), Fp::from_bits(me.y), Fp::from_bits(me.z));
                     shots.push(PendingShot {
                         source: id,
@@ -1743,8 +1769,10 @@ impl SimWorld {
                         missile,
                         homing: None,
                         bomb,
+                        spread,
                     });
-                    combat.ticks_until_ready = combat.reload_ticks;
+                    economies[stats.team.index()].energy -= weapon_energy;
+                    combat.ticks_until_ready = reload;
                     if let Some(launcher) = launcher.as_mut() {
                         launcher.stock -= 1;
                         if launcher.strategic {
@@ -1825,7 +1853,18 @@ impl SimWorld {
                 self.ecs.insert_one(entity, Falling).expect("just spawned");
                 continue;
             }
-            let solution = firing_solution(shot.from, shot.to, shot.speed);
+            // An artillery shell lands somewhere within its spread of where it was aimed.
+            let to = if shot.spread > Fp::ZERO {
+                loop {
+                    let (x, y) = (self.rng.range_fp(-shot.spread, shot.spread), self.rng.range_fp(-shot.spread, shot.spread));
+                    if wide_mul(x, x) + wide_mul(y, y) <= wide_mul(shot.spread, shot.spread) {
+                        break Vec3Fp::new(shot.to.x + x, shot.to.y + y, shot.to.z);
+                    }
+                }
+            } else {
+                shot.to
+            };
+            let solution = firing_solution(shot.from, to, shot.speed);
             let projectile = self.spawn_projectile(
                 shot.from,
                 Projectile {
