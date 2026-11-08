@@ -76,6 +76,10 @@ pub enum Shape {
     SamLauncher,
     /// A heavy gun on a low armored base, its long barrel raised high, which swivels to aim.
     ArtilleryGun,
+    /// Two long piers with a gantry across them, for building ships between.
+    NavalFactory,
+    /// A hull with a pointed bow along +Y, a bridge, and a mast.
+    Ship,
     /// A shield's dome: an open half-sphere, drawn see-through.
     Dome,
     /// Flat, around the feet of a selected mobile unit.
@@ -85,7 +89,7 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub const ALL: [Self; 44] = [
+    pub const ALL: [Self; 46] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -127,6 +131,8 @@ impl Shape {
         Self::FlakGun,
         Self::SamLauncher,
         Self::ArtilleryGun,
+        Self::NavalFactory,
+        Self::Ship,
         Self::Dome,
         Self::SelectionRing,
         Self::SelectionBox,
@@ -454,6 +460,24 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.block([-0.3, -0.35, -0.15], [0.3, 0.2, 0.15]);
             mesh.beam([0.0, -0.1, 0.0], [0.0, 0.42, 0.4], 0.07, 0.07);
             mesh.block([-0.12, -0.45, 0.0], [0.12, -0.3, 0.12]);
+        }
+        Shape::NavalFactory => {
+            mesh.block([-0.5, -0.5, -0.5], [-0.3, 0.5, -0.15]);
+            mesh.block([0.3, -0.5, -0.5], [0.5, 0.5, -0.15]);
+            mesh.block([-0.3, -0.5, -0.5], [0.3, -0.35, 0.05]);
+            mesh.block([-0.5, -0.1, 0.25], [0.5, 0.1, 0.4]);
+            mesh.block([-0.48, -0.08, -0.15], [-0.36, 0.08, 0.25]);
+            mesh.block([0.36, -0.08, -0.15], [0.48, 0.08, 0.25]);
+        }
+        Shape::Ship => {
+            mesh.block([-0.25, -0.5, -0.5], [0.25, 0.25, -0.2]);
+            mesh.cuboid(
+                [Vec3::new(-0.25, 0.25, -0.5), Vec3::new(0.25, 0.25, -0.5), Vec3::new(0.02, 0.5, -0.5), Vec3::new(-0.02, 0.5, -0.5)],
+                [Vec3::new(-0.25, 0.25, -0.2), Vec3::new(0.25, 0.25, -0.2), Vec3::new(0.02, 0.5, -0.2), Vec3::new(-0.02, 0.5, -0.2)],
+            );
+            mesh.block([-0.14, -0.3, -0.2], [0.14, 0.05, 0.12]);
+            mesh.frustum([0.0, -0.12], [0.12, 0.5], [0.03, 0.02], 6);
+            mesh.beam([0.0, 0.08, -0.12], [0.0, 0.32, -0.08], 0.04, 0.04);
         }
         Shape::AirStaging => {
             mesh.block([-0.5, -0.5, -0.5], [0.5, 0.5, -0.3]);

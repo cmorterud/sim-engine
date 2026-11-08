@@ -28,7 +28,7 @@ pub const CYCLE_TIER: char = '`';
 
 /// The keys of a build bar, by slot, in the order the bar shows them. Builders' and factories'
 /// bars use the same keys, since only one bar is shown at a time: a factory's, if one is selected.
-pub const SLOT_KEYS: [char; 17] = ['Q', 'E', 'G', 'T', 'C', 'Z', 'V', 'B', 'H', 'N', ',', '.', '/', ';', '\'', '[', ']'];
+pub const SLOT_KEYS: [char; 18] = ['Q', 'E', 'G', 'T', 'C', 'Z', 'V', 'B', 'H', 'N', ',', '.', '/', ';', '\'', '[', ']', '\\'];
 
 /// Which bar an item is in: a builder's, for structures, or a factory's, for units and missiles.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -61,10 +61,11 @@ pub fn build_slot(key: &str) -> Option<(Bar, usize)> {
         "quantum_gateway" => (Builder, 14),
         "energy_storage" => (Builder, 15),
         "t2_artillery" | "t3_artillery" => (Builder, 16),
+        "naval_factory" => (Builder, 17),
         // Builders and scouts, then direct fire, then artillery and bombers, then anti-air and gunships.
         "t1_engineer" | "t2_engineer" | "t3_engineer" | "support_commander" | "t1_air_scout" | "t3_spy_plane" => (Factory, 0),
         "tactical_missile" | "strategic_missile" | "anti_nuke" => (Factory, 0),
-        "t1_light_bot" | "t2_heavy_tank" | "t1_interceptor" | "t3_air_superiority" => (Factory, 1),
+        "t1_light_bot" | "t2_heavy_tank" | "t1_interceptor" | "t3_air_superiority" | "t1_frigate" => (Factory, 1),
         "t1_light_artillery" | "t3_mobile_artillery" | "t1_bomber" | "t2_fighter_bomber" | "t3_strategic_bomber" => (Factory, 2),
         "t1_mobile_aa" | "t2_mobile_flak" | "t2_gunship" | "t3_heavy_gunship" => (Factory, 3),
         _ => return None,
@@ -101,6 +102,7 @@ pub const fn letter_for(code: KeyCode) -> Option<char> {
         KeyCode::Quote => '\'',
         KeyCode::BracketLeft => '[',
         KeyCode::BracketRight => ']',
+        KeyCode::Backslash => '\\',
         KeyCode::Backquote => CYCLE_TIER,
         KeyCode::KeyM => MOVE,
         KeyCode::KeyF => ATTACK_MOVE,
@@ -139,7 +141,7 @@ mod tests {
     use super::*;
     use crate::sim::blueprints::BlueprintDb;
 
-    const ALL_KEYS: [KeyCode; 29] = [
+    const ALL_KEYS: [KeyCode; 30] = [
         KeyCode::KeyQ,
         KeyCode::KeyE,
         KeyCode::KeyG,
@@ -157,6 +159,7 @@ mod tests {
         KeyCode::Quote,
         KeyCode::BracketLeft,
         KeyCode::BracketRight,
+        KeyCode::Backslash,
         KeyCode::Backquote,
         KeyCode::KeyM,
         KeyCode::KeyF,

@@ -428,6 +428,8 @@ pub struct PlacementMap<'a> {
     pub deposits: &'a [(u32, u32)],
     /// Hydrocarbon vents, by cell.
     pub vents: &'a [(u32, u32)],
+    /// Sorted (y, x) cells of water deep enough for ships, where naval structures go.
+    pub water_cells: &'a [(u32, u32)],
     pub blueprints: &'a BlueprintDb,
 }
 
@@ -454,7 +456,8 @@ pub fn placement_is_valid(map: &PlacementMap<'_>, blueprint: BlueprintId, cell: 
         .collect();
     for y in cell.1..cell.1 + size {
         for x in cell.0..cell.0 + size {
-            if map.blocked_cells.binary_search(&(y, x)).is_ok() {
+            let on_water = map.water_cells.binary_search(&(y, x)).is_ok();
+            if unit.on_water != on_water || (!unit.on_water && map.blocked_cells.binary_search(&(y, x)).is_ok()) {
                 return false;
             }
             if !unit.requires_deposit && map.deposits.contains(&(x, y)) {
@@ -844,7 +847,7 @@ mod tests {
         let (generator, extractor, factory) = (db.id("power_generator"), db.id("mass_extractor"), db.id("land_factory_t1"));
         let blocked = [(10, 10)];
         let deposits = [(20, 20)];
-        let map = PlacementMap { cells_per_side: 512, blocked_cells: &blocked, deposits: &deposits, vents: &[], blueprints: &db };
+        let map = PlacementMap { cells_per_side: 512, blocked_cells: &blocked, deposits: &deposits, vents: &[], water_cells: &[], blueprints: &db };
         let existing = [view(1, Team::Blue, factory, &db, 1_030.0, 1_030.0)];
         assert!(placement_is_valid(&map, generator, (100, 100), &existing, &[]));
         assert!(!placement_is_valid(&map, generator, (10, 10), &existing, &[]), "on a wall");
@@ -865,7 +868,7 @@ mod tests {
         let extractor = db.id("mass_extractor");
         let heights = flat_heights();
         let deposits = [(100, 100), (110, 100), (140, 100)];
-        let map = PlacementMap { cells_per_side: 512, blocked_cells: &[], deposits: &deposits, vents: &[], blueprints: &db };
+        let map = PlacementMap { cells_per_side: 512, blocked_cells: &[], deposits: &deposits, vents: &[], water_cells: &[], blueprints: &db };
         let target_at = |camera: &Camera, offset_px: f64| {
             let screen = camera.world_to_screen(deposit_position((100, 100), &heights)).unwrap();
             let cursor = [screen[0] + offset_px, screen[1]];
@@ -888,7 +891,7 @@ mod tests {
         let extractor = db.id("mass_extractor");
         let heights = flat_heights();
         let deposits = [(100, 100), (102, 100)];
-        let map = PlacementMap { cells_per_side: 512, blocked_cells: &[], deposits: &deposits, vents: &[], blueprints: &db };
+        let map = PlacementMap { cells_per_side: 512, blocked_cells: &[], deposits: &deposits, vents: &[], water_cells: &[], blueprints: &db };
         let mut camera = Camera::new(10_240.0, [1600.0, 1000.0]);
         camera.look_at(2_000.0, 2_000.0, 1_500.0);
         let cursor = camera.world_to_screen(deposit_position((100, 100), &heights)).unwrap();
@@ -904,7 +907,7 @@ mod tests {
         let generator = db.id("power_generator");
         let heights = flat_heights();
         let deposits = [(100, 100)];
-        let map = PlacementMap { cells_per_side: 512, blocked_cells: &[], deposits: &deposits, vents: &[], blueprints: &db };
+        let map = PlacementMap { cells_per_side: 512, blocked_cells: &[], deposits: &deposits, vents: &[], water_cells: &[], blueprints: &db };
         let mut camera = Camera::new(10_240.0, [1600.0, 1000.0]);
         camera.look_at(2_000.0, 2_000.0, 300.0);
         let target = placement_target(&map, generator, [800.0, 500.0], Some([2_030.0, 2_010.0]), &camera, &heights, &[], &[], 1.0);
@@ -943,7 +946,7 @@ mod tests {
     fn queued_builds_block_placement_but_their_neighbors_are_free() {
         let db = db();
         let (generator, factory) = (db.id("power_generator"), db.id("land_factory_t1"));
-        let map = PlacementMap { cells_per_side: 512, blocked_cells: &[], deposits: &[], vents: &[], blueprints: &db };
+        let map = PlacementMap { cells_per_side: 512, blocked_cells: &[], deposits: &[], vents: &[], water_cells: &[], blueprints: &db };
         // A queued factory covering cells 50 to 52.
         let pending = [PendingBuild { center: [1_030.0, 1_030.0, 0.0], width: 60.0 }];
         assert!(!placement_is_valid(&map, generator, (51, 51), &[], &pending), "on top of a queued build");

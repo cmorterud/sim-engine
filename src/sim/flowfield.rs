@@ -208,7 +208,15 @@ pub enum FlowSample {
     Unreachable,
 }
 
+/// Naval routes are numbered from here, so that any route can be found from its number alone.
+pub const NAVAL_ROUTE_BASE: u32 = 1 << 30;
+
 pub struct FlowField {
+    /// Whose ground this field paths over: land, or water for ships.
+    class: MoveClass,
+    /// For ships, made the first time one needs a route, so that games without ships are
+    /// exactly as they were. Calls about a naval route go to it.
+    naval: Option<Box<FlowField>>,
     sectors_per_side: usize,
     cells: usize,
     portals: Vec<Portal>,
@@ -234,6 +242,8 @@ impl FlowField {
     pub fn new(terrain: &Terrain) -> Self {
         let cells = terrain.cells_per_side();
         Self {
+            class: MoveClass::Land,
+            naval: None,
             sectors_per_side: cells / SECTOR_CELLS,
             cells,
             portals: Vec::new(),
@@ -251,8 +261,44 @@ impl FlowField {
         }
     }
 
+    fn new_naval(terrain: &Terrain) -> Self {
+        Self { class: MoveClass::Naval, next_route: NAVAL_ROUTE_BASE, ..Self::new(terrain) }
+    }
+
+    /// The field that holds a route, by its number.
+    fn holder(&self, id: u32) -> Option<&Self> {
+        if id >= NAVAL_ROUTE_BASE && self.class == MoveClass::Land { self.naval.as_deref() } else { Some(self) }
+    }
+
+    fn holder_mut(&mut self, id: u32) -> Option<&mut Self> {
+        if id >= NAVAL_ROUTE_BASE && self.class == MoveClass::Land { self.naval.as_deref_mut() } else { Some(self) }
+    }
+
+    /// Creates a route over the ground of a movement class: water for ships, and land for
+    /// everything else.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_route_for(
+        &mut self,
+        class: MoveClass,
+        terrain: &Terrain,
+        tick: u32,
+        goal: Vec2Fp,
+        references: u32,
+        arrive_radius: Fp,
+        follow: Option<SimId>,
+    ) -> Option<u32> {
+        if class == MoveClass::Naval && self.class == MoveClass::Land {
+            let naval = self.naval.get_or_insert_with(|| Box::new(Self::new_naval(terrain)));
+            return naval.create_route(terrain, tick, goal, references, arrive_radius, follow);
+        }
+        self.create_route(terrain, tick, goal, references, arrive_radius, follow)
+    }
+
     /// Call after any cost grid change. The graph and existing routes rebuild on next use.
     pub fn invalidate(&mut self) {
+        if let Some(naval) = self.naval.as_deref_mut() {
+            naval.invalidate();
+        }
         self.graph_dirty = true;
         for links in &mut self.link_cache {
             links.clear();
@@ -262,6 +308,9 @@ impl FlowField {
     /// Call after the cost of a square of cells changes, as when a structure goes up or comes
     /// down. Only the sectors it touches forget their distances.
     pub fn invalidate_cells(&mut self, cell_x: u32, cell_y: u32, size: u32) {
+        if let Some(naval) = self.naval.as_deref_mut() {
+            naval.invalidate_cells(cell_x, cell_y, size);
+        }
         self.graph_dirty = true;
         let last = self.cells.saturating_sub(1);
         let corners = [(cell_x as usize, cell_y as usize), ((cell_x + size - 1) as usize, (cell_y + size - 1) as usize)];
@@ -303,7 +352,7 @@ impl FlowField {
     }
 
     fn build_graph(&mut self, terrain: &Terrain) {
-        let cost = land_cost(terrain);
+        let cost = class_cost(terrain, self.class);
         let sectors = self.sectors_per_side;
         let cells = self.cells;
         self.portals.clear();
@@ -399,6 +448,9 @@ impl FlowField {
 
     /// Builds the portal graph now if it is out of date.
     pub fn prepare(&mut self, terrain: &Terrain) {
+        if let Some(naval) = self.naval.as_deref_mut() {
+            naval.prepare(terrain);
+        }
         self.ensure_graph(terrain);
     }
 
@@ -414,7 +466,7 @@ impl FlowField {
         follow: Option<SimId>,
     ) -> Option<u32> {
         self.ensure_graph(terrain);
-        nearest_passable_cell(terrain, goal)?;
+        nearest_passable_cell_for(terrain, self.class, goal)?;
         let id = self.next_route;
         self.next_route += 1;
         let sectors = self.sectors_per_side * self.sectors_per_side;
@@ -443,9 +495,9 @@ impl FlowField {
     /// Runs Dijkstra outward from the goal over the portal graph. Every sector gets
     /// routing data at once, so a group spread across many sectors shares one search.
     fn route_to(&mut self, id: u32, terrain: &Terrain, goal: Vec2Fp) {
-        let cost = land_cost(terrain);
+        let cost = class_cost(terrain, self.class);
         let cells = self.cells;
-        let Some(goal_cell) = nearest_passable_cell(terrain, goal) else {
+        let Some(goal_cell) = nearest_passable_cell_for(terrain, self.class, goal) else {
             return;
         };
         let goal_sector = self.sector_of_cell(goal_cell);
@@ -495,13 +547,19 @@ impl FlowField {
 
     /// Adds references to a route, for units reassigned to it.
     pub fn retain(&mut self, id: u32) {
-        if let Some(route) = self.routes.get_mut(&id) {
+        if let Some(route) = self.holder_mut(id).and_then(|field| field.routes.get_mut(&id)) {
             route.references += 1;
         }
     }
 
     /// Drops one reference. The route and its fields are freed at zero.
     pub fn release(&mut self, id: u32) {
+        if id >= NAVAL_ROUTE_BASE && self.class == MoveClass::Land {
+            if let Some(naval) = self.naval.as_deref_mut() {
+                naval.release(id);
+            }
+            return;
+        }
         let Some(route) = self.routes.get_mut(&id) else {
             return;
         };
@@ -519,25 +577,32 @@ impl FlowField {
     }
 
     pub fn goal(&self, id: u32) -> Option<Vec2Fp> {
-        self.routes.get(&id).map(|route| route.goal)
+        self.holder(id)?.routes.get(&id).map(|route| route.goal)
     }
 
     /// The open cell the route ends in, which is not the goal's own cell if that is blocked.
     pub fn goal_cell(&self, id: u32) -> Option<(usize, usize)> {
-        self.routes.get(&id).map(|route| route.goal_cell)
+        self.holder(id)?.routes.get(&id).map(|route| route.goal_cell)
     }
 
     pub fn arrive_radius(&self, id: u32) -> Option<Fp> {
-        self.routes.get(&id).map(|route| route.arrive_radius)
+        self.holder(id)?.routes.get(&id).map(|route| route.arrive_radius)
     }
 
     pub fn is_following(&self, id: u32) -> bool {
-        self.routes.get(&id).is_some_and(|route| route.follow.is_some())
+        self.holder(id).is_some_and(|field| field.routes.get(&id).is_some_and(|route| route.follow.is_some()))
     }
 
     /// Re-routes moving goals when they change cells, at most once every
     /// `REROUTE_INTERVAL_TICKS`. `locate` returns a unit's current position.
     pub fn update_moving_goals(&mut self, terrain: &Terrain, tick: u32, locate: impl Fn(SimId) -> Option<Vec2Fp>) {
+        self.update_moving_goals_with(terrain, tick, &locate);
+    }
+
+    fn update_moving_goals_with(&mut self, terrain: &Terrain, tick: u32, locate: &dyn Fn(SimId) -> Option<Vec2Fp>) {
+        if let Some(naval) = self.naval.as_deref_mut() {
+            naval.update_moving_goals_with(terrain, tick, locate);
+        }
         self.ensure_graph(terrain);
         let mut reroutes = Vec::new();
         for (&id, route) in &mut self.routes {
@@ -565,6 +630,9 @@ impl FlowField {
     /// Samples a route for a unit, requesting a field build when one is missing or stale.
     /// A stale field stays in use until its replacement is ready, so units do not stutter.
     pub fn sample(&mut self, id: u32, tick: u32, position: Vec2Fp, terrain: &Terrain) -> FlowSample {
+        if id >= NAVAL_ROUTE_BASE && self.class == MoveClass::Land {
+            return self.naval.as_deref_mut().map_or(FlowSample::Hold, |naval| naval.sample(id, tick, position, terrain));
+        }
         let cell = terrain.cell_of(position);
         let sector = self.sector_of_cell(cell);
         let origin = self.sector_origin(sector);
@@ -594,6 +662,9 @@ impl FlowField {
 
     /// Builds queued sector fields, up to the fixed per-tick budget.
     pub fn build_pending(&mut self, terrain: &Terrain, tick: u32) {
+        if let Some(naval) = self.naval.as_deref_mut() {
+            naval.build_pending(terrain, tick);
+        }
         self.ensure_graph(terrain);
         let mut built = 0;
         while built < MAX_FIELD_BUILDS_PER_TICK {
@@ -616,7 +687,7 @@ impl FlowField {
     }
 
     fn build_field(&mut self, id: u32, sector: u32, terrain: &Terrain, tick: u32) {
-        let cost = land_cost(terrain);
+        let cost = class_cost(terrain, self.class);
         let cells = self.cells;
         let origin = self.sector_origin(sector);
         let route = &self.routes[&id];
@@ -737,11 +808,20 @@ impl FlowField {
             hasher.write(&field.generation.to_le_bytes());
             hasher.write(&field.last_used.to_le_bytes());
         }
+        if let Some(naval) = &self.naval {
+            hasher.write(&[1]);
+            naval.hash_state(hasher);
+        }
     }
 }
 
+#[cfg(test)]
 fn land_cost(terrain: &Terrain) -> &[u8] {
     terrain.cost_grid(MoveClass::Land).expect("land cost grid exists")
+}
+
+fn class_cost(terrain: &Terrain, class: MoveClass) -> &[u8] {
+    terrain.cost_grid(class).expect("land and naval cost grids exist")
 }
 
 fn local_index(cell: (usize, usize), origin: (usize, usize)) -> usize {
@@ -766,7 +846,12 @@ fn uniform_cost(cost: &[u8], cells: usize, origin: (usize, usize)) -> Option<u8>
 /// Finds the closest passable cell to a point, searching outward in square rings.
 /// Ties resolve in a fixed scan order.
 pub fn nearest_passable_cell(terrain: &Terrain, point: Vec2Fp) -> Option<(usize, usize)> {
-    let cost = land_cost(terrain);
+    nearest_passable_cell_for(terrain, MoveClass::Land, point)
+}
+
+/// The same, for the ground a movement class can be on.
+pub fn nearest_passable_cell_for(terrain: &Terrain, class: MoveClass, point: Vec2Fp) -> Option<(usize, usize)> {
+    let cost = class_cost(terrain, if class == MoveClass::Naval { MoveClass::Naval } else { MoveClass::Land });
     let cells = terrain.cells_per_side() as i64;
     let (cx, cy) = terrain.cell_of(point);
     let (cx, cy) = (cx as i64, cy as i64);

@@ -211,6 +211,7 @@ impl AdjacencyGiver {
 pub enum FactoryKind {
     Land,
     Air,
+    Naval,
 }
 
 /// What a weapon can aim at: things on the ground, aircraft, or both.
@@ -356,6 +357,10 @@ pub struct Blueprint {
     pub requires_deposit: bool,
     /// Built over a hydrocarbon vent, which must be under the middle of its footprint.
     pub requires_vent: bool,
+    /// A structure built on deep water, such as a naval factory, instead of on land.
+    pub on_water: bool,
+    /// A unit that sails, on deep water only.
+    pub naval: bool,
     /// Per tick.
     pub mass_income: Res,
     /// Per tick.
@@ -400,6 +405,17 @@ impl Blueprint {
 
     pub const fn is_air(&self) -> bool {
         self.flight.is_some()
+    }
+
+    /// How it moves: through the air, on the water, or over land.
+    pub const fn move_class(&self) -> super::components::MoveClass {
+        if self.flight.is_some() {
+            super::components::MoveClass::Air
+        } else if self.naval {
+            super::components::MoveClass::Naval
+        } else {
+            super::components::MoveClass::Land
+        }
     }
 
     /// A factory upgraded to T2 or T3, which support factories of its kind need.
@@ -583,6 +599,10 @@ struct RawUnit {
     requires_deposit: bool,
     #[serde(default)]
     requires_vent: bool,
+    #[serde(default)]
+    on_water: bool,
+    /// "land", the default, or "naval".
+    movement: Option<String>,
     mass_income: Option<Number>,
     energy_income: Option<Number>,
     mass_storage: Option<Number>,
@@ -930,6 +950,12 @@ impl BlueprintDb {
                 },
                 requires_deposit: unit.requires_deposit,
                 requires_vent: unit.requires_vent,
+                on_water: unit.on_water,
+                naval: match unit.movement.as_deref() {
+                    None | Some("land") => false,
+                    Some("naval") => true,
+                    Some(other) => return Err(context(format!("unknown movement {other:?}"))),
+                },
                 mass_income: rate(&unit.mass_income)?,
                 energy_income: rate(&unit.energy_income)?,
                 mass_storage: total(&unit.mass_storage)?,
@@ -943,6 +969,7 @@ impl BlueprintDb {
                     None => None,
                     Some("land") => Some(FactoryKind::Land),
                     Some("air") => Some(FactoryKind::Air),
+                    Some("naval") => Some(FactoryKind::Naval),
                     Some(other) => return Err(context(format!("unknown factory kind {other:?}"))),
                 },
                 support: unit.support,

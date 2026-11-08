@@ -334,6 +334,7 @@ struct MapInfo {
     /// Terrain cells covered by walls: the lower corners for drawing, and sorted (y, x) for lookups.
     wall_cells: Vec<([f64; 2], f64)>,
     blocked_cells: Vec<(u32, u32)>,
+    water_cells: Vec<(u32, u32)>,
     deposits: Vec<(u32, u32)>,
     vents: Vec<(u32, u32)>,
     blueprints: Arc<BlueprintDb>,
@@ -379,12 +380,14 @@ fn read_map(scenario: &Scenario) -> MapInfo {
     }
     blocked_cells.sort_unstable();
     blocked_cells.dedup();
+    let water_cells: Vec<(u32, u32)> = (0..cells).flat_map(|y| (0..cells).map(move |x| (y, x))).filter(|&(y, x)| world.terrain.cell_is_navigable(x, y)).collect();
     MapInfo {
         water_level: world.terrain.water_level().to_num::<f32>(),
         map_units: f64::from(world.terrain.map_units()),
         cells_per_side: world.terrain.cells_per_side() as u32,
         wall_cells,
         blocked_cells,
+        water_cells,
         deposits: world.deposits.clone(),
         vents: world.vents.clone(),
         blueprints: Arc::clone(&world.blueprints),
@@ -400,6 +403,7 @@ impl MapInfo {
             blocked_cells: &self.blocked_cells,
             deposits: &self.deposits,
             vents: &self.vents,
+            water_cells: &self.water_cells,
             blueprints: &self.blueprints,
         }
     }

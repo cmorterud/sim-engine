@@ -7,13 +7,12 @@ use std::hash::Hasher;
 use super::blueprints::{BlueprintId, Res, Targets, UnitClass, WeaponKind, ADJACENCY_SCALE, TICKS_PER_SECOND};
 use super::commands::SimCommand;
 use super::components::{
-    Adjacency, AntiAir, BeingCaptured, BombBay, Flight, MoveClass, Blueprinted, BuildTask, Builder, Intel, Launcher, Upgrading, MissileDefense, OverchargeOrder, OverchargeWeapon, Paused, Shield, Turning, Turret, Veterancy, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, OrderQueue, Patrol,
+    Adjacency, AntiAir, BeingCaptured, BombBay, Flight, Blueprinted, BuildTask, Builder, Intel, Launcher, Upgrading, MissileDefense, OverchargeOrder, OverchargeWeapon, Paused, Shield, Turning, Turret, Veterancy, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, OrderQueue, Patrol,
     Position, SimId, Team, UnitStats, Wreck, WreckKind,
 };
 use super::config::{
     PATROL_SEARCH_INTERVAL, PATROL_SEARCH_RADIUS_UNITS, RECLAIM_ENERGY_PER_POWER, RECLAIM_MASS_PER_POWER, ROCK_MASS_PER_RADIUS, TERRAIN_CELL_UNITS, TREE_ENERGY, TREE_MASS, TREE_RADIUS_UNITS,
 };
-use super::flowfield::nearest_passable_cell;
 use super::spatial::{GridEntry, Layer};
 use super::world::{BuildQueueView, EconomyView, OrderStopView, PlanStep, UnitRatesView, PlanStepKind, SimWorld, UnitPlanView, UnitSpawn, WorkLinkView};
 use crate::math::fp::{fp_int, wide_mul, Fp, Vec2Fp};
@@ -187,7 +186,7 @@ impl SimWorld {
     /// Spawns a finished mobile unit.
     pub fn spawn_mobile(&mut self, blueprint: BlueprintId, team: Team, position: Vec2Fp) -> SimId {
         let spawn = self.blueprint_spawn(blueprint, team, position);
-        let move_class = if self.blueprints.get(blueprint).is_air() { MoveClass::Air } else { MoveClass::Land };
+        let move_class = self.blueprints.get(blueprint).move_class();
         let id = self.spawn_unit_as(spawn, move_class);
         let entity = self.find_unit(id).expect("just spawned").1;
         self.attach_blueprint_parts(id, entity, blueprint);
@@ -222,7 +221,9 @@ impl SimWorld {
         }
         for y in cell_y..cell_y + size {
             for x in cell_x..cell_x + size {
-                if !self.terrain.cell_is_open(x, y) {
+                // A structure on the water needs deep water under all of it, and one on land, land.
+                let open = if unit.on_water { self.terrain.cell_is_navigable(x, y) } else { self.terrain.cell_is_open(x, y) };
+                if !open {
                     return false;
                 }
                 // Deposits are saved for extractors, and vents for hydrocarbon plants.
@@ -293,7 +294,9 @@ impl SimWorld {
         self.clear_scenery(team, cell_x, cell_y, size);
         let center = cell_center(cell_x, cell_y, size);
         let spawn = self.blueprint_spawn(blueprint, team, center);
-        let id = self.spawn_unit(spawn);
+        // A structure on the water floats on it, as ships do.
+        let class = if self.blueprints.get(blueprint).on_water { super::components::MoveClass::Naval } else { super::components::MoveClass::Land };
+        let id = self.spawn_unit_as(spawn, class);
         let entity = self.find_unit(id).expect("just spawned").1;
         self.attach_blueprint_parts(id, entity, blueprint);
         self.ecs
@@ -1474,9 +1477,9 @@ impl SimWorld {
         let exit = exits
             .iter()
             .map(|&(x, y)| center + Vec2Fp::new(reach * x, reach * y))
-            .find(|point| self.terrain.in_bounds(*point) && self.terrain.is_passable(*point))
+            .find(|point| self.terrain.in_bounds(*point) && self.terrain.passable_for(unit.move_class(), *point))
             .or_else(|| {
-                nearest_passable_cell(&self.terrain, center).map(|(x, y)| cell_center(x as u32, y as u32, 1))
+                super::flowfield::nearest_passable_cell_for(&self.terrain, unit.move_class(), center).map(|(x, y)| cell_center(x as u32, y as u32, 1))
             });
         let Some(exit) = exit else {
             return;

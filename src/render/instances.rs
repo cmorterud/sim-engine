@@ -169,6 +169,8 @@ pub fn unit_look(key: &str) -> UnitLook {
         "strategic_missile_defense" => look(Shape::AntiNukeSilo, Some([0.95, 0.95, 0.95]), 0.7),
         "air_factory" => look(Shape::Factory, Some([0.45, 0.60, 0.80]), 0.5),
         "air_staging" => look(Shape::AirStaging, Some([0.70, 0.80, 0.90]), 0.5),
+        "naval_factory" => look(Shape::NavalFactory, Some([0.35, 0.45, 0.55]), 0.5),
+        "t1_frigate" => look(Shape::Ship, None, 0.5),
         "land_factory_t2_support" => look(Shape::Factory, Some([0.28, 0.28, 0.36]), 0.62),
         "land_factory_t3_support" => look(Shape::Factory, Some([0.16, 0.16, 0.26]), 0.78),
         "air_factory_t2_support" => look(Shape::Factory, Some([0.36, 0.52, 0.72]), 0.58),

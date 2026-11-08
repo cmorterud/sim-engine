@@ -9,6 +9,8 @@ use crate::math::rng::SimRng;
 
 pub const COST_OPEN: u8 = 1;
 pub const COST_IMPASSABLE: u8 = 255;
+/// How far below the water a cell's highest corner must be for ships to sail it.
+pub const NAVAL_DEPTH_UNITS: i32 = 10;
 
 /// Height samples are stored in steps of 1/16 unit.
 pub const HEIGHT_FRAC_BITS: u32 = 4;
@@ -24,6 +26,9 @@ pub struct Terrain {
     heights: Vec<i16>,
     water_level: Fp,
     land_cost: Vec<u8>,
+    /// Open where the water is deep enough for ships. Worked out from the heights, the water,
+    /// and structures, so it is not hashed.
+    naval_cost: Vec<u8>,
     content_hash: u64,
 }
 
@@ -54,8 +59,10 @@ impl Terrain {
             heights,
             water_level: Fp::from_bits(-(1000 << FP_FRAC_BITS)),
             land_cost: vec![COST_OPEN; cells * cells],
+            naval_cost: Vec::new(),
             content_hash: 0,
         };
+        terrain.naval_cost = (0..cells * cells).map(|cell| terrain.naval_cost_of(cell % cells, cell / cells)).collect();
         terrain.update_content_hash();
         terrain
     }
@@ -72,9 +79,31 @@ impl Terrain {
         assert_eq!(heights.len(), samples * samples, "one height per cell corner");
         assert_eq!(blocked.len(), cells * cells, "one flag per cell");
         let land_cost = blocked.iter().map(|&blocked| if blocked { COST_IMPASSABLE } else { COST_OPEN }).collect();
-        let mut terrain = Self { map_units, cells, samples, heights, water_level, land_cost, content_hash: 0 };
+        let mut terrain = Self { map_units, cells, samples, heights, water_level, land_cost, naval_cost: Vec::new(), content_hash: 0 };
+        terrain.naval_cost = (0..cells * cells).map(|cell| terrain.naval_cost_of(cell % cells, cell / cells)).collect();
         terrain.update_content_hash();
         terrain
+    }
+
+    /// Open to ships if the water over the whole cell is deep enough.
+    fn naval_cost_of(&self, x: usize, y: usize) -> u8 {
+        let corners = [(x, y), (x + 1, y), (x, y + 1), (x + 1, y + 1)];
+        let highest = corners.iter().map(|&(cx, cy)| i32::from(self.heights[cy * self.samples + cx])).max().unwrap_or(0);
+        // Heights are in sixteenths of a unit, and the water in raw fixed point.
+        let water = self.water_level.to_bits() >> (FP_FRAC_BITS - HEIGHT_FRAC_BITS);
+        if highest + (NAVAL_DEPTH_UNITS << HEIGHT_FRAC_BITS) <= water { COST_OPEN } else { COST_IMPASSABLE }
+    }
+
+    /// Whether a unit of this class can be in a cell: on land, or on deep enough water.
+    pub fn passable_for(&self, class: MoveClass, point: Vec2Fp) -> bool {
+        match class {
+            MoveClass::Naval => {
+                let (x, y) = self.cell_of(point);
+                self.naval_cost[y * self.cells + x] != COST_IMPASSABLE
+            }
+            MoveClass::Air => true,
+            _ => self.is_passable(point),
+        }
     }
 
     fn update_content_hash(&mut self) {
@@ -99,6 +128,7 @@ impl Terrain {
         for y in min_y..=max_y {
             for x in min_x..=max_x {
                 self.land_cost[y * self.cells + x] = COST_IMPASSABLE;
+                self.naval_cost[y * self.cells + x] = COST_IMPASSABLE;
             }
         }
         for y in min_y..=(max_y + 1) {
@@ -116,9 +146,18 @@ impl Terrain {
         let cost = if blocked { COST_IMPASSABLE } else { COST_OPEN };
         for y in cell_y..cell_y + size {
             for x in cell_x..cell_x + size {
-                self.land_cost[y as usize * self.cells + x as usize] = cost;
+                let (x, y) = (x as usize, y as usize);
+                self.land_cost[y * self.cells + x] = cost;
+                // A structure on the water blocks ships too, and once gone leaves the water as it was.
+                self.naval_cost[y * self.cells + x] = if blocked { COST_IMPASSABLE } else { self.naval_cost_of(x, y) };
             }
         }
+    }
+
+    /// Whether ships can be in a cell: deep water, with no structure on it.
+    pub fn cell_is_navigable(&self, cell_x: u32, cell_y: u32) -> bool {
+        let (x, y) = (cell_x as usize, cell_y as usize);
+        x < self.cells && y < self.cells && self.naval_cost[y * self.cells + x] != COST_IMPASSABLE
     }
 
     pub fn cell_is_open(&self, cell_x: u32, cell_y: u32) -> bool {
@@ -154,6 +193,7 @@ impl Terrain {
     pub fn cost_grid(&self, class: MoveClass) -> Option<&[u8]> {
         match class {
             MoveClass::Land => Some(&self.land_cost),
+            MoveClass::Naval => Some(&self.naval_cost),
             _ => None,
         }
     }

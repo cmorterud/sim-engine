@@ -13,7 +13,7 @@ use super::components::{BuildTask, AntiAir, Artillery, BombBay, Falling, Flight,
     Wreck, WreckKind, rotate_toward,
 };
 use super::config::{SimConfig, TARGET_SEARCH_INTERVAL, TERRAIN_CELL_UNITS, WRECK_HEALTH_PERMILLE, WRECK_MASS_PERMILLE};
-use super::flowfield::{nearest_passable_cell, FlowField, FlowSample};
+use super::flowfield::{nearest_passable_cell_for, FlowField, FlowSample};
 use super::formation::{plan_formation, within, Travel};
 use super::production::{Economy, WorkLink};
 use super::spatial::{GridUnit, Layer, SpatialGrid};
@@ -554,9 +554,10 @@ impl SimWorld {
     /// Aircraft can start anywhere on the map, even over water or cliffs.
     pub(super) fn spawn_unit_as(&mut self, spawn: UnitSpawn, move_class: MoveClass) -> SimId {
         assert!(self.terrain.in_bounds(spawn.position), "unit spawned outside the map");
-        assert!(move_class == MoveClass::Air || self.terrain.is_passable(spawn.position), "unit spawned in an impassable cell");
+        assert!(self.terrain.passable_for(move_class, spawn.position), "unit spawned where it cannot be");
         let id = self.next_id();
-        let ground = self.terrain.height_at(spawn.position);
+        // Ships float on the water.
+        let ground = if move_class == MoveClass::Naval { self.terrain.height_at(spawn.position).max(self.terrain.water_level()) } else { self.terrain.height_at(spawn.position) };
         let entity = self.ecs.spawn((
             id,
             Position(Vec3Fp::new(spawn.position.x, spawn.position.y, ground + spawn.radius)),
@@ -968,6 +969,19 @@ impl SimWorld {
         from_planned_end: bool,
         travel: bool,
     ) -> Vec<(SimId, Order)> {
+        // Ships path over the water and everything else over the land, so a group with both
+        // gets a route for each.
+        let is_ship = |world: &Self, id: SimId| {
+            world.find_unit(id).is_some_and(|(_, entity)| world.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.move_class == MoveClass::Naval))
+        };
+        let ships: Vec<SimId> = units.iter().copied().filter(|&id| is_ship(self, id)).collect();
+        if !ships.is_empty() && ships.len() < units.len() {
+            let others: Vec<SimId> = units.iter().copied().filter(|&id| !is_ship(self, id)).collect();
+            let mut orders = self.plan_orders(&others, kind, goal, follow, from_planned_end, travel);
+            orders.extend(self.plan_orders(&ships, kind, goal, follow, from_planned_end, travel));
+            return orders;
+        }
+        let class = if ships.is_empty() { MoveClass::Land } else { MoveClass::Naval };
         // Keeps the order given, because units take their orders in that order.
         let mut seen = BTreeSet::new();
         let mut members = Vec::with_capacity(units.len());
@@ -1014,13 +1028,14 @@ impl SimWorld {
                 keep_formation = Some(Travel::plan(&walkers, &formation, goal, spacing));
             }
             for (&(id, _, speed), &slot) in walkers.iter().zip(&formation.slots) {
-                let slot = self.nearest_open_point(slot);
+                let slot = self.nearest_open_point(slot, class);
                 // Time to cross the whole approach twice, plus a margin for crowding.
                 let crossing = i64::from(arrive_radius.to_bits()) * 4 / i64::from(speed.to_bits().max(1));
                 slots.push((id, slot, (crossing + SLOT_EXTRA_TICKS).min(i64::from(u32::MAX)) as u32));
             }
         }
-        let Some(route) = self.flow_field.create_route(
+        let Some(route) = self.flow_field.create_route_for(
+            class,
             &self.terrain,
             self.current_tick,
             goal,
@@ -1045,14 +1060,15 @@ impl SimWorld {
             .collect()
     }
 
-    /// The point itself if it can be walked on and is on the map, or else the nearest open cell's center.
-    fn nearest_open_point(&self, point: Vec2Fp) -> Vec2Fp {
+    /// The point itself if units of this class can be there and it is on the map, or else the
+    /// nearest open cell's center.
+    fn nearest_open_point(&self, point: Vec2Fp, class: MoveClass) -> Vec2Fp {
         let max = self.terrain.max_coordinate_raw();
         let inside = Vec2Fp::new(Fp::from_bits(point.x.to_bits().clamp(0, max)), Fp::from_bits(point.y.to_bits().clamp(0, max)));
-        if self.terrain.is_passable(inside) {
+        if self.terrain.passable_for(class, inside) {
             return inside;
         }
-        nearest_passable_cell(&self.terrain, inside).map_or(inside, |(x, y)| {
+        nearest_passable_cell_for(&self.terrain, class, inside).map_or(inside, |(x, y)| {
             let center = |cell: usize| Fp::from_bits((cell as i32 * TERRAIN_CELL_UNITS + TERRAIN_CELL_UNITS / 2) << FP_FRAC_BITS);
             Vec2Fp::new(center(x), center(y))
         })
@@ -1165,10 +1181,14 @@ impl SimWorld {
                 continue;
             }
             let here = position.0.xy();
+            // Ships keep to deep water, and float on it.
+            let class = stats.move_class;
+            let passable = |point: Vec2Fp| terrain.passable_for(class, point);
+            let surface = |point: Vec2Fp| if class == MoveClass::Naval { terrain.height_at(point).max(terrain.water_level()) } else { terrain.height_at(point) };
 
             // A structure was placed on top of this unit: walk straight out, through it if need be.
-            if !terrain.is_passable(here) {
-                if let Some((cell_x, cell_y)) = nearest_passable_cell(terrain, here) {
+            if !passable(here) {
+                if let Some((cell_x, cell_y)) = nearest_passable_cell_for(terrain, class, here) {
                     let half_cell = TERRAIN_CELL_UNITS << FP_FRAC_BITS >> 1;
                     let cell_size = TERRAIN_CELL_UNITS << FP_FRAC_BITS;
                     let exit = Vec2Fp::new(
@@ -1178,7 +1198,7 @@ impl SimWorld {
                     let direction = (exit - here).normalized();
                     let speed = stats.max_speed.max(Fp::ONE);
                     let next = Vec2Fp::new(here.x + direction.x * speed, here.y + direction.y * speed);
-                    position.0 = Vec3Fp::new(next.x, next.y, terrain.height_at(next) + stats.radius);
+                    position.0 = Vec3Fp::new(next.x, next.y, surface(next) + stats.radius);
                 }
                 continue;
             }
@@ -1218,7 +1238,7 @@ impl SimWorld {
                     } else if may_walk {
                         // On a formation move, a member keeps to its spot unless it has fallen too far behind.
                         let spot = formations.get(&order.route).and_then(|travel| {
-                            travel.spot(id).filter(|spot| within(here, *spot, travel.catch_up_distance) && terrain.is_passable(*spot))
+                            travel.spot(id).filter(|spot| within(here, *spot, travel.catch_up_distance) && passable(*spot))
                         });
                         if goal_is_here {
                             desired = walk_to_goal(stats.max_speed);
@@ -1337,15 +1357,15 @@ impl SimWorld {
             // One axis at a time against the cost grid, so units slide along walls.
             let mut next = here;
             let candidate_x = Vec2Fp::new(Fp::from_bits((here.x.to_bits() + step_x).clamp(0, max_coordinate)), next.y);
-            if terrain.is_passable(candidate_x) {
+            if passable(candidate_x) {
                 next = candidate_x;
             }
             let candidate_y = Vec2Fp::new(next.x, Fp::from_bits((here.y.to_bits() + step_y).clamp(0, max_coordinate)));
-            if terrain.is_passable(candidate_y) {
+            if passable(candidate_y) {
                 next = candidate_y;
             }
             if next != here {
-                position.0 = Vec3Fp::new(next.x, next.y, terrain.height_at(next) + stats.radius);
+                position.0 = Vec3Fp::new(next.x, next.y, surface(next) + stats.radius);
             }
         }
         self.step_aircraft();
