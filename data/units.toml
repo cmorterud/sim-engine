@@ -383,15 +383,15 @@ id = "omni_sensor"
 name = "Omni Sensor"
 class = "economy"
 tier = 3
-mass = 1200
-energy = 18000
-build_time = 1500
-health = 1200
+mass = 2400
+energy = 30000
+build_time = 2400
+health = 100
 footprint = 1
 vision = 600
 radar = 12000
 omni = 4000
-upkeep = 50
+upkeep = 2000
 
 # Hides friendly units in its field from enemy radar, and puts decoy blips on it.
 [[unit]]

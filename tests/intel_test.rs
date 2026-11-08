@@ -208,8 +208,8 @@ fn a_radar_upgrades_in_place_to_a_t2_radar_and_then_an_omni_sensor() {
     run(&mut world, 800);
     assert_eq!(key(&world), "radar_t2");
     world.advance_tick(&[SimCommand::Upgrade { units: vec![radar] }]);
-    // 1,500 at the T2 radar's 20 is 75 seconds.
-    run(&mut world, 770);
+    // 2,400 at the T2 radar's 20 is 120 seconds.
+    run(&mut world, 1_220);
     assert_eq!(key(&world), "omni_sensor");
     run(&mut world, 10);
     let sensors = world.snapshot_for(Some(Team::Blue)).sensor_ranges;
