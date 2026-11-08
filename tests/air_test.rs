@@ -1,7 +1,7 @@
 //! Aircraft and anti-air (GAME_SPECIFICATION.md §10): aircraft fly over anything, land when
 //! they have nothing to do, and only anti-air weapons can hit them in flight.
 
-use sim_engine::math::fp::{fp_int, Vec2Fp};
+use sim_engine::math::fp::{fp_int, Fp, Vec2Fp};
 use sim_engine::sim::blueprints::Res;
 use sim_engine::sim::commands::SimCommand;
 use sim_engine::sim::components::{OrderKind, SimId, Team};
@@ -359,4 +359,86 @@ fn patrolling_aircraft_stay_up_refuel_when_low_and_go_back_to_their_patrol() {
     assert!(after.refit.is_none() && after.airborne(), "refuelled, it is back in the air");
     assert_ne!(world.unit_order(interceptor).unwrap().kind, OrderKind::Idle, "on its patrol");
     assert!(after.fuel > after.max_fuel * 9 / 10);
+}
+
+#[test]
+fn gunships_hover_over_what_they_attack() {
+    let mut world = world();
+    let generator = world.spawn_finished_structure(world.blueprints.id("power_generator"), Team::Red, 150, 125).unwrap();
+    let gunship = spawn(&mut world, "t2_gunship", Team::Blue, point(1_000, 1_000));
+    world.advance_tick(&[SimCommand::Attack { units: vec![gunship], target: generator }]);
+    let target = world.unit_position(generator).unwrap().xy();
+    let mut hovered = false;
+    for _ in 0..600 {
+        world.advance_tick(&[]);
+        if world.unit_health(generator).is_none() {
+            break;
+        }
+        let near = distance(&world, gunship, target) < 440;
+        hovered |= near && flight(&world, gunship).speed == Fp::ZERO;
+    }
+    assert!(hovered, "it should stop in the air within range");
+    assert!(world.unit_health(generator).is_none(), "and shoot the generator to pieces");
+    assert!(flight(&world, gunship).airborne());
+}
+
+#[test]
+fn flak_bursts_hit_every_enemy_aircraft_around_it() {
+    let mut world = world();
+    let flak = world.spawn_finished_structure(world.blueprints.id("t2_flak"), Team::Blue, 125, 125).unwrap();
+    // Three scouts flying close together over the cannon.
+    let scouts: Vec<SimId> = (0..3).map(|index| spawn(&mut world, "t1_air_scout", Team::Red, point(3_000 + index * 15, 2_510))).collect();
+    world.advance_tick(&[SimCommand::Follow { units: scouts.clone(), target: flak }]);
+    let first = (0..300).find(|_| {
+        world.advance_tick(&[]);
+        scouts.iter().any(|&scout| world.unit_health(scout).is_none())
+    });
+    assert!(first.is_some(), "the cannon should hit them");
+    assert!(scouts.iter().all(|&scout| world.unit_health(scout).is_none()), "one burst takes all three");
+}
+
+#[test]
+fn an_air_factory_upgrades_to_t2_and_builds_gunships() {
+    let mut world = world();
+    let factory = world.spawn_finished_structure(world.blueprints.id("air_factory"), Team::Blue, 50, 50).unwrap();
+    let (upgrade, gunship) = (world.blueprints.id("air_factory_t2"), world.blueprints.id("t2_gunship"));
+    world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: upgrade, count: 1 }]);
+    world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: gunship, count: 1 }]);
+    let built = (0..2_000).any(|_| {
+        world.advance_tick(&[]);
+        world.units.iter().any(|unit| world.ecs.get::<&sim_engine::sim::components::Blueprinted>(unit.1).is_ok_and(|bp| bp.0 == gunship))
+    });
+    assert!(built, "the upgraded factory should build a gunship");
+}
+
+#[test]
+fn a_strategic_bomber_flattens_a_whole_cluster_with_one_bomb() {
+    let mut world = world();
+    let key = world.blueprints.id("power_generator");
+    let generators: Vec<SimId> = [(150, 125), (152, 125), (150, 127)].iter().map(|&(x, y)| world.spawn_finished_structure(key, Team::Red, x, y).unwrap()).collect();
+    let bomber = spawn(&mut world, "t3_strategic_bomber", Team::Blue, point(1_000, 1_000));
+    world.advance_tick(&[SimCommand::Attack { units: vec![bomber], target: generators[0] }]);
+    let first = (0..600).find(|_| {
+        world.advance_tick(&[]);
+        generators.iter().any(|&id| world.unit_health(id).is_none())
+    });
+    assert!(first.is_some(), "the bomb should land");
+    assert!(generators.iter().all(|&id| world.unit_health(id).is_none()), "and take all three");
+}
+
+#[test]
+fn sam_launchers_and_air_superiority_fighters_down_heavy_aircraft() {
+    let mut world = world();
+    let sam = world.spawn_finished_structure(world.blueprints.id("t3_sam"), Team::Blue, 125, 125).unwrap();
+    let fighter = spawn(&mut world, "t3_air_superiority", Team::Red, point(3_000, 2_500));
+    world.advance_tick(&[SimCommand::Follow { units: vec![fighter], target: sam }]);
+    run(&mut world, 200);
+    assert!(world.unit_health(fighter).is_none(), "2,300 health, two volleys of 1,200");
+
+    let mut world = self::world();
+    let bomber = spawn(&mut world, "t1_bomber", Team::Red, point(2_500, 2_500));
+    let fighter = spawn(&mut world, "t3_air_superiority", Team::Blue, point(2_200, 2_400));
+    world.advance_tick(&[SimCommand::Follow { units: vec![bomber], target: fighter }]);
+    run(&mut world, 40);
+    assert!(world.unit_health(bomber).is_none(), "one shot of 500 against 215");
 }

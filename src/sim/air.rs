@@ -236,6 +236,13 @@ impl SimWorld {
                 }
             }
 
+            // A gunship stops over what it attacks, well within range, and turns to face it.
+            let hold = flight.hovers
+                && attacking
+                && heading_for.is_some_and(|point| {
+                    let reach = combat.range * 3 / 4;
+                    here.distance_squared(&point) <= wide_mul(reach, reach)
+                });
             // With nothing to do, it lands, if there is open ground below to land on. Patrols
             // and trips to refuel keep it in the air.
             let margin = radius.saturating_mul(fp_int(3));
@@ -252,6 +259,9 @@ impl SimWorld {
             if landing {
                 flight.speed = down(flight.speed, stats.max_speed, Fp::ZERO);
                 flight.altitude = down(flight.altitude, flight.elevation, Fp::ZERO);
+            } else if hold {
+                flight.speed = down(flight.speed, stats.max_speed, Fp::ZERO);
+                flight.altitude = up(flight.altitude, flight.elevation, height);
             } else {
                 flight.speed = up(flight.speed, stats.max_speed, top_speed);
                 flight.altitude = up(flight.altitude, flight.elevation, height);
@@ -269,7 +279,7 @@ impl SimWorld {
                 Some(point) => {
                     let offset = point - here;
                     let distance_squared = here.distance_squared(&point);
-                    if !attacking {
+                    if !attacking || flight.hovers {
                         flight.breaking_off = false;
                     } else if flight.breaking_off {
                         flight.breaking_off = distance_squared < wide_mul(flight.break_off, flight.break_off);
@@ -279,7 +289,9 @@ impl SimWorld {
                         let half = flight.break_off / 2;
                         flight.breaking_off = behind && distance_squared < wide_mul(half, half);
                     }
-                    if flight.breaking_off || offset == Vec2Fp::ZERO || inside_turn(facing, offset, radius) {
+                    // A gunship can turn on the spot, so nothing is out of its reach.
+                    let unreachable = !flight.hovers && inside_turn(facing, offset, radius);
+                    if flight.breaking_off || offset == Vec2Fp::ZERO || unreachable {
                         facing
                     } else {
                         rotate_toward(facing, offset.normalized(), turning.max_turn)

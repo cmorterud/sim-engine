@@ -22,7 +22,7 @@ vision = 520
 build_power = 10
 build_range = 200
 # Its engineering suites (the enhancements below) unlock the T2 and T3 structures on its list.
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "radar", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "stealth_field_generator", "strategic_missile_launcher", "strategic_missile_defense", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "t1_aa_turret", "air_staging"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "radar", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "stealth_field_generator", "strategic_missile_launcher", "strategic_missile_defense", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam"]
 weapon = { range = 440, reload_ticks = 7, projectile_speed = 50, damage = 70, turn_rate = 180 }
 overcharge = { energy = 3000, damage = 12000, structure_damage = 800, reload_ticks = 50 }
 mass_income = 1
@@ -124,7 +124,7 @@ health = 6000
 footprint = 3
 vision = 400
 build_power = 40
-builds = ["t1_engineer", "t2_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa"]
+builds = ["t1_engineer", "t2_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak"]
 upgrades_to = "land_factory_t3"
 
 [[unit]]
@@ -316,7 +316,7 @@ health = 10000
 footprint = 3
 vision = 400
 build_power = 90
-builds = ["t1_engineer", "t2_engineer", "t3_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa"]
+builds = ["t1_engineer", "t2_engineer", "t3_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak"]
 
 [[unit]]
 id = "t2_engineer"
@@ -334,7 +334,7 @@ radius = 9
 vision = 400
 build_power = 12
 build_range = 120
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "radar", "stealth_field_generator", "hydrocarbon_plant", "mass_fabricator", "air_factory", "t1_aa_turret", "air_staging"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "radar", "stealth_field_generator", "hydrocarbon_plant", "mass_fabricator", "air_factory", "t1_aa_turret", "air_staging", "t2_flak"]
 
 [[unit]]
 id = "t3_engineer"
@@ -352,7 +352,7 @@ radius = 10
 vision = 520
 build_power = 30
 build_range = 140
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "t1_aa_turret", "air_staging"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam"]
 
 # Intel (GAME_SPECIFICATION.md §9). Ranges are in units, and upkeep is energy per second
 # while running: a team that cannot pay switches its sensors off until it can. The commander
@@ -438,7 +438,7 @@ radius = 14
 vision = 520
 build_power = 56
 build_range = 200
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "t1_aa_turret", "air_staging"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam"]
 # Three times the commander's fire: 300 a second for its 100, and a little farther.
 weapon = { range = 500, reload_ticks = 10, projectile_speed = 50, damage = 300, turn_rate = 180 }
 mass_income = 1
@@ -546,6 +546,7 @@ footprint = 3
 vision = 400
 build_power = 20
 builds = ["t1_air_scout", "t1_interceptor", "t1_bomber"]
+upgrades_to = "air_factory_t2"
 
 [[unit]]
 id = "t1_air_scout"
@@ -624,6 +625,164 @@ turn_radius = 10
 radius = 8
 vision = 400
 weapon = { range = 640, reload_ticks = 10, projectile_speed = 90, damage = 26, targets = "air", turn_rate = 180 }
+
+# Upgraded from the Air Factory: its mass, energy, and build time are what the upgrade costs.
+[[unit]]
+id = "air_factory_t2"
+name = "Air Factory (T2)"
+class = "factory"
+tier = 2
+mass = 920
+energy = 18000
+build_time = 2300
+health = 8000
+footprint = 3
+vision = 400
+build_power = 40
+builds = ["t1_air_scout", "t1_interceptor", "t1_bomber", "t2_gunship"]
+upgrades_to = "air_factory_t3"
+
+[[unit]]
+id = "air_factory_t3"
+name = "Air Factory (T3)"
+class = "factory"
+tier = 3
+mass = 4090
+energy = 99400
+build_time = 12000
+health = 16000
+footprint = 3
+vision = 400
+build_power = 120
+builds = ["t1_air_scout", "t1_interceptor", "t1_bomber", "t2_gunship", "t3_spy_plane", "t3_air_superiority", "t3_strategic_bomber", "t3_heavy_gunship"]
+
+# Hovers over what it attacks and fires down on it.
+[[unit]]
+id = "t2_gunship"
+name = "Gunship"
+class = "air"
+tier = 2
+mass = 192
+energy = 3840
+build_time = 1280
+health = 700
+speed = 27
+radius = 12
+vision = 640
+flight = { elevation = 200, turn_rate = 90, fuel = 400, hovers = true }
+weapon = { range = 440, reload_ticks = 3, projectile_speed = 160, damage = 16 }
+
+[[unit]]
+id = "t3_spy_plane"
+name = "Spy Plane"
+class = "air"
+tier = 3
+mass = 195
+energy = 7500
+build_time = 900
+health = 1150
+speed = 54
+radius = 10
+vision = 1280
+radar = 1920
+omni = 560
+flight = { elevation = 440, turn_rate = 80, fuel = 1500 }
+
+# Two beams of 250 a second in the original, one shot of 500 here.
+[[unit]]
+id = "t3_air_superiority"
+name = "Air Superiority Fighter"
+class = "air"
+tier = 3
+mass = 450
+energy = 51200
+build_time = 3840
+health = 2300
+speed = 44
+radius = 12
+vision = 640
+flight = { elevation = 360, turn_rate = 110, break_off = 300, fuel = 1000 }
+weapon = { range = 600, reload_ticks = 10, projectile_speed = 180, damage = 500, targets = "air" }
+
+# One small nuclear bomb at a time. Its anti-air guns wait for units with two weapons.
+[[unit]]
+id = "t3_strategic_bomber"
+name = "Strategic Bomber"
+class = "air"
+tier = 3
+mass = 1750
+energy = 180000
+build_time = 12000
+health = 4000
+speed = 34
+radius = 16
+vision = 640
+radar = 1280
+flight = { elevation = 360, turn_rate = 70, break_off = 1000, fuel = 1500 }
+weapon = { kind = "bomb", range = 1800, reload_ticks = 80, projectile_speed = 34, damage = 3100, splash_radius = 110 }
+
+# Its anti-air gun waits for units with two weapons.
+[[unit]]
+id = "t3_heavy_gunship"
+name = "Heavy Gunship"
+class = "air"
+tier = 3
+mass = 1500
+energy = 65000
+build_time = 6300
+health = 6000
+speed = 20
+radius = 16
+vision = 640
+flight = { elevation = 200, turn_rate = 60, fuel = 800, hovers = true }
+weapon = { range = 500, reload_ticks = 4, projectile_speed = 70, damage = 100 }
+
+# Flak bursts on an aircraft and hits every enemy aircraft around it. Its shells fly at 90, not
+# the original's 70, so that they can catch the fastest aircraft, which steer here instead of
+# being led.
+[[unit]]
+id = "t2_flak"
+name = "Flak Cannon"
+class = "defense"
+tier = 2
+mass = 400
+energy = 4000
+build_time = 540
+health = 2590
+footprint = 1
+vision = 480
+weapon = { range = 1000, reload_ticks = 8, projectile_speed = 90, damage = 125, splash_radius = 70, targets = "air", turn_rate = 180 }
+
+# A volley of six missiles of 200 in the original, one of 1,200 here.
+[[unit]]
+id = "t3_sam"
+name = "SAM Launcher"
+class = "defense"
+tier = 3
+mass = 800
+energy = 8000
+build_time = 1400
+health = 5000
+footprint = 1
+vision = 480
+weapon = { range = 1200, reload_ticks = 36, projectile_speed = 90, damage = 1200, splash_radius = 30, targets = "air", turn_rate = 180 }
+
+# Two shells of 36 a volley in the original, one of 72 here, and at 90 for the reason above.
+[[unit]]
+id = "t2_mobile_flak"
+name = "Mobile Flak"
+class = "tank"
+tier = 2
+mass = 160
+energy = 800
+build_time = 800
+health = 1000
+speed = "6.2"
+turn_rate = 80
+turn_radius = 20
+radius = 10
+vision = 400
+weapon = { range = 800, reload_ticks = 5, projectile_speed = 90, damage = 72, splash_radius = 80, targets = "air", turn_rate = 180 }
 
 # Aircraft land on its four pads to refuel at 50 times the rate on the ground, and are repaired
 # for energy. A T2 aircraft takes two pads, and a T3 one all four.

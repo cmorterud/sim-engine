@@ -66,6 +66,14 @@ pub enum Shape {
     AntiAirGun,
     /// A low deck with four round landing pads and a control tower.
     AirStaging,
+    /// A gunship: a thick body under a rotor disc, with a tail boom, pointing along +Y.
+    Gunship,
+    /// A wide flying wing, pointing along +Y.
+    StrategicBomber,
+    /// A turret with one short, fat barrel raised to the sky, which swivels to aim.
+    FlakGun,
+    /// A turret carrying a box of missiles raised to the sky, which swivels to aim.
+    SamLauncher,
     /// A shield's dome: an open half-sphere, drawn see-through.
     Dome,
     /// Flat, around the feet of a selected mobile unit.
@@ -75,7 +83,7 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub const ALL: [Self; 39] = [
+    pub const ALL: [Self; 43] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -112,6 +120,10 @@ impl Shape {
         Self::Bomber,
         Self::AntiAirGun,
         Self::AirStaging,
+        Self::Gunship,
+        Self::StrategicBomber,
+        Self::FlakGun,
+        Self::SamLauncher,
         Self::Dome,
         Self::SelectionRing,
         Self::SelectionBox,
@@ -410,6 +422,30 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.block([-0.5, -0.05, -0.03], [0.5, 0.18, 0.03]);
             mesh.block([-0.22, -0.5, -0.02], [0.22, -0.36, 0.02]);
             mesh.block([-0.02, -0.5, 0.0], [0.02, -0.36, 0.25]);
+        }
+        Shape::Gunship => {
+            mesh.beam([0.0, -0.1, -0.1], [0.0, 0.45, -0.1], 0.2, 0.18);
+            mesh.beam([0.0, -0.5, -0.05], [0.0, -0.1, -0.05], 0.05, 0.05);
+            mesh.frustum([0.0, 0.0], [0.12, 0.16], [0.44, 0.44], 16);
+            mesh.frustum([0.0, 0.0], [0.05, 0.12], [0.04, 0.04], 6);
+        }
+        Shape::StrategicBomber => {
+            mesh.cuboid(
+                [Vec3::new(-0.5, -0.3, -0.05), Vec3::new(0.5, -0.3, -0.05), Vec3::new(0.08, 0.5, -0.05), Vec3::new(-0.08, 0.5, -0.05)],
+                [Vec3::new(-0.5, -0.3, 0.05), Vec3::new(0.5, -0.3, 0.05), Vec3::new(0.08, 0.5, 0.05), Vec3::new(-0.08, 0.5, 0.05)],
+            );
+            mesh.beam([0.0, -0.4, 0.0], [0.0, 0.45, 0.0], 0.14, 0.12);
+        }
+        Shape::FlakGun => {
+            mesh.block([-0.28, -0.28, -0.1], [0.28, 0.2, 0.2]);
+            mesh.beam([0.0, -0.05, 0.1], [0.0, 0.28, 0.38], 0.1, 0.1);
+        }
+        Shape::SamLauncher => {
+            mesh.block([-0.25, -0.25, -0.1], [0.25, 0.2, 0.15]);
+            mesh.cuboid(
+                [Vec3::new(-0.3, -0.2, 0.05), Vec3::new(0.3, -0.2, 0.05), Vec3::new(0.3, -0.05, 0.05), Vec3::new(-0.3, -0.05, 0.05)],
+                [Vec3::new(-0.3, 0.2, 0.45), Vec3::new(0.3, 0.2, 0.45), Vec3::new(0.3, 0.35, 0.45), Vec3::new(-0.3, 0.35, 0.45)],
+            );
         }
         Shape::AirStaging => {
             mesh.block([-0.5, -0.5, -0.5], [0.5, 0.5, -0.3]);

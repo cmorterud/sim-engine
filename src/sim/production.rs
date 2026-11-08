@@ -367,6 +367,7 @@ impl SimWorld {
                 refit: None,
                 docked: false,
                 pad: 0,
+                hovers: flight.hovers,
                 break_off: flight.break_off,
                 breaking_off: false,
             };
@@ -1949,7 +1950,7 @@ impl SimWorld {
             hasher.write(&capture.progress.to_bits().to_le_bytes());
         }
         if let Ok(flight) = self.ecs.get::<&Flight>(entity) {
-            hasher.write(&[25, u8::from(flight.breaking_off), u8::from(flight.docked), flight.pad, flight.size]);
+            hasher.write(&[25, u8::from(flight.breaking_off), u8::from(flight.docked), flight.pad, flight.size, u8::from(flight.hovers)]);
             for value in [flight.elevation, flight.altitude, flight.speed] {
                 hasher.write(&value.to_bits().to_le_bytes());
             }

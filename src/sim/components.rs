@@ -208,6 +208,8 @@ pub struct Flight {
     /// On the pad, and which of the four pads.
     pub docked: bool,
     pub pad: u8,
+    /// Hovers over what it attacks, like a gunship, instead of making passes.
+    pub hovers: bool,
     /// Having flown over its target, how far it flies on before it turns back for another pass.
     pub break_off: Fp,
     /// Flying on, away from its target.

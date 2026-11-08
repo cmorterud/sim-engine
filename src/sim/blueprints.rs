@@ -161,6 +161,8 @@ pub struct FlightDef {
     pub break_off: Fp,
     /// Ticks of flight on a full tank.
     pub fuel_ticks: u32,
+    /// A gunship hovers over what it attacks, instead of making passes.
+    pub hovers: bool,
 }
 
 /// A pad where aircraft land to refuel and be repaired (GAME_SPECIFICATION.md §10).
@@ -385,6 +387,8 @@ struct RawFlight {
     break_off: Option<Number>,
     /// Seconds of flight on a full tank.
     fuel: u32,
+    #[serde(default)]
+    hovers: bool,
 }
 
 #[derive(Deserialize)]
@@ -800,6 +804,7 @@ impl BlueprintDb {
                         turn_rate: flight.turn_rate,
                         break_off: whole(&flight.break_off)?,
                         fuel_ticks: flight.fuel * TICKS_PER_SECOND as u32,
+                        hovers: flight.hovers,
                     }),
                 },
                 requires_deposit: unit.requires_deposit,

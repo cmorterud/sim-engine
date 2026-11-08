@@ -1802,7 +1802,7 @@ impl SimWorld {
                     source: shot.source,
                     source_team: shot.team,
                     lifetime_ticks: lifetime,
-                    splash_radius: Fp::ZERO,
+                    splash_radius: shot.splash,
                     allied_safe_ticks: 0,
                 };
                 let id = self.spawn_projectile(shot.from, projectile);
@@ -1958,7 +1958,22 @@ impl SimWorld {
                 let distance = sqrt_wide(start.distance_squared(&aim));
                 if distance <= homing.speed + Fp::from_bits(target.radius) {
                     position.0 = aim;
-                    hits.push((target.entity, projectile.damage, Some(projectile.source)));
+                    if projectile.splash_radius > Fp::ZERO {
+                        // Flak bursts, and hits every enemy aircraft around it.
+                        let reach = i64::from(projectile.splash_radius.to_bits());
+                        let (x, y) = (target.x, target.y);
+                        let damage = projectile.damage;
+                        let source = projectile.source;
+                        grid.for_each_candidate(Some(projectile.source_team.enemy()), Layer::Air, x, y, projectile.splash_radius.to_bits() + max_mobile, |other| {
+                            let (dx, dy) = (i64::from(other.x - x), i64::from(other.y - y));
+                            let within = reach + i64::from(other.radius);
+                            if dx * dx + dy * dy <= within * within {
+                                hits.push((other.entity, damage, Some(source)));
+                            }
+                        });
+                    } else {
+                        hits.push((target.entity, projectile.damage, Some(projectile.source)));
+                    }
                     dead.push(id);
                     continue;
                 }
