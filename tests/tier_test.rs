@@ -224,3 +224,96 @@ fn an_enemy_upgrade_in_sight_shows_that_it_is_happening_and_nothing_more() {
     assert!(view.enhancing.iter().all(|(id, _, _)| *id != red), "its progress stays hidden");
     assert!(world.snapshot_for(Some(Team::Red)).enhancing.iter().any(|(id, _, _)| *id == red), "its owner sees it");
 }
+
+fn key_of(world: &SimWorld, id: SimId) -> String {
+    blueprint_key(world, id)
+}
+
+/// Runs until something of this kind exists, finished, and returns it.
+fn built(world: &mut SimWorld, key: &str, limit: u32) -> Option<SimId> {
+    for _ in 0..limit {
+        world.advance_tick(&[]);
+        let found = world.units.iter().map(|unit| unit.0).find(|&id| {
+            let entity = world.unit_entity(id).unwrap();
+            key_of(world, id) == key && world.ecs.get::<&sim_engine::sim::components::Construction>(entity).is_err()
+        });
+        if found.is_some() {
+            return found;
+        }
+    }
+    None
+}
+
+#[test]
+fn t2_builders_build_t2_extractors_generators_radar_and_point_defense_directly() {
+    for (key, cell) in [("mass_extractor_t2", (50, 50)), ("power_generator_t2", (60, 50)), ("radar_t2", (70, 50)), ("t2_point_defense", (75, 50))] {
+        let mut world = rich_world();
+        world.deposits.push((50, 50));
+        let engineer = spawn(&mut world, "t2_engineer", point(cell.0 as i32 * 20 - 60, 1_000));
+        let blueprint = world.blueprints.id(key);
+        world.advance_tick(&[SimCommand::Build { units: vec![engineer], blueprint, cell_x: cell.0, cell_y: cell.1, queued: false }]);
+        assert!(built(&mut world, key, 3_000).is_some(), "a T2 engineer should build {key} directly");
+    }
+    // A T1 engineer cannot.
+    let mut world = rich_world();
+    world.deposits.push((50, 50));
+    let engineer = spawn(&mut world, "t1_engineer", point(940, 1_000));
+    let blueprint = world.blueprints.id("mass_extractor_t2");
+    world.advance_tick(&[SimCommand::Build { units: vec![engineer], blueprint, cell_x: 50, cell_y: 50, queued: false }]);
+    assert!(tasks(&world, engineer).is_empty());
+}
+
+#[test]
+fn support_factories_need_a_headquarters_to_be_built_and_to_build_above_t1() {
+    let mut world = rich_world();
+    let engineer = spawn(&mut world, "t2_engineer", point(1_000, 1_000));
+    let support = world.blueprints.id("land_factory_t2_support");
+    world.advance_tick(&[SimCommand::Build { units: vec![engineer], blueprint: support, cell_x: 55, cell_y: 45, queued: false }]);
+    assert!(tasks(&world, engineer).is_empty(), "no headquarters, no support factory");
+
+    let headquarters = world.spawn_finished_structure(world.blueprints.id("land_factory_t2"), Team::Blue, 40, 40).unwrap();
+    world.advance_tick(&[SimCommand::Build { units: vec![engineer], blueprint: support, cell_x: 55, cell_y: 45, queued: false }]);
+    let factory = built(&mut world, "land_factory_t2_support", 2_000).expect("with a T2 headquarters it builds one");
+    // It builds T2 units while the headquarters stands.
+    let tank = world.blueprints.id("t2_heavy_tank");
+    world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: tank, count: 2 }]);
+    assert!(built(&mut world, "t2_heavy_tank", 600).is_some(), "it builds tanks");
+    // Without it, the next tank waits.
+    let tanks = |world: &SimWorld| world.units.iter().filter(|unit| key_of(world, unit.0) == "t2_heavy_tank").count();
+    let before = tanks(&world);
+    world.advance_tick(&[SimCommand::SelfDestruct { units: vec![headquarters] }]);
+    for _ in 0..600 {
+        world.advance_tick(&[]);
+    }
+    assert!(world.unit_health(headquarters).is_none());
+    assert_eq!(tanks(&world), before, "no tank without a headquarters");
+    let entity = world.unit_entity(factory).unwrap();
+    let progress = |world: &SimWorld| world.ecs.get::<&sim_engine::sim::components::Factory>(entity).unwrap().progress;
+    let waiting = progress(&world);
+    let mass = world.economies[0].mass;
+    for _ in 0..100 {
+        world.advance_tick(&[]);
+    }
+    assert_eq!(progress(&world), waiting, "the tank started before stays where it was");
+    assert!(world.economies[0].mass >= mass, "and nothing more is spent on it");
+}
+
+#[test]
+fn a_support_factory_upgrades_to_t3_only_with_a_t3_headquarters() {
+    let mut world = rich_world();
+    world.spawn_finished_structure(world.blueprints.id("land_factory_t2"), Team::Blue, 40, 40).unwrap();
+    let factory = world.spawn_finished_structure(world.blueprints.id("land_factory_t2_support"), Team::Blue, 55, 45).unwrap();
+    let upgrade = world.blueprints.id("land_factory_t3_support");
+    world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: upgrade, count: 1 }]);
+    for _ in 0..600 {
+        world.advance_tick(&[]);
+    }
+    assert_eq!(key_of(&world, factory), "land_factory_t2_support", "it waits for a T3 headquarters");
+    world.spawn_finished_structure(world.blueprints.id("land_factory_t3"), Team::Blue, 70, 40).unwrap();
+    let upgraded = (0..1_000).any(|_| {
+        world.advance_tick(&[]);
+        world.unit_entity(factory).is_some_and(|_| key_of(&world, factory) == "land_factory_t3_support")
+    });
+    assert!(upgraded, "then it upgrades");
+}
+

@@ -475,7 +475,12 @@ impl SimWorld {
                 let after_suite: Vec<SimId> = units
                     .iter()
                     .copied()
-                    .filter(|id| self.find_unit(*id).is_some_and(|(_, entity)| self.ecs.get::<&Builder>(entity).is_ok() && self.can_build_after_suite(entity, *blueprint)))
+                    .filter(|id| {
+                        self.find_unit(*id).is_some_and(|(_, entity)| {
+                            let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team;
+                            self.ecs.get::<&Builder>(entity).is_ok() && self.can_build_after_suite(entity, *blueprint) && self.support_allowed(team, *blueprint)
+                        })
+                    })
                     .collect();
                 self.push_task(&after_suite, BuildTask::Build { blueprint: *blueprint, cell_x: *cell_x, cell_y: *cell_y, site: None });
                 if !*queued {
@@ -762,13 +767,52 @@ impl SimWorld {
         self.factories.binary_search_by_key(&id, |factory| factory.0).ok().map(|index| self.factories[index].1)
     }
 
+    /// The highest tier of finished headquarters of a kind the team has, and at least 1, since
+    /// any factory builds T1.
+    pub fn headquarters_tier(&self, team: Team, kind: super::blueprints::FactoryKind) -> u8 {
+        self.factories
+            .iter()
+            .filter(|&&(_, entity)| self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team == team) && self.ecs.get::<&Construction>(entity).is_err())
+            .filter_map(|&(_, entity)| {
+                let unit = self.blueprints.get(self.ecs.get::<&Blueprinted>(entity).ok()?.0);
+                (unit.is_headquarters() && unit.factory_kind == Some(kind)).then_some(unit.tier)
+            })
+            .max()
+            .unwrap_or(1)
+    }
+
+    /// Whether the team may have this: anything but a support factory, which needs a
+    /// headquarters of its kind of at least its tier.
+    pub fn support_allowed(&self, team: Team, blueprint: BlueprintId) -> bool {
+        let unit = self.blueprints.get(blueprint);
+        match (unit.support, unit.factory_kind) {
+            (true, Some(kind)) => self.headquarters_tier(team, kind) >= unit.tier,
+            _ => true,
+        }
+    }
+
+    /// Whether a factory may work on an item now. A support factory builds nothing above its
+    /// headquarters' tier, and upgrades only to a tier its headquarters has reached.
+    fn factory_may_build(&self, entity: hecs::Entity, item: BlueprintId) -> bool {
+        let Ok(blueprint) = self.ecs.get::<&Blueprinted>(entity).map(|unit| unit.0) else {
+            return false;
+        };
+        let unit = self.blueprints.get(blueprint);
+        let (true, Some(kind)) = (unit.support, unit.factory_kind) else {
+            return true;
+        };
+        let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team;
+        self.blueprints.get(item).tier <= self.headquarters_tier(team, kind)
+    }
+
     fn units_that_can_build(&self, units: &[SimId], blueprint: BlueprintId) -> Vec<SimId> {
         units
             .iter()
             .copied()
             .filter(|id| {
                 self.find_unit(*id).is_some_and(|(_, entity)| {
-                    self.ecs.get::<&Builder>(entity).is_ok() && self.can_build(entity, blueprint)
+                    let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team;
+                    self.ecs.get::<&Builder>(entity).is_ok() && self.can_build(entity, blueprint) && self.support_allowed(team, blueprint)
                 })
             })
             .collect()
@@ -1100,6 +1144,8 @@ impl SimWorld {
                             && self.ecs.get::<&UnitStats>(occupant_entity).is_ok_and(|stats| stats.team == team);
                         joinable.then_some(occupant)
                     }
+                    // A support factory whose headquarters is gone by now is not started.
+                    None if !self.support_allowed(team, blueprint) => None,
                     None => self.spawn_site(blueprint, team, cell_x, cell_y),
                 };
                 let Some(found) = found else {
@@ -1216,6 +1262,10 @@ impl SimWorld {
         let unit = self.blueprints.get(blueprint);
         // A full silo builds no more, and takes nothing, until it fires.
         if kind == WorkKind::FactoryItem && unit.class == UnitClass::Ammo && self.silo_is_full(entity) {
+            return None;
+        }
+        // A support factory waits, at no cost, for a headquarters of the item's tier.
+        if kind == WorkKind::FactoryItem && !self.factory_may_build(entity, blueprint) {
             return None;
         }
         let step = fp_to_res(power) / (unit.build_time * TICKS_PER_SECOND);

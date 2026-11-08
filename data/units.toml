@@ -22,7 +22,7 @@ vision = 520
 build_power = 10
 build_range = 200
 # Its engineering suites (the enhancements below) unlock the T2 and T3 structures on its list.
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "radar", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "stealth_field_generator", "strategic_missile_launcher", "strategic_missile_defense", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "radar", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "stealth_field_generator", "strategic_missile_launcher", "strategic_missile_defense", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "omni_sensor", "land_factory_t3_support", "air_factory_t3_support"]
 weapon = { range = 440, reload_ticks = 7, projectile_speed = 50, damage = 70, turn_rate = 180 }
 overcharge = { energy = 3000, damage = 12000, structure_damage = 800, reload_ticks = 50 }
 mass_income = 1
@@ -111,6 +111,7 @@ vision = 400
 build_power = 20
 builds = ["t1_engineer", "t1_light_bot", "t1_light_artillery", "t1_mobile_aa"]
 upgrades_to = "land_factory_t2"
+factory_kind = "land"
 
 [[unit]]
 id = "land_factory_t2"
@@ -126,6 +127,7 @@ vision = 400
 build_power = 40
 builds = ["t1_engineer", "t2_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak"]
 upgrades_to = "land_factory_t3"
+factory_kind = "land"
 
 [[unit]]
 id = "mass_extractor"
@@ -317,6 +319,7 @@ footprint = 3
 vision = 400
 build_power = 90
 builds = ["t1_engineer", "t2_engineer", "t3_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak"]
+factory_kind = "land"
 
 [[unit]]
 id = "t2_engineer"
@@ -334,7 +337,7 @@ radius = 9
 vision = 400
 build_power = 12
 build_range = 120
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "radar", "stealth_field_generator", "hydrocarbon_plant", "mass_fabricator", "air_factory", "t1_aa_turret", "air_staging", "t2_flak"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "radar", "stealth_field_generator", "hydrocarbon_plant", "mass_fabricator", "air_factory", "t1_aa_turret", "air_staging", "t2_flak", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support"]
 
 [[unit]]
 id = "t3_engineer"
@@ -352,7 +355,7 @@ radius = 10
 vision = 520
 build_power = 30
 build_range = 140
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "omni_sensor", "land_factory_t3_support", "air_factory_t3_support"]
 
 # Intel (GAME_SPECIFICATION.md §9). Ranges are in units, and upkeep is energy per second
 # while running: a team that cannot pay switches its sensors off until it can. The commander
@@ -370,11 +373,11 @@ footprint = 1
 vision = 400
 radar = 2320
 upkeep = 10
-# Drives its own upgrade to an Omni Sensor.
+# Drives its own upgrade to a T2 Radar.
 build_power = 10
-upgrades_to = "omni_sensor"
+upgrades_to = "radar_t2"
 
-# Upgraded from a Radar: its mass, energy, and build time are what the upgrade costs.
+# Upgraded from a T2 Radar, or built by T3 builders: its mass, energy, and build time are what the upgrade costs.
 [[unit]]
 id = "omni_sensor"
 name = "Omni Sensor"
@@ -438,7 +441,7 @@ radius = 14
 vision = 520
 build_power = 56
 build_range = 200
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "omni_sensor", "land_factory_t3_support", "air_factory_t3_support"]
 # Three times the commander's fire: 300 a second for its 100, and a little farther.
 weapon = { range = 500, reload_ticks = 10, projectile_speed = 50, damage = 300, turn_rate = 180 }
 mass_income = 1
@@ -547,6 +550,7 @@ vision = 400
 build_power = 20
 builds = ["t1_air_scout", "t1_interceptor", "t1_bomber"]
 upgrades_to = "air_factory_t2"
+factory_kind = "air"
 
 [[unit]]
 id = "t1_air_scout"
@@ -641,6 +645,7 @@ vision = 400
 build_power = 40
 builds = ["t1_air_scout", "t1_interceptor", "t1_bomber", "t2_gunship"]
 upgrades_to = "air_factory_t3"
+factory_kind = "air"
 
 [[unit]]
 id = "air_factory_t3"
@@ -657,6 +662,8 @@ build_power = 120
 builds = ["t1_air_scout", "t1_interceptor", "t1_bomber", "t2_gunship", "t3_spy_plane", "t3_air_superiority", "t3_strategic_bomber", "t3_heavy_gunship"]
 
 # Hovers over what it attacks and fires down on it.
+factory_kind = "air"
+
 [[unit]]
 id = "t2_gunship"
 name = "Gunship"
@@ -783,6 +790,135 @@ turn_radius = 20
 radius = 10
 vision = 400
 weapon = { range = 800, reload_ticks = 5, projectile_speed = 90, damage = 72, splash_radius = 80, targets = "air", turn_rate = 180 }
+
+# Support factories (GAME_SPECIFICATION.md §15), as in Forged Alliance Forever: T2 and T3 builders
+# build them for less than an upgrade costs, but only while the team has a headquarters, a factory
+# upgraded to that tier, of the same kind. Without one, they build nothing above T1, and a T2
+# support factory cannot upgrade to T3 without a T3 headquarters.
+[[unit]]
+id = "land_factory_t2_support"
+name = "Land Factory (T2 Support)"
+class = "factory"
+tier = 2
+mass = 580
+energy = 4800
+build_time = 1200
+health = 4000
+footprint = 3
+vision = 400
+build_power = 40
+factory_kind = "land"
+support = true
+builds = ["t1_engineer", "t2_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak"]
+upgrades_to = "land_factory_t3_support"
+
+[[unit]]
+id = "land_factory_t3_support"
+name = "Land Factory (T3 Support)"
+class = "factory"
+tier = 3
+mass = 1440
+energy = 11600
+build_time = 3200
+health = 8000
+footprint = 3
+vision = 400
+build_power = 90
+factory_kind = "land"
+support = true
+builds = ["t1_engineer", "t2_engineer", "t3_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak"]
+
+[[unit]]
+id = "air_factory_t2_support"
+name = "Air Factory (T2 Support)"
+class = "factory"
+tier = 2
+mass = 510
+energy = 8000
+build_time = 1200
+health = 4000
+footprint = 3
+vision = 400
+build_power = 40
+factory_kind = "air"
+support = true
+builds = ["t1_air_scout", "t1_interceptor", "t1_bomber", "t2_gunship"]
+upgrades_to = "air_factory_t3_support"
+
+[[unit]]
+id = "air_factory_t3_support"
+name = "Air Factory (T3 Support)"
+class = "factory"
+tier = 3
+mass = 1510
+energy = 34000
+build_time = 3200
+health = 8000
+footprint = 3
+vision = 400
+build_power = 120
+factory_kind = "air"
+support = true
+builds = ["t1_air_scout", "t1_interceptor", "t1_bomber", "t2_gunship", "t3_spy_plane", "t3_air_superiority", "t3_strategic_bomber", "t3_heavy_gunship"]
+
+[[unit]]
+id = "power_generator_t2"
+name = "Power Generator (T2)"
+class = "economy"
+tier = 2
+mass = 1200
+energy = 12000
+build_time = 2198
+health = 2500
+footprint = 3
+vision = 300
+energy_income = 500
+death_explosion = { damage = 1500, radius = 100 }
+
+[[unit]]
+id = "power_generator_t3"
+name = "Power Generator (T3)"
+class = "economy"
+tier = 3
+mass = 3240
+energy = 57600
+build_time = 6824
+health = 9000
+footprint = 5
+vision = 300
+energy_income = 2500
+death_explosion = { damage = 5500, radius = 200 }
+
+# Upgraded from a Radar, or built by T2 builders, and upgrades to an Omni Sensor.
+[[unit]]
+id = "radar_t2"
+name = "Radar (T2)"
+class = "economy"
+tier = 2
+mass = 180
+energy = 3600
+build_time = 780
+health = 50
+footprint = 1
+vision = 480
+radar = 4000
+upkeep = 150
+build_power = 20
+upgrades_to = "omni_sensor"
+
+# Three shells of 70 a volley in the original, one of 210 here.
+[[unit]]
+id = "t2_point_defense"
+name = "Point Defense (T2)"
+class = "defense"
+tier = 2
+mass = 540
+energy = 3780
+build_time = 675
+health = 2250
+footprint = 1
+vision = 480
+weapon = { range = 1000, reload_ticks = 17, projectile_speed = 70, damage = 210, splash_radius = 40, turn_rate = 120 }
 
 # Aircraft land on its four pads to refuel at 50 times the rate on the ground, and are repaired
 # for energy. A T2 aircraft takes two pads, and a T3 one all four.

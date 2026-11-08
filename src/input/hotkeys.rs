@@ -26,11 +26,9 @@ pub const RESERVED: [char; 5] = ['W', 'A', 'S', 'D', PATROL];
 /// Shows the next tech level in the build bars.
 pub const CYCLE_TIER: char = '`';
 
-/// The keys of a builder's bar, by slot. The common structures keep the keys they always had.
-pub const BUILDER_SLOT_KEYS: [char; 13] = ['Q', 'E', 'G', 'T', 'C', 'N', ',', '.', '/', ';', '\'', '[', ']'];
-/// The keys of a factory's bar, by slot. None is a builder's, so that a builder and a factory
-/// selected together never compete for a key.
-pub const FACTORY_SLOT_KEYS: [char; 4] = ['Z', 'B', 'V', 'H'];
+/// The keys of a build bar, by slot, in the order the bar shows them. Builders' and factories'
+/// bars use the same keys, since only one bar is shown at a time: a factory's, if one is selected.
+pub const SLOT_KEYS: [char; 15] = ['Q', 'E', 'G', 'T', 'C', 'Z', 'V', 'B', 'H', 'N', ',', '.', '/', ';', '\''];
 
 /// Which bar an item is in: a builder's, for structures, or a factory's, for units and missiles.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -45,20 +43,22 @@ pub enum Bar {
 pub fn build_slot(key: &str) -> Option<(Bar, usize)> {
     use Bar::{Builder, Factory};
     Some(match key {
-        "land_factory_t1" | "quantum_gateway" => (Builder, 0),
-        "mass_extractor" => (Builder, 1),
-        "power_generator" => (Builder, 2),
+        "land_factory_t1" | "land_factory_t2_support" | "land_factory_t3_support" => (Builder, 0),
+        "mass_extractor" | "mass_extractor_t2" | "mass_extractor_t3" => (Builder, 1),
+        "power_generator" | "power_generator_t2" | "power_generator_t3" => (Builder, 2),
         "mass_storage" => (Builder, 3),
-        "t1_point_defense" => (Builder, 4),
-        "t1_aa_turret" | "t2_flak" | "t3_sam" => (Builder, 5),
-        "radar" => (Builder, 6),
-        // Two kinds that are never at the same level share a slot.
-        "air_factory" | "air_staging" => (Builder, 7),
+        "t1_point_defense" | "t2_point_defense" => (Builder, 4),
+        "radar" | "radar_t2" | "omni_sensor" => (Builder, 5),
+        "t1_aa_turret" | "t2_flak" | "t3_sam" => (Builder, 6),
+        "air_factory" | "air_factory_t2_support" | "air_factory_t3_support" => (Builder, 7),
+        // Two kinds that are never at the same level may share a slot.
         "hydrocarbon_plant" | "mass_fabricator" | "mass_fabricator_t3" => (Builder, 8),
-        "tactical_missile_launcher" | "strategic_missile_launcher" => (Builder, 9),
-        "tactical_missile_defense" | "strategic_missile_defense" => (Builder, 10),
-        "shield_generator" => (Builder, 11),
+        "shield_generator" => (Builder, 9),
+        "tactical_missile_launcher" | "strategic_missile_launcher" => (Builder, 10),
+        "tactical_missile_defense" | "strategic_missile_defense" => (Builder, 11),
         "stealth_field_generator" => (Builder, 12),
+        "air_staging" => (Builder, 13),
+        "quantum_gateway" => (Builder, 14),
         // Builders and scouts, then direct fire, then artillery and bombers, then anti-air and gunships.
         "t1_engineer" | "t2_engineer" | "t3_engineer" | "support_commander" | "t1_air_scout" | "t3_spy_plane" => (Factory, 0),
         "tactical_missile" | "strategic_missile" | "anti_nuke" => (Factory, 0),
@@ -71,10 +71,7 @@ pub fn build_slot(key: &str) -> Option<(Bar, usize)> {
 
 /// The key for an item, from its slot.
 pub fn blueprint_hotkey(key: &str) -> Option<char> {
-    build_slot(key).map(|(bar, slot)| match bar {
-        Bar::Builder => BUILDER_SLOT_KEYS[slot],
-        Bar::Factory => FACTORY_SLOT_KEYS[slot],
-    })
+    build_slot(key).map(|(_, slot)| SLOT_KEYS[slot])
 }
 
 /// How a key is shown on a button.
@@ -100,8 +97,6 @@ pub const fn letter_for(code: KeyCode) -> Option<char> {
         KeyCode::Slash => '/',
         KeyCode::Semicolon => ';',
         KeyCode::Quote => '\'',
-        KeyCode::BracketLeft => '[',
-        KeyCode::BracketRight => ']',
         KeyCode::Backquote => CYCLE_TIER,
         KeyCode::KeyM => MOVE,
         KeyCode::KeyF => ATTACK_MOVE,
@@ -140,7 +135,7 @@ mod tests {
     use super::*;
     use crate::sim::blueprints::BlueprintDb;
 
-    const ALL_KEYS: [KeyCode; 29] = [
+    const ALL_KEYS: [KeyCode; 27] = [
         KeyCode::KeyQ,
         KeyCode::KeyE,
         KeyCode::KeyG,
@@ -156,8 +151,6 @@ mod tests {
         KeyCode::Slash,
         KeyCode::Semicolon,
         KeyCode::Quote,
-        KeyCode::BracketLeft,
-        KeyCode::BracketRight,
         KeyCode::Backquote,
         KeyCode::KeyM,
         KeyCode::KeyF,
@@ -208,6 +201,12 @@ mod tests {
     fn the_same_kind_of_thing_keeps_its_key_at_every_level() {
         for kinds in [
             &["t1_aa_turret", "t2_flak", "t3_sam"][..],
+            &["mass_extractor", "mass_extractor_t2", "mass_extractor_t3"],
+            &["power_generator", "power_generator_t2", "power_generator_t3"],
+            &["radar", "radar_t2", "omni_sensor"],
+            &["t1_point_defense", "t2_point_defense"],
+            &["land_factory_t1", "land_factory_t2_support", "land_factory_t3_support"],
+            &["air_factory", "air_factory_t2_support", "air_factory_t3_support"],
             &["mass_fabricator", "mass_fabricator_t3"],
             &["tactical_missile_launcher", "strategic_missile_launcher"],
             &["tactical_missile_defense", "strategic_missile_defense"],
@@ -225,21 +224,23 @@ mod tests {
             }
         }
         // The common structures keep the keys they always had.
-        for (key, letter) in [("land_factory_t1", 'Q'), ("mass_extractor", 'E'), ("power_generator", 'G'), ("mass_storage", 'T'), ("t1_point_defense", 'C'), ("t1_engineer", 'Z'), ("t1_light_bot", 'B')] {
+        for (key, letter) in [("land_factory_t1", 'Q'), ("mass_extractor", 'E'), ("power_generator", 'G'), ("mass_storage", 'T'), ("t1_point_defense", 'C')] {
             assert_eq!(blueprint_hotkey(key), Some(letter), "{key}");
         }
     }
 
     #[test]
     fn slot_keys_never_take_a_key_already_in_use() {
-        for letter in BUILDER_SLOT_KEYS.iter().chain(&FACTORY_SLOT_KEYS) {
+        for letter in &SLOT_KEYS {
             assert!(!RESERVED.contains(letter) && !PANEL_LETTERS.contains(letter), "{letter} is already used");
         }
-        let mut keys: Vec<char> = BUILDER_SLOT_KEYS.iter().chain(&FACTORY_SLOT_KEYS).copied().collect();
-        let count = keys.len();
+        let mut keys = SLOT_KEYS.to_vec();
         keys.sort_unstable();
         keys.dedup();
-        assert_eq!(keys.len(), count, "two slots share a key, or a builder's and a factory's do");
+        assert_eq!(keys.len(), SLOT_KEYS.len(), "two slots share a key");
+        // Every item fits.
+        let db = BlueprintDb::standard();
+        assert!(buildable(&db).iter().all(|key| build_slot(key).is_some_and(|(_, slot)| slot < SLOT_KEYS.len())));
     }
 
     #[test]
@@ -254,7 +255,7 @@ mod tests {
     #[test]
     fn every_key_shown_can_really_be_pressed() {
         let pressable: Vec<char> = ALL_KEYS.iter().filter_map(|code| letter_for(*code)).collect();
-        for letter in BUILDER_SLOT_KEYS.iter().chain(&FACTORY_SLOT_KEYS).chain(&PANEL_LETTERS) {
+        for letter in SLOT_KEYS.iter().chain(&PANEL_LETTERS) {
             assert!(pressable.contains(letter), "{letter} is shown but cannot be pressed");
         }
         assert_eq!(letter_for(KeyCode::KeyW), None, "panning keys are not panel keys");

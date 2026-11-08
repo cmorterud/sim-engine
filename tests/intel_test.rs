@@ -199,14 +199,18 @@ fn an_enemy_commanders_omni_finds_a_cloaked_one() {
 }
 
 #[test]
-fn a_radar_upgrades_in_place_to_an_omni_sensor() {
+fn a_radar_upgrades_in_place_to_a_t2_radar_and_then_an_omni_sensor() {
     let mut world = foggy_world();
     let radar = structure(&mut world, "radar", Team::Blue, 50, 50);
+    let key = |world: &SimWorld| world.blueprints.get(world.ecs.get::<&Blueprinted>(world.unit_entity(radar).unwrap()).unwrap().0).key.clone();
     world.advance_tick(&[SimCommand::Upgrade { units: vec![radar] }]);
-    // 1,500 build time at its own 10 build power is 150 seconds.
-    run(&mut world, 1_520);
-    let blueprint = world.ecs.get::<&Blueprinted>(world.unit_entity(radar).unwrap()).unwrap().0;
-    assert_eq!(world.blueprints.get(blueprint).key, "omni_sensor");
+    // 780 build time at its own 10 build power is 78 seconds.
+    run(&mut world, 800);
+    assert_eq!(key(&world), "radar_t2");
+    world.advance_tick(&[SimCommand::Upgrade { units: vec![radar] }]);
+    // 1,500 at the T2 radar's 20 is 75 seconds.
+    run(&mut world, 770);
+    assert_eq!(key(&world), "omni_sensor");
     run(&mut world, 10);
     let sensors = world.snapshot_for(Some(Team::Blue)).sensor_ranges;
     assert_eq!((sensors[0].radar, sensors[0].omni), (fp_int(12_000).to_bits(), fp_int(4_000).to_bits()));

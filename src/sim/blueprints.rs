@@ -142,6 +142,14 @@ pub enum WeaponKind {
     Bomb,
 }
 
+/// What a factory builds: land units or aircraft. Headquarters and support factories of a kind
+/// go together (GAME_SPECIFICATION.md §15).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum FactoryKind {
+    Land,
+    Air,
+}
+
 /// What a weapon can aim at: things on the ground, aircraft, or both.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Targets {
@@ -288,6 +296,10 @@ pub struct Blueprint {
     pub shield: Option<ShieldDef>,
     pub missile_defense: Option<MissileDefenseDef>,
     pub air_staging: Option<AirStagingDef>,
+    /// For factories.
+    pub factory_kind: Option<FactoryKind>,
+    /// A support factory: cheaper, and it needs a headquarters of its kind and tier.
+    pub support: bool,
     /// Sensor ranges (GAME_SPECIFICATION.md §9). Zero for none.
     pub radar: Fp,
     pub omni: Fp,
@@ -314,6 +326,11 @@ impl Blueprint {
 
     pub const fn is_air(&self) -> bool {
         self.flight.is_some()
+    }
+
+    /// A factory upgraded to T2 or T3, which support factories of its kind need.
+    pub fn is_headquarters(&self) -> bool {
+        self.factory_kind.is_some() && !self.support && self.tier >= 2
     }
 
     pub fn is_commander(&self) -> bool {
@@ -493,6 +510,10 @@ struct RawUnit {
     shield: Option<RawShield>,
     missile_defense: Option<RawMissileDefense>,
     air_staging: Option<RawAirStaging>,
+    /// "land" or "air".
+    factory_kind: Option<String>,
+    #[serde(default)]
+    support: bool,
     radar: Option<Number>,
     omni: Option<Number>,
     stealth_field: Option<Number>,
@@ -818,6 +839,13 @@ impl BlueprintDb {
                 shield,
                 missile_defense,
                 air_staging,
+                factory_kind: match unit.factory_kind.as_deref() {
+                    None => None,
+                    Some("land") => Some(FactoryKind::Land),
+                    Some("air") => Some(FactoryKind::Air),
+                    Some(other) => return Err(context(format!("unknown factory kind {other:?}"))),
+                },
+                support: unit.support,
                 radar: whole(&unit.radar)?,
                 omni: whole(&unit.omni)?,
                 stealth_field: whole(&unit.stealth_field)?,

@@ -11,7 +11,7 @@ use crate::input::hotkeys::{self, blueprint_hotkey};
 use crate::input::orders::PendingBuild;
 use crate::math::fp::Fp;
 use crate::render::camera::Camera;
-use crate::sim::blueprints::{BlueprintDb, BlueprintId, Enhancement, EnhancementId, Res, Slot, Targets, UnitClass, WeaponKind, TICKS_PER_SECOND};
+use crate::sim::blueprints::{BlueprintDb, BlueprintId, Enhancement, EnhancementId, FactoryKind, Res, Slot, Targets, UnitClass, WeaponKind, TICKS_PER_SECOND};
 use crate::sim::components::{BuildTask, OrderKind, SimId, Team};
 use crate::sim::world::{MatchResult, PlanStepKind, SimSnapshot, UnitRatesView, UnitView};
 
@@ -617,12 +617,37 @@ fn builder_options(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb)
     let Some(first) = builders.first() else {
         return Vec::new();
     };
+    let team = first.team;
     db.get(BlueprintId(first.blueprint))
         .builds
         .iter()
         .copied()
         .filter(|option| builders.iter().all(|unit| db.get(BlueprintId(unit.blueprint)).builds.contains(option) && db.get(*option).tier <= unit_build_tier(snapshot, unit, db)))
+        .filter(|option| support_allowed(snapshot, team, *option, db))
         .collect()
+}
+
+/// The highest tier of finished headquarters of a kind the team has, and at least 1.
+pub fn headquarters_tier(snapshot: &SimSnapshot, team: Team, kind: FactoryKind, db: &BlueprintDb) -> u8 {
+    snapshot
+        .units
+        .iter()
+        .filter(|unit| unit.team == team && unit.blueprint != u16::MAX && unit.built_permille == 1000)
+        .map(|unit| db.get(BlueprintId(unit.blueprint)))
+        .filter(|unit| unit.is_headquarters() && unit.factory_kind == Some(kind))
+        .map(|unit| unit.tier)
+        .max()
+        .unwrap_or(1)
+}
+
+/// Whether the team may build this now: anything but a support factory, which needs a
+/// headquarters of its kind of at least its tier.
+fn support_allowed(snapshot: &SimSnapshot, team: Team, blueprint: BlueprintId, db: &BlueprintDb) -> bool {
+    let unit = db.get(blueprint);
+    match (unit.support, unit.factory_kind) {
+        (true, Some(kind)) => headquarters_tier(snapshot, team, kind, db) >= unit.tier,
+        _ => true,
+    }
 }
 
 /// Holding Shift queues several units at once. An upgrade only ever happens once.
@@ -680,18 +705,22 @@ pub fn hotkey_action(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintD
         }
     }
     let is_key = |blueprint: BlueprintId| blueprint_hotkey(&db.get(blueprint).key) == Some(letter);
-    let options = builder_options(snapshot, selected, db);
-    let shown = shown_tier(tiers.builder, &options, db);
-    if let Some(option) = options.into_iter().filter(|option| Some(db.get(*option).tier) == shown).find(|option| is_key(*option)) {
-        return Some(UiAction::BeginPlacement(option));
-    }
+    // With a factory selected, the build keys are its bar's, and a builder's bar is not shown.
+    let Some(menu) = factory_menu(snapshot, selected, db) else {
+        let options = builder_options(snapshot, selected, db);
+        let shown = shown_tier(tiers.builder, &options, db);
+        if let Some(option) = options.into_iter().filter(|option| Some(db.get(*option).tier) == shown).find(|option| is_key(*option)) {
+            return Some(UiAction::BeginPlacement(option));
+        }
+        let units = upgradable_units(snapshot, selected, db);
+        return (letter == hotkeys::UPGRADE && !units.is_empty()).then_some(UiAction::Upgrade { units });
+    };
     if letter == hotkeys::UPGRADE {
         let units = upgradable_units(snapshot, selected, db);
         if !units.is_empty() {
             return Some(UiAction::Upgrade { units });
         }
     }
-    let menu = factory_menu(snapshot, selected, db)?;
     // Options in different factories may share a key, and then it queues each in its own.
     let all: Vec<BlueprintId> = menu.options.iter().map(|(option, _)| *option).collect();
     let shown = shown_tier(tiers.factory, &all, db);
@@ -1400,13 +1429,15 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
             ui.colored_label(Color32::from_rgb(255, 90, 70), format!("Self-destruct in {seconds} s (Ctrl+K to cancel)"));
         }
 
-        let options = builder_options(snapshot, selected, db);
-        if let Some(option) = build_bar(ui, BUILDER_TIER_MEMORY, &options, db, |_| String::new()) {
-            actions.push(UiAction::BeginPlacement(option));
-        }
-
-        if let Some(menu) = factory_menu(snapshot, selected, db) {
-            factory_controls(ui, &menu, db, actions);
+        // Only one build bar is shown: a factory's, if one is selected.
+        match factory_menu(snapshot, selected, db) {
+            Some(menu) => factory_controls(ui, &menu, db, actions),
+            None => {
+                let options = builder_options(snapshot, selected, db);
+                if let Some(option) = build_bar(ui, BUILDER_TIER_MEMORY, &options, db, |_| String::new()) {
+                    actions.push(UiAction::BeginPlacement(option));
+                }
+            }
         }
 
         let chips = queue_chips(snapshot, selected, db);
@@ -1467,10 +1498,15 @@ pub fn factory_menu(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb
         menu.factories.push(id);
         menu.unfinished += usize::from(!finished);
         repeating += usize::from(factory.repeat);
-        // With an upgrade queued, it can also queue what the upgrade will let it build.
+        // With an upgrade queued, it can also queue what the upgrade will let it build. A support
+        // factory builds nothing above its headquarters' tier.
         let queued_upgrade = blueprint.upgrades_to.filter(|upgrade| factory.queue.contains(&upgrade.0));
         let after_upgrade = queued_upgrade.iter().flat_map(|upgrade| &db.get(*upgrade).builds);
-        for &option in blueprint.builds.iter().chain(after_upgrade) {
+        let allowed = match (blueprint.support, blueprint.factory_kind) {
+            (true, Some(kind)) => headquarters_tier(snapshot, unit.team, kind, db),
+            _ => u8::MAX,
+        };
+        for &option in blueprint.builds.iter().chain(after_upgrade).filter(|option| db.get(**option).tier <= allowed) {
             match menu.options.iter_mut().find(|(existing, _)| *existing == option) {
                 Some((_, able)) if !able.contains(&id) => able.push(id),
                 Some(_) => {}
@@ -1479,7 +1515,7 @@ pub fn factory_menu(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb
         }
         // Factories of different tiers upgrade to different things, so the button is for the
         // lowest tier selected, and only the factories that upgrade to the same thing take it.
-        if let Some(upgrade) = blueprint.upgrades_to.filter(|upgrade| !factory.queue.contains(&upgrade.0)) {
+        if let Some(upgrade) = blueprint.upgrades_to.filter(|upgrade| !factory.queue.contains(&upgrade.0) && db.get(*upgrade).tier <= allowed) {
             match &mut menu.upgrade {
                 Some((offered, able)) if *offered == upgrade => able.push(id),
                 Some((offered, _)) if db.get(*offered).tier <= db.get(upgrade).tier => {}
@@ -2378,13 +2414,13 @@ mod tests {
         let mut current = snapshot(vec![structure(1, "land_factory_t1"), structure(2, "air_factory"), structure(3, "quantum_gateway"), structure(4, "tactical_missile_launcher")], vec![]);
         current.factories = (1..=4).map(|id| factory_view(id, vec![], false, 0)).collect();
         let queue = |factory: u32, key: &str, selected_count: usize| UiAction::Queue { factories: vec![SimId(factory)], blueprint: db.id(key), selected_count, count: 1 };
-        let both = hotkey_action(&current, &[SimId(1), SimId(2)], &db, 'Z', BuildTiers::default()).expect("the first slot");
+        let both = hotkey_action(&current, &[SimId(1), SimId(2)], &db, 'Q', BuildTiers::default()).expect("the first slot");
         assert_eq!(both, UiAction::Batch(vec![queue(1, "t1_engineer", 2), queue(2, "t1_air_scout", 2)]), "an engineer in the land factory and a scout in the air factory");
         let UiAction::Batch(shifted) = with_shift(both, true, &db) else { panic!("still a batch") };
         assert!(shifted.iter().all(|action| matches!(action, UiAction::Queue { count: SHIFT_QUEUE_COUNT, .. })));
         // A gateway's and a silo's only items are in their first slot too.
-        assert_eq!(hotkey_action(&current, &[SimId(3)], &db, 'Z', BuildTiers::default()), Some(queue(3, "support_commander", 1)));
-        assert_eq!(hotkey_action(&current, &[SimId(4)], &db, 'Z', BuildTiers::default()), Some(queue(4, "tactical_missile", 1)));
+        assert_eq!(hotkey_action(&current, &[SimId(3)], &db, 'Q', BuildTiers::default()), Some(queue(3, "support_commander", 1)));
+        assert_eq!(hotkey_action(&current, &[SimId(4)], &db, 'Q', BuildTiers::default()), Some(queue(4, "tactical_missile", 1)));
     }
 
     #[test]
@@ -2394,15 +2430,41 @@ mod tests {
         current.enhancements = vec![(SimId(10), [u16::MAX, db.enhancement_id("t3_engineering").0, u16::MAX])];
         let press = |letter: char, builder: Option<u8>| hotkey_action(&current, &[SimId(10)], &db, letter, BuildTiers { builder, factory: None });
         let place = |key: &str| Some(UiAction::BeginPlacement(db.id(key)));
-        assert_eq!(press('Q', None), place("land_factory_t1"), "the lowest level at first");
-        assert_eq!(press('Q', Some(3)), place("quantum_gateway"), "the same slot at T3");
-        // Anti-air is on one key at every level.
-        assert_eq!(press('N', Some(1)), place("t1_aa_turret"));
-        assert_eq!(press('N', Some(2)), place("t2_flak"));
-        assert_eq!(press('N', Some(3)), place("t3_sam"));
-        assert_eq!(press('E', Some(2)), None, "no extractor at T2");
+        assert_eq!(press('E', None), place("mass_extractor"), "the lowest level at first");
+        // The same kind of thing is on one key at every level.
+        assert_eq!(press('E', Some(2)), place("mass_extractor_t2"));
+        assert_eq!(press('E', Some(3)), place("mass_extractor_t3"));
+        assert_eq!(press('G', Some(3)), place("power_generator_t3"));
+        assert_eq!(press('Z', Some(2)), place("radar_t2"));
+        assert_eq!(press('Z', Some(3)), place("omni_sensor"));
+        assert_eq!(press('C', Some(2)), place("t2_point_defense"));
+        assert_eq!(press('V', Some(1)), place("t1_aa_turret"));
+        assert_eq!(press('V', Some(2)), place("t2_flak"));
+        assert_eq!(press('V', Some(3)), place("t3_sam"));
+        assert_eq!(press('\'', Some(3)), place("quantum_gateway"));
+        assert_eq!(press('T', Some(2)), None, "no storage at T2");
+        // A support factory needs a headquarters, and there is none.
+        assert_eq!(press('Q', Some(2)), None);
         // A bot can build nothing, so N mutes instead.
         assert_eq!(hotkey_action(&current, &[SimId(12)], &db, 'N', BuildTiers::default()), None);
+    }
+
+    #[test]
+    fn support_factories_are_offered_once_there_is_a_headquarters_of_their_kind() {
+        let db = BlueprintDb::standard();
+        let mut current = commander_and_engineer(&db);
+        current.enhancements = vec![(SimId(10), [u16::MAX, db.enhancement_id("t3_engineering").0, u16::MAX])];
+        let offered = |current: &SimSnapshot, key: &str| builder_options(current, &[SimId(10)], &db).contains(&db.id(key));
+        assert!(!offered(&current, "land_factory_t2_support"));
+        let mut headquarters = unit(20, 0.0);
+        headquarters.blueprint = db.id("land_factory_t2").0;
+        headquarters.is_structure = true;
+        current.units.push(headquarters);
+        assert!(offered(&current, "land_factory_t2_support"), "with a T2 land headquarters");
+        assert!(!offered(&current, "land_factory_t3_support"), "but not T3");
+        assert!(!offered(&current, "air_factory_t2_support"), "nor air");
+        current.units.last_mut().unwrap().built_permille = 500;
+        assert!(!offered(&current, "land_factory_t2_support"), "it must be finished");
     }
 
     #[test]
@@ -2496,7 +2558,7 @@ mod tests {
         assert_eq!(able(&current, &[SimId(1)], bot).unwrap(), [SimId(1)], "listed once, though both tiers can build it");
         // The tank is in the bot's slot, at T2.
         let expected = UiAction::Queue { factories: vec![SimId(1)], blueprint: tank, selected_count: 1, count: 1 };
-        assert_eq!(hotkey_action(&current, &[SimId(1)], &db, 'B', BuildTiers { builder: None, factory: Some(2) }), Some(expected));
+        assert_eq!(hotkey_action(&current, &[SimId(1)], &db, 'E', BuildTiers { builder: None, factory: Some(2) }), Some(expected));
 
         // The other T1 factory has no upgrade queued, so it is left out.
         assert_eq!(able(&current, &[SimId(1), SimId(3)], tank).unwrap(), [SimId(1)]);
@@ -2676,13 +2738,13 @@ mod tests {
         let current = commander_and_engineer(&db);
         assert_eq!(hotkey_action(&current, &[], &db, 'E', BuildTiers::default()), None, "nothing is selected");
         assert_eq!(hotkey_action(&current, &[SimId(12)], &db, 'E', BuildTiers::default()), None, "a bot cannot build");
-        assert_eq!(hotkey_action(&current, &[SimId(10)], &db, 'B', BuildTiers::default()), None, "a commander is not a factory");
+        assert_eq!(hotkey_action(&current, &[SimId(10)], &db, 'N', BuildTiers::default()), None, "nothing in that slot at T1");
         assert_eq!(hotkey_action(&current, &[SimId(10)], &db, 'R', BuildTiers::default()), None, "a commander has no repeat");
         let factories = mixed_factories(&db);
         let tank_level = BuildTiers { builder: None, factory: Some(2) };
         let bot = UiAction::Queue { factories: vec![SimId(1)], blueprint: db.id("t1_light_bot"), selected_count: 1, count: 1 };
-        assert_eq!(hotkey_action(&factories, &[SimId(1)], &db, 'B', tank_level), Some(bot), "a T1 factory shows T1, so no tank");
-        assert_eq!(hotkey_action(&factories, &[SimId(1)], &db, 'E', BuildTiers::default()), None, "a factory does not place structures");
+        assert_eq!(hotkey_action(&factories, &[SimId(1)], &db, 'E', tank_level), Some(bot), "a T1 factory shows T1, so no tank");
+        assert_eq!(hotkey_action(&factories, &[SimId(1)], &db, 'C', BuildTiers::default()), None, "nothing in that slot of a factory's bar");
     }
 
     #[test]
@@ -2691,12 +2753,12 @@ mod tests {
         let current = mixed_factories(&db);
         let selected = [SimId(1), SimId(2), SimId(3)];
         let queue = |key: &str, factories: Vec<SimId>| UiAction::Queue { factories, blueprint: db.id(key), selected_count: 3, count: 1 };
-        assert_eq!(hotkey_action(&current, &selected, &db, 'Z', BuildTiers::default()), Some(queue("t1_engineer", selected.to_vec())));
-        assert_eq!(hotkey_action(&current, &selected, &db, 'B', BuildTiers::default()), Some(queue("t1_light_bot", selected.to_vec())));
-        assert_eq!(hotkey_action(&current, &selected, &db, 'V', BuildTiers::default()), Some(queue("t1_light_artillery", selected.to_vec())));
-        assert_eq!(hotkey_action(&current, &selected, &db, 'H', BuildTiers::default()), Some(queue("t1_mobile_aa", selected.to_vec())));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'Q', BuildTiers::default()), Some(queue("t1_engineer", selected.to_vec())));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'E', BuildTiers::default()), Some(queue("t1_light_bot", selected.to_vec())));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'G', BuildTiers::default()), Some(queue("t1_light_artillery", selected.to_vec())));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'T', BuildTiers::default()), Some(queue("t1_mobile_aa", selected.to_vec())));
         let t2 = BuildTiers { builder: None, factory: Some(2) };
-        assert_eq!(hotkey_action(&current, &selected, &db, 'B', t2), Some(queue("t2_heavy_tank", vec![SimId(2)])));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'E', t2), Some(queue("t2_heavy_tank", vec![SimId(2)])));
         assert_eq!(hotkey_action(&current, &selected, &db, 'U', BuildTiers::default()), Some(queue("land_factory_t2", vec![SimId(1), SimId(3)])), "the lowest tier goes first");
         let to_t3 = UiAction::Queue { factories: vec![SimId(2)], blueprint: db.id("land_factory_t3"), selected_count: 1, count: 1 };
         assert_eq!(hotkey_action(&current, &[SimId(2)], &db, 'U', BuildTiers::default()), Some(to_t3));
@@ -2718,16 +2780,17 @@ mod tests {
     }
 
     #[test]
-    fn a_builder_and_a_factory_selected_together_both_answer_their_own_keys() {
+    fn with_a_builder_and_a_factory_selected_the_factory_takes_the_build_keys() {
         let db = BlueprintDb::standard();
         let mut current = mixed_factories(&db);
         let mut engineer = unit(4, 0.0);
         engineer.blueprint = db.id("t1_engineer").0;
         current.units.push(engineer);
         let selected = [SimId(1), SimId(4)];
-        assert_eq!(hotkey_action(&current, &selected, &db, 'E', BuildTiers::default()), Some(UiAction::BeginPlacement(db.id("mass_extractor"))));
-        let expected = UiAction::Queue { factories: vec![SimId(1)], blueprint: db.id("t1_engineer"), selected_count: 1, count: 1 };
-        assert_eq!(hotkey_action(&current, &selected, &db, 'Z', BuildTiers::default()), Some(expected));
+        let queue = |key: &str| Some(UiAction::Queue { factories: vec![SimId(1)], blueprint: db.id(key), selected_count: 1, count: 1 });
+        assert_eq!(hotkey_action(&current, &selected, &db, 'E', BuildTiers::default()), queue("t1_light_bot"), "not the engineer's extractor");
+        assert_eq!(hotkey_action(&current, &selected, &db, 'Q', BuildTiers::default()), queue("t1_engineer"));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'C', BuildTiers::default()), None, "the engineer's bar is not shown");
     }
 
     #[test]
@@ -2825,7 +2888,7 @@ mod tests {
     fn every_button_label_shows_its_key_and_name_and_nothing_else() {
         let db = BlueprintDb::standard();
         assert_eq!(item_label(&db, db.id("mass_extractor")), "[E] Mass Extractor");
-        assert_eq!(item_label(&db, db.id("t1_light_bot")), "[B] Light Assault Bot");
+        assert_eq!(item_label(&db, db.id("t1_light_bot")), "[E] Light Assault Bot");
     }
 
     #[test]
@@ -3240,9 +3303,9 @@ mod tests {
             UiAction::Queue { count, .. } => count,
             other => panic!("expected a queue order, not {other:?}"),
         };
-        assert_eq!(count_of(press('B', false)), 1);
-        assert_eq!(count_of(press('B', true)), 5);
-        assert_eq!(count_of(press('Z', true)), 5);
+        assert_eq!(count_of(press('E', false)), 1);
+        assert_eq!(count_of(press('E', true)), 5);
+        assert_eq!(count_of(press('Q', true)), 5);
         assert_eq!(count_of(press('U', true)), 1, "a factory only upgrades once");
         let other = with_shift(UiAction::Stop, true, &db);
         assert_eq!(other, UiAction::Stop, "other orders are not affected");
