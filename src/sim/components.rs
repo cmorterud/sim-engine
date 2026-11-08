@@ -186,6 +186,53 @@ pub struct Turning {
     pub radius: Fp,
 }
 
+/// An aircraft (GAME_SPECIFICATION.md §10). In flight it never stops: it flies the way its
+/// `Turning` faces, at its own height over land or water, in arcs. With nothing to do it lands,
+/// where there is open ground, and circles where there is none. Nothing on the ground blocks it,
+/// and it pushes nothing aside.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Flight {
+    /// How high above the ground or the water it flies.
+    pub elevation: Fp,
+    /// How high it is now: `elevation` in flight, and zero once landed.
+    pub altitude: Fp,
+    /// How fast it is flying now: its top speed in flight, and zero once landed.
+    pub speed: Fp,
+    /// Having flown over its target, how far it flies on before it turns back for another pass.
+    pub break_off: Fp,
+    /// Flying on, away from its target.
+    pub breaking_off: bool,
+}
+
+impl Flight {
+    /// Off the ground. A landed aircraft is hit by what hits ground units, and not by anti-air.
+    pub fn airborne(&self) -> bool {
+        self.altitude > Fp::ZERO
+    }
+}
+
+/// A weapon that can aim at aircraft. A weapon without it only hits what is on the ground.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct AntiAir {
+    /// Whether it can also hit what is on the ground.
+    pub also_ground: bool,
+}
+
+/// A bomber's weapon: it drops its bomb as it flies over the target, and the bomb falls.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct BombBay;
+
+/// A shot at an aircraft, that steers itself to it, and hits only it.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Homing {
+    pub target: SimId,
+    pub speed: Fp,
+}
+
+/// A falling bomb. Bombs fall at the original's gravity, which is stronger than that of shells.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Falling;
+
 /// Turns a unit vector towards another by at most `turn` radians, the short way round.
 /// Exactly behind has no shorter side, so it turns the positive way.
 pub fn rotate_toward(facing: Vec2Fp, toward: Vec2Fp, turn: Fp) -> Vec2Fp {

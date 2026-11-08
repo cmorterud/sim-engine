@@ -218,8 +218,8 @@ impl AiBrain {
                         upgrading: factory.queue.first().is_some_and(|item| world.blueprints.get(*item).is_factory()),
                     });
                 }
-                // The AI builds neither silos' missiles nor support commanders yet.
-                UnitClass::Factory | UnitClass::Ammo | UnitClass::SupportCommander => {}
+                // The AI builds neither silos' missiles, support commanders nor aircraft yet.
+                UnitClass::Factory | UnitClass::Ammo | UnitClass::SupportCommander | UnitClass::Air => {}
                 UnitClass::Economy | UnitClass::Defense => {
                     if blueprint == roster.extractor {
                         forces.extractors.push(cell);

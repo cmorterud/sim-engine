@@ -115,6 +115,8 @@ pub enum UnitClass {
     Commander,
     /// Built at a Quantum Gateway (GAME_SPECIFICATION.md §2.2). Its death does not end the match.
     SupportCommander,
+    /// Aircraft (GAME_SPECIFICATION.md §10).
+    Air,
     Engineer,
     Bot,
     Artillery,
@@ -136,7 +138,30 @@ pub enum WeaponKind {
     TacticalMissile,
     /// A nuclear missile, fired only on order, one for each missile built, and once per order.
     StrategicMissile,
+    /// A bomb, dropped from an aircraft as it passes over its target.
+    Bomb,
 }
+
+/// What a weapon can aim at: things on the ground, aircraft, or both.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Targets {
+    Ground,
+    Air,
+    Both,
+}
+
+/// How an aircraft flies (GAME_SPECIFICATION.md §10).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct FlightDef {
+    /// How high above the ground it flies.
+    pub elevation: Fp,
+    /// Degrees per second. Planes keep flying, so they turn in arcs, and circle when idle.
+    pub turn_rate: u32,
+    /// How far past its target it flies before turning back for another pass.
+    pub break_off: Fp,
+}
+
+
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct WeaponDef {
@@ -150,6 +175,7 @@ pub struct WeaponDef {
     pub kind: WeaponKind,
     /// How high a missile flies above the ground. Zero for shells.
     pub cruise_height: Fp,
+    pub targets: Targets,
     /// A nuclear blast's inner ring, on top of `damage` over all of `splash_radius`. Zero for none.
     pub inner_radius: Fp,
     pub inner_damage: Fp,
@@ -231,6 +257,8 @@ pub struct Blueprint {
     pub builds: Vec<BlueprintId>,
     pub upgrades_to: Option<BlueprintId>,
     pub weapon: Option<WeaponDef>,
+    /// For aircraft.
+    pub flight: Option<FlightDef>,
     pub requires_deposit: bool,
     /// Built over a hydrocarbon vent, which must be under the middle of its footprint.
     pub requires_vent: bool,
@@ -266,6 +294,10 @@ impl Blueprint {
 
     pub const fn is_structure(&self) -> bool {
         self.footprint > 0
+    }
+
+    pub const fn is_air(&self) -> bool {
+        self.flight.is_some()
     }
 
     pub fn is_commander(&self) -> bool {
@@ -324,8 +356,19 @@ struct RawWeapon {
     /// "shell", the default, "tactical_missile", or "strategic_missile".
     kind: Option<String>,
     cruise_height: Option<Number>,
+    /// "ground", the default, "air", or "both".
+    targets: Option<String>,
     inner_radius: Option<Number>,
     inner_damage: Option<Number>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawFlight {
+    elevation: Number,
+    /// Degrees per second.
+    turn_rate: u32,
+    break_off: Option<Number>,
 }
 
 #[derive(Deserialize)]
@@ -406,6 +449,7 @@ struct RawUnit {
     builds: Vec<String>,
     upgrades_to: Option<String>,
     weapon: Option<RawWeapon>,
+    flight: Option<RawFlight>,
     #[serde(default)]
     requires_deposit: bool,
     #[serde(default)]
@@ -622,9 +666,16 @@ impl BlueprintDb {
                         None | Some("shell") => WeaponKind::Shell,
                         Some("tactical_missile") => WeaponKind::TacticalMissile,
                         Some("strategic_missile") => WeaponKind::StrategicMissile,
+                        Some("bomb") => WeaponKind::Bomb,
                         Some(other) => return Err(context(format!("unknown weapon kind {other:?}"))),
                     },
                     cruise_height: whole(&weapon.cruise_height)?,
+                    targets: match weapon.targets.as_deref() {
+                        None | Some("ground") => Targets::Ground,
+                        Some("air") => Targets::Air,
+                        Some("both") => Targets::Both,
+                        Some(other) => return Err(context(format!("unknown targets {other:?}"))),
+                    },
                     inner_radius: whole(&weapon.inner_radius)?,
                     inner_damage: whole(&weapon.inner_damage)?,
                 }),
@@ -677,6 +728,7 @@ impl BlueprintDb {
                 class: match unit.class.as_str() {
                     "commander" => UnitClass::Commander,
                     "support_commander" => UnitClass::SupportCommander,
+                    "air" => UnitClass::Air,
                     "engineer" => UnitClass::Engineer,
                     "bot" => UnitClass::Bot,
                     "artillery" => UnitClass::Artillery,
@@ -703,6 +755,14 @@ impl BlueprintDb {
                 builds: unit.builds.iter().map(|key| lookup(key)).collect::<Result<_, _>>().map_err(context)?,
                 upgrades_to: unit.upgrades_to.as_deref().map(lookup).transpose().map_err(context)?,
                 weapon,
+                flight: match &unit.flight {
+                    None => None,
+                    Some(flight) => Some(FlightDef {
+                        elevation: flight.elevation.fp().map_err(context)?,
+                        turn_rate: flight.turn_rate,
+                        break_off: whole(&flight.break_off)?,
+                    }),
+                },
                 requires_deposit: unit.requires_deposit,
                 requires_vent: unit.requires_vent,
                 mass_income: rate(&unit.mass_income)?,

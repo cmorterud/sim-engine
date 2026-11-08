@@ -22,7 +22,7 @@ vision = 520
 build_power = 10
 build_range = 200
 # Its engineering suites (the enhancements below) unlock the T2 and T3 structures on its list.
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "radar", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "stealth_field_generator", "strategic_missile_launcher", "strategic_missile_defense", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "radar", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "stealth_field_generator", "strategic_missile_launcher", "strategic_missile_defense", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "t1_aa_turret"]
 weapon = { range = 440, reload_ticks = 7, projectile_speed = 50, damage = 70, turn_rate = 180 }
 overcharge = { energy = 3000, damage = 12000, structure_damage = 800, reload_ticks = 50 }
 mass_income = 1
@@ -48,7 +48,7 @@ radius = 8
 vision = 360
 build_power = 5
 build_range = 100
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "radar", "hydrocarbon_plant"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "radar", "hydrocarbon_plant", "air_factory", "t1_aa_turret"]
 
 [[unit]]
 id = "t1_light_bot"
@@ -109,7 +109,7 @@ health = 3200
 footprint = 3
 vision = 400
 build_power = 20
-builds = ["t1_engineer", "t1_light_bot", "t1_light_artillery"]
+builds = ["t1_engineer", "t1_light_bot", "t1_light_artillery", "t1_mobile_aa"]
 upgrades_to = "land_factory_t2"
 
 [[unit]]
@@ -124,7 +124,7 @@ health = 6000
 footprint = 3
 vision = 400
 build_power = 40
-builds = ["t1_engineer", "t2_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank"]
+builds = ["t1_engineer", "t2_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa"]
 upgrades_to = "land_factory_t3"
 
 [[unit]]
@@ -316,7 +316,7 @@ health = 10000
 footprint = 3
 vision = 400
 build_power = 90
-builds = ["t1_engineer", "t2_engineer", "t3_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank"]
+builds = ["t1_engineer", "t2_engineer", "t3_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa"]
 
 [[unit]]
 id = "t2_engineer"
@@ -334,7 +334,7 @@ radius = 9
 vision = 400
 build_power = 12
 build_range = 120
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "radar", "stealth_field_generator", "hydrocarbon_plant", "mass_fabricator"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "radar", "stealth_field_generator", "hydrocarbon_plant", "mass_fabricator", "air_factory", "t1_aa_turret"]
 
 [[unit]]
 id = "t3_engineer"
@@ -352,7 +352,7 @@ radius = 10
 vision = 520
 build_power = 30
 build_range = 140
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "t1_aa_turret"]
 
 # Intel (GAME_SPECIFICATION.md §9). Ranges are in units, and upkeep is energy per second
 # while running: a team that cannot pay switches its sensors off until it can. The commander
@@ -438,7 +438,7 @@ radius = 14
 vision = 520
 build_power = 56
 build_range = 200
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "t1_aa_turret"]
 # Three times the commander's fire: 300 a second for its 100, and a little farther.
 weapon = { range = 500, reload_ticks = 10, projectile_speed = 50, damage = 300, turn_rate = 180 }
 mass_income = 1
@@ -529,6 +529,101 @@ vision = 300
 mass_income = 16
 upkeep = 1500
 death_explosion = { damage = 5000, radius = 200, only_while_running = true }
+
+# Aircraft (GAME_SPECIFICATION.md §10), with Forged Alliance Forever's numbers for its T1 aircraft.
+# An aircraft's speed is its top air speed. `flight` sets how high it flies, how fast it turns,
+# and how far past its target it flies before turning for another pass.
+[[unit]]
+id = "air_factory"
+name = "Air Factory"
+class = "factory"
+tier = 1
+mass = 210
+energy = 2400
+build_time = 300
+health = 4000
+footprint = 3
+vision = 400
+build_power = 20
+builds = ["t1_air_scout", "t1_interceptor", "t1_bomber"]
+
+[[unit]]
+id = "t1_air_scout"
+name = "Air Scout"
+class = "air"
+tier = 1
+mass = 40
+energy = 580
+build_time = 200
+health = 35
+speed = 38
+radius = 8
+vision = 840
+radar = 1280
+flight = { elevation = 320, turn_rate = 80 }
+
+# Shoots only at aircraft.
+[[unit]]
+id = "t1_interceptor"
+name = "Interceptor"
+class = "air"
+tier = 1
+mass = 50
+energy = 2250
+build_time = 500
+health = 295
+speed = 30
+radius = 10
+vision = 560
+flight = { elevation = 280, turn_rate = 120, break_off = 200 }
+weapon = { range = 500, reload_ticks = 10, projectile_speed = 180, damage = 50, targets = "air" }
+
+# Its carpet of four napalm bombs is one bomb here, with their damage over time added up.
+[[unit]]
+id = "t1_bomber"
+name = "Attack Bomber"
+class = "air"
+tier = 1
+mass = 90
+energy = 2050
+build_time = 500
+health = 215
+speed = 20
+radius = 10
+vision = 640
+radar = 880
+flight = { elevation = 280, turn_rate = 90, break_off = 640 }
+weapon = { kind = "bomb", range = 800, reload_ticks = 50, projectile_speed = 20, damage = 350, splash_radius = 60 }
+
+# Two shots a volley in the original, one shot of twice the damage here.
+[[unit]]
+id = "t1_aa_turret"
+name = "Anti-Air Turret"
+class = "defense"
+tier = 1
+mass = 150
+energy = 1500
+build_time = 188
+health = 800
+footprint = 1
+vision = 480
+weapon = { range = 880, reload_ticks = 7, projectile_speed = 90, damage = 46, targets = "air", turn_rate = 180 }
+
+[[unit]]
+id = "t1_mobile_aa"
+name = "Mobile Anti-Air"
+class = "tank"
+tier = 1
+mass = 55
+energy = 275
+build_time = 220
+health = 310
+speed = "6.6"
+turn_rate = 80
+turn_radius = 10
+radius = 8
+vision = 400
+weapon = { range = 640, reload_ticks = 10, projectile_speed = 90, damage = 26, targets = "air", turn_rate = 180 }
 
 # Field enhancements (GAME_SPECIFICATION.md §2.1), with Forged Alliance Forever's numbers for its
 # commander. A commander has three slots, and one enhancement in each: a new one replaces what is

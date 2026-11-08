@@ -3,18 +3,31 @@ use super::config::{SPATIAL_CELL_UNITS, SPATIAL_SCAN_RADIUS_UNITS};
 use crate::math::fp::{wide_mul, Fp, Vec2Fp, FP_FRAC_BITS};
 
 const CELL_RAW: i32 = SPATIAL_CELL_UNITS << FP_FRAC_BITS;
-const LIST_COUNT: usize = 4;
+const LIST_COUNT: usize = 6;
 
 /// Mobile units and structures are stored apart, so that a 3-cell factory's large radius
-/// does not widen the short-range queries that every mobile unit runs on every tick.
+/// does not widen the short-range queries that every mobile unit runs on every tick. Aircraft
+/// are apart from both, so that only what is meant to reach them does: ground shells, blasts,
+/// and collisions never look there.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Layer {
     Mobile,
     Structure,
+    Air,
 }
 
-const fn list_index(team: Team, is_structure: bool) -> usize {
-    team.index() * 2 + is_structure as usize
+const fn layer_of(is_structure: bool, is_air: bool) -> Layer {
+    if is_air {
+        Layer::Air
+    } else if is_structure {
+        Layer::Structure
+    } else {
+        Layer::Mobile
+    }
+}
+
+const fn list_index(team: Team, layer: Layer) -> usize {
+    team.index() * 3 + layer as usize
 }
 
 /// A unit's per-tick state, stored inline so queries avoid ECS lookups.
@@ -30,6 +43,8 @@ pub struct GridEntry {
     pub entity: hecs::Entity,
     pub team: Team,
     pub is_structure: bool,
+    /// Flying, in the air layer.
+    pub is_air: bool,
     /// Has no order this tick. Moving units settle when they bump into one near their goal.
     pub is_idle: bool,
     cell_x: u16,
@@ -46,6 +61,7 @@ pub struct GridUnit {
     pub z: i32,
     pub radius: i32,
     pub is_structure: bool,
+    pub is_air: bool,
     pub is_idle: bool,
 }
 
@@ -107,11 +123,12 @@ impl SpatialGrid {
                 entity: unit.entity,
                 team: unit.team,
                 is_structure: unit.is_structure,
+                is_air: unit.is_air,
                 is_idle: unit.is_idle,
                 cell_x,
             });
             let row = self.cell(unit.y) as usize;
-            self.lists[list_index(unit.team, unit.is_structure)].row_start[row + 1] += 1;
+            self.lists[list_index(unit.team, layer_of(unit.is_structure, unit.is_air))].row_start[row + 1] += 1;
         }
         for list in &mut self.lists {
             let mut total = 0;
@@ -129,7 +146,7 @@ impl SpatialGrid {
             std::array::from_fn(|list| self.lists[list].row_start[..self.rows].to_vec());
         for entry in &self.by_index {
             let row = ((entry.y / CELL_RAW).clamp(0, self.columns - 1)) as usize;
-            let list = list_index(entry.team, entry.is_structure);
+            let list = list_index(entry.team, layer_of(entry.is_structure, entry.is_air));
             let cursor = &mut cursors[list][row];
             self.lists[list].entries[*cursor as usize] = *entry;
             *cursor += 1;
@@ -165,9 +182,8 @@ impl SpatialGrid {
         radius: i32,
         mut visit: impl FnMut(&GridEntry),
     ) {
-        let is_structure = layer == Layer::Structure;
-        let blue = [list_index(Team::Blue, is_structure)];
-        let red = [list_index(Team::Red, is_structure)];
+        let blue = [list_index(Team::Blue, layer)];
+        let red = [list_index(Team::Red, layer)];
         let both = [blue[0], red[0]];
         let selected: &[usize] = match team {
             Some(Team::Blue) => &blue,
@@ -209,7 +225,7 @@ impl SpatialGrid {
     pub fn query_radius(&self, center: Vec2Fp, radius: Fp, out: &mut Vec<hecs::Entity>) {
         let radius_squared = wide_mul(radius, radius);
         let (center_x, center_y) = (center.x.to_bits(), center.y.to_bits());
-        for layer in [Layer::Mobile, Layer::Structure] {
+        for layer in [Layer::Mobile, Layer::Structure, Layer::Air] {
             self.for_each_candidate(None, layer, center_x, center_y, radius.to_bits(), |entry| {
                 let position = Vec2Fp::new(Fp::from_bits(entry.x), Fp::from_bits(entry.y));
                 if position.distance_squared(&center) <= radius_squared {
@@ -242,6 +258,7 @@ mod tests {
             z: 0,
             radius: fp_int(1).to_bits(),
             is_structure: false,
+            is_air: false,
             is_idle: false,
         }
     }

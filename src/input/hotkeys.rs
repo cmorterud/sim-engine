@@ -28,6 +28,9 @@ pub const RESERVED: [char; 5] = ['W', 'A', 'S', 'D', PATROL];
 pub const F1: char = '\u{E001}';
 pub const F2: char = '\u{E002}';
 pub const F3: char = '\u{E003}';
+pub const F4: char = '\u{E004}';
+pub const F5: char = '\u{E005}';
+pub const F6: char = '\u{E006}';
 
 /// How a key is shown on a button: the letter, or the function key's name.
 pub fn key_name(letter: char) -> String {
@@ -35,6 +38,9 @@ pub fn key_name(letter: char) -> String {
         F1 => "F1".to_string(),
         F2 => "F2".to_string(),
         F3 => "F3".to_string(),
+        F4 => "F4".to_string(),
+        F5 => "F5".to_string(),
+        F6 => "F6".to_string(),
         other => other.to_string(),
     }
 }
@@ -66,11 +72,14 @@ pub fn blueprint_hotkey(key: &str) -> Option<char> {
         "hydrocarbon_plant" => F1,
         "mass_fabricator" => F2,
         "mass_fabricator_t3" => F3,
-        // The gateway's support commander shares the engineer's key: a key queues every option
-        // on it in the selected factories' menu.
-        "t1_engineer" | "support_commander" => 'Z',
-        "t1_light_bot" => 'B',
-        "t1_light_artillery" => 'V',
+        "air_factory" => F4,
+        "t1_aa_turret" => F5,
+        "t1_mobile_aa" => F6,
+        // The gateway's support commander and the air factory's aircraft share the land
+        // factory's keys: a key queues every option on it in the selected factories' menus.
+        "t1_engineer" | "support_commander" | "t1_air_scout" => 'Z',
+        "t1_light_bot" | "t1_interceptor" => 'B',
+        "t1_light_artillery" | "t1_bomber" => 'V',
         "t2_heavy_tank" => 'H',
         _ => return None,
     })
@@ -100,6 +109,9 @@ pub const fn letter_for(code: KeyCode) -> Option<char> {
         KeyCode::F1 => F1,
         KeyCode::F2 => F2,
         KeyCode::F3 => F3,
+        KeyCode::F4 => F4,
+        KeyCode::F5 => F5,
+        KeyCode::F6 => F6,
         KeyCode::KeyB => 'B',
         KeyCode::KeyV => 'V',
         KeyCode::KeyH => 'H',
@@ -140,11 +152,14 @@ mod tests {
     use super::*;
     use crate::sim::blueprints::BlueprintDb;
 
-    const ALL_KEYS: [KeyCode; 35] = [
+    const ALL_KEYS: [KeyCode; 38] = [
         KeyCode::KeyN,
         KeyCode::F1,
         KeyCode::F2,
         KeyCode::F3,
+        KeyCode::F4,
+        KeyCode::F5,
+        KeyCode::F6,
         KeyCode::BracketLeft,
         KeyCode::BracketRight,
         KeyCode::Backquote,
@@ -192,7 +207,7 @@ mod tests {
     fn everything_that_can_be_built_has_a_key() {
         let db = BlueprintDb::standard();
         let keys = buildable(&db);
-        assert_eq!(keys.len(), 26);
+        assert_eq!(keys.len(), 32);
         for key in keys {
             assert!(blueprint_hotkey(&key).is_some(), "{key} has no hotkey");
         }
@@ -203,10 +218,13 @@ mod tests {
         let db = BlueprintDb::standard();
         // Factory items may share a key, as a key queues all of them: the two silos' missiles,
         // and the engineer and the support commander. Structures never do, nor panel orders.
-        let shared = ["tactical_missile", "support_commander"];
+        let shared = ["tactical_missile", "support_commander", "t1_air_scout", "t1_interceptor", "t1_bomber"];
         let mut letters: Vec<char> = buildable(&db).iter().filter(|key| !shared.contains(&key.as_str())).filter_map(|key| blueprint_hotkey(key)).collect();
         assert_eq!(blueprint_hotkey("tactical_missile"), blueprint_hotkey("strategic_missile"));
         assert_eq!(blueprint_hotkey("support_commander"), blueprint_hotkey("t1_engineer"));
+        assert_eq!(blueprint_hotkey("t1_air_scout"), blueprint_hotkey("t1_engineer"));
+        assert_eq!(blueprint_hotkey("t1_interceptor"), blueprint_hotkey("t1_light_bot"));
+        assert_eq!(blueprint_hotkey("t1_bomber"), blueprint_hotkey("t1_light_artillery"));
         letters.extend(PANEL_LETTERS);
         let count = letters.len();
         for letter in &letters {

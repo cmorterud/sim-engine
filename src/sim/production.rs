@@ -4,10 +4,10 @@
 use std::collections::BTreeMap;
 use std::hash::Hasher;
 
-use super::blueprints::{BlueprintId, Res, UnitClass, WeaponKind, TICKS_PER_SECOND};
+use super::blueprints::{BlueprintId, Res, Targets, UnitClass, WeaponKind, TICKS_PER_SECOND};
 use super::commands::SimCommand;
 use super::components::{
-    Adjacency, BeingCaptured, Blueprinted, BuildTask, Builder, Intel, Launcher, Upgrading, MissileDefense, OverchargeOrder, OverchargeWeapon, Paused, Shield, Turning, Turret, Veterancy, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, OrderQueue, Patrol,
+    Adjacency, AntiAir, BeingCaptured, BombBay, Flight, MoveClass, Blueprinted, BuildTask, Builder, Intel, Launcher, Upgrading, MissileDefense, OverchargeOrder, OverchargeWeapon, Paused, Shield, Turning, Turret, Veterancy, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, OrderQueue, Patrol,
     Position, SimId, Team, UnitStats, Wreck, WreckKind,
 };
 use super::config::{
@@ -193,7 +193,8 @@ impl SimWorld {
     /// Spawns a finished mobile unit.
     pub fn spawn_mobile(&mut self, blueprint: BlueprintId, team: Team, position: Vec2Fp) -> SimId {
         let spawn = self.blueprint_spawn(blueprint, team, position);
-        let id = self.spawn_unit(spawn);
+        let move_class = if self.blueprints.get(blueprint).is_air() { MoveClass::Air } else { MoveClass::Land };
+        let id = self.spawn_unit_as(spawn, move_class);
         let entity = self.find_unit(id).expect("just spawned").1;
         self.attach_blueprint_parts(id, entity, blueprint);
         if self.blueprints.get(blueprint).is_commander() {
@@ -350,10 +351,27 @@ impl SimWorld {
             };
             self.ecs.insert_one(entity, weapon).expect("entity was just spawned");
         }
+        if let Some(flight) = unit.flight {
+            self.ecs.insert_one(entity, Turning::new(facing, flight.turn_rate, Fp::ZERO)).expect("entity was just spawned");
+            let airborne = Flight { elevation: flight.elevation, altitude: flight.elevation, speed: unit.speed, break_off: flight.break_off, breaking_off: false };
+            self.ecs.insert_one(entity, airborne).expect("entity was just spawned");
+            let mut position = self.ecs.get::<&mut Position>(entity).expect("units have positions");
+            position.0.z = super::air::flying_height(&self.terrain, position.0.xy(), flight.elevation);
+            drop(position);
+            self.aircraft.push((id, entity));
+        }
+        match unit.weapon.map(|weapon| weapon.targets) {
+            Some(Targets::Air) => self.ecs.insert_one(entity, AntiAir { also_ground: false }).expect("entity was just spawned"),
+            Some(Targets::Both) => self.ecs.insert_one(entity, AntiAir { also_ground: true }).expect("entity was just spawned"),
+            Some(Targets::Ground) | None => {}
+        }
+        if unit.weapon.is_some_and(|weapon| weapon.kind == WeaponKind::Bomb) {
+            self.ecs.insert_one(entity, BombBay).expect("entity was just spawned");
+        }
         if let Some(rate) = unit.weapon.and_then(|weapon| weapon.turn_rate) {
             self.ecs.insert_one(entity, Turret::new(facing, rate)).expect("entity was just spawned");
         }
-        if let Some(weapon) = unit.weapon.filter(|weapon| weapon.kind != WeaponKind::Shell) {
+        if let Some(weapon) = unit.weapon.filter(|weapon| matches!(weapon.kind, WeaponKind::TacticalMissile | WeaponKind::StrategicMissile)) {
             let launcher = Launcher {
                 strategic: weapon.kind == WeaponKind::StrategicMissile,
                 cruise_height: weapon.cruise_height,
@@ -1266,9 +1284,10 @@ impl SimWorld {
     fn capturable(&self, entity: hecs::Entity, team: Team) -> bool {
         let theirs = self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team != team);
         let finished = self.ecs.get::<&Construction>(entity).is_err();
+        // Nor can an aircraft in flight be reached.
         let commander = self.ecs.get::<&Blueprinted>(entity).is_ok_and(|unit| {
             let class = self.blueprints.get(unit.0).class;
-            class == UnitClass::Commander || class == UnitClass::SupportCommander
+            matches!(class, UnitClass::Commander | UnitClass::SupportCommander | UnitClass::Air)
         });
         theirs && finished && !commander
     }
@@ -1895,6 +1914,19 @@ impl SimWorld {
         if let Ok(capture) = self.ecs.get::<&BeingCaptured>(entity) {
             hasher.write(&[24]);
             hasher.write(&capture.progress.to_bits().to_le_bytes());
+        }
+        if let Ok(flight) = self.ecs.get::<&Flight>(entity) {
+            hasher.write(&[25, u8::from(flight.breaking_off)]);
+            for value in [flight.elevation, flight.altitude, flight.speed] {
+                hasher.write(&value.to_bits().to_le_bytes());
+            }
+            hasher.write(&flight.break_off.to_bits().to_le_bytes());
+        }
+        if let Ok(anti_air) = self.ecs.get::<&AntiAir>(entity) {
+            hasher.write(&[26, u8::from(anti_air.also_ground)]);
+        }
+        if self.ecs.get::<&BombBay>(entity).is_ok() {
+            hasher.write(&[27]);
         }
         if let Ok(upgrading) = self.ecs.get::<&Upgrading>(entity) {
             hasher.write(&[18]);

@@ -163,6 +163,12 @@ pub fn unit_look(key: &str) -> UnitLook {
         "tactical_missile_defense" => look(Shape::MissileDefense, Some([1.00, 0.55, 0.45]), 1.2),
         "strategic_missile_launcher" => look(Shape::NukeSilo, Some([1.00, 0.90, 0.30]), 0.5),
         "strategic_missile_defense" => look(Shape::AntiNukeSilo, Some([0.95, 0.95, 0.95]), 0.7),
+        "air_factory" => look(Shape::Factory, Some([0.45, 0.60, 0.80]), 0.5),
+        "t1_air_scout" => look(Shape::Aircraft, Some([0.85, 0.90, 0.95]), 0.5),
+        "t1_interceptor" => look(Shape::Aircraft, None, 0.5),
+        "t1_bomber" => look(Shape::Bomber, None, 0.6),
+        "t1_aa_turret" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::AntiAirGun, Some([0.35, 0.75, 0.95]), 0.9) },
+        "t1_mobile_aa" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::AntiAirGun, None, 1.0) },
         "t1_point_defense" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::PointDefense, Some([0.75, 0.25, 0.85]), 0.9) },
         _ => look(Shape::Cube, None, 0.6),
     }
@@ -489,8 +495,22 @@ mod tests {
             assert_ne!(unit_look(&unit.key).shape, Shape::Cube, "{} has no shape of its own", unit.key);
         }
         // Higher tiers of the factory and the engineer, the radar's omni upgrade, and the support
-        // commander share the shape they come from, and everything else is unique.
-        let shared = ["land_factory_t2", "land_factory_t3", "t2_engineer", "t3_engineer", "omni_sensor", "support_commander", "mass_extractor_t2", "mass_extractor_t3", "mass_fabricator_t3"];
+        // commander share the shape they come from, the air factory is a factory, the scout a small
+        // fighter, and the anti-air turret has the mobile anti-air's guns. Everything else is unique.
+        let shared = [
+            "land_factory_t2",
+            "land_factory_t3",
+            "t2_engineer",
+            "t3_engineer",
+            "omni_sensor",
+            "support_commander",
+            "mass_extractor_t2",
+            "mass_extractor_t3",
+            "mass_fabricator_t3",
+            "air_factory",
+            "t1_air_scout",
+            "t1_aa_turret",
+        ];
         let shapes: Vec<Shape> = drawn().filter(|unit| !shared.contains(&unit.key.as_str())).map(|unit| unit_look(&unit.key).shape).collect();
         for (index, shape) in shapes.iter().enumerate() {
             assert!(!shapes[index + 1..].contains(shape), "{shape:?} is used twice");

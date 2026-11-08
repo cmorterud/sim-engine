@@ -2037,6 +2037,11 @@ fn draw_icon(painter: &egui::Painter, center: Pos2, class: UnitClass, color: Col
             painter.line_segment([corner(0.0, -1.0), corner(0.0, 1.0)], stroke);
             painter.line_segment([corner(-1.0, 0.0), corner(1.0, 0.0)], stroke);
         }
+        // The NATO aviation symbol: a pair of wings.
+        UnitClass::Air => {
+            painter.line_segment([corner(-0.8, 0.4), corner(0.0, -0.2)], stroke);
+            painter.line_segment([corner(0.0, -0.2), corner(0.8, 0.4)], stroke);
+        }
         // Never on the map.
         UnitClass::Ammo => {}
     }

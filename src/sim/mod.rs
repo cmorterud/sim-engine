@@ -1,6 +1,7 @@
 //! Deterministic simulation. Floats, randomized containers, and wall-clock time are banned here.
 #![deny(clippy::float_arithmetic)]
 
+pub mod air;
 pub mod blueprints;
 pub mod combat;
 pub mod commands;

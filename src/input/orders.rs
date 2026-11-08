@@ -187,12 +187,12 @@ pub fn overcharge_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
         .collect()
 }
 
-/// Whether a unit the player can see could be captured: finished, and not a commander or
-/// support commander.
+/// Whether a unit the player can see could be captured: finished, and not a commander, a
+/// support commander, or an aircraft.
 fn capturable(unit: &UnitView, blueprints: &BlueprintDb) -> bool {
     unit.blueprint != u16::MAX && unit.built_permille == 1000 && {
         let class = blueprints.get(BlueprintId(unit.blueprint)).class;
-        class != UnitClass::Commander && class != UnitClass::SupportCommander
+        !matches!(class, UnitClass::Commander | UnitClass::SupportCommander | UnitClass::Air)
     }
 }
 

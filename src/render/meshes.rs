@@ -58,6 +58,12 @@ pub enum Shape {
     HydrocarbonPlant,
     /// A block wrapped in rings.
     Fabricator,
+    /// A fighter: a slim body with swept delta wings and a tail fin, pointing along +Y.
+    Aircraft,
+    /// A thick body with long straight wings and a tailplane, pointing along +Y.
+    Bomber,
+    /// A turret with two barrels raised to the sky, which swivels to aim.
+    AntiAirGun,
     /// A shield's dome: an open half-sphere, drawn see-through.
     Dome,
     /// Flat, around the feet of a selected mobile unit.
@@ -67,7 +73,7 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub const ALL: [Self; 35] = [
+    pub const ALL: [Self; 38] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -100,6 +106,9 @@ impl Shape {
         Self::Gateway,
         Self::HydrocarbonPlant,
         Self::Fabricator,
+        Self::Aircraft,
+        Self::Bomber,
+        Self::AntiAirGun,
         Self::Dome,
         Self::SelectionRing,
         Self::SelectionBox,
@@ -383,6 +392,26 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.block([-0.32, -0.32, -0.5], [0.32, 0.32, 0.35]);
             for z in [-0.3_f32, 0.0, 0.3] {
                 mesh.frustum([0.0, 0.0], [z, z + 0.08], [0.48, 0.48], 12);
+            }
+        }
+        Shape::Aircraft => {
+            mesh.beam([0.0, -0.5, 0.0], [0.0, 0.5, 0.0], 0.14, 0.12);
+            mesh.cuboid(
+                [Vec3::new(-0.5, -0.4, -0.03), Vec3::new(0.5, -0.4, -0.03), Vec3::new(0.06, 0.2, -0.03), Vec3::new(-0.06, 0.2, -0.03)],
+                [Vec3::new(-0.5, -0.4, 0.03), Vec3::new(0.5, -0.4, 0.03), Vec3::new(0.06, 0.2, 0.03), Vec3::new(-0.06, 0.2, 0.03)],
+            );
+            mesh.block([-0.02, -0.5, 0.0], [0.02, -0.3, 0.3]);
+        }
+        Shape::Bomber => {
+            mesh.beam([0.0, -0.5, 0.0], [0.0, 0.45, 0.0], 0.2, 0.18);
+            mesh.block([-0.5, -0.05, -0.03], [0.5, 0.18, 0.03]);
+            mesh.block([-0.22, -0.5, -0.02], [0.22, -0.36, 0.02]);
+            mesh.block([-0.02, -0.5, 0.0], [0.02, -0.36, 0.25]);
+        }
+        Shape::AntiAirGun => {
+            mesh.block([-0.25, -0.25, -0.1], [0.25, 0.2, 0.22]);
+            for x in [-0.12_f32, 0.12] {
+                mesh.beam([x, -0.05, 0.1], [x, 0.38, 0.44], 0.05, 0.05);
             }
         }
         Shape::Gateway => {
