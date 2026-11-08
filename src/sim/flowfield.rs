@@ -208,8 +208,10 @@ pub enum FlowSample {
     Unreachable,
 }
 
-/// Naval routes are numbered from here, so that any route can be found from its number alone.
+/// Naval and amphibious routes are numbered from here, so that any route can be found from its
+/// number alone.
 pub const NAVAL_ROUTE_BASE: u32 = 1 << 30;
+pub const AMPHIBIOUS_ROUTE_BASE: u32 = 1 << 29;
 
 pub struct FlowField {
     /// Whose ground this field paths over: land, or water for ships.
@@ -217,6 +219,8 @@ pub struct FlowField {
     /// For ships, made the first time one needs a route, so that games without ships are
     /// exactly as they were. Calls about a naval route go to it.
     naval: Option<Box<FlowField>>,
+    /// The same, for hovercraft and seabed walkers, over land and water both.
+    amphibious: Option<Box<FlowField>>,
     sectors_per_side: usize,
     cells: usize,
     portals: Vec<Portal>,
@@ -244,6 +248,7 @@ impl FlowField {
         Self {
             class: MoveClass::Land,
             naval: None,
+            amphibious: None,
             sectors_per_side: cells / SECTOR_CELLS,
             cells,
             portals: Vec::new(),
@@ -265,13 +270,39 @@ impl FlowField {
         Self { class: MoveClass::Naval, next_route: NAVAL_ROUTE_BASE, ..Self::new(terrain) }
     }
 
+    fn new_amphibious(terrain: &Terrain) -> Self {
+        Self { class: MoveClass::Hover, next_route: AMPHIBIOUS_ROUTE_BASE, ..Self::new(terrain) }
+    }
+
+    /// Whether a route of this number is held by one of this field's others.
+    fn held_elsewhere(&self, id: u32) -> bool {
+        self.class == MoveClass::Land && id >= AMPHIBIOUS_ROUTE_BASE
+    }
+
     /// The field that holds a route, by its number.
     fn holder(&self, id: u32) -> Option<&Self> {
-        if id >= NAVAL_ROUTE_BASE && self.class == MoveClass::Land { self.naval.as_deref() } else { Some(self) }
+        if !self.held_elsewhere(id) {
+            Some(self)
+        } else if id >= NAVAL_ROUTE_BASE {
+            self.naval.as_deref()
+        } else {
+            self.amphibious.as_deref()
+        }
     }
 
     fn holder_mut(&mut self, id: u32) -> Option<&mut Self> {
-        if id >= NAVAL_ROUTE_BASE && self.class == MoveClass::Land { self.naval.as_deref_mut() } else { Some(self) }
+        if !self.held_elsewhere(id) {
+            Some(self)
+        } else if id >= NAVAL_ROUTE_BASE {
+            self.naval.as_deref_mut()
+        } else {
+            self.amphibious.as_deref_mut()
+        }
+    }
+
+    /// This field's others, naval first, that exist.
+    fn others_mut(&mut self) -> impl Iterator<Item = &mut Self> {
+        self.naval.as_deref_mut().into_iter().chain(self.amphibious.as_deref_mut())
     }
 
     /// Creates a route over the ground of a movement class: water for ships, and land for
@@ -291,13 +322,18 @@ impl FlowField {
             let naval = self.naval.get_or_insert_with(|| Box::new(Self::new_naval(terrain)));
             return naval.create_route(terrain, tick, goal, references, arrive_radius, follow);
         }
+        // Without water, amphibians cross exactly what land units do, and share their routes.
+        if matches!(class, MoveClass::Hover | MoveClass::Seabed) && self.class == MoveClass::Land && terrain.has_water() {
+            let amphibious = self.amphibious.get_or_insert_with(|| Box::new(Self::new_amphibious(terrain)));
+            return amphibious.create_route(terrain, tick, goal, references, arrive_radius, follow);
+        }
         self.create_route(terrain, tick, goal, references, arrive_radius, follow)
     }
 
     /// Call after any cost grid change. The graph and existing routes rebuild on next use.
     pub fn invalidate(&mut self) {
-        if let Some(naval) = self.naval.as_deref_mut() {
-            naval.invalidate();
+        for other in self.others_mut() {
+            other.invalidate();
         }
         self.graph_dirty = true;
         for links in &mut self.link_cache {
@@ -308,8 +344,8 @@ impl FlowField {
     /// Call after the cost of a square of cells changes, as when a structure goes up or comes
     /// down. Only the sectors it touches forget their distances.
     pub fn invalidate_cells(&mut self, cell_x: u32, cell_y: u32, size: u32) {
-        if let Some(naval) = self.naval.as_deref_mut() {
-            naval.invalidate_cells(cell_x, cell_y, size);
+        for other in self.others_mut() {
+            other.invalidate_cells(cell_x, cell_y, size);
         }
         self.graph_dirty = true;
         let last = self.cells.saturating_sub(1);
@@ -448,8 +484,13 @@ impl FlowField {
 
     /// Builds the portal graph now if it is out of date.
     pub fn prepare(&mut self, terrain: &Terrain) {
-        if let Some(naval) = self.naval.as_deref_mut() {
-            naval.prepare(terrain);
+        // Commanders walk the seabed, so on a map with water there is always an amphibian, and
+        // its graph is better built now than in the middle of a game.
+        if self.class == MoveClass::Land && terrain.has_water() && self.amphibious.is_none() {
+            self.amphibious = Some(Box::new(Self::new_amphibious(terrain)));
+        }
+        for other in self.others_mut() {
+            other.prepare(terrain);
         }
         self.ensure_graph(terrain);
     }
@@ -554,9 +595,9 @@ impl FlowField {
 
     /// Drops one reference. The route and its fields are freed at zero.
     pub fn release(&mut self, id: u32) {
-        if id >= NAVAL_ROUTE_BASE && self.class == MoveClass::Land {
-            if let Some(naval) = self.naval.as_deref_mut() {
-                naval.release(id);
+        if self.held_elsewhere(id) {
+            if let Some(other) = self.holder_mut(id) {
+                other.release(id);
             }
             return;
         }
@@ -600,8 +641,8 @@ impl FlowField {
     }
 
     fn update_moving_goals_with(&mut self, terrain: &Terrain, tick: u32, locate: &dyn Fn(SimId) -> Option<Vec2Fp>) {
-        if let Some(naval) = self.naval.as_deref_mut() {
-            naval.update_moving_goals_with(terrain, tick, locate);
+        for other in self.others_mut() {
+            other.update_moving_goals_with(terrain, tick, locate);
         }
         self.ensure_graph(terrain);
         let mut reroutes = Vec::new();
@@ -630,8 +671,8 @@ impl FlowField {
     /// Samples a route for a unit, requesting a field build when one is missing or stale.
     /// A stale field stays in use until its replacement is ready, so units do not stutter.
     pub fn sample(&mut self, id: u32, tick: u32, position: Vec2Fp, terrain: &Terrain) -> FlowSample {
-        if id >= NAVAL_ROUTE_BASE && self.class == MoveClass::Land {
-            return self.naval.as_deref_mut().map_or(FlowSample::Hold, |naval| naval.sample(id, tick, position, terrain));
+        if self.held_elsewhere(id) {
+            return self.holder_mut(id).map_or(FlowSample::Hold, |other| other.sample(id, tick, position, terrain));
         }
         let cell = terrain.cell_of(position);
         let sector = self.sector_of_cell(cell);
@@ -662,8 +703,8 @@ impl FlowField {
 
     /// Builds queued sector fields, up to the fixed per-tick budget.
     pub fn build_pending(&mut self, terrain: &Terrain, tick: u32) {
-        if let Some(naval) = self.naval.as_deref_mut() {
-            naval.build_pending(terrain, tick);
+        for other in self.others_mut() {
+            other.build_pending(terrain, tick);
         }
         self.ensure_graph(terrain);
         let mut built = 0;
@@ -812,6 +853,10 @@ impl FlowField {
             hasher.write(&[1]);
             naval.hash_state(hasher);
         }
+        if let Some(amphibious) = &self.amphibious {
+            hasher.write(&[2]);
+            amphibious.hash_state(hasher);
+        }
     }
 }
 
@@ -821,7 +866,7 @@ fn land_cost(terrain: &Terrain) -> &[u8] {
 }
 
 fn class_cost(terrain: &Terrain, class: MoveClass) -> &[u8] {
-    terrain.cost_grid(class).expect("land and naval cost grids exist")
+    terrain.cost_grid(class).expect("land, naval, and amphibious cost grids exist")
 }
 
 fn local_index(cell: (usize, usize), origin: (usize, usize)) -> usize {
@@ -851,7 +896,14 @@ pub fn nearest_passable_cell(terrain: &Terrain, point: Vec2Fp) -> Option<(usize,
 
 /// The same, for the ground a movement class can be on.
 pub fn nearest_passable_cell_for(terrain: &Terrain, class: MoveClass, point: Vec2Fp) -> Option<(usize, usize)> {
-    let cost = class_cost(terrain, if matches!(class, MoveClass::Naval | MoveClass::Submarine) { MoveClass::Naval } else { MoveClass::Land });
+    let cost = class_cost(
+        terrain,
+        match class {
+            MoveClass::Naval | MoveClass::Submarine => MoveClass::Naval,
+            MoveClass::Hover | MoveClass::Seabed => MoveClass::Hover,
+            MoveClass::Land | MoveClass::Air => MoveClass::Land,
+        },
+    );
     let cells = terrain.cells_per_side() as i64;
     let (cx, cy) = terrain.cell_of(point);
     let (cx, cy) = (cx as i64, cy as i64);

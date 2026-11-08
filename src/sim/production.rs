@@ -189,8 +189,10 @@ impl SimWorld {
         let move_class = self.blueprints.get(blueprint).move_class();
         let id = self.spawn_unit_as(spawn, move_class);
         let entity = self.find_unit(id).expect("just spawned").1;
-        if move_class == super::components::MoveClass::Submarine {
-            self.submarines.push((id, entity));
+        match move_class {
+            super::components::MoveClass::Submarine => self.submarines.push((id, entity)),
+            super::components::MoveClass::Seabed => self.seabed_walkers.push((id, entity)),
+            _ => {}
         }
         self.attach_blueprint_parts(id, entity, blueprint);
         if self.blueprints.get(blueprint).is_commander() {

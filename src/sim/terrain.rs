@@ -29,6 +29,11 @@ pub struct Terrain {
     /// Open where the water is deep enough for ships. Worked out from the heights, the water,
     /// and structures, so it is not hashed.
     naval_cost: Vec<u8>,
+    /// Open on land and on any water, for hovercraft and units that walk the seabed. Worked out
+    /// the same way, and not hashed either.
+    amphibious_cost: Vec<u8>,
+    /// Whether any cell is under the water. Without water, amphibians move as land units do.
+    has_water: bool,
     content_hash: u64,
 }
 
@@ -60,9 +65,11 @@ impl Terrain {
             water_level: Fp::from_bits(-(1000 << FP_FRAC_BITS)),
             land_cost: vec![COST_OPEN; cells * cells],
             naval_cost: Vec::new(),
+            amphibious_cost: Vec::new(),
+            has_water: false,
             content_hash: 0,
         };
-        terrain.naval_cost = (0..cells * cells).map(|cell| terrain.naval_cost_of(cell % cells, cell / cells)).collect();
+        terrain.derive_costs();
         terrain.update_content_hash();
         terrain
     }
@@ -79,10 +86,34 @@ impl Terrain {
         assert_eq!(heights.len(), samples * samples, "one height per cell corner");
         assert_eq!(blocked.len(), cells * cells, "one flag per cell");
         let land_cost = blocked.iter().map(|&blocked| if blocked { COST_IMPASSABLE } else { COST_OPEN }).collect();
-        let mut terrain = Self { map_units, cells, samples, heights, water_level, land_cost, naval_cost: Vec::new(), content_hash: 0 };
-        terrain.naval_cost = (0..cells * cells).map(|cell| terrain.naval_cost_of(cell % cells, cell / cells)).collect();
+        let mut terrain = Self { map_units, cells, samples, heights, water_level, land_cost, naval_cost: Vec::new(), amphibious_cost: Vec::new(), has_water: false, content_hash: 0 };
+        terrain.derive_costs();
         terrain.update_content_hash();
         terrain
+    }
+
+    fn derive_costs(&mut self) {
+        let cells = self.cells;
+        self.naval_cost = (0..cells * cells).map(|cell| self.naval_cost_of(cell % cells, cell / cells)).collect();
+        self.amphibious_cost = (0..cells * cells).map(|cell| self.amphibious_cost_of(cell % cells, cell / cells)).collect();
+        self.has_water = (0..cells * cells).any(|cell| self.wet(cell % cells, cell / cells));
+    }
+
+    /// Whether the map has any water at all.
+    pub const fn has_water(&self) -> bool {
+        self.has_water
+    }
+
+    /// Whether any of a cell is under the water.
+    fn wet(&self, x: usize, y: usize) -> bool {
+        let corners = [(x, y), (x + 1, y), (x, y + 1), (x + 1, y + 1)];
+        let lowest = corners.iter().map(|&(cx, cy)| i32::from(self.heights[cy * self.samples + cx])).min().unwrap_or(0);
+        lowest < self.water_level.to_bits() >> (FP_FRAC_BITS - HEIGHT_FRAC_BITS)
+    }
+
+    /// Open to hovercraft and seabed walkers: land that land units can cross, or water.
+    fn amphibious_cost_of(&self, x: usize, y: usize) -> u8 {
+        if self.land_cost[y * self.cells + x] != COST_IMPASSABLE || self.wet(x, y) { COST_OPEN } else { COST_IMPASSABLE }
     }
 
     /// Open to ships if the water over the whole cell is deep enough.
@@ -101,8 +132,12 @@ impl Terrain {
                 let (x, y) = self.cell_of(point);
                 self.naval_cost[y * self.cells + x] != COST_IMPASSABLE
             }
+            MoveClass::Hover | MoveClass::Seabed => {
+                let (x, y) = self.cell_of(point);
+                self.amphibious_cost[y * self.cells + x] != COST_IMPASSABLE
+            }
             MoveClass::Air => true,
-            _ => self.is_passable(point),
+            MoveClass::Land => self.is_passable(point),
         }
     }
 
@@ -129,6 +164,7 @@ impl Terrain {
             for x in min_x..=max_x {
                 self.land_cost[y * self.cells + x] = COST_IMPASSABLE;
                 self.naval_cost[y * self.cells + x] = COST_IMPASSABLE;
+                self.amphibious_cost[y * self.cells + x] = COST_IMPASSABLE;
             }
         }
         for y in min_y..=(max_y + 1) {
@@ -150,6 +186,7 @@ impl Terrain {
                 self.land_cost[y * self.cells + x] = cost;
                 // A structure on the water blocks ships too, and once gone leaves the water as it was.
                 self.naval_cost[y * self.cells + x] = if blocked { COST_IMPASSABLE } else { self.naval_cost_of(x, y) };
+                self.amphibious_cost[y * self.cells + x] = if blocked { COST_IMPASSABLE } else { self.amphibious_cost_of(x, y) };
             }
         }
     }
@@ -194,6 +231,7 @@ impl Terrain {
         match class {
             MoveClass::Land => Some(&self.land_cost),
             MoveClass::Naval | MoveClass::Submarine => Some(&self.naval_cost),
+            MoveClass::Hover | MoveClass::Seabed => Some(&self.amphibious_cost),
             _ => None,
         }
     }

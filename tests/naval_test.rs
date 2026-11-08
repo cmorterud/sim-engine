@@ -295,3 +295,70 @@ fn sonar_and_torpedo_launchers_go_on_the_water() {
         assert!(world.spawn_finished_structure(blueprint, Team::Blue, 90, cell_y).is_some(), "{key} on water");
     }
 }
+
+#[test]
+fn a_hovercraft_crosses_land_and_water_alike() {
+    let mut world = lake_world();
+    let riptide = spawn(&mut world, "t2_amphibious_tank", Team::Blue, point(1_000, 1_000));
+    let goal = point(4_200, 1_000);
+    world.advance_tick(&[SimCommand::Move { units: vec![riptide], goal }]);
+    let mut floated = false;
+    let arrived = (0..1_200).find(|_| {
+        world.advance_tick(&[]);
+        let at = world.unit_position(riptide).unwrap();
+        if on_water(&world, riptide) {
+            assert_eq!(at.z, fp_int(11), "it floats on the water");
+            floated = true;
+        }
+        world.unit_order(riptide).unwrap().kind == OrderKind::Idle
+    });
+    assert!(arrived.is_some() && floated, "straight across the lake");
+    assert!(distance(&world, riptide, goal) < 200);
+}
+
+#[test]
+fn a_commander_walks_the_seabed_hidden_and_silent() {
+    let mut world = lake_world_with_fog(true);
+    let commander = spawn(&mut world, "acu", Team::Blue, point(1_200, 1_000));
+    // A hovercraft on the water beside its path, which sees it but has no sonar.
+    let tank = spawn(&mut world, "t2_amphibious_tank", Team::Red, point(2_600, 1_250));
+    world.ecs.get::<&mut sim_engine::sim::components::Combat>(world.unit_entity(tank).unwrap()).unwrap().range = Fp::ZERO;
+    world.advance_tick(&[SimCommand::Move { units: vec![commander], goal: point(2_600, 1_000) }]);
+    let full = world.unit_health(tank).unwrap();
+    let mut was_under = false;
+    for _ in 0..300 {
+        world.advance_tick(&[]);
+        let at = world.unit_position(commander).unwrap();
+        if at.z < Fp::ZERO {
+            was_under = true;
+            assert!(!seen_by(&world, Team::Red, commander), "hidden under the water");
+            assert_eq!(world.unit_health(tank), Some(full), "and it cannot fire from there");
+        }
+    }
+    assert!(was_under, "it should walk along the bottom");
+}
+
+#[test]
+fn only_torpedoes_reach_a_commander_under_the_water() {
+    let mut world = lake_world();
+    let commander = spawn(&mut world, "acu", Team::Blue, point(2_000, 1_000));
+    world.ecs.get::<&mut sim_engine::sim::components::Combat>(world.unit_entity(commander).unwrap()).unwrap().range = Fp::ZERO;
+    let full = world.unit_health(commander).unwrap();
+    spawn(&mut world, "t1_frigate", Team::Red, point(2_250, 1_000));
+    run_ticks(&mut world, 200);
+    assert_eq!(world.unit_health(commander), Some(full), "shells pass over it");
+    spawn(&mut world, "t1_attack_sub", Team::Red, point(2_300, 1_100));
+    run_ticks(&mut world, 200);
+    assert!(world.unit_health(commander).unwrap() < full, "torpedoes do not");
+}
+
+#[test]
+fn a_group_of_every_kind_gets_a_route_for_each() {
+    let mut world = lake_world();
+    let tank = spawn(&mut world, "t2_heavy_tank", Team::Blue, point(1_200, 1_000));
+    let riptide = spawn(&mut world, "t2_amphibious_tank", Team::Blue, point(1_250, 1_000));
+    let frigate = spawn(&mut world, "t1_frigate", Team::Blue, point(1_600, 1_000));
+    world.advance_tick(&[SimCommand::Move { units: vec![tank, riptide, frigate], goal: point(1_600, 4_000) }]);
+    let routes: Vec<u32> = [tank, riptide, frigate].iter().map(|&id| world.unit_order(id).unwrap().route).collect();
+    assert!(routes[0] != routes[1] && routes[1] != routes[2] && routes[0] != routes[2], "{routes:?}");
+}

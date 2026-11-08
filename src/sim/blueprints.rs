@@ -363,10 +363,9 @@ pub struct Blueprint {
     pub requires_vent: bool,
     /// A structure built on deep water, such as a naval factory, instead of on land.
     pub on_water: bool,
-    /// A unit that sails, on deep water only.
-    pub naval: bool,
-    /// A ship that sails under the water.
-    pub submarine: bool,
+    /// How it moves when it is not flying: over land, on deep water, under it, hovering over
+    /// both land and water, or walking over land and along the seabed.
+    pub movement: super::components::MoveClass,
     /// Per tick.
     pub mass_income: Res,
     /// Per tick.
@@ -419,12 +418,8 @@ impl Blueprint {
     pub const fn move_class(&self) -> super::components::MoveClass {
         if self.flight.is_some() {
             super::components::MoveClass::Air
-        } else if self.submarine {
-            super::components::MoveClass::Submarine
-        } else if self.naval {
-            super::components::MoveClass::Naval
         } else {
-            super::components::MoveClass::Land
+            self.movement
         }
     }
 
@@ -613,7 +608,7 @@ struct RawUnit {
     requires_vent: bool,
     #[serde(default)]
     on_water: bool,
-    /// "land", the default, or "naval".
+    /// "land", the default, "naval", "submarine", "hover", or "seabed".
     movement: Option<String>,
     mass_income: Option<Number>,
     energy_income: Option<Number>,
@@ -966,10 +961,12 @@ impl BlueprintDb {
                 requires_deposit: unit.requires_deposit,
                 requires_vent: unit.requires_vent,
                 on_water: unit.on_water,
-                naval: matches!(unit.movement.as_deref(), Some("naval" | "submarine")),
-                submarine: match unit.movement.as_deref() {
-                    None | Some("land" | "naval") => false,
-                    Some("submarine") => true,
+                movement: match unit.movement.as_deref() {
+                    None | Some("land") => super::components::MoveClass::Land,
+                    Some("naval") => super::components::MoveClass::Naval,
+                    Some("submarine") => super::components::MoveClass::Submarine,
+                    Some("hover") => super::components::MoveClass::Hover,
+                    Some("seabed") => super::components::MoveClass::Seabed,
                     Some(other) => return Err(context(format!("unknown movement {other:?}"))),
                 },
                 mass_income: rate(&unit.mass_income)?,

@@ -413,8 +413,9 @@ pub struct SimWorld {
     pub being_captured: Vec<(SimId, hecs::Entity)>,
     /// Aircraft, and air staging facilities, sorted by `SimId`.
     pub aircraft: Vec<(SimId, hecs::Entity)>,
-    /// Submarines, sorted by `SimId`.
+    /// Submarines, and units that walk the seabed, sorted by `SimId`.
     pub submarines: Vec<(SimId, hecs::Entity)>,
+    pub seabed_walkers: Vec<(SimId, hecs::Entity)>,
     pub air_stagings: Vec<(SimId, hecs::Entity)>,
     pub(super) captured_this_tick: Vec<SimId>,
     /// For each team, the cloaked enemies it cannot see this tick, sorted by `SimId`. Worked out
@@ -509,6 +510,7 @@ impl SimWorld {
             being_captured: Vec::new(),
             aircraft: Vec::new(),
             submarines: Vec::new(),
+            seabed_walkers: Vec::new(),
             air_stagings: Vec::new(),
             captured_this_tick: Vec::new(),
             concealed: [Vec::new(), Vec::new()],
@@ -563,7 +565,7 @@ impl SimWorld {
         let id = self.next_id();
         // Ships float on the water.
         let ground = match move_class {
-            MoveClass::Naval => self.terrain.height_at(spawn.position).max(self.terrain.water_level()),
+            MoveClass::Naval | MoveClass::Hover => self.terrain.height_at(spawn.position).max(self.terrain.water_level()),
             MoveClass::Submarine => self.terrain.water_level() - spawn.radius * 2,
             _ => self.terrain.height_at(spawn.position),
         };
@@ -993,19 +995,28 @@ impl SimWorld {
         from_planned_end: bool,
         travel: bool,
     ) -> Vec<(SimId, Order)> {
-        // Ships path over the water and everything else over the land, so a group with both
-        // gets a route for each.
-        let is_ship = |world: &Self, id: SimId| {
-            world.find_unit(id).is_some_and(|(_, entity)| world.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| matches!(stats.move_class, MoveClass::Naval | MoveClass::Submarine)))
+        // Ships path over the water, hovercraft and seabed walkers over land and water, and
+        // everything else over the land, so a group of several kinds gets a route for each.
+        let family = |world: &Self, id: SimId| {
+            world.find_unit(id).map_or(MoveClass::Land, |(_, entity)| match world.ecs.get::<&UnitStats>(entity).map_or(MoveClass::Land, |stats| stats.move_class) {
+                MoveClass::Naval | MoveClass::Submarine => MoveClass::Naval,
+                // Without water, amphibians go the way land units do, together with them.
+                MoveClass::Hover | MoveClass::Seabed if world.terrain.has_water() => MoveClass::Hover,
+                MoveClass::Hover | MoveClass::Seabed | MoveClass::Land | MoveClass::Air => MoveClass::Land,
+            })
         };
-        let ships: Vec<SimId> = units.iter().copied().filter(|&id| is_ship(self, id)).collect();
-        if !ships.is_empty() && ships.len() < units.len() {
-            let others: Vec<SimId> = units.iter().copied().filter(|&id| !is_ship(self, id)).collect();
-            let mut orders = self.plan_orders(&others, kind, goal, follow, from_planned_end, travel);
-            orders.extend(self.plan_orders(&ships, kind, goal, follow, from_planned_end, travel));
+        let families: Vec<MoveClass> = units.iter().map(|&id| family(self, id)).collect();
+        let class = families.first().copied().unwrap_or(MoveClass::Land);
+        if families.iter().any(|&other| other != class) {
+            let mut orders = Vec::new();
+            for wanted in [MoveClass::Land, MoveClass::Hover, MoveClass::Naval] {
+                let group: Vec<SimId> = units.iter().zip(&families).filter(|&(_, &found)| found == wanted).map(|(&id, _)| id).collect();
+                if !group.is_empty() {
+                    orders.extend(self.plan_orders(&group, kind, goal, follow, from_planned_end, travel));
+                }
+            }
             return orders;
         }
-        let class = if ships.is_empty() { MoveClass::Land } else { MoveClass::Naval };
         // Keeps the order given, because units take their orders in that order.
         let mut seen = BTreeSet::new();
         let mut members = Vec::with_capacity(units.len());
@@ -1159,6 +1170,7 @@ impl SimWorld {
     }
 
     pub fn rebuild_grid(&mut self) {
+        let terrain = &self.terrain;
         let mut query = self.ecs.query::<(&Position, &UnitStats, &Order, Option<&Flight>)>();
         let view = query.view();
         self.spatial_grid.rebuild(self.units.iter().map(|&(id, entity)| {
@@ -1174,7 +1186,8 @@ impl SimWorld {
                 is_structure: stats.is_structure,
                 // A landed aircraft is on the ground.
                 is_air: flight.is_some_and(Flight::airborne),
-                is_sub: stats.move_class == MoveClass::Submarine,
+                // A seabed walker under the water is as submerged as a submarine.
+                is_sub: stats.move_class == MoveClass::Submarine || (stats.move_class == MoveClass::Seabed && position.0.z + stats.radius < terrain.water_level()),
                 is_naval: stats.move_class == MoveClass::Naval && !stats.is_structure,
                 is_idle: order.kind == OrderKind::Idle,
             }
@@ -1212,7 +1225,7 @@ impl SimWorld {
             let passable = |point: Vec2Fp| terrain.passable_for(class, point);
             // A submarine runs just under the water.
             let surface = |point: Vec2Fp| match class {
-                MoveClass::Naval => terrain.height_at(point).max(terrain.water_level()),
+                MoveClass::Naval | MoveClass::Hover => terrain.height_at(point).max(terrain.water_level()),
                 MoveClass::Submarine => terrain.water_level() - stats.radius * 2,
                 _ => terrain.height_at(point),
             };
@@ -1492,7 +1505,7 @@ impl SimWorld {
         }
         drop(query);
         // Submarines must be hidden even from a team with no sensors at all.
-        if !self.intel.is_empty() || !self.submarines.is_empty() {
+        if !self.intel.is_empty() || !self.submarines.is_empty() || !self.seabed_walkers.is_empty() {
             self.step_sensors(tick);
         }
     }
@@ -1542,15 +1555,18 @@ impl SimWorld {
                 concealed[enemy.index()].push(id);
             }
         }
-        // A submerged submarine is hidden from sight and radar, and only sonar finds it.
-        for &(id, entity) in &self.submarines {
-            let enemy = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team.enemy();
+        // A submerged submarine, or seabed walker under the water, is hidden from sight and
+        // radar, and only sonar finds it.
+        for &(id, entity) in self.submarines.iter().chain(&self.seabed_walkers) {
+            let stats = *self.ecs.get::<&UnitStats>(entity).expect("units have stats");
+            let enemy = stats.team.enemy();
             let at = self.ecs.get::<&Position>(entity).expect("units have positions").0;
-            if !self.visibility.senses(Sense::Sonar, enemy, at.x.to_bits(), at.y.to_bits()) {
+            let submerged = stats.move_class == MoveClass::Submarine || at.z + stats.radius < self.terrain.water_level();
+            if submerged && !self.visibility.senses(Sense::Sonar, enemy, at.x.to_bits(), at.y.to_bits()) {
                 concealed[enemy.index()].push(id);
             }
         }
-        if !self.submarines.is_empty() {
+        if !self.submarines.is_empty() || !self.seabed_walkers.is_empty() {
             for list in &mut concealed {
                 list.sort_unstable();
                 list.dedup();
@@ -1613,6 +1629,8 @@ impl SimWorld {
             // Only anti-air weapons hit aircraft, and most of them hit nothing else.
             // A torpedo hits ships and submarines, and nothing else.
             let torpedo = torpedo.is_some();
+            // Under the water, only torpedoes can be fired.
+            let can_fire = !me.is_sub || torpedo;
             let hits_air = anti_air.is_some() && !torpedo;
             let hits_ground = anti_air.is_none_or(|anti_air| anti_air.also_ground) && !torpedo;
             let can_hit = |entry: &super::spatial::GridEntry| {
@@ -1747,7 +1765,7 @@ impl SimWorld {
                 }
             };
             // Overcharge fires in range, once aimed and reloaded, if the team has the energy stored.
-            if let (Some(target), Some(weapon)) = (overcharge_target, overcharge.as_mut()) {
+            if let (Some(target), Some(weapon), true) = (overcharge_target, overcharge.as_mut(), can_fire) {
                 let economy = &mut economies[stats.team.index()];
                 if let Some(entry) = locate(target).filter(|entry| can_engage(entry)) {
                     if aimed && weapon.ticks_until_ready == 0 && economy.energy >= weapon.energy {
@@ -1799,7 +1817,7 @@ impl SimWorld {
                 _ => combat.reload_ticks,
             };
             let spread = artillery.map_or(Fp::ZERO, |artillery| artillery.spread);
-            if combat.ticks_until_ready == 0 && aimed && gun_free && loaded && charged {
+            if combat.ticks_until_ready == 0 && aimed && gun_free && loaded && charged && can_fire {
                 if let Some(target) = combat.target {
                     let entry = locate(target).expect("target was just validated or found");
                     let (from, to) = (raw(me.x, me.y, me.z), raw(entry.x, entry.y, entry.z));
@@ -1846,7 +1864,7 @@ impl SimWorld {
                 let distance = squared_distance(spot.x.to_bits(), spot.y.to_bits());
                 let in_reach = if bomb.is_some() { bomb_on(spot_point, 0) } else { distance <= range * range && far_enough(distance) };
                 let charged = economies[stats.team.index()].energy >= weapon_energy;
-                if combat.ticks_until_ready == 0 && aimed && loaded && in_reach && charged {
+                if combat.ticks_until_ready == 0 && aimed && loaded && in_reach && charged && can_fire {
                     let from = Vec3Fp::new(Fp::from_bits(me.x), Fp::from_bits(me.y), Fp::from_bits(me.z));
                     shots.push(PendingShot {
                         source: id,
@@ -1948,7 +1966,7 @@ impl SimWorld {
                             }
                         },
                     };
-                    if weapon.ticks_until_ready > 0 || !aimed {
+                    if weapon.ticks_until_ready > 0 || !aimed || (me.is_sub && !weapon.torpedo) {
                         continue;
                     }
                     let from = raw(me.x, me.y, me.z);
@@ -2441,6 +2459,7 @@ impl SimWorld {
             self.being_captured.retain(alive);
             self.aircraft.retain(alive);
             self.submarines.retain(alive);
+            self.seabed_walkers.retain(alive);
             self.air_stagings.retain(alive);
             self.dead_units.clear();
         }
@@ -3097,7 +3116,8 @@ impl SimWorld {
             let (x, y) = (at.x.to_bits(), at.y.to_bits());
             let shown = visibility.is_visible(viewer, x, y) && self.concealed[viewer.index()].binary_search(&id).is_err();
             // Radar does not reach under the water: a submarine shows only where sonar finds it.
-            let sensed = if stats.move_class == MoveClass::Submarine { visibility.senses(Sense::Sonar, viewer, x, y) } else { on_radar(x, y) };
+            let submerged = stats.move_class == MoveClass::Submarine || (stats.move_class == MoveClass::Seabed && at.z + stats.radius < self.terrain.water_level());
+            let sensed = if submerged { visibility.senses(Sense::Sonar, viewer, x, y) } else { on_radar(x, y) };
             if shown || !sensed {
                 continue;
             }

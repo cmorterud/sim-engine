@@ -19,6 +19,8 @@ speed = 4
 turn_rate = 180
 radius = 16
 vision = 520
+# As in the original, it walks the seabed too.
+movement = "seabed"
 build_power = 10
 build_range = 200
 # Its engineering suites (the enhancements below) unlock the T2 and T3 structures on its list.
@@ -125,7 +127,7 @@ health = 6000
 footprint = 3
 vision = 400
 build_power = 40
-builds = ["t1_engineer", "t2_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak"]
+builds = ["t1_engineer", "t2_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_amphibious_tank"]
 upgrades_to = "land_factory_t3"
 factory_kind = "land"
 
@@ -323,7 +325,7 @@ health = 10000
 footprint = 3
 vision = 400
 build_power = 90
-builds = ["t1_engineer", "t2_engineer", "t3_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t3_mobile_artillery"]
+builds = ["t1_engineer", "t2_engineer", "t3_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_amphibious_tank", "t3_mobile_artillery"]
 factory_kind = "land"
 
 [[unit]]
@@ -447,6 +449,7 @@ speed = 5
 turn_rate = 180
 radius = 14
 vision = 520
+movement = "seabed"
 build_power = 56
 build_range = 200
 builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "naval_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "omni_sensor", "land_factory_t3_support", "air_factory_t3_support", "t2_artillery", "t3_artillery", "naval_factory_t2_support", "naval_factory_t3_support", "t1_sonar", "t1_torpedo_launcher", "t2_sonar", "t2_torpedo_launcher"]
@@ -829,7 +832,7 @@ vision = 400
 build_power = 40
 factory_kind = "land"
 support = true
-builds = ["t1_engineer", "t2_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak"]
+builds = ["t1_engineer", "t2_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_amphibious_tank"]
 upgrades_to = "land_factory_t3_support"
 
 [[unit]]
@@ -846,7 +849,7 @@ vision = 400
 build_power = 90
 factory_kind = "land"
 support = true
-builds = ["t1_engineer", "t2_engineer", "t3_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t3_mobile_artillery"]
+builds = ["t1_engineer", "t2_engineer", "t3_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_amphibious_tank", "t3_mobile_artillery"]
 
 [[unit]]
 id = "air_factory_t2_support"
@@ -1355,6 +1358,24 @@ on_water = true
 vision = 400
 sonar = 720
 weapon = { range = 1200, reload_ticks = 40, projectile_speed = 30, damage = 720, targets = "naval" }
+
+# FAF's Riptide: it hovers over land and water alike.
+[[unit]]
+id = "t2_amphibious_tank"
+name = "Amphibious Tank"
+class = "tank"
+tier = 2
+mass = 320
+energy = 1650
+build_time = 1420
+health = 1800
+speed = "7.4"
+turn_rate = 90
+turn_radius = 20
+radius = 11
+vision = 400
+movement = "hover"
+weapon = { range = 360, reload_ticks = 3, projectile_speed = 120, damage = "13.5", turn_rate = 180 }
 
 # Field enhancements (GAME_SPECIFICATION.md §2.1), with Forged Alliance Forever's numbers for its
 # commander. A commander has three slots, and one enhancement in each: a new one replaces what is
