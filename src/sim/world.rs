@@ -347,6 +347,8 @@ struct PendingShot {
     bomb: Option<Vec3Fp>,
     /// How far from where it is aimed an artillery shell may land.
     spread: Fp,
+    /// A torpedo, steering under the water.
+    underwater: bool,
 }
 
 /// What a launcher gives the missile it fires.
@@ -411,6 +413,8 @@ pub struct SimWorld {
     pub being_captured: Vec<(SimId, hecs::Entity)>,
     /// Aircraft, and air staging facilities, sorted by `SimId`.
     pub aircraft: Vec<(SimId, hecs::Entity)>,
+    /// Submarines, sorted by `SimId`.
+    pub submarines: Vec<(SimId, hecs::Entity)>,
     pub air_stagings: Vec<(SimId, hecs::Entity)>,
     pub(super) captured_this_tick: Vec<SimId>,
     /// For each team, the cloaked enemies it cannot see this tick, sorted by `SimId`. Worked out
@@ -504,6 +508,7 @@ impl SimWorld {
             self_destructing: Vec::new(),
             being_captured: Vec::new(),
             aircraft: Vec::new(),
+            submarines: Vec::new(),
             air_stagings: Vec::new(),
             captured_this_tick: Vec::new(),
             concealed: [Vec::new(), Vec::new()],
@@ -557,7 +562,11 @@ impl SimWorld {
         assert!(self.terrain.passable_for(move_class, spawn.position), "unit spawned where it cannot be");
         let id = self.next_id();
         // Ships float on the water.
-        let ground = if move_class == MoveClass::Naval { self.terrain.height_at(spawn.position).max(self.terrain.water_level()) } else { self.terrain.height_at(spawn.position) };
+        let ground = match move_class {
+            MoveClass::Naval => self.terrain.height_at(spawn.position).max(self.terrain.water_level()),
+            MoveClass::Submarine => self.terrain.water_level() - spawn.radius * 2,
+            _ => self.terrain.height_at(spawn.position),
+        };
         let entity = self.ecs.spawn((
             id,
             Position(Vec3Fp::new(spawn.position.x, spawn.position.y, ground + spawn.radius)),
@@ -885,8 +894,13 @@ impl SimWorld {
         let Some(position) = self.unit_position(target) else {
             return;
         };
-        let target_flies = self.find_unit(target).is_some_and(|(_, entity)| self.ecs.get::<&Flight>(entity).is_ok_and(|flight| flight.airborne()));
-        // Only units whose weapons can hit it: anti-air for an aircraft, and anything else otherwise.
+        let (target_flies, target_dives, target_sails) = self.find_unit(target).map_or((false, false, false), |(_, entity)| {
+            let flies = self.ecs.get::<&Flight>(entity).is_ok_and(|flight| flight.airborne());
+            let class = self.ecs.get::<&UnitStats>(entity).map_or(MoveClass::Land, |stats| stats.move_class);
+            (flies, class == MoveClass::Submarine, class == MoveClass::Naval)
+        });
+        // Only units with a weapon that can hit it: anti-air for an aircraft, a torpedo for a
+        // submarine, and for anything else, a ground weapon, or a torpedo for a ship.
         let armed: Vec<SimId> = units
             .iter()
             .copied()
@@ -894,12 +908,22 @@ impl SimWorld {
             .filter(|id| {
                 self.find_unit(*id).is_some_and(|(_, entity)| {
                     let anti_air = self.ecs.get::<&AntiAir>(entity).ok().map(|anti_air| *anti_air);
-                    let main_can = if target_flies { anti_air.is_some() } else { anti_air.is_none_or(|anti_air| anti_air.also_ground) };
+                    let torpedo = self.ecs.get::<&super::components::Torpedo>(entity).is_ok();
+                    let reaches = |air: bool, ground: bool, torpedo: bool| {
+                        if target_dives {
+                            torpedo
+                        } else if target_flies {
+                            air
+                        } else {
+                            ground || (torpedo && target_sails)
+                        }
+                    };
+                    let main_can = reaches(anti_air.is_some() && !torpedo, anti_air.is_none_or(|anti_air| anti_air.also_ground) && !torpedo, torpedo);
                     // Or any of its extra weapons can.
                     let extra_can = self
                         .ecs
                         .get::<&super::components::ExtraWeapons>(entity)
-                        .is_ok_and(|extras| extras.0.iter().any(|weapon| if target_flies { weapon.hits_air } else { weapon.hits_ground }));
+                        .is_ok_and(|extras| extras.0.iter().any(|weapon| reaches(weapon.hits_air, weapon.hits_ground, weapon.torpedo)));
                     let can_hit = main_can || extra_can;
                     can_hit && self.ecs.get::<&Combat>(entity).is_ok_and(|combat| combat.range > Fp::ZERO)
                 })
@@ -972,7 +996,7 @@ impl SimWorld {
         // Ships path over the water and everything else over the land, so a group with both
         // gets a route for each.
         let is_ship = |world: &Self, id: SimId| {
-            world.find_unit(id).is_some_and(|(_, entity)| world.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.move_class == MoveClass::Naval))
+            world.find_unit(id).is_some_and(|(_, entity)| world.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| matches!(stats.move_class, MoveClass::Naval | MoveClass::Submarine)))
         };
         let ships: Vec<SimId> = units.iter().copied().filter(|&id| is_ship(self, id)).collect();
         if !ships.is_empty() && ships.len() < units.len() {
@@ -1150,6 +1174,8 @@ impl SimWorld {
                 is_structure: stats.is_structure,
                 // A landed aircraft is on the ground.
                 is_air: flight.is_some_and(Flight::airborne),
+                is_sub: stats.move_class == MoveClass::Submarine,
+                is_naval: stats.move_class == MoveClass::Naval && !stats.is_structure,
                 is_idle: order.kind == OrderKind::Idle,
             }
         }));
@@ -1184,7 +1210,12 @@ impl SimWorld {
             // Ships keep to deep water, and float on it.
             let class = stats.move_class;
             let passable = |point: Vec2Fp| terrain.passable_for(class, point);
-            let surface = |point: Vec2Fp| if class == MoveClass::Naval { terrain.height_at(point).max(terrain.water_level()) } else { terrain.height_at(point) };
+            // A submarine runs just under the water.
+            let surface = |point: Vec2Fp| match class {
+                MoveClass::Naval => terrain.height_at(point).max(terrain.water_level()),
+                MoveClass::Submarine => terrain.water_level() - stats.radius * 2,
+                _ => terrain.height_at(point),
+            };
 
             // A structure was placed on top of this unit: walk straight out, through it if need be.
             if !passable(here) {
@@ -1460,7 +1491,8 @@ impl SimWorld {
             self.visibility.stamp_disc(stats.team, entry.x, entry.y, stats.vision);
         }
         drop(query);
-        if !self.intel.is_empty() {
+        // Submarines must be hidden even from a team with no sensors at all.
+        if !self.intel.is_empty() || !self.submarines.is_empty() {
             self.step_sensors(tick);
         }
     }
@@ -1479,9 +1511,10 @@ impl SimWorld {
                 continue;
             }
             let (radar, omni) = self.sensor_ranges(entity);
+            let sonar = self.ecs.get::<&Blueprinted>(entity).map_or(Fp::ZERO, |unit| self.blueprints.get(unit.0).sonar);
             let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team;
             let at = self.ecs.get::<&Position>(entity).expect("units have positions").0;
-            for (sense, range) in [(Sense::Radar, radar), (Sense::Omni, omni)] {
+            for (sense, range) in [(Sense::Radar, radar), (Sense::Omni, omni), (Sense::Sonar, sonar)] {
                 if range > Fp::ZERO {
                     self.visibility.stamp(sense, team, at.x.to_bits(), at.y.to_bits(), range);
                 }
@@ -1507,6 +1540,20 @@ impl SimWorld {
             }
             if !revealed {
                 concealed[enemy.index()].push(id);
+            }
+        }
+        // A submerged submarine is hidden from sight and radar, and only sonar finds it.
+        for &(id, entity) in &self.submarines {
+            let enemy = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team.enemy();
+            let at = self.ecs.get::<&Position>(entity).expect("units have positions").0;
+            if !self.visibility.senses(Sense::Sonar, enemy, at.x.to_bits(), at.y.to_bits()) {
+                concealed[enemy.index()].push(id);
+            }
+        }
+        if !self.submarines.is_empty() {
+            for list in &mut concealed {
+                list.sort_unstable();
+                list.dedup();
             }
         }
         self.concealed = concealed;
@@ -1541,10 +1588,11 @@ impl SimWorld {
             Option<&Artillery>,
             Option<&super::components::Adjacency>,
             Option<&mut super::components::ExtraWeapons>,
+            Option<&super::components::Torpedo>,
         )>();
         let mut view = query.view();
         for (index, &(id, entity)) in units.iter().enumerate() {
-            let (stats, combat, turret, turning, mut overcharge, overcharge_order, mut launcher, anti_air, bomb_bay, flight, artillery, adjacency, extras) =
+            let (stats, combat, turret, turning, mut overcharge, overcharge_order, mut launcher, anti_air, bomb_bay, flight, artillery, adjacency, extras, torpedo) =
                 view.get_mut(entity).expect("unit list only holds live units");
             combat.ticks_until_ready = combat.ticks_until_ready.saturating_sub(1);
             if let Some(weapon) = overcharge.as_mut() {
@@ -1563,8 +1611,19 @@ impl SimWorld {
             // A cloaked enemy it cannot see is no target, even in plain sight.
             let hidden = |id: SimId| concealed[stats.team.index()].binary_search(&id).is_ok();
             // Only anti-air weapons hit aircraft, and most of them hit nothing else.
-            let hits_air = anti_air.is_some();
-            let hits_ground = anti_air.is_none_or(|anti_air| anti_air.also_ground);
+            // A torpedo hits ships and submarines, and nothing else.
+            let torpedo = torpedo.is_some();
+            let hits_air = anti_air.is_some() && !torpedo;
+            let hits_ground = anti_air.is_none_or(|anti_air| anti_air.also_ground) && !torpedo;
+            let can_hit = |entry: &super::spatial::GridEntry| {
+                if entry.is_sub {
+                    torpedo
+                } else if entry.is_air {
+                    hits_air
+                } else {
+                    hits_ground || (torpedo && entry.is_naval)
+                }
+            };
             // Artillery cannot hit what is closer than its least range.
             let least = artillery.map_or(0, |artillery| i64::from(artillery.min_range.to_bits()));
             let far_enough = |distance: i64| distance >= least * least;
@@ -1572,7 +1631,7 @@ impl SimWorld {
                 let reach = range + i64::from(entry.radius);
                 squared_distance(entry.x, entry.y) <= reach * reach
                     && far_enough(squared_distance(entry.x, entry.y))
-                    && (if entry.is_air { hits_air } else { hits_ground })
+                    && can_hit(entry)
                     && (!fog || visibility.is_visible(stats.team, entry.x, entry.y))
                     && !hidden(entry.id)
             };
@@ -1623,7 +1682,7 @@ impl SimWorld {
                             let distance = squared_distance(other.x, other.y);
                             let reach = radius + i64::from(other.radius);
                             let visible = (!fog || visibility.is_visible(stats.team, other.x, other.y)) && !hidden(other.id);
-                            if distance <= reach * reach && far_enough(distance) && visible && blocked != Some(other.id) {
+                            if distance <= reach * reach && far_enough(distance) && visible && blocked != Some(other.id) && can_hit(other) {
                                 let candidate = (other.is_structure, distance, other.id);
                                 if best.is_none_or(|current| candidate < current) {
                                     best = Some(candidate);
@@ -1634,11 +1693,14 @@ impl SimWorld {
                         if hits_air {
                             grid.for_each_candidate(enemy, Layer::Air, me.x, me.y, radius as i32 + max_mobile, &mut consider);
                         }
-                        if hits_ground {
+                        if hits_ground || torpedo {
                             grid.for_each_candidate(enemy, Layer::Mobile, me.x, me.y, radius as i32 + max_mobile, &mut consider);
-                            if max_structure > 0 {
-                                grid.for_each_candidate(enemy, Layer::Structure, me.x, me.y, radius as i32 + max_structure, &mut consider);
-                            }
+                        }
+                        if hits_ground && max_structure > 0 {
+                            grid.for_each_candidate(enemy, Layer::Structure, me.x, me.y, radius as i32 + max_structure, &mut consider);
+                        }
+                        if torpedo {
+                            grid.for_each_candidate(enemy, Layer::Sub, me.x, me.y, radius as i32 + max_mobile, &mut consider);
                         }
                         if let Some((_, _, found)) = best {
                             combat.target = Some(found);
@@ -1704,6 +1766,7 @@ impl SimWorld {
                             homing: None,
                             bomb: None,
                             spread: Fp::ZERO,
+                            underwater: false,
                         });
                         weapon.ticks_until_ready = weapon.reload_ticks;
                         finished_overcharges.push(id);
@@ -1740,7 +1803,7 @@ impl SimWorld {
                 if let Some(target) = combat.target {
                     let entry = locate(target).expect("target was just validated or found");
                     let (from, to) = (raw(me.x, me.y, me.z), raw(entry.x, entry.y, entry.z));
-                    let homing = entry.is_air.then_some(target);
+                    let homing = (entry.is_air || torpedo).then_some(target);
                     if bomb.is_some() && !bomb_on(Vec3Fp::new(to.x, to.y, terrain.height_at(to.xy())), entry.radius) {
                         // Not over it yet.
                     // A target picked by the unit itself is passed over for a while if the ground
@@ -1763,6 +1826,7 @@ impl SimWorld {
                             homing,
                             bomb,
                             spread,
+                            underwater: torpedo,
                         });
                         economies[stats.team.index()].energy -= weapon_energy;
                         combat.ticks_until_ready = reload;
@@ -1797,6 +1861,7 @@ impl SimWorld {
                         homing: None,
                         bomb,
                         spread,
+                        underwater: false,
                     });
                     economies[stats.team.index()].energy -= weapon_energy;
                     combat.ticks_until_ready = reload;
@@ -1817,8 +1882,15 @@ impl SimWorld {
                     let reach = i64::from(weapon.range.to_bits());
                     let usable = |entry: &super::spatial::GridEntry| {
                         let within = reach + i64::from(entry.radius);
+                        let hit = if entry.is_sub {
+                            weapon.torpedo
+                        } else if entry.is_air {
+                            weapon.hits_air
+                        } else {
+                            weapon.hits_ground || (weapon.torpedo && entry.is_naval)
+                        };
                         squared_distance(entry.x, entry.y) <= within * within
-                            && (if entry.is_air { weapon.hits_air } else { weapon.hits_ground })
+                            && hit
                             && (!fog || visibility.is_visible(stats.team, entry.x, entry.y))
                             && !hidden(entry.id)
                     };
@@ -1844,11 +1916,14 @@ impl SimWorld {
                             if weapon.hits_air {
                                 grid.for_each_candidate(enemy, Layer::Air, me.x, me.y, reach as i32 + max_mobile, &mut consider);
                             }
-                            if weapon.hits_ground {
+                            if weapon.hits_ground || weapon.torpedo {
                                 grid.for_each_candidate(enemy, Layer::Mobile, me.x, me.y, reach as i32 + max_mobile, &mut consider);
-                                if max_structure > 0 {
-                                    grid.for_each_candidate(enemy, Layer::Structure, me.x, me.y, reach as i32 + max_structure, &mut consider);
-                                }
+                            }
+                            if weapon.hits_ground && max_structure > 0 {
+                                grid.for_each_candidate(enemy, Layer::Structure, me.x, me.y, reach as i32 + max_structure, &mut consider);
+                            }
+                            if weapon.torpedo {
+                                grid.for_each_candidate(enemy, Layer::Sub, me.x, me.y, reach as i32 + max_mobile, &mut consider);
                             }
                             weapon.target = best.map(|(_, _, found)| found);
                         }
@@ -1879,7 +1954,7 @@ impl SimWorld {
                     let from = raw(me.x, me.y, me.z);
                     let (to, homing) = match (spot, target) {
                         (Some(spot), _) => (Vec3Fp::new(spot.x, spot.y, terrain.height_at(spot) - GROUND_AIM_DEPTH), None),
-                        (None, Some(entry)) => (raw(entry.x, entry.y, entry.z), entry.is_air.then_some(entry.id)),
+                        (None, Some(entry)) => (raw(entry.x, entry.y, entry.z), (entry.is_air || weapon.torpedo).then_some(entry.id)),
                         (None, None) => continue,
                     };
                     // A shell the ground would stop is not fired, and the weapon looks again.
@@ -1900,6 +1975,7 @@ impl SimWorld {
                         homing,
                         bomb: None,
                         spread: Fp::ZERO,
+                        underwater: weapon.torpedo,
                     });
                     weapon.ticks_until_ready = weapon.reload_ticks;
                 }
@@ -1958,7 +2034,7 @@ impl SimWorld {
                 };
                 let id = self.spawn_projectile(shot.from, projectile);
                 let entity = self.projectiles.last().filter(|last| last.0 == id).expect("just spawned").1;
-                self.ecs.insert_one(entity, Homing { target, speed: shot.speed }).expect("just spawned");
+                self.ecs.insert_one(entity, Homing { target, speed: shot.speed, underwater: shot.underwater }).expect("just spawned");
                 continue;
             }
             if let Some(velocity) = shot.bomb {
@@ -2112,7 +2188,8 @@ impl SimWorld {
                 projectile.lifetime_ticks = projectile.lifetime_ticks.saturating_sub(1);
                 let target = units.binary_search_by_key(&homing.target, |unit| unit.0).ok().map(|index| grid.entry(index));
                 // Nor can it hit an aircraft that has landed.
-                let Some(target) = target.filter(|target| target.is_air) else {
+                // A torpedo reaches only what is on or under the water.
+                let Some(target) = target.filter(|target| if homing.underwater { target.is_sub || target.is_naval } else { target.is_air }) else {
                     dead.push(id);
                     continue;
                 };
@@ -2363,6 +2440,7 @@ impl SimWorld {
             self.self_destructing.retain(alive);
             self.being_captured.retain(alive);
             self.aircraft.retain(alive);
+            self.submarines.retain(alive);
             self.air_stagings.retain(alive);
             self.dead_units.clear();
         }
@@ -2678,6 +2756,9 @@ impl SimWorld {
             hasher.write(&[3]);
             hasher.write(&homing.target.0.to_le_bytes());
             write_fp(hasher, homing.speed);
+            if homing.underwater {
+                hasher.write(&[1]);
+            }
         }
         if self.ecs.get::<&Falling>(entity).is_ok() {
             hasher.write(&[4]);
@@ -2976,7 +3057,7 @@ impl SimWorld {
     /// jammers, except where its omni or its sight shows there is nothing there.
     fn blips_for(&self, viewer: Team) -> Vec<[i32; 3]> {
         let visibility = &self.visibility;
-        if !visibility.has_any(Sense::Radar, viewer) && !visibility.has_any(Sense::Omni, viewer) {
+        if !visibility.has_any(Sense::Radar, viewer) && !visibility.has_any(Sense::Omni, viewer) && !visibility.has_any(Sense::Sonar, viewer) {
             return Vec::new();
         }
         let enemy = viewer.enemy();
@@ -3015,7 +3096,9 @@ impl SimWorld {
             let at = self.ecs.get::<&Position>(entity).expect("units have positions").0;
             let (x, y) = (at.x.to_bits(), at.y.to_bits());
             let shown = visibility.is_visible(viewer, x, y) && self.concealed[viewer.index()].binary_search(&id).is_err();
-            if shown || !on_radar(x, y) {
+            // Radar does not reach under the water: a submarine shows only where sonar finds it.
+            let sensed = if stats.move_class == MoveClass::Submarine { visibility.senses(Sense::Sonar, viewer, x, y) } else { on_radar(x, y) };
+            if shown || !sensed {
                 continue;
             }
             if !visibility.senses(Sense::Omni, viewer, x, y) {

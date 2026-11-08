@@ -189,6 +189,9 @@ impl SimWorld {
         let move_class = self.blueprints.get(blueprint).move_class();
         let id = self.spawn_unit_as(spawn, move_class);
         let entity = self.find_unit(id).expect("just spawned").1;
+        if move_class == super::components::MoveClass::Submarine {
+            self.submarines.push((id, entity));
+        }
         self.attach_blueprint_parts(id, entity, blueprint);
         if self.blueprints.get(blueprint).is_commander() {
             self.commanders[team.index()] = Some(id);
@@ -377,6 +380,7 @@ impl SimWorld {
         match unit.weapon.map(|weapon| weapon.targets) {
             Some(Targets::Air) => self.ecs.insert_one(entity, AntiAir { also_ground: false }).expect("entity was just spawned"),
             Some(Targets::Both) => self.ecs.insert_one(entity, AntiAir { also_ground: true }).expect("entity was just spawned"),
+            Some(Targets::Naval) => self.ecs.insert_one(entity, super::components::Torpedo).expect("entity was just spawned"),
             Some(Targets::Ground) | None => {}
         }
         if unit.weapon.is_some_and(|weapon| weapon.kind == WeaponKind::Bomb) {
@@ -393,8 +397,9 @@ impl SimWorld {
                     projectile_speed: weapon.projectile_speed,
                     damage: weapon.damage,
                     splash: weapon.splash_radius,
-                    hits_air: weapon.targets != Targets::Ground,
-                    hits_ground: weapon.targets != Targets::Air,
+                    hits_air: matches!(weapon.targets, Targets::Air | Targets::Both),
+                    hits_ground: matches!(weapon.targets, Targets::Ground | Targets::Both),
+                    torpedo: weapon.targets == Targets::Naval,
                     target: None,
                     turret: weapon.turn_rate.map(|rate| Turret::new(facing, rate)),
                 })
@@ -2049,6 +2054,9 @@ impl SimWorld {
         }
         if self.ecs.get::<&BombBay>(entity).is_ok() {
             hasher.write(&[27]);
+        }
+        if self.ecs.get::<&super::components::Torpedo>(entity).is_ok() {
+            hasher.write(&[30]);
         }
         if let Ok(extras) = self.ecs.get::<&super::components::ExtraWeapons>(entity) {
             hasher.write(&[29]);

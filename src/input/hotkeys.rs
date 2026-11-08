@@ -28,7 +28,7 @@ pub const CYCLE_TIER: char = '`';
 
 /// The keys of a build bar, by slot, in the order the bar shows them. Builders' and factories'
 /// bars use the same keys, since only one bar is shown at a time: a factory's, if one is selected.
-pub const SLOT_KEYS: [char; 18] = ['Q', 'E', 'G', 'T', 'C', 'Z', 'V', 'B', 'H', 'N', ',', '.', '/', ';', '\'', '[', ']', '\\'];
+pub const SLOT_KEYS: [char; 20] = ['Q', 'E', 'G', 'T', 'C', 'Z', 'V', 'B', 'H', 'N', ',', '.', '/', ';', '\'', '[', ']', '\\', '-', '='];
 
 /// Which bar an item is in: a builder's, for structures, or a factory's, for units and missiles.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -62,12 +62,14 @@ pub fn build_slot(key: &str) -> Option<(Bar, usize)> {
         "energy_storage" => (Builder, 15),
         "t2_artillery" | "t3_artillery" => (Builder, 16),
         "naval_factory" | "naval_factory_t2_support" | "naval_factory_t3_support" => (Builder, 17),
+        "t1_sonar" | "t2_sonar" => (Builder, 18),
+        "t1_torpedo_launcher" | "t2_torpedo_launcher" => (Builder, 19),
         // Builders and scouts, then direct fire, then artillery and bombers, then anti-air and gunships.
         "t1_engineer" | "t2_engineer" | "t3_engineer" | "support_commander" | "t1_air_scout" | "t3_spy_plane" => (Factory, 0),
         "tactical_missile" | "strategic_missile" | "anti_nuke" => (Factory, 0),
-        "t1_light_bot" | "t2_heavy_tank" | "t1_interceptor" | "t3_air_superiority" | "t1_frigate" | "t2_destroyer" | "t3_battleship" => (Factory, 1),
+        "t1_light_bot" | "t2_heavy_tank" | "t1_interceptor" | "t2_torpedo_bomber" | "t3_air_superiority" | "t1_frigate" | "t2_destroyer" | "t3_battleship" => (Factory, 1),
         "t1_light_artillery" | "t3_mobile_artillery" | "t1_bomber" | "t2_fighter_bomber" | "t3_strategic_bomber" | "t2_cruiser" | "t3_battlecruiser" => (Factory, 2),
-        "t1_mobile_aa" | "t2_mobile_flak" | "t2_gunship" | "t3_heavy_gunship" => (Factory, 3),
+        "t1_mobile_aa" | "t2_mobile_flak" | "t2_gunship" | "t3_heavy_gunship" | "t1_attack_sub" => (Factory, 3),
         _ => return None,
     })
 }
@@ -103,6 +105,8 @@ pub const fn letter_for(code: KeyCode) -> Option<char> {
         KeyCode::BracketLeft => '[',
         KeyCode::BracketRight => ']',
         KeyCode::Backslash => '\\',
+        KeyCode::Minus => '-',
+        KeyCode::Equal => '=',
         KeyCode::Backquote => CYCLE_TIER,
         KeyCode::KeyM => MOVE,
         KeyCode::KeyF => ATTACK_MOVE,
@@ -141,7 +145,7 @@ mod tests {
     use super::*;
     use crate::sim::blueprints::BlueprintDb;
 
-    const ALL_KEYS: [KeyCode; 30] = [
+    const ALL_KEYS: [KeyCode; 32] = [
         KeyCode::KeyQ,
         KeyCode::KeyE,
         KeyCode::KeyG,
@@ -160,6 +164,8 @@ mod tests {
         KeyCode::BracketLeft,
         KeyCode::BracketRight,
         KeyCode::Backslash,
+        KeyCode::Minus,
+        KeyCode::Equal,
         KeyCode::Backquote,
         KeyCode::KeyM,
         KeyCode::KeyF,
@@ -219,6 +225,8 @@ mod tests {
             &["land_factory_t1", "land_factory_t2_support", "land_factory_t3_support"],
             &["air_factory", "air_factory_t2_support", "air_factory_t3_support"],
             &["naval_factory", "naval_factory_t2_support", "naval_factory_t3_support"],
+            &["t1_sonar", "t2_sonar"],
+            &["t1_torpedo_launcher", "t2_torpedo_launcher"],
             &["t1_frigate", "t2_destroyer", "t3_battleship"],
             &["t2_cruiser", "t3_battlecruiser"],
             &["mass_fabricator", "mass_fabricator_t3"],
@@ -273,6 +281,6 @@ mod tests {
             assert!(pressable.contains(letter), "{letter} is shown but cannot be pressed");
         }
         assert_eq!(letter_for(KeyCode::KeyW), None, "panning keys are not panel keys");
-        assert_eq!(letter_for(KeyCode::Minus), None, "- and = set the volume");
+
     }
 }

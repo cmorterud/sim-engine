@@ -19,6 +19,10 @@ fn point(x: i32, y: i32) -> Vec2Fp {
 /// Land 20 above the water, with a lake from x 1,400 to 3,800 across the whole map, and an
 /// island in its middle, from y 2,000 to 3,000 and x 2,400 to 2,800.
 fn lake_world() -> SimWorld {
+    lake_world_with_fog(false)
+}
+
+fn lake_world_with_fog(fog_of_war: bool) -> SimWorld {
     let samples = CELLS + 1;
     let height = |x: usize, y: usize| {
         let (wx, wy) = (x as i32 * 20, y as i32 * 20);
@@ -35,7 +39,7 @@ fn lake_world() -> SimWorld {
         })
         .collect();
     let terrain = Terrain::from_heights(MAP, heights, &blocked, Fp::ZERO);
-    let config = SimConfig { map_units: MAP, terrain: TerrainStyle::Flat, fog_of_war: false, ..SimConfig::default() };
+    let config = SimConfig { map_units: MAP, terrain: TerrainStyle::Flat, fog_of_war, ..SimConfig::default() };
     let mut world = SimWorld::with_terrain(config, 1, terrain);
     world.prepare_map();
     for economy in &mut world.economies {
@@ -201,4 +205,93 @@ fn naval_support_factories_need_a_naval_headquarters() {
     world.spawn_finished_structure(world.blueprints.id("naval_factory_t2"), Team::Blue, 80, 100).unwrap();
     world.advance_tick(&[SimCommand::Build { units: vec![engineer], blueprint: support, cell_x: 71, cell_y: 49, queued: false }]);
     assert_eq!(tasks(&world), 1, "with one");
+}
+
+fn seen_by(world: &SimWorld, viewer: Team, id: SimId) -> bool {
+    world.snapshot_for(Some(viewer)).units.iter().any(|unit| unit.id == id)
+}
+
+#[test]
+fn a_submarine_is_hidden_until_sonar_finds_it() {
+    let mut world = lake_world_with_fog(true);
+    let sub = spawn(&mut world, "t1_attack_sub", Team::Blue, point(2_000, 1_000));
+    world.spawn_mobile(world.blueprints.id("t2_heavy_tank"), Team::Red, point(1_300, 1_000));
+    run_ticks(&mut world, 10);
+    assert!(!seen_by(&world, Team::Red, sub), "the tank's sight does not reach under the water");
+    let blips = |world: &SimWorld| world.snapshot_for(Some(Team::Red)).blips.len();
+    assert_eq!(blips(&world), 0, "nor does anything show on radar");
+    // A sonar 600 away, beyond its own sight, finds it as a contact.
+    world.spawn_finished_structure(world.blueprints.id("t1_sonar"), Team::Red, 130, 50).unwrap();
+    run_ticks(&mut world, 10);
+    assert_eq!(blips(&world), 1, "a sonar contact");
+    assert!(!seen_by(&world, Team::Red, sub), "but not in sight");
+    // With the sonar's contact and the sight of a ship nearby, it is in full view.
+    spawn(&mut world, "t1_frigate", Team::Red, point(2_200, 1_000));
+    run_ticks(&mut world, 10);
+    assert!(seen_by(&world, Team::Red, sub));
+}
+
+fn run_ticks(world: &mut SimWorld, ticks: u32) {
+    for _ in 0..ticks {
+        world.advance_tick(&[]);
+    }
+}
+
+#[test]
+fn only_torpedoes_hurt_a_submarine() {
+    let mut world = lake_world();
+    let sub = spawn(&mut world, "t1_attack_sub", Team::Blue, point(2_000, 1_000));
+    world.ecs.get::<&mut sim_engine::sim::components::Combat>(world.unit_entity(sub).unwrap()).unwrap().range = Fp::ZERO;
+    // A frigate close enough for its sonar to find the sub, whose guns cannot reach it.
+    spawn(&mut world, "t1_frigate", Team::Red, point(2_200, 1_000));
+    run_ticks(&mut world, 200);
+    assert_eq!(world.unit_health(sub), Some(fp_int(800)), "shells pass over it");
+    // A destroyer's torpedoes do.
+    spawn(&mut world, "t2_destroyer", Team::Red, point(2_300, 1_100));
+    let sunk = (0..600).any(|_| {
+        world.advance_tick(&[]);
+        world.unit_health(sub).is_none()
+    });
+    assert!(sunk, "the destroyer's torpedoes should sink it");
+}
+
+#[test]
+fn a_submarine_sinks_ships_and_leaves_land_alone() {
+    let mut world = lake_world();
+    spawn(&mut world, "t1_attack_sub", Team::Blue, point(1_500, 1_000));
+    let tank = spawn(&mut world, "t2_heavy_tank", Team::Red, point(1_300, 1_000));
+    let frigate = spawn(&mut world, "t1_frigate", Team::Red, point(1_900, 1_000));
+    world.ecs.get::<&mut sim_engine::sim::components::Combat>(world.unit_entity(tank).unwrap()).unwrap().range = Fp::ZERO;
+    let full = world.unit_health(tank).unwrap();
+    let sunk = (0..800).any(|_| {
+        world.advance_tick(&[]);
+        world.unit_health(frigate).is_none()
+    });
+    assert!(sunk, "its torpedoes should sink the frigate");
+    assert_eq!(world.unit_health(tank), Some(full), "torpedoes do not reach land");
+}
+
+#[test]
+fn a_torpedo_bomber_sinks_a_ship() {
+    let mut world = lake_world();
+    let destroyer = spawn(&mut world, "t2_destroyer", Team::Red, point(2_000, 1_000));
+    let combat = |world: &mut SimWorld, id: SimId| world.ecs.get::<&mut sim_engine::sim::components::ExtraWeapons>(world.unit_entity(id).unwrap()).unwrap().0.clear();
+    combat(&mut world, destroyer);
+    let bomber = spawn(&mut world, "t2_torpedo_bomber", Team::Blue, point(1_000, 1_000));
+    world.advance_tick(&[SimCommand::Attack { units: vec![bomber], target: destroyer }]);
+    let sunk = (0..900).any(|_| {
+        world.advance_tick(&[]);
+        world.unit_health(destroyer).is_none()
+    });
+    assert!(sunk, "four runs of 2,250 against 7,200");
+}
+
+#[test]
+fn sonar_and_torpedo_launchers_go_on_the_water() {
+    let mut world = lake_world();
+    for (key, cell_y) in [("t1_sonar", 30), ("t1_torpedo_launcher", 40), ("t2_torpedo_launcher", 50)] {
+        let blueprint = world.blueprints.id(key);
+        assert!(world.spawn_finished_structure(blueprint, Team::Blue, 30, cell_y).is_none(), "{key} on land");
+        assert!(world.spawn_finished_structure(blueprint, Team::Blue, 90, cell_y).is_some(), "{key} on water");
+    }
 }

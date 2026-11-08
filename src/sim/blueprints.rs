@@ -220,6 +220,8 @@ pub enum Targets {
     Ground,
     Air,
     Both,
+    /// Torpedoes: ships and submarines only.
+    Naval,
 }
 
 /// How an aircraft flies (GAME_SPECIFICATION.md §10).
@@ -363,6 +365,8 @@ pub struct Blueprint {
     pub on_water: bool,
     /// A unit that sails, on deep water only.
     pub naval: bool,
+    /// A ship that sails under the water.
+    pub submarine: bool,
     /// Per tick.
     pub mass_income: Res,
     /// Per tick.
@@ -383,6 +387,8 @@ pub struct Blueprint {
     pub adjacency_size: usize,
     /// Sensor ranges (GAME_SPECIFICATION.md §9). Zero for none.
     pub radar: Fp,
+    /// Reveals submerged submarines within it (GAME_SPECIFICATION.md §10). Zero for none.
+    pub sonar: Fp,
     pub omni: Fp,
     /// Friendly units within this range of it make no radar blip. Zero for none.
     pub stealth_field: Fp,
@@ -398,7 +404,7 @@ pub struct Blueprint {
 impl Blueprint {
     /// Whether it does anything for intel: sensors, stealth, jamming, or cloaking.
     pub fn has_intel(&self) -> bool {
-        self.radar > Fp::ZERO || self.omni > Fp::ZERO || self.stealth_field > Fp::ZERO || self.jammer.is_some() || self.cloak_upkeep.is_some()
+        self.radar > Fp::ZERO || self.omni > Fp::ZERO || self.sonar > Fp::ZERO || self.stealth_field > Fp::ZERO || self.jammer.is_some() || self.cloak_upkeep.is_some()
     }
 
     pub const fn is_structure(&self) -> bool {
@@ -413,6 +419,8 @@ impl Blueprint {
     pub const fn move_class(&self) -> super::components::MoveClass {
         if self.flight.is_some() {
             super::components::MoveClass::Air
+        } else if self.submarine {
+            super::components::MoveClass::Submarine
         } else if self.naval {
             super::components::MoveClass::Naval
         } else {
@@ -626,6 +634,7 @@ struct RawUnit {
     /// the footprint: 1 is 4, 2 is 8, 3 is 12, 4 is 16, and larger is 20.
     adjacency_size: Option<u8>,
     radar: Option<Number>,
+    sonar: Option<Number>,
     omni: Option<Number>,
     stealth_field: Option<Number>,
     jammer: Option<RawJammer>,
@@ -836,6 +845,7 @@ impl BlueprintDb {
                         None | Some("ground") => Targets::Ground,
                         Some("air") => Targets::Air,
                         Some("both") => Targets::Both,
+                        Some("naval") => Targets::Naval,
                         Some(other) => return Err(context(format!("unknown targets {other:?}"))),
                     },
                     inner_radius: whole(&weapon.inner_radius)?,
@@ -956,9 +966,10 @@ impl BlueprintDb {
                 requires_deposit: unit.requires_deposit,
                 requires_vent: unit.requires_vent,
                 on_water: unit.on_water,
-                naval: match unit.movement.as_deref() {
-                    None | Some("land") => false,
-                    Some("naval") => true,
+                naval: matches!(unit.movement.as_deref(), Some("naval" | "submarine")),
+                submarine: match unit.movement.as_deref() {
+                    None | Some("land" | "naval") => false,
+                    Some("submarine") => true,
                     Some(other) => return Err(context(format!("unknown movement {other:?}"))),
                 },
                 mass_income: rate(&unit.mass_income)?,
@@ -1000,6 +1011,7 @@ impl BlueprintDb {
                     (None, false, size) => usize::from(size.clamp(1, 5) - 1),
                 },
                 radar: whole(&unit.radar)?,
+                sonar: whole(&unit.sonar)?,
                 omni: whole(&unit.omni)?,
                 stealth_field: whole(&unit.stealth_field)?,
                 jammer,

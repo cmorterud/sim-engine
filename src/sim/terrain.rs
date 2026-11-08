@@ -97,7 +97,7 @@ impl Terrain {
     /// Whether a unit of this class can be in a cell: on land, or on deep enough water.
     pub fn passable_for(&self, class: MoveClass, point: Vec2Fp) -> bool {
         match class {
-            MoveClass::Naval => {
+            MoveClass::Naval | MoveClass::Submarine => {
                 let (x, y) = self.cell_of(point);
                 self.naval_cost[y * self.cells + x] != COST_IMPASSABLE
             }
@@ -193,7 +193,7 @@ impl Terrain {
     pub fn cost_grid(&self, class: MoveClass) -> Option<&[u8]> {
         match class {
             MoveClass::Land => Some(&self.land_cost),
-            MoveClass::Naval => Some(&self.naval_cost),
+            MoveClass::Naval | MoveClass::Submarine => Some(&self.naval_cost),
             _ => None,
         }
     }

@@ -15,6 +15,8 @@ pub enum Sense {
     Sight,
     Radar,
     Omni,
+    /// Finds submerged submarines.
+    Sonar,
 }
 
 pub struct Visibility {
@@ -24,13 +26,14 @@ pub struct Visibility {
     /// The same, for radar and omni coverage. Empty until a team first has such a sensor.
     radar: [Vec<u32>; 2],
     omni: [Vec<u32>; 2],
+    sonar: [Vec<u32>; 2],
     current_tick: u32,
 }
 
 impl Visibility {
     pub fn new(map_units: i32) -> Self {
         let side = (map_units / VISIBILITY_CELL_UNITS) as usize + 1;
-        Self { side, stamps: [vec![0; side * side], vec![0; side * side]], radar: [Vec::new(), Vec::new()], omni: [Vec::new(), Vec::new()], current_tick: 0 }
+        Self { side, stamps: [vec![0; side * side], vec![0; side * side]], radar: [Vec::new(), Vec::new()], omni: [Vec::new(), Vec::new()], sonar: [Vec::new(), Vec::new()], current_tick: 0 }
     }
 
     fn cells_mut(&mut self, sense: Sense, team: Team) -> &mut Vec<u32> {
@@ -39,6 +42,7 @@ impl Visibility {
             Sense::Sight => &mut self.stamps[team.index()],
             Sense::Radar => &mut self.radar[team.index()],
             Sense::Omni => &mut self.omni[team.index()],
+            Sense::Sonar => &mut self.sonar[team.index()],
         };
         if cells.is_empty() {
             cells.resize(side * side, 0);
@@ -51,6 +55,7 @@ impl Visibility {
             Sense::Sight => &self.stamps[team.index()],
             Sense::Radar => &self.radar[team.index()],
             Sense::Omni => &self.omni[team.index()],
+            Sense::Sonar => &self.sonar[team.index()],
         }
     }
 
@@ -139,7 +144,7 @@ impl Visibility {
             }
         }
         // Nothing is written for sensors nobody has had, so checksums from before they existed hold.
-        for (tag, cells) in [(1u8, &self.radar[0]), (2, &self.radar[1]), (3, &self.omni[0]), (4, &self.omni[1])] {
+        for (tag, cells) in [(1u8, &self.radar[0]), (2, &self.radar[1]), (3, &self.omni[0]), (4, &self.omni[1]), (5, &self.sonar[0]), (6, &self.sonar[1])] {
             if !cells.is_empty() {
                 hasher.write(&[tag]);
                 for stamp in cells {

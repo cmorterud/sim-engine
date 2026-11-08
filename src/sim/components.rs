@@ -33,6 +33,8 @@ pub enum MoveClass {
     Naval,
     Seabed,
     Air,
+    /// Sails under the water, on the same water as ships.
+    Submarine,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -262,6 +264,8 @@ pub struct ExtraWeapon {
     pub splash: Fp,
     pub hits_air: bool,
     pub hits_ground: bool,
+    /// A torpedo: ships and submarines only.
+    pub torpedo: bool,
     pub target: Option<SimId>,
     pub turret: Option<Turret>,
 }
@@ -282,15 +286,22 @@ pub struct AntiAir {
     pub also_ground: bool,
 }
 
+/// A torpedo weapon: it hits ships and submarines, and nothing else.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Torpedo;
+
 /// A bomber's weapon: it drops its bomb as it flies over the target, and the bomb falls.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct BombBay;
 
-/// A shot at an aircraft, that steers itself to it, and hits only it.
+/// A shot at an aircraft, or a torpedo at a ship or submarine, that steers itself to it, and
+/// hits only it.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Homing {
     pub target: SimId,
     pub speed: Fp,
+    /// A torpedo, which can only hit what is on or under the water.
+    pub underwater: bool,
 }
 
 /// A falling bomb. Bombs fall at the original's gravity, which is stronger than that of shells.

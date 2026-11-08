@@ -22,7 +22,7 @@ vision = 520
 build_power = 10
 build_range = 200
 # Its engineering suites (the enhancements below) unlock the T2 and T3 structures on its list.
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "radar", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "stealth_field_generator", "strategic_missile_launcher", "strategic_missile_defense", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "naval_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "omni_sensor", "land_factory_t3_support", "air_factory_t3_support", "t2_artillery", "t3_artillery", "naval_factory_t2_support", "naval_factory_t3_support"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "radar", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "stealth_field_generator", "strategic_missile_launcher", "strategic_missile_defense", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "naval_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "omni_sensor", "land_factory_t3_support", "air_factory_t3_support", "t2_artillery", "t3_artillery", "naval_factory_t2_support", "naval_factory_t3_support", "t1_sonar", "t1_torpedo_launcher", "t2_sonar", "t2_torpedo_launcher"]
 weapon = { range = 440, reload_ticks = 7, projectile_speed = 50, damage = 70, turn_rate = 180 }
 overcharge = { energy = 3000, damage = 12000, structure_damage = 800, reload_ticks = 50 }
 mass_income = 1
@@ -48,7 +48,7 @@ radius = 8
 vision = 360
 build_power = 5
 build_range = 100
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "radar", "hydrocarbon_plant", "air_factory", "naval_factory", "t1_aa_turret"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "radar", "hydrocarbon_plant", "air_factory", "naval_factory", "t1_aa_turret", "t1_sonar", "t1_torpedo_launcher"]
 
 [[unit]]
 id = "t1_light_bot"
@@ -342,7 +342,7 @@ radius = 9
 vision = 400
 build_power = 12
 build_range = 120
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "radar", "stealth_field_generator", "hydrocarbon_plant", "mass_fabricator", "air_factory", "naval_factory", "t1_aa_turret", "air_staging", "t2_flak", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "t2_artillery", "naval_factory_t2_support"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "radar", "stealth_field_generator", "hydrocarbon_plant", "mass_fabricator", "air_factory", "naval_factory", "t1_aa_turret", "air_staging", "t2_flak", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "t2_artillery", "naval_factory_t2_support", "t1_sonar", "t1_torpedo_launcher", "t2_sonar", "t2_torpedo_launcher"]
 
 [[unit]]
 id = "t3_engineer"
@@ -360,7 +360,7 @@ radius = 10
 vision = 520
 build_power = 30
 build_range = 140
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "naval_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "omni_sensor", "land_factory_t3_support", "air_factory_t3_support", "t2_artillery", "t3_artillery", "naval_factory_t2_support", "naval_factory_t3_support"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "naval_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "omni_sensor", "land_factory_t3_support", "air_factory_t3_support", "t2_artillery", "t3_artillery", "naval_factory_t2_support", "naval_factory_t3_support", "t1_sonar", "t1_torpedo_launcher", "t2_sonar", "t2_torpedo_launcher"]
 
 # Intel (GAME_SPECIFICATION.md §9). Ranges are in units, and upkeep is energy per second
 # while running: a team that cannot pay switches its sensors off until it can. The commander
@@ -449,7 +449,7 @@ radius = 14
 vision = 520
 build_power = 56
 build_range = 200
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "naval_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "omni_sensor", "land_factory_t3_support", "air_factory_t3_support", "t2_artillery", "t3_artillery", "naval_factory_t2_support", "naval_factory_t3_support"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "naval_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "omni_sensor", "land_factory_t3_support", "air_factory_t3_support", "t2_artillery", "t3_artillery", "naval_factory_t2_support", "naval_factory_t3_support", "t1_sonar", "t1_torpedo_launcher", "t2_sonar", "t2_torpedo_launcher"]
 # Three times the commander's fire: 300 a second for its 100, and a little farther.
 weapon = { range = 500, reload_ticks = 10, projectile_speed = 50, damage = 300, turn_rate = 180 }
 mass_income = 1
@@ -659,7 +659,7 @@ health = 8000
 footprint = 3
 vision = 400
 build_power = 40
-builds = ["t1_air_scout", "t1_interceptor", "t1_bomber", "t2_gunship", "t2_fighter_bomber"]
+builds = ["t1_air_scout", "t1_interceptor", "t1_bomber", "t2_gunship", "t2_fighter_bomber", "t2_torpedo_bomber"]
 upgrades_to = "air_factory_t3"
 factory_kind = "air"
 
@@ -675,7 +675,7 @@ health = 16000
 footprint = 3
 vision = 400
 build_power = 120
-builds = ["t1_air_scout", "t1_interceptor", "t1_bomber", "t2_gunship", "t2_fighter_bomber", "t3_spy_plane", "t3_air_superiority", "t3_strategic_bomber", "t3_heavy_gunship"]
+builds = ["t1_air_scout", "t1_interceptor", "t1_bomber", "t2_gunship", "t2_fighter_bomber", "t2_torpedo_bomber", "t3_spy_plane", "t3_air_superiority", "t3_strategic_bomber", "t3_heavy_gunship"]
 
 # Hovers over what it attacks and fires down on it.
 factory_kind = "air"
@@ -862,7 +862,7 @@ vision = 400
 build_power = 40
 factory_kind = "air"
 support = true
-builds = ["t1_air_scout", "t1_interceptor", "t1_bomber", "t2_gunship", "t2_fighter_bomber"]
+builds = ["t1_air_scout", "t1_interceptor", "t1_bomber", "t2_gunship", "t2_fighter_bomber", "t2_torpedo_bomber"]
 upgrades_to = "air_factory_t3_support"
 
 [[unit]]
@@ -879,7 +879,7 @@ vision = 400
 build_power = 120
 factory_kind = "air"
 support = true
-builds = ["t1_air_scout", "t1_interceptor", "t1_bomber", "t2_gunship", "t2_fighter_bomber", "t3_spy_plane", "t3_air_superiority", "t3_strategic_bomber", "t3_heavy_gunship"]
+builds = ["t1_air_scout", "t1_interceptor", "t1_bomber", "t2_gunship", "t2_fighter_bomber", "t2_torpedo_bomber", "t3_spy_plane", "t3_air_superiority", "t3_strategic_bomber", "t3_heavy_gunship"]
 
 [[unit]]
 id = "power_generator_t2"
@@ -1056,7 +1056,7 @@ vision = 400
 build_power = 20
 factory_kind = "naval"
 on_water = true
-builds = ["t1_frigate"]
+builds = ["t1_frigate", "t1_attack_sub"]
 upgrades_to = "naval_factory_t2"
 
 # A gun for ships and shore, and a railgun of 5 a second at aircraft.
@@ -1075,6 +1075,7 @@ turn_radius = 40
 radius = 14
 vision = 640
 radar = 1600
+sonar = 320
 movement = "naval"
 weapon = { range = 560, reload_ticks = 17, projectile_speed = 60, damage = 85, splash_radius = 20, turn_rate = 120 }
 extra_weapons = [{ range = 960, reload_ticks = 10, projectile_speed = 90, damage = 5, targets = "air", turn_rate = 180 }]
@@ -1095,7 +1096,7 @@ vision = 400
 build_power = 90
 factory_kind = "naval"
 on_water = true
-builds = ["t1_frigate", "t2_destroyer", "t2_cruiser"]
+builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser"]
 upgrades_to = "naval_factory_t3"
 
 [[unit]]
@@ -1112,7 +1113,7 @@ vision = 400
 build_power = 150
 factory_kind = "naval"
 on_water = true
-builds = ["t1_frigate", "t2_destroyer", "t2_cruiser", "t3_battleship", "t3_battlecruiser"]
+builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t3_battleship", "t3_battlecruiser"]
 
 [[unit]]
 id = "naval_factory_t2_support"
@@ -1129,7 +1130,7 @@ build_power = 90
 factory_kind = "naval"
 support = true
 on_water = true
-builds = ["t1_frigate", "t2_destroyer", "t2_cruiser"]
+builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser"]
 upgrades_to = "naval_factory_t3_support"
 
 [[unit]]
@@ -1147,9 +1148,9 @@ build_power = 150
 factory_kind = "naval"
 support = true
 on_water = true
-builds = ["t1_frigate", "t2_destroyer", "t2_cruiser", "t3_battleship", "t3_battlecruiser"]
+builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t3_battleship", "t3_battlecruiser"]
 
-# Two gauss cannons and a railgun at aircraft. Its torpedoes wait for submarines.
+# Two gauss cannons, a railgun at aircraft, and torpedoes.
 [[unit]]
 id = "t2_destroyer"
 name = "Destroyer"
@@ -1165,11 +1166,13 @@ turn_radius = 60
 radius = 20
 vision = 640
 radar = 800
+sonar = 720
 movement = "naval"
 weapon = { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 305, splash_radius = 20, turn_rate = 90 }
 extra_weapons = [
     { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 305, splash_radius = 20, turn_rate = 90 },
     { range = 1200, reload_ticks = 14, projectile_speed = 120, damage = 10, targets = "air", turn_rate = 180 },
+    { range = 900, reload_ticks = 40, projectile_speed = 30, damage = 120, targets = "naval" },
 ]
 
 # Cruise missiles it fires on its own, a gauss cannon, SAMs (four of 250 a volley, as one), and
@@ -1189,6 +1192,7 @@ turn_radius = 60
 radius = 20
 vision = 1280
 radar = 3040
+sonar = 2400
 movement = "naval"
 weapon = { kind = "tactical_missile", automatic = true, range = 3000, reload_ticks = 25, projectile_speed = 18, damage = 300, splash_radius = 40, cruise_height = 60 }
 extra_weapons = [
@@ -1214,6 +1218,7 @@ turn_radius = 100
 radius = 32
 vision = 1000
 radar = 960
+sonar = 400
 movement = "naval"
 weapon = { range = 3000, reload_ticks = 200, projectile_speed = 60, damage = 3000, splash_radius = 40, turn_rate = 30 }
 extra_weapons = [
@@ -1223,7 +1228,7 @@ extra_weapons = [
 ]
 missile_defense = { kind = "tactical", range = 620, reload_ticks = 10 }
 
-# Two dual plasma cannons and a Phalanx. Its torpedoes wait for submarines.
+# Two dual plasma cannons, torpedoes, and a Phalanx.
 [[unit]]
 id = "t3_battlecruiser"
 name = "Battlecruiser"
@@ -1239,10 +1244,117 @@ turn_radius = 80
 radius = 28
 vision = 800
 radar = 960
+sonar = 400
 movement = "naval"
 weapon = { range = 1600, reload_ticks = 67, projectile_speed = 70, damage = 210, splash_radius = 20, turn_rate = 60 }
-extra_weapons = [{ range = 1600, reload_ticks = 67, projectile_speed = 70, damage = 210, splash_radius = 20, turn_rate = 60 }]
+extra_weapons = [
+    { range = 1600, reload_ticks = 67, projectile_speed = 70, damage = 210, splash_radius = 20, turn_rate = 60 },
+    { range = 1200, reload_ticks = 100, projectile_speed = 30, damage = 200, targets = "naval" },
+]
 missile_defense = { kind = "tactical", range = 620, reload_ticks = 20 }
+
+# Under the sea (GAME_SPECIFICATION.md §10). A submarine sails submerged, where only torpedoes
+# reach it and only sonar finds it. Torpedoes steer to ships and submarines, and hit nothing
+# else; they run at 30, faster than the original's launch speed, as they steer here rather than
+# speed up, and slower ones could never catch a ship.
+[[unit]]
+id = "t1_attack_sub"
+name = "Attack Submarine"
+class = "tank"
+tier = 1
+mass = 360
+energy = 2880
+build_time = 1440
+health = 800
+speed = 12
+turn_rate = 80
+turn_radius = 30
+radius = 12
+vision = 640
+sonar = 1200
+movement = "submarine"
+weapon = { range = 640, reload_ticks = 40, projectile_speed = 30, damage = 150, targets = "naval" }
+
+# Fifteen torpedoes of 150 a run, as one.
+[[unit]]
+id = "t2_torpedo_bomber"
+name = "Torpedo Bomber"
+class = "air"
+tier = 2
+mass = 270
+energy = 8000
+build_time = 1600
+health = 860
+speed = 30
+radius = 12
+vision = 640
+sonar = 880
+flight = { elevation = 240, turn_rate = 90, break_off = 400, fuel = 600 }
+weapon = { range = 840, reload_ticks = 100, projectile_speed = 30, damage = 2250, targets = "naval" }
+
+[[unit]]
+id = "t1_sonar"
+name = "Sonar"
+class = "economy"
+tier = 1
+mass = 150
+energy = 1250
+build_time = 125
+health = 400
+footprint = 1
+on_water = true
+vision = 400
+sonar = 3200
+upkeep = 20
+build_power = 10
+upgrades_to = "t2_sonar"
+
+[[unit]]
+id = "t2_sonar"
+name = "Sonar (T2)"
+class = "economy"
+tier = 2
+mass = 300
+energy = 7200
+build_time = 780
+health = 800
+footprint = 1
+on_water = true
+vision = 480
+sonar = 5760
+upkeep = 100
+
+# Two torpedoes of 180 a volley, as one.
+[[unit]]
+id = "t1_torpedo_launcher"
+name = "Torpedo Launcher"
+class = "defense"
+tier = 1
+mass = 450
+energy = 3600
+build_time = 450
+health = 1700
+footprint = 1
+on_water = true
+vision = 240
+sonar = 720
+weapon = { range = 1000, reload_ticks = 40, projectile_speed = 30, damage = 360, targets = "naval" }
+
+# Four torpedoes of 180 a volley, as one.
+[[unit]]
+id = "t2_torpedo_launcher"
+name = "Torpedo Launcher (T2)"
+class = "defense"
+tier = 2
+mass = 1080
+energy = 9000
+build_time = 1446
+health = 6400
+footprint = 2
+on_water = true
+vision = 400
+sonar = 720
+weapon = { range = 1200, reload_ticks = 40, projectile_speed = 30, damage = 720, targets = "naval" }
 
 # Field enhancements (GAME_SPECIFICATION.md §2.1), with Forged Alliance Forever's numbers for its
 # commander. A commander has three slots, and one enhancement in each: a new one replaces what is

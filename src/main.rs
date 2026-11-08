@@ -1059,8 +1059,15 @@ fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                                     None => sound_settings.toggle_mute(),
                                 }
                             }
-                            PhysicalKey::Code(KeyCode::Minus) if pressed && !command_held => sound_settings.quieter(),
-                            PhysicalKey::Code(KeyCode::Equal) if pressed && !command_held => sound_settings.louder(),
+                            // - and = build what is in their slots of the bar shown, and set the volume otherwise.
+                            PhysicalKey::Code(code @ (KeyCode::Minus | KeyCode::Equal)) if pressed && !command_held => {
+                                let letter = hotkeys::letter_for(code).expect("both are panel keys");
+                                match ui::hotkey_action(&session.current, selection.selected(), &map.blueprints, letter, ui::build_tiers(&egui_context)) {
+                                    Some(action) => hotkey_actions.push(ui::with_shift(action, shift_held, &map.blueprints)),
+                                    None if code == KeyCode::Minus => sound_settings.quieter(),
+                                    None => sound_settings.louder(),
+                                }
+                            }
                             // ` shows the next tech level in the build bars.
                             PhysicalKey::Code(KeyCode::Backquote) if pressed && !event.repeat && !command_held => {
                                 ui::cycle_build_tiers(&egui_context, &session.current, selection.selected(), &map.blueprints);

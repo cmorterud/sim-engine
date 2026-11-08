@@ -287,7 +287,7 @@ impl FlowField {
         arrive_radius: Fp,
         follow: Option<SimId>,
     ) -> Option<u32> {
-        if class == MoveClass::Naval && self.class == MoveClass::Land {
+        if matches!(class, MoveClass::Naval | MoveClass::Submarine) && self.class == MoveClass::Land {
             let naval = self.naval.get_or_insert_with(|| Box::new(Self::new_naval(terrain)));
             return naval.create_route(terrain, tick, goal, references, arrive_radius, follow);
         }
@@ -851,7 +851,7 @@ pub fn nearest_passable_cell(terrain: &Terrain, point: Vec2Fp) -> Option<(usize,
 
 /// The same, for the ground a movement class can be on.
 pub fn nearest_passable_cell_for(terrain: &Terrain, class: MoveClass, point: Vec2Fp) -> Option<(usize, usize)> {
-    let cost = class_cost(terrain, if class == MoveClass::Naval { MoveClass::Naval } else { MoveClass::Land });
+    let cost = class_cost(terrain, if matches!(class, MoveClass::Naval | MoveClass::Submarine) { MoveClass::Naval } else { MoveClass::Land });
     let cells = terrain.cells_per_side() as i64;
     let (cx, cy) = terrain.cell_of(point);
     let (cx, cy) = (cx as i64, cy as i64);
