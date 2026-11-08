@@ -56,6 +56,7 @@ Destroy the enemy commander to win. Yours explodes if it dies, and your whole te
 | Ctrl (or Cmd) + K | Self-destruct the selected units in 5 seconds, leaving no debris. Press again to stop |
 | U, R, K | With a factory selected: Upgrade, Repeat, Clear queue |
 | Space | Jump to your commander and select it |
+| Ctrl (or Cmd) + P, or the Pause button at the top right | Pause or resume the game. Orders given while paused are carried out when it resumes |
 | Scroll | Zoom, towards the cursor |
 | WASD or arrow keys | Pan |
 | Esc | Cancel placement or attack-move, or clear the selection |

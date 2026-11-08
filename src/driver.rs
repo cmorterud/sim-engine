@@ -37,6 +37,8 @@ pub struct DriverOptions {
     pub viewer: Option<Team>,
     /// Ticks to run back to back before pacing starts, to reach a later point in a match.
     pub fast_forward_ticks: u32,
+    /// Starts with the clock stopped, after any fast-forward.
+    pub start_paused: bool,
 }
 
 /// The simulation's state when its thread ended.
@@ -51,6 +53,7 @@ pub struct SimDriver {
     snapshots: Receiver<Arc<SimSnapshot>>,
     tick_micros: Arc<AtomicU32>,
     stop: Arc<AtomicBool>,
+    paused: Arc<AtomicBool>,
     thread: Option<JoinHandle<DriverResult>>,
 }
 
@@ -67,10 +70,12 @@ impl SimDriver {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_micros = Arc::clone(&tick_micros);
         let thread_stop = Arc::clone(&stop);
+        let paused = Arc::new(AtomicBool::new(options.start_paused));
+        let thread_paused = Arc::clone(&paused);
         let thread = thread::Builder::new()
             .name("simulation".into())
             .spawn(move || {
-                run(scenario, source, paced, options, &command_receiver, &snapshot_sender, &thread_micros, &thread_stop)
+                run(scenario, source, paced, options, &command_receiver, &snapshot_sender, &thread_micros, &thread_stop, &thread_paused)
             })
             .expect("simulation thread starts");
         Self {
@@ -78,6 +83,7 @@ impl SimDriver {
             snapshots: snapshot_receiver,
             tick_micros,
             stop,
+            paused,
             thread: Some(thread),
         }
     }
@@ -89,6 +95,17 @@ impl SimDriver {
 
     pub fn try_snapshot(&self) -> Option<Arc<SimSnapshot>> {
         self.snapshots.try_recv().ok()
+    }
+
+    /// Stops or restarts the clock. While paused no tick runs, and commands sent meanwhile wait
+    /// in order for the next tick, so the player can still give orders. With one human player,
+    /// the pause is theirs alone; in multiplayer it will have to be a command every peer applies.
+    pub fn set_paused(&self, paused: bool) {
+        self.paused.store(paused, Ordering::Relaxed);
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.paused.load(Ordering::Relaxed)
     }
 
     pub fn last_tick_micros(&self) -> u32 {
@@ -122,6 +139,7 @@ fn run(
     snapshots: &Sender<Arc<SimSnapshot>>,
     tick_micros: &AtomicU32,
     stop: &AtomicBool,
+    paused: &AtomicBool,
 ) -> DriverResult {
     let Scenario { mut world, opening_commands } = scenario;
     let seed = match source {
@@ -140,6 +158,12 @@ fn run(
     loop {
         if stop.load(Ordering::Relaxed) {
             break;
+        }
+        if paused.load(Ordering::Relaxed) {
+            // Nothing changes, so no snapshot is sent: the last one stays on screen.
+            thread::sleep(TICK_DURATION / 10);
+            next_tick = Instant::now();
+            continue;
         }
         let started = Instant::now();
         match source {

@@ -16,7 +16,7 @@ const SEED: u64 = 77;
 const VIEW: Option<Team> = Some(Team::Blue);
 
 fn start_session() -> SimDriver {
-    let options = DriverOptions { viewer: VIEW, fast_forward_ticks: 0 };
+    let options = DriverOptions { viewer: VIEW, fast_forward_ticks: 0, start_paused: false };
     SimDriver::start_with(scenario::skirmish(SEED), CommandSource::PlayerVsAi { seed: SEED }, false, options)
 }
 

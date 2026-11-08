@@ -110,6 +110,8 @@ Controls:
   N                    Mute or unmute, unless a builder that can build a gateway is selected
   - and =              Sound quieter and louder, unless a missile silo is selected
   Space                Jump to your commander
+  Ctrl + P             Pause or resume the game. Orders given while paused wait for
+                       it to resume. Command works too, and so does the Pause button
   Scroll               Zoom, towards the cursor
   WASD or arrow keys   Pan
   Esc                  Cancel placement or attack-move, or clear the selection
@@ -434,6 +436,13 @@ impl Session {
     }
 }
 
+/// Stops or restarts the game clock, which only the one human player controls for now.
+fn toggle_pause(session: &Session) {
+    if let Some(driver) = &session.driver {
+        driver.set_paused(!driver.is_paused());
+    }
+}
+
 /// The builders in a selection that can build a blueprint.
 fn builders_for(selected: &[SimId], snapshot: &SimSnapshot, blueprints: &BlueprintDb, blueprint: BlueprintId) -> Vec<SimId> {
     selected
@@ -683,7 +692,7 @@ fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
         (None, true) => CommandSource::Player,
         (None, false) => CommandSource::PlayerVsAi { seed },
     };
-    let driver_options = DriverOptions { viewer: is_match.then_some(PLAYER_TEAM), fast_forward_ticks: fast_forward };
+    let driver_options = DriverOptions { viewer: is_match.then_some(PLAYER_TEAM), fast_forward_ticks: fast_forward, start_paused: false };
     let mut session = Session::start(scenario, source, driver_options);
 
     let event_loop = EventLoop::new().expect("event loop starts");
@@ -722,6 +731,7 @@ fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
     let mut feedback = OrderFeedback::default();
     let mut patrol_points: Vec<Vec2Fp> = Vec::new();
     let mut patrol_held = false;
+    let mut pause_chord = false;
     let mut last_frame = Instant::now();
     let mut frames_seen = 0usize;
     let mut held_keys = [false; 4];
@@ -961,6 +971,14 @@ fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                                     selection.select(vec![commander]);
                                 }
                             }
+                            // Ctrl (or Cmd) + P stops the clock. Its release is not a patrol tap.
+                            PhysicalKey::Code(KeyCode::KeyP) if pressed && command_held && is_match => {
+                                if !event.repeat {
+                                    pause_chord = true;
+                                    toggle_pause(&session);
+                                }
+                            }
+                            PhysicalKey::Code(KeyCode::KeyP) if !pressed && pause_chord => pause_chord = false,
                             PhysicalKey::Code(KeyCode::KeyP) => {
                                 if pressed {
                                     patrol_held = true;
@@ -1288,6 +1306,7 @@ fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                         let open_deposits: Vec<[f64; 3]> = open_sites.iter().map(|&cell| site_position(cell, site_footprint, &map.heights)).collect();
                         let snapped_deposit = placement_spot.filter(|cell| open_sites.contains(cell)).map(|cell| site_position(cell, site_footprint, &map.heights));
                         let group_rows = control_groups.in_use(&snapshot.units);
+                        let game_paused = session.driver.as_ref().is_some_and(SimDriver::is_paused);
                         let output = egui_context.run(raw_input, |ctx| {
                             ui::release_keyboard_focus(ctx);
                             ui::placement_grid(ctx, &camera, &grid_lines, f64::from(TERRAIN_CELL_UNITS), pixels_per_point);
@@ -1321,7 +1340,7 @@ fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                             if is_match {
                                 ui::world_overlay(ctx, &camera, &snapshot, &selected, &map.blueprints, pixels_per_point);
                                 let sound_label = sound.as_ref().map(|_| sound_settings.label());
-                                ui::resource_bar(ctx, &snapshot, sound_label.as_deref());
+                                ui::resource_bar(ctx, &snapshot, sound_label.as_deref(), game_paused, &mut actions);
                                 ui::commander_alert(ctx, attack_alarm.alert_strength());
                                 ui::control_group_bar(ctx, &group_rows, &snapshot, PLAYER_TEAM, &map.blueprints, &selected, &mut actions);
                                 ui::quick_select_bar(ctx, &snapshot, PLAYER_TEAM, &map.blueprints, &selected, camera.focus(), &mut quick_select, &mut actions);
@@ -1394,6 +1413,7 @@ fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                                     feedback.set_label(MarkerKind::Build, format!("Upgrading: {}", units.len()));
                                     session.send(SimCommand::Upgrade { units });
                                 }
+                                UiAction::TogglePause => toggle_pause(&session),
                                 UiAction::SetPaused { units, paused } => {
                                     let word = if paused { "Paused" } else { "Resumed" };
                                     feedback.set_label(MarkerKind::Build, format!("{word}: {}", units.len()));

@@ -158,6 +158,8 @@ pub enum UiAction {
     Stop,
     /// Pause or resume these factories and construction sites.
     SetPaused { units: Vec<SimId>, paused: bool },
+    /// Stop or restart the game clock.
+    TogglePause,
     /// From the quick select bar: select these, or add them to the selection.
     QuickSelect { units: Vec<SimId>, add: bool },
     /// Remove one order from these builders' queues.
@@ -1308,7 +1310,12 @@ pub fn release_keyboard_focus(ctx: &egui::Context) {
 }
 
 /// The bar across the top of the screen.
-pub fn resource_bar(ctx: &egui::Context, snapshot: &SimSnapshot, sound: Option<&str>) {
+pub fn resource_bar(ctx: &egui::Context, snapshot: &SimSnapshot, sound: Option<&str>, paused: bool, actions: &mut Vec<UiAction>) {
+    if paused {
+        egui::Area::new(egui::Id::new("paused")).anchor(Align2::CENTER_TOP, Vec2::new(0.0, 80.0)).interactable(false).show(ctx, |ui| {
+            ui.label(egui::RichText::new("PAUSED").size(32.0).strong().color(Color32::from_rgb(255, 230, 140)));
+        });
+    }
     egui::TopBottomPanel::top("resources").show(ctx, |ui| {
         ui.horizontal(|ui| {
             let economy = &snapshot.economy;
@@ -1339,6 +1346,10 @@ pub fn resource_bar(ctx: &egui::Context, snapshot: &SimSnapshot, sound: Option<&
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let seconds = snapshot.tick / 10;
                 ui.label(format!("{}:{:02}", seconds / 60, seconds % 60));
+                let (label, hint) = if paused { ("Resume", "Restart the game (Ctrl+P)") } else { ("Pause", "Stop the game clock. Orders given while paused are carried out on resuming (Ctrl+P)") };
+                if ui.button(label).on_hover_text(hint).clicked() {
+                    actions.push(UiAction::TogglePause);
+                }
                 if let Some(sound) = sound {
                     ui.separator();
                     ui.label(sound);
