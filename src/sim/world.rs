@@ -893,7 +893,13 @@ impl SimWorld {
             .filter(|id| {
                 self.find_unit(*id).is_some_and(|(_, entity)| {
                     let anti_air = self.ecs.get::<&AntiAir>(entity).ok().map(|anti_air| *anti_air);
-                    let can_hit = if target_flies { anti_air.is_some() } else { anti_air.is_none_or(|anti_air| anti_air.also_ground) };
+                    let main_can = if target_flies { anti_air.is_some() } else { anti_air.is_none_or(|anti_air| anti_air.also_ground) };
+                    // Or any of its extra weapons can.
+                    let extra_can = self
+                        .ecs
+                        .get::<&super::components::ExtraWeapons>(entity)
+                        .is_ok_and(|extras| extras.0.iter().any(|weapon| if target_flies { weapon.hits_air } else { weapon.hits_ground }));
+                    let can_hit = main_can || extra_can;
                     can_hit && self.ecs.get::<&Combat>(entity).is_ok_and(|combat| combat.range > Fp::ZERO)
                 })
             })
@@ -1514,10 +1520,11 @@ impl SimWorld {
             Option<&Flight>,
             Option<&Artillery>,
             Option<&super::components::Adjacency>,
+            Option<&mut super::components::ExtraWeapons>,
         )>();
         let mut view = query.view();
         for (index, &(id, entity)) in units.iter().enumerate() {
-            let (stats, combat, turret, turning, mut overcharge, overcharge_order, mut launcher, anti_air, bomb_bay, flight, artillery, adjacency) =
+            let (stats, combat, turret, turning, mut overcharge, overcharge_order, mut launcher, anti_air, bomb_bay, flight, artillery, adjacency, extras) =
                 view.get_mut(entity).expect("unit list only holds live units");
             combat.ticks_until_ready = combat.ticks_until_ready.saturating_sub(1);
             if let Some(weapon) = overcharge.as_mut() {
@@ -1779,6 +1786,102 @@ impl SimWorld {
                             fired_nukes.push(id);
                         }
                     }
+                }
+            }
+
+            // Each extra weapon picks its own target: the ordered one if it can hit it, or else
+            // the nearest it can, mobile units first. A ground attack takes over those that hit the ground.
+            if let Some(extras) = extras {
+                for weapon in &mut extras.0 {
+                    weapon.ticks_until_ready = weapon.ticks_until_ready.saturating_sub(1);
+                    let reach = i64::from(weapon.range.to_bits());
+                    let usable = |entry: &super::spatial::GridEntry| {
+                        let within = reach + i64::from(entry.radius);
+                        squared_distance(entry.x, entry.y) <= within * within
+                            && (if entry.is_air { weapon.hits_air } else { weapon.hits_ground })
+                            && (!fog || visibility.is_visible(stats.team, entry.x, entry.y))
+                            && !hidden(entry.id)
+                    };
+                    let spot = ground.filter(|spot| weapon.hits_ground && squared_distance(spot.x.to_bits(), spot.y.to_bits()) <= reach * reach);
+                    let forced = combat.forced_target.and_then(locate).filter(|entry| usable(entry)).map(|entry| entry.id);
+                    if spot.is_some() {
+                        weapon.target = None;
+                    } else if forced.is_some() {
+                        weapon.target = forced;
+                    } else if !weapon.target.and_then(locate).is_some_and(usable) {
+                        weapon.target = None;
+                        if id.0.wrapping_add(tick) % TARGET_SEARCH_INTERVAL == 0 {
+                            let mut best: Option<(bool, i64, SimId)> = None;
+                            let mut consider = |other: &super::spatial::GridEntry| {
+                                if usable(other) {
+                                    let candidate = (other.is_structure, squared_distance(other.x, other.y), other.id);
+                                    if best.is_none_or(|current| candidate < current) {
+                                        best = Some(candidate);
+                                    }
+                                }
+                            };
+                            let enemy = Some(stats.team.enemy());
+                            if weapon.hits_air {
+                                grid.for_each_candidate(enemy, Layer::Air, me.x, me.y, reach as i32 + max_mobile, &mut consider);
+                            }
+                            if weapon.hits_ground {
+                                grid.for_each_candidate(enemy, Layer::Mobile, me.x, me.y, reach as i32 + max_mobile, &mut consider);
+                                if max_structure > 0 {
+                                    grid.for_each_candidate(enemy, Layer::Structure, me.x, me.y, reach as i32 + max_structure, &mut consider);
+                                }
+                            }
+                            weapon.target = best.map(|(_, _, found)| found);
+                        }
+                    }
+                    let target = weapon.target.and_then(locate);
+                    let aim_at = match spot {
+                        Some(spot) => Some((spot.x.to_bits(), spot.y.to_bits())),
+                        None => target.map(|entry| (entry.x, entry.y)),
+                    };
+                    let aimed = match weapon.turret.as_mut() {
+                        None => true,
+                        Some(turret) => match aim_at {
+                            Some((x, y)) => {
+                                let away = Vec2Fp::new(Fp::from_bits(x - me.x), Fp::from_bits(y - me.y));
+                                away == Vec2Fp::ZERO || turret.aim(away.normalized())
+                            }
+                            None => {
+                                if let Some(front) = turning.map(|turning| turning.facing) {
+                                    turret.aim(front);
+                                }
+                                false
+                            }
+                        },
+                    };
+                    if weapon.ticks_until_ready > 0 || !aimed {
+                        continue;
+                    }
+                    let from = raw(me.x, me.y, me.z);
+                    let (to, homing) = match (spot, target) {
+                        (Some(spot), _) => (Vec3Fp::new(spot.x, spot.y, terrain.height_at(spot) - GROUND_AIM_DEPTH), None),
+                        (None, Some(entry)) => (raw(entry.x, entry.y, entry.z), entry.is_air.then_some(entry.id)),
+                        (None, None) => continue,
+                    };
+                    // A shell the ground would stop is not fired, and the weapon looks again.
+                    if homing.is_none() && spot.is_none() && !shot_is_clear(terrain, from, to, weapon.projectile_speed) {
+                        weapon.target = None;
+                        continue;
+                    }
+                    shots.push(PendingShot {
+                        source: id,
+                        team: stats.team,
+                        from,
+                        to,
+                        speed: weapon.projectile_speed,
+                        damage: weapon.damage,
+                        splash: weapon.splash,
+                        overcharge: None,
+                        missile: None,
+                        homing,
+                        bomb: None,
+                        spread: Fp::ZERO,
+                    });
+                    weapon.ticks_until_ready = weapon.reload_ticks;
                 }
             }
         }

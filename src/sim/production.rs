@@ -379,6 +379,25 @@ impl SimWorld {
         if unit.weapon.is_some_and(|weapon| weapon.kind == WeaponKind::Bomb) {
             self.ecs.insert_one(entity, BombBay).expect("entity was just spawned");
         }
+        if !unit.extra_weapons.is_empty() {
+            let extras = unit
+                .extra_weapons
+                .iter()
+                .map(|weapon| super::components::ExtraWeapon {
+                    range: weapon.range,
+                    reload_ticks: weapon.reload_ticks,
+                    ticks_until_ready: 0,
+                    projectile_speed: weapon.projectile_speed,
+                    damage: weapon.damage,
+                    splash: weapon.splash_radius,
+                    hits_air: weapon.targets != Targets::Ground,
+                    hits_ground: weapon.targets != Targets::Air,
+                    target: None,
+                    turret: weapon.turn_rate.map(|rate| Turret::new(facing, rate)),
+                })
+                .collect();
+            self.ecs.insert_one(entity, super::components::ExtraWeapons(extras)).expect("entity was just spawned");
+        }
         if let Some(weapon) = unit.weapon.filter(|weapon| weapon.artillery) {
             let artillery = super::components::Artillery { min_range: weapon.min_range, spread: weapon.spread, energy_per_shot: weapon.energy_per_shot };
             self.ecs.insert_one(entity, artillery).expect("entity was just spawned");
@@ -2026,6 +2045,17 @@ impl SimWorld {
         }
         if self.ecs.get::<&BombBay>(entity).is_ok() {
             hasher.write(&[27]);
+        }
+        if let Ok(extras) = self.ecs.get::<&super::components::ExtraWeapons>(entity) {
+            hasher.write(&[29]);
+            for weapon in &extras.0 {
+                hasher.write(&weapon.ticks_until_ready.to_le_bytes());
+                hasher.write(&weapon.target.map_or(u32::MAX, |target| target.0).to_le_bytes());
+                if let Some(turret) = weapon.turret {
+                    hasher.write(&turret.facing.x.to_bits().to_le_bytes());
+                    hasher.write(&turret.facing.y.to_bits().to_le_bytes());
+                }
+            }
         }
         if let Ok(artillery) = self.ecs.get::<&super::components::Artillery>(entity) {
             hasher.write(&[28]);

@@ -349,6 +349,8 @@ pub struct Blueprint {
     pub builds: Vec<BlueprintId>,
     pub upgrades_to: Option<BlueprintId>,
     pub weapon: Option<WeaponDef>,
+    /// More weapons than the main one, each picking its own targets.
+    pub extra_weapons: Vec<WeaponDef>,
     /// For aircraft.
     pub flight: Option<FlightDef>,
     pub requires_deposit: bool,
@@ -573,6 +575,9 @@ struct RawUnit {
     builds: Vec<String>,
     upgrades_to: Option<String>,
     weapon: Option<RawWeapon>,
+    /// More weapons, each with its own targets, reload, and turret.
+    #[serde(default)]
+    extra_weapons: Vec<RawWeapon>,
     flight: Option<RawFlight>,
     #[serde(default)]
     requires_deposit: bool,
@@ -787,9 +792,8 @@ impl BlueprintDb {
             if build_time <= Res::ZERO {
                 return Err(context("build_time must be positive".into()));
             }
-            let weapon = match &unit.weapon {
-                None => None,
-                Some(weapon) => Some(WeaponDef {
+            let parse_weapon = |weapon: &RawWeapon| -> Result<WeaponDef, String> {
+                Ok(WeaponDef {
                     range: weapon.range.fp().map_err(context)?,
                     reload_ticks: weapon.reload_ticks,
                     projectile_speed: weapon.projectile_speed.fp().map_err(context)?,
@@ -816,8 +820,17 @@ impl BlueprintDb {
                     min_range: whole(&weapon.min_range)?,
                     spread: whole(&weapon.spread)?,
                     energy_per_shot: weapon.energy_per_shot.as_ref().map_or(Ok(Res::ZERO), Number::res).map_err(context)?,
-                }),
+                })
             };
+            let weapon = unit.weapon.as_ref().map(parse_weapon).transpose()?;
+            // Extra weapons fire shells, or steering shots at aircraft, on their own targets.
+            let extra_weapons = unit.extra_weapons.iter().map(parse_weapon).collect::<Result<Vec<_>, _>>()?;
+            if extra_weapons.iter().any(|extra| extra.kind != WeaponKind::Shell || extra.artillery) {
+                return Err(context("extra weapons can only fire shells".into()));
+            }
+            if !extra_weapons.is_empty() && weapon.is_none() {
+                return Err(context("extra weapons need a main weapon".into()));
+            }
             let death_explosion = match &unit.death_explosion {
                 None => None,
                 Some(explosion) => Some(ExplosionDef {
@@ -904,6 +917,7 @@ impl BlueprintDb {
                 builds: unit.builds.iter().map(|key| lookup(key)).collect::<Result<_, _>>().map_err(context)?,
                 upgrades_to: unit.upgrades_to.as_deref().map(lookup).transpose().map_err(context)?,
                 weapon,
+                extra_weapons,
                 flight: match &unit.flight {
                     None => None,
                     Some(flight) => Some(FlightDef {

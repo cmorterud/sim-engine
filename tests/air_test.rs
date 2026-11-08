@@ -442,3 +442,42 @@ fn sam_launchers_and_air_superiority_fighters_down_heavy_aircraft() {
     run(&mut world, 40);
     assert!(world.unit_health(bomber).is_none(), "one shot of 500 against 215");
 }
+
+#[test]
+fn a_strategic_bomber_bombs_with_its_main_weapon_and_shoots_aircraft_with_its_guns() {
+    let mut world = world();
+    let generator = world.spawn_finished_structure(world.blueprints.id("power_generator"), Team::Red, 150, 125).unwrap();
+    let bomber = spawn(&mut world, "t3_strategic_bomber", Team::Blue, point(1_000, 1_000));
+    let scout = spawn(&mut world, "t1_air_scout", Team::Red, point(1_300, 1_000));
+    world.advance_tick(&[SimCommand::Follow { units: vec![scout], target: bomber }]);
+    world.advance_tick(&[SimCommand::Attack { units: vec![bomber], target: generator }]);
+    run(&mut world, 600);
+    assert!(world.unit_health(scout).is_none(), "its guns should down the scout on its tail");
+    assert!(world.unit_health(generator).is_none(), "while its bomb takes the generator");
+}
+
+#[test]
+fn a_unit_can_be_told_to_attack_what_only_its_extra_weapons_can_hit() {
+    let mut world = world();
+    let gunship = spawn(&mut world, "t3_heavy_gunship", Team::Blue, point(1_000, 1_000));
+    let scout = spawn(&mut world, "t1_air_scout", Team::Red, point(1_500, 1_000));
+    world.advance_tick(&[SimCommand::Follow { units: vec![scout], target: gunship }]);
+    world.advance_tick(&[SimCommand::Attack { units: vec![gunship], target: scout }]);
+    assert_eq!(world.unit_order(gunship).unwrap().kind, OrderKind::Attack, "its anti-air gun can hit the scout");
+    run(&mut world, 200);
+    assert!(world.unit_health(scout).is_none());
+}
+
+#[test]
+fn a_fighter_bomber_carpets_the_ground_and_fights_aircraft() {
+    let mut world = world();
+    let key = world.blueprints.id("power_generator");
+    let generators: Vec<SimId> = [(150, 125), (152, 125)].iter().map(|&(x, y)| world.spawn_finished_structure(key, Team::Red, x, y).unwrap()).collect();
+    let janus = spawn(&mut world, "t2_fighter_bomber", Team::Blue, point(1_000, 1_000));
+    let interceptor = spawn(&mut world, "t1_interceptor", Team::Red, point(1_200, 1_000));
+    world.advance_tick(&[SimCommand::Follow { units: vec![interceptor], target: janus }]);
+    world.advance_tick(&[SimCommand::Attack { units: vec![janus], target: generators[0] }]);
+    run(&mut world, 700);
+    assert!(world.unit_health(interceptor).is_none(), "150 a second against 295");
+    assert!(generators.iter().all(|&id| world.unit_health(id).is_none()), "1,600 within 60 takes both");
+}

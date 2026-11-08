@@ -247,6 +247,25 @@ impl Flight {
     }
 }
 
+/// A unit's weapons beyond its main one, such as a battleship's other guns or a bomber's anti-air
+/// guns. Each picks its own targets, among what it can hit, reloads on its own, and has its own turret.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExtraWeapons(pub Vec<ExtraWeapon>);
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct ExtraWeapon {
+    pub range: Fp,
+    pub reload_ticks: u32,
+    pub ticks_until_ready: u32,
+    pub projectile_speed: Fp,
+    pub damage: Fp,
+    pub splash: Fp,
+    pub hits_air: bool,
+    pub hits_ground: bool,
+    pub target: Option<SimId>,
+    pub turret: Option<Turret>,
+}
+
 /// An artillery piece's weapon (GAME_SPECIFICATION.md §7): it cannot hit what is too close,
 /// its shells scatter, and a shot may cost energy, which the team must have when it fires.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
