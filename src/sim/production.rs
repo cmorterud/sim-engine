@@ -415,6 +415,7 @@ impl SimWorld {
                 stock: 0,
                 inner_radius: weapon.inner_radius,
                 inner_damage: weapon.inner_damage,
+                automatic: weapon.automatic,
             };
             self.ecs.insert_one(entity, launcher).expect("entity was just spawned");
         }
@@ -2078,6 +2079,9 @@ impl SimWorld {
             if launcher.inner_radius > Fp::ZERO {
                 hasher.write(&launcher.inner_radius.to_bits().to_le_bytes());
                 hasher.write(&launcher.inner_damage.to_bits().to_le_bytes());
+            }
+            if launcher.automatic {
+                hasher.write(&[1]);
             }
         }
         if let Ok(defense) = self.ecs.get::<&MissileDefense>(entity) {

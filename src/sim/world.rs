@@ -1578,14 +1578,14 @@ impl SimWorld {
             };
             let locate = |target: SimId| units.binary_search_by_key(&target, |unit| unit.0).ok().map(|i| grid.entry(i));
             // A missile launcher picks no targets itself, and fires only the missiles it has built.
-            let picks_targets = launcher.is_none();
+            let picks_targets = launcher.as_ref().is_none_or(|launcher| launcher.automatic);
             let missile = launcher.as_ref().map(|launcher| MissileShot {
                 cruise_height: launcher.cruise_height,
                 strategic: launcher.strategic,
                 inner_radius: launcher.inner_radius,
                 inner_damage: launcher.inner_damage,
             });
-            let loaded = launcher.as_ref().is_none_or(|launcher| launcher.stock > 0);
+            let loaded = launcher.as_ref().is_none_or(|launcher| launcher.automatic || launcher.stock > 0);
 
             // A ground attack takes over the gun, so the unit looks for nothing else.
             let ground = combat.ground_target;
@@ -1767,7 +1767,7 @@ impl SimWorld {
                         economies[stats.team.index()].energy -= weapon_energy;
                         combat.ticks_until_ready = reload;
                         if let Some(launcher) = launcher.as_mut() {
-                            launcher.stock -= 1;
+                            launcher.stock = launcher.stock.saturating_sub(1);
                             if launcher.strategic {
                                 fired_nukes.push(id);
                             }
@@ -1801,7 +1801,7 @@ impl SimWorld {
                     economies[stats.team.index()].energy -= weapon_energy;
                     combat.ticks_until_ready = reload;
                     if let Some(launcher) = launcher.as_mut() {
-                        launcher.stock -= 1;
+                        launcher.stock = launcher.stock.saturating_sub(1);
                         if launcher.strategic {
                             fired_nukes.push(id);
                         }

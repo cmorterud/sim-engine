@@ -459,6 +459,8 @@ pub struct Launcher {
     /// A nuclear blast's inner ring. Zero for none.
     pub inner_radius: Fp,
     pub inner_damage: Fp,
+    /// Picks its own targets, and needs no missiles built, as a ship's cruise missiles do.
+    pub automatic: bool,
 }
 
 /// A defense that destroys enemy missiles in flight.

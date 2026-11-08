@@ -147,3 +147,58 @@ fn a_frigate_shells_the_shore_and_shoots_at_aircraft() {
     assert!(world.unit_health(generator).is_none(), "its gun reaches the generator on the shore");
     assert!(world.unit_health(scout).is_none(), "and its railgun the scout");
 }
+
+#[test]
+fn a_cruiser_fires_its_missiles_on_its_own_beyond_its_guns() {
+    let mut world = lake_world();
+    let cruiser = spawn(&mut world, "t2_cruiser", Team::Blue, point(3_600, 1_000));
+    // A generator on the far shore, 2,400 away: beyond its gun, within its missiles' 3,000.
+    let generator = world.spawn_finished_structure(world.blueprints.id("power_generator"), Team::Red, 59, 50).unwrap();
+    let gone = (0..600).any(|_| {
+        world.advance_tick(&[]);
+        world.unit_health(generator).is_none()
+    });
+    assert!(gone, "its missiles should destroy the generator");
+    assert!(world.unit_health(cruiser).is_some());
+}
+
+#[test]
+fn a_cruiser_shoots_down_missiles_fired_at_it() {
+    let mut world = lake_world();
+    spawn(&mut world, "t2_cruiser", Team::Blue, point(1_600, 1_000));
+    let red = spawn(&mut world, "t2_cruiser", Team::Red, point(3_600, 1_000));
+    let mut intercepted = 0;
+    for _ in 0..400 {
+        world.advance_tick(&[]);
+        intercepted += world.snapshot_for(Some(Team::Blue)).interceptions.len();
+    }
+    assert!(intercepted > 0, "the Phalanx should stop some of the missiles");
+    let _ = red;
+}
+
+#[test]
+fn a_battleship_outranges_and_sinks_a_destroyer() {
+    let mut world = lake_world();
+    let battleship = spawn(&mut world, "t3_battleship", Team::Blue, point(1_600, 1_000));
+    let destroyer = spawn(&mut world, "t2_destroyer", Team::Red, point(3_600, 1_000));
+    let full = world.unit_health(battleship).unwrap();
+    let sunk = (0..1_200).any(|_| {
+        world.advance_tick(&[]);
+        world.unit_health(destroyer).is_none()
+    });
+    assert!(sunk, "three turrets of 3,000 every 20 seconds against 7,200");
+    assert_eq!(world.unit_health(battleship), Some(full), "2,000 away, beyond the destroyer's 1,200");
+}
+
+#[test]
+fn naval_support_factories_need_a_naval_headquarters() {
+    let mut world = lake_world();
+    let engineer = spawn(&mut world, "t2_engineer", Team::Blue, point(1_350, 1_000));
+    let support = world.blueprints.id("naval_factory_t2_support");
+    world.advance_tick(&[SimCommand::Build { units: vec![engineer], blueprint: support, cell_x: 71, cell_y: 49, queued: false }]);
+    let tasks = |world: &SimWorld| world.ecs.get::<&sim_engine::sim::components::Builder>(world.unit_entity(engineer).unwrap()).unwrap().tasks.len();
+    assert_eq!(tasks(&world), 0, "no naval headquarters");
+    world.spawn_finished_structure(world.blueprints.id("naval_factory_t2"), Team::Blue, 80, 100).unwrap();
+    world.advance_tick(&[SimCommand::Build { units: vec![engineer], blueprint: support, cell_x: 71, cell_y: 49, queued: false }]);
+    assert_eq!(tasks(&world), 1, "with one");
+}

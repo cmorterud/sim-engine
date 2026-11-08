@@ -272,6 +272,8 @@ pub struct WeaponDef {
     pub min_range: Fp,
     pub spread: Fp,
     pub energy_per_shot: Res,
+    /// A missile weapon that picks its own targets and needs no missiles built, as a ship's do.
+    pub automatic: bool,
 }
 
 /// A defense that destroys enemy missiles in flight.
@@ -488,6 +490,8 @@ struct RawWeapon {
     min_range: Option<Number>,
     spread: Option<Number>,
     energy_per_shot: Option<Number>,
+    #[serde(default)]
+    automatic: bool,
 }
 
 #[derive(Deserialize)]
@@ -840,6 +844,7 @@ impl BlueprintDb {
                     min_range: whole(&weapon.min_range)?,
                     spread: whole(&weapon.spread)?,
                     energy_per_shot: weapon.energy_per_shot.as_ref().map_or(Ok(Res::ZERO), Number::res).map_err(context)?,
+                    automatic: weapon.automatic,
                 })
             };
             let weapon = unit.weapon.as_ref().map(parse_weapon).transpose()?;
