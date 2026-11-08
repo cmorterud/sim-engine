@@ -198,6 +198,16 @@ pub struct Flight {
     pub altitude: Fp,
     /// How fast it is flying now: its top speed in flight, and zero once landed.
     pub speed: Fp,
+    /// Ticks of flight left, and on a full tank. With none left, it flies low and slow.
+    pub fuel: u32,
+    pub max_fuel: u32,
+    /// How many of an air staging facility's slots it takes: one for T1, two for T2, four for T3.
+    pub size: u8,
+    /// The air staging facility it is on its way to, or on, to refuel and be repaired.
+    pub refit: Option<SimId>,
+    /// On the pad, and which of the four pads.
+    pub docked: bool,
+    pub pad: u8,
     /// Having flown over its target, how far it flies on before it turns back for another pass.
     pub break_off: Fp,
     /// Flying on, away from its target.
@@ -208,6 +218,10 @@ impl Flight {
     /// Off the ground. A landed aircraft is hit by what hits ground units, and not by anti-air.
     pub fn airborne(&self) -> bool {
         self.altitude > Fp::ZERO
+    }
+
+    pub fn out_of_fuel(&self) -> bool {
+        self.fuel == 0
     }
 }
 

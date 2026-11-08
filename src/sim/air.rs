@@ -1,6 +1,7 @@
 //! Aircraft (GAME_SPECIFICATION.md §10). An aircraft flies at its own height over land and
-//! water, straight at where it is going, with no pathfinding and nothing to bump into. It never
-//! stops, so it turns in arcs, makes passes over its target, and circles when it has nowhere to go.
+//! water, straight at where it is going, with no pathfinding and nothing to bump into. In flight
+//! it never stops, so it turns in arcs and makes passes over its target. With nothing to do it
+//! lands. It burns fuel as it flies, and refuels and is repaired on an air staging facility.
 
 use super::components::{rotate_toward, Combat, Flight, Order, OrderKind, Position, SimId, Turning, UnitStats, Velocity};
 use super::config::GRAVITY_RAW;
@@ -55,36 +56,176 @@ fn inside_turn(facing: Vec2Fp, offset: Vec2Fp, radius: Fp) -> bool {
     wide_mul(along, along) + wide_mul(side, side) < wide_mul(radius, radius)
 }
 
+/// Below this share of a full tank, a patrolling aircraft goes to refuel.
+const REFUEL_SHARE_PERCENT: u32 = 20;
+/// Ticks of fuel gained each tick on the ground, the original's recharge rate of 5, and on an
+/// air staging facility's pad, 50 times that.
+const LANDED_REFUEL_PER_TICK: u32 = 5;
+const DOCKED_REFUEL_PER_TICK: u32 = LANDED_REFUEL_PER_TICK * 50;
+/// How far from its middle an air staging facility's four pads are, in units.
+const PAD_OFFSET_UNITS: i32 = 20;
+
+/// An air staging facility, as the aircraft see it this tick.
+struct Staging {
+    id: SimId,
+    team: super::components::Team,
+    center: Vec2Fp,
+    slots: u8,
+    used: u8,
+    repair: Fp,
+    energy: super::blueprints::Res,
+}
+
+impl Staging {
+    fn pad(&self, pad: u8) -> Vec2Fp {
+        let offset = fp_int(PAD_OFFSET_UNITS);
+        let (x, y) = [(-1, -1), (1, -1), (-1, 1), (1, 1)][usize::from(pad % 4)];
+        Vec2Fp::new(self.center.x + offset * x, self.center.y + offset * y)
+    }
+}
+
 impl SimWorld {
+    /// Sends aircraft to land on an air staging facility of their team, and stay until they are
+    /// refuelled and repaired. It ends whatever else they were doing, patrols included.
+    pub(super) fn command_refit(&mut self, units: &[SimId], staging: SimId) {
+        let Some((_, staging_entity)) = self.find_unit(staging) else {
+            return;
+        };
+        if self.air_stagings.binary_search_by_key(&staging, |unit| unit.0).is_err() || self.ecs.get::<&super::components::Construction>(staging_entity).is_ok() {
+            return;
+        }
+        let team = self.ecs.get::<&UnitStats>(staging_entity).expect("units have stats").team;
+        let aircraft: Vec<SimId> = units
+            .iter()
+            .copied()
+            .filter(|id| self.find_unit(*id).is_some_and(|(_, entity)| self.ecs.get::<&Flight>(entity).is_ok() && self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team == team)))
+            .collect();
+        self.clear_unit_plans(&aircraft);
+        for id in aircraft {
+            self.set_order(id, Order::IDLE);
+            let (_, entity) = self.find_unit(id).expect("just checked");
+            self.ecs.get::<&mut Flight>(entity).expect("just checked").refit = Some(staging);
+        }
+    }
+
+    /// The finished air staging facilities, with how many of their slots are taken.
+    fn stagings(&self) -> Vec<Staging> {
+        let mut stagings: Vec<Staging> = self
+            .air_stagings
+            .iter()
+            .filter(|&&(_, entity)| self.ecs.get::<&super::components::Construction>(entity).is_err())
+            .filter_map(|&(id, entity)| {
+                let def = self.blueprints.get(self.ecs.get::<&super::components::Blueprinted>(entity).ok()?.0).air_staging?;
+                let team = self.ecs.get::<&UnitStats>(entity).ok()?.team;
+                let center = self.ecs.get::<&Position>(entity).ok()?.0.xy();
+                Some(Staging { id, team, center, slots: def.slots, used: 0, repair: def.repair_per_tick, energy: def.energy_per_tick })
+            })
+            .collect();
+        for &(_, entity) in &self.aircraft {
+            let flight = *self.ecs.get::<&Flight>(entity).expect("aircraft fly");
+            if let (true, Some(staging)) = (flight.docked, flight.refit) {
+                if let Some(spot) = stagings.iter_mut().find(|spot| spot.id == staging) {
+                    spot.used += flight.size;
+                }
+            }
+        }
+        stagings
+    }
+
     /// Flies every aircraft for a tick. Positions of other units come from the grid, so the
     /// order aircraft are updated in cannot matter.
     pub(super) fn step_aircraft(&mut self) {
         if self.aircraft.is_empty() {
             return;
         }
+        let mut stagings = if self.air_stagings.is_empty() { Vec::new() } else { self.stagings() };
         let units = &self.units;
         let grid = &self.spatial_grid;
         let terrain = &self.terrain;
         let flow = &mut self.flow_field;
+        let economies = &mut self.economies;
+        let occupancy = &self.occupancy;
         let max = terrain.max_coordinate_raw();
         let center = Vec2Fp::new(Fp::from_bits(max / 2), Fp::from_bits(max / 2));
         let locate = |target: SimId| -> Option<GridEntry> { units.binary_search_by_key(&target, |unit| unit.0).ok().map(|index| *grid.entry(index)) };
-        let mut query = self.ecs.query_mut::<(&mut Position, &mut Velocity, &UnitStats, &mut Order, &Combat, &mut Turning, &mut Flight)>();
+        let mut query = self.ecs.query_mut::<(
+            &mut Position,
+            &mut Velocity,
+            &UnitStats,
+            &mut Order,
+            &Combat,
+            &mut Turning,
+            &mut Flight,
+            &mut super::components::Health,
+            Option<&super::components::Patrol>,
+        )>();
         let mut view = query.view();
         for &(_, entity) in &self.aircraft {
-            let (position, velocity, stats, order, combat, turning, flight) = view.get_mut(entity).expect("aircraft are live units");
+            let (position, velocity, stats, order, combat, turning, flight, health, patrol) = view.get_mut(entity).expect("aircraft are live units");
             let here = position.0.xy();
             let radius = turn_radius(stats.max_speed, turning.max_turn);
+            let patrolling = patrol.is_some();
 
-            // A target to make passes over, the end of its move, or nowhere.
+            // On patrol and low on fuel, it goes to the nearest air staging facility of its team.
+            if patrolling && flight.refit.is_none() && flight.fuel * 100 < flight.max_fuel * REFUEL_SHARE_PERCENT {
+                let nearest = stagings.iter().filter(|spot| spot.team == stats.team).min_by_key(|spot| (here.distance_squared(&spot.center), spot.id));
+                if let Some(spot) = nearest {
+                    flight.refit = Some(spot.id);
+                    if order.kind != OrderKind::Idle {
+                        flow.release(order.route);
+                        *order = Order::IDLE;
+                    }
+                }
+            }
+            // A facility that is gone, or no longer its team's, leaves it where it is.
+            let staging = flight.refit.and_then(|id| stagings.iter().position(|spot| spot.id == id && spot.team == stats.team));
+            if flight.refit.is_some() && staging.is_none() {
+                (flight.refit, flight.docked) = (None, false);
+            }
+
+            // On the pad, it refuels and is repaired, and leaves once it is done.
+            if let (Some(index), true) = (staging, flight.docked) {
+                let spot = &stagings[index];
+                flight.fuel = (flight.fuel + DOCKED_REFUEL_PER_TICK).min(flight.max_fuel);
+                let economy = &mut economies[stats.team.index()];
+                if health.current < health.max && economy.energy >= spot.energy {
+                    economy.energy -= spot.energy;
+                    health.current = (health.current + spot.repair).min(health.max);
+                }
+                let pad = spot.pad(flight.pad);
+                position.0 = Vec3Fp::new(pad.x, pad.y, terrain.height_at(pad) + stats.radius);
+                velocity.0 = Vec3Fp::ZERO;
+                (flight.speed, flight.altitude) = (Fp::ZERO, Fp::ZERO);
+                if flight.fuel == flight.max_fuel && health.current == health.max {
+                    (flight.refit, flight.docked) = (None, false);
+                }
+                continue;
+            }
+
+            // A target to make passes over, a facility to land on, the end of its move, or nowhere.
             let chasing = if order.kind == OrderKind::Move { None } else { combat.target.or(combat.forced_target) };
             let target = chasing.and_then(locate).map(|entry| Vec2Fp::new(Fp::from_bits(entry.x), Fp::from_bits(entry.y)));
             let ground_target = combat.ground_target.filter(|_| order.kind == OrderKind::Attack);
-            let mut heading_for = target.or(ground_target);
+            let mut heading_for = if staging.is_some() { None } else { target.or(ground_target) };
             let attacking = heading_for.is_some();
-            if heading_for.is_none() && order.kind != OrderKind::Idle {
+            let close = Fp::from_bits(stats.max_speed.to_bits().saturating_mul(ARRIVE_TICKS));
+            if let Some(index) = staging {
+                let spot = &mut stagings[index];
+                if here.distance_squared(&spot.center) > wide_mul(close, close) {
+                    heading_for = Some(spot.center);
+                } else if spot.used + flight.size <= spot.slots {
+                    // Lands on the first pad free, and waits overhead while they are all taken.
+                    flight.docked = true;
+                    flight.pad = spot.used;
+                    spot.used += flight.size;
+                    let pad = spot.pad(flight.pad);
+                    position.0 = Vec3Fp::new(pad.x, pad.y, terrain.height_at(pad) + stats.radius);
+                    velocity.0 = Vec3Fp::ZERO;
+                    (flight.speed, flight.altitude) = (Fp::ZERO, Fp::ZERO);
+                    continue;
+                }
+            } else if heading_for.is_none() && order.kind != OrderKind::Idle {
                 let goal = flow.goal(order.route).unwrap_or(here);
-                let close = Fp::from_bits(stats.max_speed.to_bits().saturating_mul(ARRIVE_TICKS));
                 // Following a unit never ends: it keeps making passes over it.
                 let ends = order.kind != OrderKind::Attack && !flow.is_following(order.route);
                 if ends && here.distance_squared(&goal) <= wide_mul(close, close) {
@@ -95,18 +236,31 @@ impl SimWorld {
                 }
             }
 
-            // With nothing to do, it lands, if there is open ground below to land on.
+            // With nothing to do, it lands, if there is open ground below to land on. Patrols
+            // and trips to refuel keep it in the air.
             let margin = radius.saturating_mul(fp_int(3));
             let near_edge = [here.x, here.y].iter().any(|&value| value < margin || Fp::from_bits(max) - value < margin);
-            let landing = heading_for.is_none() && !near_edge && terrain.is_passable(here);
-            let toward_zero = |value: Fp, full: Fp| (value - full / LANDING_TICKS).max(Fp::ZERO);
-            let toward_full = |value: Fp, full: Fp| (value + full / LANDING_TICKS).min(full);
+            let idle = heading_for.is_none() && !patrolling && flight.refit.is_none();
+            let landing = idle && !near_edge && terrain.is_passable(here);
+            // Over a structure, such as the facility it has just left, it flies on to land beyond it.
+            let (cell_x, cell_y) = terrain.cell_of(here);
+            let over_structure = idle && occupancy.contains_key(&((cell_y * terrain.cells_per_side() + cell_x) as u32));
+            // Out of fuel, it flies at half its height and speed.
+            let (top_speed, height) = if flight.out_of_fuel() { (stats.max_speed / 2, flight.elevation / 2) } else { (stats.max_speed, flight.elevation) };
+            let down = |value: Fp, full: Fp, floor: Fp| (value - full / LANDING_TICKS).max(floor);
+            let up = |value: Fp, full: Fp, ceiling: Fp| if value > ceiling { down(value, full, ceiling) } else { (value + full / LANDING_TICKS).min(ceiling) };
             if landing {
-                flight.speed = toward_zero(flight.speed, stats.max_speed);
-                flight.altitude = toward_zero(flight.altitude, flight.elevation);
+                flight.speed = down(flight.speed, stats.max_speed, Fp::ZERO);
+                flight.altitude = down(flight.altitude, flight.elevation, Fp::ZERO);
             } else {
-                flight.speed = toward_full(flight.speed, stats.max_speed);
-                flight.altitude = toward_full(flight.altitude, flight.elevation);
+                flight.speed = up(flight.speed, stats.max_speed, top_speed);
+                flight.altitude = up(flight.altitude, flight.elevation, height);
+            }
+            // Flying burns fuel, and on the ground it slowly comes back.
+            if flight.airborne() {
+                flight.fuel = flight.fuel.saturating_sub(1);
+            } else {
+                flight.fuel = (flight.fuel + LANDED_REFUEL_PER_TICK).min(flight.max_fuel);
             }
             let speed = flight.speed;
 
@@ -131,12 +285,13 @@ impl SimWorld {
                         rotate_toward(facing, offset.normalized(), turning.max_turn)
                     }
                 }
-                // Coming down, it flies straight on as it slows.
-                None if landing => {
+                // Coming down, it flies straight on as it slows, as it does to clear a structure.
+                None if landing || (over_structure && !near_edge) => {
                     flight.breaking_off = false;
                     facing
                 }
-                // Over water or cliffs, it circles where it is, unless that would take it off the map.
+                // Over water or cliffs, or waiting for a pad, it circles where it is, unless that
+                // would take it off the map.
                 None => {
                     flight.breaking_off = false;
                     let toward = if near_edge { (center - here).normalized() } else { Vec2Fp::new(-facing.y, facing.x) };

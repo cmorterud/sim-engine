@@ -353,7 +353,23 @@ impl SimWorld {
         }
         if let Some(flight) = unit.flight {
             self.ecs.insert_one(entity, Turning::new(facing, flight.turn_rate, Fp::ZERO)).expect("entity was just spawned");
-            let airborne = Flight { elevation: flight.elevation, altitude: flight.elevation, speed: unit.speed, break_off: flight.break_off, breaking_off: false };
+            let airborne = Flight {
+                elevation: flight.elevation,
+                altitude: flight.elevation,
+                speed: unit.speed,
+                fuel: flight.fuel_ticks,
+                max_fuel: flight.fuel_ticks,
+                size: match unit.tier {
+                    0 | 1 => 1,
+                    2 => 2,
+                    _ => 4,
+                },
+                refit: None,
+                docked: false,
+                pad: 0,
+                break_off: flight.break_off,
+                breaking_off: false,
+            };
             self.ecs.insert_one(entity, airborne).expect("entity was just spawned");
             let mut position = self.ecs.get::<&mut Position>(entity).expect("units have positions");
             position.0.z = super::air::flying_height(&self.terrain, position.0.xy(), flight.elevation);
@@ -404,6 +420,9 @@ impl SimWorld {
             };
             self.ecs.insert_one(entity, shield).expect("entity was just spawned");
             self.shields.push((id, entity));
+        }
+        if unit.air_staging.is_some() {
+            self.air_stagings.push((id, entity));
         }
         if is_factory {
             let factory = Factory { power, queue: Vec::new(), repeat: false, progress: Res::ZERO, rally: None };
@@ -632,6 +651,7 @@ impl SimWorld {
             | SimCommand::Enhance { .. }
             | SimCommand::Teleport { .. }
             | SimCommand::SelfDestruct { .. }
+            | SimCommand::Refit { .. }
             | SimCommand::AttackMove { .. }
             | SimCommand::QueueMove { .. }
             | SimCommand::FormationMove { .. }
@@ -1518,6 +1538,10 @@ impl SimWorld {
         for index in 0..self.patrols.len() {
             let (id, entity) = self.patrols[index];
             let is_idle = self.ecs.get::<&Order>(entity).expect("units have orders").kind == OrderKind::Idle;
+            // An aircraft gone to refuel comes back to its patrol once it is done.
+            if self.ecs.get::<&Flight>(entity).is_ok_and(|flight| flight.refit.is_some()) {
+                continue;
+            }
             let tasks = self.ecs.get::<&Builder>(entity).map_or(0, |builder| builder.tasks.len());
             let is_builder = self.ecs.get::<&Builder>(entity).is_ok();
             if tasks > 0 {
@@ -1925,9 +1949,12 @@ impl SimWorld {
             hasher.write(&capture.progress.to_bits().to_le_bytes());
         }
         if let Ok(flight) = self.ecs.get::<&Flight>(entity) {
-            hasher.write(&[25, u8::from(flight.breaking_off)]);
+            hasher.write(&[25, u8::from(flight.breaking_off), u8::from(flight.docked), flight.pad, flight.size]);
             for value in [flight.elevation, flight.altitude, flight.speed] {
                 hasher.write(&value.to_bits().to_le_bytes());
+            }
+            for value in [flight.fuel, flight.max_fuel, flight.refit.map_or(u32::MAX, |staging| staging.0)] {
+                hasher.write(&value.to_le_bytes());
             }
             hasher.write(&flight.break_off.to_bits().to_le_bytes());
         }

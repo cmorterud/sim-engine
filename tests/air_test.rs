@@ -245,3 +245,118 @@ fn an_aircraft_told_to_follow_a_unit_keeps_with_it() {
     assert!(distance(&world, scout, at) < 800, "the scout stays over the tank");
     assert_ne!(world.unit_order(scout).unwrap().kind, OrderKind::Idle, "and is still following it");
 }
+
+fn flight(world: &SimWorld, id: SimId) -> sim_engine::sim::components::Flight {
+    *world.ecs.get::<&sim_engine::sim::components::Flight>(world.unit_entity(id).unwrap()).unwrap()
+}
+
+fn staging_center() -> Vec2Fp {
+    point(2_030, 2_030)
+}
+
+fn set_fuel(world: &mut SimWorld, id: SimId, fuel: u32) {
+    world.ecs.get::<&mut sim_engine::sim::components::Flight>(world.unit_entity(id).unwrap()).unwrap().fuel = fuel;
+}
+
+#[test]
+fn aircraft_burn_fuel_in_the_air_and_fly_low_and_slow_without_it() {
+    let mut world = world();
+    let scout = spawn(&mut world, "t1_air_scout", Team::Blue, point(500, 2_500));
+    assert_eq!(flight(&world, scout).fuel, 5_000, "500 seconds of fuel");
+    world.advance_tick(&[SimCommand::Move { units: vec![scout], goal: point(4_500, 2_500) }]);
+    run(&mut world, 10);
+    assert_eq!(flight(&world, scout).fuel, 4_989);
+    set_fuel(&mut world, scout, 1);
+    run(&mut world, 40);
+    let at = world.unit_position(scout).unwrap();
+    assert!(flight(&world, scout).out_of_fuel());
+    assert_eq!(at.z, world.terrain.height_at(at.xy()) + fp_int(160), "half its height");
+    assert_eq!(flight(&world, scout).speed, fp_int(19), "half its speed");
+    // Landed, the tank slowly fills again.
+    world.advance_tick(&[SimCommand::Stop { units: vec![scout] }]);
+    run(&mut world, 60);
+    assert!(flight(&world, scout).fuel > 100, "it refuels on the ground: {}", flight(&world, scout).fuel);
+}
+
+#[test]
+fn an_air_staging_facility_refuels_and_repairs_aircraft_for_energy() {
+    let mut world = world();
+    let staging = world.spawn_finished_structure(world.blueprints.id("air_staging"), Team::Blue, 100, 100).unwrap();
+    let interceptor = spawn(&mut world, "t1_interceptor", Team::Blue, point(1_000, 1_000));
+    set_fuel(&mut world, interceptor, 100);
+    world.ecs.get::<&mut sim_engine::sim::components::Health>(world.unit_entity(interceptor).unwrap()).unwrap().current = fp_int(95);
+    world.advance_tick(&[SimCommand::Refit { units: vec![interceptor], staging }]);
+    let docked = (0..300).any(|_| {
+        world.advance_tick(&[]);
+        flight(&world, interceptor).docked
+    });
+    assert!(docked, "it should land on the pad");
+    let pad = world.unit_position(interceptor).unwrap().xy();
+    assert!(distance(&world, interceptor, staging_center()) < 40, "on the facility, at {pad:?}");
+    let energy = world.economies[0].energy;
+    // 3,000 ticks of fuel at 250 a tick, and 200 health at 50 a tick.
+    let left = (0..20).find(|_| {
+        world.advance_tick(&[]);
+        flight(&world, interceptor).refit.is_none()
+    });
+    assert!(left.is_some_and(|ticks| ticks <= 13), "done in about 12 ticks: {left:?}");
+    assert_eq!(world.unit_health(interceptor), Some(fp_int(295)));
+    assert!(energy - world.economies[0].energy >= Res::from_num(12), "repairs cost energy");
+    // With nothing to do, it lifts off the pad, flies clear of the facility, and lands beside it.
+    run(&mut world, 80);
+    let after = flight(&world, interceptor);
+    assert!(!after.airborne(), "it lands");
+    assert!(after.fuel >= after.max_fuel - 10, "full, less the hop: {}", after.fuel);
+    let at = world.unit_position(interceptor).unwrap().xy();
+    assert!(world.terrain.is_passable(at), "off the facility");
+    assert!(distance(&world, interceptor, staging_center()) < 800, "and close by");
+}
+
+#[test]
+fn a_facility_holds_four_aircraft_at_once_and_the_rest_wait_overhead() {
+    let mut world = world();
+    let staging = world.spawn_finished_structure(world.blueprints.id("air_staging"), Team::Blue, 100, 100).unwrap();
+    // All five arrive at once.
+    let scouts: Vec<SimId> = (0..5).map(|index| spawn(&mut world, "t1_air_scout", Team::Blue, point(2_020 + index * 5, 2_030))).collect();
+    for &scout in &scouts {
+        set_fuel(&mut world, scout, 0);
+    }
+    world.advance_tick(&[SimCommand::Refit { units: scouts.clone(), staging }]);
+    let mut most = 0;
+    let mut all_served = [false; 5];
+    for _ in 0..600 {
+        world.advance_tick(&[]);
+        let docked: Vec<bool> = scouts.iter().map(|&scout| flight(&world, scout).docked).collect();
+        most = most.max(docked.iter().filter(|&&docked| docked).count());
+        for (served, docked) in all_served.iter_mut().zip(&docked) {
+            *served |= *docked;
+        }
+    }
+    assert_eq!(most, 4, "four pads");
+    assert!(all_served.iter().all(|&served| served), "the fifth gets its turn");
+    assert!(scouts.iter().all(|&scout| flight(&world, scout).fuel == flight(&world, scout).max_fuel));
+}
+
+#[test]
+fn patrolling_aircraft_stay_up_refuel_when_low_and_go_back_to_their_patrol() {
+    let mut world = world();
+    world.spawn_finished_structure(world.blueprints.id("air_staging"), Team::Blue, 100, 100).unwrap();
+    let interceptor = spawn(&mut world, "t1_interceptor", Team::Blue, point(1_000, 1_000));
+    world.advance_tick(&[SimCommand::Patrol { units: vec![interceptor], points: vec![point(1_000, 1_000), point(4_000, 1_000)] }]);
+    for _ in 0..300 {
+        world.advance_tick(&[]);
+        assert!(flight(&world, interceptor).airborne(), "a patrol never lands");
+    }
+    // Below a fifth of a tank, it goes to refuel.
+    set_fuel(&mut world, interceptor, 500);
+    let docked = (0..300).any(|_| {
+        world.advance_tick(&[]);
+        flight(&world, interceptor).docked
+    });
+    assert!(docked, "it should divert to the facility");
+    run(&mut world, 60);
+    let after = flight(&world, interceptor);
+    assert!(after.refit.is_none() && after.airborne(), "refuelled, it is back in the air");
+    assert_ne!(world.unit_order(interceptor).unwrap().kind, OrderKind::Idle, "on its patrol");
+    assert!(after.fuel > after.max_fuel * 9 / 10);
+}

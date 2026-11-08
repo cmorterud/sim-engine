@@ -22,7 +22,7 @@ vision = 520
 build_power = 10
 build_range = 200
 # Its engineering suites (the enhancements below) unlock the T2 and T3 structures on its list.
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "radar", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "stealth_field_generator", "strategic_missile_launcher", "strategic_missile_defense", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "t1_aa_turret"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "radar", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "stealth_field_generator", "strategic_missile_launcher", "strategic_missile_defense", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "t1_aa_turret", "air_staging"]
 weapon = { range = 440, reload_ticks = 7, projectile_speed = 50, damage = 70, turn_rate = 180 }
 overcharge = { energy = 3000, damage = 12000, structure_damage = 800, reload_ticks = 50 }
 mass_income = 1
@@ -334,7 +334,7 @@ radius = 9
 vision = 400
 build_power = 12
 build_range = 120
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "radar", "stealth_field_generator", "hydrocarbon_plant", "mass_fabricator", "air_factory", "t1_aa_turret"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "radar", "stealth_field_generator", "hydrocarbon_plant", "mass_fabricator", "air_factory", "t1_aa_turret", "air_staging"]
 
 [[unit]]
 id = "t3_engineer"
@@ -352,7 +352,7 @@ radius = 10
 vision = 520
 build_power = 30
 build_range = 140
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "t1_aa_turret"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "t1_aa_turret", "air_staging"]
 
 # Intel (GAME_SPECIFICATION.md §9). Ranges are in units, and upkeep is energy per second
 # while running: a team that cannot pay switches its sensors off until it can. The commander
@@ -438,7 +438,7 @@ radius = 14
 vision = 520
 build_power = 56
 build_range = 200
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "t1_aa_turret"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "t1_aa_turret", "air_staging"]
 # Three times the commander's fire: 300 a second for its 100, and a little farther.
 weapon = { range = 500, reload_ticks = 10, projectile_speed = 50, damage = 300, turn_rate = 180 }
 mass_income = 1
@@ -532,7 +532,7 @@ death_explosion = { damage = 5000, radius = 200, only_while_running = true }
 
 # Aircraft (GAME_SPECIFICATION.md §10), with Forged Alliance Forever's numbers for its T1 aircraft.
 # An aircraft's speed is its top air speed. `flight` sets how high it flies, how fast it turns,
-# and how far past its target it flies before turning for another pass.
+# how far past its target it flies before turning for another pass, and its seconds of fuel.
 [[unit]]
 id = "air_factory"
 name = "Air Factory"
@@ -560,7 +560,7 @@ speed = 38
 radius = 8
 vision = 840
 radar = 1280
-flight = { elevation = 320, turn_rate = 80 }
+flight = { elevation = 320, turn_rate = 80, fuel = 500 }
 
 # Shoots only at aircraft.
 [[unit]]
@@ -575,7 +575,7 @@ health = 295
 speed = 30
 radius = 10
 vision = 560
-flight = { elevation = 280, turn_rate = 120, break_off = 200 }
+flight = { elevation = 280, turn_rate = 120, break_off = 200, fuel = 300 }
 weapon = { range = 500, reload_ticks = 10, projectile_speed = 180, damage = 50, targets = "air" }
 
 # Its carpet of four napalm bombs is one bomb here, with their damage over time added up.
@@ -592,7 +592,7 @@ speed = 20
 radius = 10
 vision = 640
 radar = 880
-flight = { elevation = 280, turn_rate = 90, break_off = 640 }
+flight = { elevation = 280, turn_rate = 90, break_off = 640, fuel = 400 }
 weapon = { kind = "bomb", range = 800, reload_ticks = 50, projectile_speed = 20, damage = 350, splash_radius = 60 }
 
 # Two shots a volley in the original, one shot of twice the damage here.
@@ -624,6 +624,21 @@ turn_radius = 10
 radius = 8
 vision = 400
 weapon = { range = 640, reload_ticks = 10, projectile_speed = 90, damage = 26, targets = "air", turn_rate = 180 }
+
+# Aircraft land on its four pads to refuel at 50 times the rate on the ground, and are repaired
+# for energy. A T2 aircraft takes two pads, and a T3 one all four.
+[[unit]]
+id = "air_staging"
+name = "Air Staging Facility"
+class = "economy"
+tier = 2
+mass = 175
+energy = 2100
+build_time = 350
+health = 500
+footprint = 3
+vision = 400
+air_staging = { slots = 4, repair = 500, repair_energy = 30 }
 
 # Field enhancements (GAME_SPECIFICATION.md §2.1), with Forged Alliance Forever's numbers for its
 # commander. A commander has three slots, and one enhancement in each: a new one replaces what is

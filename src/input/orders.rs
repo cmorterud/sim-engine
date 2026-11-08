@@ -101,6 +101,27 @@ pub fn right_click_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
     }
 
     let friend = nearest_unit(click.units, click.camera, click.team, click.cursor).filter(|id| !click.selected.contains(id));
+    // Aircraft sent to a finished air staging facility land on it to refuel and be repaired.
+    if let Some(target) = friend {
+        let index = click.units.binary_search_by_key(&target, |unit| unit.id).expect("found in this list");
+        let unit = &click.units[index];
+        let staging = unit.blueprint != u16::MAX && unit.built_permille == 1000 && click.blueprints.get(BlueprintId(unit.blueprint)).air_staging.is_some();
+        let aircraft: Vec<SimId> = parts
+            .mobile
+            .iter()
+            .copied()
+            .filter(|id| {
+                click.units.binary_search_by_key(id, |unit| unit.id).ok().is_some_and(|index| {
+                    let unit = &click.units[index];
+                    unit.blueprint != u16::MAX && click.blueprints.get(BlueprintId(unit.blueprint)).is_air()
+                })
+            })
+            .collect();
+        if staging && !aircraft.is_empty() {
+            commands.push(SimCommand::Refit { units: aircraft, staging: target });
+            return commands;
+        }
+    }
     if let (Some(target), false) = (friend, parts.builders.is_empty()) {
         let index = click.units.binary_search_by_key(&target, |unit| unit.id).expect("found in this list");
         let unit = &click.units[index];

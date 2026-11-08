@@ -68,4 +68,7 @@ pub enum SimCommand {
     /// Pause or resume factories and construction sites. Anything else is left alone.
     SetPaused { units: Vec<SimId>, paused: bool },
     SetRally { factory: SimId, point: Vec2Fp },
+    /// Send aircraft to land on one of their team's air staging facilities, to refuel and be
+    /// repaired (GAME_SPECIFICATION.md §10).
+    Refit { units: Vec<SimId>, staging: SimId },
 }

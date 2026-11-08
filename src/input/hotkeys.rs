@@ -31,6 +31,7 @@ pub const F3: char = '\u{E003}';
 pub const F4: char = '\u{E004}';
 pub const F5: char = '\u{E005}';
 pub const F6: char = '\u{E006}';
+pub const F7: char = '\u{E007}';
 
 /// How a key is shown on a button: the letter, or the function key's name.
 pub fn key_name(letter: char) -> String {
@@ -41,6 +42,7 @@ pub fn key_name(letter: char) -> String {
         F4 => "F4".to_string(),
         F5 => "F5".to_string(),
         F6 => "F6".to_string(),
+        F7 => "F7".to_string(),
         other => other.to_string(),
     }
 }
@@ -75,6 +77,7 @@ pub fn blueprint_hotkey(key: &str) -> Option<char> {
         "air_factory" => F4,
         "t1_aa_turret" => F5,
         "t1_mobile_aa" => F6,
+        "air_staging" => F7,
         // The gateway's support commander and the air factory's aircraft share the land
         // factory's keys: a key queues every option on it in the selected factories' menus.
         "t1_engineer" | "support_commander" | "t1_air_scout" => 'Z',
@@ -112,6 +115,7 @@ pub const fn letter_for(code: KeyCode) -> Option<char> {
         KeyCode::F4 => F4,
         KeyCode::F5 => F5,
         KeyCode::F6 => F6,
+        KeyCode::F7 => F7,
         KeyCode::KeyB => 'B',
         KeyCode::KeyV => 'V',
         KeyCode::KeyH => 'H',
@@ -152,7 +156,7 @@ mod tests {
     use super::*;
     use crate::sim::blueprints::BlueprintDb;
 
-    const ALL_KEYS: [KeyCode; 38] = [
+    const ALL_KEYS: [KeyCode; 39] = [
         KeyCode::KeyN,
         KeyCode::F1,
         KeyCode::F2,
@@ -160,6 +164,7 @@ mod tests {
         KeyCode::F4,
         KeyCode::F5,
         KeyCode::F6,
+        KeyCode::F7,
         KeyCode::BracketLeft,
         KeyCode::BracketRight,
         KeyCode::Backquote,
@@ -207,7 +212,7 @@ mod tests {
     fn everything_that_can_be_built_has_a_key() {
         let db = BlueprintDb::standard();
         let keys = buildable(&db);
-        assert_eq!(keys.len(), 32);
+        assert_eq!(keys.len(), 33);
         for key in keys {
             assert!(blueprint_hotkey(&key).is_some(), "{key} has no hotkey");
         }

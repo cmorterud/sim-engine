@@ -64,6 +64,8 @@ pub enum Shape {
     Bomber,
     /// A turret with two barrels raised to the sky, which swivels to aim.
     AntiAirGun,
+    /// A low deck with four round landing pads and a control tower.
+    AirStaging,
     /// A shield's dome: an open half-sphere, drawn see-through.
     Dome,
     /// Flat, around the feet of a selected mobile unit.
@@ -73,7 +75,7 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub const ALL: [Self; 38] = [
+    pub const ALL: [Self; 39] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -109,6 +111,7 @@ impl Shape {
         Self::Aircraft,
         Self::Bomber,
         Self::AntiAirGun,
+        Self::AirStaging,
         Self::Dome,
         Self::SelectionRing,
         Self::SelectionBox,
@@ -407,6 +410,14 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.block([-0.5, -0.05, -0.03], [0.5, 0.18, 0.03]);
             mesh.block([-0.22, -0.5, -0.02], [0.22, -0.36, 0.02]);
             mesh.block([-0.02, -0.5, 0.0], [0.02, -0.36, 0.25]);
+        }
+        Shape::AirStaging => {
+            mesh.block([-0.5, -0.5, -0.5], [0.5, 0.5, -0.3]);
+            for (x, y) in [(-0.25_f32, -0.25_f32), (0.25, -0.25), (-0.25, 0.25), (0.25, 0.25)] {
+                mesh.frustum([x, y], [-0.3, -0.24], [0.2, 0.2], 12);
+            }
+            mesh.frustum([0.0, 0.0], [-0.3, 0.4], [0.07, 0.05], 6);
+            mesh.block([-0.1, -0.1, 0.4], [0.1, 0.1, 0.5]);
         }
         Shape::AntiAirGun => {
             mesh.block([-0.25, -0.25, -0.1], [0.25, 0.2, 0.22]);

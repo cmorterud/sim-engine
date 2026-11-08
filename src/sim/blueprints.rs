@@ -159,6 +159,19 @@ pub struct FlightDef {
     pub turn_rate: u32,
     /// How far past its target it flies before turning back for another pass.
     pub break_off: Fp,
+    /// Ticks of flight on a full tank.
+    pub fuel_ticks: u32,
+}
+
+/// A pad where aircraft land to refuel and be repaired (GAME_SPECIFICATION.md §10).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct AirStagingDef {
+    /// Room for this many T1 aircraft. A T2 aircraft takes two, and a T3 one four.
+    pub slots: u8,
+    /// Health given back to each aircraft on it, per tick.
+    pub repair_per_tick: Fp,
+    /// Energy each aircraft being repaired costs, per tick.
+    pub energy_per_tick: Res,
 }
 
 
@@ -272,6 +285,7 @@ pub struct Blueprint {
     pub overcharge: Option<OverchargeDef>,
     pub shield: Option<ShieldDef>,
     pub missile_defense: Option<MissileDefenseDef>,
+    pub air_staging: Option<AirStagingDef>,
     /// Sensor ranges (GAME_SPECIFICATION.md §9). Zero for none.
     pub radar: Fp,
     pub omni: Fp,
@@ -369,6 +383,18 @@ struct RawFlight {
     /// Degrees per second.
     turn_rate: u32,
     break_off: Option<Number>,
+    /// Seconds of flight on a full tank.
+    fuel: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawAirStaging {
+    slots: u8,
+    /// Health a second, for each aircraft.
+    repair: Number,
+    /// Energy a second, for each aircraft being repaired.
+    repair_energy: Number,
 }
 
 #[derive(Deserialize)]
@@ -462,6 +488,7 @@ struct RawUnit {
     overcharge: Option<RawOvercharge>,
     shield: Option<RawShield>,
     missile_defense: Option<RawMissileDefense>,
+    air_staging: Option<RawAirStaging>,
     radar: Option<Number>,
     omni: Option<Number>,
     stealth_field: Option<Number>,
@@ -710,6 +737,17 @@ impl BlueprintDb {
                     reload_ticks: defense.reload_ticks.unwrap_or(0),
                 }),
             };
+            let air_staging = match &unit.air_staging {
+                None => None,
+                Some(staging) => Some(AirStagingDef {
+                    slots: staging.slots,
+                    repair_per_tick: staging.repair.fp().map_err(context)? / TICKS_PER_SECOND as i32,
+                    energy_per_tick: staging.repair_energy.res().map_err(context)? / TICKS_PER_SECOND,
+                }),
+            };
+            if air_staging.is_some() && footprint == 0 {
+                return Err(context("only structures can be air staging".into()));
+            }
             let jammer = match &unit.jammer {
                 None => None,
                 Some(jammer) => Some(JammerDef { radius: jammer.radius.fp().map_err(context)?, decoys: jammer.decoys }),
@@ -761,6 +799,7 @@ impl BlueprintDb {
                         elevation: flight.elevation.fp().map_err(context)?,
                         turn_rate: flight.turn_rate,
                         break_off: whole(&flight.break_off)?,
+                        fuel_ticks: flight.fuel * TICKS_PER_SECOND as u32,
                     }),
                 },
                 requires_deposit: unit.requires_deposit,
@@ -773,6 +812,7 @@ impl BlueprintDb {
                 overcharge,
                 shield,
                 missile_defense,
+                air_staging,
                 radar: whole(&unit.radar)?,
                 omni: whole(&unit.omni)?,
                 stealth_field: whole(&unit.stealth_field)?,

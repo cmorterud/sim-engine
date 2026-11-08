@@ -407,8 +407,9 @@ pub struct SimWorld {
     pub self_destructing: Vec<(SimId, hecs::Entity)>,
     /// Units an enemy is capturing, sorted by `SimId`, and those worked on this tick.
     pub being_captured: Vec<(SimId, hecs::Entity)>,
-    /// Aircraft, sorted by `SimId`.
+    /// Aircraft, and air staging facilities, sorted by `SimId`.
     pub aircraft: Vec<(SimId, hecs::Entity)>,
+    pub air_stagings: Vec<(SimId, hecs::Entity)>,
     pub(super) captured_this_tick: Vec<SimId>,
     /// For each team, the cloaked enemies it cannot see this tick, sorted by `SimId`. Worked out
     /// again every tick from what is hashed, so it is not hashed itself.
@@ -501,6 +502,7 @@ impl SimWorld {
             self_destructing: Vec::new(),
             being_captured: Vec::new(),
             aircraft: Vec::new(),
+            air_stagings: Vec::new(),
             captured_this_tick: Vec::new(),
             concealed: [Vec::new(), Vec::new()],
             interceptions: Vec::new(),
@@ -678,6 +680,7 @@ impl SimWorld {
                 }
                 SimCommand::Teleport { units, point } => self.command_teleport(units, *point),
                 SimCommand::SelfDestruct { units } => self.command_self_destruct(units),
+                SimCommand::Refit { units, staging } => self.command_refit(units, *staging),
                 other => self.apply_production_command(other),
             }
         }
@@ -839,6 +842,10 @@ impl SimWorld {
                 combat.ground_target = None;
             }
             let _ = self.ecs.remove_one::<OverchargeOrder>(entity);
+            // And an aircraft's trip to refuel.
+            if let Ok(mut flight) = self.ecs.get::<&mut Flight>(entity) {
+                (flight.refit, flight.docked) = (None, false);
+            }
             // A new order cancels a commander's upgrade, enhancement, or teleport, and what was
             // spent on it is lost.
             if self.ecs.remove_one::<Upgrading>(entity).is_ok() {
@@ -2179,6 +2186,7 @@ impl SimWorld {
             self.self_destructing.retain(alive);
             self.being_captured.retain(alive);
             self.aircraft.retain(alive);
+            self.air_stagings.retain(alive);
             self.dead_units.clear();
         }
         if !self.dead_projectiles.is_empty() {
