@@ -4,7 +4,7 @@
 use super::selection::{nearest_unit, order_command};
 use crate::math::fp::{Fp, Vec2Fp};
 use crate::render::camera::{Camera, HeightField};
-use crate::sim::blueprints::{BlueprintDb, BlueprintId, WeaponKind};
+use crate::sim::blueprints::{BlueprintDb, BlueprintId, UnitClass, WeaponKind};
 use crate::sim::commands::SimCommand;
 use crate::sim::components::{BuildTask, SimId, Team};
 use crate::sim::config::TERRAIN_CELL_UNITS;
@@ -84,10 +84,20 @@ pub fn right_click_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
         return commands;
     }
 
+    // On an enemy, armed units attack, and builders that cannot fight capture it.
     let enemy = nearest_unit(click.units, click.camera, click.team.enemy(), click.cursor);
-    if let (Some(target), false) = (enemy, parts.armed.is_empty()) {
-        commands.push(SimCommand::Attack { units: parts.armed.clone(), target });
-        return commands;
+    if let Some(target) = enemy {
+        let unarmed: Vec<SimId> = parts.builders.iter().copied().filter(|id| !parts.armed.contains(id)).collect();
+        let index = click.units.binary_search_by_key(&target, |unit| unit.id).expect("found in this list");
+        if !parts.armed.is_empty() {
+            commands.push(SimCommand::Attack { units: parts.armed.clone(), target });
+        }
+        if !unarmed.is_empty() && capturable(&click.units[index], click.blueprints) {
+            commands.push(SimCommand::Capture { units: unarmed, target });
+        }
+        if !commands.is_empty() {
+            return commands;
+        }
     }
 
     let friend = nearest_unit(click.units, click.camera, click.team, click.cursor).filter(|id| !click.selected.contains(id));
@@ -142,6 +152,7 @@ pub fn queued_commands(commands: Vec<SimCommand>, units: &[UnitView]) -> Vec<Sim
             },
             SimCommand::Assist { units, target } => SimCommand::QueueTask { units, task: BuildTask::Assist { target } },
             SimCommand::Repair { units, target } => SimCommand::QueueTask { units, task: BuildTask::Repair { target } },
+            SimCommand::Capture { units, target } => SimCommand::QueueTask { units, task: BuildTask::Capture { target } },
             SimCommand::Reclaim { units, target } => SimCommand::QueueTask { units, task: BuildTask::Reclaim { target } },
             other => other,
         })
@@ -174,6 +185,28 @@ pub fn overcharge_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
         .filter(|unit| unit.blueprint != u16::MAX && click.blueprints.get(BlueprintId(unit.blueprint)).overcharge.is_some())
         .map(|unit| SimCommand::Overcharge { unit: unit.id, target })
         .collect()
+}
+
+/// Whether a unit the player can see could be captured: finished, and not a commander or
+/// support commander.
+fn capturable(unit: &UnitView, blueprints: &BlueprintDb) -> bool {
+    unit.blueprint != u16::MAX && unit.built_permille == 1000 && {
+        let class = blueprints.get(BlueprintId(unit.blueprint)).class;
+        class != UnitClass::Commander && class != UnitClass::SupportCommander
+    }
+}
+
+/// The selected builders capture the enemy under the cursor.
+pub fn capture_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
+    let Some(target) = nearest_unit(click.units, click.camera, click.team.enemy(), click.cursor) else {
+        return Vec::new();
+    };
+    let builders = sort_selection(click.selected, click.units, click.blueprints).builders;
+    let index = click.units.binary_search_by_key(&target, |unit| unit.id).expect("found in this list");
+    if builders.is_empty() || !capturable(&click.units[index], click.blueprints) {
+        return Vec::new();
+    }
+    vec![SimCommand::Capture { units: builders, target }]
 }
 
 /// The selected units that can walk.
@@ -678,7 +711,7 @@ mod tests {
     }
 
     #[test]
-    fn right_clicking_an_enemy_attacks_it_with_armed_units_only() {
+    fn right_clicking_an_enemy_attacks_it_with_armed_units_and_captures_it_with_engineers() {
         let db = db();
         let units = [
             view(1, Team::Blue, db.id("t1_light_bot"), &db, 2_000.0, 1_950.0),
@@ -686,7 +719,7 @@ mod tests {
             view(3, Team::Red, db.id("t1_light_bot"), &db, 2_000.0, 2_050.0),
         ];
         let orders = click_at(&[SimId(1), SimId(2)], &units, &[], &db, &camera(), [2_000.0, 2_050.0]);
-        assert_eq!(orders, [SimCommand::Attack { units: vec![SimId(1)], target: SimId(3) }]);
+        assert_eq!(orders, [SimCommand::Attack { units: vec![SimId(1)], target: SimId(3) }, SimCommand::Capture { units: vec![SimId(2)], target: SimId(3) }]);
     }
 
     #[test]
@@ -754,6 +787,25 @@ mod tests {
         ];
         let orders = click_at(&[SimId(1), SimId(2), SimId(3)], &units, &[], &db, &camera(), [2_000.0, 2_000.0]);
         assert_eq!(orders, [SimCommand::Attack { units: vec![SimId(1), SimId(2)], target: SimId(4) }]);
+    }
+
+    #[test]
+    fn right_clicking_an_enemy_has_engineers_capture_it_while_armed_units_attack() {
+        let db = db();
+        let units = [
+            view(1, Team::Blue, db.id("t1_engineer"), &db, 1_000.0, 1_000.0),
+            view(2, Team::Blue, db.id("acu"), &db, 1_050.0, 1_000.0),
+            view(3, Team::Red, db.id("power_generator"), &db, 2_000.0, 2_000.0),
+            view(4, Team::Red, db.id("acu"), &db, 3_000.0, 3_000.0),
+        ];
+        let at = |selected: &[SimId], cursor: [f64; 2]| click_at(selected, &units, &[], &db, &camera(), cursor);
+        assert_eq!(at(&[SimId(1)], [2_000.0, 2_000.0]), [SimCommand::Capture { units: vec![SimId(1)], target: SimId(3) }]);
+        assert_eq!(
+            at(&[SimId(1), SimId(2)], [2_000.0, 2_000.0]),
+            [SimCommand::Attack { units: vec![SimId(2)], target: SimId(3) }, SimCommand::Capture { units: vec![SimId(1)], target: SimId(3) }],
+            "the commander fights, and the engineer captures"
+        );
+        assert!(!at(&[SimId(1)], [3_000.0, 3_000.0]).iter().any(|order| matches!(order, SimCommand::Capture { .. })), "a commander cannot be captured");
     }
 
     #[test]

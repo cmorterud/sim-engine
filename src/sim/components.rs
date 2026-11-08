@@ -151,6 +151,8 @@ pub enum BuildTask {
     Assist { target: SimId },
     Reclaim { target: SimId },
     Repair { target: SimId },
+    /// Take over an enemy unit (GAME_SPECIFICATION.md §5.3).
+    Capture { target: SimId },
     /// Walk somewhere as part of a queue. Until `started`, this task holds the route's reference.
     Walk { order: Order, started: bool },
 }
@@ -398,6 +400,14 @@ pub struct Intel {
     pub stealthed: bool,
     /// A jammer enhancement is paid for this tick, so its decoys show on enemy radar.
     pub jamming: bool,
+}
+
+/// How far along an enemy capture of this unit is. Gone if nobody works on it for a tick, so a
+/// capture that stops starts over, as in the original.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct BeingCaptured {
+    /// From 0 to 1.
+    pub progress: Res,
 }
 
 /// The field enhancements a unit has, one for each slot (GAME_SPECIFICATION.md §2.1).

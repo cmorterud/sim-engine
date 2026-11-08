@@ -76,6 +76,7 @@ pub fn describe(command: &SimCommand, blueprints: &BlueprintDb) -> Option<(Marke
         SimCommand::Follow { units, target } => (MarkerKind::Support, format!("Follow: {}", unit_count(units)), Some(*target)),
         SimCommand::Assist { units, target } => (MarkerKind::Support, format!("Assist: {}", unit_count(units)), Some(*target)),
         SimCommand::Repair { units, target } => (MarkerKind::Support, format!("Repair: {}", unit_count(units)), Some(*target)),
+        SimCommand::Capture { units, target } => (MarkerKind::Attack, format!("Capture: {}", unit_count(units)), Some(*target)),
         SimCommand::Reclaim { units, .. } => (MarkerKind::Support, format!("Reclaim: {}", unit_count(units)), None),
         SimCommand::SetRally { .. } => (MarkerKind::Rally, "Rally point set".to_string(), None),
         SimCommand::Patrol { units, points } => {

@@ -71,6 +71,8 @@ pub enum ArmedOrder {
     Overcharge,
     /// Not on a letter: Ctrl+T, and only for units with a teleporter.
     Teleport,
+    /// Not on a letter: Ctrl+C, for builders.
+    Capture,
 }
 
 impl ArmedOrder {
@@ -86,6 +88,7 @@ impl ArmedOrder {
             Self::Assist => hotkeys::ASSIST,
             Self::Overcharge => hotkeys::OVERCHARGE,
             Self::Teleport => 'T',
+            Self::Capture => 'C',
         }
     }
 
@@ -99,6 +102,7 @@ impl ArmedOrder {
             Self::Assist => "Assist",
             Self::Overcharge => "Overcharge",
             Self::Teleport => "Teleport",
+            Self::Capture => "Capture",
         }
     }
 
@@ -112,6 +116,7 @@ impl ArmedOrder {
             Self::Assist => "Stay with a friendly unit and protect it. Builders also help it build.",
             Self::Overcharge => "Spend stored energy on one shot that destroys almost any unit. Weak against structures.",
             Self::Teleport => "Charge up, standing still, and jump to a spot you can see or have on radar. Costs a great deal of energy, more the farther it goes, and aborts if the energy runs out. Lands on enemy units destroy them.",
+            Self::Capture => "Take over an enemy unit or structure, in half its build time at your builders' build power, for its energy cost. Stopping starts it over. Commanders cannot be captured.",
         }
     }
 
@@ -126,6 +131,7 @@ impl ArmedOrder {
             Self::Assist => "Assist: left-click a friendly unit. Right-click or Esc to cancel.",
             Self::Overcharge => "Overcharge: left-click an enemy. Right-click or Esc to cancel.",
             Self::Teleport => "Teleport: left-click open ground you can see or have on radar. Right-click or Esc to cancel.",
+            Self::Capture => "Capture: left-click an enemy unit or structure. Right-click or Esc to cancel.",
         }
     }
 }
@@ -174,6 +180,13 @@ fn cost_label(db: &BlueprintDb, blueprint: BlueprintId) -> String {
 /// Whether anything selected can walk, and so take the unit orders.
 pub fn has_mobile_units(snapshot: &SimSnapshot, selected: &[SimId]) -> bool {
     selected.iter().filter_map(|id| find_unit(snapshot, *id)).any(|unit| !unit.is_structure)
+}
+
+/// Whether anything selected is a builder that can walk, and so can capture.
+pub fn has_mobile_builders(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb) -> bool {
+    selected.iter().filter_map(|id| find_unit(snapshot, *id)).any(|unit| {
+        unit.blueprint != u16::MAX && !unit.is_structure && db.get(BlueprintId(unit.blueprint)).build_power > crate::math::fp::Fp::ZERO
+    })
 }
 
 /// Whether anything selected has Overcharge.
@@ -225,7 +238,8 @@ pub fn has_weapons(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb)
         .any(|unit| unit.blueprint == u16::MAX || db.get(BlueprintId(unit.blueprint)).weapon.is_some())
 }
 
-fn unit_order_row(ui: &mut egui::Ui, armed: Option<ArmedOrder>, overcharge: bool, weapons: bool, teleport: bool, actions: &mut Vec<UiAction>) {
+#[allow(clippy::fn_params_excessive_bools)]
+fn unit_order_row(ui: &mut egui::Ui, armed: Option<ArmedOrder>, overcharge: bool, weapons: bool, teleport: bool, capture: bool, actions: &mut Vec<UiAction>) {
     ui.horizontal_wrapped(|ui| {
         let offered = |order: &ArmedOrder| match order {
             ArmedOrder::Overcharge => overcharge,
@@ -240,6 +254,12 @@ fn unit_order_row(ui: &mut egui::Ui, armed: Option<ArmedOrder>, overcharge: bool
         }
         if ui.button(format!("[{}] Stop", hotkeys::STOP)).on_hover_text("Drop all orders.").clicked() {
             actions.push(UiAction::Stop);
+        }
+        if capture {
+            let button = egui::Button::new("[Ctrl+C] Capture").selected(armed == Some(ArmedOrder::Capture));
+            if ui.add(button).on_hover_text(ArmedOrder::Capture.description()).clicked() {
+                actions.push(UiAction::Arm(ArmedOrder::Capture));
+            }
         }
         if teleport {
             let button = egui::Button::new("[Ctrl+T] Teleport").selected(armed == Some(ArmedOrder::Teleport));
@@ -750,6 +770,7 @@ pub fn task_name(task: &BuildTask, db: &BlueprintDb) -> String {
         BuildTask::Assist { .. } => "Assist".to_string(),
         BuildTask::Reclaim { .. } => "Reclaim".to_string(),
         BuildTask::Repair { .. } => "Repair".to_string(),
+        BuildTask::Capture { .. } => "Capture".to_string(),
         BuildTask::Walk { order, .. } => if order.kind == OrderKind::AttackMove { "Attack-move" } else { "Move" }.to_string(),
     }
 }
@@ -1146,7 +1167,7 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
 
         if has_mobile_units(snapshot, selected) {
             let teleport = !teleporters(snapshot, selected, db).is_empty();
-            unit_order_row(ui, armed, has_overcharge(snapshot, selected, db), has_weapons(snapshot, selected, db), teleport, actions);
+            unit_order_row(ui, armed, has_overcharge(snapshot, selected, db), has_weapons(snapshot, selected, db), teleport, has_mobile_builders(snapshot, selected, db), actions);
         }
         if let Some(action) = cloak_action(snapshot, selected) {
             let UiAction::SetCloak { on, .. } = &action else {

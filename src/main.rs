@@ -11,7 +11,7 @@ use sim_engine::audio::{self, AttackAlarm, SoundEngine, SoundSettings};
 use sim_engine::input::feedback::{MarkerKind, OrderFeedback};
 use sim_engine::input::hotkeys;
 use sim_engine::input::orders::{
-    assist_orders, attack_ground_orders, deposit_position, formation_commands, free_deposits, site_position, line_cells, mobile_units, move_orders, overcharge_orders, pending_builds, queued_commands, PendingBuild, placement_cell, placement_is_valid, placement_target, right_click_orders, PlacementMap, RightClick,
+    assist_orders, attack_ground_orders, capture_orders, deposit_position, formation_commands, free_deposits, site_position, line_cells, mobile_units, move_orders, overcharge_orders, pending_builds, queued_commands, PendingBuild, placement_cell, placement_is_valid, placement_target, right_click_orders, PlacementMap, RightClick,
 };
 use sim_engine::input::selection::{group_center, ControlGroups, Selection};
 use sim_engine::math::fp::{Fp, Vec2Fp};
@@ -99,6 +99,8 @@ Controls:
   L, then left-click   Overcharge an enemy with the commander
   O                    Pause or resume the selected factories and construction sites,
                        or switch a cloak on and off
+  Ctrl + C, then click Capture an enemy unit or structure with the selected builders.
+                       Right-clicking an enemy with engineers alone does it too
   Ctrl + T, then click Teleport a commander with a teleporter. Command works too
   Ctrl + K             Self-destruct the selection in 5 seconds, or stop counting.
                        Command works too
@@ -843,6 +845,11 @@ fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                                             }
                                         }
                                     }
+                                    ArmedOrder::Capture => {
+                                        if issue_planned_orders(&session, &selection, &camera, &map, &mut feedback, false, shift_held, false, "Click an enemy unit or structure to capture", capture_orders) && !shift_held {
+                                            armed = None;
+                                        }
+                                    }
                                     ArmedOrder::Teleport => {
                                         let units = ui::teleporters(&session.current, selection.selected(), &map.blueprints);
                                         let ground = camera.screen_to_ground(selection.cursor(), &map.heights);
@@ -1002,6 +1009,17 @@ fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                                         line_start = None;
                                         patrol_points.clear();
                                     }
+                                }
+                            }
+                            // Ctrl+C arms a capture.
+                            PhysicalKey::Code(KeyCode::KeyC) if pressed && !event.repeat && command_held && is_match => {
+                                if ui::has_mobile_builders(&session.current, selection.selected(), &map.blueprints) {
+                                    armed = Some(ArmedOrder::Capture);
+                                    placing = None;
+                                    line_start = None;
+                                    patrol_points.clear();
+                                } else {
+                                    feedback.show_rejected(None, "No builders selected");
                                 }
                             }
                             // Ctrl+T arms a teleport, and Ctrl+K starts or stops a self-destruct.

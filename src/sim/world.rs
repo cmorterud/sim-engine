@@ -393,6 +393,9 @@ pub struct SimWorld {
     /// Units charging a teleport, and those counting down to blowing up, sorted by `SimId`.
     pub teleporting: Vec<(SimId, hecs::Entity)>,
     pub self_destructing: Vec<(SimId, hecs::Entity)>,
+    /// Units an enemy is capturing, sorted by `SimId`, and those worked on this tick.
+    pub being_captured: Vec<(SimId, hecs::Entity)>,
+    pub(super) captured_this_tick: Vec<SimId>,
     /// For each team, the cloaked enemies it cannot see this tick, sorted by `SimId`. Worked out
     /// again every tick from what is hashed, so it is not hashed itself.
     concealed: [Vec<SimId>; 2],
@@ -482,6 +485,8 @@ impl SimWorld {
             enhancing: Vec::new(),
             teleporting: Vec::new(),
             self_destructing: Vec::new(),
+            being_captured: Vec::new(),
+            captured_this_tick: Vec::new(),
             concealed: [Vec::new(), Vec::new()],
             interceptions: Vec::new(),
             formations: BTreeMap::new(),
@@ -2041,6 +2046,7 @@ impl SimWorld {
             self.enhancing.retain(alive);
             self.teleporting.retain(alive);
             self.self_destructing.retain(alive);
+            self.being_captured.retain(alive);
             self.dead_units.clear();
         }
         if !self.dead_projectiles.is_empty() {

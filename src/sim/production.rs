@@ -7,7 +7,7 @@ use std::hash::Hasher;
 use super::blueprints::{BlueprintId, Res, UnitClass, WeaponKind, TICKS_PER_SECOND};
 use super::commands::SimCommand;
 use super::components::{
-    Adjacency, Blueprinted, BuildTask, Builder, Intel, Launcher, Upgrading, MissileDefense, OverchargeOrder, OverchargeWeapon, Paused, Shield, Turning, Turret, Veterancy, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, OrderQueue, Patrol,
+    Adjacency, BeingCaptured, Blueprinted, BuildTask, Builder, Intel, Launcher, Upgrading, MissileDefense, OverchargeOrder, OverchargeWeapon, Paused, Shield, Turning, Turret, Veterancy, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, OrderQueue, Patrol,
     Position, SimId, Team, UnitStats, Wreck, WreckKind,
 };
 use super::config::{
@@ -116,6 +116,7 @@ enum WorkKind {
     Repair,
     Upgrade,
     Enhance,
+    Capture,
 }
 
 /// The result of looking at a builder's first task.
@@ -484,6 +485,7 @@ impl SimWorld {
             SimCommand::Assist { units, target } => self.replace_tasks(units, BuildTask::Assist { target: *target }),
             SimCommand::Reclaim { units, target } => self.replace_tasks(units, BuildTask::Reclaim { target: *target }),
             SimCommand::Repair { units, target } => self.replace_tasks(units, BuildTask::Repair { target: *target }),
+            SimCommand::Capture { units, target } => self.replace_tasks(units, BuildTask::Capture { target: *target }),
             SimCommand::QueueUnit { factory, blueprint, count } => {
                 let Some(entity) = self.factory_entity(*factory) else {
                     return;
@@ -847,6 +849,9 @@ impl SimWorld {
             }
             self.apply_work(item, item.step * share);
         }
+        if !self.being_captured.is_empty() {
+            self.drop_stopped_captures();
+        }
         for (team_index, economy) in self.economies.iter_mut().enumerate() {
             let mass = economy.mass + economy.mass_income - economy.extractor_shortfall() + economy.mass_reclaimed - spent[team_index].0;
             let energy = economy.energy + economy.energy_income + economy.energy_reclaimed - spent[team_index].1 - upkeep[team_index];
@@ -1100,10 +1105,26 @@ impl SimWorld {
                     return TaskStep::MoveTo(target_position);
                 }
                 let health = *self.ecs.get::<&Health>(target_entity).expect("units have health");
-                if health.current >= health.max {
+                // A unit captured away from its team is not repaired by its old one.
+                let theirs = self.ecs.get::<&UnitStats>(target_entity).expect("units have stats").team != team;
+                if health.current >= health.max || theirs {
                     return TaskStep::Done;
                 }
                 TaskStep::Work { target, kind: WorkKind::Repair }
+            }
+            BuildTask::Capture { target } => {
+                let Some((_, target_entity)) = self.find_unit(target) else {
+                    return TaskStep::Done;
+                };
+                if !self.capturable(target_entity, team) {
+                    return TaskStep::Done;
+                }
+                let target_position = self.ecs.get::<&Position>(target_entity).expect("units have positions").0.xy();
+                let target_radius = self.ecs.get::<&UnitStats>(target_entity).expect("units have stats").radius;
+                if !self.within(here, target_position, range + target_radius) {
+                    return TaskStep::MoveTo(target_position);
+                }
+                TaskStep::Work { target, kind: WorkKind::Capture }
             }
             BuildTask::Walk { .. } => unreachable!("walks are handled before looking at a task"),
             BuildTask::Reclaim { target } => {
@@ -1124,13 +1145,19 @@ impl SimWorld {
         let (_, entity) = self.find_unit(target)?;
         let team = self.ecs.get::<&UnitStats>(entity).ok()?.team;
         let adjacency = self.ecs.get::<&Adjacency>(entity).map_or(Adjacency::default(), |adjacency| *adjacency);
+        // A capture takes half the target's build time, and costs its energy, to the capturers.
+        if kind == WorkKind::Capture {
+            let unit = self.blueprints.get(self.ecs.get::<&Blueprinted>(entity).ok()?.0);
+            let step = fp_to_res(power) * 2 / (unit.build_time * TICKS_PER_SECOND);
+            return Some(WorkItem { target, entity, kind, team: team.enemy(), step, mass: Res::ZERO, energy: unit.energy * step });
+        }
         if kind == WorkKind::Enhance {
             let enhancement = self.blueprints.enhancement(self.ecs.get::<&super::components::Enhancing>(entity).ok()?.enhancement);
             let step = fp_to_res(power) / (enhancement.build_time * TICKS_PER_SECOND);
             return Some(WorkItem { target, entity, kind, team, step, mass: enhancement.mass * step, energy: enhancement.energy * step });
         }
         let blueprint = match kind {
-            WorkKind::Enhance => unreachable!("worked out above"),
+            WorkKind::Enhance | WorkKind::Capture => unreachable!("worked out above"),
             WorkKind::FactoryItem => {
                 let factory = self.ecs.get::<&Factory>(entity).ok()?;
                 *factory.queue.first()?
@@ -1175,6 +1202,18 @@ impl SimWorld {
                 }
             }
             WorkKind::Repair => self.heal(item.entity, amount),
+            WorkKind::Capture => {
+                let progress = self.ecs.get::<&BeingCaptured>(item.entity).map_or(Res::ZERO, |capture| capture.progress) + amount;
+                if progress >= Res::ONE {
+                    self.capture_unit(item.target, item.entity, item.team);
+                } else {
+                    self.ecs.insert_one(item.entity, BeingCaptured { progress }).expect("work item checked the unit");
+                    if let Err(at) = self.being_captured.binary_search_by_key(&item.target, |unit| unit.0) {
+                        self.being_captured.insert(at, (item.target, item.entity));
+                    }
+                    self.captured_this_tick.push(item.target);
+                }
+            }
             WorkKind::Enhance => {
                 let Ok(mut under_way) = self.ecs.get::<&mut super::components::Enhancing>(item.entity) else {
                     return;
@@ -1220,6 +1259,59 @@ impl SimWorld {
         let mut health = self.ecs.get::<&mut Health>(entity).expect("units have health");
         let gain = Fp::from_bits(((i64::from(health.max.to_bits()) * share.to_bits()) >> 24) as i32);
         health.current = health.current.saturating_add(gain).min(health.max);
+    }
+
+    /// Whether a team's builders can capture this unit: an enemy's, finished, and not a
+    /// commander or support commander, which cannot be captured, as in the original.
+    fn capturable(&self, entity: hecs::Entity, team: Team) -> bool {
+        let theirs = self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team != team);
+        let finished = self.ecs.get::<&Construction>(entity).is_err();
+        let commander = self.ecs.get::<&Blueprinted>(entity).is_ok_and(|unit| {
+            let class = self.blueprints.get(unit.0).class;
+            class == UnitClass::Commander || class == UnitClass::SupportCommander
+        });
+        theirs && finished && !commander
+    }
+
+    /// A capture nobody worked on this tick starts over.
+    fn drop_stopped_captures(&mut self) {
+        let worked = std::mem::take(&mut self.captured_this_tick);
+        let (kept, stopped): (Vec<_>, Vec<_>) = self.being_captured.iter().partition(|unit| worked.contains(&unit.0));
+        for (_, entity) in stopped {
+            let _ = self.ecs.remove_one::<BeingCaptured>(entity);
+        }
+        self.being_captured = kept;
+    }
+
+    /// Hands a unit to the team that captured it, as it is, with nothing to do.
+    fn capture_unit(&mut self, id: SimId, entity: hecs::Entity, team: Team) {
+        self.clear_unit_plans(&[id]);
+        self.set_order(id, Order::IDLE);
+        let _ = self.ecs.remove_one::<BeingCaptured>(entity);
+        self.being_captured.retain(|unit| unit.0 != id);
+        let _ = self.ecs.remove_one::<Paused>(entity);
+        if self.ecs.remove_one::<super::components::SelfDestructing>(entity).is_ok() {
+            self.self_destructing.retain(|unit| unit.0 != id);
+        }
+        if let Ok(mut factory) = self.ecs.get::<&mut Factory>(entity) {
+            factory.queue.clear();
+            factory.repeat = false;
+            factory.progress = Res::ZERO;
+            factory.rally = None;
+        }
+        self.ecs.get::<&mut UnitStats>(entity).expect("units have stats").team = team;
+        // Nobody keeps shooting at it: its new side would be shooting its own.
+        for &(_, other) in &self.units {
+            if let Ok(mut combat) = self.ecs.get::<&mut Combat>(other) {
+                if combat.target == Some(id) {
+                    combat.target = None;
+                }
+                if combat.forced_target == Some(id) {
+                    combat.forced_target = None;
+                }
+            }
+        }
+        self.economy_dirty = true;
     }
 
     fn silo_is_full(&self, entity: hecs::Entity) -> bool {
@@ -1689,7 +1781,7 @@ impl SimWorld {
                 let width = if site.is_none() { fp_int(size as i32 * TERRAIN_CELL_UNITS).to_bits() } else { 0 };
                 Some(self.plan_step(PlanStepKind::Build, cell_center(cell_x, cell_y, size), width))
             }
-            BuildTask::Assist { target } | BuildTask::Repair { target } => {
+            BuildTask::Assist { target } | BuildTask::Repair { target } | BuildTask::Capture { target } => {
                 Some(self.plan_step(PlanStepKind::Support, unit_point(target)?, 0))
             }
             BuildTask::Walk { order, .. } => self.order_step(&order),
@@ -1735,6 +1827,7 @@ impl SimWorld {
                     BuildTask::Assist { target } => (1, target.0, 0, 0, 0),
                     BuildTask::Reclaim { target } => (2, target.0, 0, 0, 0),
                     BuildTask::Repair { target } => (3, target.0, 0, 0, 0),
+                    BuildTask::Capture { target } => (5, target.0, 0, 0, 0),
                     BuildTask::Walk { order, started } => {
                         hash_slot(hasher, order.slot);
                         (4, order.route, u32::from(started), order.slot_ticks, order.kind as u32)
@@ -1799,6 +1892,10 @@ impl SimWorld {
             }
         }
         self.hash_enhancement_state(entity, hasher);
+        if let Ok(capture) = self.ecs.get::<&BeingCaptured>(entity) {
+            hasher.write(&[24]);
+            hasher.write(&capture.progress.to_bits().to_le_bytes());
+        }
         if let Ok(upgrading) = self.ecs.get::<&Upgrading>(entity) {
             hasher.write(&[18]);
             hasher.write(&upgrading.into.0.to_le_bytes());

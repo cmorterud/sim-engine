@@ -265,6 +265,22 @@ fn every_enhancement_field_changes_the_checksum() {
     }
 }
 
+/// A capture under way is hashed only while there is one.
+#[test]
+fn capture_progress_changes_the_checksum() {
+    use sim_engine::sim::components::{BeingCaptured, Team};
+    let (_, mut world) = run(scenario::battle(SEED, 20, small_config()), 10, 10);
+    let generator = world.blueprints.id("power_generator");
+    let target = (4..200).find_map(|cell| world.spawn_finished_structure(generator, Team::Red, cell, 8)).expect("room");
+    let entity = world.unit_entity(target).unwrap();
+    let before = world.compute_checksum();
+    world.ecs.insert_one(entity, BeingCaptured { progress: Res::from_bits(1) }).unwrap();
+    let with = world.compute_checksum();
+    assert_ne!(with, before, "a capture under way is part of the state");
+    world.ecs.get::<&mut BeingCaptured>(entity).unwrap().progress += Res::from_bits(1);
+    assert_ne!(world.compute_checksum(), with, "and so is how far along it is");
+}
+
 /// Launchers, missile defenses, and missiles are hashed only where they exist.
 #[test]
 fn every_missile_field_changes_the_checksum() {

@@ -37,6 +37,8 @@ pub enum SimCommand {
     Assist { units: Vec<SimId>, target: SimId },
     Reclaim { units: Vec<SimId>, target: SimId },
     Repair { units: Vec<SimId>, target: SimId },
+    /// Builders take over an enemy unit (GAME_SPECIFICATION.md §5.3).
+    Capture { units: Vec<SimId>, target: SimId },
     /// Add to a factory's queue. An item that is a factory is an upgrade. With an upgrade in
     /// its queue, a factory also takes what the upgrade will let it build, which waits behind it.
     QueueUnit { factory: SimId, blueprint: BlueprintId, count: u32 },
