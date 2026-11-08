@@ -93,8 +93,23 @@ impl SimWorld {
 
     /// Whether a builder can build this: it is on its list, and not above its tier.
     pub fn can_build(&self, entity: hecs::Entity, blueprint: BlueprintId) -> bool {
+        self.on_build_list(entity, blueprint) && self.blueprints.get(blueprint).tier <= self.build_tier(entity)
+    }
+
+    /// The tier it will build once the engineering suite it is being fitted with is done.
+    pub fn build_tier_ahead(&self, entity: hecs::Entity) -> u8 {
+        let pending = self.ecs.get::<&Enhancing>(entity).map_or(0, |under_way| self.blueprints.enhancement(under_way.enhancement).effects.build_tier);
+        self.build_tier(entity).max(pending)
+    }
+
+    /// Whether a builder could build this once its engineering suite under way is done, but not
+    /// yet. Such a build waits behind the suite, and goes if the suite is cancelled.
+    pub fn can_build_after_suite(&self, entity: hecs::Entity, blueprint: BlueprintId) -> bool {
+        self.on_build_list(entity, blueprint) && !self.can_build(entity, blueprint) && self.blueprints.get(blueprint).tier <= self.build_tier_ahead(entity)
+    }
+
+    fn on_build_list(&self, entity: hecs::Entity, blueprint: BlueprintId) -> bool {
         self.ecs.get::<&super::components::Blueprinted>(entity).is_ok_and(|unit| self.blueprints.get(unit.0).builds.contains(&blueprint))
-            && self.blueprints.get(blueprint).tier <= self.build_tier(entity)
     }
 
     /// Starts an enhancement, if the unit can take it. What is in its slot is removed first,
@@ -140,10 +155,16 @@ impl SimWorld {
         self.set_enhancement(id, entity, slot, Some(under_way.enhancement));
     }
 
-    /// Cancels an enhancement under way, losing what was spent on it.
+    /// Cancels an enhancement under way, losing what was spent on it. Structures queued for the
+    /// tier it would have unlocked go with it.
     pub(super) fn cancel_enhancement(&mut self, id: SimId, entity: hecs::Entity) {
         if self.ecs.remove_one::<Enhancing>(entity).is_ok() {
             self.enhancing.retain(|unit| unit.0 != id);
+            let tier = self.build_tier(entity);
+            let blueprints = &self.blueprints;
+            if let Ok(mut builder) = self.ecs.get::<&mut super::components::Builder>(entity) {
+                builder.tasks.retain(|task| !matches!(task, super::components::BuildTask::Build { blueprint, site: None, .. } if blueprints.get(*blueprint).tier > tier));
+            }
         }
         if self.ecs.remove_one::<Teleporting>(entity).is_ok() {
             self.teleporting.retain(|unit| unit.0 != id);

@@ -449,6 +449,15 @@ impl SimWorld {
             }
             SimCommand::Build { units, blueprint, cell_x, cell_y, queued } => {
                 let builders = self.units_that_can_build(units, *blueprint);
+                // A commander being fitted with an engineering suite can already queue what the
+                // suite unlocks. That waits behind the suite, so it is queued whatever the order
+                // says, and never cancels the suite.
+                let after_suite: Vec<SimId> = units
+                    .iter()
+                    .copied()
+                    .filter(|id| self.find_unit(*id).is_some_and(|(_, entity)| self.ecs.get::<&Builder>(entity).is_ok() && self.can_build_after_suite(entity, *blueprint)))
+                    .collect();
+                self.push_task(&after_suite, BuildTask::Build { blueprint: *blueprint, cell_x: *cell_x, cell_y: *cell_y, site: None });
                 if !*queued {
                     self.clear_unit_plans(&builders);
                     for &id in &builders {

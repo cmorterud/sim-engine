@@ -158,3 +158,69 @@ fn factories_go_up_to_t3_and_make_engineers_of_their_tier() {
     let made = world.units.iter().any(|&(id, _)| id != factory && blueprint_key(&world, id) == "t3_engineer");
     assert!(made, "the T3 factory should have made a T3 engineer");
 }
+
+#[test]
+fn a_commander_queues_the_next_tier_as_soon_as_its_suite_is_started_and_loses_it_if_cancelled() {
+    let mut world = rich_world();
+    let commander = spawn(&mut world, "acu", point(1_000, 1_000));
+    let entity = world.unit_entity(commander).unwrap();
+    enhance(&mut world, commander, "advanced_engineering");
+    // Even without Shift, a T2 structure waits behind the T2 suite, and does not cancel it.
+    order_build(&mut world, vec![commander], "tactical_missile_launcher", 60);
+    assert!(world.ecs.get::<&Enhancing>(entity).is_ok(), "the suite carries on");
+    assert!(matches!(tasks(&world, commander).as_slice(), [BuildTask::Build { .. }]), "the launcher is queued");
+    // T3 is still out of reach.
+    let mut more = world.blueprints.id("strategic_missile_launcher");
+    world.advance_tick(&[SimCommand::Build { units: vec![commander], blueprint: more, cell_x: 70, cell_y: 50, queued: true }]);
+    assert_eq!(tasks(&world, commander).len(), 1, "no T3 structure on a T2 suite");
+    // Once the suite is done, it builds the launcher.
+    let built = (0..2_000).any(|_| {
+        world.advance_tick(&[]);
+        world.units.iter().any(|unit| unit.0 != commander && blueprint_key(&world, unit.0) == "tactical_missile_launcher")
+    });
+    assert!(built, "the queued launcher should be started once the suite is done");
+
+    // A suite cancelled takes what was queued for it along.
+    let mut world = rich_world();
+    let commander = spawn(&mut world, "acu", point(1_000, 1_000));
+    let entity = world.unit_entity(commander).unwrap();
+    enhance(&mut world, commander, "advanced_engineering");
+    order_build(&mut world, vec![commander], "tactical_missile_launcher", 60);
+    more = world.blueprints.id("tactical_missile_defense");
+    world.advance_tick(&[SimCommand::Build { units: vec![commander], blueprint: more, cell_x: 70, cell_y: 50, queued: true }]);
+    assert_eq!(tasks(&world, commander).len(), 2);
+    world.advance_tick(&[SimCommand::Stop { units: vec![commander] }]);
+    assert!(world.ecs.get::<&Enhancing>(entity).is_err());
+    assert!(tasks(&world, commander).is_empty(), "the T2 structures are gone with the suite");
+    // And with no suite under way, T2 is out of reach again.
+    order_build(&mut world, vec![commander], "tactical_missile_launcher", 60);
+    assert!(tasks(&world, commander).is_empty());
+}
+
+#[test]
+fn an_enemy_upgrade_in_sight_shows_that_it_is_happening_and_nothing_more() {
+    let config = SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: true, ..SimConfig::default() };
+    let mut world = SimWorld::new(config, 1);
+    for economy in &mut world.economies {
+        economy.mass = Res::from_num(5_000);
+        economy.energy = Res::from_num(50_000);
+    }
+    let blue = world.spawn_mobile(world.blueprints.id("acu"), Team::Blue, point(1_000, 1_000));
+    let red = world.spawn_mobile(world.blueprints.id("acu"), Team::Red, point(4_000, 4_000));
+    let enhancement = world.blueprints.enhancement_id("advanced_engineering");
+    world.advance_tick(&[SimCommand::Enhance { units: vec![red], enhancement }]);
+    world.advance_tick(&[]);
+    // Out of sight, nothing at all.
+    let view = world.snapshot_for(Some(Team::Blue));
+    assert!(!view.upgrading.contains(&red));
+    // In sight, that it is upgrading, but not what into or how far along.
+    world.advance_tick(&[SimCommand::Move { units: vec![blue], goal: point(3_700, 3_700) }]);
+    let seen = (0..1_000).any(|_| {
+        world.advance_tick(&[]);
+        world.snapshot_for(Some(Team::Blue)).upgrading.contains(&red)
+    });
+    assert!(seen, "the enemy's upgrade should show once it is in sight");
+    let view = world.snapshot_for(Some(Team::Blue));
+    assert!(view.enhancing.iter().all(|(id, _, _)| *id != red), "its progress stays hidden");
+    assert!(world.snapshot_for(Some(Team::Red)).enhancing.iter().any(|(id, _, _)| *id == red), "its owner sees it");
+}

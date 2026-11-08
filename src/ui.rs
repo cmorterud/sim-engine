@@ -9,8 +9,9 @@ use egui::{Align2, Color32, FontId, Pos2, Rect, Rounding, Stroke, Vec2};
 use crate::input::feedback::{Marker, MarkerKind, OrderFeedback, LABEL_SECONDS};
 use crate::input::hotkeys::{self, blueprint_hotkey};
 use crate::input::orders::PendingBuild;
+use crate::math::fp::Fp;
 use crate::render::camera::Camera;
-use crate::sim::blueprints::{BlueprintDb, BlueprintId, Enhancement, EnhancementId, Slot, UnitClass, TICKS_PER_SECOND};
+use crate::sim::blueprints::{BlueprintDb, BlueprintId, Enhancement, EnhancementId, Res, Slot, Targets, UnitClass, WeaponKind, TICKS_PER_SECOND};
 use crate::sim::components::{BuildTask, OrderKind, SimId, Team};
 use crate::sim::world::{MatchResult, PlanStepKind, SimSnapshot, UnitRatesView, UnitView};
 
@@ -38,6 +39,10 @@ const HEALTHY: Color32 = Color32::from_rgb(120, 230, 120);
 const BUILDING: Color32 = Color32::from_rgb(120, 200, 255);
 const SPENDING: Color32 = Color32::from_rgb(250, 190, 120);
 const VETERAN: Color32 = Color32::from_rgb(255, 205, 60);
+/// The ring and bar shown on anything upgrading.
+const UPGRADING: Color32 = Color32::from_rgb(200, 130, 255);
+/// How fast the ring around an upgrading unit pulses, in radians a second.
+const UPGRADE_PULSE_RATE: f64 = 4.0;
 /// How close to an order's icon a Shift-press grabs it, in points.
 const HANDLE_GRAB_POINTS: f64 = 18.0;
 const HANDLE_RADIUS_POINTS: f32 = 10.0;
@@ -170,11 +175,122 @@ fn find_unit(snapshot: &SimSnapshot, id: SimId) -> Option<&UnitView> {
     snapshot.units.binary_search_by_key(&id, |unit| unit.id).ok().map(|index| &snapshot.units[index])
 }
 
-/// A button's name and cost, with its key in front.
-fn cost_label(db: &BlueprintDb, blueprint: BlueprintId) -> String {
+/// A build menu button: the item's name, with its key in front.
+fn item_label(db: &BlueprintDb, blueprint: BlueprintId) -> String {
     let unit = db.get(blueprint);
     let key = blueprint_hotkey(&unit.key).map_or(String::new(), |letter| format!("[{}] ", hotkeys::key_name(letter)));
-    format!("{key}{}\n{} mass  {} energy", unit.name, unit.mass.to_num::<i64>(), unit.energy.to_num::<i64>())
+    format!("{key}{}", unit.name)
+}
+
+/// What hovering over a build menu item shows: its cost, and what it does.
+pub fn item_details(db: &BlueprintDb, blueprint: BlueprintId) -> String {
+    let unit = db.get(blueprint);
+    let whole = |value: Fp| value.to_num::<f64>().round() as i64;
+    let per_second = |per_tick: Res| per_tick.to_num::<f64>() * TICKS_PER_SECOND as f64;
+    let kind = if unit.is_structure() { format!("T{} structure, {} by {}", unit.tier, unit.footprint, unit.footprint) } else { format!("T{} unit", unit.tier) };
+    let mut lines = vec![
+        format!("{} ({kind})", unit.name),
+        format!("Costs {} mass and {} energy, build time {}", unit.mass.to_num::<i64>(), unit.energy.to_num::<i64>(), unit.build_time.to_num::<i64>()),
+        format!("Health {}", whole(unit.health)),
+    ];
+    if let Some(weapon) = unit.weapon {
+        let seconds = f64::from(weapon.reload_ticks) / TICKS_PER_SECOND as f64;
+        let aims = match (weapon.kind, weapon.targets) {
+            (WeaponKind::Bomb, _) => ", bombs ground targets",
+            (_, Targets::Air) => ", at aircraft only",
+            (_, Targets::Both) => ", at aircraft and ground",
+            (WeaponKind::TacticalMissile | WeaponKind::StrategicMissile, _) => ", fires on order",
+            _ => "",
+        };
+        let splash = if weapon.splash_radius > Fp::ZERO { format!(", within {}", whole(weapon.splash_radius)) } else { String::new() };
+        lines.push(format!("Weapon: {} damage every {seconds:.1} s{splash}, range {}{aims}", whole(weapon.damage), whole(weapon.range)));
+    }
+    if unit.speed > Fp::ZERO {
+        let flies = unit.flight.map_or(String::new(), |flight| format!(", flies at {}", whole(flight.elevation)));
+        lines.push(format!("Speed {} a second{flies}", whole(unit.speed * Fp::from_num(TICKS_PER_SECOND))));
+    }
+    let mut makes = Vec::new();
+    if unit.mass_income > Res::ZERO {
+        makes.push(format!("{:.1} mass", per_second(unit.mass_income)));
+    }
+    if unit.energy_income > Res::ZERO {
+        makes.push(format!("{:.0} energy", per_second(unit.energy_income)));
+    }
+    if !makes.is_empty() {
+        lines.push(format!("Makes {} a second", makes.join(" and ")));
+    }
+    if unit.upkeep > Res::ZERO {
+        lines.push(format!("Uses {:.0} energy a second while running", per_second(unit.upkeep)));
+    }
+    if unit.mass_storage > Res::ZERO || unit.energy_storage > Res::ZERO {
+        lines.push(format!("Stores {} mass and {} energy", unit.mass_storage.to_num::<i64>(), unit.energy_storage.to_num::<i64>()));
+    }
+    if let Some(shield) = unit.shield {
+        lines.push(format!("Shield: {} health, radius {}", whole(shield.health), whole(shield.radius)));
+    }
+    let mut sensors = vec![format!("vision {}", whole(unit.vision))];
+    if unit.radar > Fp::ZERO {
+        sensors.push(format!("radar {}", whole(unit.radar)));
+    }
+    if unit.omni > Fp::ZERO {
+        sensors.push(format!("omni {}", whole(unit.omni)));
+    }
+    if unit.stealth_field > Fp::ZERO {
+        sensors.push(format!("stealth field {}", whole(unit.stealth_field)));
+    }
+    lines.push(format!("Sees: {}", sensors.join(", ")));
+    if unit.build_power > Fp::ZERO && !unit.builds.is_empty() {
+        lines.push(format!("Build power {}", whole(unit.build_power)));
+    }
+    if unit.requires_deposit {
+        lines.push("Built on a mass deposit".to_string());
+    }
+    if unit.requires_vent {
+        lines.push("Built over a hydrocarbon vent".to_string());
+    }
+    lines.join("\n")
+}
+
+/// The tech levels a build menu can show.
+const MENU_TIERS: [u8; 3] = [1, 2, 3];
+
+/// The tech level a build menu shows: the one last chosen, if the menu has something of it,
+/// or else the lowest it has anything of.
+pub fn shown_tier(chosen: Option<u8>, options: &[BlueprintId], db: &BlueprintDb) -> Option<u8> {
+    let has = |tier: u8| options.iter().any(|option| db.get(*option).tier == tier);
+    chosen.filter(|tier| has(*tier)).or_else(|| MENU_TIERS.into_iter().find(|tier| has(*tier)))
+}
+
+/// One build menu, as a single bar: a toggle for the tech level, then the items of that level,
+/// each showing only its key and name, with its details on hover. The level chosen is
+/// remembered under `memory`. Returns the item clicked.
+fn build_bar(ui: &mut egui::Ui, memory: &str, options: &[BlueprintId], db: &BlueprintDb, extra_hint: impl Fn(BlueprintId) -> String) -> Option<BlueprintId> {
+    let id = egui::Id::new(memory);
+    let chosen = ui.ctx().data(|data| data.get_temp::<u8>(id));
+    let shown = shown_tier(chosen, options, db)?;
+    let mut clicked = None;
+    ui.horizontal(|ui| {
+        for tier in MENU_TIERS {
+            let available = options.iter().any(|option| db.get(*option).tier == tier);
+            let toggle = ui.add_enabled(available, egui::SelectableLabel::new(tier == shown, format!("T{tier}")));
+            if toggle.on_hover_text(format!("Show what can be built at tech level {tier}")).clicked() {
+                ui.ctx().data_mut(|data| data.insert_temp(id, tier));
+            }
+        }
+        ui.separator();
+        egui::ScrollArea::horizontal().id_source(memory).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                for &option in options.iter().filter(|option| db.get(**option).tier == shown) {
+                    let extra = extra_hint(option);
+                    let hint = if extra.is_empty() { item_details(db, option) } else { format!("{}\n\n{extra}", item_details(db, option)) };
+                    if ui.button(item_label(db, option)).on_hover_text(hint).clicked() {
+                        clicked = Some(option);
+                    }
+                }
+            });
+        });
+    });
+    clicked
 }
 
 /// Whether anything selected can walk, and so take the unit orders.
@@ -297,9 +413,11 @@ pub fn installed_enhancements(snapshot: &SimSnapshot, id: SimId) -> [Option<Enha
         .map_or([None; 3], |(_, slots)| slots.map(|slot| (slot != u16::MAX).then_some(EnhancementId(slot))))
 }
 
-/// The tier of structures a builder can build: its own, or its engineering suite's.
+/// The tier of structures a builder can build: its own, or its engineering suite's. A suite
+/// still being fitted counts, as what it unlocks can be queued behind it.
 fn unit_build_tier(snapshot: &SimSnapshot, unit: &UnitView, db: &BlueprintDb) -> u8 {
-    let suites = installed_enhancements(snapshot, unit.id).into_iter().flatten().map(|id| db.enhancement(id).effects.build_tier);
+    let under_way = snapshot.enhancing.iter().filter(|(id, _, _)| *id == unit.id).map(|&(_, enhancement, _)| EnhancementId(enhancement));
+    let suites = installed_enhancements(snapshot, unit.id).into_iter().flatten().chain(under_way).map(|id| db.enhancement(id).effects.build_tier);
     suites.fold(db.get(BlueprintId(unit.blueprint)).tier, u8::max)
 }
 
@@ -1229,14 +1347,8 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
         }
 
         let options = builder_options(snapshot, selected, db);
-        if !options.is_empty() {
-            ui.horizontal_wrapped(|ui| {
-                for &option in &options {
-                    if ui.button(cost_label(db, option)).clicked() {
-                        actions.push(UiAction::BeginPlacement(option));
-                    }
-                }
-            });
+        if let Some(option) = build_bar(ui, "builder_menu_tier", &options, db, |_| String::new()) {
+            actions.push(UiAction::BeginPlacement(option));
         }
 
         if let Some(menu) = factory_menu(snapshot, selected, db) {
@@ -1372,24 +1484,22 @@ pub fn queue_label(name: &str, given: usize, selected: usize) -> String {
 
 fn factory_controls(ui: &mut egui::Ui, menu: &FactoryMenu, db: &BlueprintDb, actions: &mut Vec<UiAction>) {
     let total = menu.factories.len();
-    let partial = |able: usize| if able < total { format!("\n{able} of {total} factories") } else { String::new() };
+    let partial = |able: usize| if able < total { format!("{able} of {total} factories can build this.\n") } else { String::new() };
     let shift = ui.input(|input| input.modifiers.shift);
-    ui.horizontal_wrapped(|ui| {
-        for (option, able) in &menu.options {
-            let hint = format!("Hold Shift to queue {SHIFT_QUEUE_COUNT}.");
-            if ui.button(format!("{}{}", cost_label(db, *option), partial(able.len()))).on_hover_text(hint).clicked() {
-                actions.push(with_shift(queue_action(menu, able, *option), shift, db));
-            }
-        }
+    let options: Vec<BlueprintId> = menu.options.iter().map(|(option, _)| *option).collect();
+    let able = |option: BlueprintId| menu.options.iter().find(|(existing, _)| *existing == option).map_or(&[][..], |(_, able)| able.as_slice());
+    let hint = |option: BlueprintId| format!("{}Hold Shift to queue {SHIFT_QUEUE_COUNT}.", partial(able(option).len()));
+    if let Some(option) = build_bar(ui, "factory_menu_tier", &options, db, hint) {
+        actions.push(with_shift(queue_action(menu, able(option), option), shift, db));
+    }
+    ui.horizontal(|ui| {
         if let Some((upgrade, able)) = &menu.upgrade {
-            let cost = cost_label(db, *upgrade);
-            let label = format!("[{}] Upgrade to T{}\n{}{}", hotkeys::UPGRADE, db.get(*upgrade).tier, cost.lines().nth(1).unwrap_or(""), partial(able.len()));
-            if ui.button(label).clicked() {
+            let label = format!("[{}] Upgrade to T{}", hotkeys::UPGRADE, db.get(*upgrade).tier);
+            let hint = format!("{}{}", partial(able.len()), item_details(db, *upgrade));
+            if ui.button(label).on_hover_text(hint).clicked() {
                 actions.push(queue_action(menu, able, *upgrade));
             }
         }
-    });
-    ui.horizontal(|ui| {
         let mut repeat = menu.repeat == RepeatState::On;
         let checkbox = egui::Checkbox::new(&mut repeat, format!("[{}] Repeat", hotkeys::REPEAT)).indeterminate(menu.repeat == RepeatState::Mixed);
         if ui.add(checkbox).clicked() {
@@ -2047,6 +2157,23 @@ fn draw_icon(painter: &egui::Painter, center: Pos2, class: UnitClass, color: Col
     }
 }
 
+/// How far along one of the viewer's own upgrades is, from 0 to 1: an enhancement, an upgrade in
+/// place, or a factory's upgrade at the front of its queue. `None` for anything else, and for
+/// every enemy unit, whose progress the viewer is never told.
+pub fn upgrade_progress(snapshot: &SimSnapshot, id: SimId, db: &BlueprintDb) -> Option<f32> {
+    let share = |permille: u16| f32::from(permille) / 1000.0;
+    if let Some(&(_, _, permille)) = snapshot.enhancing.iter().find(|(unit, _, _)| *unit == id) {
+        return Some(share(permille));
+    }
+    if let Some(&(_, permille)) = snapshot.upgrades.iter().find(|(unit, _)| *unit == id) {
+        return Some(share(permille));
+    }
+    let factory = snapshot.factories.iter().find(|factory| factory.id == id)?;
+    let unit = find_unit(snapshot, id)?;
+    let upgrade = db.get(BlueprintId(unit.blueprint)).upgrades_to?;
+    (factory.queue.first() == Some(&upgrade.0)).then(|| share(factory.progress_permille))
+}
+
 fn draw_bar(painter: &egui::Painter, center: Pos2, width: f32, share: f32, color: Color32) {
     let back = Rect::from_center_size(center, Vec2::new(width, 3.0));
     painter.rect_filled(back, Rounding::ZERO, Color32::from_black_alpha(180));
@@ -2061,6 +2188,7 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
     let to_points = |pixels: [f64; 2]| Pos2::new(pixels[0] as f32 / pixels_per_point, pixels[1] as f32 / pixels_per_point);
     let raw = |value: i32| f64::from(value) / 4096.0;
     let viewport = ctx.screen_rect();
+    let time = ctx.input(|input| input.time);
     for unit in &snapshot.units {
         if unit.blueprint == u16::MAX {
             continue;
@@ -2091,16 +2219,31 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
         }
         let hurt = unit.health_permille < 1000;
         let building = unit.built_permille < 1000;
-        if hurt || building || is_selected {
-            let edge = camera.world_to_screen([raw(unit.x) + raw(unit.radius), raw(unit.y), raw(unit.z)]);
-            let apparent = edge.map_or(8.0, |edge| ((edge[0] - pixels[0]).hypot(edge[1] - pixels[1]) as f32 / pixels_per_point).max(8.0));
+        let upgrading = snapshot.upgrading.binary_search(&unit.id).is_ok();
+        let edge = camera.world_to_screen([raw(unit.x) + raw(unit.radius), raw(unit.y), raw(unit.z)]);
+        let apparent = edge.map_or(8.0, |edge| ((edge[0] - pixels[0]).hypot(edge[1] - pixels[1]) as f32 / pixels_per_point).max(8.0));
+        if upgrading {
+            // The same pulsing ring on every upgrade, the enemy's included, as long as it is in sight.
+            let pulse = ((time * UPGRADE_PULSE_RATE).sin() * 0.5 + 0.5) as f32;
+            let radius = if show_icons { 13.0 } else { apparent * 1.35 } + pulse * 3.0;
+            let alpha = (120.0 + pulse * 135.0) as u8;
+            painter.circle_stroke(center, radius, Stroke::new(2.0_f32, Color32::from_rgba_unmultiplied(UPGRADING.r(), UPGRADING.g(), UPGRADING.b(), alpha)));
+        }
+        // How far along it is, only for the viewer's own upgrades.
+        let upgrade_share = upgrade_progress(snapshot, unit.id, db).filter(|_| upgrading);
+        if hurt || building || is_selected || upgrade_share.is_some() {
             let above = if show_icons { 12.0 } else { apparent + 4.0 };
             let width = if show_icons { 18.0 } else { (apparent * 2.0).clamp(14.0, 70.0) };
             let share = f32::from(unit.health_permille) / 1000.0;
             let color = if share > 0.5 { HEALTHY } else if share > 0.25 { Color32::YELLOW } else { STALLED };
             draw_bar(&painter, center - Vec2::new(0.0, above), width, share, color);
+            let mut next = above + 4.0;
             if building {
-                draw_bar(&painter, center - Vec2::new(0.0, above + 4.0), width, f32::from(unit.built_permille) / 1000.0, BUILDING);
+                draw_bar(&painter, center - Vec2::new(0.0, next), width, f32::from(unit.built_permille) / 1000.0, BUILDING);
+                next += 4.0;
+            }
+            if let Some(share) = upgrade_share {
+                draw_bar(&painter, center - Vec2::new(0.0, next), width, share, UPGRADING);
             }
         }
     }
@@ -2383,6 +2526,22 @@ mod tests {
         assert!(builder_options(&current, &[SimId(10)], &db).contains(&nuke), "T3 with the T3 suite");
         // With an engineer selected too, only what both can build.
         assert!(!builder_options(&current, &[SimId(10), SimId(11)], &db).contains(&shield));
+        // A suite still being fitted already offers what it unlocks, to queue behind it.
+        current.enhancements = Vec::new();
+        current.enhancing = vec![(SimId(10), db.enhancement_id("advanced_engineering").0, 300)];
+        let options = builder_options(&current, &[SimId(10)], &db);
+        assert!(options.contains(&shield) && !options.contains(&nuke), "T2 while the T2 suite is fitted");
+    }
+
+    #[test]
+    fn only_the_viewers_own_upgrades_show_how_far_along_they_are() {
+        let db = BlueprintDb::standard();
+        let mut current = commander_and_engineer(&db);
+        current.enhancing = vec![(SimId(10), db.enhancement_id("advanced_engineering").0, 400)];
+        current.upgrading = vec![SimId(10), SimId(12)];
+        assert_eq!(upgrade_progress(&current, SimId(10), &db), Some(0.4));
+        // Listed as upgrading, but with nothing more known, as for an enemy.
+        assert_eq!(upgrade_progress(&current, SimId(12), &db), None);
     }
 
     #[test]
@@ -2585,10 +2744,34 @@ mod tests {
     }
 
     #[test]
-    fn every_button_label_shows_its_key() {
+    fn every_button_label_shows_its_key_and_name_and_nothing_else() {
         let db = BlueprintDb::standard();
-        assert!(cost_label(&db, db.id("mass_extractor")).starts_with("[E] Mass Extractor"), "{}", cost_label(&db, db.id("mass_extractor")));
-        assert!(cost_label(&db, db.id("t1_light_bot")).starts_with("[B] "));
+        assert_eq!(item_label(&db, db.id("mass_extractor")), "[E] Mass Extractor");
+        assert_eq!(item_label(&db, db.id("t1_light_bot")), "[B] Light Assault Bot");
+    }
+
+    #[test]
+    fn hovering_an_item_shows_its_cost_and_what_it_does() {
+        let db = BlueprintDb::standard();
+        let generator = item_details(&db, db.id("power_generator"));
+        assert!(generator.contains("Costs 75 mass and 750 energy"), "{generator}");
+        assert!(generator.contains("Makes 20 energy a second"), "{generator}");
+        let interceptor = item_details(&db, db.id("t1_interceptor"));
+        assert!(interceptor.contains("at aircraft only"), "{interceptor}");
+        assert!(interceptor.contains("Speed 300 a second, flies at 280"), "{interceptor}");
+        let extractor = item_details(&db, db.id("mass_extractor"));
+        assert!(extractor.contains("Built on a mass deposit"), "{extractor}");
+    }
+
+    #[test]
+    fn a_build_menu_shows_one_tech_level_remembering_the_last_one_chosen() {
+        let db = BlueprintDb::standard();
+        let options: Vec<BlueprintId> = ["power_generator", "mass_extractor", "shield_generator", "strategic_missile_launcher"].iter().map(|key| db.id(key)).collect();
+        assert_eq!(shown_tier(None, &options, &db), Some(1), "the lowest level at first");
+        assert_eq!(shown_tier(Some(3), &options, &db), Some(3));
+        let t1_only = &options[..2];
+        assert_eq!(shown_tier(Some(3), t1_only, &db), Some(1), "a level with nothing in it falls back");
+        assert_eq!(shown_tier(Some(1), &[], &db), None, "no items, no menu");
     }
 
     fn build(db: &BlueprintDb, key: &str, cell_x: u32, site: Option<SimId>) -> BuildTask {
@@ -2994,7 +3177,8 @@ mod tests {
         let menu = factory_menu(&current, &[SimId(1)], &db).unwrap();
         let click = |modifiers: egui::Modifiers| {
             let ctx = egui::Context::default();
-            let at = egui::pos2(40.0, 25.0);
+            // Just past the T1, T2, and T3 toggles, on the first item of the bar.
+            let at = egui::pos2(150.0, 15.0);
             let press = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers };
             let mut actions = Vec::new();
             for events in [vec![], vec![egui::Event::PointerMoved(at)], vec![press(true)], vec![press(false)], vec![]] {

@@ -278,6 +278,11 @@ pub struct SimSnapshot {
     pub enhancements: Vec<(SimId, [u16; 3])>,
     /// The viewer's enhancements under way: which, and how far along, in thousandths.
     pub enhancing: Vec<(SimId, u16, u16)>,
+    /// Every unit in `units`, of either team, that is upgrading: a commander or support
+    /// commander being fitted with an enhancement, a factory on an unpaused upgrade, or a
+    /// structure upgrading in place. It says nothing more, so it gives away nothing else of an
+    /// enemy's. Sorted by `SimId`.
+    pub upgrading: Vec<SimId>,
     /// The viewer's teleports charging: to where, and how far along, in thousandths.
     pub teleports: Vec<(SimId, [i32; 2], u16)>,
     /// The viewer's units counting down to blowing up, and the ticks left.
@@ -2520,7 +2525,7 @@ impl SimWorld {
         };
         let mut unit_query = self.ecs.query::<(&Position, &UnitStats, &Health, Option<&Blueprinted>, Option<&Construction>, Option<&Turning>, Option<&Turret>)>();
         let unit_view = unit_query.view();
-        let units = self
+        let units: Vec<UnitView> = self
             .units
             .iter()
             .filter_map(|&(id, entity)| {
@@ -2727,6 +2732,16 @@ impl SimWorld {
             Some(viewer) if self.config.fog_of_war => Some(Arc::new(self.visibility.fog_bytes(viewer))),
             _ => None,
         };
+        let shown = |id: &SimId| units.binary_search_by_key(id, |unit| unit.id).is_ok();
+        let factory_upgrading = self.factories.iter().filter(|&&(_, entity)| {
+            let next = self.ecs.get::<&Factory>(entity).ok().and_then(|factory| factory.queue.first().copied());
+            let upgrade = self.ecs.get::<&Blueprinted>(entity).ok().and_then(|unit| self.blueprints.get(unit.0).upgrades_to);
+            let working = self.ecs.get::<&Construction>(entity).is_err() && self.ecs.get::<&Paused>(entity).is_err();
+            working && next.is_some() && next == upgrade
+        });
+        let mut upgrading: Vec<SimId> = self.upgrading.iter().chain(&self.enhancing).chain(factory_upgrading).map(|unit| unit.0).filter(shown).collect();
+        upgrading.sort_unstable();
+        upgrading.dedup();
         SimSnapshot {
             tick: self.current_tick,
             units,
@@ -2742,6 +2757,7 @@ impl SimWorld {
             upgrades,
             enhancements,
             enhancing,
+            upgrading,
             teleports,
             self_destructs,
             factories,
