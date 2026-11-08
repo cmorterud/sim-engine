@@ -42,6 +42,22 @@ const GENERATOR_T2_INCOME: i64 = 15;
 const GENERATOR_T3_INCOME: i64 = 45;
 /// How many higher-tier engineers it keeps, once its factories can build them.
 const T2_ENGINEERS: usize = 3;
+/// Mass income at which the AI builds its first air factory, without a T2 land headquarters,
+/// and its second. Its air factory upgrades to T2 and T3 at these.
+const AIR_FACTORY_INCOME: i64 = 15;
+const SECOND_AIR_FACTORY_INCOME: i64 = 50;
+const AIR_T2_INCOME: i64 = 25;
+const AIR_T3_INCOME: i64 = 60;
+/// Strike aircraft set out in groups that start at this size and grow to the largest.
+const FIRST_AIR_WAVE: usize = 6;
+const LARGEST_AIR_WAVE: usize = 16;
+/// Enemy aircraft seen this recently call for anti-air.
+const AIR_THREAT_TICKS: u32 = 3_000;
+/// Anti-air structures it keeps: this many, plus one for every 20 mass a second, up to the most.
+const BASE_ANTI_AIR: usize = 2;
+const MOST_ANTI_AIR: usize = 6;
+/// Aircraft it needs before it builds an air staging facility.
+const STAGING_AIRCRAFT: usize = 6;
 /// A structure being built that costs at least this much mass is worth sending idle builders to.
 const BIG_SITE_MASS: i32 = 500;
 const T3_ENGINEERS: usize = 2;
@@ -69,6 +85,18 @@ struct Roster {
     storage: BlueprintId,
     point_defense: BlueprintId,
     hydrocarbon: BlueprintId,
+    air_factory: BlueprintId,
+    air_support_factories: [BlueprintId; 2],
+    interceptor: BlueprintId,
+    air_superiority: BlueprintId,
+    /// Strike aircraft by tier: the bomber, the gunship, and the heavy gunship.
+    strike_aircraft: [BlueprintId; 3],
+    fighter_bomber: BlueprintId,
+    /// Mobile anti-air: T1 and T2.
+    mobile_anti_air: [BlueprintId; 2],
+    /// Anti-air structures by tier.
+    anti_air: [BlueprintId; 3],
+    air_staging: BlueprintId,
 }
 
 impl Roster {
@@ -89,11 +117,24 @@ impl Roster {
             storage: id("mass_storage"),
             point_defense: id("t1_point_defense"),
             hydrocarbon: id("hydrocarbon_plant"),
+            air_factory: id("air_factory"),
+            air_support_factories: [id("air_factory_t2_support"), id("air_factory_t3_support")],
+            interceptor: id("t1_interceptor"),
+            air_superiority: id("t3_air_superiority"),
+            strike_aircraft: [id("t1_bomber"), id("t2_gunship"), id("t3_heavy_gunship")],
+            fighter_bomber: id("t2_fighter_bomber"),
+            mobile_anti_air: [id("t1_mobile_aa"), id("t2_mobile_flak")],
+            anti_air: [id("t1_aa_turret"), id("t2_flak"), id("t3_sam")],
+            air_staging: id("air_staging"),
         }
     }
 
     fn is_generator(&self, blueprint: BlueprintId) -> bool {
         self.generators.contains(&blueprint)
+    }
+
+    fn is_fighter(&self, blueprint: BlueprintId) -> bool {
+        blueprint == self.interceptor || blueprint == self.air_superiority
     }
 }
 
@@ -117,6 +158,14 @@ struct Forces {
     big_sites: Vec<(SimId, Vec2Fp)>,
     /// Whether any engineer can build T2, or T3, structures.
     builder_tier: u8,
+    air_factories: Vec<FactoryInfo>,
+    air_headquarters_tier: u8,
+    /// Idle fighters, and idle strike aircraft, and all aircraft.
+    idle_fighters: Vec<SimId>,
+    idle_strike: Vec<SimId>,
+    aircraft: usize,
+    anti_air_structures: usize,
+    air_stagings: usize,
     generators: usize,
     generators_building: usize,
     storages: usize,
@@ -159,6 +208,7 @@ struct Sighting {
     id: SimId,
     position: Vec2Fp,
     is_structure: bool,
+    is_air: bool,
 }
 
 pub struct AiBrain {
@@ -175,6 +225,10 @@ pub struct AiBrain {
     roster: Option<Roster>,
     rally_set_on: Vec<SimId>,
     unit_counter: u32,
+    air_counter: u32,
+    air_wave_size: usize,
+    /// When it last saw an enemy aircraft.
+    enemy_air_seen: Option<u32>,
 }
 
 impl AiBrain {
@@ -193,6 +247,9 @@ impl AiBrain {
             roster: None,
             rally_set_on: Vec::new(),
             unit_counter: 0,
+            air_counter: 0,
+            air_wave_size: FIRST_AIR_WAVE,
+            enemy_air_seen: None,
         }
     }
 
@@ -210,11 +267,16 @@ impl AiBrain {
         }
         let forces = self.survey(world);
         let sightings = visible_enemies(world, self.team);
+        if sightings.iter().any(|enemy| enemy.is_air) {
+            self.enemy_air_seen = Some(world.current_tick);
+        }
         let mut commands = Vec::new();
         self.command_builders(world, &forces, &mut commands);
         self.command_factories(world, &forces, &mut commands);
+        self.command_air_factories(world, &forces, &mut commands);
         self.command_upgrades(world, &forces, &mut commands);
         self.command_army(world, &forces, &sightings, &mut commands);
+        self.command_air(world, &forces, &sightings, &mut commands);
         commands
     }
 
@@ -224,7 +286,11 @@ impl AiBrain {
 
     fn survey(&self, world: &SimWorld) -> Forces {
         let roster = self.roster();
-        let mut forces = Forces { headquarters_tier: world.headquarters_tier(self.team, FactoryKind::Land), ..Forces::default() };
+        let mut forces = Forces {
+            headquarters_tier: world.headquarters_tier(self.team, FactoryKind::Land),
+            air_headquarters_tier: world.headquarters_tier(self.team, FactoryKind::Air),
+            ..Forces::default()
+        };
         for &(id, entity) in &world.units {
             let stats = world.ecs.get::<&UnitStats>(entity).expect("units have stats");
             if stats.team != self.team {
@@ -269,10 +335,11 @@ impl AiBrain {
                     }
                 }
                 // Only land factories: the AI builds no missile silos, and must never queue in one.
-                UnitClass::Factory if unit.factory_kind == Some(FactoryKind::Land) => {
+                UnitClass::Factory if matches!(unit.factory_kind, Some(FactoryKind::Land | FactoryKind::Air)) => {
                     let factory = world.ecs.get::<&Factory>(entity).expect("factories have factory parts");
                     let half = i32::from(unit.footprint) / 2;
-                    forces.factories.push(FactoryInfo {
+                    let list = if unit.factory_kind == Some(FactoryKind::Air) { &mut forces.air_factories } else { &mut forces.factories };
+                    list.push(FactoryInfo {
                         id,
                         blueprint,
                         cell: ((cell.0 as i32 - half) as u32, (cell.1 as i32 - half) as u32),
@@ -283,8 +350,18 @@ impl AiBrain {
                         support: unit.support,
                     });
                 }
-                // The AI builds neither silos' missiles, support commanders nor aircraft yet.
-                UnitClass::Factory | UnitClass::Ammo | UnitClass::SupportCommander | UnitClass::Air => {}
+                UnitClass::Air => {
+                    forces.aircraft += 1;
+                    if order.kind == OrderKind::Idle && finished {
+                        if roster.is_fighter(blueprint) {
+                            forces.idle_fighters.push(id);
+                        } else {
+                            forces.idle_strike.push(id);
+                        }
+                    }
+                }
+                // The AI builds neither silos' missiles nor support commanders yet.
+                UnitClass::Factory | UnitClass::Ammo | UnitClass::SupportCommander => {}
                 UnitClass::Economy | UnitClass::Defense => {
                     if unit.requires_deposit {
                         forces.extractors.push(cell);
@@ -295,6 +372,10 @@ impl AiBrain {
                     } else if roster.is_generator(blueprint) {
                         forces.generators += 1;
                         forces.generators_building += usize::from(!finished);
+                    } else if roster.anti_air.contains(&blueprint) {
+                        forces.anti_air_structures += 1;
+                    } else if blueprint == roster.air_staging {
+                        forces.air_stagings += 1;
                     } else if blueprint == roster.storage {
                         forces.storages += 1;
                     } else if blueprint == roster.point_defense {
@@ -393,7 +474,9 @@ impl AiBrain {
         // mass income, two at a time, before each new extractor.
         let energy_is_low = economy.energy < economy.energy_capacity * 2 / 5 && economy.energy_demand > economy.energy_income;
         let generators_coming = forces.generators_building + generators_planned;
-        let energy_lags = energy_income < mass_income * 12;
+        // Aircraft cost far more energy for their mass than anything on the ground.
+        let ratio = if forces.air_factories.is_empty() { 12 } else { 20 };
+        let energy_lags = energy_income < mass_income * ratio;
         // A free vent near home is the cheapest energy there is.
         if energy_is_low || energy_lags {
             if let Some(cell) = self.vent_site(world, planned) {
@@ -416,6 +499,44 @@ impl AiBrain {
         if factories_total < factories_wanted && economy.mass > Res::from_num(150) {
             if let Some(cell) = self.site_near_home(world, factory, 1, planned) {
                 return Some((factory, cell));
+            }
+        }
+
+        // Air comes once the land side has its T2 headquarters, or the income for it.
+        let air_factory = (0..2)
+            .rev()
+            .map(|tier| roster.air_support_factories[tier])
+            .find(|&blueprint| world.can_build(builder, blueprint) && world.support_allowed(self.team, blueprint))
+            .unwrap_or(roster.air_factory);
+        let air_planned = count_planned(roster.air_factory) + roster.air_support_factories.iter().map(|&blueprint| count_planned(blueprint)).sum::<usize>();
+        let air_wanted = if mass_income >= SECOND_AIR_FACTORY_INCOME {
+            2
+        } else {
+            usize::from(forces.headquarters_tier >= 2 || mass_income >= AIR_FACTORY_INCOME)
+        };
+        // The first needs no mass in store: it is cheap, and the AI spends all it makes.
+        let air_total = forces.air_factories.len() + air_planned;
+        if air_total < air_wanted && world.can_build(builder, air_factory) && (air_total == 0 || economy.mass > Res::from_num(150)) {
+            if let Some(cell) = self.site_near_home(world, air_factory, 1, planned) {
+                return Some((air_factory, cell));
+            }
+        }
+
+        // Once enemy aircraft have been seen, anti-air goes up toward the enemy, the best this
+        // builder can make.
+        if self.air_threat(world) {
+            let wanted = (BASE_ANTI_AIR + mass_income as usize / 20).min(MOST_ANTI_AIR);
+            let planned_anti_air: usize = roster.anti_air.iter().map(|&blueprint| count_planned(blueprint)).sum();
+            let turret = roster.anti_air.iter().rev().copied().find(|&blueprint| world.can_build(builder, blueprint));
+            if let Some(turret) = turret.filter(|_| forces.anti_air_structures + planned_anti_air < wanted) {
+                if let Some(cell) = self.site_towards_enemy(world, turret, planned) {
+                    return Some((turret, cell));
+                }
+            }
+        }
+        if forces.aircraft >= STAGING_AIRCRAFT && forces.air_stagings + count_planned(roster.air_staging) == 0 && world.can_build(builder, roster.air_staging) {
+            if let Some(cell) = self.site_near_home(world, roster.air_staging, 1, planned) {
+                return Some((roster.air_staging, cell));
             }
         }
 
@@ -628,6 +749,7 @@ impl AiBrain {
                     _ => T3_INCOME,
                 };
                 // An upgrade draws a great deal of energy, so it waits for an economy that can feed it.
+                // Started into a stall, a factory upgrade drags out everything else for minutes.
                 let energy_ready = economy.satisfaction >= Res::ONE && energy_income >= mass_income * 10;
                 allowed && energy_ready && mass_income >= income
             });
@@ -648,8 +770,13 @@ impl AiBrain {
                 upgrade.expect("just checked")
             } else {
                 self.unit_counter += 1;
+                let air_threat = self.air_threat(world);
                 let roster = self.roster();
                 let turn = self.unit_counter % 6;
+                // Against aircraft, every fourth unit is anti-air.
+                if air_threat && self.unit_counter.is_multiple_of(4) {
+                    roster.mobile_anti_air[usize::from(tier >= 2)]
+                } else {
                 match tier {
                     1 => {
                         if self.unit_counter.is_multiple_of(4) { roster.artillery } else { roster.bot }
@@ -657,9 +784,81 @@ impl AiBrain {
                     2 => [roster.tank, roster.tank, roster.bot, roster.amphibious, roster.tank, roster.missile_launcher][turn as usize],
                     _ => [roster.tank, roster.heavy_artillery, roster.tank, roster.amphibious, roster.missile_launcher, roster.tank][turn as usize],
                 }
+                }
             };
             commands.push(SimCommand::QueueUnit { factory: factory.id, blueprint: item, count: 1 });
         }
+    }
+
+    fn air_threat(&self, world: &SimWorld) -> bool {
+        self.enemy_air_seen.is_some_and(|seen| world.current_tick.saturating_sub(seen) < AIR_THREAT_TICKS)
+    }
+
+    /// Air factories upgrade with the economy, one at a time, and make fighters and strike
+    /// aircraft: mostly strike aircraft, unless enemy aircraft have been seen. Aircraft cost a
+    /// great deal of energy, so none are started while energy is short.
+    fn command_air_factories(&mut self, world: &SimWorld, forces: &Forces, commands: &mut Vec<SimCommand>) {
+        let economy = world.economies[self.team.index()];
+        let mass_income = (economy.mass_income * 10).to_num::<i64>();
+        let energy_income = (economy.energy_income * 10).to_num::<i64>();
+        let energy_is_low = economy.energy < economy.energy_capacity / 2;
+        let mut upgrade_under_way = forces.air_factories.iter().any(|factory| factory.upgrading);
+        let headquarters = forces.air_headquarters_tier;
+        let air_threat = self.air_threat(world);
+        for factory in forces.air_factories.iter().filter(|factory| factory.finished && factory.queue_is_empty) {
+            if economy.satisfaction < Res::ONE / 2 || energy_is_low {
+                continue;
+            }
+            let tier = if factory.support { factory.tier.min(headquarters) } else { factory.tier };
+            let upgrade = world.blueprints.get(factory.blueprint).upgrades_to.filter(|&into| {
+                let into = world.blueprints.get(into);
+                let income = if into.tier == 2 { AIR_T2_INCOME } else { AIR_T3_INCOME };
+                // By now mass always runs short, as the AI spends all it makes, so only energy is checked.
+                world.support_allowed(self.team, into.id) && energy_income >= mass_income * 20 && mass_income >= income
+            });
+            let item = match upgrade.filter(|_| !upgrade_under_way) {
+                Some(into) => {
+                    upgrade_under_way = true;
+                    into
+                }
+                None => {
+                    self.air_counter += 1;
+                    let roster = self.roster();
+                    let fighter = if tier >= 3 { roster.air_superiority } else { roster.interceptor };
+                    let strike = match tier {
+                        1 => roster.strike_aircraft[0],
+                        2 if self.air_counter.is_multiple_of(4) => roster.fighter_bomber,
+                        _ => roster.strike_aircraft[usize::from(tier.clamp(1, 3)) - 1],
+                    };
+                    // A third fighters, or two thirds against enemy aircraft.
+                    let fighter_turn = if air_threat { !self.air_counter.is_multiple_of(3) } else { self.air_counter.is_multiple_of(3) };
+                    if fighter_turn { fighter } else { strike }
+                }
+            };
+            commands.push(SimCommand::QueueUnit { factory: factory.id, blueprint: item, count: 1 });
+        }
+    }
+
+    /// Fighters patrol between home and the rally point, where they meet raiders. Strike
+    /// aircraft gather at home and set out together, against what can be seen, or else an
+    /// outlying deposit or the enemy's base, and fly home afterwards.
+    fn command_air(&mut self, world: &SimWorld, forces: &Forces, sightings: &[Sighting], commands: &mut Vec<SimCommand>) {
+        if !forces.idle_fighters.is_empty() {
+            commands.push(SimCommand::Patrol { units: forces.idle_fighters.clone(), points: vec![self.home, self.rally_point()] });
+        }
+        if forces.idle_strike.len() < self.air_wave_size {
+            return;
+        }
+        // Structures first, which cannot dodge, then anything else on the ground.
+        let target = sightings
+            .iter()
+            .filter(|enemy| !enemy.is_air)
+            .min_by_key(|enemy| (!enemy.is_structure, enemy.position.distance_squared(&self.home), enemy.id))
+            .map(|enemy| enemy.position);
+        let goal = target.unwrap_or_else(|| self.search_point(world, false));
+        commands.push(SimCommand::AttackMove { units: forces.idle_strike.clone(), goal });
+        commands.push(SimCommand::QueueMove { units: forces.idle_strike.clone(), goal: self.home, attack: false });
+        self.air_wave_size = (self.air_wave_size + 2).min(LARGEST_AIR_WAVE);
     }
 
     /// Extractors near home upgrade first, a few at a time as income grows, unless energy is short.
@@ -702,9 +901,10 @@ impl AiBrain {
         }
         // Enemies near home come first, whatever the size of the army.
         let defend = fp_int(DEFEND_RADIUS_UNITS);
+        // The land army cannot catch aircraft, which are the anti-air's and the fighters' job.
         let threat = sightings
             .iter()
-            .filter(|enemy| enemy.position.distance_squared(&self.home) <= wide_mul(defend, defend))
+            .filter(|enemy| !enemy.is_air && enemy.position.distance_squared(&self.home) <= wide_mul(defend, defend))
             .min_by_key(|enemy| (enemy.position.distance_squared(&self.home), enemy.id));
         if let Some(enemy) = threat {
             commands.push(SimCommand::AttackMove { units: forces.idle_combat.clone(), goal: enemy.position });
@@ -724,7 +924,7 @@ impl AiBrain {
             .iter()
             .find(|enemy| Some(enemy.id) == commander)
             .or_else(|| sightings.iter().find(|enemy| enemy.is_structure))
-            .or_else(|| sightings.first())
+            .or_else(|| sightings.iter().find(|enemy| !enemy.is_air))
             .map(|enemy| enemy.position);
         let full_strength = gathered >= LARGEST_WAVE;
         let goal = target.unwrap_or_else(|| self.search_point(world, full_strength));
@@ -801,6 +1001,7 @@ fn visible_enemies(world: &SimWorld, team: Team) -> Vec<Sighting> {
             id: entry.id,
             position: Vec2Fp::new(Fp::from_bits(entry.x), Fp::from_bits(entry.y)),
             is_structure: entry.is_structure,
+            is_air: entry.is_air,
         })
         .collect()
 }

@@ -54,6 +54,8 @@ fn ai_commands_only_its_own_units() {
                     | SimCommand::Reclaim { units, .. }
                     | SimCommand::AttackMove { units, .. }
                     | SimCommand::Upgrade { units }
+                    | SimCommand::Patrol { units, .. }
+                    | SimCommand::QueueMove { units, .. }
                     | SimCommand::FormationMove { units, .. } => units.clone(),
                     SimCommand::QueueUnit { factory, .. } | SimCommand::SetRally { factory, .. } => vec![*factory],
                     other => panic!("unexpected command {other:?}"),
@@ -100,6 +102,8 @@ fn mirrored_order(world: &SimWorld, team: Team, command: &SimCommand) -> String 
         SimCommand::Assist { units, .. } => format!("assist x{}", units.len()),
         SimCommand::Reclaim { units, .. } => format!("reclaim x{}", units.len()),
         SimCommand::Upgrade { units } => format!("upgrade x{}", units.len()),
+        SimCommand::Patrol { units, points } => format!("patrol x{} {:?}", units.len(), points.iter().map(|at| point(*at)).collect::<Vec<_>>()),
+        SimCommand::QueueMove { units, goal, attack } => format!("queue-move x{} to {:?} {attack}", units.len(), point(*goal)),
         other => panic!("unexpected command {other:?}"),
     }
 }
@@ -242,4 +246,41 @@ fn ai_climbs_the_tech_tree_and_upgrades_its_economy() {
     assert!(count("t2_heavy_tank") >= 5 && count("t3_mobile_artillery") >= 1, "the army is not keeping up with the tech");
     let income = (world.economies[0].mass_income * 10).to_num::<i64>();
     assert!(income >= 60, "mass income is only {income}/s");
+}
+
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn ai_takes_to_the_air_and_answers_enemy_aircraft_with_anti_air() {
+    let mut world = scenario::skirmish(11).world;
+    let mut brain = AiBrain::new(Team::Blue, 11, world.starts);
+    let keep_red_alive = |world: &mut SimWorld| {
+        let red = world.unit_entity(world.commanders[Team::Red.index()].unwrap()).unwrap();
+        let mut health = world.ecs.get::<&mut sim_engine::sim::components::Health>(red).unwrap();
+        health.current = health.max;
+    };
+    for _ in 0..9_000 {
+        let commands = brain.think(&world);
+        world.advance_tick(&commands);
+        keep_red_alive(&mut world);
+    }
+    let count = |world: &SimWorld, key: &str| count_owned(world, Team::Blue, key);
+    let air_factories = count(&world, "air_factory") + count(&world, "air_factory_t2") + count(&world, "air_factory_t3");
+    assert!(air_factories >= 1, "no air factory after 15 minutes");
+    let aircraft = count(&world, "t1_interceptor") + count(&world, "t1_bomber") + count(&world, "t2_gunship");
+    assert!(aircraft >= 3, "only {aircraft} aircraft");
+    let anti_air = |world: &SimWorld| ["t1_aa_turret", "t2_flak", "t3_sam", "t1_mobile_aa", "t2_mobile_flak"].iter().map(|key| count(world, key)).sum::<usize>();
+    assert_eq!(anti_air(&world), 0, "no anti-air before any enemy aircraft are seen");
+    // Red bombers circle over Blue's base, where Blue sees them.
+    let home = scenario::skirmish_start(Team::Blue);
+    let bomber = world.blueprints.id("t1_bomber");
+    for index in 0..3 {
+        let raider = world.spawn_mobile(bomber, Team::Red, Vec2Fp::new(home.x + fp_int(200 + index * 40), home.y + fp_int(200)));
+        world.advance_tick(&[SimCommand::Patrol { units: vec![raider], points: vec![Vec2Fp::new(home.x + fp_int(200), home.y + fp_int(200)), Vec2Fp::new(home.x + fp_int(400), home.y + fp_int(300))] }]);
+    }
+    for _ in 0..3_000 {
+        let commands = brain.think(&world);
+        world.advance_tick(&commands);
+        keep_red_alive(&mut world);
+    }
+    assert!(anti_air(&world) >= 2, "only {} anti-air after enemy aircraft were seen", anti_air(&world));
 }
