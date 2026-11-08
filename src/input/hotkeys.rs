@@ -23,6 +23,22 @@ pub const CLEAR_QUEUE: char = 'K';
 /// Letters handled on their own: panning, patrol, which also works by holding the key, and mute.
 pub const RESERVED: [char; 5] = ['W', 'A', 'S', 'D', PATROL];
 
+/// Function keys, for options added after every letter and punctuation key was taken. Each
+/// stands for its key as a character no keyboard types.
+pub const F1: char = '\u{E001}';
+pub const F2: char = '\u{E002}';
+pub const F3: char = '\u{E003}';
+
+/// How a key is shown on a button: the letter, or the function key's name.
+pub fn key_name(letter: char) -> String {
+    match letter {
+        F1 => "F1".to_string(),
+        F2 => "F2".to_string(),
+        F3 => "F3".to_string(),
+        other => other.to_string(),
+    }
+}
+
 /// The key for building a blueprint, by its key in the blueprint data.
 pub fn blueprint_hotkey(key: &str) -> Option<char> {
     Some(match key {
@@ -47,6 +63,9 @@ pub fn blueprint_hotkey(key: &str) -> Option<char> {
         "anti_nuke" => '=',
         // N mutes the sound when nothing selected can build a gateway.
         "quantum_gateway" => 'N',
+        "hydrocarbon_plant" => F1,
+        "mass_fabricator" => F2,
+        "mass_fabricator_t3" => F3,
         // The gateway's support commander shares the engineer's key: a key queues every option
         // on it in the selected factories' menu.
         "t1_engineer" | "support_commander" => 'Z',
@@ -78,6 +97,9 @@ pub const fn letter_for(code: KeyCode) -> Option<char> {
         KeyCode::Backslash => '\\',
         KeyCode::KeyZ => 'Z',
         KeyCode::KeyN => 'N',
+        KeyCode::F1 => F1,
+        KeyCode::F2 => F2,
+        KeyCode::F3 => F3,
         KeyCode::KeyB => 'B',
         KeyCode::KeyV => 'V',
         KeyCode::KeyH => 'H',
@@ -118,8 +140,11 @@ mod tests {
     use super::*;
     use crate::sim::blueprints::BlueprintDb;
 
-    const ALL_KEYS: [KeyCode; 32] = [
+    const ALL_KEYS: [KeyCode; 35] = [
         KeyCode::KeyN,
+        KeyCode::F1,
+        KeyCode::F2,
+        KeyCode::F3,
         KeyCode::BracketLeft,
         KeyCode::BracketRight,
         KeyCode::Backquote,
@@ -167,7 +192,7 @@ mod tests {
     fn everything_that_can_be_built_has_a_key() {
         let db = BlueprintDb::standard();
         let keys = buildable(&db);
-        assert_eq!(keys.len(), 23);
+        assert_eq!(keys.len(), 26);
         for key in keys {
             assert!(blueprint_hotkey(&key).is_some(), "{key} has no hotkey");
         }

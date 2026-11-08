@@ -29,6 +29,8 @@ const LARGEST_WAVE: usize = 50;
 const WAVE_PATIENCE_TICKS: u32 = 600;
 const MAX_ENGINEERS: usize = 6;
 const MAX_FACTORIES: usize = 4;
+/// How far from home the AI goes to build on a hydrocarbon vent.
+const VENT_REACH_UNITS: i32 = 2_500;
 const MAX_POINT_DEFENSES: usize = 4;
 /// How long before trying a deposit again, in case a hidden enemy holds it.
 const DEPOSIT_RETRY_TICKS: u32 = 1_500;
@@ -44,6 +46,7 @@ struct Roster {
     generator: BlueprintId,
     storage: BlueprintId,
     point_defense: BlueprintId,
+    hydrocarbon: BlueprintId,
 }
 
 impl Roster {
@@ -60,6 +63,7 @@ impl Roster {
             generator: id("power_generator"),
             storage: id("mass_storage"),
             point_defense: id("t1_point_defense"),
+            hydrocarbon: id("hydrocarbon_plant"),
         }
     }
 }
@@ -291,6 +295,12 @@ impl AiBrain {
         let energy_is_low = economy.energy < economy.energy_capacity * 2 / 5 && economy.energy_demand > economy.energy_income;
         let generators_coming = forces.generators_building + count_planned(roster.generator);
         let energy_lags = energy_income < mass_income * 12;
+        // A free vent near home is the cheapest energy there is.
+        if energy_is_low || energy_lags {
+            if let Some(cell) = self.vent_site(world, planned) {
+                return Some((roster.hydrocarbon, cell));
+            }
+        }
         if energy_is_low && generators_coming < 3 {
             if let Some(cell) = self.generator_site(world, forces, planned) {
                 return Some((roster.generator, cell));
@@ -325,6 +335,24 @@ impl AiBrain {
             }
         }
         None
+    }
+
+    /// The corner cell for a hydrocarbon plant over the free vent nearest home, if one is
+    /// within reach of the base.
+    fn vent_site(&self, world: &SimWorld, planned: &[(u32, u32)]) -> Option<(u32, u32)> {
+        let plant = self.roster().hydrocarbon;
+        let half = u32::from(world.blueprints.get(plant).footprint) / 2;
+        let reach = wide_mul(fp_int(VENT_REACH_UNITS), fp_int(VENT_REACH_UNITS));
+        world
+            .vents
+            .iter()
+            .filter(|vent| vent.0 >= half && vent.1 >= half)
+            .map(|vent| (vent.0 - half, vent.1 - half))
+            .filter(|&cell| !planned.contains(&cell) && world.can_place(plant, cell.0, cell.1))
+            .map(|cell| (cell_center(cell).distance_squared(&self.home), cell))
+            .filter(|&(distance, _)| distance <= reach)
+            .min()
+            .map(|(_, cell)| cell)
     }
 
     fn nearest_deposit(&self, world: &SimWorld, forces: &Forces, position: Vec2Fp, is_commander: bool, planned: &[(u32, u32)]) -> Option<(u32, u32)> {

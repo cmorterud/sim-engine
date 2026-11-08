@@ -55,6 +55,7 @@ Destroy the enemy commander to win. Yours explodes if it dies, and your whole te
 | U | Upgrade a factory or a mass extractor to its next tier, or a radar to an omni sensor |
 | Ctrl (or Cmd) + T, then left-click | Teleport a commander that has a teleporter, to open ground you can see or have on radar |
 | N | With a T3 builder selected: build a Quantum Gateway, which builds support commanders (Z). Mutes the sound otherwise |
+| F1, F2, F3 | With a builder selected: Hydrocarbon Power Plant (only over a vent), Mass Fabricator, T3 Mass Fabricator |
 | Ctrl (or Cmd) + K | Self-destruct the selected units in 5 seconds, leaving no debris. Press again to stop |
 | Z, B, V, H | With a factory selected: queue an Engineer, Light Bot, Light Artillery, Heavy Tank. Hold Shift, on the key or the button, to queue 5 |
 | U, R, K | With a factory selected: Upgrade, Repeat, Clear queue |

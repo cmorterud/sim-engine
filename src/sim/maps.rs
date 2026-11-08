@@ -153,6 +153,7 @@ struct Layout<'a> {
     cells: i32,
     blocked: &'a [bool],
     deposits: Vec<(u32, u32)>,
+    vents: Vec<(u32, u32)>,
     scenery: Vec<(WreckKind, Vec2Fp)>,
 }
 
@@ -176,6 +177,21 @@ impl Layout<'_> {
         }
         self.deposits.push((cell.0 as u32, cell.1 as u32));
         self.deposits.push((partner.0 as u32, partner.1 as u32));
+        true
+    }
+
+    /// A hydrocarbon vent and its turned partner, if a plant would fit on open, level ground
+    /// over both, away from deposits and other vents.
+    fn vent(&mut self, cell: (i32, i32)) -> bool {
+        let partner = self.turned(cell);
+        let crowded = |layout: &Self, at: (i32, i32)| {
+            layout.near_deposit(at, 3) || layout.vents.iter().any(|&(x, y)| chebyshev((x as i32, y as i32), at) < 12)
+        };
+        if !self.open(cell, 2) || !self.open(partner, 2) || crowded(self, cell) || crowded(self, partner) {
+            return false;
+        }
+        self.vents.push((cell.0 as u32, cell.1 as u32));
+        self.vents.push((partner.0 as u32, partner.1 as u32));
         true
     }
 
@@ -207,6 +223,26 @@ impl Layout<'_> {
             }
             self.scenery.push((kind, point));
             self.scenery.push((kind, Vec2Fp::new(map - point.x, map - point.y)));
+            placed += 1;
+        }
+    }
+}
+
+/// One vent near the start, as close to `near` from it as fits, and the rest anywhere on the
+/// high half that `allowed` accepts, each with its turned partner.
+fn place_vents(layout: &mut Layout<'_>, rng: &mut SimRng, start: (i32, i32), near: (i32, i32), count: usize, allowed: &dyn Fn((i32, i32)) -> bool) {
+    let home = (0..6).find_map(|step| {
+        let at = (start.0 + near.0 + step * 2, start.1 + near.1);
+        layout.vent(at).then_some(at)
+    });
+    let mut placed = usize::from(home.is_some());
+    let half = layout.cells / 2;
+    for _ in 0..3_000 {
+        if placed == count {
+            break;
+        }
+        let cell = (16 + rng.below(layout.cells as u32 - 32) as i32, half + 8 + rng.below(half as u32 - 24) as i32);
+        if allowed(cell) && layout.vent(cell) {
             placed += 1;
         }
     }
@@ -259,10 +295,12 @@ pub fn highland() -> MapData {
     draft.flatten(draft.turned(start), 30);
 
     let blocked = draft.blocked(i32::MIN);
-    let mut layout = Layout { cells: CELLS as i32, blocked: &blocked, deposits: Vec::new(), scenery: Vec::new() };
+    let mut layout = Layout { cells: CELLS as i32, blocked: &blocked, deposits: Vec::new(), vents: Vec::new(), scenery: Vec::new() };
     for offset in [(-6, -4), (5, -6), (-4, 7), (7, 5)] {
         layout.deposit((start.0 + offset.0, start.1 + offset.1));
     }
+    // A vent a short walk from each base, and two more out on the plateau to fight over.
+    place_vents(&mut layout, &mut draft.rng, start, (16, -14), 3, &|cell| clear_of_start(cell, 24));
     let mut expansions = 0;
     for _ in 0..2_000 {
         if expansions == 12 {
@@ -289,8 +327,8 @@ pub fn highland() -> MapData {
         }
     }
     let starts = [cell_point(start), cell_point((last - start.0, last - start.1))];
-    let (deposits, scenery) = (layout.deposits, layout.scenery);
-    MapData { name: "highland".into(), map_units: map, heights: draft.heights, blocked, water_level: fp_int(-1000), deposits, starts, scenery }
+    let (deposits, vents, scenery) = (layout.deposits, layout.vents, layout.scenery);
+    MapData { name: "highland".into(), map_units: map, heights: draft.heights, blocked, water_level: fp_int(-1000), deposits, vents, starts, scenery }
 }
 
 /// Twin Passes, 20 km: a sea down the middle, crossed by two land bridges, forests on the shores.
@@ -344,10 +382,12 @@ pub fn twin_passes() -> MapData {
 
     let water_raw = WATER_UNITS << HEIGHT_FRAC_BITS;
     let blocked = draft.blocked(water_raw);
-    let mut layout = Layout { cells: CELLS as i32, blocked: &blocked, deposits: Vec::new(), scenery: Vec::new() };
+    let mut layout = Layout { cells: CELLS as i32, blocked: &blocked, deposits: Vec::new(), vents: Vec::new(), scenery: Vec::new() };
     for offset in [(-6, -4), (5, -6), (-4, 7), (7, 5)] {
         layout.deposit((start.0 + offset.0, start.1 + offset.1));
     }
+    // A vent near each base, and three more on each shore.
+    place_vents(&mut layout, &mut draft.rng, start, (18, 14), 4, &|cell| clear_of_start(cell, 26) && (cell.0 - center).abs() > sea_half_width + shore + 30);
     // Two on each bridge, worth fighting over.
     layout.deposit((center - 40, bridge_row - 4));
     layout.deposit((center + 40, bridge_row + 4));
@@ -376,8 +416,8 @@ pub fn twin_passes() -> MapData {
         }
     }
     let starts = [cell_point(start), cell_point((last - start.0, last - start.1))];
-    let (deposits, scenery) = (layout.deposits, layout.scenery);
-    MapData { name: "twin_passes".into(), map_units: map, heights: draft.heights, blocked, water_level: fp_int(WATER_UNITS), deposits, starts, scenery }
+    let (deposits, vents, scenery) = (layout.deposits, layout.vents, layout.scenery);
+    MapData { name: "twin_passes".into(), map_units: map, heights: draft.heights, blocked, water_level: fp_int(WATER_UNITS), deposits, vents, starts, scenery }
 }
 
 #[cfg(test)]
@@ -423,6 +463,14 @@ mod tests {
             let partner = (cells as u32 - 1 - x, cells as u32 - 1 - y);
             assert!(map.deposits.contains(&partner), "deposit {x}, {y} has no partner");
             assert!(!map.blocked[y as usize * cells + x as usize], "deposit {x}, {y} is on blocked ground");
+        }
+        // Vents mirror too, and a plant fits over each, clear of deposits.
+        assert!(map.vents.len() >= 6, "{} vents", map.vents.len());
+        for &(x, y) in &map.vents {
+            assert!(map.vents.contains(&(cells as u32 - 1 - x, cells as u32 - 1 - y)), "vent {x}, {y} has no partner");
+            for (cx, cy) in (y - 1..=y + 1).flat_map(|cy| (x - 1..=x + 1).map(move |cx| (cx, cy))) {
+                assert!(!map.blocked[cy as usize * cells + cx as usize] && !map.deposits.contains(&(cx, cy)), "a plant on vent {x}, {y} would not fit");
+            }
         }
         let full = fp_int(map.map_units);
         assert_eq!(map.starts[1], Vec2Fp::new(full - map.starts[0].x, full - map.starts[0].y), "the starts mirror");

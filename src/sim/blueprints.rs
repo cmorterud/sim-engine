@@ -200,6 +200,8 @@ pub struct JammerDef {
 pub struct ExplosionDef {
     pub damage: Fp,
     pub radius: Fp,
+    /// Only if it was running when destroyed: built, not paused, and with energy to run on.
+    pub only_while_running: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -230,6 +232,8 @@ pub struct Blueprint {
     pub upgrades_to: Option<BlueprintId>,
     pub weapon: Option<WeaponDef>,
     pub requires_deposit: bool,
+    /// Built over a hydrocarbon vent, which must be under the middle of its footprint.
+    pub requires_vent: bool,
     /// Per tick.
     pub mass_income: Res,
     /// Per tick.
@@ -373,6 +377,8 @@ struct RawCloak {
 struct RawExplosion {
     damage: Number,
     radius: Number,
+    #[serde(default)]
+    only_while_running: bool,
 }
 
 #[derive(Deserialize)]
@@ -402,6 +408,8 @@ struct RawUnit {
     weapon: Option<RawWeapon>,
     #[serde(default)]
     requires_deposit: bool,
+    #[serde(default)]
+    requires_vent: bool,
     mass_income: Option<Number>,
     energy_income: Option<Number>,
     mass_storage: Option<Number>,
@@ -626,6 +634,7 @@ impl BlueprintDb {
                 Some(explosion) => Some(ExplosionDef {
                     damage: explosion.damage.fp().map_err(context)?,
                     radius: explosion.radius.fp().map_err(context)?,
+                    only_while_running: explosion.only_while_running,
                 }),
             };
             let overcharge = match &unit.overcharge {
@@ -695,6 +704,7 @@ impl BlueprintDb {
                 upgrades_to: unit.upgrades_to.as_deref().map(lookup).transpose().map_err(context)?,
                 weapon,
                 requires_deposit: unit.requires_deposit,
+                requires_vent: unit.requires_vent,
                 mass_income: rate(&unit.mass_income)?,
                 energy_income: rate(&unit.energy_income)?,
                 mass_storage: total(&unit.mass_storage)?,

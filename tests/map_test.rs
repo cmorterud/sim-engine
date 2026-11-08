@@ -33,6 +33,7 @@ fn test_map() -> MapData {
         blocked,
         water_level: Fp::from_num(-1000),
         deposits,
+        vents: vec![(200, 300), (311, 211)],
         starts: [point(2_800, 2_400), point(7_440, 7_840)],
         scenery,
     }

@@ -11,7 +11,7 @@ use sim_engine::audio::{self, AttackAlarm, SoundEngine, SoundSettings};
 use sim_engine::input::feedback::{MarkerKind, OrderFeedback};
 use sim_engine::input::hotkeys;
 use sim_engine::input::orders::{
-    assist_orders, attack_ground_orders, deposit_position, formation_commands, free_deposits, line_cells, mobile_units, move_orders, overcharge_orders, pending_builds, queued_commands, PendingBuild, placement_cell, placement_is_valid, placement_target, right_click_orders, PlacementMap, RightClick,
+    assist_orders, attack_ground_orders, deposit_position, formation_commands, free_deposits, site_position, line_cells, mobile_units, move_orders, overcharge_orders, pending_builds, queued_commands, PendingBuild, placement_cell, placement_is_valid, placement_target, right_click_orders, PlacementMap, RightClick,
 };
 use sim_engine::input::selection::{ControlGroups, Selection};
 use sim_engine::math::fp::{Fp, Vec2Fp};
@@ -333,6 +333,7 @@ struct MapInfo {
     wall_cells: Vec<([f64; 2], f64)>,
     blocked_cells: Vec<(u32, u32)>,
     deposits: Vec<(u32, u32)>,
+    vents: Vec<(u32, u32)>,
     blueprints: Arc<BlueprintDb>,
     fog_side: Option<usize>,
     /// Below this height, ground is drawn as water.
@@ -383,6 +384,7 @@ fn read_map(scenario: &Scenario) -> MapInfo {
         wall_cells,
         blocked_cells,
         deposits: world.deposits.clone(),
+        vents: world.vents.clone(),
         blueprints: Arc::clone(&world.blueprints),
         fog_side: world.config.fog_of_war.then(|| world.visibility.side()),
         heights,
@@ -395,6 +397,7 @@ impl MapInfo {
             cells_per_side: self.cells_per_side,
             blocked_cells: &self.blocked_cells,
             deposits: &self.deposits,
+            vents: &self.vents,
             blueprints: &self.blueprints,
         }
     }
@@ -787,7 +790,7 @@ fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                             let footprint = unit.footprint;
                             let end = camera.screen_to_ground(selection.cursor(), &map.heights).map_or(start, |ground| placement_cell(ground, footprint));
                             // Deposits are never in a row, so an extractor stays where it snapped.
-                            let cells = if unit.requires_deposit { vec![start] } else { line_cells(start, end, footprint) };
+                            let cells = if unit.requires_deposit || unit.requires_vent { vec![start] } else { line_cells(start, end, footprint) };
                             let placed = place_structures(&session, &selection, &map, &mut feedback, blueprint, &cells, true);
                             if placed && !shift_held {
                                 placing = None;
@@ -1242,16 +1245,16 @@ fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                             })
                             .unwrap_or_default();
                         // While placing an extractor, mark the deposits it can go on.
-                        let extractor = placing.filter(|blueprint| map.blueprints.get(*blueprint).requires_deposit);
-                        let open_deposits: Vec<[f64; 3]> = extractor.map_or_else(Vec::new, |blueprint| {
-                            free_deposits(&map.placement_map(), blueprint, &snapshot.units, &pending)
-                                .into_iter()
-                                .map(|cell| deposit_position(cell, &map.heights))
-                                .collect()
+                        // A hydrocarbon plant marks the free vents the same way.
+                        let extractor = placing.filter(|blueprint| {
+                            let unit = map.blueprints.get(*blueprint);
+                            unit.requires_deposit || unit.requires_vent
                         });
-                        let snapped_deposit = placement_spot
-                            .filter(|cell| extractor.is_some() && map.deposits.contains(cell))
-                            .map(|cell| deposit_position(cell, &map.heights));
+                        let site_footprint = extractor.map_or(1, |blueprint| map.blueprints.get(blueprint).footprint);
+                        let open_sites: Vec<(u32, u32)> =
+                            extractor.map_or_else(Vec::new, |blueprint| free_deposits(&map.placement_map(), blueprint, &snapshot.units, &pending));
+                        let open_deposits: Vec<[f64; 3]> = open_sites.iter().map(|&cell| site_position(cell, site_footprint, &map.heights)).collect();
+                        let snapped_deposit = placement_spot.filter(|cell| open_sites.contains(cell)).map(|cell| site_position(cell, site_footprint, &map.heights));
                         let group_rows = control_groups.in_use(&snapshot.units);
                         let output = egui_context.run(raw_input, |ctx| {
                             ui::release_keyboard_focus(ctx);
@@ -1419,6 +1422,12 @@ fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                             let center = [center_x, center_y, map.heights.height_at(center_x, center_y) + 0.5];
                             scene_instances.push(Shape::Cube, instances::deposit_instance(center, cell * 0.8, eye));
                         }
+                        // A vent is wider, as wide as the plant that goes on it.
+                        for &(x, y) in &map.vents {
+                            let (center_x, center_y) = ((f64::from(x) + 0.5) * cell, (f64::from(y) + 0.5) * cell);
+                            let center = [center_x, center_y, map.heights.height_at(center_x, center_y) + 0.5];
+                            scene_instances.push(Shape::Cube, instances::vent_instance(center, cell * 2.6, eye));
+                        }
                         for wreck in &current.wrecks {
                             let center = [raw_to_world(wreck.x), raw_to_world(wreck.y), raw_to_world(wreck.z)];
                             if wreck.kind.is_scenery() {
@@ -1436,7 +1445,7 @@ fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                                 let unit = map.blueprints.get(blueprint);
                                 // While Shift-dragging, preview the whole row. Extractors stay where they snapped.
                                 let spots = match line_start {
-                                    Some(start) if unit.requires_deposit => vec![start],
+                                    Some(start) if unit.requires_deposit || unit.requires_vent => vec![start],
                                     Some(start) => line_cells(start, spot, unit.footprint),
                                     None => vec![spot],
                                 };

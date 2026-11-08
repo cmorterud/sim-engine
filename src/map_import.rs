@@ -274,9 +274,22 @@ fn convert(name: &str, scmap: &Scmap, markers: &[Marker], starts: (usize, usize)
     if deposits_blocked > 0 {
         notes.push(format!("{deposits_blocked} of them on ground too steep to build on"));
     }
-    let hydrocarbons = markers.iter().filter(|marker| marker.kind == "Hydrocarbon").count();
-    if hydrocarbons > 0 {
-        notes.push(format!("{hydrocarbons} hydrocarbon vents left out, until hydrocarbon plants (§3.4)"));
+    let mut vents: Vec<(u32, u32)> = Vec::new();
+    let mut vents_blocked = 0;
+    for marker in markers.iter().filter(|marker| marker.kind == "Hydrocarbon") {
+        let (x, y) = cell_of(marker.position[0], marker.position[2]);
+        if !vents.contains(&(x as u32, y as u32)) {
+            vents.push((x as u32, y as u32));
+            // A plant covers the vent's cell and the ring around it.
+            let ground = (y.saturating_sub(1)..=(y + 1).min(size - 1)).any(|row| (x.saturating_sub(1)..=(x + 1).min(size - 1)).any(|column| blocked[row * size + column]));
+            vents_blocked += usize::from(ground);
+        }
+    }
+    if !vents.is_empty() {
+        notes.push(format!("{} hydrocarbon vents", vents.len()));
+    }
+    if vents_blocked > 0 {
+        notes.push(format!("{vents_blocked} of them on ground too steep to build on"));
     }
 
     let army = |number: usize| {
@@ -320,7 +333,7 @@ fn convert(name: &str, scmap: &Scmap, markers: &[Marker], starts: (usize, usize)
         notes.push(format!("{drowned} props under water left out"));
     }
 
-    let map = MapData { name: name.to_string(), map_units, heights, blocked, water_level, deposits, starts: chosen, scenery };
+    let map = MapData { name: name.to_string(), map_units, heights, blocked, water_level, deposits, vents, starts: chosen, scenery };
     Ok(Imported { map, notes })
 }
 
@@ -439,7 +452,8 @@ mod tests {
         assert_eq!(map.deposits, [(6, 7)]);
         assert_eq!(map.starts, [Vec2Fp::new(Fp::from_num(170), Fp::from_num(1_130)), Vec2Fp::new(Fp::from_num(1_110), Fp::from_num(150))]);
         assert_eq!(map.scenery, [(WreckKind::Tree, Vec2Fp::new(Fp::from_num(70), Fp::from_num(90))), (WreckKind::Rock, Vec2Fp::new(Fp::from_num(205), Fp::from_num(40)))]);
-        assert!(imported.notes.iter().any(|note| note.contains("hydrocarbon")));
+        assert_eq!(map.vents, [(20, 20)]);
+        assert!(imported.notes.iter().any(|note| note.contains("1 hydrocarbon vents")));
         assert!(convert("test", &scmap, &parse_markers(SAVE), (1, 3)).is_err(), "there is no army 3");
     }
 

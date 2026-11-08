@@ -31,6 +31,7 @@ Taken so far:
   enhancements (§2.2), from FAF's UEF units, with the support commander's teleporter and Rapid
   Fabricator from its Aeon one.
 * How one enhancement's effects replace another's of the same kind, as FAF's commander scripts do.
+* Mass extractor tiers, mass fabricators, and the hydrocarbon power plant (§3), from FAF's UEF units.
 
 ## Maps from other games
 

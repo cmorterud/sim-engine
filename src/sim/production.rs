@@ -221,13 +221,19 @@ impl SimWorld {
         if unit.requires_deposit && !self.deposits.contains(&(cell_x, cell_y)) {
             return false;
         }
+        if unit.requires_vent && !self.vents.contains(&(cell_x + size / 2, cell_y + size / 2)) {
+            return false;
+        }
         for y in cell_y..cell_y + size {
             for x in cell_x..cell_x + size {
                 if !self.terrain.cell_is_open(x, y) {
                     return false;
                 }
-                // Deposits are saved for extractors.
+                // Deposits are saved for extractors, and vents for hydrocarbon plants.
                 if !unit.requires_deposit && self.deposits.contains(&(x, y)) {
+                    return false;
+                }
+                if !unit.requires_vent && self.vents.contains(&(x, y)) {
                     return false;
                 }
             }

@@ -363,6 +363,9 @@ pub struct SimWorld {
     pub visibility: Visibility,
     pub economies: [Economy; 2],
     pub deposits: Vec<(u32, u32)>,
+    /// Hydrocarbon vents, by cell (GAME_SPECIFICATION.md §3.4). A plant is built with one at the
+    /// middle of its footprint.
+    pub vents: Vec<(u32, u32)>,
     /// The structure on each occupied terrain cell, by cell index.
     pub occupancy: BTreeMap<u32, SimId>,
     pub wrecks: Vec<(SimId, hecs::Entity)>,
@@ -461,6 +464,7 @@ impl SimWorld {
             visibility,
             economies: [Economy::default(), Economy::default()],
             deposits: Vec::new(),
+            vents: Vec::new(),
             occupancy: BTreeMap::new(),
             wrecks: Vec::new(),
             builders: Vec::new(),
@@ -1987,7 +1991,13 @@ impl SimWorld {
                                 kills.push((killer, team, self.blueprints.get(blueprint).mass * built));
                             }
                             if let Some(blast) = self.blueprints.get(blueprint).death_explosion {
-                                self.pending_explosions.push(Explosion { x, y, radius: blast.radius, damage: blast.damage, source: None });
+                                // A fabricator only blows up if it was running.
+                                let running = construction.is_none()
+                                    && self.ecs.get::<&Paused>(target).is_err()
+                                    && self.economies[team.index()].extractor_efficiency > Res::ZERO;
+                                if !blast.only_while_running || running {
+                                    self.pending_explosions.push(Explosion { x, y, radius: blast.radius, damage: blast.damage, source: None });
+                                }
                             }
                         }
                     }
@@ -2220,6 +2230,14 @@ impl SimWorld {
         for &(x, y) in &self.deposits {
             hasher.write(&x.to_le_bytes());
             hasher.write(&y.to_le_bytes());
+        }
+        // Only maps that have vents hash them.
+        if !self.vents.is_empty() {
+            hasher.write(&[1]);
+            for &(x, y) in &self.vents {
+                hasher.write(&x.to_le_bytes());
+                hasher.write(&y.to_le_bytes());
+            }
         }
         for (&cell, id) in &self.occupancy {
             hasher.write(&cell.to_le_bytes());

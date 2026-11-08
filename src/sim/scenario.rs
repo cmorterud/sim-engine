@@ -252,6 +252,8 @@ pub struct MapData {
     /// Below this, land is under water. Far below the map if it has none.
     pub water_level: Fp,
     pub deposits: Vec<(u32, u32)>,
+    /// Hydrocarbon vents, by cell.
+    pub vents: Vec<(u32, u32)>,
     /// Blue's start, then Red's.
     pub starts: [Vec2Fp; 2],
     pub scenery: Vec<(WreckKind, Vec2Fp)>,
@@ -263,6 +265,7 @@ pub fn from_map(map: &MapData, seed: u64) -> Scenario {
     let terrain = super::terrain::Terrain::from_heights(map.map_units, map.heights.clone(), &map.blocked, map.water_level);
     let mut world = SimWorld::with_terrain(config, seed, terrain);
     world.deposits.clone_from(&map.deposits);
+    world.vents.clone_from(&map.vents);
     for &(kind, position) in &map.scenery {
         // Rocks vary in size as the skirmish's do. Trees are all one size.
         let radius = world.rng.range_fp(fp_int(5), fp_int(10));

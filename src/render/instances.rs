@@ -30,6 +30,7 @@ const WRECK: [f32; 3] = [0.24, 0.23, 0.22];
 const TREE: [f32; 3] = [0.13, 0.36, 0.17];
 const ROCK: [f32; 3] = [0.47, 0.44, 0.40];
 const DEPOSIT: [f32; 3] = [0.10, 0.75, 0.62];
+const VENT: [f32; 3] = [0.75, 0.55, 0.20];
 const GHOST_VALID: [f32; 3] = [0.35, 0.95, 0.45];
 const GHOST_INVALID: [f32; 3] = [0.95, 0.25, 0.20];
 /// How far a unit must have moved in a tick, in raw squared units, to count as heading somewhere.
@@ -137,6 +138,9 @@ pub fn unit_look(key: &str) -> UnitLook {
         "acu" => UnitLook { base: Some(Shape::CommanderLegs), ..look(Shape::Commander, Some([1.00, 1.00, 1.00]), 1.0) },
         "support_commander" => UnitLook { base: Some(Shape::CommanderLegs), ..look(Shape::Commander, Some([0.70, 0.75, 0.85]), 1.0) },
         "quantum_gateway" => look(Shape::Gateway, Some([0.55, 0.60, 1.00]), 0.6),
+        "hydrocarbon_plant" => look(Shape::HydrocarbonPlant, Some([0.85, 0.60, 0.25]), 0.7),
+        "mass_fabricator" => look(Shape::Fabricator, Some([0.40, 0.95, 0.85]), 1.0),
+        "mass_fabricator_t3" => look(Shape::Fabricator, Some([0.70, 0.45, 1.00]), 0.8),
         "t2_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([0.95, 0.65, 0.25]), 1.0) },
         "t3_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([0.95, 0.50, 0.20]), 1.0) },
         "land_factory_t3" => look(Shape::Factory, Some([0.10, 0.10, 0.20]), 0.85),
@@ -384,6 +388,11 @@ pub fn deposit_instance(center: [f64; 3], width: f64, eye: [f64; 3]) -> UnitInst
     instance(center, [width as f32, width as f32, 1.0], NORTH, DEPOSIT, UNIT_ICON_PX, eye)
 }
 
+/// A hydrocarbon vent: a dark, wide patch on the ground.
+pub fn vent_instance(center: [f64; 3], width: f64, eye: [f64; 3]) -> UnitInstanceRaw {
+    instance(center, [width as f32, width as f32, 1.0], NORTH, VENT, UNIT_ICON_PX, eye)
+}
+
 /// A preview of a structure about to be placed, standing on `ground`. Use with the structure's own shape.
 pub fn ghost_instance(ground: [f64; 3], width: f64, height_share: f32, valid: bool, eye: [f64; 3]) -> UnitInstanceRaw {
     let color = if valid { GHOST_VALID } else { GHOST_INVALID };
@@ -481,7 +490,7 @@ mod tests {
         }
         // Higher tiers of the factory and the engineer, the radar's omni upgrade, and the support
         // commander share the shape they come from, and everything else is unique.
-        let shared = ["land_factory_t2", "land_factory_t3", "t2_engineer", "t3_engineer", "omni_sensor", "support_commander", "mass_extractor_t2", "mass_extractor_t3"];
+        let shared = ["land_factory_t2", "land_factory_t3", "t2_engineer", "t3_engineer", "omni_sensor", "support_commander", "mass_extractor_t2", "mass_extractor_t3", "mass_fabricator_t3"];
         let shapes: Vec<Shape> = drawn().filter(|unit| !shared.contains(&unit.key.as_str())).map(|unit| unit_look(&unit.key).shape).collect();
         for (index, shape) in shapes.iter().enumerate() {
             assert!(!shapes[index + 1..].contains(shape), "{shape:?} is used twice");

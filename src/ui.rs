@@ -167,7 +167,7 @@ fn find_unit(snapshot: &SimSnapshot, id: SimId) -> Option<&UnitView> {
 /// A button's name and cost, with its key in front.
 fn cost_label(db: &BlueprintDb, blueprint: BlueprintId) -> String {
     let unit = db.get(blueprint);
-    let key = blueprint_hotkey(&unit.key).map_or(String::new(), |letter| format!("[{letter}] "));
+    let key = blueprint_hotkey(&unit.key).map_or(String::new(), |letter| format!("[{}] ", hotkeys::key_name(letter)));
     format!("{key}{}\n{} mass  {} energy", unit.name, unit.mass.to_num::<i64>(), unit.energy.to_num::<i64>())
 }
 

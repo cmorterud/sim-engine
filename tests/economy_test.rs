@@ -1681,7 +1681,7 @@ fn a_queued_build_gives_a_full_size_outline_and_blocks_its_spot() {
 
     let deposits: Vec<(u32, u32)> = world.deposits.clone();
     let cells_per_side = world.terrain.cells_per_side() as u32;
-    let map = PlacementMap { cells_per_side, blocked_cells: &[], deposits: &deposits, blueprints: &world.blueprints };
+    let map = PlacementMap { cells_per_side, blocked_cells: &[], deposits: &deposits, vents: &[], blueprints: &world.blueprints };
     assert!(!placement_is_valid(&map, generator, (101, 101), &current.units, &pending), "a queued factory must block its spot");
     assert!(placement_is_valid(&map, generator, (120, 120), &current.units, &pending));
 }

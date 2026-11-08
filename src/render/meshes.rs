@@ -54,6 +54,10 @@ pub enum Shape {
     StealthGenerator,
     /// A slab with four pillars around a glowing core, under a ring.
     Gateway,
+    /// A wide, low drum with three stacks.
+    HydrocarbonPlant,
+    /// A block wrapped in rings.
+    Fabricator,
     /// A shield's dome: an open half-sphere, drawn see-through.
     Dome,
     /// Flat, around the feet of a selected mobile unit.
@@ -63,7 +67,7 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub const ALL: [Self; 33] = [
+    pub const ALL: [Self; 35] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -94,6 +98,8 @@ impl Shape {
         Self::Radar,
         Self::StealthGenerator,
         Self::Gateway,
+        Self::HydrocarbonPlant,
+        Self::Fabricator,
         Self::Dome,
         Self::SelectionRing,
         Self::SelectionBox,
@@ -365,6 +371,18 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             for z in [-0.35_f32, -0.05, 0.25] {
                 let radius = 0.5 - (z + 0.5) * 0.4;
                 mesh.frustum([0.0, 0.0], [z, z + 0.06], [radius, radius], 12);
+            }
+        }
+        Shape::HydrocarbonPlant => {
+            mesh.frustum([0.0, 0.0], [-0.5, -0.15], [0.48, 0.44], 12);
+            for (x, y) in [(-0.22_f32, -0.15_f32), (0.22, -0.15), (0.0, 0.25)] {
+                mesh.frustum([x, y], [-0.15, 0.5], [0.09, 0.06], 8);
+            }
+        }
+        Shape::Fabricator => {
+            mesh.block([-0.32, -0.32, -0.5], [0.32, 0.32, 0.35]);
+            for z in [-0.3_f32, 0.0, 0.3] {
+                mesh.frustum([0.0, 0.0], [z, z + 0.08], [0.48, 0.48], 12);
             }
         }
         Shape::Gateway => {
