@@ -140,3 +140,20 @@ fn heavy_artillery_reaches_across_the_map() {
     });
     assert!(hit, "7,840 damage takes the generator");
 }
+
+#[test]
+fn a_mobile_missile_launcher_fires_on_its_own_but_not_up_close() {
+    let mut world = world(5_120);
+    let launcher = world.spawn_mobile(world.blueprints.id("t2_mobile_missile_launcher"), Team::Blue, point(1_000, 2_500));
+    // A storage 150 away, inside its least range of 240.
+    structure(&mut world, "mass_storage", Team::Red, 57, 125);
+    assert_eq!(first_shot(&mut world, launcher, 200), None, "too close");
+    // One 1,000 away is in reach.
+    let far = structure(&mut world, "mass_storage", Team::Red, 100, 125);
+    assert!(first_shot(&mut world, launcher, 200).is_some(), "it fires on its own");
+    let gone = (0..600).any(|_| {
+        world.advance_tick(&[]);
+        world.unit_health(far).is_none()
+    });
+    assert!(gone);
+}

@@ -413,6 +413,8 @@ pub struct SimWorld {
     pub being_captured: Vec<(SimId, hecs::Entity)>,
     /// Aircraft, and air staging facilities, sorted by `SimId`.
     pub aircraft: Vec<(SimId, hecs::Entity)>,
+    /// Units with anti-torpedo charges, sorted by `SimId`.
+    pub torpedo_defenses: Vec<(SimId, hecs::Entity)>,
     /// Submarines, and units that walk the seabed, sorted by `SimId`.
     pub submarines: Vec<(SimId, hecs::Entity)>,
     pub seabed_walkers: Vec<(SimId, hecs::Entity)>,
@@ -511,6 +513,7 @@ impl SimWorld {
             aircraft: Vec::new(),
             submarines: Vec::new(),
             seabed_walkers: Vec::new(),
+            torpedo_defenses: Vec::new(),
             air_stagings: Vec::new(),
             captured_this_tick: Vec::new(),
             concealed: [Vec::new(), Vec::new()],
@@ -1629,8 +1632,8 @@ impl SimWorld {
             // Only anti-air weapons hit aircraft, and most of them hit nothing else.
             // A torpedo hits ships and submarines, and nothing else.
             let torpedo = torpedo.is_some();
-            // Under the water, only torpedoes can be fired.
-            let can_fire = !me.is_sub || torpedo;
+            // Under the water, only torpedoes and missiles can be fired.
+            let can_fire = !me.is_sub || torpedo || launcher.is_some();
             let hits_air = anti_air.is_some() && !torpedo;
             let hits_ground = anti_air.is_none_or(|anti_air| anti_air.also_ground) && !torpedo;
             let can_hit = |entry: &super::spatial::GridEntry| {
@@ -1966,7 +1969,7 @@ impl SimWorld {
                             }
                         },
                     };
-                    if weapon.ticks_until_ready > 0 || !aimed || (me.is_sub && !weapon.torpedo) {
+                    if weapon.ticks_until_ready > 0 || !aimed || (me.is_sub && !weapon.torpedo && weapon.missile_height.is_none()) {
                         continue;
                     }
                     let from = raw(me.x, me.y, me.z);
@@ -1975,8 +1978,11 @@ impl SimWorld {
                         (None, Some(entry)) => (raw(entry.x, entry.y, entry.z), (entry.is_air || weapon.torpedo).then_some(entry.id)),
                         (None, None) => continue,
                     };
-                    // A shell the ground would stop is not fired, and the weapon looks again.
-                    if homing.is_none() && spot.is_none() && !shot_is_clear(terrain, from, to, weapon.projectile_speed) {
+                    // Missiles fly over the ground. A shell the ground would stop is not fired, and
+                    // the weapon looks again.
+                    let missile = weapon.missile_height.map(|cruise_height| MissileShot { cruise_height, strategic: false, inner_radius: Fp::ZERO, inner_damage: Fp::ZERO });
+                    let homing = if missile.is_some() { None } else { homing };
+                    if missile.is_none() && homing.is_none() && spot.is_none() && !shot_is_clear(terrain, from, to, weapon.projectile_speed) {
                         weapon.target = None;
                         continue;
                     }
@@ -1989,7 +1995,7 @@ impl SimWorld {
                         damage: weapon.damage,
                         splash: weapon.splash,
                         overcharge: None,
-                        missile: None,
+                        missile,
                         homing,
                         bomb: None,
                         spread: Fp::ZERO,
@@ -2112,8 +2118,11 @@ impl SimWorld {
                     return None;
                 }
                 let base = self.ecs.get::<&Position>(entity).ok()?.0.xy();
-                let team = self.ecs.get::<&UnitStats>(entity).ok()?.team;
-                let center = [base.x.to_bits(), base.y.to_bits(), self.terrain.height_at(base).to_bits()];
+                let stats = *self.ecs.get::<&UnitStats>(entity).ok()?;
+                let team = stats.team;
+                // A ship's dome sits on the water.
+                let floor = if stats.move_class == MoveClass::Naval { self.terrain.height_at(base).max(self.terrain.water_level()) } else { self.terrain.height_at(base) };
+                let center = [base.x.to_bits(), base.y.to_bits(), floor.to_bits()];
                 Some(Dome { id, team, center, radius: shield.radius.to_bits() })
             })
             .collect()
@@ -2124,6 +2133,47 @@ impl SimWorld {
     /// one spends an interceptor on a nuclear missile that is in its range and heading for
     /// somewhere in its range. Defenses go in `SimId` order, and no missile is shot down twice.
     /// Returns the missiles destroyed, sorted by `SimId`.
+    /// Anti-torpedo charges that are ready each destroy the nearest enemy torpedo within range,
+    /// in `SimId` order, and no torpedo twice. Returns the torpedoes destroyed.
+    fn intercept_torpedoes(&mut self) -> Vec<SimId> {
+        // The missile defenses' step clears the last tick's interceptions, if there are any.
+        if self.missile_defenses.is_empty() {
+            self.interceptions.clear();
+        }
+        let mut destroyed: Vec<SimId> = Vec::new();
+        for index in 0..self.torpedo_defenses.len() {
+            let entity = self.torpedo_defenses[index].1;
+            let mut defense = *self.ecs.get::<&super::components::TorpedoDefense>(entity).expect("defense list only holds defenses");
+            defense.ticks_until_ready = defense.ticks_until_ready.saturating_sub(1);
+            if defense.ticks_until_ready == 0 {
+                let here = self.ecs.get::<&Position>(entity).expect("units have positions").0;
+                let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team;
+                let range = i64::from(defense.range.to_bits());
+                let mut best: Option<(i64, SimId, Vec3Fp)> = None;
+                for &(id, torpedo) in &self.projectiles {
+                    let underwater = self.ecs.get::<&Homing>(torpedo).is_ok_and(|homing| homing.underwater);
+                    let enemy = self.ecs.get::<&Projectile>(torpedo).is_ok_and(|projectile| projectile.source_team != team);
+                    if !underwater || !enemy || destroyed.contains(&id) {
+                        continue;
+                    }
+                    let at = self.ecs.get::<&Position>(torpedo).expect("projectiles have positions").0;
+                    let (dx, dy) = (i64::from(at.x.to_bits() - here.x.to_bits()), i64::from(at.y.to_bits() - here.y.to_bits()));
+                    let distance = dx * dx + dy * dy;
+                    if distance <= range * range && best.is_none_or(|(closest, _, _)| distance < closest) {
+                        best = Some((distance, id, at));
+                    }
+                }
+                if let Some((_, id, at)) = best {
+                    destroyed.push(id);
+                    self.interceptions.push([[here.x.to_bits(), here.y.to_bits(), here.z.to_bits()], [at.x.to_bits(), at.y.to_bits(), at.z.to_bits()]]);
+                    defense.ticks_until_ready = defense.reload_ticks;
+                }
+            }
+            *self.ecs.get::<&mut super::components::TorpedoDefense>(entity).expect("defense list only holds defenses") = defense;
+        }
+        destroyed
+    }
+
     fn intercept_missiles(&mut self) -> Vec<SimId> {
         self.interceptions.clear();
         let mut destroyed: Vec<SimId> = Vec::new();
@@ -2179,7 +2229,12 @@ impl SimWorld {
     pub fn step_projectiles(&mut self) {
         self.pending_shield_hits.clear();
         self.dead_projectiles.clear();
-        let shot_down = if self.missile_defenses.is_empty() { Vec::new() } else { self.intercept_missiles() };
+        let mut shot_down = if self.missile_defenses.is_empty() { Vec::new() } else { self.intercept_missiles() };
+        if !self.torpedo_defenses.is_empty() {
+            shot_down.extend(self.intercept_torpedoes());
+            shot_down.sort_unstable();
+            shot_down.dedup();
+        }
         let domes = if self.shields.is_empty() { Vec::new() } else { self.standing_domes() };
         let shield_hits = &mut self.pending_shield_hits;
         let terrain = &self.terrain;
@@ -2459,6 +2514,7 @@ impl SimWorld {
             self.being_captured.retain(alive);
             self.aircraft.retain(alive);
             self.submarines.retain(alive);
+            self.torpedo_defenses.retain(alive);
             self.seabed_walkers.retain(alive);
             self.air_stagings.retain(alive);
             self.dead_units.clear();

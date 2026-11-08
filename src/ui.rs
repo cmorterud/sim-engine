@@ -308,7 +308,21 @@ pub fn shown_tier(chosen: Option<u8>, options: &[BlueprintId], db: &BlueprintDb)
 /// One build menu, as a single bar: a toggle for the tech level, then the items of that level,
 /// each showing only its key and name, with its details on hover. The level chosen is
 /// remembered under `memory`. Returns the item clicked.
-fn build_bar(ui: &mut egui::Ui, memory: &str, options: &[BlueprintId], db: &BlueprintDb, extra_hint: impl Fn(BlueprintId) -> String) -> Option<BlueprintId> {
+/// What was clicked on a build bar: an item, with the left button or the right.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum BarClick {
+    Left(BlueprintId),
+    Right(BlueprintId),
+}
+
+fn build_bar(
+    ui: &mut egui::Ui,
+    memory: &str,
+    options: &[BlueprintId],
+    db: &BlueprintDb,
+    extra_hint: impl Fn(BlueprintId) -> String,
+    label_suffix: impl Fn(BlueprintId) -> String,
+) -> Option<BarClick> {
     let id = egui::Id::new(memory);
     let chosen = ui.ctx().data(|data| data.get_temp::<u8>(id));
     let shown = shown_tier(chosen, options, db)?;
@@ -327,8 +341,11 @@ fn build_bar(ui: &mut egui::Ui, memory: &str, options: &[BlueprintId], db: &Blue
                 for option in bar_items(options, shown, db) {
                     let extra = extra_hint(option);
                     let hint = if extra.is_empty() { item_details(db, option) } else { format!("{}\n\n{extra}", item_details(db, option)) };
-                    if ui.button(item_label(db, option)).on_hover_text(hint).clicked() {
-                        clicked = Some(option);
+                    let button = ui.button(format!("{}{}", item_label(db, option), label_suffix(option))).on_hover_text(hint);
+                    if button.clicked() {
+                        clicked = Some(BarClick::Left(option));
+                    } else if button.secondary_clicked() {
+                        clicked = Some(BarClick::Right(option));
                     }
                 }
             });
@@ -1434,7 +1451,7 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
             Some(menu) => factory_controls(ui, &menu, db, actions),
             None => {
                 let options = builder_options(snapshot, selected, db);
-                if let Some(option) = build_bar(ui, BUILDER_TIER_MEMORY, &options, db, |_| String::new()) {
+                if let Some(BarClick::Left(option)) = build_bar(ui, BUILDER_TIER_MEMORY, &options, db, |_| String::new(), |_| String::new()) {
                     actions.push(UiAction::BeginPlacement(option));
                 }
             }
@@ -1572,15 +1589,40 @@ pub fn queue_label(name: &str, given: usize, selected: usize) -> String {
     }
 }
 
+/// Whether the selected launchers are building this missile one after another.
+pub fn auto_building(menu: &FactoryMenu, missile: BlueprintId) -> bool {
+    menu.repeat == RepeatState::On && menu.queue.iter().any(|(item, _)| *item == missile)
+}
+
+/// Right-clicking a missile: build them one after another, until right-clicked again.
+pub fn auto_build_action(menu: &FactoryMenu, able: &[SimId], missile: BlueprintId) -> UiAction {
+    if auto_building(menu, missile) {
+        return UiAction::SetRepeat { factories: able.to_vec(), repeat: false };
+    }
+    let mut actions = Vec::new();
+    if !menu.queue.iter().any(|(item, _)| *item == missile) {
+        actions.push(queue_action(menu, able, missile));
+    }
+    actions.push(UiAction::SetRepeat { factories: able.to_vec(), repeat: true });
+    UiAction::Batch(actions)
+}
+
 fn factory_controls(ui: &mut egui::Ui, menu: &FactoryMenu, db: &BlueprintDb, actions: &mut Vec<UiAction>) {
     let total = menu.factories.len();
     let partial = |able: usize| if able < total { format!("{able} of {total} factories can build this.\n") } else { String::new() };
     let shift = ui.input(|input| input.modifiers.shift);
     let options: Vec<BlueprintId> = menu.options.iter().map(|(option, _)| *option).collect();
     let able = |option: BlueprintId| menu.options.iter().find(|(existing, _)| *existing == option).map_or(&[][..], |(_, able)| able.as_slice());
-    let hint = |option: BlueprintId| format!("{}Hold Shift to queue {SHIFT_QUEUE_COUNT}.", partial(able(option).len()));
-    if let Some(option) = build_bar(ui, FACTORY_TIER_MEMORY, &options, db, hint) {
-        actions.push(with_shift(queue_action(menu, able(option), option), shift, db));
+    let missile = |option: BlueprintId| db.get(option).class == UnitClass::Ammo;
+    let hint = |option: BlueprintId| {
+        let auto = if missile(option) { " Right-click to build them one after another, and again to stop." } else { "" };
+        format!("{}Hold Shift to queue {SHIFT_QUEUE_COUNT}.{auto}", partial(able(option).len()))
+    };
+    let suffix = |option: BlueprintId| if missile(option) && auto_building(menu, option) { " (auto)".to_string() } else { String::new() };
+    match build_bar(ui, FACTORY_TIER_MEMORY, &options, db, hint, suffix) {
+        Some(BarClick::Left(option)) => actions.push(with_shift(queue_action(menu, able(option), option), shift, db)),
+        Some(BarClick::Right(option)) if missile(option) => actions.push(auto_build_action(menu, able(option), option)),
+        _ => {}
     }
     ui.horizontal(|ui| {
         if let Some((upgrade, able)) = &menu.upgrade {
@@ -3292,6 +3334,29 @@ mod tests {
         };
         assert_eq!(click(0, egui::Modifiers::NONE), [UiAction::QuickSelect { units: vec![SimId(10), SimId(11)], add: false }]);
         assert_eq!(click(1, egui::Modifiers::SHIFT), [UiAction::QuickSelect { units: vec![SimId(12)], add: true }]);
+    }
+
+    #[test]
+    fn right_clicking_a_missile_builds_them_one_after_another_until_right_clicked_again() {
+        let db = BlueprintDb::standard();
+        let mut silo = unit(5, 0.0);
+        silo.blueprint = db.id("strategic_missile_launcher").0;
+        silo.is_structure = true;
+        let mut current = snapshot(vec![silo], vec![]);
+        current.factories = vec![factory_view(5, vec![], false, 0)];
+        let nuke = db.id("strategic_missile");
+        let menu = factory_menu(&current, &[SimId(5)], &db).unwrap();
+        assert!(!auto_building(&menu, nuke));
+        let on = UiAction::Batch(vec![
+            UiAction::Queue { factories: vec![SimId(5)], blueprint: nuke, selected_count: 1, count: 1 },
+            UiAction::SetRepeat { factories: vec![SimId(5)], repeat: true },
+        ]);
+        assert_eq!(auto_build_action(&menu, &[SimId(5)], nuke), on);
+        // Once it is building them one after another, right-clicking stops that.
+        current.factories = vec![factory_view(5, vec![nuke.0], true, 0)];
+        let menu = factory_menu(&current, &[SimId(5)], &db).unwrap();
+        assert!(auto_building(&menu, nuke));
+        assert_eq!(auto_build_action(&menu, &[SimId(5)], nuke), UiAction::SetRepeat { factories: vec![SimId(5)], repeat: false });
     }
 
     #[test]

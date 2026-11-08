@@ -266,6 +266,8 @@ pub struct ExtraWeapon {
     pub hits_ground: bool,
     /// A torpedo: ships and submarines only.
     pub torpedo: bool,
+    /// Cruise missiles, which pick their own targets, fly at this height, and need none built.
+    pub missile_height: Option<Fp>,
     pub target: Option<SimId>,
     pub turret: Option<Turret>,
 }
@@ -484,6 +486,14 @@ pub struct MissileDefense {
     pub ticks_until_ready: u32,
     /// Interceptors built and waiting. Only strategic defenses use it.
     pub stock: u32,
+}
+
+/// Anti-torpedo charges, which shoot down enemy torpedoes in range, one each reload.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct TorpedoDefense {
+    pub range: Fp,
+    pub reload_ticks: u32,
+    pub ticks_until_ready: u32,
 }
 
 /// A projectile that flies itself to a spot: up to its cruise height above the ground, along

@@ -402,6 +402,7 @@ impl SimWorld {
                     hits_air: matches!(weapon.targets, Targets::Air | Targets::Both),
                     hits_ground: matches!(weapon.targets, Targets::Ground | Targets::Both),
                     torpedo: weapon.targets == Targets::Naval,
+                    missile_height: (weapon.kind == WeaponKind::TacticalMissile).then_some(weapon.cruise_height),
                     target: None,
                     turret: weapon.turn_rate.map(|rate| Turret::new(facing, rate)),
                 })
@@ -436,6 +437,11 @@ impl SimWorld {
             let defense = MissileDefense { strategic: def.strategic, range: def.range, reload_ticks: def.reload_ticks, ticks_until_ready: 0, stock: 0 };
             self.ecs.insert_one(entity, defense).expect("entity was just spawned");
             self.missile_defenses.push((id, entity));
+        }
+        if let Some(def) = unit.torpedo_defense {
+            let defense = super::components::TorpedoDefense { range: def.range, reload_ticks: def.reload_ticks, ticks_until_ready: 0 };
+            self.ecs.insert_one(entity, defense).expect("entity was just spawned");
+            self.torpedo_defenses.push((id, entity));
         }
         if let Some(def) = unit.shield {
             let shield = Shield {
@@ -2100,6 +2106,10 @@ impl SimWorld {
             for value in [defense.reload_ticks, defense.ticks_until_ready, defense.stock] {
                 hasher.write(&value.to_le_bytes());
             }
+        }
+        if let Ok(defense) = self.ecs.get::<&super::components::TorpedoDefense>(entity) {
+            hasher.write(&[31]);
+            hasher.write(&defense.ticks_until_ready.to_le_bytes());
         }
         if let Ok(shield) = self.ecs.get::<&Shield>(entity) {
             hasher.write(&[15]);

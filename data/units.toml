@@ -127,7 +127,7 @@ health = 6000
 footprint = 3
 vision = 400
 build_power = 40
-builds = ["t1_engineer", "t2_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_amphibious_tank"]
+builds = ["t1_engineer", "t2_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_amphibious_tank", "t2_mobile_missile_launcher"]
 upgrades_to = "land_factory_t3"
 factory_kind = "land"
 
@@ -325,7 +325,7 @@ health = 10000
 footprint = 3
 vision = 400
 build_power = 90
-builds = ["t1_engineer", "t2_engineer", "t3_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_amphibious_tank", "t3_mobile_artillery"]
+builds = ["t1_engineer", "t2_engineer", "t3_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_amphibious_tank", "t2_mobile_missile_launcher", "t3_mobile_artillery"]
 factory_kind = "land"
 
 [[unit]]
@@ -832,7 +832,7 @@ vision = 400
 build_power = 40
 factory_kind = "land"
 support = true
-builds = ["t1_engineer", "t2_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_amphibious_tank"]
+builds = ["t1_engineer", "t2_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_amphibious_tank", "t2_mobile_missile_launcher"]
 upgrades_to = "land_factory_t3_support"
 
 [[unit]]
@@ -849,7 +849,7 @@ vision = 400
 build_power = 90
 factory_kind = "land"
 support = true
-builds = ["t1_engineer", "t2_engineer", "t3_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_amphibious_tank", "t3_mobile_artillery"]
+builds = ["t1_engineer", "t2_engineer", "t3_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_amphibious_tank", "t2_mobile_missile_launcher", "t3_mobile_artillery"]
 
 [[unit]]
 id = "air_factory_t2_support"
@@ -1099,7 +1099,7 @@ vision = 400
 build_power = 90
 factory_kind = "naval"
 on_water = true
-builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser"]
+builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_shield_boat"]
 upgrades_to = "naval_factory_t3"
 
 [[unit]]
@@ -1116,7 +1116,7 @@ vision = 400
 build_power = 150
 factory_kind = "naval"
 on_water = true
-builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t3_battleship", "t3_battlecruiser"]
+builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_shield_boat", "t3_battleship", "t3_battlecruiser", "t3_missile_sub"]
 
 [[unit]]
 id = "naval_factory_t2_support"
@@ -1133,7 +1133,7 @@ build_power = 90
 factory_kind = "naval"
 support = true
 on_water = true
-builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser"]
+builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_shield_boat"]
 upgrades_to = "naval_factory_t3_support"
 
 [[unit]]
@@ -1151,9 +1151,9 @@ build_power = 150
 factory_kind = "naval"
 support = true
 on_water = true
-builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t3_battleship", "t3_battlecruiser"]
+builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_shield_boat", "t3_battleship", "t3_battlecruiser", "t3_missile_sub"]
 
-# Two gauss cannons, a railgun at aircraft, and torpedoes.
+# Two gauss cannons, a railgun at aircraft, torpedoes, and an anti-torpedo charge.
 [[unit]]
 id = "t2_destroyer"
 name = "Destroyer"
@@ -1170,6 +1170,8 @@ radius = 20
 vision = 640
 radar = 800
 sonar = 720
+# FAF's Smart Charge: it shoots down a torpedo within 600 every 10 seconds.
+torpedo_defense = { range = 600, reload_ticks = 100 }
 movement = "naval"
 weapon = { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 305, splash_radius = 20, turn_rate = 90 }
 extra_weapons = [
@@ -1231,7 +1233,7 @@ extra_weapons = [
 ]
 missile_defense = { kind = "tactical", range = 620, reload_ticks = 10 }
 
-# Two dual plasma cannons, torpedoes, and a Phalanx.
+# Two dual plasma cannons, torpedoes, a Phalanx, and an anti-torpedo charge.
 [[unit]]
 id = "t3_battlecruiser"
 name = "Battlecruiser"
@@ -1248,6 +1250,7 @@ radius = 28
 vision = 800
 radar = 960
 sonar = 400
+torpedo_defense = { range = 600, reload_ticks = 100 }
 movement = "naval"
 weapon = { range = 1600, reload_ticks = 67, projectile_speed = 70, damage = 210, splash_radius = 20, turn_rate = 60 }
 extra_weapons = [
@@ -1278,7 +1281,7 @@ sonar = 1200
 movement = "submarine"
 weapon = { range = 640, reload_ticks = 40, projectile_speed = 30, damage = 150, targets = "naval" }
 
-# Fifteen torpedoes of 150 a run, as one.
+# Fifteen torpedoes of 150 a run, as five of 450, so that anti-torpedo charges stop some of a run.
 [[unit]]
 id = "t2_torpedo_bomber"
 name = "Torpedo Bomber"
@@ -1293,7 +1296,7 @@ radius = 12
 vision = 640
 sonar = 880
 flight = { elevation = 240, turn_rate = 90, break_off = 400, fuel = 600 }
-weapon = { range = 840, reload_ticks = 100, projectile_speed = 30, damage = 2250, targets = "naval" }
+weapon = { range = 840, reload_ticks = 20, projectile_speed = 30, damage = 450, targets = "naval" }
 
 [[unit]]
 id = "t1_sonar"
@@ -1376,6 +1379,68 @@ radius = 11
 vision = 400
 movement = "hover"
 weapon = { range = 360, reload_ticks = 3, projectile_speed = 120, damage = "13.5", turn_rate = 180 }
+
+# A dome that moves with it, which on the water covers 660 around it: the original's sphere of
+# 1,200 sunk 1,000 below the surface.
+[[unit]]
+id = "t2_shield_boat"
+name = "Shield Boat"
+class = "defense"
+tier = 2
+mass = 900
+energy = 9000
+build_time = 3600
+health = 550
+speed = 10
+turn_rate = 45
+turn_radius = 40
+radius = 16
+vision = 640
+movement = "naval"
+shield = { radius = 660, health = 5500, regen = 80, recharge_seconds = 30, upkeep = 100 }
+
+# FAF's Ace. It builds nuclear missiles as a strategic missile launcher does, on order or one after
+# another, up to three, and fires one only on order. Its cruise missiles it fires on its own at
+# whatever is in range, and needs none built. It fires both from under the water.
+[[unit]]
+id = "t3_missile_sub"
+name = "Strategic Missile Submarine"
+class = "factory"
+tier = 3
+mass = 9500
+energy = 152000
+build_time = 20000
+health = 4000
+speed = "6.6"
+turn_rate = 50
+turn_radius = 50
+radius = 20
+vision = 320
+sonar = 1200
+movement = "submarine"
+build_power = 20
+builds = ["strategic_missile"]
+max_stock = 3
+weapon = { range = 8200, reload_ticks = 100, projectile_speed = 25, damage = 500, splash_radius = 800, inner_damage = 70000, inner_radius = 600, kind = "strategic_missile", cruise_height = 500 }
+extra_weapons = [{ kind = "tactical_missile", automatic = true, range = 5120, reload_ticks = 100, projectile_speed = 18, damage = 2000, splash_radius = 60, cruise_height = 60 }]
+
+# FAF's Flapjack: it fires cruise missiles on its own at what is in range, as artillery does,
+# and cannot hit what is closer than 240. Two of 300 a volley, as one every 5 seconds.
+[[unit]]
+id = "t2_mobile_missile_launcher"
+name = "Mobile Missile Launcher"
+class = "artillery"
+tier = 2
+mass = 180
+energy = 1350
+build_time = 800
+health = 825
+speed = "5.8"
+turn_rate = 90
+turn_radius = 20
+radius = 11
+vision = 400
+weapon = { kind = "tactical_missile", automatic = true, artillery = true, min_range = 240, range = 1300, reload_ticks = 50, projectile_speed = 18, damage = 300, splash_radius = 20, cruise_height = 40 }
 
 # Field enhancements (GAME_SPECIFICATION.md §2.1), with Forged Alliance Forever's numbers for its
 # commander. A commander has three slots, and one enhancement in each: a new one replaces what is

@@ -283,7 +283,7 @@ fn a_torpedo_bomber_sinks_a_ship() {
         world.advance_tick(&[]);
         world.unit_health(destroyer).is_none()
     });
-    assert!(sunk, "four runs of 2,250 against 7,200");
+    assert!(sunk, "five torpedoes of 450 every 10 seconds, less what its charges stop, against 7,200");
 }
 
 #[test]
@@ -361,4 +361,82 @@ fn a_group_of_every_kind_gets_a_route_for_each() {
     world.advance_tick(&[SimCommand::Move { units: vec![tank, riptide, frigate], goal: point(1_600, 4_000) }]);
     let routes: Vec<u32> = [tank, riptide, frigate].iter().map(|&id| world.unit_order(id).unwrap().route).collect();
     assert!(routes[0] != routes[1] && routes[1] != routes[2] && routes[0] != routes[2], "{routes:?}");
+}
+
+#[test]
+fn a_shield_boats_dome_moves_with_it_and_stops_shells() {
+    let mut world = lake_world();
+    let boat = spawn(&mut world, "t2_shield_boat", Team::Blue, point(2_000, 1_000));
+    let frigate = spawn(&mut world, "t1_frigate", Team::Blue, point(2_050, 1_000));
+    world.ecs.get::<&mut sim_engine::sim::components::Combat>(world.unit_entity(frigate).unwrap()).unwrap().range = Fp::ZERO;
+    world.ecs.get::<&mut sim_engine::sim::components::ExtraWeapons>(world.unit_entity(frigate).unwrap()).unwrap().0.clear();
+    // A destroyer outside the dome, with only its gun.
+    let enemy = spawn(&mut world, "t2_destroyer", Team::Red, point(3_000, 1_000));
+    world.ecs.get::<&mut sim_engine::sim::components::ExtraWeapons>(world.unit_entity(enemy).unwrap()).unwrap().0.clear();
+    let full = world.unit_health(frigate).unwrap();
+    run_ticks(&mut world, 200);
+    let shield = |world: &SimWorld| world.snapshot_for(Some(Team::Blue)).shields.iter().find(|view| view.id == boat).map(|view| (view.health_permille, view.center));
+    let (health, start) = shield(&world).expect("its dome");
+    assert!(health < 1_000, "the dome takes the shells");
+    assert_eq!(world.unit_health(frigate), Some(full), "and the frigate under it none");
+    // It sails away, and the dome goes with it.
+    world.advance_tick(&[SimCommand::Move { units: vec![boat], goal: point(2_000, 1_600) }]);
+    run_ticks(&mut world, 150);
+    let (_, later) = shield(&world).expect("its dome");
+    assert!(later[1] - start[1] > fp_int(300).to_bits(), "the dome moved with the boat");
+}
+
+#[test]
+fn anti_torpedo_charges_shoot_torpedoes_down() {
+    let damage_taken = |charges: bool| {
+        let mut world = lake_world();
+        let destroyer = spawn(&mut world, "t2_destroyer", Team::Blue, point(2_000, 1_000));
+        let entity = world.unit_entity(destroyer).unwrap();
+        world.ecs.get::<&mut sim_engine::sim::components::Combat>(entity).unwrap().range = Fp::ZERO;
+        world.ecs.get::<&mut sim_engine::sim::components::ExtraWeapons>(entity).unwrap().0.clear();
+        if !charges {
+            world.ecs.remove_one::<sim_engine::sim::components::TorpedoDefense>(entity).unwrap();
+            world.torpedo_defenses.clear();
+        }
+        world.spawn_finished_structure(world.blueprints.id("t1_torpedo_launcher"), Team::Red, 120, 50).unwrap();
+        let full = world.unit_health(destroyer).unwrap();
+        run_ticks(&mut world, 400);
+        full - world.unit_health(destroyer).unwrap_or(Fp::ZERO)
+    };
+    let (without, with) = (damage_taken(false), damage_taken(true));
+    assert!(without > Fp::ZERO);
+    assert!(with < without, "the charges stop some torpedoes: {with} against {without}");
+}
+
+fn stock(world: &SimWorld, id: SimId) -> u32 {
+    world.ecs.get::<&sim_engine::sim::components::Launcher>(world.unit_entity(id).unwrap()).unwrap().stock
+}
+
+#[test]
+fn a_missile_sub_builds_nuclear_missiles_only_on_order_and_fires_cruise_missiles_on_its_own() {
+    let mut world = lake_world();
+    let sub = spawn(&mut world, "t3_missile_sub", Team::Blue, point(3_600, 1_000));
+    // A generator on the far shore, 2,400 away, in reach of its cruise missiles.
+    let generator = world.spawn_finished_structure(world.blueprints.id("power_generator"), Team::Red, 59, 50).unwrap();
+    let gone = (0..600).any(|_| {
+        world.advance_tick(&[]);
+        world.unit_health(generator).is_none()
+    });
+    assert!(gone, "its cruise missiles fire on their own, and cost nothing");
+    assert_eq!(stock(&world, sub), 0, "no nuclear missile without an order to build one");
+    let nuke = world.blueprints.id("strategic_missile");
+    world.advance_tick(&[SimCommand::QueueUnit { factory: sub, blueprint: nuke, count: 1 }]);
+    // 4,000 build time at 20 build power is 200 seconds.
+    let built = (0..2_100).any(|_| {
+        world.advance_tick(&[]);
+        stock(&world, sub) == 1
+    });
+    assert!(built, "it builds one when told to");
+    run_ticks(&mut world, 2_100);
+    assert_eq!(stock(&world, sub), 1, "and only the one");
+    // Building one after another, it stops at three.
+    world.advance_tick(&[SimCommand::QueueUnit { factory: sub, blueprint: nuke, count: 1 }]);
+    world.advance_tick(&[SimCommand::SetRepeat { factory: sub, repeat: true }]);
+    run_ticks(&mut world, 6_500);
+    assert_eq!(stock(&world, sub), 3, "up to three");
 }

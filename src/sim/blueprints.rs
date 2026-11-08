@@ -288,6 +288,12 @@ pub struct MissileDefenseDef {
     pub reload_ticks: u32,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct TorpedoDefenseDef {
+    pub range: Fp,
+    pub reload_ticks: u32,
+}
+
 /// The commander's Overcharge: a shot paid for from stored energy, that destroys almost any
 /// mobile unit but does little to structures.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -376,6 +382,8 @@ pub struct Blueprint {
     pub overcharge: Option<OverchargeDef>,
     pub shield: Option<ShieldDef>,
     pub missile_defense: Option<MissileDefenseDef>,
+    /// Anti-torpedo charges: they shoot down enemy torpedoes within range, one each reload.
+    pub torpedo_defense: Option<TorpedoDefenseDef>,
     pub air_staging: Option<AirStagingDef>,
     /// For factories.
     pub factory_kind: Option<FactoryKind>,
@@ -531,6 +539,13 @@ struct RawMissileDefense {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct RawTorpedoDefense {
+    range: Number,
+    reload_ticks: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawOvercharge {
     energy: Number,
     damage: Number,
@@ -618,6 +633,7 @@ struct RawUnit {
     overcharge: Option<RawOvercharge>,
     shield: Option<RawShield>,
     missile_defense: Option<RawMissileDefense>,
+    torpedo_defense: Option<RawTorpedoDefense>,
     air_staging: Option<RawAirStaging>,
     /// "land" or "air".
     factory_kind: Option<String>,
@@ -855,8 +871,9 @@ impl BlueprintDb {
             let weapon = unit.weapon.as_ref().map(parse_weapon).transpose()?;
             // Extra weapons fire shells, or steering shots at aircraft, on their own targets.
             let extra_weapons = unit.extra_weapons.iter().map(parse_weapon).collect::<Result<Vec<_>, _>>()?;
-            if extra_weapons.iter().any(|extra| extra.kind != WeaponKind::Shell || extra.artillery) {
-                return Err(context("extra weapons can only fire shells".into()));
+            // Extra weapons fire shells, steering shots, or missiles that pick their own targets.
+            if extra_weapons.iter().any(|extra| extra.artillery || !(extra.kind == WeaponKind::Shell || (extra.kind == WeaponKind::TacticalMissile && extra.automatic))) {
+                return Err(context("extra weapons can only fire shells, or automatic tactical missiles".into()));
             }
             if !extra_weapons.is_empty() && weapon.is_none() {
                 return Err(context("extra weapons need a main weapon".into()));
@@ -910,9 +927,7 @@ impl BlueprintDb {
                 None => None,
                 Some(cloak) => Some(cloak.upkeep.res().map_err(context)? / TICKS_PER_SECOND),
             };
-            if shield.is_some() && footprint == 0 {
-                return Err(context("only structures can have shields".into()));
-            }
+
             blueprints.push(Blueprint {
                 id: BlueprintId(index as u16),
                 key: unit.id.clone(),
@@ -977,6 +992,10 @@ impl BlueprintDb {
                 overcharge,
                 shield,
                 missile_defense,
+                torpedo_defense: match &unit.torpedo_defense {
+                    None => None,
+                    Some(defense) => Some(TorpedoDefenseDef { range: defense.range.fp().map_err(context)?, reload_ticks: defense.reload_ticks }),
+                },
                 air_staging,
                 factory_kind: match unit.factory_kind.as_deref() {
                     None => None,
