@@ -41,6 +41,10 @@ const SPENDING: Color32 = Color32::from_rgb(250, 190, 120);
 const VETERAN: Color32 = Color32::from_rgb(255, 205, 60);
 /// The ring and bar shown on anything upgrading.
 const UPGRADING: Color32 = Color32::from_rgb(200, 130, 255);
+/// The mark on a stunned unit, and the color of tractor beams and storms.
+const STUNNED: Color32 = Color32::from_rgb(140, 210, 255);
+const TRACTOR: Color32 = Color32::from_rgb(120, 255, 200);
+const STORM: Color32 = Color32::from_rgb(170, 110, 255);
 /// How fast the ring around an upgrading unit pulses, in radians a second.
 const UPGRADE_PULSE_RATE: f64 = 4.0;
 /// How close to an order's icon a Shift-press grabs it, in points.
@@ -2078,6 +2082,33 @@ pub fn draw_interceptions(ctx: &egui::Context, camera: &Camera, interceptions: &
     }
 }
 
+/// Tractor beams, from each holder to what it holds, and the storms roaming the battlefield
+/// (GAME_SPECIFICATION.md §12).
+pub fn draw_exotic(ctx: &egui::Context, camera: &Camera, heights: &crate::render::camera::HeightField, snapshot: &SimSnapshot, pixels_per_point: f32) {
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    let to_points = |world: [f64; 3]| camera.world_to_screen(world).map(|pixels| Pos2::new(pixels[0] as f32 / pixels_per_point, pixels[1] as f32 / pixels_per_point));
+    let raw = |value: i32| f64::from(value) / 4096.0;
+    for &[from, to] in &snapshot.tractor_beams {
+        let (Some(from), Some(to)) = (to_points([raw(from[0]), raw(from[1]), raw(from[2])]), to_points([raw(to[0]), raw(to[1]), raw(to[2])])) else {
+            continue;
+        };
+        painter.line_segment([from, to], Stroke::new(7.0_f32, TRACTOR.gamma_multiply(0.25)));
+        painter.line_segment([from, to], Stroke::new(2.0_f32, TRACTOR));
+    }
+    let time = ctx.input(|input| input.time);
+    for storm in &snapshot.storms {
+        let (x, y) = (raw(storm.x), raw(storm.y));
+        let ground = heights.height_at(x, y);
+        let (Some(center), Some(edge)) = (to_points([x, y, ground]), to_points([x + raw(storm.radius), y, ground])) else {
+            continue;
+        };
+        let radius = (edge - center).length().max(6.0);
+        let flicker = ((time * 9.0).sin() * 0.5 + 0.5) as f32;
+        painter.circle_filled(center, radius, STORM.gamma_multiply(0.18 + flicker * 0.12));
+        painter.circle_stroke(center, radius, Stroke::new(2.0_f32, STORM));
+    }
+}
+
 /// Rings where the viewer's teleports will land, filling as they charge.
 pub fn draw_teleports(ctx: &egui::Context, camera: &Camera, heights: &crate::render::camera::HeightField, teleports: &[(SimId, [i32; 2], u16)], pixels_per_point: f32) {
     let painter = ctx.layer_painter(egui::LayerId::background());
@@ -2339,6 +2370,10 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
         }
         if snapshot.paused.binary_search(&unit.id).is_ok() {
             painter.text(center, Align2::CENTER_CENTER, "PAUSED", FontId::proportional(13.0), Color32::YELLOW);
+        }
+        // Stunned by an EMP, on either side, as long as it is in sight.
+        if snapshot.stunned.binary_search(&unit.id).is_ok() {
+            painter.text(center + Vec2::new(0.0, 16.0), Align2::CENTER_CENTER, "STUNNED", FontId::proportional(12.0), STUNNED);
         }
         let rank = rank_of(snapshot, unit.id);
         if rank > 0 {

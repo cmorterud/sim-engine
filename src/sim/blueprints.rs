@@ -140,6 +140,9 @@ pub enum WeaponKind {
     StrategicMissile,
     /// A bomb, dropped from an aircraft as it passes over its target.
     Bomb,
+    /// A gravity beam (GAME_SPECIFICATION.md §12): it lifts an enemy land unit, holds it, and
+    /// crushes it once `crush_ticks` have passed.
+    Tractor,
 }
 
 /// What a structure gives the finished structures of its team that touch it (GAME_SPECIFICATION.md
@@ -276,6 +279,22 @@ pub struct WeaponDef {
     pub energy_per_shot: Res,
     /// A missile weapon that picks its own targets and needs no missiles built, as a ship's do.
     pub automatic: bool,
+    /// EMP (GAME_SPECIFICATION.md §12): what it hits, directly or in its blast, is stunned this long.
+    pub stun_ticks: u32,
+    /// For a tractor beam: how long it holds a unit before crushing it.
+    pub crush_ticks: u32,
+}
+
+/// A storm a unit leaves where it is destroyed (GAME_SPECIFICATION.md §12), that roams on its
+/// own and damages every enemy it covers.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct StormDef {
+    pub radius: Fp,
+    /// Per tick, to each enemy under it.
+    pub damage_per_tick: Fp,
+    pub ticks: u32,
+    /// Units per tick.
+    pub speed: Fp,
 }
 
 /// A defense that destroys enemy missiles in flight.
@@ -379,6 +398,7 @@ pub struct Blueprint {
     pub mass_storage: Res,
     pub energy_storage: Res,
     pub death_explosion: Option<ExplosionDef>,
+    pub death_storm: Option<StormDef>,
     pub overcharge: Option<OverchargeDef>,
     pub shield: Option<ShieldDef>,
     pub missile_defense: Option<MissileDefenseDef>,
@@ -503,6 +523,19 @@ struct RawWeapon {
     energy_per_shot: Option<Number>,
     #[serde(default)]
     automatic: bool,
+    stun_seconds: Option<u32>,
+    crush_seconds: Option<u32>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawStorm {
+    radius: Number,
+    /// A second, to each enemy under it.
+    damage: Number,
+    seconds: u32,
+    /// Units a tick.
+    speed: Number,
 }
 
 #[derive(Deserialize)]
@@ -634,6 +667,7 @@ struct RawUnit {
     shield: Option<RawShield>,
     missile_defense: Option<RawMissileDefense>,
     torpedo_defense: Option<RawTorpedoDefense>,
+    death_storm: Option<RawStorm>,
     air_staging: Option<RawAirStaging>,
     /// "land" or "air".
     factory_kind: Option<String>,
@@ -849,6 +883,7 @@ impl BlueprintDb {
                         Some("tactical_missile") => WeaponKind::TacticalMissile,
                         Some("strategic_missile") => WeaponKind::StrategicMissile,
                         Some("bomb") => WeaponKind::Bomb,
+                        Some("tractor") => WeaponKind::Tractor,
                         Some(other) => return Err(context(format!("unknown weapon kind {other:?}"))),
                     },
                     cruise_height: whole(&weapon.cruise_height)?,
@@ -866,6 +901,8 @@ impl BlueprintDb {
                     spread: whole(&weapon.spread)?,
                     energy_per_shot: weapon.energy_per_shot.as_ref().map_or(Ok(Res::ZERO), Number::res).map_err(context)?,
                     automatic: weapon.automatic,
+                    stun_ticks: weapon.stun_seconds.unwrap_or(0) * TICKS_PER_SECOND as u32,
+                    crush_ticks: weapon.crush_seconds.unwrap_or(0) * TICKS_PER_SECOND as u32,
                 })
             };
             let weapon = unit.weapon.as_ref().map(parse_weapon).transpose()?;
@@ -992,6 +1029,15 @@ impl BlueprintDb {
                 overcharge,
                 shield,
                 missile_defense,
+                death_storm: match &unit.death_storm {
+                    None => None,
+                    Some(storm) => Some(StormDef {
+                        radius: storm.radius.fp().map_err(context)?,
+                        damage_per_tick: storm.damage.fp().map_err(context)? / TICKS_PER_SECOND as i32,
+                        ticks: storm.seconds * TICKS_PER_SECOND as u32,
+                        speed: storm.speed.fp().map_err(context)?,
+                    }),
+                },
                 torpedo_defense: match &unit.torpedo_defense {
                     None => None,
                     Some(defense) => Some(TorpedoDefenseDef { range: defense.range.fp().map_err(context)?, reload_ticks: defense.reload_ticks }),

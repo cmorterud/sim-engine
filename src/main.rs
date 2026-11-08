@@ -1297,6 +1297,7 @@ fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                             ui::draw_work_beams(ctx, &camera, &beams, beam_time, pixels_per_point);
                             ui::draw_interceptions(ctx, &camera, &snapshot.interceptions, pixels_per_point);
                             ui::draw_teleports(ctx, &camera, &map.heights, &snapshot.teleports, pixels_per_point);
+                            ui::draw_exotic(ctx, &camera, &map.heights, &snapshot, pixels_per_point);
                             ui::draw_sensor_coverage(ctx, &camera, &map.heights, &snapshot.sensor_ranges, pixels_per_point);
                             ui::draw_blips(ctx, &camera, &snapshot.blips, pixels_per_point);
                             ui::order_trails(ctx, &camera, &trails, pixels_per_point);

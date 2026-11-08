@@ -405,6 +405,7 @@ impl SimWorld {
                     missile_height: (weapon.kind == WeaponKind::TacticalMissile).then_some(weapon.cruise_height),
                     target: None,
                     turret: weapon.turn_rate.map(|rate| Turret::new(facing, rate)),
+                    stun_ticks: weapon.stun_ticks,
                 })
                 .collect();
             self.ecs.insert_one(entity, super::components::ExtraWeapons(extras)).expect("entity was just spawned");
@@ -412,6 +413,14 @@ impl SimWorld {
         if let Some(weapon) = unit.weapon.filter(|weapon| weapon.artillery) {
             let artillery = super::components::Artillery { min_range: weapon.min_range, spread: weapon.spread, energy_per_shot: weapon.energy_per_shot };
             self.ecs.insert_one(entity, artillery).expect("entity was just spawned");
+        }
+        if let Some(weapon) = unit.weapon.filter(|weapon| weapon.stun_ticks > 0) {
+            self.ecs.insert_one(entity, super::components::StunWeapon(weapon.stun_ticks)).expect("entity was just spawned");
+        }
+        if let Some(weapon) = unit.weapon.filter(|weapon| weapon.kind == WeaponKind::Tractor) {
+            let beam = super::components::TractorBeam { crush_ticks: weapon.crush_ticks.max(1), holding: None };
+            self.ecs.insert_one(entity, beam).expect("entity was just spawned");
+            self.tractors.push((id, entity));
         }
         if let Some(rate) = unit.weapon.and_then(|weapon| weapon.turn_rate) {
             self.ecs.insert_one(entity, Turret::new(facing, rate)).expect("entity was just spawned");
@@ -1038,7 +1047,7 @@ impl SimWorld {
     /// jamming run while paid for, and a cloak that cannot be paid for switches off. Paused and
     /// unfinished structures neither pay nor run. Returns what each team has paid, shields included.
     fn step_intel_upkeep(&mut self, mut paid: [Res; 2]) -> [Res; 2] {
-        for &(_, entity) in &self.intel {
+        for &(id, entity) in &self.intel {
             let blueprint = self.blueprints.get(self.ecs.get::<&Blueprinted>(entity).expect("intel units have blueprints").0);
             let (upkeep, cloak_upkeep) = (blueprint.upkeep, self.cloak_upkeep(entity).unwrap_or(Res::ZERO));
             let effects = if self.enhanced.is_empty() { None } else { Some(self.enhancement_effects(entity)) };
@@ -1047,6 +1056,12 @@ impl SimWorld {
             let switched_off = self.ecs.get::<&Construction>(entity).is_ok() || self.ecs.get::<&Paused>(entity).is_ok();
             let discount = self.ecs.get::<&Adjacency>(entity).map_or(0, |adjacency| adjacency.upkeep_discount);
             let mut intel = self.ecs.get::<&mut Intel>(entity).expect("intel list only holds intel units");
+            // Stunned, or held in a tractor beam, everything is off, and nothing is paid for.
+            if !self.disabled.is_empty() && self.disabled.binary_search_by_key(&id, |unit| unit.0).is_ok() {
+                intel.running &= upkeep == Res::ZERO;
+                (intel.cloaked, intel.stealthed, intel.jamming) = (false, false, false);
+                continue;
+            }
             let economy = &self.economies[team];
             let mut afford = |cost: Res| {
                 let ok = economy.energy + economy.energy_income - paid[team] >= cost;
@@ -2119,6 +2134,25 @@ impl SimWorld {
             hasher.write(&shield.recharging.to_le_bytes());
             hasher.write(&shield.recharge_ticks.to_le_bytes());
             hasher.write(&shield.upkeep.to_bits().to_le_bytes());
+        }
+        // §12's status effects and tractor beams, only for the units that have them.
+        if let Ok(stunned) = self.ecs.get::<&super::components::Stunned>(entity) {
+            hasher.write(&[32]);
+            hasher.write(&stunned.ticks_left.to_le_bytes());
+        }
+        if let Ok(held) = self.ecs.get::<&super::components::Held>(entity) {
+            hasher.write(&[33]);
+            hasher.write(&held.by.0.to_le_bytes());
+            hasher.write(&held.ticks_left.to_le_bytes());
+        }
+        if let Ok(beam) = self.ecs.get::<&super::components::TractorBeam>(entity) {
+            hasher.write(&[34]);
+            hasher.write(&beam.crush_ticks.to_le_bytes());
+            hasher.write(&beam.holding.map_or(u32::MAX, |id| id.0).to_le_bytes());
+        }
+        if let Ok(weapon) = self.ecs.get::<&super::components::StunWeapon>(entity) {
+            hasher.write(&[35]);
+            hasher.write(&weapon.0.to_le_bytes());
         }
         if let Ok(patrol) = self.ecs.get::<&Patrol>(entity) {
             hasher.write(&[7]);

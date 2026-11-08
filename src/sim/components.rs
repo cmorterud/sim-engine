@@ -270,6 +270,8 @@ pub struct ExtraWeapon {
     pub missile_height: Option<Fp>,
     pub target: Option<SimId>,
     pub turret: Option<Turret>,
+    /// What it hits is stunned this many ticks.
+    pub stun_ticks: u32,
 }
 
 /// An artillery piece's weapon (GAME_SPECIFICATION.md §7): it cannot hit what is too close,
@@ -762,3 +764,33 @@ mod tests {
         assert!((length - Fp::ONE).abs() <= Fp::from_bits(8), "facing is no longer a unit vector: {length}");
     }
 }
+
+/// Stunned by an EMP (GAME_SPECIFICATION.md §12): it cannot move or fire, its sensors, cloak,
+/// stealth and jamming are off, and its shield dome is down, until the time runs out.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Stunned {
+    pub ticks_left: u32,
+}
+
+/// Lifted by a tractor beam (GAME_SPECIFICATION.md §12): held helpless, and drawn in to the unit
+/// holding it, which crushes it when the time runs out. Let go if that unit dies.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Held {
+    pub by: SimId,
+    pub ticks_left: u32,
+}
+
+/// A tractor beam: it holds one unit at a time, and crushes each after `crush_ticks`.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct TractorBeam {
+    pub crush_ticks: u32,
+    pub holding: Option<SimId>,
+}
+
+/// A unit whose main weapon stuns what it hits, for this many ticks.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct StunWeapon(pub u32);
+
+/// A shot that stuns what it hits, or what its blast reaches, for this many ticks.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Stunning(pub u32);

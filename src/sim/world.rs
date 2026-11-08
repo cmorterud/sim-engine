@@ -9,7 +9,7 @@ use super::combat::{entry_hit, firing_solution, missile_velocity, probe_terrain,
 use super::commands::SimCommand;
 use super::components::{BuildTask, AntiAir, Artillery, BombBay, Falling, Flight, Homing,
     Blueprinted, Builder, Combat, Construction, Factory, Footprint, Health, MoveClass, Order, OrderKind, OrderQueue, Patrol,
-    Intel, Launcher, Missile, MissileDefense, Upgrading, Overcharged, OverchargeOrder, OverchargeWeapon, Paused, Position, Projectile, Shield, SimId, Team, Turning, Turret, UnitStats, Velocity, Veterancy,
+    Intel, Launcher, Missile, Stunning, MissileDefense, Upgrading, Overcharged, OverchargeOrder, OverchargeWeapon, Paused, Position, Projectile, Shield, SimId, Team, Turning, Turret, UnitStats, Velocity, Veterancy,
     Wreck, WreckKind, rotate_toward,
 };
 use super::config::{SimConfig, TARGET_SEARCH_INTERVAL, TERRAIN_CELL_UNITS, WRECK_HEALTH_PERMILLE, WRECK_MASS_PERMILLE};
@@ -31,7 +31,7 @@ const SLOT_EXTRA_TICKS: i64 = 40;
 /// How long a formation waits for members that have fallen behind, before going on without them.
 const FORMATION_PATIENCE_TICKS: u32 = 100;
 /// How long a unit passes over a target that the ground stops its shots at.
-const BLOCKED_TARGET_TICKS: u32 = 50;
+pub(super) const BLOCKED_TARGET_TICKS: u32 = 50;
 /// How far below the ground a ground attack aims: a sixteenth of a unit.
 const GROUND_AIM_DEPTH: Fp = Fp::from_bits(256);
 /// Long enough for a bomb to fall from any aircraft's height.
@@ -283,6 +283,13 @@ pub struct SimSnapshot {
     /// structure upgrading in place. It says nothing more, so it gives away nothing else of an
     /// enemy's. Sorted by `SimId`.
     pub upgrading: Vec<SimId>,
+    /// Units in `units` that are stunned, sorted by `SimId` (GAME_SPECIFICATION.md §12).
+    pub stunned: Vec<SimId>,
+    /// Units in `units` held in a tractor beam, and the unit holding each, as raw `Fp`
+    /// positions: from the holder to what it holds.
+    pub tractor_beams: Vec<[[i32; 3]; 2]>,
+    /// Storms the viewer can see: where, as raw `Fp`, and how wide.
+    pub storms: Vec<StormView>,
     /// The viewer's teleports charging: to where, and how far along, in thousandths.
     pub teleports: Vec<(SimId, [i32; 2], u16)>,
     /// The viewer's units counting down to blowing up, and the ticks left.
@@ -310,6 +317,14 @@ pub struct SimSnapshot {
     pub match_result: Option<MatchResult>,
 }
 
+/// A roaming storm, for drawing.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct StormView {
+    pub x: i32,
+    pub y: i32,
+    pub radius: i32,
+}
+
 /// A blast waiting to be applied.
 #[derive(Copy, Clone, Debug)]
 struct Explosion {
@@ -319,6 +334,8 @@ struct Explosion {
     damage: Fp,
     /// Who gets the credit for what it destroys.
     source: Option<SimId>,
+    /// An EMP blast stuns what it reaches this many ticks.
+    stun: u32,
 }
 
 /// The highest veteran rank.
@@ -349,6 +366,8 @@ struct PendingShot {
     spread: Fp,
     /// A torpedo, steering under the water.
     underwater: bool,
+    /// What it hits is stunned this many ticks.
+    stun: u32,
 }
 
 /// What a launcher gives the missile it fires.
@@ -419,6 +438,16 @@ pub struct SimWorld {
     pub submarines: Vec<(SimId, hecs::Entity)>,
     pub seabed_walkers: Vec<(SimId, hecs::Entity)>,
     pub air_stagings: Vec<(SimId, hecs::Entity)>,
+    /// Units that are stunned or held in a tractor beam, and units with tractor beams, sorted by
+    /// `SimId`. Worked out from what is hashed, so they are not hashed themselves.
+    pub disabled: Vec<(SimId, hecs::Entity)>,
+    pub tractors: Vec<(SimId, hecs::Entity)>,
+    /// Storms roaming where units died (GAME_SPECIFICATION.md §12), oldest first.
+    pub storms: Vec<super::exotic::Storm>,
+    /// Stuns from this tick's hits and blasts, applied with the damage.
+    pub(super) pending_stuns: Vec<(hecs::Entity, u32)>,
+    /// Units that tractor beams take hold of this tick: by whom, and whom.
+    pub(super) pending_grabs: Vec<(SimId, SimId)>,
     pub(super) captured_this_tick: Vec<SimId>,
     /// For each team, the cloaked enemies it cannot see this tick, sorted by `SimId`. Worked out
     /// again every tick from what is hashed, so it is not hashed itself.
@@ -515,6 +544,11 @@ impl SimWorld {
             seabed_walkers: Vec::new(),
             torpedo_defenses: Vec::new(),
             air_stagings: Vec::new(),
+            disabled: Vec::new(),
+            tractors: Vec::new(),
+            storms: Vec::new(),
+            pending_stuns: Vec::new(),
+            pending_grabs: Vec::new(),
             captured_this_tick: Vec::new(),
             concealed: [Vec::new(), Vec::new()],
             interceptions: Vec::new(),
@@ -612,6 +646,14 @@ impl SimWorld {
         let entity = self.ecs.spawn((id, Position(position), projectile));
         self.projectiles.push((id, entity));
         id
+    }
+
+    pub(super) fn max_mobile_radius(&self) -> i32 {
+        self.max_mobile_radius
+    }
+
+    pub(super) fn max_structure_radius(&self) -> i32 {
+        self.max_structure_radius
     }
 
     pub(super) fn find_unit(&self, id: SimId) -> Option<(usize, hecs::Entity)> {
@@ -1214,12 +1256,18 @@ impl SimWorld {
 
         let max_radius = self.max_mobile_radius;
         let max_coordinate = terrain.max_coordinate_raw();
+        let disabled = &self.disabled;
         let mut unreachable = Vec::new();
         let mut query = self.ecs.query_mut::<(&mut Position, &mut Velocity, &UnitStats, &mut Order, &Combat, Option<&mut Turning>)>();
         let mut view = query.view();
         for (index, &(id, entity)) in units.iter().enumerate() {
             let (position, velocity, stats, order, combat, turning) = view.get_mut(entity).expect("unit list only holds live units");
             if stats.is_structure || stats.move_class == MoveClass::Air {
+                continue;
+            }
+            // Stunned, or held in a tractor beam, it cannot move.
+            if !disabled.is_empty() && disabled.binary_search_by_key(&id, |unit| unit.0).is_ok() {
+                velocity.0 = Vec3Fp::ZERO;
                 continue;
             }
             let here = position.0.xy();
@@ -1523,7 +1571,7 @@ impl SimWorld {
                 continue;
             }
             let running = self.ecs.get::<&Intel>(entity).is_ok_and(|intel| intel.running) && self.ecs.get::<&Construction>(entity).is_err();
-            if !running {
+            if !running || self.is_disabled(id) {
                 continue;
             }
             let (radar, omni) = self.sensor_ranges(entity);
@@ -1608,10 +1656,14 @@ impl SimWorld {
             Option<&super::components::Adjacency>,
             Option<&mut super::components::ExtraWeapons>,
             Option<&super::components::Torpedo>,
+            (Option<&super::components::TractorBeam>, Option<&super::components::StunWeapon>),
         )>();
         let mut view = query.view();
+        let disabled = &self.disabled;
+        let grabs = &mut self.pending_grabs;
+        grabs.clear();
         for (index, &(id, entity)) in units.iter().enumerate() {
-            let (stats, combat, turret, turning, mut overcharge, overcharge_order, mut launcher, anti_air, bomb_bay, flight, artillery, adjacency, extras, torpedo) =
+            let (stats, combat, turret, turning, mut overcharge, overcharge_order, mut launcher, anti_air, bomb_bay, flight, artillery, adjacency, extras, torpedo, (tractor, stun_weapon)) =
                 view.get_mut(entity).expect("unit list only holds live units");
             combat.ticks_until_ready = combat.ticks_until_ready.saturating_sub(1);
             if let Some(weapon) = overcharge.as_mut() {
@@ -1620,6 +1672,11 @@ impl SimWorld {
             if !combat.enabled || combat.range == Fp::ZERO {
                 continue;
             }
+            // Stunned, or held in a tractor beam, it cannot fire.
+            if !disabled.is_empty() && disabled.binary_search_by_key(&id, |unit| unit.0).is_ok() {
+                continue;
+            }
+            let stun = stun_weapon.map_or(0, |weapon| weapon.0);
             let me = grid.entry(index);
             let range = i64::from(combat.range.to_bits());
             let squared_distance = |x: i32, y: i32| {
@@ -1637,6 +1694,10 @@ impl SimWorld {
             let hits_air = anti_air.is_some() && !torpedo;
             let hits_ground = anti_air.is_none_or(|anti_air| anti_air.also_ground) && !torpedo;
             let can_hit = |entry: &super::spatial::GridEntry| {
+                // A tractor beam lifts only what moves on land.
+                if tractor.is_some() {
+                    return !entry.is_structure && !entry.is_air && !entry.is_sub && !entry.is_naval;
+                }
                 if entry.is_sub {
                     torpedo
                 } else if entry.is_air {
@@ -1665,7 +1726,8 @@ impl SimWorld {
                 inner_radius: launcher.inner_radius,
                 inner_damage: launcher.inner_damage,
             });
-            let loaded = launcher.as_ref().is_none_or(|launcher| launcher.automatic || launcher.stock > 0);
+            // A tractor beam holds one unit at a time.
+            let loaded = launcher.as_ref().is_none_or(|launcher| launcher.automatic || launcher.stock > 0) && tractor.is_none_or(|beam| beam.holding.is_none());
 
             // A ground attack takes over the gun, so the unit looks for nothing else.
             let ground = combat.ground_target;
@@ -1788,6 +1850,7 @@ impl SimWorld {
                             bomb: None,
                             spread: Fp::ZERO,
                             underwater: false,
+                            stun: 0,
                         });
                         weapon.ticks_until_ready = weapon.reload_ticks;
                         finished_overcharges.push(id);
@@ -1830,9 +1893,13 @@ impl SimWorld {
                     // A target picked by the unit itself is passed over for a while if the ground
                     // would stop the shot. One the player ordered is fired at regardless.
                     // Missiles, bombs and shots at aircraft are never blocked.
-                    } else if combat.forced_target.is_none() && missile.is_none() && homing.is_none() && bomb.is_none() && !shot_is_clear(terrain, from, to, combat.projectile_speed) {
+                    } else if combat.forced_target.is_none() && missile.is_none() && homing.is_none() && bomb.is_none() && tractor.is_none() && !shot_is_clear(terrain, from, to, combat.projectile_speed) {
                         combat.blocked = Some((target, tick + BLOCKED_TARGET_TICKS));
                         combat.target = None;
+                    } else if tractor.is_some() {
+                        // It takes hold, once the cleanup has checked the unit can be lifted.
+                        grabs.push((id, target));
+                        combat.ticks_until_ready = reload;
                     } else {
                         shots.push(PendingShot {
                             source: id,
@@ -1848,6 +1915,7 @@ impl SimWorld {
                             bomb,
                             spread,
                             underwater: torpedo,
+                            stun,
                         });
                         economies[stats.team.index()].energy -= weapon_energy;
                         combat.ticks_until_ready = reload;
@@ -1862,7 +1930,7 @@ impl SimWorld {
             }
             // A ground attack aims a hair below the ground, so that rounding cannot leave the shell
             // just above it at the spot, to skim on past. Any deeper, and a flat shot lands short.
-            if let Some(spot) = ground.filter(|_| hits_ground) {
+            if let Some(spot) = ground.filter(|_| hits_ground && tractor.is_none()) {
                 let spot_point = Vec3Fp::new(spot.x, spot.y, terrain.height_at(spot));
                 let distance = squared_distance(spot.x.to_bits(), spot.y.to_bits());
                 let in_reach = if bomb.is_some() { bomb_on(spot_point, 0) } else { distance <= range * range && far_enough(distance) };
@@ -1883,6 +1951,7 @@ impl SimWorld {
                         bomb,
                         spread,
                         underwater: false,
+                        stun,
                     });
                     economies[stats.team.index()].energy -= weapon_energy;
                     combat.ticks_until_ready = reload;
@@ -2000,6 +2069,7 @@ impl SimWorld {
                         bomb: None,
                         spread: Fp::ZERO,
                         underwater: weapon.torpedo,
+                        stun: weapon.stun_ticks,
                     });
                     weapon.ticks_until_ready = weapon.reload_ticks;
                 }
@@ -2042,6 +2112,9 @@ impl SimWorld {
                 let missile = Missile { target: shot.to.xy(), speed: shot.speed, cruise_height, strategic, inner_radius, inner_damage };
                 self.ecs.insert_one(entity, missile).expect("just spawned");
                 self.missiles.push((id, entity));
+                if shot.stun > 0 {
+                    self.ecs.insert_one(entity, Stunning(shot.stun)).expect("just spawned");
+                }
                 continue;
             }
             if let Some(target) = shot.homing {
@@ -2059,6 +2132,9 @@ impl SimWorld {
                 let id = self.spawn_projectile(shot.from, projectile);
                 let entity = self.projectiles.last().filter(|last| last.0 == id).expect("just spawned").1;
                 self.ecs.insert_one(entity, Homing { target, speed: shot.speed, underwater: shot.underwater }).expect("just spawned");
+                if shot.stun > 0 {
+                    self.ecs.insert_one(entity, Stunning(shot.stun)).expect("just spawned");
+                }
                 continue;
             }
             if let Some(velocity) = shot.bomb {
@@ -2074,6 +2150,9 @@ impl SimWorld {
                 let id = self.spawn_projectile(shot.from, projectile);
                 let entity = self.projectiles.last().filter(|last| last.0 == id).expect("just spawned").1;
                 self.ecs.insert_one(entity, Falling).expect("just spawned");
+                if shot.stun > 0 {
+                    self.ecs.insert_one(entity, Stunning(shot.stun)).expect("just spawned");
+                }
                 continue;
             }
             // An artillery shell lands somewhere within its spread of where it was aimed.
@@ -2105,6 +2184,10 @@ impl SimWorld {
                 let entity = self.projectiles.last().filter(|last| last.0 == projectile).expect("just spawned").1;
                 self.ecs.insert_one(entity, Overcharged { structure_damage }).expect("just spawned");
             }
+            if shot.stun > 0 {
+                let entity = self.projectiles.last().filter(|last| last.0 == projectile).expect("just spawned").1;
+                self.ecs.insert_one(entity, Stunning(shot.stun)).expect("just spawned");
+            }
         }
     }
 
@@ -2115,6 +2198,10 @@ impl SimWorld {
             .filter_map(|&(id, entity)| {
                 let shield = self.ecs.get::<&Shield>(entity).ok()?;
                 if !shield.is_up() || self.ecs.get::<&Construction>(entity).is_ok() || self.ecs.get::<&Paused>(entity).is_ok() {
+                    return None;
+                }
+                // A stunned generator's dome is down.
+                if self.is_disabled(id) {
                     return None;
                 }
                 let base = self.ecs.get::<&Position>(entity).ok()?.0.xy();
@@ -2246,15 +2333,18 @@ impl SimWorld {
         let friendly_fire = self.config.friendly_fire;
         let (max_mobile, max_structure) = (self.max_mobile_radius, self.max_structure_radius);
         hits.clear();
+        self.pending_stuns.clear();
         let units = &self.units;
-        let mut query = self.ecs.query_mut::<(&mut Position, &mut Projectile, Option<&Overcharged>, Option<&Missile>, Option<&Homing>, Option<&Falling>)>();
+        let stuns = &mut self.pending_stuns;
+        let mut query = self.ecs.query_mut::<(&mut Position, &mut Projectile, Option<&Overcharged>, Option<&Missile>, Option<&Homing>, Option<&Falling>, Option<&Stunning>)>();
         let mut view = query.view();
         for &(id, entity) in &self.projectiles {
             if shot_down.binary_search(&id).is_ok() {
                 dead.push(id);
                 continue;
             }
-            let (position, projectile, overcharged, missile, homing, falling) = view.get_mut(entity).expect("projectile list only holds live projectiles");
+            let (position, projectile, overcharged, missile, homing, falling, stunning) = view.get_mut(entity).expect("projectile list only holds live projectiles");
+            let stun = stunning.map_or(0, |stunning| stunning.0);
             let start = position.0;
             // A shot at an aircraft flies to it and hits only it. With the aircraft gone, it is spent.
             if let Some(homing) = homing {
@@ -2285,6 +2375,9 @@ impl SimWorld {
                         });
                     } else {
                         hits.push((target.entity, projectile.damage, Some(projectile.source)));
+                        if stun > 0 {
+                            stuns.push((target.entity, stun));
+                        }
                     }
                     dead.push(id);
                     continue;
@@ -2374,9 +2467,9 @@ impl SimWorld {
 
             // Splash shells detonate where they stop, and damage everything nearby.
             let splash = projectile.splash_radius > Fp::ZERO;
-            let blast = Explosion { x: end.x.to_bits(), y: end.y.to_bits(), radius: projectile.splash_radius, damage: projectile.damage, source: Some(projectile.source) };
+            let blast = Explosion { x: end.x.to_bits(), y: end.y.to_bits(), radius: projectile.splash_radius, damage: projectile.damage, source: Some(projectile.source), stun };
             // A nuclear blast also has an inner ring, that does far more.
-            let core = missile.filter(|missile| missile.inner_radius > Fp::ZERO).map(|missile| Explosion { radius: missile.inner_radius, damage: missile.inner_damage, ..blast });
+            let core = missile.filter(|missile| missile.inner_radius > Fp::ZERO).map(|missile| Explosion { radius: missile.inner_radius, damage: missile.inner_damage, stun: 0, ..blast });
 
             match (best, probe.hit) {
                 (Some((along, _, target, is_structure)), terrain_hit) if terrain_hit.is_none_or(|ground| along <= ground) => {
@@ -2389,6 +2482,9 @@ impl SimWorld {
                             _ => projectile.damage,
                         };
                         hits.push((target, damage, Some(projectile.source)));
+                        if stun > 0 {
+                            stuns.push((target, stun));
+                        }
                     }
                     dead.push(id);
                 }
@@ -2416,13 +2512,16 @@ impl SimWorld {
     /// Queues a hit on every unit within a blast, friend or foe, and on the debris there.
     fn apply_explosion(&mut self, blast: Explosion) {
         self.pending_wreck_blasts.push(blast);
-        let (grid, hits) = (&self.spatial_grid, &mut self.pending_hits);
+        let (grid, hits, stuns) = (&self.spatial_grid, &mut self.pending_hits, &mut self.pending_stuns);
         let radius = i64::from(blast.radius.to_bits());
         let mut consider = |other: &super::spatial::GridEntry| {
             let (dx, dy) = (i64::from(other.x - blast.x), i64::from(other.y - blast.y));
             let reach = radius + i64::from(other.radius);
             if dx * dx + dy * dy <= reach * reach {
                 hits.push((other.entity, blast.damage, blast.source));
+                if blast.stun > 0 {
+                    stuns.push((other.entity, blast.stun));
+                }
             }
         };
         let search = blast.radius.to_bits();
@@ -2434,6 +2533,7 @@ impl SimWorld {
     /// chain reactions they cause, then removes everything that died.
     pub fn step_cleanup(&mut self) {
         self.dead_units.clear();
+        self.step_exotic();
         let mut kills: Vec<(SimId, Team, Res)> = Vec::new();
         if !self.config.invulnerable_units {
             loop {
@@ -2466,8 +2566,11 @@ impl SimWorld {
                                     && self.ecs.get::<&Paused>(target).is_err()
                                     && self.economies[team.index()].extractor_efficiency > Res::ZERO;
                                 if !blast.only_while_running || running {
-                                    self.pending_explosions.push(Explosion { x, y, radius: blast.radius, damage: blast.damage, source: None });
+                                    self.pending_explosions.push(Explosion { x, y, radius: blast.radius, damage: blast.damage, source: None, stun: 0 });
                                 }
+                            }
+                            if let Some(storm) = self.blueprints.get(blueprint).death_storm {
+                                self.storms.push(super::exotic::Storm::new(team, Vec2Fp::new(Fp::from_bits(x), Fp::from_bits(y)), storm));
                             }
                         }
                     }
@@ -2478,6 +2581,9 @@ impl SimWorld {
         self.damage_shields();
         self.pending_explosions.clear();
         self.pending_hits.clear();
+        if !self.pending_stuns.is_empty() {
+            self.apply_stuns();
+        }
         for (killer, victim_team, mass) in kills {
             self.award_experience(killer, victim_team, mass);
         }
@@ -2517,6 +2623,8 @@ impl SimWorld {
             self.torpedo_defenses.retain(alive);
             self.seabed_walkers.retain(alive);
             self.air_stagings.retain(alive);
+            self.disabled.retain(alive);
+            self.tractors.retain(alive);
             self.dead_units.clear();
         }
         if !self.dead_projectiles.is_empty() {
@@ -2754,6 +2862,14 @@ impl SimWorld {
             write_fp(&mut hasher, wreck.health);
         }
         self.flow_field.hash_state(&mut hasher);
+        // Nothing is written without storms, so checksums from before they existed still hold.
+        if !self.storms.is_empty() {
+            hasher.write(&[3]);
+            hasher.write(&(self.storms.len() as u64).to_le_bytes());
+            for storm in &self.storms {
+                storm.hash_state(&mut hasher);
+            }
+        }
         // Nothing is written without formations, so checksums from before they existed still hold.
         if !self.formations.is_empty() {
             hasher.write(&(self.formations.len() as u64).to_le_bytes());
@@ -2837,6 +2953,10 @@ impl SimWorld {
         }
         if self.ecs.get::<&Falling>(entity).is_ok() {
             hasher.write(&[4]);
+        }
+        if let Ok(stunning) = self.ecs.get::<&Stunning>(entity) {
+            hasher.write(&[5]);
+            hasher.write(&stunning.0.to_le_bytes());
         }
         // Last, so that nothing is written for a shell.
         if let Ok(missile) = self.ecs.get::<&Missile>(entity) {
@@ -2947,7 +3067,7 @@ impl SimWorld {
                     center: [x, y, self.terrain.height_at(base).to_bits()],
                     radius: shield.radius.to_bits(),
                     health_permille: permille(i64::from(shield.health.to_bits()), i64::from(shield.max_health.to_bits())),
-                    up: switched_on && shield.is_up(),
+                    up: switched_on && shield.is_up() && !self.is_disabled(id),
                     recharging: shield.recharging,
                 })
             })
@@ -3013,7 +3133,7 @@ impl SimWorld {
         let own_intel = |viewer: Team| self.intel.iter().filter(move |&&(_, entity)| self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team == viewer));
         let sensor_ranges = viewer.map_or_else(Vec::new, |viewer| {
             own_intel(viewer)
-                .filter(|&&(_, entity)| self.ecs.get::<&Intel>(entity).is_ok_and(|intel| intel.running) && self.ecs.get::<&Construction>(entity).is_err())
+                .filter(|&&(id, entity)| self.ecs.get::<&Intel>(entity).is_ok_and(|intel| intel.running) && self.ecs.get::<&Construction>(entity).is_err() && !self.is_disabled(id))
                 .filter_map(|&(_, entity)| {
                     let (radar, omni) = self.sensor_ranges(entity);
                     let at = self.ecs.get::<&Position>(entity).ok()?.0;
@@ -3083,6 +3203,7 @@ impl SimWorld {
         let mut upgrading: Vec<SimId> = self.upgrading.iter().chain(&self.enhancing).chain(factory_upgrading).map(|unit| unit.0).filter(shown).collect();
         upgrading.sort_unstable();
         upgrading.dedup();
+        let (stunned, tractor_beams, storms) = self.exotic_views(&units, &seen);
         SimSnapshot {
             tick: self.current_tick,
             units,
@@ -3099,6 +3220,9 @@ impl SimWorld {
             enhancements,
             enhancing,
             upgrading,
+            stunned,
+            tractor_beams,
+            storms,
             teleports,
             self_destructs,
             factories,
