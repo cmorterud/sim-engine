@@ -44,7 +44,7 @@ Destroy the enemy commander to win. Yours explodes if it dies, and your whole te
 | L, then left-click an enemy | Overcharge with the commander: 3,000 stored energy for a shot that destroys almost any unit, but does little to structures |
 | O | Pause or resume the selected factories and construction sites. They keep their queue and progress |
 | Ctrl + 1 to 0 | Save the selection as a group, or clear the group if nothing is selected. Command works too |
-| 1 to 0, or click it in the bar on the left | Select that group. Hold Shift on the bar to add it to the selection |
+| 1 to 0, or click it in the bar on the left | Select that group, and press the key again quickly to jump the camera to it. Hold Shift on the bar to add it to the selection |
 | N | Mute or unmute, when nothing selected can build a gateway |
 | - and = | Sound quieter and louder, when nothing selected builds missiles |
 | Q, E, G, T, C, `, `,` `.` `/` `;` | With a builder selected: Land Factory, Mass Extractor, Power Generator, Mass Storage, Point Defense; with T2 engineers or T2 Engineering, also Shield Generator, Tactical Missile Launcher, Tactical Missile Defense; with T3, also Strategic Missile Launcher, Strategic Missile Defense. ` is the key above Tab |

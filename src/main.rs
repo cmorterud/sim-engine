@@ -13,7 +13,7 @@ use sim_engine::input::hotkeys;
 use sim_engine::input::orders::{
     assist_orders, attack_ground_orders, deposit_position, formation_commands, free_deposits, site_position, line_cells, mobile_units, move_orders, overcharge_orders, pending_builds, queued_commands, PendingBuild, placement_cell, placement_is_valid, placement_target, right_click_orders, PlacementMap, RightClick,
 };
-use sim_engine::input::selection::{ControlGroups, Selection};
+use sim_engine::input::selection::{group_center, ControlGroups, Selection};
 use sim_engine::math::fp::{Fp, Vec2Fp};
 use sim_engine::render::camera::{Camera, HeightField};
 use sim_engine::render::instances::{self, Headings, InstanceBatches};
@@ -104,7 +104,7 @@ Controls:
                        Command works too
   Ctrl + 1 to 0        Save the selection as a group, or clear it if nothing is selected.
                        Command works too
-  1 to 0               Select that group
+  1 to 0               Select that group, and press again quickly to jump the camera to it
   N                    Mute or unmute, unless a builder that can build a gateway is selected
   - and =              Sound quieter and louder, unless a missile silo is selected
   Space                Jump to your commander
@@ -990,6 +990,12 @@ fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                                     if members.is_empty() {
                                         feedback.show_rejected(None, &format!("Group {group} is empty"));
                                     } else {
+                                        // Pressing the key again straight away jumps the camera to the group.
+                                        if control_groups.recalled_twice(group, clock.elapsed().as_secs_f64()) {
+                                            if let Some([x, y]) = group_center(&members, &session.current.units) {
+                                                camera.look_at(x, y, 0.0);
+                                            }
+                                        }
                                         selection.select(members);
                                         armed = None;
                                         placing = None;

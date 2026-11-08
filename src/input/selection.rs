@@ -185,9 +185,20 @@ fn raw_to_world(raw: i32) -> f64 {
 #[derive(Clone, Debug, Default)]
 pub struct ControlGroups {
     groups: [Vec<SimId>; 10],
+    /// The last group recalled, and when, to spot a second press of its key.
+    last_recall: Option<(usize, f64)>,
 }
 
 impl ControlGroups {
+    /// Notes that a group was recalled at `now`, in seconds, and says whether this was the
+    /// second press of its key in quick succession, which jumps the camera to it.
+    pub fn recalled_twice(&mut self, group: usize, now: f64) -> bool {
+        let twice = self.last_recall.is_some_and(|(last, at)| last == group && now - at <= DOUBLE_CLICK_SECONDS);
+        // A third press starts a new pair rather than jumping again.
+        self.last_recall = if twice { None } else { Some((group, now)) };
+        twice
+    }
+
     /// Replaces a group with these units. Group numbers run from 0 to 9.
     pub fn store(&mut self, group: usize, units: &[SimId]) {
         self.groups[group] = units.to_vec();
@@ -217,6 +228,20 @@ impl ControlGroups {
         members.retain(|id| units.binary_search_by_key(id, |unit| unit.id).is_ok());
         members
     }
+}
+
+/// The middle of a group's units, in world units, if any of them are on the map.
+pub fn group_center(members: &[SimId], units: &[UnitView]) -> Option<[f64; 2]> {
+    let positions: Vec<[f64; 2]> = members
+        .iter()
+        .filter_map(|id| units.binary_search_by_key(id, |unit| unit.id).ok().map(|index| &units[index]))
+        .map(|unit| [f64::from(unit.x) / 4096.0, f64::from(unit.y) / 4096.0])
+        .collect();
+    if positions.is_empty() {
+        return None;
+    }
+    let count = positions.len() as f64;
+    Some([positions.iter().map(|p| p[0]).sum::<f64>() / count, positions.iter().map(|p| p[1]).sum::<f64>() / count])
 }
 
 pub fn units_in_box(units: &[UnitView], camera: &Camera, team: Team, min: [f64; 2], max: [f64; 2]) -> Vec<SimId> {
@@ -337,6 +362,26 @@ mod tests {
         let survivors = [plain_unit(1), plain_unit(3)];
         assert_eq!(groups.recall(3, &survivors), [SimId(1), SimId(3)]);
         assert!(groups.recall(3, &[]).is_empty());
+    }
+
+    #[test]
+    fn a_quick_second_press_of_a_group_key_jumps_to_it_and_a_third_does_not() {
+        let mut groups = ControlGroups::default();
+        assert!(!groups.recalled_twice(1, 10.0), "the first press only selects");
+        assert!(groups.recalled_twice(1, 10.3), "a second within 0.4 seconds jumps");
+        assert!(!groups.recalled_twice(1, 10.5), "a third starts over");
+        assert!(!groups.recalled_twice(1, 11.0), "too slow");
+        assert!(!groups.recalled_twice(2, 11.1), "another group's key is not a second press");
+        assert!(groups.recalled_twice(2, 11.2));
+    }
+
+    #[test]
+    fn a_groups_center_is_the_middle_of_its_units_on_the_map() {
+        let unit = |id: u32, x: i32, y: i32| UnitView { x: x * 4096, y: y * 4096, ..plain_unit(id) };
+        let units = [unit(1, 100, 200), unit(2, 300, 400), unit(5, 900, 900)];
+        assert_eq!(group_center(&[SimId(1), SimId(2)], &units), Some([200.0, 300.0]));
+        assert_eq!(group_center(&[SimId(1), SimId(7)], &units), Some([100.0, 200.0]), "units no longer on the map are left out");
+        assert_eq!(group_center(&[SimId(7)], &units), None);
     }
 
     #[test]
