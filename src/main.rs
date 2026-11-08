@@ -1048,26 +1048,23 @@ fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                                     session.send(order);
                                 }
                             }
-                            // N builds a gateway when a builder that can is selected, and mutes otherwise.
+                            // N builds what is in its slot of the build bar shown, and mutes otherwise.
                             PhysicalKey::Code(KeyCode::KeyN) if pressed && !event.repeat && !command_held => {
-                                match ui::hotkey_action(&session.current, selection.selected(), &map.blueprints, 'N') {
-                                    Some(action) => hotkey_actions.push(action),
+                                match ui::hotkey_action(&session.current, selection.selected(), &map.blueprints, 'N', ui::build_tiers(&egui_context)) {
+                                    Some(action) => hotkey_actions.push(ui::with_shift(action, shift_held, &map.blueprints)),
                                     None => sound_settings.toggle_mute(),
                                 }
                             }
-                            // - and = build missiles when a launcher is selected, and set the volume otherwise.
-                            PhysicalKey::Code(code @ (KeyCode::Minus | KeyCode::Equal)) if pressed && !command_held => {
-                                let letter = hotkeys::letter_for(code).expect("both are panel keys");
-                                match ui::hotkey_action(&session.current, selection.selected(), &map.blueprints, letter) {
-                                    Some(action) => hotkey_actions.push(ui::with_shift(action, shift_held, &map.blueprints)),
-                                    None if code == KeyCode::Minus => sound_settings.quieter(),
-                                    None => sound_settings.louder(),
-                                }
+                            PhysicalKey::Code(KeyCode::Minus) if pressed && !command_held => sound_settings.quieter(),
+                            PhysicalKey::Code(KeyCode::Equal) if pressed && !command_held => sound_settings.louder(),
+                            // ` shows the next tech level in the build bars.
+                            PhysicalKey::Code(KeyCode::Backquote) if pressed && !event.repeat && !command_held => {
+                                ui::cycle_build_tiers(&egui_context, &session.current, selection.selected(), &map.blueprints);
                             }
                             // Command and Control belong to the system: Command-Q must not start a factory.
                             PhysicalKey::Code(code) if pressed && !event.repeat && !command_held => {
                                 if let Some(letter) = hotkeys::letter_for(code) {
-                                    match ui::hotkey_action(&session.current, selection.selected(), &map.blueprints, letter) {
+                                    match ui::hotkey_action(&session.current, selection.selected(), &map.blueprints, letter, ui::build_tiers(&egui_context)) {
                                         Some(action) => hotkey_actions.push(ui::with_shift(action, shift_held, &map.blueprints)),
                                         None if selection.selected().is_empty() => feedback.show_rejected(None, "No units selected"),
                                         None => feedback.show_rejected(None, "Not available for this selection"),

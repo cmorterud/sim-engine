@@ -1,6 +1,6 @@
-//! Keys for the options in the command panel. Each option has one key whatever is selected,
-//! so that a builder and a factory selected together never compete for a key.
-//! Mostly on the left of the keyboard, because the other hand is on the mouse.
+//! Keys for the options in the command panel. Unit orders have a key each. Build items take
+//! the key of their slot in the build bar, which is the same for the same kind of thing at every
+//! tech level. Mostly on the left of the keyboard, because the other hand is on the mouse.
 
 use winit::keyboard::KeyCode;
 
@@ -23,79 +23,63 @@ pub const CLEAR_QUEUE: char = 'K';
 /// Letters handled on their own: panning, patrol, which also works by holding the key, and mute.
 pub const RESERVED: [char; 5] = ['W', 'A', 'S', 'D', PATROL];
 
-/// Function keys, for options added after every letter and punctuation key was taken. Each
-/// stands for its key as a character no keyboard types.
-pub const F1: char = '\u{E001}';
-pub const F2: char = '\u{E002}';
-pub const F3: char = '\u{E003}';
-pub const F4: char = '\u{E004}';
-pub const F5: char = '\u{E005}';
-pub const F6: char = '\u{E006}';
-pub const F7: char = '\u{E007}';
-pub const F8: char = '\u{E008}';
-pub const F9: char = '\u{E009}';
-pub const F10: char = '\u{E00A}';
+/// Shows the next tech level in the build bars.
+pub const CYCLE_TIER: char = '`';
 
-/// How a key is shown on a button: the letter, or the function key's name.
-pub fn key_name(letter: char) -> String {
-    match letter {
-        F1 => "F1".to_string(),
-        F2 => "F2".to_string(),
-        F3 => "F3".to_string(),
-        F4 => "F4".to_string(),
-        F5 => "F5".to_string(),
-        F6 => "F6".to_string(),
-        F7 => "F7".to_string(),
-        F8 => "F8".to_string(),
-        F9 => "F9".to_string(),
-        F10 => "F10".to_string(),
-        other => other.to_string(),
-    }
+/// The keys of a builder's bar, by slot. The common structures keep the keys they always had.
+pub const BUILDER_SLOT_KEYS: [char; 13] = ['Q', 'E', 'G', 'T', 'C', 'N', ',', '.', '/', ';', '\'', '[', ']'];
+/// The keys of a factory's bar, by slot. None is a builder's, so that a builder and a factory
+/// selected together never compete for a key.
+pub const FACTORY_SLOT_KEYS: [char; 4] = ['Z', 'B', 'V', 'H'];
+
+/// Which bar an item is in: a builder's, for structures, or a factory's, for units and missiles.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Bar {
+    Builder,
+    Factory,
 }
 
-/// The key for building a blueprint, by its key in the blueprint data.
-pub fn blueprint_hotkey(key: &str) -> Option<char> {
+/// An item's place in its build bar. Each kind of thing has its own slot, the same at every
+/// tech level, so that the key for an extractor, a power generator, or anti-air never changes
+/// with the level shown: only one level's items are in the bar at a time.
+pub fn build_slot(key: &str) -> Option<(Bar, usize)> {
+    use Bar::{Builder, Factory};
     Some(match key {
-        "land_factory_t1" => 'Q',
-        "mass_extractor" => 'E',
-        "power_generator" => 'G',
-        "mass_storage" => 'T',
-        "t1_point_defense" => 'C',
-        // Every letter is taken, so the key above Tab, beside 1.
-        "shield_generator" => '`',
-        // Missiles go on the keys right of M, and the silos' missiles beside 0.
-        "tactical_missile_launcher" => ',',
-        "tactical_missile_defense" => '.',
-        "strategic_missile_launcher" => '/',
-        "strategic_missile_defense" => ';',
-        // Building a missile is the same key in every silo, as no silo builds two kinds.
-        "strategic_missile" | "tactical_missile" => '-',
-        "radar" => '[',
-        "stealth_field_generator" => ']',
-
-        "anti_nuke" => '=',
-        // N mutes the sound when nothing selected can build a gateway.
-        "quantum_gateway" => 'N',
-        "hydrocarbon_plant" => F1,
-        "mass_fabricator" => F2,
-        "mass_fabricator_t3" => F3,
-        "air_factory" => F4,
-        "t1_aa_turret" => F5,
-        "air_staging" => F7,
-        "t2_flak" => F8,
-        "t3_sam" => F9,
-        // The gateway's support commander and the air factory's aircraft share the land
-        // factory's keys: a key queues every option on it in the selected factories' menus.
-        "t1_engineer" | "support_commander" | "t1_air_scout" => 'Z',
-        "t1_light_bot" | "t1_interceptor" => 'B',
-        "t1_light_artillery" | "t1_bomber" => 'V',
-        "t2_heavy_tank" | "t2_gunship" => 'H',
-        "t2_engineer" | "t3_spy_plane" => '\'',
-        "t3_engineer" | "t3_air_superiority" => '\\',
-        "t1_mobile_aa" | "t3_strategic_bomber" => F6,
-        "t2_mobile_flak" | "t3_heavy_gunship" => F10,
+        "land_factory_t1" | "quantum_gateway" => (Builder, 0),
+        "mass_extractor" => (Builder, 1),
+        "power_generator" => (Builder, 2),
+        "mass_storage" => (Builder, 3),
+        "t1_point_defense" => (Builder, 4),
+        "t1_aa_turret" | "t2_flak" | "t3_sam" => (Builder, 5),
+        "radar" => (Builder, 6),
+        // Two kinds that are never at the same level share a slot.
+        "air_factory" | "air_staging" => (Builder, 7),
+        "hydrocarbon_plant" | "mass_fabricator" | "mass_fabricator_t3" => (Builder, 8),
+        "tactical_missile_launcher" | "strategic_missile_launcher" => (Builder, 9),
+        "tactical_missile_defense" | "strategic_missile_defense" => (Builder, 10),
+        "shield_generator" => (Builder, 11),
+        "stealth_field_generator" => (Builder, 12),
+        // Builders and scouts, then direct fire, then artillery and bombers, then anti-air and gunships.
+        "t1_engineer" | "t2_engineer" | "t3_engineer" | "support_commander" | "t1_air_scout" | "t3_spy_plane" => (Factory, 0),
+        "tactical_missile" | "strategic_missile" | "anti_nuke" => (Factory, 0),
+        "t1_light_bot" | "t2_heavy_tank" | "t1_interceptor" | "t3_air_superiority" => (Factory, 1),
+        "t1_light_artillery" | "t1_bomber" | "t3_strategic_bomber" => (Factory, 2),
+        "t1_mobile_aa" | "t2_mobile_flak" | "t2_gunship" | "t3_heavy_gunship" => (Factory, 3),
         _ => return None,
     })
+}
+
+/// The key for an item, from its slot.
+pub fn blueprint_hotkey(key: &str) -> Option<char> {
+    build_slot(key).map(|(bar, slot)| match bar {
+        Bar::Builder => BUILDER_SLOT_KEYS[slot],
+        Bar::Factory => FACTORY_SLOT_KEYS[slot],
+    })
+}
+
+/// How a key is shown on a button.
+pub fn key_name(letter: char) -> String {
+    letter.to_string()
 }
 
 /// The letter of a key that is used for command panel options.
@@ -106,32 +90,19 @@ pub const fn letter_for(code: KeyCode) -> Option<char> {
         KeyCode::KeyG => 'G',
         KeyCode::KeyT => 'T',
         KeyCode::KeyC => 'C',
-        KeyCode::Backquote => '`',
+        KeyCode::KeyZ => 'Z',
+        KeyCode::KeyV => 'V',
+        KeyCode::KeyB => 'B',
+        KeyCode::KeyH => 'H',
+        KeyCode::KeyN => 'N',
         KeyCode::Comma => ',',
         KeyCode::Period => '.',
         KeyCode::Slash => '/',
         KeyCode::Semicolon => ';',
-        KeyCode::Minus => '-',
-        KeyCode::Equal => '=',
         KeyCode::Quote => '\'',
         KeyCode::BracketLeft => '[',
         KeyCode::BracketRight => ']',
-        KeyCode::Backslash => '\\',
-        KeyCode::KeyZ => 'Z',
-        KeyCode::KeyN => 'N',
-        KeyCode::F1 => F1,
-        KeyCode::F2 => F2,
-        KeyCode::F3 => F3,
-        KeyCode::F4 => F4,
-        KeyCode::F5 => F5,
-        KeyCode::F6 => F6,
-        KeyCode::F7 => F7,
-        KeyCode::F8 => F8,
-        KeyCode::F9 => F9,
-        KeyCode::F10 => F10,
-        KeyCode::KeyB => 'B',
-        KeyCode::KeyV => 'V',
-        KeyCode::KeyH => 'H',
+        KeyCode::Backquote => CYCLE_TIER,
         KeyCode::KeyM => MOVE,
         KeyCode::KeyF => ATTACK_MOVE,
         KeyCode::KeyY => ASSIST,
@@ -169,52 +140,39 @@ mod tests {
     use super::*;
     use crate::sim::blueprints::BlueprintDb;
 
-    const ALL_KEYS: [KeyCode; 42] = [
-        KeyCode::KeyN,
-        KeyCode::F1,
-        KeyCode::F2,
-        KeyCode::F3,
-        KeyCode::F4,
-        KeyCode::F5,
-        KeyCode::F6,
-        KeyCode::F7,
-        KeyCode::F8,
-        KeyCode::F9,
-        KeyCode::F10,
-        KeyCode::BracketLeft,
-        KeyCode::BracketRight,
-        KeyCode::Backquote,
-        KeyCode::Quote,
-        KeyCode::Backslash,
-        KeyCode::Comma,
-        KeyCode::Period,
-        KeyCode::Slash,
-        KeyCode::Semicolon,
-        KeyCode::Minus,
-        KeyCode::Equal,
-        KeyCode::KeyJ,
-        KeyCode::KeyI,
-        KeyCode::KeyO,
-        KeyCode::KeyL,
-        KeyCode::KeyM,
-        KeyCode::KeyF,
-        KeyCode::KeyY,
-        KeyCode::KeyX,
+    const ALL_KEYS: [KeyCode; 29] = [
         KeyCode::KeyQ,
         KeyCode::KeyE,
         KeyCode::KeyG,
         KeyCode::KeyT,
         KeyCode::KeyC,
         KeyCode::KeyZ,
-        KeyCode::KeyB,
         KeyCode::KeyV,
+        KeyCode::KeyB,
         KeyCode::KeyH,
+        KeyCode::KeyN,
+        KeyCode::Comma,
+        KeyCode::Period,
+        KeyCode::Slash,
+        KeyCode::Semicolon,
+        KeyCode::Quote,
+        KeyCode::BracketLeft,
+        KeyCode::BracketRight,
+        KeyCode::Backquote,
+        KeyCode::KeyM,
+        KeyCode::KeyF,
+        KeyCode::KeyY,
+        KeyCode::KeyJ,
+        KeyCode::KeyI,
+        KeyCode::KeyX,
+        KeyCode::KeyO,
+        KeyCode::KeyL,
         KeyCode::KeyU,
         KeyCode::KeyR,
         KeyCode::KeyK,
     ];
 
-    const PANEL_LETTERS: [char; 11] = [MOVE, ATTACK_MOVE, FORMATION, ATTACK_GROUND, ASSIST, STOP, PAUSE, OVERCHARGE, UPGRADE, REPEAT, CLEAR_QUEUE];
+    const PANEL_LETTERS: [char; 12] = [MOVE, ATTACK_MOVE, FORMATION, ATTACK_GROUND, ASSIST, STOP, PAUSE, OVERCHARGE, UPGRADE, REPEAT, CLEAR_QUEUE, CYCLE_TIER];
 
     /// Everything that can appear in a build menu, from the real data.
     fn buildable(db: &BlueprintDb) -> Vec<String> {
@@ -225,60 +183,63 @@ mod tests {
     }
 
     #[test]
-    fn everything_that_can_be_built_has_a_key() {
+    fn everything_that_can_be_built_has_a_slot_in_the_right_bar() {
         let db = BlueprintDb::standard();
-        let keys = buildable(&db);
-        assert_eq!(keys.len(), 41);
-        for key in keys {
-            assert!(blueprint_hotkey(&key).is_some(), "{key} has no hotkey");
+        for key in buildable(&db) {
+            let (bar, _) = build_slot(&key).unwrap_or_else(|| panic!("{key} has no slot"));
+            let expected = if db.get(db.id(&key)).is_structure() { Bar::Builder } else { Bar::Factory };
+            assert_eq!(bar, expected, "{key} is in the wrong bar");
         }
     }
 
     #[test]
-    fn no_two_options_share_a_key_or_take_one_already_in_use() {
+    fn no_two_items_in_one_bar_at_one_level_share_a_slot() {
         let db = BlueprintDb::standard();
-        // Factory items may share a key, as a key queues all of them: the two silos' missiles,
-        // and the engineer and the support commander. Structures never do, nor panel orders.
-        let shared = [
-            "tactical_missile",
-            "support_commander",
-            "t1_air_scout",
-            "t1_interceptor",
-            "t1_bomber",
-            "t2_gunship",
-            "t3_spy_plane",
-            "t3_air_superiority",
-            "t3_strategic_bomber",
-            "t3_heavy_gunship",
-        ];
-        let mut letters: Vec<char> = buildable(&db).iter().filter(|key| !shared.contains(&key.as_str())).filter_map(|key| blueprint_hotkey(key)).collect();
-        assert_eq!(blueprint_hotkey("tactical_missile"), blueprint_hotkey("strategic_missile"));
-        assert_eq!(blueprint_hotkey("support_commander"), blueprint_hotkey("t1_engineer"));
-        assert_eq!(blueprint_hotkey("t1_air_scout"), blueprint_hotkey("t1_engineer"));
-        assert_eq!(blueprint_hotkey("t1_interceptor"), blueprint_hotkey("t1_light_bot"));
-        assert_eq!(blueprint_hotkey("t1_bomber"), blueprint_hotkey("t1_light_artillery"));
-        // The T2 and T3 aircraft share the keys of T2 and T3 land factory items.
-        assert_eq!(blueprint_hotkey("t2_gunship"), blueprint_hotkey("t2_heavy_tank"));
-        assert_eq!(blueprint_hotkey("t3_spy_plane"), blueprint_hotkey("t2_engineer"));
-        assert_eq!(blueprint_hotkey("t3_air_superiority"), blueprint_hotkey("t3_engineer"));
-        assert_eq!(blueprint_hotkey("t3_strategic_bomber"), blueprint_hotkey("t1_mobile_aa"));
-        assert_eq!(blueprint_hotkey("t3_heavy_gunship"), blueprint_hotkey("t2_mobile_flak"));
-        letters.extend(PANEL_LETTERS);
-        let count = letters.len();
-        for letter in &letters {
-            assert!(!RESERVED.contains(letter), "{letter} is already used");
-        }
-        letters.sort_unstable();
-        letters.dedup();
-        assert_eq!(letters.len(), count, "two options share a key");
-        // And no one menu has two options on one key.
         for unit in db.iter() {
-            let mut menu: Vec<char> = unit.builds.iter().filter_map(|option| blueprint_hotkey(&db.get(*option).key)).collect();
-            let count = menu.len();
-            menu.sort_unstable();
-            menu.dedup();
-            assert_eq!(menu.len(), count, "two options in {}'s menu share a key", unit.key);
+            let mut taken: Vec<(u8, usize)> = unit.builds.iter().map(|option| (db.get(*option).tier, build_slot(&db.get(*option).key).unwrap().1)).collect();
+            let count = taken.len();
+            taken.sort_unstable();
+            taken.dedup();
+            assert_eq!(taken.len(), count, "two items in {}'s bar share a slot at one level", unit.key);
         }
+    }
+
+    #[test]
+    fn the_same_kind_of_thing_keeps_its_key_at_every_level() {
+        for kinds in [
+            &["t1_aa_turret", "t2_flak", "t3_sam"][..],
+            &["mass_fabricator", "mass_fabricator_t3"],
+            &["tactical_missile_launcher", "strategic_missile_launcher"],
+            &["tactical_missile_defense", "strategic_missile_defense"],
+            &["t1_engineer", "t2_engineer", "t3_engineer"],
+            &["t1_light_bot", "t2_heavy_tank"],
+            &["t1_mobile_aa", "t2_mobile_flak"],
+            &["t1_air_scout", "t3_spy_plane"],
+            &["t1_interceptor", "t3_air_superiority"],
+            &["t1_bomber", "t3_strategic_bomber"],
+            &["t2_gunship", "t3_heavy_gunship"],
+        ] {
+            let first = blueprint_hotkey(kinds[0]);
+            for kind in kinds {
+                assert_eq!(blueprint_hotkey(kind), first, "{kind}");
+            }
+        }
+        // The common structures keep the keys they always had.
+        for (key, letter) in [("land_factory_t1", 'Q'), ("mass_extractor", 'E'), ("power_generator", 'G'), ("mass_storage", 'T'), ("t1_point_defense", 'C'), ("t1_engineer", 'Z'), ("t1_light_bot", 'B')] {
+            assert_eq!(blueprint_hotkey(key), Some(letter), "{key}");
+        }
+    }
+
+    #[test]
+    fn slot_keys_never_take_a_key_already_in_use() {
+        for letter in BUILDER_SLOT_KEYS.iter().chain(&FACTORY_SLOT_KEYS) {
+            assert!(!RESERVED.contains(letter) && !PANEL_LETTERS.contains(letter), "{letter} is already used");
+        }
+        let mut keys: Vec<char> = BUILDER_SLOT_KEYS.iter().chain(&FACTORY_SLOT_KEYS).copied().collect();
+        let count = keys.len();
+        keys.sort_unstable();
+        keys.dedup();
+        assert_eq!(keys.len(), count, "two slots share a key, or a builder's and a factory's do");
     }
 
     #[test]
@@ -292,13 +253,11 @@ mod tests {
 
     #[test]
     fn every_key_shown_can_really_be_pressed() {
-        let db = BlueprintDb::standard();
         let pressable: Vec<char> = ALL_KEYS.iter().filter_map(|code| letter_for(*code)).collect();
-        let mut shown: Vec<char> = buildable(&db).iter().filter_map(|key| blueprint_hotkey(key)).collect();
-        shown.extend(PANEL_LETTERS);
-        for letter in shown {
-            assert!(pressable.contains(&letter), "{letter} is shown but cannot be pressed");
+        for letter in BUILDER_SLOT_KEYS.iter().chain(&FACTORY_SLOT_KEYS).chain(&PANEL_LETTERS) {
+            assert!(pressable.contains(letter), "{letter} is shown but cannot be pressed");
         }
         assert_eq!(letter_for(KeyCode::KeyW), None, "panning keys are not panel keys");
+        assert_eq!(letter_for(KeyCode::Minus), None, "- and = set the volume");
     }
 }
