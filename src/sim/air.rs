@@ -311,7 +311,7 @@ impl SimWorld {
                 }
             };
 
-            let step = Vec2Fp::new(turning.facing.x * speed, turning.facing.y * speed);
+            let step = turning.facing.scaled(speed);
             let next = Vec2Fp::new(Fp::from_bits((here.x + step.x).to_bits().clamp(0, max)), Fp::from_bits((here.y + step.y).to_bits().clamp(0, max)));
             // Landed, it rests on the ground like any other unit.
             position.0 = Vec3Fp::new(next.x, next.y, flying_height(terrain, next, flight.altitude.max(stats.radius)));

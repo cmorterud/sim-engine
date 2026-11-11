@@ -7,7 +7,7 @@ use super::blueprints::StormDef;
 use super::components::{Blueprinted, Combat, Health, Held, MoveClass, Position, SimId, Stunned, Team, TractorBeam, UnitStats};
 use super::spatial::Layer;
 use super::world::{SimWorld, StormView, UnitView, BLOCKED_TARGET_TICKS};
-use crate::math::fp::{fp_int, sqrt_wide, Fp, Vec2Fp, Vec3Fp};
+use crate::math::fp::{fp_int, mul_toward_zero, sqrt_wide, Fp, Vec2Fp, Vec3Fp};
 
 /// How often a storm looks again for the nearest enemy, in ticks.
 const STORM_RETARGET_TICKS: u32 = 10;
@@ -116,7 +116,7 @@ impl SimWorld {
             if gap > Fp::ZERO && distance > Fp::ZERO {
                 let step = gap / Fp::from_num(ticks_left + 1);
                 let direction = offset.normalized();
-                next = Vec2Fp::new(here.x + direction.x * step, here.y + direction.y * step);
+                next = here + direction.scaled(step);
             }
             let lifted = self.terrain.height_at(next) + radius + fp_int(TRACTOR_LIFT_UNITS);
             self.ecs.get::<&mut Position>(entity).expect("units have positions").0 = Vec3Fp::new(next.x, next.y, lifted);
@@ -253,7 +253,7 @@ impl SimWorld {
             }
             storm.age += 1;
             let clamp = |value: Fp| value.clamp(Fp::ZERO, max_coordinate);
-            storm.position = Vec2Fp::new(clamp(storm.position.x + storm.heading.x * storm.speed), clamp(storm.position.y + storm.heading.y * storm.speed));
+            storm.position = Vec2Fp::new(clamp(storm.position.x + mul_toward_zero(storm.heading.x, storm.speed)), clamp(storm.position.y + mul_toward_zero(storm.heading.y, storm.speed)));
 
             let (x, y) = (storm.position.x.to_bits(), storm.position.y.to_bits());
             let radius = i64::from(storm.radius.to_bits());

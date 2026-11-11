@@ -540,3 +540,33 @@ fn dragging_a_formation_move_somewhere_else_keeps_it_a_formation() {
     assert_eq!(world.flow_field.goal(routes[0]), Some(goal));
     assert_eq!(run_until_idle(&mut world, &units, 2_000), 0);
 }
+
+#[test]
+fn mirror_image_moves_stay_mirror_images() {
+    // A mirrored map is fair only if a unit heading one way moves exactly as its mirror image
+    // heading the other way. Rounding that favours one direction would put the side heading
+    // toward lower coordinates a little ahead in every race to a deposit or into range.
+    let mut world = flat_world();
+    let map = 5_120;
+    let mirror = |p: Vec2Fp| Vec2Fp::new(fp_int(map) - p.x, fp_int(map) - p.y);
+    let mut pairs = Vec::new();
+    let mut commands = Vec::new();
+    for (index, key) in ["t1_light_bot", "t2_heavy_tank", "t1_engineer"].into_iter().enumerate() {
+        let blueprint = world.blueprints.id(key);
+        let start = point(1_007 + 211 * index as i32, 1_013);
+        let goal = point(1_903 + 211 * index as i32, 1_597 + 97 * index as i32);
+        let unit = world.spawn_mobile(blueprint, Team::Blue, start);
+        let twin = world.spawn_mobile(blueprint, Team::Red, mirror(start));
+        commands.push(SimCommand::Move { units: vec![unit], goal });
+        commands.push(SimCommand::Move { units: vec![twin], goal: mirror(goal) });
+        pairs.push((key, unit, twin));
+    }
+    let position = |world: &SimWorld, id| world.unit_position(id).unwrap().xy();
+    for tick in 0..400 {
+        world.advance_tick(&commands);
+        commands.clear();
+        for &(key, unit, twin) in &pairs {
+            assert_eq!(mirror(position(&world, unit)), position(&world, twin), "{key} left its mirror image at tick {tick}");
+        }
+    }
+}

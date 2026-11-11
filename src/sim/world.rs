@@ -1207,7 +1207,7 @@ impl SimWorld {
                     FlowSample::Unreachable => return false,
                 }
             };
-            travel.leader = Vec2Fp::new(leader.x + direction.x * travel.speed, leader.y + direction.y * travel.speed);
+            travel.leader = leader + direction.scaled(travel.speed);
             travel.heading = rotate_toward(travel.heading, direction, travel.max_turn);
             true
         });
@@ -1292,7 +1292,7 @@ impl SimWorld {
                     );
                     let direction = (exit - here).normalized();
                     let speed = stats.max_speed.max(Fp::ONE);
-                    let next = Vec2Fp::new(here.x + direction.x * speed, here.y + direction.y * speed);
+                    let next = here + direction.scaled(speed);
                     position.0 = Vec3Fp::new(next.x, next.y, surface(next) + stats.radius);
                 }
                 continue;
@@ -1311,7 +1311,7 @@ impl SimWorld {
                 let walk_to_goal = |speed: Fp| {
                     let direction = (goal - here).normalized();
                     let speed = speed.min(sqrt_wide(here.distance_squared(&goal)));
-                    Vec2Fp::new(direction.x * speed, direction.y * speed)
+                    direction.scaled(speed)
                 };
                 // A ground attack stops as soon as its spot is in range.
                 let shelling_ground = combat.ground_target.is_some_and(|spot| within(here, spot, combat.range));
@@ -1328,7 +1328,7 @@ impl SimWorld {
                             let direction = (slot - here).normalized();
                             let remaining = sqrt_wide(here.distance_squared(&slot));
                             let speed = stats.max_speed.min(remaining);
-                            desired = Vec2Fp::new(direction.x * speed, direction.y * speed);
+                            desired = direction.scaled(speed);
                         }
                     } else if may_walk {
                         // On a formation move, a member keeps to its spot unless it has fallen too far behind.
@@ -1342,11 +1342,11 @@ impl SimWorld {
                             if remaining > Fp::ZERO {
                                 let direction = (spot - here).normalized();
                                 let speed = stats.max_speed.min(remaining);
-                                desired = Vec2Fp::new(direction.x * speed, direction.y * speed);
+                                desired = direction.scaled(speed);
                             }
                         } else {
                             match flow.sample(order.route, tick, here, terrain) {
-                                FlowSample::Direction(direction) => desired = Vec2Fp::new(direction.x * stats.max_speed, direction.y * stats.max_speed),
+                                FlowSample::Direction(direction) => desired = direction.scaled(stats.max_speed),
                                 FlowSample::Unreachable => {
                                     flow.release(order.route);
                                     *order = Order::IDLE;
@@ -1366,7 +1366,7 @@ impl SimWorld {
                         desired = walk_to_goal(stats.max_speed);
                     } else {
                         match flow.sample(order.route, tick, here, terrain) {
-                            FlowSample::Direction(direction) => desired = Vec2Fp::new(direction.x * stats.max_speed, direction.y * stats.max_speed),
+                            FlowSample::Direction(direction) => desired = direction.scaled(stats.max_speed),
                             FlowSample::Unreachable => {
                                 flow.release(order.route);
                                 *order = Order::IDLE;
@@ -1861,7 +1861,10 @@ impl SimWorld {
             let gun_free = overcharge_target.is_none_or(|target| combat.target == Some(target));
             // A bomber's velocity, which its bombs keep as they fall.
             let speed = flight.map_or(stats.max_speed, |flight| flight.speed);
-            let bomb = bomb_bay.and(turning).map(|turning| Vec3Fp::new(turning.facing.x * speed, turning.facing.y * speed, Fp::ZERO));
+            let bomb = bomb_bay.and(turning).map(|turning| {
+                let step = turning.facing.scaled(speed);
+                Vec3Fp::new(step.x, step.y, Fp::ZERO)
+            });
             // It bombs only from its flying height, not while taking off or landing.
             let at_height = flight.is_none_or(|flight| flight.altitude >= flight.elevation);
             let raw = |x: i32, y: i32, z: i32| Vec3Fp::new(Fp::from_bits(x), Fp::from_bits(y), Fp::from_bits(z));
@@ -2384,7 +2387,7 @@ impl SimWorld {
                 }
                 let share = homing.speed / distance;
                 let offset = aim - start;
-                projectile.velocity = Vec3Fp::new(offset.x * share, offset.y * share, offset.z * share);
+                projectile.velocity = offset.scaled(share);
                 position.0 = start + projectile.velocity;
                 if projectile.lifetime_ticks == 0 {
                     dead.push(id);

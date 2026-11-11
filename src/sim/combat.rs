@@ -69,7 +69,7 @@ pub fn missile_velocity(terrain: &Terrain, from: Vec3Fp, missile: &Missile) -> V
     let along = missile.speed.min(distance);
     let flat = if distance > Fp::ZERO {
         let direction = away.normalized();
-        Vec2Fp::new(direction.x * along, direction.y * along)
+        direction.scaled(along)
     } else {
         Vec2Fp::ZERO
     };

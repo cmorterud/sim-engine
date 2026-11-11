@@ -137,10 +137,7 @@ impl Travel {
         let index = self.members.binary_search_by_key(&id, |member| member.0).ok()?;
         let (_, ahead, aside) = self.members[index];
         let right = Vec2Fp::new(self.heading.y, -self.heading.x);
-        Some(Vec2Fp::new(
-            self.leader.x + self.heading.x * ahead + right.x * aside,
-            self.leader.y + self.heading.y * ahead + right.y * aside,
-        ))
+        Some(self.leader + self.heading.scaled(ahead) + right.scaled(aside))
     }
 
     pub fn hash_state(&self, hasher: &mut impl Hasher) {

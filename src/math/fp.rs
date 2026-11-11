@@ -18,6 +18,14 @@ pub fn wide_mul(a: Fp, b: Fp) -> FpWide {
     FpWide::from_bits(a.to_bits() as i64 * b.to_bits() as i64)
 }
 
+/// `a * b` rounded toward zero, so that negating either factor negates the product exactly.
+/// `Fp`'s own `*` rounds toward negative infinity: a unit heading the negative way along an axis
+/// would move a fraction further each tick than its mirror image heading the positive way, and
+/// on a mirrored map that hands one side a small, steady edge. Scaling a direction uses this.
+pub fn mul_toward_zero(a: Fp, b: Fp) -> Fp {
+    Fp::from_bits((i64::from(a.to_bits()) * i64::from(b.to_bits()) / (1 << FP_FRAC_BITS)) as i32)
+}
+
 /// The raw bits of an `FpWide` have 24 fractional bits, so their integer square
 /// root has 12 fractional bits: exactly the raw bits of an `Fp`.
 pub fn sqrt_wide(value: FpWide) -> Fp {
@@ -54,6 +62,11 @@ impl Vec2Fp {
         wide_mul(dx, dx) + wide_mul(dy, dy)
     }
 
+    /// Each component times `factor`, rounded toward zero, so that mirror images scale alike.
+    pub fn scaled(&self, factor: Fp) -> Self {
+        Self::new(mul_toward_zero(self.x, factor), mul_toward_zero(self.y, factor))
+    }
+
     /// Returns `ZERO` for a zero-length vector; callers handle that case explicitly.
     pub fn normalized(&self) -> Self {
         let length = sqrt_wide(self.length_squared()).to_bits() as i64;
@@ -72,6 +85,11 @@ impl Vec3Fp {
 
     pub const fn new(x: Fp, y: Fp, z: Fp) -> Self {
         Self { x, y, z }
+    }
+
+    /// Each component times `factor`, rounded toward zero, so that mirror images scale alike.
+    pub fn scaled(&self, factor: Fp) -> Self {
+        Self::new(mul_toward_zero(self.x, factor), mul_toward_zero(self.y, factor), mul_toward_zero(self.z, factor))
     }
 
     pub fn xy(&self) -> Vec2Fp {
@@ -163,6 +181,20 @@ mod tests {
         // sqrt(3) * 81,920 is about 141,889.6.
         let distance = sqrt_wide(distance_squared);
         assert_eq!(distance.to_num::<i32>(), 141_889);
+    }
+
+    #[test]
+    fn scaling_a_mirrored_direction_gives_the_mirrored_step() {
+        // Fp's own product rounds toward negative infinity, so -a * b is one bit further from
+        // zero than a * b. Rounding toward zero keeps mirror images exactly opposite.
+        let (a, b) = (Fp::from_bits(3_001), Fp::from_bits(1_234));
+        assert_eq!(mul_toward_zero(-a, b), -mul_toward_zero(a, b));
+        assert_eq!(mul_toward_zero(a, -b), -mul_toward_zero(a, b));
+        assert_eq!(mul_toward_zero(a, b), a * b);
+        let direction = Vec2Fp::new(fp_int(3), fp_int(-4)).normalized();
+        let mirror = Vec2Fp::new(-direction.x, -direction.y);
+        let speed = Fp::lit("1.37");
+        assert_eq!(mirror.scaled(speed), Vec2Fp::new(-direction.scaled(speed).x, -direction.scaled(speed).y));
     }
 
     #[test]

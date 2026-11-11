@@ -1,5 +1,5 @@
 use super::blueprints::{BlueprintId, EnhancementId, Res};
-use crate::math::fp::{cos_sin_radians, radians_from_tenths_of_degree, sqrt_wide, wide_mul, Fp, FpWide, Vec2Fp, Vec3Fp};
+use crate::math::fp::{cos_sin_radians, mul_toward_zero, radians_from_tenths_of_degree, sqrt_wide, wide_mul, Fp, FpWide, Vec2Fp, Vec3Fp};
 
 /// Assigned from a counter on spawn and never reused. The stable identity for
 /// ordering, hashing, and interpolation. `hecs::Entity` is only a storage handle.
@@ -322,7 +322,8 @@ pub fn rotate_toward(facing: Vec2Fp, toward: Vec2Fp, turn: Fp) -> Vec2Fp {
     }
     let left = facing.x * toward.y - facing.y * toward.x >= Fp::ZERO;
     let sin = if left { sin } else { -sin };
-    Vec2Fp::new(facing.x * cos - facing.y * sin, facing.x * sin + facing.y * cos).normalized()
+    let turn = |a: Fp, b: Fp| mul_toward_zero(a, b);
+    Vec2Fp::new(turn(facing.x, cos) - turn(facing.y, sin), turn(facing.x, sin) + turn(facing.y, cos)).normalized()
 }
 
 /// A weapon that has to swivel to its target before it can fire.
@@ -388,7 +389,7 @@ impl Turning {
         };
         self.facing = rotate_toward(facing, toward, turn);
         let ahead = if self.radius == Fp::ZERO { forward.min(speed * (self.facing.x * toward.x + self.facing.y * toward.y).max(Fp::ZERO)) } else { forward };
-        Vec2Fp::new(self.facing.x * ahead, self.facing.y * ahead)
+        self.facing.scaled(ahead)
     }
 
     /// Whether the goal is inside the circle this unit would turn in on that side, where
@@ -398,7 +399,7 @@ impl Turning {
         if goal_distance >= radius * 2 {
             return false;
         }
-        let goal = Vec2Fp::new(toward.x * goal_distance, toward.y * goal_distance);
+        let goal = toward.scaled(goal_distance);
         let (side_x, side_y) = if left { (-self.facing.y, self.facing.x) } else { (self.facing.y, -self.facing.x) };
         // Inside the circle of this radius centred to that side: |goal - side * radius| < radius.
         goal.length_squared() < wide_mul(radius * 2, goal.x * side_x + goal.y * side_y)

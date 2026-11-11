@@ -1071,7 +1071,7 @@ mod tests {
             }
             flow.build_pending(terrain, step);
             if let FlowSample::Direction(direction) = flow.sample(route, step, position, terrain) {
-                position = position + Vec2Fp::new(direction.x * speed, direction.y * speed);
+                position = position + direction.scaled(speed);
                 assert!(terrain.is_passable(position), "walked into a wall at {position:?}");
             }
         }
