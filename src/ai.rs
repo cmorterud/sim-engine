@@ -7,7 +7,7 @@ use crate::math::fp::{fp_int, wide_mul, Fp, FpWide, Vec2Fp};
 use crate::math::rng::SimRng;
 use crate::sim::blueprints::{BlueprintId, FactoryKind, Res, UnitClass};
 use crate::sim::commands::SimCommand;
-use crate::sim::components::{Blueprinted, BuildTask, Builder, Construction, Factory, Order, OrderKind, Position, SimId, Team, UnitStats, Upgrading};
+use crate::sim::components::{Blueprinted, BuildTask, Builder, Construction, Factory, MoveClass, Order, OrderKind, Position, SimId, Team, UnitStats, Upgrading};
 use crate::sim::config::TERRAIN_CELL_UNITS;
 use crate::sim::scenario::MapSource;
 use crate::sim::world::{MatchResult, SimWorld};
@@ -58,6 +58,17 @@ const BASE_ANTI_AIR: usize = 2;
 const MOST_ANTI_AIR: usize = 6;
 /// Aircraft it needs before it builds an air staging facility.
 const STAGING_AIRCRAFT: usize = 6;
+/// On a map with water, mass income for its first naval factory, without a T2 land
+/// headquarters, and its second; its naval factories upgrade to T2 and T3 at these.
+const NAVAL_FACTORY_INCOME: i64 = 20;
+const SECOND_NAVAL_FACTORY_INCOME: i64 = 60;
+const NAVAL_T2_INCOME: i64 = 30;
+const NAVAL_T3_INCOME: i64 = 70;
+/// How far from home it looks for water deep enough for a naval factory.
+const NAVAL_REACH_UNITS: i32 = 7_000;
+/// Fleets set out at this size, growing to the largest.
+const FIRST_FLEET: usize = 4;
+const LARGEST_FLEET: usize = 12;
 /// A structure being built that costs at least this much mass is worth sending idle builders to.
 const BIG_SITE_MASS: i32 = 500;
 const T3_ENGINEERS: usize = 2;
@@ -97,6 +108,15 @@ struct Roster {
     /// Anti-air structures by tier.
     anti_air: [BlueprintId; 3],
     air_staging: BlueprintId,
+    naval_factory: BlueprintId,
+    naval_support_factories: [BlueprintId; 2],
+    frigate: BlueprintId,
+    submarine: BlueprintId,
+    destroyer: BlueprintId,
+    cruiser: BlueprintId,
+    shield_boat: BlueprintId,
+    battleship: BlueprintId,
+    battlecruiser: BlueprintId,
 }
 
 impl Roster {
@@ -126,6 +146,15 @@ impl Roster {
             mobile_anti_air: [id("t1_mobile_aa"), id("t2_mobile_flak")],
             anti_air: [id("t1_aa_turret"), id("t2_flak"), id("t3_sam")],
             air_staging: id("air_staging"),
+            naval_factory: id("naval_factory"),
+            naval_support_factories: [id("naval_factory_t2_support"), id("naval_factory_t3_support")],
+            frigate: id("t1_frigate"),
+            submarine: id("t1_attack_sub"),
+            destroyer: id("t2_destroyer"),
+            cruiser: id("t2_cruiser"),
+            shield_boat: id("t2_shield_boat"),
+            battleship: id("t3_battleship"),
+            battlecruiser: id("t3_battlecruiser"),
         }
     }
 
@@ -166,6 +195,17 @@ struct Forces {
     aircraft: usize,
     anti_air_structures: usize,
     air_stagings: usize,
+    naval_factories: Vec<FactoryInfo>,
+    naval_headquarters_tier: u8,
+    /// Builders at work on anything but a generator.
+    busy_builders: Vec<IdleBuilder>,
+    /// What the running extractors' upkeep costs a tick.
+    extractor_upkeep: Res,
+    /// Energy gone, and less coming in than the extractors alone cost.
+    energy_crisis: bool,
+    /// Idle ships and submarines, and all of them.
+    idle_naval: Vec<SimId>,
+    naval_units: usize,
     generators: usize,
     generators_building: usize,
     storages: usize,
@@ -200,6 +240,7 @@ struct ExtractorInfo {
     position: Vec2Fp,
     tier: u8,
     upgrading: bool,
+    paused: bool,
 }
 
 /// A seen enemy, from the team's own sight.
@@ -209,6 +250,8 @@ struct Sighting {
     position: Vec2Fp,
     is_structure: bool,
     is_air: bool,
+    /// On or under the water: a ship, a submarine, or a structure on the water.
+    is_naval: bool,
 }
 
 pub struct AiBrain {
@@ -229,6 +272,15 @@ pub struct AiBrain {
     air_wave_size: usize,
     /// When it last saw an enemy aircraft.
     enemy_air_seen: Option<u32>,
+    fleet_size: usize,
+    /// Worked out once per map: deep water near home where a naval factory fits, nearest
+    /// first, and the deep water nearest the enemy's start, where fleets go.
+    naval_plan: Option<NavalPlan>,
+}
+
+struct NavalPlan {
+    sites: Vec<(u32, u32)>,
+    enemy_water: Option<Vec2Fp>,
 }
 
 impl AiBrain {
@@ -250,6 +302,8 @@ impl AiBrain {
             air_counter: 0,
             air_wave_size: FIRST_AIR_WAVE,
             enemy_air_seen: None,
+            fleet_size: FIRST_FLEET,
+            naval_plan: None,
         }
     }
 
@@ -264,6 +318,7 @@ impl AiBrain {
         }
         if self.roster.is_none() {
             self.roster = Some(Roster::new(world));
+            self.naval_plan = Some(self.plan_naval(world));
         }
         let forces = self.survey(world);
         let sightings = visible_enemies(world, self.team);
@@ -271,12 +326,15 @@ impl AiBrain {
             self.enemy_air_seen = Some(world.current_tick);
         }
         let mut commands = Vec::new();
+        self.command_energy(world, &forces, &mut commands);
         self.command_builders(world, &forces, &mut commands);
         self.command_factories(world, &forces, &mut commands);
         self.command_air_factories(world, &forces, &mut commands);
+        self.command_naval_factories(world, &forces, &mut commands);
         self.command_upgrades(world, &forces, &mut commands);
         self.command_army(world, &forces, &sightings, &mut commands);
         self.command_air(world, &forces, &sightings, &mut commands);
+        self.command_fleet(&forces, &sightings, &mut commands);
         commands
     }
 
@@ -289,6 +347,7 @@ impl AiBrain {
         let mut forces = Forces {
             headquarters_tier: world.headquarters_tier(self.team, FactoryKind::Land),
             air_headquarters_tier: world.headquarters_tier(self.team, FactoryKind::Air),
+            naval_headquarters_tier: world.headquarters_tier(self.team, FactoryKind::Naval),
             ..Forces::default()
         };
         for &(id, entity) in &world.units {
@@ -307,6 +366,14 @@ impl AiBrain {
             if !finished && unit.is_structure() && unit.mass >= Res::from_num(BIG_SITE_MASS) {
                 forces.big_sites.push((id, position));
             }
+            // Ships and submarines are the fleet's, whatever their class.
+            if matches!(stats.move_class, MoveClass::Naval | MoveClass::Submarine) && !unit.is_structure() {
+                forces.naval_units += 1;
+                if order.kind == OrderKind::Idle && finished {
+                    forces.idle_naval.push(id);
+                }
+                continue;
+            }
             match unit.class {
                 UnitClass::Commander | UnitClass::Engineer => {
                     if unit.class == UnitClass::Commander {
@@ -320,6 +387,12 @@ impl AiBrain {
                     let upgrading = world.ecs.get::<&crate::sim::components::Enhancing>(entity).is_ok();
                     if builder.tasks.is_empty() && order.kind == OrderKind::Idle && !upgrading {
                         forces.idle_builders.push(IdleBuilder { id, entity, position });
+                    }
+                    // In an energy crisis, a builder on anything but a generator is taken off it.
+                    let off_generators = !builder.tasks.is_empty()
+                        && !builder.tasks.iter().any(|task| matches!(task, BuildTask::Build { blueprint, .. } if roster.is_generator(*blueprint)));
+                    if off_generators && !upgrading {
+                        forces.busy_builders.push(IdleBuilder { id, entity, position });
                     }
                     for task in &builder.tasks {
                         if let BuildTask::Build { blueprint, cell_x, cell_y, site: None } = *task {
@@ -335,10 +408,14 @@ impl AiBrain {
                     }
                 }
                 // Only land factories: the AI builds no missile silos, and must never queue in one.
-                UnitClass::Factory if matches!(unit.factory_kind, Some(FactoryKind::Land | FactoryKind::Air)) => {
+                UnitClass::Factory if unit.factory_kind.is_some() => {
                     let factory = world.ecs.get::<&Factory>(entity).expect("factories have factory parts");
                     let half = i32::from(unit.footprint) / 2;
-                    let list = if unit.factory_kind == Some(FactoryKind::Air) { &mut forces.air_factories } else { &mut forces.factories };
+                    let list = match unit.factory_kind {
+                        Some(FactoryKind::Air) => &mut forces.air_factories,
+                        Some(FactoryKind::Naval) => &mut forces.naval_factories,
+                        _ => &mut forces.factories,
+                    };
                     list.push(FactoryInfo {
                         id,
                         blueprint,
@@ -367,7 +444,11 @@ impl AiBrain {
                         forces.extractors.push(cell);
                         if finished {
                             let upgrading = world.ecs.get::<&Upgrading>(entity).is_ok();
-                            forces.extractor_sites.push(ExtractorInfo { id, position, tier: unit.tier, upgrading });
+                            let paused = world.ecs.get::<&crate::sim::components::Paused>(entity).is_ok();
+                            if !paused {
+                                forces.extractor_upkeep += unit.upkeep;
+                            }
+                            forces.extractor_sites.push(ExtractorInfo { id, position, tier: unit.tier, upgrading, paused });
                         }
                     } else if roster.is_generator(blueprint) {
                         forces.generators += 1;
@@ -383,6 +464,14 @@ impl AiBrain {
                     }
                 }
             }
+        }
+        // Extractors pay their upkeep before anything is built. Once raids take out the
+        // generators and less comes in than they cost, a generator under way never finishes.
+        let economy = &world.economies[self.team.index()];
+        forces.energy_crisis = economy.energy <= economy.energy_capacity / 20 && economy.energy_income <= forces.extractor_upkeep && forces.extractor_upkeep > Res::ZERO;
+        if forces.energy_crisis {
+            let busy = std::mem::take(&mut forces.busy_builders);
+            forces.idle_builders.extend(busy);
         }
         forces
     }
@@ -519,6 +608,25 @@ impl AiBrain {
         if air_total < air_wanted && world.can_build(builder, air_factory) && (air_total == 0 || economy.mass > Res::from_num(150)) {
             if let Some(cell) = self.site_near_home(world, air_factory, 1, planned) {
                 return Some((air_factory, cell));
+            }
+        }
+
+        // On a map with water, a naval factory once the land side has its T2 headquarters, or the income.
+        let naval_factory = (0..2)
+            .rev()
+            .map(|tier| roster.naval_support_factories[tier])
+            .find(|&blueprint| world.can_build(builder, blueprint) && world.support_allowed(self.team, blueprint))
+            .unwrap_or(roster.naval_factory);
+        let naval_planned = count_planned(roster.naval_factory) + roster.naval_support_factories.iter().map(|&blueprint| count_planned(blueprint)).sum::<usize>();
+        let naval_wanted = if mass_income >= SECOND_NAVAL_FACTORY_INCOME {
+            2
+        } else {
+            usize::from(forces.headquarters_tier >= 2 || mass_income >= NAVAL_FACTORY_INCOME)
+        };
+        let naval_total = forces.naval_factories.len() + naval_planned;
+        if naval_total < naval_wanted && world.can_build(builder, naval_factory) && (naval_total == 0 || economy.mass > Res::from_num(150)) {
+            if let Some(cell) = self.naval_site(world, naval_factory, planned) {
+                return Some((naval_factory, cell));
             }
         }
 
@@ -790,6 +898,144 @@ impl AiBrain {
         }
     }
 
+    /// Finds, once, the deep water near home where naval factories fit, and the deep water
+    /// nearest the enemy's start. Ties go by the cell as seen on the plan, so that both sides
+    /// of a mirrored map choose mirrored spots. Nothing, on a map without water.
+    fn plan_naval(&self, world: &SimWorld) -> NavalPlan {
+        if !world.terrain.has_water() {
+            return NavalPlan { sites: Vec::new(), enemy_water: None };
+        }
+        let factory = self.roster().naval_factory;
+        let size = footprint(world, factory);
+        let cells = world.terrain.cells_per_side() as u32;
+        let plan_cell = |cell: (u32, u32), size: i32| self.flip_site(world, cell_i32(cell), size);
+        let reach = wide_mul(fp_int(NAVAL_REACH_UNITS), fp_int(NAVAL_REACH_UNITS));
+        // Each candidate with its distance, its cell on the plan for ties, and its cell.
+        type Candidate = (FpWide, (i32, i32), (u32, u32));
+        let mut sites: Vec<Candidate> = Vec::new();
+        let mut enemy_water: Option<Candidate> = None;
+        for y in 0..cells {
+            for x in 0..cells {
+                if !world.terrain.cell_is_navigable(x, y) {
+                    continue;
+                }
+                let center = cell_center((x, y));
+                let to_enemy = center.distance_squared(&self.enemy_home);
+                let candidate = (to_enemy, plan_cell((x, y), 1), (x, y));
+                if enemy_water.is_none_or(|best| (candidate.0, candidate.1) < (best.0, best.1)) {
+                    enemy_water = Some(candidate);
+                }
+                // A site is named by its corner, so its middle is a cell in from it.
+                let middle = cell_center((x + size as u32 / 2, y + size as u32 / 2));
+                let from_home = middle.distance_squared(&self.home);
+                if from_home <= reach && from_home < middle.distance_squared(&self.enemy_home) && world.can_place(factory, x, y) {
+                    sites.push((from_home, plan_cell((x, y), size), (x, y)));
+                }
+            }
+        }
+        sites.sort_unstable();
+        NavalPlan { sites: sites.into_iter().map(|(_, _, cell)| cell).collect(), enemy_water: enemy_water.map(|(_, _, cell)| cell_center(cell)) }
+    }
+
+    /// The nearest site that is still free, with a cell of open water around it so that
+    /// factories do not wall each other in.
+    fn naval_site(&self, world: &SimWorld, factory: BlueprintId, planned: &[(u32, u32)]) -> Option<(u32, u32)> {
+        let size = footprint(world, factory) as u32;
+        let plan = self.naval_plan.as_ref()?;
+        plan.sites.iter().copied().find(|&(x, y)| {
+            let clear = (y.saturating_sub(1)..y + size + 1).all(|row| (x.saturating_sub(1)..x + size + 1).all(|column| world.terrain.cell_is_navigable(column, row) && !planned.contains(&(column, row))));
+            clear && world.can_place(factory, x, y)
+        })
+    }
+
+    /// Naval factories upgrade with the economy, one at a time, and build the fleet.
+    fn command_naval_factories(&mut self, world: &SimWorld, forces: &Forces, commands: &mut Vec<SimCommand>) {
+        let economy = world.economies[self.team.index()];
+        let mass_income = (economy.mass_income * 10).to_num::<i64>();
+        let energy_income = (economy.energy_income * 10).to_num::<i64>();
+        let mut upgrade_under_way = forces.naval_factories.iter().any(|factory| factory.upgrading);
+        let headquarters = forces.naval_headquarters_tier;
+        let rally = self.naval_rally();
+        for factory in forces.naval_factories.iter().filter(|factory| factory.finished) {
+            if let Some(point) = rally.filter(|_| !self.rally_set_on.contains(&factory.id)) {
+                self.rally_set_on.push(factory.id);
+                commands.push(SimCommand::SetRally { factory: factory.id, point });
+            }
+            if !factory.queue_is_empty || economy.satisfaction < Res::ONE / 2 || economy.energy < economy.energy_capacity / 4 {
+                continue;
+            }
+            let tier = if factory.support { factory.tier.min(headquarters) } else { factory.tier };
+            let upgrade = world.blueprints.get(factory.blueprint).upgrades_to.filter(|&into| {
+                let into = world.blueprints.get(into);
+                // A fleet first: a factory that only upgrades puts nothing on the water.
+                let (income, fleet) = if into.tier == 2 { (NAVAL_T2_INCOME, 3) } else { (NAVAL_T3_INCOME, 6) };
+                world.support_allowed(self.team, into.id) && energy_income >= mass_income * 12 && mass_income >= income && forces.naval_units >= fleet
+            });
+            let item = match upgrade.filter(|_| !upgrade_under_way) {
+                Some(into) => {
+                    upgrade_under_way = true;
+                    into
+                }
+                None => {
+                    self.unit_counter += 1;
+                    let roster = self.roster();
+                    let turn = (self.unit_counter % 6) as usize;
+                    match tier {
+                        1 => [roster.frigate, roster.frigate, roster.submarine][turn % 3],
+                        2 => [roster.destroyer, roster.frigate, roster.cruiser, roster.destroyer, roster.frigate, roster.shield_boat][turn],
+                        _ => [roster.battleship, roster.destroyer, roster.battlecruiser, roster.cruiser, roster.destroyer, roster.shield_boat][turn],
+                    }
+                }
+            };
+            commands.push(SimCommand::QueueUnit { factory: factory.id, blueprint: item, count: 1 });
+        }
+    }
+
+    /// Where new ships wait: the water off the first naval site.
+    fn naval_rally(&self) -> Option<Vec2Fp> {
+        self.naval_plan.as_ref()?.sites.first().map(|&cell| cell_center(cell))
+    }
+
+    /// The fleet meets enemy ships that come near home, and otherwise sets out, once it is big
+    /// enough, for the water nearest the enemy's start, shelling whatever it finds there.
+    fn command_fleet(&mut self, forces: &Forces, sightings: &[Sighting], commands: &mut Vec<SimCommand>) {
+        if forces.idle_naval.is_empty() {
+            return;
+        }
+        let Some(plan) = self.naval_plan.as_ref() else {
+            return;
+        };
+        let reach = fp_int(NAVAL_REACH_UNITS);
+        let threat = sightings
+            .iter()
+            .filter(|enemy| enemy.is_naval && enemy.position.distance_squared(&self.home) <= wide_mul(reach, reach))
+            .min_by_key(|enemy| (enemy.position.distance_squared(&self.home), enemy.id));
+        if let Some(enemy) = threat {
+            commands.push(SimCommand::AttackMove { units: forces.idle_naval.clone(), goal: enemy.position });
+            return;
+        }
+        if forces.idle_naval.len() < self.fleet_size {
+            return;
+        }
+        let Some(goal) = plan.enemy_water else {
+            return;
+        };
+        commands.push(SimCommand::AttackMove { units: forces.idle_naval.clone(), goal });
+        self.fleet_size = (self.fleet_size + 2).min(LARGEST_FLEET);
+    }
+
+    /// In a crisis, pauses its extractors, so that what energy there is goes into generators,
+    /// and starts them again once energy is half full.
+    fn command_energy(&self, world: &SimWorld, forces: &Forces, commands: &mut Vec<SimCommand>) {
+        let economy = &world.economies[self.team.index()];
+        let (paused, running): (Vec<&ExtractorInfo>, Vec<&ExtractorInfo>) = forces.extractor_sites.iter().partition(|extractor| extractor.paused);
+        if forces.energy_crisis && !running.is_empty() {
+            commands.push(SimCommand::SetPaused { units: running.iter().map(|extractor| extractor.id).collect(), paused: true });
+        } else if economy.energy >= economy.energy_capacity / 2 && !paused.is_empty() {
+            commands.push(SimCommand::SetPaused { units: paused.iter().map(|extractor| extractor.id).collect(), paused: false });
+        }
+    }
+
     fn air_threat(&self, world: &SimWorld) -> bool {
         self.enemy_air_seen.is_some_and(|seen| world.current_tick.saturating_sub(seen) < AIR_THREAT_TICKS)
     }
@@ -1002,6 +1248,7 @@ fn visible_enemies(world: &SimWorld, team: Team) -> Vec<Sighting> {
             position: Vec2Fp::new(Fp::from_bits(entry.x), Fp::from_bits(entry.y)),
             is_structure: entry.is_structure,
             is_air: entry.is_air,
+            is_naval: entry.is_naval || entry.is_sub || (entry.is_structure && world.unit_entity(entry.id).is_some_and(|entity| world.ecs.get::<&Blueprinted>(entity).is_ok_and(|unit| world.blueprints.get(unit.0).on_water))),
         })
         .collect()
 }

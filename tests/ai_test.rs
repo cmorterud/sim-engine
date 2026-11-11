@@ -55,6 +55,7 @@ fn ai_commands_only_its_own_units() {
                     | SimCommand::AttackMove { units, .. }
                     | SimCommand::Upgrade { units }
                     | SimCommand::Patrol { units, .. }
+                    | SimCommand::SetPaused { units, .. }
                     | SimCommand::QueueMove { units, .. }
                     | SimCommand::FormationMove { units, .. } => units.clone(),
                     SimCommand::QueueUnit { factory, .. } | SimCommand::SetRally { factory, .. } => vec![*factory],
@@ -102,6 +103,7 @@ fn mirrored_order(world: &SimWorld, team: Team, command: &SimCommand) -> String 
         SimCommand::Assist { units, .. } => format!("assist x{}", units.len()),
         SimCommand::Reclaim { units, .. } => format!("reclaim x{}", units.len()),
         SimCommand::Upgrade { units } => format!("upgrade x{}", units.len()),
+        SimCommand::SetPaused { units, paused } => format!("pause {paused} x{}", units.len()),
         SimCommand::Patrol { units, points } => format!("patrol x{} {:?}", units.len(), points.iter().map(|at| point(*at)).collect::<Vec<_>>()),
         SimCommand::QueueMove { units, goal, attack } => format!("queue-move x{} to {:?} {attack}", units.len(), point(*goal)),
         other => panic!("unexpected command {other:?}"),
@@ -283,4 +285,97 @@ fn ai_takes_to_the_air_and_answers_enemy_aircraft_with_anti_air() {
         keep_red_alive(&mut world);
     }
     assert!(anti_air(&world) >= 2, "only {} anti-air after enemy aircraft were seen", anti_air(&world));
+}
+
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn on_a_map_with_a_sea_the_ai_builds_a_navy_and_none_on_a_dry_one() {
+    let map = scenario::MapSource::Imported(std::sync::Arc::new(sim_engine::sim::maps::twin_passes()));
+    let mut world = map.scenario(3).world;
+    let mut brain = AiBrain::new(Team::Blue, 3, world.starts);
+    // 20 minutes, with nobody playing Red.
+    for _ in 0..12_000 {
+        let commands = brain.think(&world);
+        world.advance_tick(&commands);
+        let red = world.unit_entity(world.commanders[Team::Red.index()].unwrap()).unwrap();
+        let mut health = world.ecs.get::<&mut sim_engine::sim::components::Health>(red).unwrap();
+        health.current = health.max;
+    }
+    let count = |world: &SimWorld, keys: &[&str]| keys.iter().map(|key| count_owned(world, Team::Blue, key)).sum::<usize>();
+    let yards = ["naval_factory", "naval_factory_t2", "naval_factory_t3", "naval_factory_t2_support", "naval_factory_t3_support"];
+    let ships = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_shield_boat", "t3_battleship", "t3_battlecruiser"];
+    assert!(count(&world, &yards) >= 1, "no naval factory on the sea's shore");
+    assert!(count(&world, &ships) >= 2, "only {} ships", count(&world, &ships));
+
+    // The skirmish map has no water, so no shipyard is ever planned there.
+    let mut world = scenario::skirmish(3).world;
+    let mut brain = AiBrain::new(Team::Blue, 3, world.starts);
+    for _ in 0..12_000 {
+        let commands = brain.think(&world);
+        world.advance_tick(&commands);
+        let red = world.unit_entity(world.commanders[Team::Red.index()].unwrap()).unwrap();
+        let mut health = world.ecs.get::<&mut sim_engine::sim::components::Health>(red).unwrap();
+        health.current = health.max;
+    }
+    assert_eq!(count(&world, &yards), 0);
+}
+
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn after_losing_every_generator_the_ai_pauses_its_extractors_and_rebuilds_its_power() {
+    let mut world = scenario::skirmish(11).world;
+    let mut brain = AiBrain::new(Team::Blue, 11, world.starts);
+    let keep_red_alive = |world: &mut SimWorld| {
+        let red = world.unit_entity(world.commanders[Team::Red.index()].unwrap()).unwrap();
+        let mut health = world.ecs.get::<&mut sim_engine::sim::components::Health>(red).unwrap();
+        health.current = health.max;
+    };
+    for _ in 0..9_000 {
+        let commands = brain.think(&world);
+        world.advance_tick(&commands);
+        keep_red_alive(&mut world);
+    }
+    // Finished ones: a site still being built cannot self-destruct, and makes nothing.
+    let generators = |world: &SimWorld| {
+        let kinds: Vec<_> = ["power_generator", "power_generator_t2", "power_generator_t3", "hydrocarbon_plant"].iter().map(|key| world.blueprints.id(key)).collect();
+        world
+            .units
+            .iter()
+            .filter(|(_, entity)| {
+                world.ecs.get::<&UnitStats>(*entity).is_ok_and(|stats| stats.team == Team::Blue)
+                    && world.ecs.get::<&Blueprinted>(*entity).is_ok_and(|unit| kinds.contains(&unit.0))
+                    && world.ecs.get::<&sim_engine::sim::components::Construction>(*entity).is_err()
+            })
+            .count()
+    };
+    assert!(generators(&world) >= 4);
+    // Raiders take out every generator at once, and the energy in store with them.
+    let wanted: Vec<_> = ["power_generator", "power_generator_t2", "power_generator_t3", "hydrocarbon_plant"].iter().map(|key| world.blueprints.id(key)).collect();
+    let doomed: Vec<_> = world
+        .units
+        .iter()
+        .filter(|(_, entity)| world.ecs.get::<&UnitStats>(*entity).is_ok_and(|stats| stats.team == Team::Blue) && world.ecs.get::<&Blueprinted>(*entity).is_ok_and(|unit| wanted.contains(&unit.0)))
+        .map(|(id, _)| *id)
+        .collect();
+    world.advance_tick(&[SimCommand::SelfDestruct { units: doomed }]);
+    for _ in 0..60 {
+        world.advance_tick(&[]);
+    }
+    assert_eq!(generators(&world), 0);
+    world.economies[0].energy = sim_engine::sim::blueprints::Res::ZERO;
+    let (mut paused, mut resumed) = (false, false);
+    for _ in 0..6_000 {
+        let commands = brain.think(&world);
+        for command in &commands {
+            if let SimCommand::SetPaused { paused: on, .. } = command {
+                paused |= *on;
+                resumed |= paused && !*on;
+            }
+        }
+        world.advance_tick(&commands);
+        keep_red_alive(&mut world);
+    }
+    assert!(paused, "its extractors were paused, so that energy went into generators");
+    assert!(resumed, "and started again once energy was back");
+    assert!(generators(&world) >= 2, "only {} generators rebuilt", generators(&world));
 }
