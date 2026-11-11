@@ -1,0 +1,155 @@
+name: Soak
+
+# The soak plays whole AI-vs-AI matches and replays each from its command log (README,
+# Validate): hundreds of matches, too heavy to run on a laptop for every change. Here it is
+# split across runners, one shard of seeds each, all running the same release binary.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push makes an older soak moot, so stop it and save the minutes.
+concurrency:
+  group: soak-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Kept in step with CI, so that this workflow reuses the release build cache CI saves.
+  RUST_VERSION: "1.99.1"
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  build:
+    name: Build the release binary
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      # The audio library needs the system's sound headers to compile.
+      - name: Install audio headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+
+      # The same key as CI's release job, so a push usually finds its build already cached.
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ env.RUST_VERSION }}-release-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ env.RUST_VERSION }}-release-
+
+      - name: Build
+        run: cargo build --locked --release --bin sim-engine
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sim-engine
+          path: target/release/sim-engine
+          retention-days: 3
+
+  soak:
+    name: Soak (${{ matrix.name }})
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      # Every shard reports, so that one run shows every failing seed.
+      fail-fast: false
+      matrix:
+        include:
+          # The 200 skirmish matches of the exit criteria, 25 seeds to a shard.
+          - { name: "skirmish 1-25", args: "--soak 25 --seed 1" }
+          - { name: "skirmish 26-50", args: "--soak 25 --seed 26" }
+          - { name: "skirmish 51-75", args: "--soak 25 --seed 51" }
+          - { name: "skirmish 76-100", args: "--soak 25 --seed 76" }
+          - { name: "skirmish 101-125", args: "--soak 25 --seed 101" }
+          - { name: "skirmish 126-150", args: "--soak 25 --seed 126" }
+          - { name: "skirmish 151-175", args: "--soak 25 --seed 151" }
+          - { name: "skirmish 176-200", args: "--soak 25 --seed 176" }
+          # The bundled maps, 24 matches each.
+          - { name: "highland", args: "--map highland --soak 24" }
+          - { name: "twin_passes", args: "--map twin_passes --soak 24" }
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: sim-engine
+
+      # The binary links the system's sound library, which the runner may not have.
+      - name: Install the sound library if missing
+        run: |
+          chmod +x sim-engine
+          if ldd sim-engine | grep -q "not found"; then
+            sudo apt-get update && sudo apt-get install -y libasound2t64
+          fi
+          ldd sim-engine | grep "not found" && exit 1 || true
+          echo "cores: $(nproc)"
+
+      # Tick times are reported but not gated: on a shared runner they measure its other load
+      # as much as the game. Unfinished matches, replay mismatches, and panics still fail.
+      - name: Soak
+        run: |
+          set -o pipefail
+          ./sim-engine ${{ matrix.args }} --threads "$(nproc)" --no-tick-gate | tee soak.txt
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: soak-${{ strategy.job-index }}
+          path: soak.txt
+          retention-days: 14
+
+  summary:
+    name: Summary
+    needs: soak
+    if: always() && needs.soak.result != 'skipped'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: soak-*
+
+      # One table for the whole run: wins by side, matches that did not finish, and replays
+      # that did not match, per map. Fails if any shard failed.
+      - name: Summarize
+        run: |
+          python3 - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import glob, re
+          totals = {}
+          for path in sorted(glob.glob("soak-*/soak.txt")):
+              text = open(path).read()
+              mapname = re.search(r"^map (\S+):", text, re.M)
+              key = mapname.group(1) if mapname else "skirmish"
+              t = totals.setdefault(key, [0, 0, 0, 0, 0, []])
+              wins = re.search(r"Blue wins (\d+), Red wins (\d+), draws (\d+), unfinished (\d+)", text)
+              mismatches = re.search(r"replay mismatches (\d+)", text)
+              if wins:
+                  for i in range(4):
+                      t[i] += int(wins.group(i + 1))
+              if mismatches:
+                  t[4] += int(mismatches.group(1))
+              seeds = re.search(r"unfinished seeds: \[([^\]]*)\]", text)
+              if seeds:
+                  t[5] += [seed.strip() for seed in seeds.group(1).split(",")]
+          print("| Map | Blue | Red | Draws | Unfinished | Replay mismatches | Unfinished seeds |")
+          print("| :-- | --: | --: | --: | --: | --: | :-- |")
+          for key, t in totals.items():
+              print(f"| {key} | {t[0]} | {t[1]} | {t[2]} | {t[3]} | {t[4]} | {', '.join(t[5])} |")
+          EOF
+          cat "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail if any shard failed
+        if: needs.soak.result != 'success'
+        run: |
+          echo "A soak shard failed: see its log."
+          exit 1

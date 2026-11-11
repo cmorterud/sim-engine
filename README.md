@@ -77,4 +77,6 @@ cargo run --release -- --soak 100         # Plays and replays 100 AI-vs-AI match
 cargo run --release -- --autotest 60 --fast-forward 10000   # Opens a window for 60 seconds
 ```
 
+Every push to `main` also runs the soak on GitHub's runners (`.github/workflows/soak.yml`): the 200 skirmish matches in eight shards of 25 seeds, and 24 matches on each bundled map, all from one release build. The run's summary page adds up wins by side, unfinished matches, and replay mismatches per map. Tick times are reported there but do not fail the run (`--no-tick-gate`), since a shared runner's other load would fail it falsely; the benchmarks check speed locally. Start a soak by hand from the Actions tab, or with `gh workflow run soak.yml`.
+
 The stored checksums in `tests/golden/` change whenever simulation behavior changes on purpose. Update them with `UPDATE_GOLDEN=1 cargo test --release --test determinism_test`, then confirm that the x86-64 run still matches.

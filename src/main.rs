@@ -64,6 +64,8 @@ Usage: sim-engine [options]
   --capture <dir>      With --autotest, save screenshots at several zoom levels
   --soak <matches>     Play and replay AI-vs-AI matches, and report on the exit criteria
   --threads <n>        Threads for --soak (default 6)
+  --no-tick-gate       With --soak, report tick times without failing on them, for
+                       shared machines such as CI runners
   --seed <number>      Scenario seed
   --sound-check        Play each sound in turn, and exit
   --map <name>         Play on a map that comes with the game: highland or twin_passes
@@ -128,6 +130,7 @@ struct Options {
     capture_dir: Option<PathBuf>,
     soak: Option<u64>,
     threads: Option<usize>,
+    no_tick_gate: bool,
     seed: Option<u64>,
     sound_check: bool,
     map: Option<PathBuf>,
@@ -148,6 +151,7 @@ fn parse_options() -> Result<Options, String> {
             "--capture" => options.capture_dir = Some(PathBuf::from(value("--capture")?)),
             "--soak" => options.soak = Some(number("--soak", value("--soak")?)?),
             "--threads" => options.threads = Some(number("--threads", value("--threads")?)? as usize),
+            "--no-tick-gate" => options.no_tick_gate = true,
             "--seed" => options.seed = Some(number("--seed", value("--seed")?)?),
             "--sound-check" => options.sound_check = true,
             "--map" => options.map = Some(PathBuf::from(value("--map")?)),
@@ -199,7 +203,7 @@ fn main() {
     }
     if let Some(matches) = options.soak {
         let mut report = run_soak(options.seed.unwrap_or(1), matches, options.threads.unwrap_or(6), &map_source);
-        if !report.print() {
+        if !report.print(!options.no_tick_gate) {
             std::process::exit(1);
         }
         return;

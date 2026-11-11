@@ -74,8 +74,10 @@ pub fn run_soak(first_seed: u64, count: u64, threads: usize, map: &MapSource) ->
 }
 
 impl SoakReport {
-    /// Prints the results and returns whether every exit criterion held.
-    pub fn print(&mut self) -> bool {
+    /// Prints the results and returns whether every exit criterion held. Without
+    /// `gate_tick_time`, tick times are reported but cannot fail the run, since on a shared
+    /// machine they measure its other load as much as the game.
+    pub fn print(&mut self, gate_tick_time: bool) -> bool {
         let count = self.matches.len();
         let unfinished = self.matches.iter().filter(|summary| summary.result.is_none()).count();
         let mismatched = self.matches.iter().filter(|summary| !summary.replay_matches).count();
@@ -111,8 +113,13 @@ impl SoakReport {
                 at(50).as_secs_f64() * 1000.0,
                 p99.as_secs_f64() * 1000.0,
                 self.tick_times[self.tick_times.len() - 1].as_secs_f64() * 1000.0,
-                if tick_gate { "PASS" } else { "FAIL" }
+                match (tick_gate, gate_tick_time) {
+                    (true, _) => "PASS",
+                    (false, true) => "FAIL",
+                    (false, false) => "over, not gated",
+                }
             );
+            tick_gate |= !gate_tick_time;
         }
         let passed = unfinished == 0 && mismatched == 0 && tick_gate;
         println!("  result: {}", if passed { "PASS" } else { "FAIL" });
