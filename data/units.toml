@@ -44,6 +44,8 @@ energy = 260
 build_time = 130
 health = 160
 speed = 4
+# As in the original, engineers float over water, so they can build out on it.
+movement = "hover"
 turn_rate = 240
 turn_radius = 10
 radius = 8
@@ -338,6 +340,8 @@ energy = 650
 build_time = 260
 health = 400
 speed = 4
+# As in the original, engineers float over water, so they can build out on it.
+movement = "hover"
 turn_rate = 240
 turn_radius = 10
 radius = 9
@@ -356,6 +360,8 @@ energy = 1750
 build_time = 520
 health = 900
 speed = 4
+# As in the original, engineers float over water, so they can build out on it.
+movement = "hover"
 turn_rate = 240
 turn_radius = 10
 radius = 10

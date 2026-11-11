@@ -297,6 +297,29 @@ fn sonar_and_torpedo_launchers_go_on_the_water() {
 }
 
 #[test]
+fn an_engineer_floats_out_on_the_water_and_builds_a_naval_factory_far_from_shore() {
+    let mut world = lake_world();
+    let engineer = spawn(&mut world, "t1_engineer", Team::Blue, point(1_000, 1_000));
+    let factory_key = world.blueprints.id("naval_factory");
+    // Cell 100 is x 2,000, 600 out from the shore at 1,400: far beyond an engineer's reach of 100.
+    world.advance_tick(&[SimCommand::Build { units: vec![engineer], blueprint: factory_key, cell_x: 100, cell_y: 50, queued: false }]);
+    let mut floated = false;
+    let built = (0..3_000).find(|_| {
+        world.advance_tick(&[]);
+        if on_water(&world, engineer) {
+            assert_eq!(world.unit_position(engineer).unwrap().z, fp_int(8), "it floats on the water, its radius up");
+            floated = true;
+        }
+        world.units.iter().any(|unit| {
+            world.ecs.get::<&Blueprinted>(unit.1).is_ok_and(|bp| bp.0 == factory_key)
+                && world.ecs.get::<&sim_engine::sim::components::Construction>(unit.1).is_err()
+        })
+    });
+    assert!(floated, "it went out on the water");
+    assert!(built.is_some(), "and finished the factory there");
+}
+
+#[test]
 fn a_hovercraft_crosses_land_and_water_alike() {
     let mut world = lake_world();
     let riptide = spawn(&mut world, "t2_amphibious_tank", Team::Blue, point(1_000, 1_000));
