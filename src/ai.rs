@@ -7,7 +7,7 @@ use crate::math::fp::{fp_int, wide_mul, Fp, FpWide, Vec2Fp};
 use crate::math::rng::SimRng;
 use crate::sim::blueprints::{BlueprintId, FactoryKind, Res, UnitClass};
 use crate::sim::commands::SimCommand;
-use crate::sim::components::{Blueprinted, BuildTask, Builder, Construction, Factory, MoveClass, Order, OrderKind, Position, SimId, Team, UnitStats, Upgrading};
+use crate::sim::components::{Blueprinted, BuildTask, Builder, Combat, Construction, Factory, Launcher, MoveClass, Order, OrderKind, Position, SimId, Team, UnitStats, Upgrading};
 use crate::sim::config::TERRAIN_CELL_UNITS;
 use crate::sim::scenario::MapSource;
 use crate::sim::world::{MatchResult, SimWorld};
@@ -77,6 +77,24 @@ const VENT_REACH_UNITS: i32 = 2_500;
 const MAX_POINT_DEFENSES: usize = 4;
 /// How long before trying a deposit again, in case a hidden enemy holds it.
 const DEPOSIT_RETRY_TICKS: u32 = 1_500;
+/// A radar once the base has this many factories: early warning for little mass.
+const RADAR_FACTORIES: usize = 2;
+/// Mass income at which the radar upgrades to T2, which costs 150 energy a second to run.
+const RADAR_T2_INCOME: i64 = 40;
+/// Mass income for the first shield generator, the first tactical missile defense, and the
+/// tactical missile launcher. Each needs T2 builders.
+const SHIELD_INCOME: i64 = 20;
+const MOST_SHIELDS: usize = 4;
+const TMD_INCOME: i64 = 20;
+const MOST_TMDS: usize = 3;
+const TACTICAL_LAUNCHER_INCOME: i64 = 25;
+/// The commander keeps this much energy on top of an Overcharge shot, fires only above this
+/// share of its health, and never at what is this close to the enemy commander.
+const OVERCHARGE_RESERVE: i64 = 1_000;
+const OVERCHARGE_HEALTH_PERCENT: i32 = 50;
+const OVERCHARGE_CLEARANCE_UNITS: i32 = 900;
+/// A radar blip this far above the ground or the water is an aircraft, which the army leaves alone.
+const BLIP_GROUND_HEIGHT: i32 = 30;
 
 struct Roster {
     /// Engineers by tier, T1 first.
@@ -117,6 +135,12 @@ struct Roster {
     shield_boat: BlueprintId,
     battleship: BlueprintId,
     battlecruiser: BlueprintId,
+    /// Radars by tier: the radar and the T2 radar.
+    radars: [BlueprintId; 2],
+    shield: BlueprintId,
+    tactical_launcher: BlueprintId,
+    tactical_missile: BlueprintId,
+    tactical_defense: BlueprintId,
 }
 
 impl Roster {
@@ -155,6 +179,11 @@ impl Roster {
             shield_boat: id("t2_shield_boat"),
             battleship: id("t3_battleship"),
             battlecruiser: id("t3_battlecruiser"),
+            radars: [id("radar"), id("radar_t2")],
+            shield: id("shield_generator"),
+            tactical_launcher: id("tactical_missile_launcher"),
+            tactical_missile: id("tactical_missile"),
+            tactical_defense: id("tactical_missile_defense"),
         }
     }
 
@@ -210,7 +239,13 @@ struct Forces {
     generators_building: usize,
     storages: usize,
     point_defenses: usize,
-    /// Cells that are spoken for: occupied, or planned by a builder on its way.
+    /// Finished radars that could upgrade, and whether they are, and all radars.
+    radar_sites: Vec<(SimId, bool)>,
+    radars: usize,
+    shields: usize,
+    tactical_defenses: usize,
+    tactical_launchers: Vec<LauncherInfo>,
+    /// Cells that are spoken for: planned by a builder on its way, each site's whole footprint.
     planned: Vec<(u32, u32)>,
     /// What builders are already on their way to start.
     planned_blueprints: Vec<BlueprintId>,
@@ -235,6 +270,17 @@ struct IdleBuilder {
 }
 
 #[derive(Copy, Clone)]
+struct LauncherInfo {
+    id: SimId,
+    position: Vec2Fp,
+    finished: bool,
+    queue_is_empty: bool,
+    stock: u32,
+    /// Already firing at something.
+    busy: bool,
+}
+
+#[derive(Copy, Clone)]
 struct ExtractorInfo {
     id: SimId,
     position: Vec2Fp,
@@ -252,6 +298,9 @@ struct Sighting {
     is_air: bool,
     /// On or under the water: a ship, a submarine, or a structure on the water.
     is_naval: bool,
+    /// Under the water, where only torpedoes reach: a submarine, or an amphibious unit on the
+    /// seabed. The land army cannot hit it.
+    is_submerged: bool,
 }
 
 pub struct AiBrain {
@@ -335,6 +384,8 @@ impl AiBrain {
         self.command_army(world, &forces, &sightings, &mut commands);
         self.command_air(world, &forces, &sightings, &mut commands);
         self.command_fleet(&forces, &sightings, &mut commands);
+        self.command_missiles(world, &forces, &sightings, &mut commands);
+        self.command_overcharge(world, &forces, &sightings, &mut commands);
         commands
     }
 
@@ -396,7 +447,7 @@ impl AiBrain {
                     }
                     for task in &builder.tasks {
                         if let BuildTask::Build { blueprint, cell_x, cell_y, site: None } = *task {
-                            forces.planned.push((cell_x, cell_y));
+                            forces.planned.extend(footprint_cells(world, blueprint, (cell_x, cell_y)));
                             forces.planned_blueprints.push(blueprint);
                         }
                     }
@@ -437,7 +488,18 @@ impl AiBrain {
                         }
                     }
                 }
-                // The AI builds neither silos' missiles nor support commanders yet.
+                // Of the silos, only the tactical missile launcher. No support commanders yet.
+                UnitClass::Factory if blueprint == roster.tactical_launcher => {
+                    let factory = world.ecs.get::<&Factory>(entity).expect("launchers have factory parts");
+                    forces.tactical_launchers.push(LauncherInfo {
+                        id,
+                        position,
+                        finished,
+                        queue_is_empty: factory.queue.is_empty(),
+                        stock: world.ecs.get::<&Launcher>(entity).map_or(0, |launcher| launcher.stock),
+                        busy: world.ecs.get::<&Combat>(entity).is_ok_and(|combat| combat.forced_target.is_some() || combat.ground_target.is_some()),
+                    });
+                }
                 UnitClass::Factory | UnitClass::Ammo | UnitClass::SupportCommander => {}
                 UnitClass::Economy | UnitClass::Defense => {
                     if unit.requires_deposit {
@@ -461,6 +523,15 @@ impl AiBrain {
                         forces.storages += 1;
                     } else if blueprint == roster.point_defense {
                         forces.point_defenses += 1;
+                    } else if roster.radars.contains(&blueprint) {
+                        forces.radars += 1;
+                        if finished && blueprint == roster.radars[0] {
+                            forces.radar_sites.push((id, world.ecs.get::<&Upgrading>(entity).is_ok()));
+                        }
+                    } else if blueprint == roster.shield {
+                        forces.shields += 1;
+                    } else if blueprint == roster.tactical_defense {
+                        forces.tactical_defenses += 1;
                     }
                 }
             }
@@ -479,14 +550,24 @@ impl AiBrain {
     fn command_builders(&mut self, world: &SimWorld, forces: &Forces, commands: &mut Vec<SimCommand>) {
         let mut planned = forces.planned.clone();
         let mut new_blueprints = forces.planned_blueprints.clone();
+        // In an energy crisis, one generator at a time, with every other builder helping: a
+        // trickle of energy split between many sites finishes none of them.
+        let mut crisis_lead: Option<SimId> = None;
         for &IdleBuilder { id, entity, position } in &forces.idle_builders {
             let is_commander = forces.commander == Some(id);
+            if let Some(lead) = crisis_lead {
+                commands.push(SimCommand::Assist { units: vec![id], target: lead });
+                continue;
+            }
             let plan = self.next_structure(world, forces, entity, position, is_commander, &planned, &new_blueprints);
             if let Some((blueprint, cell)) = plan {
-                planned.push(cell);
+                planned.extend(footprint_cells(world, blueprint, cell));
                 new_blueprints.push(blueprint);
                 if blueprint == self.roster().extractor {
                     self.deposit_attempts.push((cell, world.current_tick));
+                }
+                if forces.energy_crisis && self.roster().is_generator(blueprint) {
+                    crisis_lead = Some(id);
                 }
                 commands.push(SimCommand::Build {
                     units: vec![id],
@@ -542,6 +623,8 @@ impl AiBrain {
         // builders leave generators to it, and help instead.
         let wanted_tier = (0..3).rev().find(|&tier| [0, GENERATOR_T2_INCOME, GENERATOR_T3_INCOME][tier] <= mass_income).unwrap_or(0);
         let wanted_tier = wanted_tier.min(usize::from(forces.builder_tier.max(1)) - 1);
+        // With no energy at all, the cheapest generator, which the trickle can actually finish.
+        let wanted_tier = if forces.energy_crisis { 0 } else { wanted_tier };
         let generator = (0..=wanted_tier).rev().map(|tier| roster.generators[tier]).find(|&blueprint| world.can_build(builder, blueprint));
         let generator_tier = generator.map_or(0, |blueprint| world.blueprints.get(blueprint).tier as usize - 1);
         let generator = generator.filter(|_| generator_tier == wanted_tier);
@@ -645,6 +728,34 @@ impl AiBrain {
         if forces.aircraft >= STAGING_AIRCRAFT && forces.air_stagings + count_planned(roster.air_staging) == 0 && world.can_build(builder, roster.air_staging) {
             if let Some(cell) = self.site_near_home(world, roster.air_staging, 1, planned) {
                 return Some((roster.air_staging, cell));
+            }
+        }
+
+        // Intel and defenses. A radar warns of what comes, for little; shields, missile defense,
+        // and a missile launcher come with T2 builders and the income to run them.
+        if factories_total >= RADAR_FACTORIES && forces.radars + count_planned(roster.radars[0]) == 0 && world.can_build(builder, roster.radars[0]) {
+            if let Some(cell) = self.site_towards_enemy(world, roster.radars[0], planned) {
+                return Some((roster.radars[0], cell));
+            }
+        }
+        if !energy_lags {
+            let shields_wanted = if mass_income >= SHIELD_INCOME { (1 + (mass_income - SHIELD_INCOME) as usize / 30).min(MOST_SHIELDS) } else { 0 };
+            if forces.shields + count_planned(roster.shield) < shields_wanted && world.can_build(builder, roster.shield) {
+                if let Some(cell) = self.site_near_home(world, roster.shield, 1, planned) {
+                    return Some((roster.shield, cell));
+                }
+            }
+            let defenses_wanted = if mass_income >= TMD_INCOME { (1 + (mass_income - TMD_INCOME) as usize / 40).min(MOST_TMDS) } else { 0 };
+            if forces.tactical_defenses + count_planned(roster.tactical_defense) < defenses_wanted && world.can_build(builder, roster.tactical_defense) {
+                if let Some(cell) = self.site_towards_enemy(world, roster.tactical_defense, planned) {
+                    return Some((roster.tactical_defense, cell));
+                }
+            }
+            let launchers_wanted = usize::from(mass_income >= TACTICAL_LAUNCHER_INCOME);
+            if forces.tactical_launchers.len() + count_planned(roster.tactical_launcher) < launchers_wanted && world.can_build(builder, roster.tactical_launcher) {
+                if let Some(cell) = self.site_near_home(world, roster.tactical_launcher, 1, planned) {
+                    return Some((roster.tactical_launcher, cell));
+                }
             }
         }
 
@@ -1120,6 +1231,13 @@ impl AiBrain {
         if energy_is_low {
             return;
         }
+        // One radar goes to T2, for its reach, once the income can carry its upkeep.
+        let has_t2_radar = forces.radars > forces.radar_sites.len() || forces.radar_sites.iter().any(|&(_, upgrading)| upgrading);
+        if mass_income >= RADAR_T2_INCOME && !has_t2_radar {
+            if let Some(&(radar, _)) = forces.radar_sites.first() {
+                commands.push(SimCommand::Upgrade { units: vec![radar] });
+            }
+        }
         let under_way = forces.extractor_sites.iter().filter(|extractor| extractor.upgrading).count();
         if under_way > mass_income as usize / 25 {
             return;
@@ -1150,10 +1268,25 @@ impl AiBrain {
         // The land army cannot catch aircraft, which are the anti-air's and the fighters' job.
         let threat = sightings
             .iter()
-            .filter(|enemy| !enemy.is_air && enemy.position.distance_squared(&self.home) <= wide_mul(defend, defend))
+            .filter(|enemy| !enemy.is_air && !enemy.is_submerged && enemy.position.distance_squared(&self.home) <= wide_mul(defend, defend))
             .min_by_key(|enemy| (enemy.position.distance_squared(&self.home), enemy.id));
         if let Some(enemy) = threat {
             commands.push(SimCommand::AttackMove { units: forces.idle_combat.clone(), goal: enemy.position });
+            return;
+        }
+        // With a radar, something unseen coming close is met as well, unless it flies.
+        let blips = if forces.radars > 0 { world.blips_for(self.team) } else { Vec::new() };
+        let blip = blips
+            .into_iter()
+            .map(|[x, y, z]| (Vec2Fp::new(Fp::from_bits(x), Fp::from_bits(y)), Fp::from_bits(z)))
+            .filter(|&(at, z)| z <= world.terrain.height_at(at).max(world.terrain.water_level()) + fp_int(BLIP_GROUND_HEIGHT))
+            .filter(|(at, _)| at.distance_squared(&self.home) <= wide_mul(defend, defend))
+            .min_by_key(|(at, _)| {
+                let seen = self.plan_position(world, *at);
+                (at.distance_squared(&self.home), seen.x, seen.y)
+            });
+        if let Some((at, _)) = blip {
+            commands.push(SimCommand::AttackMove { units: forces.idle_combat.clone(), goal: at });
             return;
         }
         let gathered = forces.idle_combat.len();
@@ -1166,11 +1299,15 @@ impl AiBrain {
         }
         // Send a wave at what can be seen, then the enemy's base, then search their deposits.
         let commander = world.commanders[self.team.enemy().index()];
+        // Nothing under the water, which the army cannot hit: two commanders that followed
+        // their waves onto the seabed once stalked each other there until the time ran out.
+        let reachable = |enemy: &&Sighting| !enemy.is_air && !enemy.is_submerged;
         let target = sightings
             .iter()
+            .filter(reachable)
             .find(|enemy| Some(enemy.id) == commander)
-            .or_else(|| sightings.iter().find(|enemy| enemy.is_structure))
-            .or_else(|| sightings.iter().find(|enemy| !enemy.is_air))
+            .or_else(|| sightings.iter().filter(reachable).find(|enemy| enemy.is_structure))
+            .or_else(|| sightings.iter().find(reachable))
             .map(|enemy| enemy.position);
         let full_strength = gathered >= LARGEST_WAVE;
         let goal = target.unwrap_or_else(|| self.search_point(world, full_strength));
@@ -1179,7 +1316,8 @@ impl AiBrain {
         let mut wave = forces.idle_combat.clone();
         // A long, even game is one a defended base keeps winning. The commander joins a
         // full-size wave, which either breaks the enemy's base or loses the commander.
-        if full_strength && world.current_tick >= COMMANDER_PUSH_TICKS {
+        let on_land = world.terrain.height_at(goal) >= world.terrain.water_level();
+        if full_strength && world.current_tick >= COMMANDER_PUSH_TICKS && on_land {
             wave.extend(forces.commander);
         }
         commands.push(SimCommand::AttackMove { units: wave, goal });
@@ -1187,6 +1325,85 @@ impl AiBrain {
             self.wave_size = (self.wave_size + self.wave_size / 4 + 1).min(LARGEST_WAVE);
         }
         self.gathered = (0, world.current_tick);
+    }
+
+    /// Tactical missile launchers build missiles one after another, and fire them at enemy
+    /// structures in sight and in range: extractors first, which a missile or two destroys,
+    /// then the nearest.
+    fn command_missiles(&self, world: &SimWorld, forces: &Forces, sightings: &[Sighting], commands: &mut Vec<SimCommand>) {
+        let roster = self.roster();
+        for launcher in forces.tactical_launchers.iter().filter(|launcher| launcher.finished) {
+            if launcher.queue_is_empty {
+                commands.push(SimCommand::QueueUnit { factory: launcher.id, blueprint: roster.tactical_missile, count: 1 });
+                commands.push(SimCommand::SetRepeat { factory: launcher.id, repeat: true });
+            }
+            if launcher.busy || launcher.stock == 0 {
+                continue;
+            }
+            let Some(range) = world.unit_entity(launcher.id).and_then(|entity| world.ecs.get::<&Combat>(entity).ok().map(|combat| combat.range)) else {
+                continue;
+            };
+            let is_extractor = |id: SimId| {
+                world.unit_entity(id).and_then(|entity| world.ecs.get::<&Blueprinted>(entity).ok().map(|unit| world.blueprints.get(unit.0).requires_deposit)).unwrap_or(false)
+            };
+            let target = sightings
+                .iter()
+                .filter(|enemy| enemy.is_structure && enemy.position.distance_squared(&launcher.position) <= wide_mul(range, range))
+                .min_by_key(|enemy| (!is_extractor(enemy.id), enemy.position.distance_squared(&launcher.position), enemy.id));
+            if let Some(enemy) = target {
+                commands.push(SimCommand::Attack { units: vec![launcher.id], target: enemy.id });
+            }
+        }
+    }
+
+    /// The commander overcharges the costliest enemy unit in its gun's range, away from the
+    /// enemy commander, when the energy for the shot is there with some to spare and it is
+    /// above half health. One shot destroys anything mobile.
+    fn command_overcharge(&self, world: &SimWorld, forces: &Forces, sightings: &[Sighting], commands: &mut Vec<SimCommand>) {
+        let Some(commander) = forces.commander else {
+            return;
+        };
+        let Some(entity) = world.unit_entity(commander) else {
+            return;
+        };
+        if world.ecs.get::<&crate::sim::components::OverchargeOrder>(entity).is_ok() {
+            return;
+        }
+        let Ok(weapon) = world.ecs.get::<&crate::sim::components::OverchargeWeapon>(entity).map(|weapon| *weapon) else {
+            return;
+        };
+        let economy = &world.economies[self.team.index()];
+        if weapon.ticks_until_ready > 0 || economy.energy < weapon.energy + Res::from_num(OVERCHARGE_RESERVE) {
+            return;
+        }
+        let health = *world.ecs.get::<&crate::sim::components::Health>(entity).expect("units have health");
+        if wide_mul(health.current, fp_int(100)) < wide_mul(health.max, fp_int(OVERCHARGE_HEALTH_PERCENT)) {
+            return;
+        }
+        let at = world.ecs.get::<&Position>(entity).expect("units have positions").0.xy();
+        // Only what is already in range, so that a shot never draws the commander forward.
+        let Some(reach) = world.ecs.get::<&Combat>(entity).ok().map(|combat| combat.range) else {
+            return;
+        };
+        // Never the enemy commander, nor anything near it. The shot kills a commander, and a
+        // commander's reactor takes the other with it when they die close together: a match
+        // the AI could have won ends drawn.
+        let enemy_commander = world.commanders[self.team.enemy().index()];
+        let clearance = fp_int(OVERCHARGE_CLEARANCE_UNITS);
+        let near_enemy_commander = |position: Vec2Fp| {
+            sightings.iter().any(|enemy| Some(enemy.id) == enemy_commander && enemy.position.distance_squared(&position) <= wide_mul(clearance, clearance))
+        };
+        let worth = |id: SimId| {
+            world.unit_entity(id).and_then(|entity| world.ecs.get::<&Blueprinted>(entity).ok().map(|unit| world.blueprints.get(unit.0).mass)).unwrap_or(Res::ZERO)
+        };
+        let target = sightings
+            .iter()
+            .filter(|enemy| !enemy.is_structure && !enemy.is_air && Some(enemy.id) != enemy_commander && enemy.position.distance_squared(&at) <= wide_mul(reach, reach))
+            .filter(|enemy| !near_enemy_commander(enemy.position))
+            .max_by_key(|enemy| (worth(enemy.id), std::cmp::Reverse(enemy.position.distance_squared(&at)), std::cmp::Reverse(enemy.id)));
+        if let Some(enemy) = target {
+            commands.push(SimCommand::Overcharge { unit: commander, target: enemy.id });
+        }
     }
 
     /// Where to look when no enemy is in sight. The enemy's start is public knowledge, as on
@@ -1220,6 +1437,14 @@ fn footprint(world: &SimWorld, blueprint: BlueprintId) -> i32 {
     i32::from(world.blueprints.get(blueprint).footprint)
 }
 
+/// Every cell a structure with its corner at `corner` covers. Planned sites are kept as their
+/// whole footprints: a corner alone is the bottom-left on Blue's plan but the top-right on Red's,
+/// turned about the map, so the two sides would keep different ground clear around it.
+fn footprint_cells(world: &SimWorld, blueprint: BlueprintId, corner: (u32, u32)) -> impl Iterator<Item = (u32, u32)> {
+    let size = world.blueprints.get(blueprint).footprint.max(1) as u32;
+    (0..size * size).map(move |index| (corner.0 + index % size, corner.1 + index / size))
+}
+
 const fn cell_i32(cell: (u32, u32)) -> (i32, i32) {
     (cell.0 as i32, cell.1 as i32)
 }
@@ -1248,6 +1473,7 @@ fn visible_enemies(world: &SimWorld, team: Team) -> Vec<Sighting> {
             position: Vec2Fp::new(Fp::from_bits(entry.x), Fp::from_bits(entry.y)),
             is_structure: entry.is_structure,
             is_air: entry.is_air,
+            is_submerged: entry.is_sub,
             is_naval: entry.is_naval || entry.is_sub || (entry.is_structure && world.unit_entity(entry.id).is_some_and(|entity| world.ecs.get::<&Blueprinted>(entity).is_ok_and(|unit| world.blueprints.get(unit.0).on_water))),
         })
         .collect()

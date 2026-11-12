@@ -2,7 +2,7 @@
 
 use sim_engine::ai::{play_match, replay_match, AiBrain};
 use sim_engine::sim::commands::SimCommand;
-use sim_engine::math::fp::{fp_int, Vec2Fp};
+use sim_engine::math::fp::{fp_int, Fp, Vec2Fp};
 use sim_engine::sim::components::{Blueprinted, Position, Team, UnitStats};
 use sim_engine::sim::scenario;
 use sim_engine::sim::world::SimWorld;
@@ -57,8 +57,10 @@ fn ai_commands_only_its_own_units() {
                     | SimCommand::Patrol { units, .. }
                     | SimCommand::SetPaused { units, .. }
                     | SimCommand::QueueMove { units, .. }
-                    | SimCommand::FormationMove { units, .. } => units.clone(),
-                    SimCommand::QueueUnit { factory, .. } | SimCommand::SetRally { factory, .. } => vec![*factory],
+                    | SimCommand::FormationMove { units, .. }
+                    | SimCommand::Attack { units, .. } => units.clone(),
+                    SimCommand::Overcharge { unit, .. } => vec![*unit],
+                    SimCommand::QueueUnit { factory, .. } | SimCommand::SetRally { factory, .. } | SimCommand::SetRepeat { factory, .. } => vec![*factory],
                     other => panic!("unexpected command {other:?}"),
                 };
                 for unit in units {
@@ -106,6 +108,9 @@ fn mirrored_order(world: &SimWorld, team: Team, command: &SimCommand) -> String 
         SimCommand::SetPaused { units, paused } => format!("pause {paused} x{}", units.len()),
         SimCommand::Patrol { units, points } => format!("patrol x{} {:?}", units.len(), points.iter().map(|at| point(*at)).collect::<Vec<_>>()),
         SimCommand::QueueMove { units, goal, attack } => format!("queue-move x{} to {:?} {attack}", units.len(), point(*goal)),
+        SimCommand::SetRepeat { repeat, .. } => format!("repeat {repeat}"),
+        SimCommand::Attack { units, .. } => format!("attack x{}", units.len()),
+        SimCommand::Overcharge { .. } => "overcharge".to_string(),
         other => panic!("unexpected command {other:?}"),
     }
 }
@@ -285,6 +290,153 @@ fn ai_takes_to_the_air_and_answers_enemy_aircraft_with_anti_air() {
         keep_red_alive(&mut world);
     }
     assert!(anti_air(&world) >= 2, "only {} anti-air after enemy aircraft were seen", anti_air(&world));
+}
+
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn ai_puts_up_radar_shields_and_missiles_and_overcharges_what_comes_close() {
+    let mut world = scenario::skirmish(11).world;
+    let mut brain = AiBrain::new(Team::Blue, 11, world.starts);
+    let keep_red_alive = |world: &mut SimWorld| {
+        let red = world.unit_entity(world.commanders[Team::Red.index()].unwrap()).unwrap();
+        let mut health = world.ecs.get::<&mut sim_engine::sim::components::Health>(red).unwrap();
+        health.current = health.max;
+    };
+    // 25 minutes with nobody playing Red, as in the tech tree test.
+    for _ in 0..15_000 {
+        let commands = brain.think(&world);
+        world.advance_tick(&commands);
+        keep_red_alive(&mut world);
+    }
+    let count = |world: &SimWorld, key: &str| count_owned(world, Team::Blue, key);
+    assert!(count(&world, "radar") + count(&world, "radar_t2") >= 1, "no radar");
+    assert!(count(&world, "shield_generator") >= 1, "no shield generator");
+    assert!(count(&world, "tactical_missile_defense") >= 1, "no tactical missile defense");
+    assert_eq!(count(&world, "tactical_missile_launcher"), 1, "not one tactical missile launcher");
+
+    // A Red generator in sight of Blue's base draws a missile, and a Red tank by the commander
+    // an Overcharge.
+    let home = scenario::skirmish_start(Team::Blue);
+    let home_cell = (home.x.to_num::<i32>() / 20, home.y.to_num::<i32>() / 20);
+    let generator = world.blueprints.id("power_generator");
+    let target = (0..40)
+        .find_map(|step| world.spawn_finished_structure(generator, Team::Red, (home_cell.0 + 25 + step % 8) as u32, (home_cell.1 + 25 + step / 8) as u32))
+        .expect("room for a Red generator");
+    // Kept standing, like Red's commander, so that the base's other guns do not end it first.
+    let keep_standing = |world: &mut SimWorld| {
+        if let Some(entity) = world.unit_entity(target) {
+            let mut health = world.ecs.get::<&mut sim_engine::sim::components::Health>(entity).unwrap();
+            health.current = health.max;
+        }
+    };
+    let commander = world.commanders[Team::Blue.index()].unwrap();
+    let at = world.unit_position(commander).unwrap().xy();
+    let tank = world.spawn_mobile(world.blueprints.id("t2_heavy_tank"), Team::Red, Vec2Fp::new(at.x + fp_int(300), at.y));
+    let (mut fired_at, mut overcharged) = (false, false);
+    let launcher = world.units.iter().find(|(_, entity)| {
+        world.ecs.get::<&Blueprinted>(*entity).is_ok_and(|unit| unit.0 == world.blueprints.id("tactical_missile_launcher"))
+    }).map(|&(id, _)| id).unwrap();
+    for _ in 0..600 {
+        let commands = brain.think(&world);
+        overcharged |= commands.iter().any(|command| matches!(command, SimCommand::Overcharge { target, .. } if *target == tank));
+        fired_at |= commands.iter().any(|command| matches!(command, SimCommand::Attack { units, target: aimed } if units == &vec![launcher] && *aimed == target));
+        world.advance_tick(&commands);
+        keep_red_alive(&mut world);
+        keep_standing(&mut world);
+    }
+    assert!(fired_at, "the missile launcher never fired at the Red generator");
+    assert!(overcharged, "the commander never overcharged the Red tank");
+}
+
+#[test]
+fn the_commander_never_overcharges_the_enemy_commander() {
+    // The shot would kill it, and its reactor's blast would take Blue's commander too: a draw.
+    let mut world = scenario::skirmish(5).world;
+    let mut brain = AiBrain::new(Team::Blue, 5, world.starts);
+    let (blue, red) = (world.commanders[0].unwrap(), world.commanders[1].unwrap());
+    let at = world.unit_position(blue).unwrap().xy();
+    let red_entity = world.unit_entity(red).unwrap();
+    world.ecs.get::<&mut sim_engine::sim::components::Position>(red_entity).unwrap().0 = world.unit_position(blue).unwrap() + sim_engine::math::fp::Vec3Fp::new(fp_int(350), Fp::ZERO, Fp::ZERO);
+    let _ = at;
+    let mut offered_something_else = false;
+    for tick in 0..300 {
+        let economy = &mut world.economies[0];
+        economy.energy_capacity = economy.energy_capacity.max(sim_engine::sim::blueprints::Res::from_num(10_000));
+        economy.energy = economy.energy_capacity;
+        let commands = brain.think(&world);
+        for command in &commands {
+            if let SimCommand::Overcharge { target, .. } = command {
+                assert_ne!(*target, red, "overcharged the enemy commander at tick {tick}");
+            }
+        }
+        // With Red's commander gone home, a Red tank beside it is fair game, which shows the
+        // commander was free to overcharge all along.
+        if tick == 150 {
+            let red_entity = world.unit_entity(red).unwrap();
+            let start = scenario::skirmish_start(Team::Red);
+            world.ecs.get::<&mut sim_engine::sim::components::Position>(red_entity).unwrap().0 = sim_engine::math::fp::Vec3Fp::new(start.x, start.y, Fp::ZERO);
+            let tank = world.blueprints.id("t2_heavy_tank");
+            world.spawn_mobile(tank, Team::Red, Vec2Fp::new(at.x - fp_int(300), at.y));
+        }
+        offered_something_else |= tick > 150 && commands.iter().any(|command| matches!(command, SimCommand::Overcharge { .. }));
+        world.advance_tick(&commands);
+        let health = |id| world.unit_entity(id).map(|entity| { let mut h = world.ecs.get::<&mut sim_engine::sim::components::Health>(entity).unwrap(); h.current = h.max; });
+        health(red);
+        health(blue);
+    }
+    assert!(offered_something_else, "the commander never overcharged the tank either");
+}
+
+#[test]
+fn the_army_is_never_sent_at_an_enemy_commander_under_the_water() {
+    // Tanks cannot hit what is on the seabed. Two commanders that followed their waves there
+    // once stalked each other until the match ran out of time.
+    let map = scenario::MapSource::Imported(std::sync::Arc::new(sim_engine::sim::maps::twin_passes()));
+    let mut world = map.scenario(3).world;
+    let mut brain = AiBrain::new(Team::Blue, 3, world.starts);
+    let home = world.starts[0];
+    let water = world.terrain.water_level();
+    let cells = world.terrain.cells_per_side() as i32;
+    let deep = (0..cells * cells)
+        .map(|index| Vec2Fp::new(fp_int((index % cells) * 20 + 10), fp_int((index / cells) * 20 + 10)))
+        .filter(|&at| world.terrain.height_at(at) + fp_int(40) < water)
+        .min_by_key(|at| at.distance_squared(&home))
+        .expect("twin passes has a sea");
+    let red = world.commanders[1].unwrap();
+    let seabed = sim_engine::math::fp::Vec3Fp::new(deep.x, deep.y, world.terrain.height_at(deep));
+    // A Blue frigate over it sees it, and a dozen tanks at home make a wave.
+    world.spawn_mobile(world.blueprints.id("t1_frigate"), Team::Blue, deep);
+    let tank = world.blueprints.id("t2_heavy_tank");
+    for index in 0..12 {
+        world.spawn_mobile(tank, Team::Blue, Vec2Fp::new(home.x + fp_int(200 + 40 * (index % 4)), home.y + fp_int(200 + 40 * (index / 4))));
+    }
+    let place_red = |world: &mut SimWorld| {
+        let entity = world.unit_entity(red).unwrap();
+        world.ecs.get::<&mut sim_engine::sim::components::Position>(entity).unwrap().0 = seabed;
+    };
+    // Long enough for the frigate's sight to take in the commander before the AI looks.
+    for _ in 0..20 {
+        place_red(&mut world);
+        world.advance_tick(&[]);
+    }
+    let mut waves = 0;
+    for tick in 0..400 {
+        let entity = world.unit_entity(red).unwrap();
+        world.ecs.get::<&mut sim_engine::sim::components::Position>(entity).unwrap().0 = seabed;
+        let commands = brain.think(&world);
+        for command in &commands {
+            // The tanks' waves: the frigate is the fleet's, and goes where ships go.
+            if let SimCommand::AttackMove { units, goal } = command.clone() {
+                if units.len() < 10 {
+                    continue;
+                }
+                waves += 1;
+                assert!(goal.distance_squared(&deep) > sim_engine::math::fp::wide_mul(fp_int(300), fp_int(300)), "a wave was sent at the commander on the seabed at tick {tick}");
+            }
+        }
+        world.advance_tick(&commands);
+    }
+    assert!(waves >= 1, "no wave set out, so nothing was tested");
 }
 
 #[test]

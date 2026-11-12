@@ -130,7 +130,7 @@ jobs:
               text = open(path).read()
               mapname = re.search(r"^map (\S+):", text, re.M)
               key = mapname.group(1) if mapname else "skirmish"
-              t = totals.setdefault(key, [0, 0, 0, 0, 0, []])
+              t = totals.setdefault(key, [0, 0, 0, 0, 0, [], []])
               wins = re.search(r"Blue wins (\d+), Red wins (\d+), draws (\d+), unfinished (\d+)", text)
               mismatches = re.search(r"replay mismatches (\d+)", text)
               if wins:
@@ -141,10 +141,13 @@ jobs:
               seeds = re.search(r"unfinished seeds: \[([^\]]*)\]", text)
               if seeds:
                   t[5] += [seed.strip() for seed in seeds.group(1).split(",")]
-          print("| Map | Blue | Red | Draws | Unfinished | Replay mismatches | Unfinished seeds |")
-          print("| :-- | --: | --: | --: | --: | --: | :-- |")
+              drawn = re.search(r"drawn seeds: \[([^\]]*)\]", text)
+              if drawn:
+                  t[6] += [seed.strip() for seed in drawn.group(1).split(",")]
+          print("| Map | Blue | Red | Draws | Unfinished | Replay mismatches | Unfinished seeds | Drawn seeds |")
+          print("| :-- | --: | --: | --: | --: | --: | :-- | :-- |")
           for key, t in totals.items():
-              print(f"| {key} | {t[0]} | {t[1]} | {t[2]} | {t[3]} | {t[4]} | {', '.join(t[5])} |")
+              print(f"| {key} | {t[0]} | {t[1]} | {t[2]} | {t[3]} | {t[4]} | {', '.join(t[5])} | {', '.join(t[6])} |")
           EOF
           cat "$GITHUB_STEP_SUMMARY"
 

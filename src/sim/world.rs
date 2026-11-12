@@ -3256,8 +3256,9 @@ impl SimWorld {
 impl SimWorld {
     /// What the viewer's radar shows that it cannot see: enemies on its radar or omni, except
     /// those hidden by a stealth field or a cloak where it has no omni, and decoys from enemy
-    /// jammers, except where its omni or its sight shows there is nothing there.
-    fn blips_for(&self, viewer: Team) -> Vec<[i32; 3]> {
+    /// jammers, except where its omni or its sight shows there is nothing there. Each is its
+    /// position's raw bits. The AI reads these too, so it can be fooled by decoys as a player can.
+    pub fn blips_for(&self, viewer: Team) -> Vec<[i32; 3]> {
         let visibility = &self.visibility;
         if !visibility.has_any(Sense::Radar, viewer) && !visibility.has_any(Sense::Omni, viewer) && !visibility.has_any(Sense::Sonar, viewer) {
             return Vec::new();
@@ -3333,7 +3334,7 @@ impl SimWorld {
 }
 
 /// Where a jammer's decoy is for a while, as whole units from the jammer, within its radius.
-/// From a hash, not the simulation's random numbers, since decoys are only ever shown.
+/// From a hash, not the simulation's random numbers, which drawing them must never use up.
 pub fn decoy_spot(jammer: SimId, period: u32, decoy: u32, radius: i32) -> (i32, i32) {
     let mut value = (u64::from(jammer.0) << 40) ^ (u64::from(period) << 8) ^ u64::from(decoy);
     // SplitMix64.

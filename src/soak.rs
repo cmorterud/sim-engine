@@ -93,6 +93,10 @@ impl SoakReport {
         if !unfinished_seeds.is_empty() {
             println!("  unfinished seeds: {unfinished_seeds:?}");
         }
+        let drawn_seeds: Vec<u64> = self.matches.iter().filter(|summary| summary.result == Some(MatchResult::Draw)).map(|summary| summary.seed).collect();
+        if !drawn_seeds.is_empty() {
+            println!("  drawn seeds: {drawn_seeds:?}");
+        }
         if let (Some(first), Some(last)) = (lengths.first(), lengths.last()) {
             println!(
                 "  match length: shortest {} s, median {} s, longest {} s",
