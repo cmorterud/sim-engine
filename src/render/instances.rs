@@ -33,6 +33,13 @@ const DEPOSIT: [f32; 3] = [0.10, 0.75, 0.62];
 const VENT: [f32; 3] = [0.75, 0.55, 0.20];
 const GHOST_VALID: [f32; 3] = [0.35, 0.95, 0.45];
 const GHOST_INVALID: [f32; 3] = [0.95, 0.25, 0.20];
+/// Bare armor, before it takes on a little of the team's and the blueprint's color.
+const ARMOR: [f32; 3] = [0.50, 0.52, 0.55];
+/// How much of the blueprint's tint, then the team's color, the armor takes on.
+const ARMOR_TINT: f32 = 0.4;
+const ARMOR_TEAM: f32 = 0.15;
+/// How far glowing parts are lifted towards white.
+const GLOW_WHITEN: f32 = 0.25;
 /// How far a unit must have moved in a tick, in raw squared units, to count as heading somewhere.
 const HEADING_MIN_MOVE_SQUARED: f64 = 400.0 * 400.0;
 /// How quickly a unit turns towards its new heading, per frame.
@@ -46,8 +53,33 @@ const SELECTION_THICKNESS: f32 = 1.0;
 pub struct UnitInstanceRaw {
     /// Interpolated, camera-relative 3D transform.
     pub model_matrix: [[f32; 4]; 4],
-    /// RGB, with the tactical dot's half-size in pixels in the last component.
+    /// The team's color, as RGB, with the tactical dot's half-size in pixels in the last component.
     pub color: [f32; 4],
+    /// The body's color, for parts painted as hull, with the last component unused.
+    pub hull: [u8; 4],
+    /// The color of parts that glow, with the last component unused.
+    pub glow: [u8; 4],
+}
+
+/// A color from 0 to 1 as bytes, as the GPU reads them back.
+fn bytes(color: [f32; 3]) -> [u8; 4] {
+    let byte = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
+    [byte(color[0]), byte(color[1]), byte(color[2]), 255]
+}
+
+fn mix(from: [f32; 3], to: [f32; 3], share: f32) -> [f32; 3] {
+    std::array::from_fn(|channel| from[channel] + (to[channel] - from[channel]) * share)
+}
+
+/// The armor of a unit: grey, with a little of what it is and whose it is.
+fn armor(team: [f32; 3], tint: Option<[f32; 3]>) -> [f32; 3] {
+    mix(tint.map_or(ARMOR, |tint| mix(ARMOR, tint, ARMOR_TINT)), team, ARMOR_TEAM)
+}
+
+/// A color at full brightness, lifted a little towards white, for parts lit from inside.
+fn glowing(color: [f32; 3]) -> [f32; 3] {
+    let brightest = color.iter().copied().fold(0.01_f32, f32::max);
+    mix(color.map(|channel| channel / brightest), [1.0; 3], GLOW_WHITEN)
 }
 
 /// A unit's facing as a unit vector, which is where a shape's +Y axis points.
@@ -63,7 +95,15 @@ fn instance(center: [f64; 3], size: [f32; 3], heading: [f32; 2], color: [f32; 3]
             [(center[0] - eye[0]) as f32, (center[1] - eye[1]) as f32, (center[2] - eye[2]) as f32, 1.0],
         ],
         color: [color[0], color[1], color[2], icon_px],
+        hull: bytes(color),
+        glow: bytes(color),
     }
+}
+
+/// A unit's part, with its hull and glowing parts colored apart from its team color.
+#[allow(clippy::too_many_arguments)]
+fn painted(center: [f64; 3], size: [f32; 3], heading: [f32; 2], trim: [f32; 3], hull: [f32; 3], glow: [f32; 3], icon_px: f32, eye: [f64; 3]) -> UnitInstanceRaw {
+    UnitInstanceRaw { hull: bytes(hull), glow: bytes(glow), ..instance(center, size, heading, trim, icon_px, eye) }
 }
 
 /// Instances grouped by shape, ready for one draw per shape.
@@ -314,14 +354,14 @@ pub fn build_unit_instances(
             next_work += 1;
         }
         let working_on = work.get(next_work).filter(|link| link.builder == unit.id);
-        let mut color = match unit.team {
+        let color = match unit.team {
             Team::Blue => BLUE,
             Team::Red => RED,
         };
         let look = looks.get(usize::from(unit.blueprint));
-        if let Some(tint) = look.and_then(|look| look.tint) {
-            color = std::array::from_fn(|channel| color[channel] * 0.7 + tint[channel] * 0.3);
-        }
+        let tint = look.and_then(|look| look.tint);
+        let hull = armor(color, tint);
+        let glow = glowing(tint.unwrap_or(color));
         let shape = look.map_or(Shape::Cube, |look| look.shape);
         let size = (f64::from(unit.radius) * RAW_TO_WORLD * 2.0) as f32;
         let mut center = interpolate(from, now, alpha);
@@ -340,13 +380,15 @@ pub fn build_unit_instances(
             let height = size * height_share * (0.25 + 0.75 * built);
             center[2] += f64::from(height - size) * 0.5;
             let shade = 0.55 + 0.45 * built;
-            let tinted = [color[0] * shade, color[1] * shade, color[2] * shade];
+            let (trim, hull) = (color.map(|channel| channel * shade), hull.map(|channel| channel * shade));
+            // Nothing glows until it is finished.
+            let glow = if unit.built_permille >= 1000 { glow } else { hull };
             // A structure's base stays put, and its gun, if any, turns to aim.
             if let Some(base) = look.and_then(|look| look.base) {
-                out.push(base, instance(center, [size, size, height], NORTH, tinted, UNIT_ICON_PX * 1.6, eye));
+                out.push(base, painted(center, [size, size, height], NORTH, trim, hull, glow, UNIT_ICON_PX * 1.6, eye));
             }
             let aim = unit_vector(unit.aim).unwrap_or(NORTH);
-            out.push(shape, instance(center, [size, size, height], aim, tinted, UNIT_ICON_PX * 1.6, eye));
+            out.push(shape, painted(center, [size, size, height], aim, trim, hull, glow, UNIT_ICON_PX * 1.6, eye));
         } else {
             // The body faces the way the simulation says. Units that turn instantly, such as the
             // stress test's cubes, have no facing, so they are turned here as before.
@@ -364,9 +406,9 @@ pub fn build_unit_instances(
                 }
             };
             if let Some(base) = look.and_then(|look| look.base) {
-                out.push(base, instance(center, [size; 3], body, color, UNIT_ICON_PX, eye));
+                out.push(base, painted(center, [size; 3], body, color, hull, glow, UNIT_ICON_PX, eye));
             }
-            out.push(shape, instance(center, [size; 3], upper, color, UNIT_ICON_PX, eye));
+            out.push(shape, painted(center, [size; 3], upper, color, hull, glow, UNIT_ICON_PX, eye));
         }
     });
 }
@@ -595,6 +637,40 @@ mod tests {
         for (index, shape) in shapes.iter().enumerate() {
             assert!(!shapes[index + 1..].contains(shape), "{shape:?} is used twice");
         }
+    }
+
+    /// The team must show on every unit, whatever else it is painted with.
+    #[test]
+    fn every_unit_shows_its_team_color() {
+        use super::super::meshes::{tests::materials, Material, MeshSet};
+        let db = BlueprintDb::standard();
+        let set = MeshSet::build();
+        for unit in db.iter().filter(|unit| unit.class != crate::sim::blueprints::UnitClass::Ammo) {
+            let look = unit_look(&unit.key);
+            let parts: Vec<Material> = look.base.into_iter().chain([look.shape]).flat_map(|shape| materials(&set, shape)).collect();
+            assert!(parts.contains(&Material::Trim), "{} has nothing in team color", unit.key);
+            assert!(parts.len() > 1, "{} is painted all one color", unit.key);
+        }
+    }
+
+    #[test]
+    fn units_have_grey_armor_and_glow_only_once_built() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let mut generator = unit(1, 0);
+        generator.blueprint = db.id("power_generator").0;
+        generator.is_structure = true;
+        let mut site = generator;
+        site.id = SimId(2);
+        site.built_permille = 500;
+        let mut out = InstanceBatches::default();
+        build_unit_instances(&[], &[generator, site], 0.0, [0.0; 3], &[], &looks, &[], &mut Headings::new(), &mut out);
+        let [finished, building] = out.shape(Shape::Generator) else { panic!("two generators") };
+        assert_eq!(finished.color[..3], BLUE, "the trim is the team's own color");
+        assert_ne!(bytes(BLUE), finished.hull, "the armor is not the team color");
+        assert_ne!(finished.glow, finished.hull, "a finished generator glows");
+        assert_eq!(building.glow, building.hull, "a generator being built does not glow yet");
+        assert!(building.hull[0] < finished.hull[0], "a site looks unfinished");
     }
 
     #[test]

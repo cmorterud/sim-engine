@@ -140,20 +140,43 @@ impl Shape {
     pub const COUNT: usize = Self::ALL.len();
 }
 
+/// What a part of a shape is made of, which decides its color.
+#[repr(u32)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub enum Material {
+    /// The team's color, and the instance's only color for shapes that are not painted.
+    #[default]
+    Trim = 0,
+    /// The body: grey armor, colored a little by what the unit is.
+    Hull = 1,
+    /// Dark gunmetal, for guns, tracks, legs, and masts.
+    Metal = 2,
+    /// Lit from inside: engines, emitters, and cores. Never shaded.
+    Glow = 3,
+}
+
 #[repr(C)]
 #[derive(Copy, Clone, Debug, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct MeshVertex {
     pub position: [f32; 3],
     pub normal: [f32; 3],
+    /// A `Material`.
+    pub material: u32,
 }
 
 #[derive(Default)]
 struct MeshBuilder {
     vertices: Vec<MeshVertex>,
     indices: Vec<u16>,
+    /// What the parts added next are made of.
+    material: Material,
 }
 
 impl MeshBuilder {
+    fn paint(&mut self, material: Material) {
+        self.material = material;
+    }
+
     /// Adds a flat, convex polygon facing away from `part_center`.
     fn face(&mut self, points: &[Vec3], part_center: Vec3) {
         let face_center = points.iter().copied().sum::<Vec3>() / points.len() as f32;
@@ -169,7 +192,7 @@ impl MeshBuilder {
         let normal = if flipped { -normal } else { normal };
         let base = self.vertices.len() as u16;
         for point in points {
-            self.vertices.push(MeshVertex { position: point.to_array(), normal: normal.to_array() });
+            self.vertices.push(MeshVertex { position: point.to_array(), normal: normal.to_array(), material: self.material as u32 });
         }
         for index in 1..points.len() as u16 - 1 {
             let (second, third) = if flipped { (index + 1, index) } else { (index, index + 1) };
@@ -241,36 +264,51 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         // A broad walking figure with a gun arm: the one unit that must never be missed.
         Shape::Commander => {
             mesh.block([-0.3, -0.2, -0.1], [0.3, 0.2, 0.28]);
+            mesh.paint(Material::Hull);
             mesh.block([-0.5, -0.12, -0.05], [-0.3, 0.12, 0.26]);
             mesh.block([0.3, -0.12, -0.05], [0.5, 0.12, 0.26]);
+            mesh.paint(Material::Metal);
             mesh.beam([0.4, 0.1, 0.1], [0.4, 0.5, 0.1], 0.07, 0.07);
+            mesh.paint(Material::Hull);
             mesh.block([-0.13, -0.1, 0.28], [0.13, 0.13, 0.5]);
+            // A visor across the front of the head, and a core in the chest.
+            mesh.paint(Material::Glow);
+            mesh.block([-0.1, 0.13, 0.38], [0.1, 0.16, 0.45]);
+            mesh.block([-0.08, 0.2, 0.05], [0.08, 0.23, 0.18]);
         }
         // Two legs, with feet that point the way it walks.
         Shape::CommanderLegs => {
+            mesh.paint(Material::Hull);
             mesh.block([-0.28, -0.14, -0.5], [-0.07, 0.14, -0.1]);
             mesh.block([0.07, -0.14, -0.5], [0.28, 0.14, -0.1]);
+            mesh.paint(Material::Metal);
             mesh.block([-0.28, 0.14, -0.5], [-0.07, 0.24, -0.4]);
             mesh.block([0.07, 0.14, -0.5], [0.28, 0.24, -0.4]);
         }
         // A low hull, with a sloped front so that its direction shows.
         Shape::EngineerHull => {
             mesh.block([-0.42, -0.5, -0.5], [0.42, 0.3, -0.12]);
+            mesh.paint(Material::Metal);
             mesh.block([-0.36, 0.3, -0.5], [0.36, 0.45, -0.22]);
         }
         // A raised construction arm on a turntable.
         Shape::Engineer => {
+            mesh.paint(Material::Hull);
             mesh.frustum([0.0, -0.15], [-0.12, 0.05], [0.3, 0.22], 6);
             mesh.beam([0.0, -0.15, 0.03], [0.0, 0.42, 0.42], 0.07, 0.06);
+            mesh.paint(Material::Glow);
             mesh.frustum([0.0, 0.4], [0.3, 0.5], [0.04, 0.09], 6);
         }
         // A narrow two-legged walker.
         Shape::Bot => {
             mesh.block([-0.34, -0.22, -0.02], [0.34, 0.22, 0.42]);
+            mesh.paint(Material::Metal);
             mesh.beam([0.0, 0.1, 0.2], [0.0, 0.5, 0.2], 0.08, 0.07);
+            mesh.paint(Material::Hull);
             mesh.block([-0.12, -0.1, 0.42], [0.12, 0.1, 0.5]);
         }
         Shape::BotLegs => {
+            mesh.paint(Material::Metal);
             mesh.block([-0.3, -0.12, -0.5], [-0.1, 0.12, -0.02]);
             mesh.block([0.1, -0.12, -0.5], [0.3, 0.12, -0.02]);
             mesh.block([-0.3, 0.12, -0.5], [-0.1, 0.2, -0.42]);
@@ -278,27 +316,35 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         }
         // A wide hull on two tracks.
         Shape::TankHull => {
+            mesh.paint(Material::Metal);
             mesh.block([-0.48, -0.5, -0.5], [-0.2, 0.42, -0.18]);
             mesh.block([0.2, -0.5, -0.5], [0.48, 0.42, -0.18]);
+            mesh.paint(Material::Hull);
             mesh.block([-0.3, -0.42, -0.42], [0.3, 0.34, -0.1]);
         }
         // A turret and one long gun.
         Shape::Tank => {
             mesh.frustum([0.0, -0.08], [-0.1, 0.16], [0.28, 0.2], 8);
+            mesh.paint(Material::Metal);
             mesh.beam([0.0, 0.1, 0.03], [0.0, 0.49, 0.03], 0.05, 0.05);
         }
         // A small hull with a long barrel pointing up.
         Shape::ArtilleryHull => {
+            mesh.paint(Material::Hull);
             mesh.block([-0.45, -0.5, -0.5], [0.45, 0.25, -0.2]);
+            mesh.paint(Material::Metal);
             mesh.block([-0.3, 0.25, -0.5], [0.3, 0.38, -0.3]);
         }
         Shape::Artillery => {
             mesh.block([-0.2, -0.4, -0.2], [0.2, 0.05, 0.02]);
+            mesh.paint(Material::Metal);
             mesh.beam([0.0, -0.2, -0.05], [0.0, 0.42, 0.42], 0.08, 0.08);
         }
         // A wide hall with a sawtooth roof and a smokestack.
         Shape::Factory => {
+            mesh.paint(Material::Hull);
             mesh.block([-0.5, -0.5, -0.5], [0.5, 0.5, 0.05]);
+            mesh.paint(Material::Trim);
             for start in [-0.5_f32, -0.17, 0.16] {
                 let end = start + 0.33;
                 let bottom = [
@@ -315,30 +361,41 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 ];
                 mesh.cuboid(bottom, top);
             }
+            mesh.paint(Material::Metal);
             mesh.frustum([0.32, 0.4], [0.05, 0.5], [0.09, 0.06], 6);
         }
         // A squat hexagonal collar with a central drill spike.
         Shape::Extractor => {
             mesh.frustum([0.0, 0.0], [-0.5, -0.15], [0.5, 0.36], 6);
+            mesh.paint(Material::Glow);
             mesh.frustum([0.0, 0.0], [-0.15, 0.5], [0.16, 0.0], 6);
         }
         // A cooling tower, pinched at the waist.
         Shape::Generator => {
+            mesh.paint(Material::Hull);
             mesh.frustum([0.0, 0.0], [-0.5, 0.2], [0.5, 0.26], 10);
+            mesh.paint(Material::Glow);
+            mesh.frustum([0.0, 0.0], [0.14, 0.26], [0.31, 0.31], 10);
+            mesh.paint(Material::Trim);
             mesh.frustum([0.0, 0.0], [0.2, 0.5], [0.26, 0.36], 10);
         }
         // A wide storage drum with a domed lid.
         Shape::Storage => {
+            mesh.paint(Material::Hull);
             mesh.frustum([0.0, 0.0], [-0.5, 0.15], [0.46, 0.46], 10);
+            mesh.paint(Material::Trim);
             mesh.frustum([0.0, 0.0], [0.15, 0.5], [0.46, 0.14], 10);
         }
         // A turret on a pedestal, with a long gun.
         Shape::PointDefenseBase => {
+            mesh.paint(Material::Hull);
             mesh.frustum([0.0, 0.0], [-0.5, -0.05], [0.48, 0.22], 8);
         }
         Shape::PointDefense => {
             mesh.block([-0.26, -0.3, -0.05], [0.26, 0.2, 0.3]);
+            mesh.paint(Material::Metal);
             mesh.beam([0.0, 0.1, 0.12], [0.0, 0.5, 0.12], 0.07, 0.07);
+            mesh.paint(Material::Hull);
             mesh.block([-0.1, -0.2, 0.3], [0.1, 0.05, 0.5]);
         }
         Shape::Shell => {
@@ -366,41 +423,58 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.frustum([0.04, -0.03], [0.15, 0.5], [0.36, 0.08], 5);
         }
         Shape::ShieldGenerator => {
+            mesh.paint(Material::Hull);
             mesh.frustum([0.0, 0.0], [-0.5, -0.3], [0.5, 0.42], 8);
+            mesh.paint(Material::Metal);
             mesh.frustum([0.0, 0.0], [-0.3, 0.2], [0.16, 0.12], 6);
+            mesh.paint(Material::Trim);
             mesh.frustum([0.0, 0.0], [0.2, 0.35], [0.12, 0.3], 8);
+            mesh.paint(Material::Glow);
             mesh.frustum([0.0, 0.0], [0.35, 0.5], [0.3, 0.1], 8);
         }
         Shape::MissileLauncher => {
             mesh.block([-0.5, -0.5, -0.5], [0.5, 0.5, -0.15]);
+            mesh.paint(Material::Hull);
             mesh.beam([0.0, -0.3, -0.1], [0.0, 0.36, 0.36], 0.18, 0.1);
         }
         Shape::MissileDefense => {
             mesh.frustum([0.0, 0.0], [-0.5, -0.25], [0.5, 0.4], 6);
+            mesh.paint(Material::Metal);
             mesh.frustum([0.0, 0.0], [-0.25, 0.3], [0.1, 0.07], 6);
+            mesh.paint(Material::Glow);
             mesh.block([-0.22, -0.15, 0.3], [0.22, 0.15, 0.5]);
         }
         Shape::NukeSilo => {
+            mesh.paint(Material::Hull);
             mesh.block([-0.5, -0.5, -0.5], [0.5, 0.5, 0.1]);
+            mesh.paint(Material::Trim);
             mesh.block([-0.25, -0.25, 0.1], [0.25, 0.25, 0.25]);
+            mesh.paint(Material::Metal);
             mesh.frustum([0.3, 0.3], [0.1, 0.5], [0.12, 0.08], 6);
         }
         Shape::AntiNukeSilo => {
+            mesh.paint(Material::Hull);
             mesh.frustum([0.0, 0.0], [-0.5, 0.15], [0.5, 0.48], 10);
             for (x, y) in [(-0.22_f32, -0.22_f32), (0.22, -0.22), (-0.22, 0.22), (0.22, 0.22)] {
+                mesh.paint(Material::Trim);
                 mesh.frustum([x, y], [0.15, 0.5], [0.12, 0.12], 6);
             }
         }
         Shape::Radar => {
+            mesh.paint(Material::Hull);
             mesh.frustum([0.0, 0.0], [-0.5, -0.35], [0.4, 0.32], 6);
+            mesh.paint(Material::Metal);
             mesh.frustum([0.0, 0.0], [-0.35, 0.15], [0.07, 0.05], 6);
+            mesh.paint(Material::Trim);
             mesh.cuboid(
                 [Vec3::new(-0.45, -0.1, 0.1), Vec3::new(0.45, -0.1, 0.1), Vec3::new(0.45, 0.05, 0.1), Vec3::new(-0.45, 0.05, 0.1)],
                 [Vec3::new(-0.45, 0.1, 0.5), Vec3::new(0.45, 0.1, 0.5), Vec3::new(0.45, 0.25, 0.5), Vec3::new(-0.45, 0.25, 0.5)],
             );
         }
         Shape::StealthGenerator => {
+            mesh.paint(Material::Hull);
             mesh.frustum([0.0, 0.0], [-0.5, 0.5], [0.3, 0.0], 8);
+            mesh.paint(Material::Trim);
             for z in [-0.35_f32, -0.05, 0.25] {
                 let radius = 0.5 - (z + 0.5) * 0.4;
                 mesh.frustum([0.0, 0.0], [z, z + 0.06], [radius, radius], 12);
@@ -409,33 +483,44 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         Shape::HydrocarbonPlant => {
             mesh.frustum([0.0, 0.0], [-0.5, -0.15], [0.48, 0.44], 12);
             for (x, y) in [(-0.22_f32, -0.15_f32), (0.22, -0.15), (0.0, 0.25)] {
+                mesh.paint(Material::Metal);
                 mesh.frustum([x, y], [-0.15, 0.5], [0.09, 0.06], 8);
             }
         }
         Shape::Fabricator => {
             mesh.block([-0.32, -0.32, -0.5], [0.32, 0.32, 0.35]);
+            mesh.paint(Material::Glow);
             for z in [-0.3_f32, 0.0, 0.3] {
                 mesh.frustum([0.0, 0.0], [z, z + 0.08], [0.48, 0.48], 12);
             }
         }
         Shape::Aircraft => {
             mesh.beam([0.0, -0.5, 0.0], [0.0, 0.5, 0.0], 0.14, 0.12);
+            mesh.paint(Material::Hull);
             mesh.cuboid(
                 [Vec3::new(-0.5, -0.4, -0.03), Vec3::new(0.5, -0.4, -0.03), Vec3::new(0.06, 0.2, -0.03), Vec3::new(-0.06, 0.2, -0.03)],
                 [Vec3::new(-0.5, -0.4, 0.03), Vec3::new(0.5, -0.4, 0.03), Vec3::new(0.06, 0.2, 0.03), Vec3::new(-0.06, 0.2, 0.03)],
             );
+            mesh.paint(Material::Trim);
             mesh.block([-0.02, -0.5, 0.0], [0.02, -0.3, 0.3]);
         }
         Shape::Bomber => {
             mesh.beam([0.0, -0.5, 0.0], [0.0, 0.45, 0.0], 0.2, 0.18);
+            mesh.paint(Material::Hull);
             mesh.block([-0.5, -0.05, -0.03], [0.5, 0.18, 0.03]);
             mesh.block([-0.22, -0.5, -0.02], [0.22, -0.36, 0.02]);
+            mesh.paint(Material::Trim);
             mesh.block([-0.02, -0.5, 0.0], [0.02, -0.36, 0.25]);
         }
         Shape::Gunship => {
+            mesh.paint(Material::Hull);
             mesh.beam([0.0, -0.1, -0.1], [0.0, 0.45, -0.1], 0.2, 0.18);
+            mesh.paint(Material::Hull);
             mesh.beam([0.0, -0.5, -0.05], [0.0, -0.1, -0.05], 0.05, 0.05);
+            // Team colored, because from above the rotor hides the rest.
+            mesh.paint(Material::Trim);
             mesh.frustum([0.0, 0.0], [0.12, 0.16], [0.44, 0.44], 16);
+            mesh.paint(Material::Hull);
             mesh.frustum([0.0, 0.0], [0.05, 0.12], [0.04, 0.04], 6);
         }
         Shape::StrategicBomber => {
@@ -443,10 +528,12 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 [Vec3::new(-0.5, -0.3, -0.05), Vec3::new(0.5, -0.3, -0.05), Vec3::new(0.08, 0.5, -0.05), Vec3::new(-0.08, 0.5, -0.05)],
                 [Vec3::new(-0.5, -0.3, 0.05), Vec3::new(0.5, -0.3, 0.05), Vec3::new(0.08, 0.5, 0.05), Vec3::new(-0.08, 0.5, 0.05)],
             );
+            mesh.paint(Material::Hull);
             mesh.beam([0.0, -0.4, 0.0], [0.0, 0.45, 0.0], 0.14, 0.12);
         }
         Shape::FlakGun => {
             mesh.block([-0.28, -0.28, -0.1], [0.28, 0.2, 0.2]);
+            mesh.paint(Material::Metal);
             mesh.beam([0.0, -0.05, 0.1], [0.0, 0.28, 0.38], 0.1, 0.1);
         }
         Shape::SamLauncher => {
@@ -458,47 +545,64 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         }
         Shape::ArtilleryGun => {
             mesh.block([-0.3, -0.35, -0.15], [0.3, 0.2, 0.15]);
+            mesh.paint(Material::Metal);
             mesh.beam([0.0, -0.1, 0.0], [0.0, 0.42, 0.4], 0.07, 0.07);
+            mesh.paint(Material::Hull);
             mesh.block([-0.12, -0.45, 0.0], [0.12, -0.3, 0.12]);
         }
         Shape::NavalFactory => {
+            mesh.paint(Material::Hull);
             mesh.block([-0.5, -0.5, -0.5], [-0.3, 0.5, -0.15]);
             mesh.block([0.3, -0.5, -0.5], [0.5, 0.5, -0.15]);
+            mesh.paint(Material::Trim);
             mesh.block([-0.3, -0.5, -0.5], [0.3, -0.35, 0.05]);
             mesh.block([-0.5, -0.1, 0.25], [0.5, 0.1, 0.4]);
+            mesh.paint(Material::Metal);
             mesh.block([-0.48, -0.08, -0.15], [-0.36, 0.08, 0.25]);
             mesh.block([0.36, -0.08, -0.15], [0.48, 0.08, 0.25]);
         }
         Shape::Ship => {
+            mesh.paint(Material::Hull);
             mesh.block([-0.25, -0.5, -0.5], [0.25, 0.25, -0.2]);
             mesh.cuboid(
                 [Vec3::new(-0.25, 0.25, -0.5), Vec3::new(0.25, 0.25, -0.5), Vec3::new(0.02, 0.5, -0.5), Vec3::new(-0.02, 0.5, -0.5)],
                 [Vec3::new(-0.25, 0.25, -0.2), Vec3::new(0.25, 0.25, -0.2), Vec3::new(0.02, 0.5, -0.2), Vec3::new(-0.02, 0.5, -0.2)],
             );
+            mesh.paint(Material::Trim);
             mesh.block([-0.14, -0.3, -0.2], [0.14, 0.05, 0.12]);
+            mesh.paint(Material::Metal);
             mesh.frustum([0.0, -0.12], [0.12, 0.5], [0.03, 0.02], 6);
             mesh.beam([0.0, 0.08, -0.12], [0.0, 0.32, -0.08], 0.04, 0.04);
         }
         Shape::AirStaging => {
+            mesh.paint(Material::Hull);
             mesh.block([-0.5, -0.5, -0.5], [0.5, 0.5, -0.3]);
+            mesh.paint(Material::Trim);
             for (x, y) in [(-0.25_f32, -0.25_f32), (0.25, -0.25), (-0.25, 0.25), (0.25, 0.25)] {
                 mesh.frustum([x, y], [-0.3, -0.24], [0.2, 0.2], 12);
             }
+            mesh.paint(Material::Metal);
             mesh.frustum([0.0, 0.0], [-0.3, 0.4], [0.07, 0.05], 6);
+            mesh.paint(Material::Glow);
             mesh.block([-0.1, -0.1, 0.4], [0.1, 0.1, 0.5]);
         }
         Shape::AntiAirGun => {
             mesh.block([-0.25, -0.25, -0.1], [0.25, 0.2, 0.22]);
+            mesh.paint(Material::Metal);
             for x in [-0.12_f32, 0.12] {
                 mesh.beam([x, -0.05, 0.1], [x, 0.38, 0.44], 0.05, 0.05);
             }
         }
         Shape::Gateway => {
+            mesh.paint(Material::Hull);
             mesh.block([-0.5, -0.5, -0.5], [0.5, 0.5, -0.35]);
+            mesh.paint(Material::Metal);
             for (x, y) in [(-0.38_f32, -0.38_f32), (0.38, -0.38), (-0.38, 0.38), (0.38, 0.38)] {
                 mesh.frustum([x, y], [-0.35, 0.3], [0.09, 0.07], 6);
             }
+            mesh.paint(Material::Glow);
             mesh.frustum([0.0, 0.0], [-0.35, -0.05], [0.26, 0.18], 12);
+            mesh.paint(Material::Trim);
             mesh.frustum([0.0, 0.0], [0.3, 0.4], [0.48, 0.42], 16);
         }
         // Rings from the rim at the bottom of the box up to a point at the top, with no base,
@@ -561,6 +665,7 @@ impl MeshSet {
         let mut ranges = Vec::with_capacity(Shape::COUNT);
         for shape in Shape::ALL {
             let start = mesh.indices.len() as u32;
+            mesh.paint(Material::Trim);
             build_shape(shape, &mut mesh);
             ranges.push(start..mesh.indices.len() as u32);
         }
@@ -570,7 +675,7 @@ impl MeshSet {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
 
     fn shape_vertices(set: &MeshSet, shape: usize) -> Vec<MeshVertex> {
@@ -614,6 +719,24 @@ mod tests {
                 assert_ne!(shape_vertices(&set, first), shape_vertices(&set, second), "{:?} and {:?} match", Shape::ALL[first], Shape::ALL[second]);
             }
         }
+    }
+
+    /// Which materials a shape uses, for tests elsewhere.
+    pub fn materials(set: &MeshSet, shape: Shape) -> Vec<Material> {
+        let mut found = Vec::new();
+        for vertex in shape_vertices(set, shape as usize) {
+            let material = [Material::Trim, Material::Hull, Material::Metal, Material::Glow][vertex.material as usize];
+            if !found.contains(&material) {
+                found.push(material);
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn every_vertex_has_a_known_material() {
+        let set = MeshSet::build();
+        assert!(set.vertices.iter().all(|vertex| vertex.material <= Material::Glow as u32));
     }
 
     /// When zoomed out, each vertex moves to a corner of a dot based on its quadrant, so a shape

@@ -24,29 +24,57 @@ const TERRAIN_GRID_SIZE: u32 = 512u;
 
 // ---- Units, projectiles, and obstacles ----
 
+// Materials, as the meshes tag their vertices.
+const TRIM: u32 = 0u;
+const HULL: u32 = 1u;
+const METAL: u32 = 2u;
+const GLOW: u32 = 3u;
+// Dark gunmetal, the same for every unit.
+const GUNMETAL: vec3<f32> = vec3<f32>(0.20, 0.21, 0.23);
+// Light from the open sky above and from the ground below, and from the sun.
+const SKY: vec3<f32> = vec3<f32>(0.42, 0.45, 0.52);
+const GROUND_BOUNCE: vec3<f32> = vec3<f32>(0.20, 0.19, 0.16);
+const SUN: vec3<f32> = vec3<f32>(0.80, 0.77, 0.70);
+
 struct InstanceInput {
     @location(2) m0: vec4<f32>,
     @location(3) m1: vec4<f32>,
     @location(4) m2: vec4<f32>,
     @location(5) m3: vec4<f32>,
     @location(6) color: vec4<f32>,
+    @location(7) hull: vec4<f32>,
+    @location(8) glow: vec4<f32>,
 };
 
 struct UnitOutput {
     @builtin(position) clip: vec4<f32>,
-    @location(0) color: vec3<f32>,
+    @location(0) albedo: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) relative: vec3<f32>,
+    @location(3) @interpolate(flat) material: u32,
+    // 0 for a lit shape, up to 1 for a flat tactical dot.
+    @location(4) morph: f32,
 };
+
+// Colors are chosen as they should look on screen, and lit in linear light.
+fn to_linear(color: vec3<f32>) -> vec3<f32> {
+    let low = color / 12.92;
+    let high = pow((color + vec3<f32>(0.055)) / 1.055, vec3<f32>(2.4));
+    return select(high, low, color <= vec3<f32>(0.04045));
+}
 
 @vertex
 fn vs_unit(
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
+    @location(9) material: u32,
     instance: InstanceInput,
 ) -> UnitOutput {
     let model = mat4x4<f32>(instance.m0, instance.m1, instance.m2, instance.m3);
     let center = instance.m3.xyz;
     let icon_px = instance.color.a * globals.terrain_scale.y;
-    let cube_clip = globals.view_proj * model * vec4<f32>(position, 1.0);
+    let relative = (model * vec4<f32>(position, 1.0)).xyz;
+    let cube_clip = globals.view_proj * vec4<f32>(relative, 1.0);
     let center_clip = globals.view_proj * vec4<f32>(center, 1.0);
 
     // Far units collapse to a screen-aligned dot with a minimum size. Rotating faces
@@ -60,18 +88,50 @@ fn vs_unit(
     let offset = corner * icon_px * 2.0 / globals.viewport_lod.xy * center_clip.w;
     let dot_clip = vec4<f32>(center_clip.xy + offset, center_clip.z, center_clip.w);
 
-    // Light the shape as it is turned in the world.
-    let world_normal = normalize((model * vec4<f32>(normal, 0.0)).xyz);
-    let shade = 0.5 + 0.5 * max(dot(world_normal, LIGHT), 0.0);
+    var albedo = instance.color.rgb;
+    if (material == HULL) {
+        albedo = instance.hull.rgb;
+    } else if (material == GLOW) {
+        albedo = instance.glow.rgb;
+    }
+    var linear = to_linear(albedo);
+    if (material == METAL) {
+        linear = GUNMETAL * GUNMETAL;
+    }
     var out: UnitOutput;
     out.clip = mix(cube_clip, dot_clip, morph);
-    out.color = mix(instance.color.rgb * shade, instance.color.rgb, morph);
+    // A dot is all team color.
+    out.albedo = mix(linear, to_linear(instance.color.rgb), morph);
+    out.normal = (model * vec4<f32>(normal, 0.0)).xyz;
+    out.relative = relative;
+    out.material = material;
+    out.morph = morph;
     return out;
 }
 
 @fragment
 fn fs_unit(input: UnitOutput) -> @location(0) vec4<f32> {
-    return vec4<f32>(input.color, 1.0);
+    if (input.material == GLOW || input.morph >= 1.0) {
+        return vec4<f32>(input.albedo, 1.0);
+    }
+    let normal = normalize(input.normal);
+    let to_eye = normalize(-input.relative);
+    let sun = max(dot(normal, LIGHT), 0.0);
+    let ambient = mix(GROUND_BOUNCE, SKY, normal.z * 0.5 + 0.5);
+    var diffuse = input.albedo * (ambient + SUN * sun);
+    // Metal shines sharply, paint softly.
+    var shininess = 20.0;
+    var strength = 0.18;
+    if (input.material == METAL) {
+        shininess = 48.0;
+        strength = 0.35;
+    }
+    let halfway = normalize(LIGHT + to_eye);
+    let shine = pow(max(dot(normal, halfway), 0.0), shininess) * strength * step(0.0, sun);
+    // Edges facing away from the eye catch a little light, so that outlines show against the ground.
+    let rim = pow(1.0 - max(dot(normal, to_eye), 0.0), 3.0) * 0.18;
+    let lit = diffuse + vec3<f32>(shine) + rim * mix(input.albedo, vec3<f32>(1.0), 0.5);
+    return vec4<f32>(mix(lit, input.albedo, input.morph), 1.0);
 }
 
 // ---- Shield domes ----

@@ -428,7 +428,9 @@ The camera smoothly scales along an exponential zoom curve:
   #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
   pub struct UnitInstanceRaw {
       pub model_matrix: [[f32; 4]; 4], // Interpolated, camera-relative 3D transform
-      pub color: [f32; 4],             // Team color (Blue / Red)
+      pub color: [f32; 4],             // Team color (Blue / Red), then the tactical dot's size
+      pub hull: [u8; 4],               // Armor color, for parts painted as hull
+      pub glow: [u8; 4],               // Color of parts lit from inside
   }
   ```
 * **Render-Time Interpolation:**

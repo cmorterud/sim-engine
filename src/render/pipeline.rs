@@ -327,9 +327,9 @@ impl Renderer {
             write_mask: wgpu::ColorWrites::ALL,
         })];
 
-        let mesh_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3];
+        let mesh_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 9 => Uint32];
         let instance_attributes = wgpu::vertex_attr_array![
-            2 => Float32x4, 3 => Float32x4, 4 => Float32x4, 5 => Float32x4, 6 => Float32x4
+            2 => Float32x4, 3 => Float32x4, 4 => Float32x4, 5 => Float32x4, 6 => Float32x4, 7 => Unorm8x4, 8 => Unorm8x4
         ];
         let unit_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("units"),
