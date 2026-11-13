@@ -506,6 +506,7 @@ mod tests {
             built_permille: 1000,
             is_structure: unit.is_structure(),
             facing: [0, 0], aim: [0, 0],
+            working: false,
         }
     }
 

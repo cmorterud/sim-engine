@@ -2458,6 +2458,7 @@ mod tests {
             built_permille: 1000,
             is_structure: false,
             facing: [0, 0], aim: [0, 0],
+            working: false,
         }
     }
 

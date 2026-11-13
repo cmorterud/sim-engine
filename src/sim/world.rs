@@ -80,6 +80,8 @@ pub struct UnitView {
     pub facing: [i32; 2],
     /// Which way the weapon points, as a raw unit vector. Zero for weapons that do not swivel.
     pub aim: [i32; 2],
+    /// A factory making something, or a builder at work, with the power to do it. For drawing.
+    pub working: bool,
 }
 
 /// A factory's production state, for the build menu. Only for the viewer's team.
@@ -199,6 +201,8 @@ pub struct ProjectileView {
     pub y: i32,
     pub z: i32,
     pub kind: ProjectileKind,
+    /// The unit that fired it, so that a new shell shows that unit firing.
+    pub source: SimId,
 }
 
 /// What a projectile is, for drawing it.
@@ -2987,13 +2991,23 @@ impl SimWorld {
             Some(viewer) if self.config.fog_of_war && team != viewer => self.visibility.is_visible(viewer, x, y),
             _ => true,
         };
-        let mut unit_query = self.ecs.query::<(&Position, &UnitStats, &Health, Option<&Blueprinted>, Option<&Construction>, Option<&Turning>, Option<&Turret>)>();
+        // Builders spending power, which shows on them while it lasts.
+        let mut builders: Vec<SimId> = self
+            .work_links
+            .iter()
+            .filter(|link| link.reclaim || self.find_unit(link.builder).and_then(|(_, entity)| self.ecs.get::<&UnitStats>(entity).ok().map(|stats| self.economies[stats.team.index()].satisfaction > Res::ZERO)).unwrap_or(false))
+            .map(|link| link.builder)
+            .collect();
+        builders.sort_unstable();
+        let mut unit_query = self.ecs.query::<(&Position, &UnitStats, &Health, Option<&Blueprinted>, Option<&Construction>, Option<&Turning>, Option<&Turret>, Option<&Factory>, Option<&Paused>)>();
         let unit_view = unit_query.view();
         let units: Vec<UnitView> = self
             .units
             .iter()
             .filter_map(|&(id, entity)| {
-                let (position, stats, health, blueprint, construction, turning, turret) = unit_view.get(entity).expect("unit list only holds live units");
+                let (position, stats, health, blueprint, construction, turning, turret, factory, paused) = unit_view.get(entity).expect("unit list only holds live units");
+                let powered = self.economies[stats.team.index()].satisfaction > Res::ZERO;
+                let producing = factory.is_some_and(|factory| !factory.queue.is_empty()) && paused.is_none() && powered;
                 let (x, y, z) = (position.0.x.to_bits(), position.0.y.to_bits(), position.0.z.to_bits());
                 let cloaked_away = viewer.is_some_and(|viewer| self.concealed[viewer.index()].binary_search(&id).is_ok());
                 (seen(stats.team, x, y) && !cloaked_away).then(|| UnitView {
@@ -3011,6 +3025,7 @@ impl SimWorld {
                     is_structure: stats.is_structure,
                     facing: turning.map_or([0, 0], |turning| [turning.facing.x.to_bits(), turning.facing.y.to_bits()]),
                     aim: turret.map_or([0, 0], |turret| [turret.facing.x.to_bits(), turret.facing.y.to_bits()]),
+                    working: producing || builders.binary_search(&id).is_ok(),
                 })
             })
             .collect();
@@ -3028,7 +3043,7 @@ impl SimWorld {
                     (None, Some(_)) => ProjectileKind::TacticalMissile,
                     (None, None) => ProjectileKind::Shell,
                 };
-                seen(projectile.source_team, x, y).then_some(ProjectileView { id, team: projectile.source_team, x, y, z, kind })
+                seen(projectile.source_team, x, y).then_some(ProjectileView { id, team: projectile.source_team, x, y, z, kind, source: projectile.source })
             })
             .collect();
         let wrecks = self

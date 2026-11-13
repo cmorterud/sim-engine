@@ -114,6 +114,8 @@ pub enum Shape {
     NavalFactoryT2,
     /// The tier 3 naval factory: tall piers lit along their length, two gantries, and a tower.
     NavalFactoryT3,
+    /// Scaffolding around a structure being built: posts at the corners and rails between them.
+    Scaffold,
     /// A heavy fighter with two engines and two tail fins, pointing along +Y.
     AirSuperiority,
     /// A long gunship with two rotors, pointing along +Y.
@@ -127,7 +129,7 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub const ALL: [Self; 66] = [
+    pub const ALL: [Self; 67] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -189,6 +191,7 @@ impl Shape {
         Self::ExtractorT3,
         Self::NavalFactoryT2,
         Self::NavalFactoryT3,
+        Self::Scaffold,
         Self::AirSuperiority,
         Self::HeavyGunship,
         Self::Dome,
@@ -201,6 +204,22 @@ impl Shape {
     /// too small to see do not.
     pub const fn casts_shadow(self) -> bool {
         !matches!(self, Self::Dome | Self::SelectionRing | Self::SelectionBox | Self::Shell)
+    }
+
+    /// How many turns a second the shape's spinning parts make, if it has any.
+    pub const fn spin_rate(self) -> Option<f32> {
+        match self {
+            Self::Gunship => Some(2.2),
+            Self::HeavyGunship => Some(1.7),
+            Self::Radar => Some(0.25),
+            Self::AirFactoryT3 => Some(0.3),
+            _ => None,
+        }
+    }
+
+    /// Whether the shape is a pair of legs, which swing as the unit walks.
+    pub const fn walks(self) -> bool {
+        matches!(self, Self::CommanderLegs | Self::BotLegs)
     }
 }
 
@@ -219,13 +238,33 @@ pub enum Material {
     Glow = 3,
 }
 
+/// How a part moves, as flags above a vertex's material. Each moves about the vertex's pivot,
+/// driven by the instance's phase (the hull color's last byte) or action (the glow's last byte).
+pub mod motion {
+    /// Turns about the vertical line through the pivot, once per phase.
+    pub const SPIN: u32 = 1 << 8;
+    /// A leg, swinging about the hip at the pivot, forward on one side as it goes back on the
+    /// other, through one stride per phase.
+    pub const SWING: u32 = 1 << 9;
+    /// A gun barrel, kicked back along -Y as it fires, by the action.
+    pub const RECOIL: u32 = 1 << 10;
+    /// A muzzle flash, which shows about the pivot only just after firing.
+    pub const FLASH: u32 = 1 << 11;
+    /// Glows fully only while the unit is at work, and dimly when idle.
+    pub const PULSE: u32 = 1 << 12;
+    /// The bits that hold the material.
+    pub const MATERIAL_MASK: u32 = 0xff;
+}
+
 #[repr(C)]
 #[derive(Copy, Clone, Debug, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct MeshVertex {
     pub position: [f32; 3],
     pub normal: [f32; 3],
-    /// A `Material`.
+    /// A `Material` in the low byte, with any `motion` flags above it.
     pub material: u32,
+    /// The point a moving part moves about.
+    pub pivot: [f32; 3],
 }
 
 #[derive(Default)]
@@ -234,11 +273,34 @@ struct MeshBuilder {
     indices: Vec<u16>,
     /// What the parts added next are made of.
     material: Material,
+    /// How the parts added next move, and about where.
+    motion: u32,
+    pivot: Vec3,
 }
 
 impl MeshBuilder {
     fn paint(&mut self, material: Material) {
         self.material = material;
+    }
+
+    /// Adds the parts `draw` makes as moving parts, then goes back to still ones.
+    fn moving(&mut self, motion: u32, pivot: [f32; 3], draw: impl FnOnce(&mut Self)) {
+        let (before, before_pivot) = (self.motion, self.pivot);
+        self.motion = motion;
+        self.pivot = Vec3::from(pivot);
+        draw(self);
+        self.motion = before;
+        self.pivot = before_pivot;
+    }
+
+    /// A muzzle flash around a gun's tip, which shows only just after it fires.
+    fn flash(&mut self, at: [f32; 3], half: f32) {
+        let before = self.material;
+        self.paint(Material::Glow);
+        let min = at.map(|value| (value - half).max(-0.5));
+        let max = at.map(|value| (value + half).min(0.5));
+        self.moving(motion::FLASH, at, |mesh| mesh.block(min, max));
+        self.paint(before);
     }
 
     /// Adds a flat, convex polygon facing away from `part_center`.
@@ -256,7 +318,7 @@ impl MeshBuilder {
         let normal = if flipped { -normal } else { normal };
         let base = self.vertices.len() as u16;
         for point in points {
-            self.vertices.push(MeshVertex { position: point.to_array(), normal: normal.to_array(), material: self.material as u32 });
+            self.vertices.push(MeshVertex { position: point.to_array(), normal: normal.to_array(), material: self.material as u32 | self.motion, pivot: self.pivot.to_array() });
         }
         for index in 1..points.len() as u16 - 1 {
             let (second, third) = if flipped { (index + 1, index) } else { (index, index + 1) };
@@ -347,9 +409,15 @@ impl MeshBuilder {
         self.paint(Material::Metal);
         let direction = if aft { -1.0 } else { 1.0 };
         let height = (z[0] + z[1]) * 0.5;
+        // Guns forward kick back and flash as they fire. Recoil runs along -Y, so guns aft keep still.
+        let motion = if aft { 0 } else { motion::RECOIL };
         for index in 0..barrels {
             let x = at[0] + (index as f32 - (barrels as f32 - 1.0) * 0.5) * radius * 0.6;
-            self.beam([x, at[1], height], [x, at[1] + direction * (radius + length), height], radius * 0.14, radius * 0.14);
+            let tip = at[1] + direction * (radius + length);
+            self.moving(motion, [x, at[1], height], |mesh| mesh.beam([x, at[1], height], [x, tip, height], radius * 0.14, radius * 0.14));
+            if !aft {
+                self.flash([x, tip, height], radius * 0.3);
+            }
         }
     }
 
@@ -389,7 +457,8 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.block([-0.5, -0.12, -0.05], [-0.3, 0.12, 0.26]);
             mesh.block([0.3, -0.12, -0.05], [0.5, 0.12, 0.26]);
             mesh.paint(Material::Metal);
-            mesh.beam([0.4, 0.1, 0.1], [0.4, 0.5, 0.1], 0.07, 0.07);
+            mesh.moving(motion::RECOIL, [0.4, 0.1, 0.1], |mesh| mesh.beam([0.4, 0.1, 0.1], [0.4, 0.5, 0.1], 0.07, 0.07));
+            mesh.flash([0.4, 0.46, 0.1], 0.06);
             mesh.paint(Material::Hull);
             mesh.block([-0.13, -0.1, 0.28], [0.13, 0.13, 0.5]);
             // A visor across the front of the head, and a core in the chest.
@@ -399,12 +468,15 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         }
         // Two legs, with feet that point the way it walks.
         Shape::CommanderLegs => {
-            mesh.paint(Material::Hull);
-            mesh.block([-0.28, -0.14, -0.5], [-0.07, 0.14, -0.1]);
-            mesh.block([0.07, -0.14, -0.5], [0.28, 0.14, -0.1]);
-            mesh.paint(Material::Metal);
-            mesh.block([-0.28, 0.14, -0.5], [-0.07, 0.24, -0.4]);
-            mesh.block([0.07, 0.14, -0.5], [0.28, 0.24, -0.4]);
+            for (inner, outer) in [(-0.07_f32, -0.28_f32), (0.07, 0.28)] {
+                let (low, high) = (inner.min(outer), inner.max(outer));
+                mesh.moving(motion::SWING, [(low + high) * 0.5, 0.0, -0.1], |mesh| {
+                    mesh.paint(Material::Hull);
+                    mesh.block([low, -0.14, -0.5], [high, 0.14, -0.1]);
+                    mesh.paint(Material::Metal);
+                    mesh.block([low, 0.14, -0.5], [high, 0.24, -0.4]);
+                });
+            }
         }
         // A low hull, with a sloped front so that its direction shows.
         Shape::EngineerHull => {
@@ -418,7 +490,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.frustum([0.0, -0.15], [-0.12, 0.05], [0.3, 0.22], 6);
             mesh.beam([0.0, -0.15, 0.03], [0.0, 0.42, 0.42], 0.07, 0.06);
             mesh.paint(Material::Glow);
-            mesh.frustum([0.0, 0.4], [0.3, 0.5], [0.04, 0.09], 6);
+            mesh.moving(motion::PULSE, [0.0, 0.4, 0.4], |mesh| mesh.frustum([0.0, 0.4], [0.3, 0.5], [0.04, 0.09], 6));
         }
         // A narrow two-legged walker, with a gun in its right arm and its left arm raised.
         Shape::Bot => {
@@ -429,7 +501,8 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.beam([-0.3, 0.0, 0.2], [-0.3, 0.28, 0.12], 0.05, 0.05);
             mesh.beam([0.3, -0.02, 0.2], [0.3, 0.2, 0.18], 0.06, 0.06);
             mesh.paint(Material::Metal);
-            mesh.beam([0.3, 0.18, 0.18], [0.3, 0.5, 0.18], 0.045, 0.045);
+            mesh.moving(motion::RECOIL, [0.3, 0.18, 0.18], |mesh| mesh.beam([0.3, 0.18, 0.18], [0.3, 0.5, 0.18], 0.045, 0.045));
+            mesh.flash([0.3, 0.47, 0.18], 0.05);
             mesh.paint(Material::Hull);
             mesh.bevel([-0.1, -0.08, 0.36], [0.1, 0.1, 0.5], 0.03);
             mesh.paint(Material::Glow);
@@ -437,10 +510,12 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         }
         Shape::BotLegs => {
             mesh.paint(Material::Metal);
-            mesh.block([-0.3, -0.12, -0.5], [-0.1, 0.12, -0.02]);
-            mesh.block([0.1, -0.12, -0.5], [0.3, 0.12, -0.02]);
-            mesh.block([-0.3, 0.12, -0.5], [-0.1, 0.2, -0.42]);
-            mesh.block([0.1, 0.12, -0.5], [0.3, 0.2, -0.42]);
+            for (low, high) in [(-0.3_f32, -0.1_f32), (0.1, 0.3)] {
+                mesh.moving(motion::SWING, [(low + high) * 0.5, 0.0, -0.02], |mesh| {
+                    mesh.block([low, -0.12, -0.5], [high, 0.12, -0.02]);
+                    mesh.block([low, 0.12, -0.5], [high, 0.2, -0.42]);
+                });
+            }
         }
         // A wide hull on two tracks.
         Shape::TankHull => {
@@ -457,7 +532,8 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         Shape::Tank => {
             mesh.frustum([0.0, -0.08], [-0.1, 0.16], [0.28, 0.2], 8);
             mesh.paint(Material::Metal);
-            mesh.beam([0.0, 0.1, 0.03], [0.0, 0.49, 0.03], 0.05, 0.05);
+            mesh.moving(motion::RECOIL, [0.0, 0.1, 0.03], |mesh| mesh.beam([0.0, 0.1, 0.03], [0.0, 0.49, 0.03], 0.05, 0.05));
+            mesh.flash([0.0, 0.46, 0.03], 0.06);
         }
         // A small hull with a long barrel pointing up.
         Shape::ArtilleryHull => {
@@ -469,7 +545,8 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         Shape::Artillery => {
             mesh.block([-0.2, -0.4, -0.2], [0.2, 0.05, 0.02]);
             mesh.paint(Material::Metal);
-            mesh.beam([0.0, -0.2, -0.05], [0.0, 0.42, 0.42], 0.08, 0.08);
+            mesh.moving(motion::RECOIL, [0.0, -0.2, -0.05], |mesh| mesh.beam([0.0, -0.2, -0.05], [0.0, 0.42, 0.42], 0.08, 0.08));
+            mesh.flash([0.0, 0.42, 0.42], 0.07);
         }
         // A wide hall with a sawtooth roof and a smokestack.
         Shape::Factory => {
@@ -494,6 +571,8 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             }
             mesh.paint(Material::Metal);
             mesh.frustum([0.32, 0.4], [0.05, 0.5], [0.09, 0.06], 6);
+            mesh.paint(Material::Glow);
+            mesh.moving(motion::PULSE, [0.0; 3], |mesh| mesh.block([-0.45, 0.34, 0.05], [0.18, 0.4, 0.09]));
         }
         // A squat hexagonal collar with a central drill spike.
         Shape::Extractor => {
@@ -525,7 +604,8 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         Shape::PointDefense => {
             mesh.block([-0.26, -0.3, -0.05], [0.26, 0.2, 0.3]);
             mesh.paint(Material::Metal);
-            mesh.beam([0.0, 0.1, 0.12], [0.0, 0.5, 0.12], 0.07, 0.07);
+            mesh.moving(motion::RECOIL, [0.0, 0.1, 0.12], |mesh| mesh.beam([0.0, 0.1, 0.12], [0.0, 0.5, 0.12], 0.07, 0.07));
+            mesh.flash([0.0, 0.46, 0.12], 0.06);
             mesh.paint(Material::Hull);
             mesh.block([-0.1, -0.2, 0.3], [0.1, 0.05, 0.5]);
         }
@@ -597,10 +677,12 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Metal);
             mesh.frustum([0.0, 0.0], [-0.35, 0.15], [0.07, 0.05], 6);
             mesh.paint(Material::Trim);
-            mesh.cuboid(
-                [Vec3::new(-0.45, -0.1, 0.1), Vec3::new(0.45, -0.1, 0.1), Vec3::new(0.45, 0.05, 0.1), Vec3::new(-0.45, 0.05, 0.1)],
-                [Vec3::new(-0.45, 0.1, 0.5), Vec3::new(0.45, 0.1, 0.5), Vec3::new(0.45, 0.25, 0.5), Vec3::new(-0.45, 0.25, 0.5)],
-            );
+            mesh.moving(motion::SPIN, [0.0; 3], |mesh| {
+                mesh.cuboid(
+                    [Vec3::new(-0.45, -0.1, 0.1), Vec3::new(0.45, -0.1, 0.1), Vec3::new(0.45, 0.05, 0.1), Vec3::new(-0.45, 0.05, 0.1)],
+                    [Vec3::new(-0.45, 0.1, 0.5), Vec3::new(0.45, 0.1, 0.5), Vec3::new(0.45, 0.25, 0.5), Vec3::new(-0.45, 0.25, 0.5)],
+                );
+            });
         }
         Shape::StealthGenerator => {
             mesh.paint(Material::Hull);
@@ -636,6 +718,28 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.bevel([-0.06, 0.12, 0.08], [0.06, 0.34, 0.15], 0.03);
             mesh.paint(Material::Glow);
             mesh.block([-0.07, -0.5, -0.06], [0.07, -0.45, 0.06]);
+        }
+        Shape::Scaffold => {
+            mesh.paint(Material::Metal);
+            const EDGE: f32 = 0.47;
+            const POST: f32 = 0.03;
+            for (x, y) in [(-EDGE, -EDGE), (EDGE, -EDGE), (EDGE, EDGE), (-EDGE, EDGE)] {
+                mesh.block([x - POST, y - POST, -0.5], [x + POST, y + POST, 0.5]);
+            }
+            for z in [-0.12_f32, 0.26] {
+                mesh.block([-EDGE, -EDGE - 0.015, z - 0.015], [EDGE, -EDGE + 0.015, z + 0.015]);
+                mesh.block([-EDGE, EDGE - 0.015, z - 0.015], [EDGE, EDGE + 0.015, z + 0.015]);
+                mesh.block([-EDGE - 0.015, -EDGE, z - 0.015], [-EDGE + 0.015, EDGE, z + 0.015]);
+                mesh.block([EDGE - 0.015, -EDGE, z - 0.015], [EDGE + 0.015, EDGE, z + 0.015]);
+            }
+            // Team-colored caps on the posts, and a brace across each side.
+            mesh.paint(Material::Trim);
+            for (x, y) in [(-EDGE, -EDGE), (EDGE, -EDGE), (EDGE, EDGE), (-EDGE, EDGE)] {
+                mesh.block([x - 0.03, y - 0.03, 0.44], [x + 0.03, y + 0.03, 0.5]);
+            }
+            mesh.paint(Material::Metal);
+            mesh.beam([-EDGE + 0.02, -EDGE, -0.48], [EDGE - 0.02, -EDGE, 0.26], 0.012, 0.012);
+            mesh.beam([EDGE - 0.02, EDGE, -0.48], [-EDGE + 0.02, EDGE, 0.26], 0.012, 0.012);
         }
         Shape::AirSuperiority => {
             mesh.prism(&[[-0.16, -0.42], [0.16, -0.42], [0.14, 0.15], [0.02, 0.5], [-0.02, 0.5], [-0.14, 0.15]], [-0.1, 0.1], [0.8, 0.7]);
@@ -687,12 +791,14 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             }
             mesh.bevel([-0.1, 0.32, -0.12], [0.1, 0.46, 0.0], 0.03);
             // Four team-colored blades on a hub, so that the team shows from above.
-            mesh.paint(Material::Metal);
-            mesh.frustum([0.0, 0.0], [0.05, 0.16], [0.05, 0.04], 6);
-            mesh.paint(Material::Trim);
-            for (x, y) in [(0.33_f32, 0.33_f32), (-0.33, 0.33)] {
-                mesh.beam([-x, -y, 0.14], [x, y, 0.14], 0.035, 0.01);
-            }
+            mesh.moving(motion::SPIN, [0.0; 3], |mesh| {
+                mesh.paint(Material::Metal);
+                mesh.frustum([0.0, 0.0], [0.05, 0.16], [0.05, 0.04], 6);
+                mesh.paint(Material::Trim);
+                for (x, y) in [(0.33_f32, 0.33_f32), (-0.33, 0.33)] {
+                    mesh.beam([-x, -y, 0.14], [x, y, 0.14], 0.035, 0.01);
+                }
+            });
         }
         Shape::HeavyGunship => {
             mesh.paint(Material::Hull);
@@ -708,12 +814,14 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.bevel([-0.1, 0.34, -0.12], [0.1, 0.47, -0.02], 0.03);
             // A rotor at each end, on a mast.
             for y in [-0.26_f32, 0.24] {
-                mesh.paint(Material::Metal);
-                mesh.frustum([0.0, y], [0.0, 0.14], [0.05, 0.04], 6);
-                mesh.paint(Material::Trim);
-                for (dx, dy) in [(0.17_f32, 0.17_f32), (-0.17, 0.17)] {
-                    mesh.beam([-dx, y - dy, 0.12], [dx, y + dy, 0.12], 0.03, 0.01);
-                }
+                mesh.moving(motion::SPIN, [0.0, y, 0.0], |mesh| {
+                    mesh.paint(Material::Metal);
+                    mesh.frustum([0.0, y], [0.0, 0.14], [0.05, 0.04], 6);
+                    mesh.paint(Material::Trim);
+                    for (dx, dy) in [(0.17_f32, 0.17_f32), (-0.17, 0.17)] {
+                        mesh.beam([-dx, y - dy, 0.12], [dx, y + dy, 0.12], 0.03, 0.01);
+                    }
+                });
             }
         }
         Shape::StrategicBomber => {
@@ -731,7 +839,8 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         Shape::FlakGun => {
             mesh.block([-0.28, -0.28, -0.1], [0.28, 0.2, 0.2]);
             mesh.paint(Material::Metal);
-            mesh.beam([0.0, -0.05, 0.1], [0.0, 0.28, 0.38], 0.1, 0.1);
+            mesh.moving(motion::RECOIL, [0.0, -0.05, 0.1], |mesh| mesh.beam([0.0, -0.05, 0.1], [0.0, 0.28, 0.38], 0.1, 0.1));
+            mesh.flash([0.0, 0.3, 0.4], 0.08);
         }
         Shape::SamLauncher => {
             mesh.block([-0.25, -0.25, -0.1], [0.25, 0.2, 0.15]);
@@ -743,7 +852,8 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         Shape::ArtilleryGun => {
             mesh.block([-0.3, -0.35, -0.15], [0.3, 0.2, 0.15]);
             mesh.paint(Material::Metal);
-            mesh.beam([0.0, -0.1, 0.0], [0.0, 0.42, 0.4], 0.07, 0.07);
+            mesh.moving(motion::RECOIL, [0.0, -0.1, 0.0], |mesh| mesh.beam([0.0, -0.1, 0.0], [0.0, 0.42, 0.4], 0.07, 0.07));
+            mesh.flash([0.0, 0.42, 0.4], 0.07);
             mesh.paint(Material::Hull);
             mesh.block([-0.12, -0.45, 0.0], [0.12, -0.3, 0.12]);
         }
@@ -757,6 +867,8 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Metal);
             mesh.block([-0.48, -0.08, -0.15], [-0.36, 0.08, 0.25]);
             mesh.block([0.36, -0.08, -0.15], [0.48, 0.08, 0.25]);
+            mesh.paint(Material::Glow);
+            mesh.moving(motion::PULSE, [0.0; 3], |mesh| mesh.block([-0.4, -0.03, 0.4], [0.4, 0.03, 0.42]));
         }
         Shape::Frigate => {
             mesh.paint(Material::Hull);
@@ -890,7 +1002,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.cuboid(bottom, top);
             }
             mesh.paint(Material::Glow);
-            mesh.block([-0.4, -0.5, -0.3], [0.1, -0.48, -0.24]);
+            mesh.moving(motion::PULSE, [0.0; 3], |mesh| mesh.block([-0.4, -0.5, -0.3], [0.1, -0.48, -0.24]));
             mesh.paint(Material::Metal);
             for y in [0.05_f32, 0.32] {
                 mesh.frustum([0.36, y], [-0.1, 0.48], [0.07, 0.05], 6);
@@ -903,8 +1015,10 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.bevel([-0.44, -0.44, -0.05], [0.44, 0.2, 0.12], 0.04);
             mesh.bevel([-0.3, -0.3, 0.12], [0.3, 0.1, 0.26], 0.04);
             mesh.paint(Material::Glow);
-            mesh.block([-0.44, -0.45, 0.0], [0.44, -0.44, 0.05]);
-            mesh.block([-0.3, -0.31, 0.16], [0.3, -0.3, 0.2]);
+            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
+                mesh.block([-0.44, -0.45, 0.0], [0.44, -0.44, 0.05]);
+                mesh.block([-0.3, -0.31, 0.16], [0.3, -0.3, 0.2]);
+            });
             // A gantry across the roof.
             mesh.paint(Material::Metal);
             for x in [-0.46_f32, 0.46] {
@@ -923,10 +1037,12 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Metal);
             mesh.block([-0.14, 0.18, -0.38], [0.14, 0.5, -0.36]);
             mesh.paint(Material::Glow);
-            for y in [0.24_f32, 0.34, 0.44] {
-                mesh.block([-0.13, y - 0.015, -0.36], [-0.1, y + 0.015, -0.35]);
-                mesh.block([0.1, y - 0.015, -0.36], [0.13, y + 0.015, -0.35]);
-            }
+            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
+                for y in [0.24_f32, 0.34, 0.44] {
+                    mesh.block([-0.13, y - 0.015, -0.36], [-0.1, y + 0.015, -0.35]);
+                    mesh.block([0.1, y - 0.015, -0.36], [0.13, y + 0.015, -0.35]);
+                }
+            });
             mesh.paint(Material::Hull);
             mesh.frustum([0.42, 0.36], [-0.38, 0.3], [0.06, 0.05], 6);
             mesh.paint(Material::Glow);
@@ -943,10 +1059,12 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Metal);
             mesh.block([-0.14, 0.2, -0.36], [0.14, 0.5, -0.34]);
             mesh.paint(Material::Glow);
-            for y in [0.26_f32, 0.38] {
-                mesh.block([-0.13, y - 0.015, -0.34], [-0.1, y + 0.015, -0.33]);
-                mesh.block([0.1, y - 0.015, -0.34], [0.13, y + 0.015, -0.33]);
-            }
+            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
+                for y in [0.26_f32, 0.38] {
+                    mesh.block([-0.13, y - 0.015, -0.34], [-0.1, y + 0.015, -0.33]);
+                    mesh.block([0.1, y - 0.015, -0.34], [0.13, y + 0.015, -0.33]);
+                }
+            });
             mesh.paint(Material::Hull);
             mesh.frustum([0.42, 0.36], [-0.36, 0.38], [0.06, 0.05], 6);
             mesh.paint(Material::Glow);
@@ -958,14 +1076,16 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Trim);
             mesh.arch(0.34, [-0.46, 0.22], -0.32, 0.7, 10);
             mesh.paint(Material::Glow);
-            mesh.block([-0.3, -0.47, -0.3], [0.3, -0.46, -0.24]);
+            mesh.moving(motion::PULSE, [0.0; 3], |mesh| mesh.block([-0.3, -0.47, -0.3], [0.3, -0.46, -0.24]));
             mesh.paint(Material::Metal);
             mesh.block([-0.16, 0.22, -0.32], [0.16, 0.5, -0.3]);
             mesh.paint(Material::Glow);
-            for y in [0.28_f32, 0.36, 0.44] {
-                mesh.block([-0.15, y - 0.015, -0.3], [-0.12, y + 0.015, -0.29]);
-                mesh.block([0.12, y - 0.015, -0.3], [0.15, y + 0.015, -0.29]);
-            }
+            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
+                for y in [0.28_f32, 0.36, 0.44] {
+                    mesh.block([-0.15, y - 0.015, -0.3], [-0.12, y + 0.015, -0.29]);
+                    mesh.block([0.12, y - 0.015, -0.3], [0.15, y + 0.015, -0.29]);
+                }
+            });
             // A tall tower with a radar dish.
             mesh.paint(Material::Hull);
             mesh.frustum([0.42, 0.36], [-0.32, 0.3], [0.07, 0.05], 6);
@@ -973,10 +1093,12 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.frustum([0.42, 0.36], [0.3, 0.4], [0.08, 0.07], 6);
             mesh.paint(Material::Metal);
             mesh.frustum([-0.42, 0.38], [-0.32, 0.36], [0.03, 0.02], 6);
-            mesh.cuboid(
-                [Vec3::new(-0.49, 0.3, 0.32), Vec3::new(-0.35, 0.3, 0.32), Vec3::new(-0.35, 0.34, 0.32), Vec3::new(-0.49, 0.34, 0.32)],
-                [Vec3::new(-0.49, 0.36, 0.48), Vec3::new(-0.35, 0.36, 0.48), Vec3::new(-0.35, 0.4, 0.48), Vec3::new(-0.49, 0.4, 0.48)],
-            );
+            mesh.moving(motion::SPIN, [-0.42, 0.36, 0.0], |mesh| {
+                mesh.cuboid(
+                    [Vec3::new(-0.48, 0.3, 0.32), Vec3::new(-0.36, 0.3, 0.32), Vec3::new(-0.36, 0.34, 0.32), Vec3::new(-0.48, 0.34, 0.32)],
+                    [Vec3::new(-0.48, 0.36, 0.46), Vec3::new(-0.36, 0.36, 0.46), Vec3::new(-0.36, 0.4, 0.46), Vec3::new(-0.48, 0.4, 0.46)],
+                );
+            });
         }
         Shape::GeneratorT2 => {
             mesh.paint(Material::Hull);
@@ -1036,6 +1158,8 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.block([-0.3, -0.5, -0.5], [0.3, -0.35, 0.05]);
             for y in [-0.15_f32, 0.25] {
                 mesh.block([-0.5, y - 0.08, 0.25], [0.5, y + 0.08, 0.38]);
+                mesh.paint(Material::Glow);
+                mesh.moving(motion::PULSE, [0.0; 3], |mesh| mesh.block([-0.4, y - 0.03, 0.38], [0.4, y + 0.03, 0.4]));
                 mesh.paint(Material::Metal);
                 mesh.block([-0.48, y - 0.06, -0.12], [-0.38, y + 0.06, 0.25]);
                 mesh.block([0.38, y - 0.06, -0.12], [0.48, y + 0.06, 0.25]);
@@ -1050,9 +1174,11 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.bevel([-0.5, -0.5, -0.5], [-0.28, 0.5, -0.05], 0.04);
             mesh.bevel([0.28, -0.5, -0.5], [0.5, 0.5, -0.05], 0.04);
             mesh.paint(Material::Glow);
-            for x in [-0.39_f32, 0.39] {
-                mesh.block([x - 0.02, -0.46, -0.05], [x + 0.02, 0.46, -0.04]);
-            }
+            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
+                for x in [-0.39_f32, 0.39] {
+                    mesh.block([x - 0.02, -0.46, -0.05], [x + 0.02, 0.46, -0.04]);
+                }
+            });
             mesh.paint(Material::Trim);
             mesh.bevel([-0.28, -0.5, -0.5], [0.28, -0.32, 0.1], 0.03);
             for y in [-0.12_f32, 0.24] {
@@ -1083,7 +1209,8 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.block([-0.25, -0.25, -0.1], [0.25, 0.2, 0.22]);
             mesh.paint(Material::Metal);
             for x in [-0.12_f32, 0.12] {
-                mesh.beam([x, -0.05, 0.1], [x, 0.38, 0.44], 0.05, 0.05);
+                mesh.moving(motion::RECOIL, [x, -0.05, 0.1], |mesh| mesh.beam([x, -0.05, 0.1], [x, 0.38, 0.44], 0.05, 0.05));
+                mesh.flash([x, 0.38, 0.44], 0.05);
             }
         }
         Shape::Gateway => {
@@ -1094,7 +1221,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.frustum([x, y], [-0.35, 0.3], [0.09, 0.07], 6);
             }
             mesh.paint(Material::Glow);
-            mesh.frustum([0.0, 0.0], [-0.35, -0.05], [0.26, 0.18], 12);
+            mesh.moving(motion::PULSE, [0.0; 3], |mesh| mesh.frustum([0.0, 0.0], [-0.35, -0.05], [0.26, 0.18], 12));
             mesh.paint(Material::Trim);
             mesh.frustum([0.0, 0.0], [0.3, 0.4], [0.48, 0.42], 16);
         }
@@ -1159,6 +1286,8 @@ impl MeshSet {
         for shape in Shape::ALL {
             let start = mesh.indices.len() as u32;
             mesh.paint(Material::Trim);
+            mesh.motion = 0;
+            mesh.pivot = Vec3::ZERO;
             build_shape(shape, &mut mesh);
             ranges.push(start..mesh.indices.len() as u32);
         }
@@ -1226,7 +1355,7 @@ pub(super) mod tests {
     pub fn materials(set: &MeshSet, shape: Shape) -> Vec<Material> {
         let mut found = Vec::new();
         for vertex in shape_vertices(set, shape as usize) {
-            let material = [Material::Trim, Material::Hull, Material::Metal, Material::Glow][vertex.material as usize];
+            let material = [Material::Trim, Material::Hull, Material::Metal, Material::Glow][(vertex.material & motion::MATERIAL_MASK) as usize];
             if !found.contains(&material) {
                 found.push(material);
             }
@@ -1237,7 +1366,25 @@ pub(super) mod tests {
     #[test]
     fn every_vertex_has_a_known_material() {
         let set = MeshSet::build();
-        assert!(set.vertices.iter().all(|vertex| vertex.material <= Material::Glow as u32));
+        assert!(set.vertices.iter().all(|vertex| vertex.material & motion::MATERIAL_MASK <= Material::Glow as u32));
+    }
+
+    /// Only glowing parts flash or pulse, and a flash never shows until a gun fires.
+    #[test]
+    fn flashes_and_pulses_are_glowing_parts() {
+        let set = MeshSet::build();
+        for vertex in &set.vertices {
+            if vertex.material & (motion::FLASH | motion::PULSE) != 0 {
+                assert_eq!(vertex.material & motion::MATERIAL_MASK, Material::Glow as u32);
+            }
+        }
+        let walking: Vec<_> = Shape::ALL.into_iter().filter(|shape| shape.walks()).collect();
+        for (index, shape) in Shape::ALL.into_iter().enumerate() {
+            let swings = shape_vertices(&set, index).iter().any(|vertex| vertex.material & motion::SWING != 0);
+            assert_eq!(swings, walking.contains(&shape), "{shape:?} swings only if it walks");
+            let spins = shape_vertices(&set, index).iter().any(|vertex| vertex.material & motion::SPIN != 0);
+            assert_eq!(spins, shape.spin_rate().is_some(), "{shape:?} spins only if it has a spin rate");
+        }
     }
 
     #[test]

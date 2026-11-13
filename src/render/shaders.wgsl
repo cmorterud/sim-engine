@@ -29,6 +29,20 @@ const TRIM: u32 = 0u;
 const HULL: u32 = 1u;
 const METAL: u32 = 2u;
 const GLOW: u32 = 3u;
+// How parts move, as flags above the material (meshes.rs, `motion`).
+const MATERIAL_MASK: u32 = 0xffu;
+const SPIN: u32 = 256u;
+const SWING: u32 = 512u;
+const RECOIL: u32 = 1024u;
+const FLASH: u32 = 2048u;
+const PULSE: u32 = 4096u;
+const TAU: f32 = 6.2831853;
+// How far a leg swings either way, in radians, and how far a gun kicks back, as a share of the unit.
+const SWING_ANGLE: f32 = 0.45;
+const RECOIL_DISTANCE: f32 = 0.09;
+// A muzzle flash's color, in linear light, and how bright pulsing lights are while idle.
+const FLASH_COLOR: vec3<f32> = vec3<f32>(1.0, 0.75, 0.3);
+const IDLE_GLOW: f32 = 0.3;
 // Dark gunmetal, the same for every unit.
 const GUNMETAL: vec3<f32> = vec3<f32>(0.20, 0.21, 0.23);
 // Light from the open sky above and from the ground below, and from the sun.
@@ -56,6 +70,47 @@ struct UnitOutput {
     @location(4) morph: f32,
 };
 
+struct Animated {
+    position: vec3<f32>,
+    normal: vec3<f32>,
+};
+
+// Moves a vertex of a moving part, in the shape's own space, by the instance's phase (the
+// hull color's last byte) and action (the glow's last byte).
+fn animate(position: vec3<f32>, normal: vec3<f32>, flags: u32, pivot: vec3<f32>, instance: InstanceInput) -> Animated {
+    let phase = instance.hull.a;
+    let action = instance.glow.a;
+    var point = position;
+    var turned = normal;
+    if ((flags & SPIN) != 0u) {
+        let angle = phase * TAU;
+        let c = cos(angle);
+        let s = sin(angle);
+        let arm = point.xy - pivot.xy;
+        point = vec3<f32>(pivot.xy + vec2<f32>(arm.x * c - arm.y * s, arm.x * s + arm.y * c), point.z);
+        turned = vec3<f32>(turned.x * c - turned.y * s, turned.x * s + turned.y * c, turned.z);
+    }
+    if ((flags & SWING) != 0u) {
+        // Each leg swings about its hip, the left forward as the right goes back.
+        let side = select(-1.0, 1.0, pivot.x > 0.0);
+        let angle = sin(phase * TAU) * SWING_ANGLE * side;
+        let c = cos(angle);
+        let s = sin(angle);
+        let arm = point.yz - pivot.yz;
+        let swung = pivot.yz + vec2<f32>(arm.x * c - arm.y * s, arm.x * s + arm.y * c);
+        point = vec3<f32>(point.x, swung.x, swung.y);
+        turned = vec3<f32>(turned.x, turned.y * c - turned.z * s, turned.y * s + turned.z * c);
+    }
+    if ((flags & RECOIL) != 0u) {
+        point.y -= action * RECOIL_DISTANCE;
+    }
+    if ((flags & FLASH) != 0u) {
+        // Only in the first moments after a shot, and gone to nothing otherwise.
+        point = pivot + (point - pivot) * smoothstep(0.55, 0.95, action);
+    }
+    return Animated(point, turned);
+}
+
 // How far a shape has collapsed towards its tactical dot: 0 for a lit shape, 1 for a dot.
 fn dot_morph(instance: InstanceInput, center: vec3<f32>, center_clip: vec4<f32>) -> f32 {
     let icon_px = instance.color.a * globals.terrain_scale.y;
@@ -78,12 +133,15 @@ fn vs_unit(
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(9) material: u32,
+    @location(10) pivot: vec3<f32>,
     instance: InstanceInput,
 ) -> UnitOutput {
     let model = mat4x4<f32>(instance.m0, instance.m1, instance.m2, instance.m3);
     let center = instance.m3.xyz;
     let icon_px = instance.color.a * globals.terrain_scale.y;
-    let relative = (model * vec4<f32>(position, 1.0)).xyz;
+    let kind = material & MATERIAL_MASK;
+    let moved = animate(position, normal, material, pivot, instance);
+    let relative = (model * vec4<f32>(moved.position, 1.0)).xyz;
     let cube_clip = globals.view_proj * vec4<f32>(relative, 1.0);
     let center_clip = globals.view_proj * vec4<f32>(center, 1.0);
 
@@ -95,22 +153,27 @@ fn vs_unit(
     let dot_clip = vec4<f32>(center_clip.xy + offset, center_clip.z, center_clip.w);
 
     var albedo = instance.color.rgb;
-    if (material == HULL) {
+    if (kind == HULL) {
         albedo = instance.hull.rgb;
-    } else if (material == GLOW) {
+    } else if (kind == GLOW) {
         albedo = instance.glow.rgb;
     }
     var linear = to_linear(albedo);
-    if (material == METAL) {
+    if (kind == METAL) {
         linear = GUNMETAL * GUNMETAL;
+    }
+    if ((material & FLASH) != 0u) {
+        linear = FLASH_COLOR;
+    } else if ((material & PULSE) != 0u) {
+        linear = linear * mix(IDLE_GLOW, 1.0, instance.glow.a);
     }
     var out: UnitOutput;
     out.clip = mix(cube_clip, dot_clip, morph);
     // A dot is all team color.
     out.albedo = mix(linear, to_linear(instance.color.rgb), morph);
-    out.normal = (model * vec4<f32>(normal, 0.0)).xyz;
+    out.normal = (model * vec4<f32>(moved.normal, 0.0)).xyz;
     out.relative = relative;
-    out.material = material;
+    out.material = kind;
     out.morph = morph;
     return out;
 }
@@ -186,6 +249,8 @@ struct ShadowOutput {
 fn vs_shadow(
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
+    @location(9) material: u32,
+    @location(10) pivot: vec3<f32>,
     instance: InstanceInput,
 ) -> ShadowOutput {
     let model = mat4x4<f32>(instance.m0, instance.m1, instance.m2, instance.m3);
@@ -199,7 +264,13 @@ fn vs_shadow(
         out.darkness = 0.0;
         return out;
     }
-    let point = (model * vec4<f32>(position, 1.0)).xyz;
+    // Moving parts cast their shadows where they are, and a flash casts none.
+    if ((material & FLASH) != 0u) {
+        out.clip = vec4<f32>(0.0, 0.0, -1.0, 1.0);
+        out.darkness = 0.0;
+        return out;
+    }
+    let point = (model * vec4<f32>(animate(position, normal, material, pivot, instance).position, 1.0)).xyz;
     let ground = ground_at(center.xy);
     let flat = point.xy - LIGHT.xy / LIGHT.z * max(point.z - ground, 0.0);
     out.clip = globals.view_proj * vec4<f32>(flat, ground_at(flat) + SHADOW_LIFT, 1.0);

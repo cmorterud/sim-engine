@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use sim_engine::math::fp::{fp_int, Fp, Vec2Fp};
 use sim_engine::render::camera::{Camera, HeightField};
-use sim_engine::render::instances::{build_unit_instances, unit_looks, Headings, InstanceBatches};
+use sim_engine::render::instances::{build_unit_instances, unit_looks, InstanceBatches, Motion};
 use sim_engine::render::pipeline::{FrameScene, Renderer};
 use sim_engine::sim::blueprints::UnitClass;
 use sim_engine::sim::components::{MoveClass, Team};
@@ -118,7 +118,7 @@ fn main() {
         camera.look_at(focus[0], focus[1], altitude);
         camera.update(0.0, &heights);
         let mut instances = InstanceBatches::default();
-        build_unit_instances(&snapshot.units, &snapshot.units, 1.0, camera.eye(), &[], &looks, &[], &mut Headings::new(), &mut instances);
+        build_unit_instances(&snapshot.units, &snapshot.units, 1.0, camera.eye(), &[], &looks, &[], &mut Motion::new(), &mut instances);
         let scene = FrameScene { camera: &camera, instances: &instances, selection_box: None };
         let path = out.join(format!("{name}.bmp"));
         renderer.capture(&scene, None, &path).expect("capture saves");

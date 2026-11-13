@@ -16,7 +16,7 @@ use sim_engine::input::orders::{
 use sim_engine::input::selection::{group_center, ControlGroups, Selection};
 use sim_engine::math::fp::{Fp, Vec2Fp};
 use sim_engine::render::camera::{Camera, HeightField};
-use sim_engine::render::instances::{self, Headings, InstanceBatches};
+use sim_engine::render::instances::{self, InstanceBatches, Motion};
 use sim_engine::render::meshes::Shape;
 use sim_engine::render::pipeline::{FrameScene, Renderer, UiFrame};
 use sim_engine::sim::blueprints::{BlueprintDb, BlueprintId};
@@ -758,7 +758,7 @@ fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
         }
     });
     let mut scene_instances = InstanceBatches::default();
-    let mut headings = Headings::new();
+    let mut motion = Motion::new();
     let mut title_timer = Instant::now();
     let mut title_frames = 0u32;
     let mut autotest_selected = false;
@@ -1126,7 +1126,7 @@ fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                                     renderer.update_fog(fog);
                                 }
                                 let units = &session.current.units;
-                                headings.retain(|id, _| units.binary_search_by_key(id, |unit| unit.id).is_ok());
+                                motion.retain(|id| units.binary_search_by_key(id, |unit| unit.id).is_ok());
                             }
                         }
                         selection.retain_alive(&session.current.units);
@@ -1463,7 +1463,9 @@ fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                         let eye = camera.eye();
                         let (previous, current) = (&session.previous, &session.current);
                         scene_instances.clear();
-                        instances::build_unit_instances(&previous.units, &current.units, alpha, eye, selection.selected(), &looks, &current.work_links, &mut headings, &mut scene_instances);
+                        motion.time = (f64::from(previous.tick) + alpha) * TICK_DURATION.as_secs_f64();
+                        motion.note_shots(&previous.projectiles, &current.projectiles);
+                        instances::build_unit_instances(&previous.units, &current.units, alpha, eye, selection.selected(), &looks, &current.work_links, &mut motion, &mut scene_instances);
                         let drawn_units_and_shells = {
                             let units = scene_instances.total();
                             instances::build_projectile_instances(&previous.projectiles, &current.projectiles, alpha, eye, &mut scene_instances);

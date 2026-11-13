@@ -8,6 +8,15 @@ use crate::sim::blueprints::BlueprintDb;
 use crate::sim::components::{SimId, Team, WreckKind};
 use crate::sim::world::{ProjectileKind, ProjectileView, ShieldView, UnitView, WorkLinkView};
 
+/// How long a gun's kick and flash last after it fires, in seconds.
+const RECOIL_SECONDS: f64 = 0.3;
+/// A stride's length, as a share of the unit's size, and how quickly legs settle when it stops.
+const STRIDE_SHARE: f64 = 1.6;
+const SETTLE_SHARE: f64 = 0.04;
+/// How quickly working lights pulse, in pulses a second, and how far they dip.
+const WORK_PULSES: f64 = 0.8;
+const WORK_DIP: f64 = 0.25;
+
 const RAW_TO_WORLD: f64 = 1.0 / 4096.0;
 const PROJECTILE_SIZE: f32 = 0.6;
 
@@ -55,16 +64,21 @@ pub struct UnitInstanceRaw {
     pub model_matrix: [[f32; 4]; 4],
     /// The team's color, as RGB, with the tactical dot's half-size in pixels in the last component.
     pub color: [f32; 4],
-    /// The body's color, for parts painted as hull, with the last component unused.
+    /// The body's color, for parts painted as hull, then the phase of moving parts, from 0 to
+    /// 1: how far round spinning parts are, or how far through a stride legs are.
     pub hull: [u8; 4],
-    /// The color of parts that glow, with the last component unused.
+    /// The color of parts that glow, then the action, from 0 to 1: how hard guns are kicking
+    /// back from a shot, or how brightly working lights shine.
     pub glow: [u8; 4],
 }
 
-/// A color from 0 to 1 as bytes, as the GPU reads them back.
+fn byte(value: f32) -> u8 {
+    (value.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+/// A color from 0 to 1 as bytes, as the GPU reads them back, with nothing moving.
 fn bytes(color: [f32; 3]) -> [u8; 4] {
-    let byte = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
-    [byte(color[0]), byte(color[1]), byte(color[2]), 255]
+    [byte(color[0]), byte(color[1]), byte(color[2]), 0]
 }
 
 fn mix(from: [f32; 3], to: [f32; 3], share: f32) -> [f32; 3] {
@@ -140,6 +154,81 @@ impl InstanceBatches {
 
 /// Which way units are facing. Kept between frames, so that a unit that stops keeps its facing.
 pub type Headings = BTreeMap<SimId, [f32; 2]>;
+
+/// A walker's stride: where it was last frame, and how far it has walked.
+#[derive(Copy, Clone, Debug)]
+struct Stride {
+    last: [f64; 2],
+    walked: f64,
+}
+
+/// A unit's latest shot: the newest shell it fired, and when it was seen.
+#[derive(Copy, Clone, Debug)]
+struct Shot {
+    shell: SimId,
+    at: f64,
+}
+
+/// How units move between frames, beyond where they are: facing, strides, and gunfire. Kept
+/// between frames, and only ever read from the snapshots, never written back.
+#[derive(Default)]
+pub struct Motion {
+    /// The simulation's time at the frame being drawn, in seconds. Spinning parts, pulsing
+    /// lights, and recoil follow it, so that they stop while the game is paused.
+    pub time: f64,
+    headings: Headings,
+    strides: BTreeMap<SimId, Stride>,
+    shots: BTreeMap<SimId, Shot>,
+}
+
+impl Motion {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Forgets units for which `keep` is false.
+    pub fn retain(&mut self, keep: impl Fn(&SimId) -> bool) {
+        self.headings.retain(|id, _| keep(id));
+        self.strides.retain(|id, _| keep(id));
+        self.shots.retain(|id, _| keep(id));
+    }
+
+    /// Notes which units fired since the last snapshot: those whose shells are new in it.
+    pub fn note_shots(&mut self, previous: &[ProjectileView], current: &[ProjectileView]) {
+        let time = self.time;
+        merge_by_id(previous, current, |projectile| projectile.id, |before, projectile| {
+            if before.is_some() {
+                return;
+            }
+            let shot = self.shots.entry(projectile.source).or_insert(Shot { shell: projectile.id, at: time });
+            if projectile.id > shot.shell {
+                *shot = Shot { shell: projectile.id, at: time };
+            }
+        });
+    }
+
+    /// How hard a unit's guns are kicking back, from 1 as it fires to 0.
+    fn recoil(&self, id: SimId) -> f32 {
+        self.shots.get(&id).map_or(0.0, |shot| (1.0 - (self.time - shot.at) / RECOIL_SECONDS).clamp(0.0, 1.0) as f32)
+    }
+
+    /// How far through a stride a walker is, from how far it has walked. Legs settle straight
+    /// once it stops.
+    fn stride(&mut self, id: SimId, at: [f64; 3], size: f32) -> f32 {
+        let length = f64::from(size) * STRIDE_SHARE;
+        let stride = self.strides.entry(id).or_insert(Stride { last: [at[0], at[1]], walked: 0.0 });
+        let moved = (at[0] - stride.last[0]).hypot(at[1] - stride.last[1]);
+        stride.last = [at[0], at[1]];
+        if moved > length * 0.002 && moved < length * 4.0 {
+            stride.walked += moved;
+        } else {
+            let half = length * 0.5;
+            let rest = (stride.walked / half).round() * half;
+            stride.walked += (rest - stride.walked).clamp(-length * SETTLE_SHARE, length * SETTLE_SHARE);
+        }
+        (stride.walked / length).rem_euclid(1.0) as f32
+    }
+}
 
 fn interpolate(previous: [i32; 3], current: [i32; 3], alpha: f64) -> [f64; 3] {
     let lerp = |from: i32, to: i32| (f64::from(from) + (f64::from(to) - f64::from(from)) * alpha) * RAW_TO_WORLD;
@@ -338,9 +427,10 @@ pub fn build_unit_instances(
     selected: &[SimId],
     looks: &[UnitLook],
     work: &[WorkLinkView],
-    headings: &mut Headings,
+    motion: &mut Motion,
     out: &mut InstanceBatches,
 ) {
+    let time = motion.time;
     let mut next_selected = 0;
     let mut next_work = 0;
     merge_by_id(previous, current, |unit| unit.id, |before, unit| {
@@ -365,6 +455,16 @@ pub fn build_unit_instances(
         let shape = look.map_or(Shape::Cube, |look| look.shape);
         let size = (f64::from(unit.radius) * RAW_TO_WORLD * 2.0) as f32;
         let mut center = interpolate(from, now, alpha);
+        // Guns kick back as they fire, and working lights pulse.
+        let pulse = if unit.working { (1.0 - WORK_DIP * (0.5 + 0.5 * (time * WORK_PULSES * std::f64::consts::TAU).sin())) as f32 } else { 0.0 };
+        let action = byte(motion.recoil(unit.id).max(pulse));
+        // Spinning parts turn with time, each unit a little apart from the next.
+        let spin = look.and_then(|look| look.shape.spin_rate()).map_or(0, |rate| byte(((time * f64::from(rate) + f64::from(unit.id.0) * 0.618) % 1.0) as f32));
+        let animated = |mut instance: UnitInstanceRaw, phase: u8| {
+            instance.hull[3] = phase;
+            instance.glow[3] = action;
+            instance
+        };
         if is_selected {
             // Selection is shown on the ground, so that the unit keeps its own colors.
             let radius = f64::from(unit.radius) * RAW_TO_WORLD;
@@ -385,10 +485,17 @@ pub fn build_unit_instances(
             let glow = if unit.built_permille >= 1000 { glow } else { hull };
             // A structure's base stays put, and its gun, if any, turns to aim.
             if let Some(base) = look.and_then(|look| look.base) {
-                out.push(base, painted(center, [size, size, height], NORTH, trim, hull, glow, UNIT_ICON_PX * 1.6, eye));
+                out.push(base, animated(painted(center, [size, size, height], NORTH, trim, hull, glow, UNIT_ICON_PX * 1.6, eye), 0));
             }
             let aim = unit_vector(unit.aim).unwrap_or(NORTH);
-            out.push(shape, painted(center, [size, size, height], aim, trim, hull, glow, UNIT_ICON_PX * 1.6, eye));
+            out.push(shape, animated(painted(center, [size, size, height], aim, trim, hull, glow, UNIT_ICON_PX * 1.6, eye), spin));
+            // Scaffolding stands around the whole of what it will be until it is finished.
+            if unit.built_permille < 1000 {
+                let full = size * height_share;
+                let ground = center[2] - f64::from(height) * 0.5;
+                let frame = [center[0], center[1], ground + f64::from(full) * 0.5];
+                out.push(Shape::Scaffold, painted(frame, [size * 1.04, size * 1.04, full], NORTH, color, hull, glow, NO_ICON, eye));
+            }
         } else {
             // The body faces the way the simulation says. Units that turn instantly, such as the
             // stress test's cubes, have no facing, so they are turned here as before.
@@ -396,19 +503,20 @@ pub fn build_unit_instances(
                 Some(body) => {
                     // Work comes first, then the weapon's aim, and otherwise straight ahead.
                     let rest = unit_vector(unit.aim).unwrap_or(body);
-                    let upper = if look.is_some_and(|look| look.base.is_some()) { update_heading(headings, unit, before, working_on, Some(rest)) } else { body };
+                    let upper = if look.is_some_and(|look| look.base.is_some()) { update_heading(&mut motion.headings, unit, before, working_on, Some(rest)) } else { body };
                     (body, upper)
                 }
                 None => {
                     // The stress test's plain cubes have no front, and skip this to save time.
-                    let heading = if look.is_some() { update_heading(headings, unit, before, working_on, None) } else { NORTH };
+                    let heading = if look.is_some() { update_heading(&mut motion.headings, unit, before, working_on, None) } else { NORTH };
                     (heading, heading)
                 }
             };
             if let Some(base) = look.and_then(|look| look.base) {
-                out.push(base, painted(center, [size; 3], body, color, hull, glow, UNIT_ICON_PX, eye));
+                let stride = if base.walks() { byte(motion.stride(unit.id, center, size)) } else { 0 };
+                out.push(base, animated(painted(center, [size; 3], body, color, hull, glow, UNIT_ICON_PX, eye), stride));
             }
-            out.push(shape, painted(center, [size; 3], upper, color, hull, glow, UNIT_ICON_PX, eye));
+            out.push(shape, animated(painted(center, [size; 3], upper, color, hull, glow, UNIT_ICON_PX, eye), spin));
         }
     });
 }
@@ -512,6 +620,7 @@ mod tests {
             built_permille: 1000,
             is_structure: false,
             facing: [0, 0], aim: [0, 0],
+            working: false,
         }
     }
 
@@ -523,7 +632,7 @@ mod tests {
     /// Builds instances with no looks, so that everything lands in the cube batch.
     fn cubes(previous: &[UnitView], current: &[UnitView], alpha: f64, eye: [f64; 3], selected: &[SimId]) -> Vec<UnitInstanceRaw> {
         let mut out = InstanceBatches::default();
-        build_unit_instances(previous, current, alpha, eye, selected, &[], &[], &mut Headings::new(), &mut out);
+        build_unit_instances(previous, current, alpha, eye, selected, &[], &[], &mut Motion::new(), &mut out);
         out.shape(Shape::Cube).to_vec()
     }
 
@@ -547,7 +656,7 @@ mod tests {
     fn selected_units_keep_their_color_and_get_a_ring_at_their_feet() {
         let current = [unit(1, 0), unit(2, 0), unit(3, 0)];
         let mut out = InstanceBatches::default();
-        build_unit_instances(&current, &current, 0.0, [0.0; 3], &[SimId(2)], &[], &[], &mut Headings::new(), &mut out);
+        build_unit_instances(&current, &current, 0.0, [0.0; 3], &[SimId(2)], &[], &[], &mut Motion::new(), &mut out);
         assert!(out.shape(Shape::Cube).iter().all(|cube| cube.color[..3] == BLUE), "selection must not recolor units");
         let rings = out.shape(Shape::SelectionRing);
         assert_eq!(rings.len(), 1, "only the selected unit gets a ring");
@@ -566,7 +675,7 @@ mod tests {
         generator.blueprint = db.id("power_generator").0;
         generator.is_structure = true;
         let mut out = InstanceBatches::default();
-        build_unit_instances(&[], &[generator], 0.0, [0.0; 3], &[SimId(1)], &looks, &[], &mut Headings::new(), &mut out);
+        build_unit_instances(&[], &[generator], 0.0, [0.0; 3], &[SimId(1)], &looks, &[], &mut Motion::new(), &mut out);
         assert_eq!(out.shape(Shape::SelectionBox).len(), 1);
         assert_eq!(out.shape(Shape::SelectionRing).len(), 0);
         assert_ne!(out.shape(Shape::Generator)[0].color[..3], SELECTED);
@@ -653,6 +762,96 @@ mod tests {
         }
     }
 
+    fn shell(id: u32, source: u32) -> ProjectileView {
+        ProjectileView { id: SimId(id), team: Team::Blue, x: 0, y: 0, z: 0, kind: ProjectileKind::Shell, source: SimId(source) }
+    }
+
+    /// A unit kicks back as a new shell of its own appears, and settles again after.
+    #[test]
+    fn a_new_shell_kicks_its_gun_back_for_a_moment() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let mut tank = unit(1, 0);
+        tank.blueprint = db.id("t2_heavy_tank").0;
+        let action = |motion: &mut Motion| {
+            let mut out = InstanceBatches::default();
+            build_unit_instances(&[tank], &[tank], 1.0, [0.0; 3], &[], &looks, &[], motion, &mut out);
+            out.shape(Shape::Tank)[0].glow[3]
+        };
+        let mut motion = Motion::new();
+        motion.note_shots(&[], &[]);
+        assert_eq!(action(&mut motion), 0, "nothing fired yet");
+        motion.note_shots(&[], &[shell(10, 1), shell(11, 2)]);
+        assert_eq!(action(&mut motion), 255, "it has just fired");
+        motion.time = RECOIL_SECONDS * 0.5;
+        // The same shell, a frame later, is not a new shot.
+        motion.note_shots(&[], &[shell(10, 1)]);
+        let halfway = action(&mut motion);
+        assert!(halfway > 64 && halfway < 192, "half settled: {halfway}");
+        motion.time = RECOIL_SECONDS * 2.0;
+        assert_eq!(action(&mut motion), 0, "settled");
+    }
+
+    /// Legs swing through a stride as a walker moves, and come back straight when it stops.
+    #[test]
+    fn legs_swing_while_walking_and_settle_when_stopped() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let mut motion = Motion::new();
+        let phase = |motion: &mut Motion, x: i32| {
+            let mut bot = unit(1, x);
+            bot.blueprint = db.id("t1_light_bot").0;
+            let mut out = InstanceBatches::default();
+            build_unit_instances(&[bot], &[bot], 1.0, [0.0; 3], &[], &looks, &[], motion, &mut out);
+            out.shape(Shape::BotLegs)[0].hull[3]
+        };
+        assert_eq!(phase(&mut motion, 0), 0);
+        // A quarter of a stride, for a unit 2 across.
+        let quarter = (2.0 * STRIDE_SHARE * 0.25 * 4096.0) as i32;
+        let walking = phase(&mut motion, quarter);
+        assert!((60..=70).contains(&walking), "a quarter of the way through a stride: {walking}");
+        let settled = (0..100).map(|_| phase(&mut motion, quarter)).last().expect("ran");
+        assert!(settled == 0 || settled == 128 || settled == 127, "legs straight again: {settled}");
+    }
+
+    /// Only a structure still being built stands in scaffolding, as tall as it will be.
+    #[test]
+    fn scaffolding_stands_around_unfinished_structures() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let mut site = unit(1, 0);
+        site.blueprint = db.id("power_generator").0;
+        site.is_structure = true;
+        site.built_permille = 300;
+        let mut finished = site;
+        finished.id = SimId(2);
+        finished.built_permille = 1000;
+        let mut out = InstanceBatches::default();
+        build_unit_instances(&[], &[site, finished], 0.0, [0.0; 3], &[], &looks, &[], &mut Motion::new(), &mut out);
+        let frames = out.shape(Shape::Scaffold);
+        assert_eq!(frames.len(), 1);
+        let site_height = out.shape(Shape::Generator)[0].model_matrix[2][2];
+        assert!(frames[0].model_matrix[2][2] > site_height, "the scaffold is as tall as the finished building");
+    }
+
+    /// Working lights shine while a unit works, and dim when it stops.
+    #[test]
+    fn working_lights_shine_only_at_work() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let mut factory = unit(1, 0);
+        factory.blueprint = db.id("land_factory_t1").0;
+        factory.is_structure = true;
+        let mut busy = factory;
+        busy.id = SimId(2);
+        busy.working = true;
+        let mut out = InstanceBatches::default();
+        build_unit_instances(&[], &[factory, busy], 0.0, [0.0; 3], &[], &looks, &[], &mut Motion::new(), &mut out);
+        let lights: Vec<u8> = out.shape(Shape::Factory).iter().map(|instance| instance.glow[3]).collect();
+        assert_eq!(lights[0], 0);
+        assert!(lights[1] >= 180, "busy lights shine: {}", lights[1]);
+    }
+
     #[test]
     fn units_have_grey_armor_and_glow_only_once_built() {
         let db = BlueprintDb::standard();
@@ -664,7 +863,7 @@ mod tests {
         site.id = SimId(2);
         site.built_permille = 500;
         let mut out = InstanceBatches::default();
-        build_unit_instances(&[], &[generator, site], 0.0, [0.0; 3], &[], &looks, &[], &mut Headings::new(), &mut out);
+        build_unit_instances(&[], &[generator, site], 0.0, [0.0; 3], &[], &looks, &[], &mut Motion::new(), &mut out);
         let [finished, building] = out.shape(Shape::Generator) else { panic!("two generators") };
         assert_eq!(finished.color[..3], BLUE, "the trim is the team's own color");
         assert_ne!(bytes(BLUE), finished.hull, "the armor is not the team color");
@@ -683,7 +882,7 @@ mod tests {
         generator.blueprint = db.id("power_generator").0;
         generator.is_structure = true;
         let mut out = InstanceBatches::default();
-        build_unit_instances(&[], &[tank, generator], 0.0, [0.0; 3], &[], &looks, &[], &mut Headings::new(), &mut out);
+        build_unit_instances(&[], &[tank, generator], 0.0, [0.0; 3], &[], &looks, &[], &mut Motion::new(), &mut out);
         assert_eq!(out.shape(Shape::Tank).len(), 1);
         assert_eq!(out.shape(Shape::Generator).len(), 1);
         assert_eq!(out.shape(Shape::Cube).len(), 0);
@@ -705,10 +904,10 @@ mod tests {
         tank.blueprint = db.id("t2_heavy_tank").0;
         let mut moved = tank;
         moved.x = 4096 * 4;
-        let mut headings = Headings::new();
+        let mut motion = Motion::new();
         let mut draw = |before: UnitView, after: UnitView| {
             let mut out = InstanceBatches::default();
-            build_unit_instances(&[before], &[after], 1.0, [0.0; 3], &[], &looks, &[], &mut headings, &mut out);
+            build_unit_instances(&[before], &[after], 1.0, [0.0; 3], &[], &looks, &[], &mut motion, &mut out);
             facing(&out.shape(Shape::Tank)[0])
         };
         let start = draw(tank, tank);
@@ -729,10 +928,10 @@ mod tests {
         acu.blueprint = db.id("acu").0;
         // Directly north-west of the unit, whichever way it was facing.
         let work = [WorkLinkView { builder: SimId(1), target: [-40_960, 40_960, 0], reclaim: false }];
-        let mut headings = Headings::new();
+        let mut motion = Motion::new();
         let mut draw = |before: UnitView, links: &[WorkLinkView]| {
             let mut out = InstanceBatches::default();
-            build_unit_instances(&[before], &[acu], 1.0, [0.0; 3], &[], &looks, links, &mut headings, &mut out);
+            build_unit_instances(&[before], &[acu], 1.0, [0.0; 3], &[], &looks, links, &mut motion, &mut out);
             facing(&out.shape(Shape::Commander)[0])
         };
         let start = draw(acu, &[]);
@@ -786,11 +985,11 @@ mod tests {
         // Walking east, and building something to the north.
         acu.facing = [4096, 0];
         let work = [WorkLinkView { builder: SimId(1), target: [0, 40_960, 0], reclaim: false }];
-        let mut headings = Headings::new();
+        let mut motion = Motion::new();
         let mut out = InstanceBatches::default();
         for _ in 0..60 {
             out.clear();
-            build_unit_instances(&[acu], &[acu], 1.0, [0.0; 3], &[], &looks, &work, &mut headings, &mut out);
+            build_unit_instances(&[acu], &[acu], 1.0, [0.0; 3], &[], &looks, &work, &mut motion, &mut out);
         }
         let legs = facing(&out.shape(Shape::CommanderLegs)[0]);
         let body = facing(&out.shape(Shape::Commander)[0]);
@@ -800,7 +999,7 @@ mod tests {
         // With the work done, the body settles back over its legs.
         for _ in 0..60 {
             out.clear();
-            build_unit_instances(&[acu], &[acu], 1.0, [0.0; 3], &[], &looks, &[], &mut headings, &mut out);
+            build_unit_instances(&[acu], &[acu], 1.0, [0.0; 3], &[], &looks, &[], &mut motion, &mut out);
         }
         let body = facing(&out.shape(Shape::Commander)[0]);
         assert!((body[0] - 1.0).abs() < 1e-2, "the body should face the way the legs do: {body:?}");
@@ -814,11 +1013,11 @@ mod tests {
         tank.blueprint = db.id("t2_heavy_tank").0;
         tank.facing = [4096, 0];
         tank.aim = [0, -4096];
-        let mut headings = Headings::new();
+        let mut motion = Motion::new();
         let mut out = InstanceBatches::default();
         for _ in 0..60 {
             out.clear();
-            build_unit_instances(&[tank], &[tank], 1.0, [0.0; 3], &[], &looks, &[], &mut headings, &mut out);
+            build_unit_instances(&[tank], &[tank], 1.0, [0.0; 3], &[], &looks, &[], &mut motion, &mut out);
         }
         assert!((facing(&out.shape(Shape::TankHull)[0])[0] - 1.0).abs() < 1e-3, "the hull should face east");
         assert!((facing(&out.shape(Shape::Tank)[0])[1] + 1.0).abs() < 1e-2, "the turret should aim south");
@@ -833,7 +1032,7 @@ mod tests {
         tower.is_structure = true;
         tower.aim = [-4096, 0];
         let mut out = InstanceBatches::default();
-        build_unit_instances(&[tower], &[tower], 1.0, [0.0; 3], &[], &looks, &[], &mut Headings::new(), &mut out);
+        build_unit_instances(&[tower], &[tower], 1.0, [0.0; 3], &[], &looks, &[], &mut Motion::new(), &mut out);
         assert_eq!(facing(&out.shape(Shape::PointDefenseBase)[0]), NORTH, "the base stays put");
         assert!((facing(&out.shape(Shape::PointDefense)[0])[0] + 1.0).abs() < 1e-3, "the gun should aim west");
     }
@@ -848,7 +1047,7 @@ mod tests {
         let mut after = before;
         after.facing = [0, 4096];
         let mut out = InstanceBatches::default();
-        build_unit_instances(&[before], &[after], 0.5, [0.0; 3], &[], &looks, &[], &mut Headings::new(), &mut out);
+        build_unit_instances(&[before], &[after], 0.5, [0.0; 3], &[], &looks, &[], &mut Motion::new(), &mut out);
         let halfway = facing(&out.shape(Shape::Tank)[0]);
         assert!((halfway[0] - FRAC_1_SQRT_2).abs() < 1e-3 && (halfway[1] - FRAC_1_SQRT_2).abs() < 1e-3, "{halfway:?}");
     }
@@ -862,12 +1061,12 @@ mod tests {
         let mut second = unit(2, 0);
         second.blueprint = db.id("t1_engineer").0;
         let work = [WorkLinkView { builder: SimId(2), target: [-40_960, 0, 0], reclaim: false }];
-        let mut headings = Headings::new();
+        let mut motion = Motion::new();
         let units = [first, second];
         let mut out = InstanceBatches::default();
         for _ in 0..60 {
             out.clear();
-            build_unit_instances(&units, &units, 1.0, [0.0; 3], &[], &looks, &work, &mut headings, &mut out);
+            build_unit_instances(&units, &units, 1.0, [0.0; 3], &[], &looks, &work, &mut motion, &mut out);
         }
         let engineers = out.shape(Shape::Engineer);
         assert!((facing(&engineers[0])[0] - FRAC_1_SQRT_2).abs() < 1e-3, "the idle one stays as it was");
