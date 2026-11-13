@@ -34,6 +34,8 @@ struct Globals {
     terrain_grid: [i32; 4],
     selection_box: [f32; 4],
     terrain_scale: [f32; 4],
+    /// The simulation's time in seconds, for waves, then nothing yet.
+    water: [f32; 4],
 }
 
 fn terrain_indices() -> Vec<u32> {
@@ -91,6 +93,8 @@ pub struct FrameScene<'a> {
     pub instances: &'a InstanceBatches,
     /// The selection box in pixels, as `(min, max)`.
     pub selection_box: Option<([f64; 2], [f64; 2])>,
+    /// The simulation's time in seconds, which moves the waves.
+    pub time: f32,
 }
 
 pub struct Renderer {
@@ -107,6 +111,7 @@ pub struct Renderer {
     terrain_pipeline: wgpu::RenderPipeline,
     box_pipeline: wgpu::RenderPipeline,
     dome_pipeline: wgpu::RenderPipeline,
+    water_pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     globals_buffer: wgpu::Buffer,
     mesh_vertices: wgpu::Buffer,
@@ -123,6 +128,8 @@ pub struct Renderer {
     height_scale: f32,
     /// Ground below this height is drawn as water.
     water_level: f32,
+    /// The lowest ground on the map, so that water nowhere above it is not drawn at all.
+    lowest_ground: f32,
     icon_scale: f32,
     fog_texture: wgpu::Texture,
     fog_side: u32,
@@ -518,6 +525,29 @@ impl Renderer {
             multiview: None,
         });
 
+        // The water's surface: the terrain grid again, flat at the water's height, see-through,
+        // and hidden wherever the ground stands above it.
+        let water_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("water"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_water",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_water",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &blended,
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: depth(false, wgpu::CompareFunction::Greater),
+            multisample,
+            multiview: None,
+        });
+
         let meshes = MeshSet::build();
         let mesh_vertices = device.create_buffer_init(&BufferInitDescriptor {
             label: Some("mesh vertices"),
@@ -551,6 +581,7 @@ impl Renderer {
             terrain_pipeline,
             box_pipeline,
             dome_pipeline,
+            water_pipeline,
             bind_group,
             globals_buffer,
             mesh_vertices,
@@ -565,6 +596,7 @@ impl Renderer {
             cell_units: heights.cell_units(),
             height_scale: heights.units_per_step() as f32,
             water_level: -1.0e6,
+            lowest_ground: heights.heights().iter().copied().min().map_or(0.0, |lowest| f32::from(lowest) * heights.units_per_step() as f32),
             icon_scale,
             fog_texture,
             fog_side: fog_extent,
@@ -672,6 +704,7 @@ impl Renderer {
             terrain_grid: [first[0], first[1], step, self.samples_per_side],
             selection_box,
             terrain_scale: [self.height_scale, self.icon_scale, self.fog_scale, self.water_level],
+            water: [scene.time, 0.0, 0.0, 0.0],
         };
         self.queue.write_buffer(&self.globals_buffer, 0, bytemuck::bytes_of(&globals));
         self.flat_instances.clear();
@@ -728,6 +761,13 @@ impl Renderer {
             if !instances.is_empty() && shape != Shape::Dome {
                 pass.draw_indexed(indices.clone(), 0, instances.clone());
             }
+        }
+        // Water over the units, so that what is under it shows through, tinted by its depth.
+        if self.water_level > self.lowest_ground {
+            pass.set_pipeline(&self.water_pipeline);
+            pass.set_index_buffer(self.terrain_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..self.terrain_index_count, 0, 0..1);
+            pass.set_index_buffer(self.mesh_indices.slice(..), wgpu::IndexFormat::Uint16);
         }
         let domes = &self.shape_instances[Shape::Dome as usize];
         if !domes.is_empty() {

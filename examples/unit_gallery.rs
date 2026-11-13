@@ -136,7 +136,7 @@ fn main() {
         }
         let mut instances = InstanceBatches::default();
         build_unit_instances(&snapshot.units, &snapshot.units, 1.0, camera.eye(), &[], &looks, &[], &mut Motion::new(), &mut instances);
-        let scene = FrameScene { camera: &camera, instances: &instances, selection_box: None };
+        let scene = FrameScene { camera: &camera, instances: &instances, selection_box: None, time: 0.0 };
         let path = out.join(format!("{name}.bmp"));
         renderer.capture(&scene, None, &path).expect("capture saves");
         println!("saved {}", path.display());

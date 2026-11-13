@@ -1529,6 +1529,7 @@ fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                             camera: &camera,
                             instances: &scene_instances,
                             selection_box: selection.drag_box(),
+                            time: motion.time as f32,
                         };
 
                         renderer.begin_ui(&ui_frame);

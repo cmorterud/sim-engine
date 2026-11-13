@@ -12,6 +12,8 @@ struct Globals {
     selection_box: vec4<f32>,
     // terrain height scale, display scale factor, fog texture coordinates per height sample, water level.
     terrain_scale: vec4<f32>,
+    // the simulation's time in seconds, for waves, then nothing yet.
+    water: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -365,27 +367,62 @@ struct TerrainOutput {
     @location(0) relative: vec3<f32>,
     @location(1) height: f32,
     @location(2) fog_coordinates: vec2<f32>,
+    // Where it is on the map, for patterns that stay put as the camera moves.
+    @location(3) world: vec2<f32>,
 };
+
+// A grid vertex of the terrain, for a grid index: which height sample it stands on, and where.
+struct GridPoint {
+    sample: vec2<i32>,
+    offset: vec2<f32>,
+};
+
+fn grid_point(index: u32) -> GridPoint {
+    let grid = vec2<i32>(i32(index % TERRAIN_GRID_SIZE), i32(index / TERRAIN_GRID_SIZE));
+    let first = globals.terrain_grid.xy;
+    let last = globals.terrain_grid.w - 1;
+    // Vertices beyond the map edge collapse onto it, so that the grid never leaves the map.
+    let sample = clamp(first + grid * globals.terrain_grid.z, vec2<i32>(0, 0), vec2<i32>(last, last));
+    return GridPoint(sample, vec2<f32>(sample - first) * globals.terrain_origin.w);
+}
 
 @vertex
 fn vs_terrain(@builtin(vertex_index) index: u32) -> TerrainOutput {
-    let grid = vec2<i32>(i32(index % TERRAIN_GRID_SIZE), i32(index / TERRAIN_GRID_SIZE));
-    let first = globals.terrain_grid.xy;
-    let step = globals.terrain_grid.z;
-    let last = globals.terrain_grid.w - 1;
-    // Vertices beyond the map edge collapse onto it, so that the grid never leaves the map.
-    let sample = clamp(first + grid * step, vec2<i32>(0, 0), vec2<i32>(last, last));
-    let height = f32(textureLoad(heights, sample, 0).r) * globals.terrain_scale.x;
-    let offset = vec2<f32>(sample - first) * globals.terrain_origin.w;
-    let relative = vec3<f32>(globals.terrain_origin.xy + offset, height - globals.terrain_origin.z);
+    let point = grid_point(index);
+    let height = f32(textureLoad(heights, point.sample, 0).r) * globals.terrain_scale.x;
+    let relative = vec3<f32>(globals.terrain_origin.xy + point.offset, height - globals.terrain_origin.z);
 
     var out: TerrainOutput;
     out.clip = globals.view_proj * vec4<f32>(relative, 1.0);
     out.relative = relative;
     out.height = height;
-    out.fog_coordinates = vec2<f32>(sample) * globals.terrain_scale.z;
+    out.fog_coordinates = vec2<f32>(point.sample) * globals.terrain_scale.z;
+    out.world = vec2<f32>(point.sample) * globals.terrain_origin.w;
     return out;
 }
+
+fn hash2(point: vec2<f32>) -> f32 {
+    return fract(sin(dot(point, vec2<f32>(127.1, 311.7))) * 43758.5453);
+}
+
+// Smooth noise from 0 to 1, changing over about one unit of `point`.
+fn value_noise(point: vec2<f32>) -> f32 {
+    let cell = floor(point);
+    let along = fract(point);
+    let smooth_along = along * along * (3.0 - 2.0 * along);
+    let a = hash2(cell);
+    let b = hash2(cell + vec2<f32>(1.0, 0.0));
+    let c = hash2(cell + vec2<f32>(0.0, 1.0));
+    let d = hash2(cell + vec2<f32>(1.0, 1.0));
+    return mix(mix(a, b, smooth_along.x), mix(c, d, smooth_along.x), smooth_along.y);
+}
+
+// Ground colors, in linear light.
+const GRASS_LOW: vec3<f32> = vec3<f32>(0.10, 0.17, 0.09);
+const GRASS_HIGH: vec3<f32> = vec3<f32>(0.24, 0.27, 0.14);
+const DIRT: vec3<f32> = vec3<f32>(0.25, 0.21, 0.14);
+const ROCK: vec3<f32> = vec3<f32>(0.30, 0.28, 0.26);
+const SAND: vec3<f32> = vec3<f32>(0.44, 0.40, 0.29);
 
 @fragment
 fn fs_terrain(input: TerrainOutput) -> @location(0) vec4<f32> {
@@ -394,23 +431,96 @@ fn fs_terrain(input: TerrainOutput) -> @location(0) vec4<f32> {
     if (normal.z < 0.0) {
         normal = -normal;
     }
-    let light = 0.55 + 0.45 * max(dot(normal, LIGHT), 0.0);
+    let light = 0.5 + 0.55 * max(dot(normal, LIGHT), 0.0);
+    // Grass, darker in the lows and drier on the heights, in soft patches large and small,
+    // with bare dirt here and there.
     let t = clamp((input.height + 36.0) / 72.0, 0.0, 1.0);
-    let base = mix(vec3<f32>(0.10, 0.16, 0.11), vec3<f32>(0.30, 0.33, 0.20), t);
-    // Height contours give a sense of shape and scale without any textures.
+    let patches = value_noise(input.world / 220.0) * 0.5 + value_noise(input.world / 61.0) * 0.3 + value_noise(input.world / 17.0) * 0.2;
+    var base = mix(GRASS_LOW, GRASS_HIGH, t) * (0.91 + 0.18 * patches);
+    base = mix(base, DIRT, smoothstep(0.66, 0.82, patches) * 0.3);
+    // Rock where it is steep.
+    let steep = smoothstep(0.18, 0.42, 1.0 - normal.z);
+    base = mix(base, ROCK * (0.9 + 0.2 * patches), steep);
+    // Sand along the shore, a little above the water.
+    let above_water = input.height - globals.terrain_scale.w;
+    base = mix(base, SAND, (1.0 - smoothstep(1.0, 5.0, above_water)) * (1.0 - steep));
+    // Faint height contours give a sense of shape and scale.
     let contour = abs(fract(input.height / 8.0) - 0.5);
     let width = max(fwidth(input.height / 8.0), 0.0001);
     let line = 1.0 - clamp(contour / width, 0.0, 1.0);
     // Ground that has never been seen is dark, and ground seen before is dim.
     let sight = 0.18 + 0.82 * textureSample(fog_texture, fog_sampler, input.fog_coordinates).r;
-    var color = base * light * (1.0 - 0.18 * line);
-    // Under the water level, ground shows through water, less the deeper it lies.
-    let depth = globals.terrain_scale.w - input.height;
+    var color = base * light * (1.0 - 0.1 * line);
+    // Under water the ground darkens with depth. The water's surface is drawn over it.
+    let depth = -above_water;
     if (depth > 0.0) {
-        let murk = clamp(0.6 + depth / 80.0, 0.6, 0.92);
-        color = mix(base * light, vec3<f32>(0.08, 0.22, 0.36), murk);
+        color = color * mix(0.85, 0.35, clamp(depth / 60.0, 0.0, 1.0));
     }
     return vec4<f32>(color * sight, 1.0);
+}
+
+// ---- Water ----
+
+struct WaterOutput {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) relative: vec3<f32>,
+    @location(1) world: vec2<f32>,
+    // How deep the water is here.
+    @location(2) depth: f32,
+    @location(3) fog_coordinates: vec2<f32>,
+};
+
+const WATER_SHALLOW: vec3<f32> = vec3<f32>(0.07, 0.24, 0.30);
+const WATER_DEEP: vec3<f32> = vec3<f32>(0.02, 0.09, 0.18);
+const WATER_SKY: vec3<f32> = vec3<f32>(0.42, 0.52, 0.62);
+const FOAM_COLOR: vec3<f32> = vec3<f32>(0.85, 0.90, 0.92);
+
+@vertex
+fn vs_water(@builtin(vertex_index) index: u32) -> WaterOutput {
+    let point = grid_point(index);
+    let ground = f32(textureLoad(heights, point.sample, 0).r) * globals.terrain_scale.x;
+    let level = globals.terrain_scale.w;
+    let relative = vec3<f32>(globals.terrain_origin.xy + point.offset, level - globals.terrain_origin.z);
+    var out: WaterOutput;
+    out.clip = globals.view_proj * vec4<f32>(relative, 1.0);
+    out.relative = relative;
+    out.world = vec2<f32>(point.sample) * globals.terrain_origin.w;
+    out.depth = level - ground;
+    out.fog_coordinates = vec2<f32>(point.sample) * globals.terrain_scale.z;
+    return out;
+}
+
+@fragment
+fn fs_water(input: WaterOutput) -> @location(0) vec4<f32> {
+    let time = globals.water.x;
+    let at = input.world;
+    // Swells: three trains of gentle waves crossing, which tilt the surface a little as they pass.
+    let k1 = vec2<f32>(0.021, 0.013);
+    let k2 = vec2<f32>(-0.017, 0.026);
+    let k3 = vec2<f32>(0.05, -0.034);
+    let tilt = k1 * 3.0 * cos(dot(at, k1) + time * 1.3) + k2 * 2.5 * cos(dot(at, k2) + time * 1.7) + k3 * 1.0 * cos(dot(at, k3) + time * 2.3);
+    let normal = normalize(vec3<f32>(-tilt, 1.0));
+    let to_eye = normalize(-input.relative);
+    // Darker and less clear the deeper it is.
+    let depth = max(input.depth, 0.0);
+    let deep = 1.0 - exp(-depth / 30.0);
+    var color = mix(WATER_SHALLOW, WATER_DEEP, deep);
+    // The sky shows in it, more at a glancing angle.
+    let fresnel = pow(1.0 - max(dot(normal, to_eye), 0.0), 4.0);
+    color = mix(color, WATER_SKY, fresnel * 0.45);
+    // A gentle shimmer drifting across it, with the odd sparkle. The fine layer fades out
+    // before it is small enough on screen to shimmer for the wrong reason.
+    let fine = 1.0 - smoothstep(0.3, 1.0, length(fwidth(at / 7.0)));
+    let shimmer = value_noise(at / 18.0 + vec2<f32>(time * 0.4, time * 0.15)) * 0.6 + value_noise(at / 7.0 - vec2<f32>(time * 0.25, time * 0.5)) * 0.4 * fine + 0.2 * (1.0 - fine);
+    color = color * (0.92 + 0.16 * shimmer) + vec3<f32>(0.9, 0.9, 0.85) * smoothstep(0.75, 0.92, shimmer) * 0.08;
+    // Foam where it laps against the shore.
+    let ripple = value_noise(at / 9.0 + vec2<f32>(time * 0.3, time * 0.2));
+    let edge = 1.0 - smoothstep(0.0, 3.5, depth);
+    let foam = edge * smoothstep(0.35, 0.6, ripple + edge * 0.4);
+    color = mix(color, FOAM_COLOR, foam * 0.8);
+    let alpha = clamp(mix(0.35, 0.9, deep) + foam * 0.5 + fresnel * 0.2, 0.0, 0.95);
+    let sight = 0.18 + 0.82 * textureSample(fog_texture, fog_sampler, input.fog_coordinates).r;
+    return vec4<f32>(color * sight, alpha);
 }
 
 // ---- Selection box ----
