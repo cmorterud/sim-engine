@@ -95,6 +95,14 @@ fn main() {
     rows.push(("navy_wide".to_string(), [1_500.0, 1_860.0], 700.0));
 
     let snapshot = world.snapshot();
+    // `GALLERY_FOCUS=<blueprint key>` adds close-ups of Blue's copy of that unit, near and nearer.
+    if let Ok(key) = std::env::var("GALLERY_FOCUS") {
+        let id = blueprints.id(&key).0;
+        let unit = snapshot.units.iter().find(|unit| unit.blueprint == id && unit.team == Team::Blue).expect("GALLERY_FOCUS names a unit in the gallery");
+        let (x, y, radius) = (f64::from(unit.x) / 4096.0, f64::from(unit.y) / 4096.0, f64::from(unit.radius) / 4096.0);
+        rows.push((format!("{key}_close"), [x, y], radius * 9.0));
+        rows.push((format!("{key}_closer"), [x, y], radius * 4.5));
+    }
     if std::env::var_os("GALLERY_DEBUG").is_some() {
         for unit in &snapshot.units {
             println!("{} {} at {} {} {}", unit.id.0, blueprints.get(sim_engine::sim::blueprints::BlueprintId(unit.blueprint)).key, unit.x >> 12, unit.y >> 12, unit.z >> 12);
