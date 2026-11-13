@@ -15,7 +15,8 @@ use super::instances::{InstanceBatches, UnitInstanceRaw};
 use super::meshes::{MeshSet, MeshVertex, Shape};
 
 const TERRAIN_GRID_SIZE: u32 = 512;
-const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+/// Samples per pixel, for smooth edges, where the graphics adapter supports it.
+const MSAA_SAMPLES: u32 = 4;
 const BACKGROUND: wgpu::Color = wgpu::Color { r: 0.015, g: 0.02, b: 0.035, a: 1.0 };
 
 /// The size-to-distance ratios where a unit is fully a dot, and fully a cube. Based on
@@ -97,8 +98,12 @@ pub struct Renderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
-    depth_view: wgpu::TextureView,
+    /// Depth, with a stencil that lets each pixel be shadowed only once.
+    depth_format: wgpu::TextureFormat,
+    samples: u32,
+    targets: SceneTargets,
     unit_pipeline: wgpu::RenderPipeline,
+    shadow_pipeline: wgpu::RenderPipeline,
     terrain_pipeline: wgpu::RenderPipeline,
     box_pipeline: wgpu::RenderPipeline,
     dome_pipeline: wgpu::RenderPipeline,
@@ -127,19 +132,31 @@ pub struct Renderer {
     last_acquire: Duration,
 }
 
-fn create_depth_view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::TextureView {
-    device
-        .create_texture(&wgpu::TextureDescriptor {
-            label: Some("depth"),
-            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: DEPTH_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        })
-        .create_view(&wgpu::TextureViewDescriptor::default())
+/// What the scene draws into before it lands in the window: depth, and with more than one
+/// sample per pixel, the color that is then averaged down into the window.
+struct SceneTargets {
+    depth: wgpu::TextureView,
+    color: Option<wgpu::TextureView>,
+}
+
+impl SceneTargets {
+    fn new(device: &wgpu::Device, width: u32, height: u32, color_format: wgpu::TextureFormat, depth_format: wgpu::TextureFormat, samples: u32) -> Self {
+        let texture = |label, format| {
+            device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some(label),
+                    size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                    mip_level_count: 1,
+                    sample_count: samples,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    view_formats: &[],
+                })
+                .create_view(&wgpu::TextureViewDescriptor::default())
+        };
+        Self { depth: texture("depth", depth_format), color: (samples > 1).then(|| texture("multisampled color", color_format)) }
+    }
 }
 
 impl Renderer {
@@ -167,7 +184,7 @@ impl Renderer {
         let (device, queue) = pollster::block_on(adapter.request_device(
             &wgpu::DeviceDescriptor {
                 label: Some("device"),
-                required_features: wgpu::Features::empty(),
+                required_features: adapter.features() & wgpu::Features::DEPTH32FLOAT_STENCIL8,
                 required_limits: wgpu::Limits::default(),
             },
             None,
@@ -192,6 +209,14 @@ impl Renderer {
             view_formats: vec![],
         };
         surface.configure(&device, &config);
+        let depth_format = if device.features().contains(wgpu::Features::DEPTH32FLOAT_STENCIL8) {
+            wgpu::TextureFormat::Depth32FloatStencil8
+        } else {
+            wgpu::TextureFormat::Depth24PlusStencil8
+        };
+        let supports = |format| adapter.get_texture_format_features(format).flags.sample_count_supported(MSAA_SAMPLES);
+        let msaa_samples = if supports(format) && supports(depth_format) { MSAA_SAMPLES } else { 1 };
+        let multisample = wgpu::MultisampleState { count: msaa_samples, ..Default::default() };
 
         // The height map, read directly in the vertex shader.
         let samples = heights.samples() as u32;
@@ -314,7 +339,7 @@ impl Renderer {
 
         let depth = |write: bool, compare| {
             Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
+                format: depth_format,
                 depth_write_enabled: write,
                 depth_compare: compare,
                 stencil: wgpu::StencilState::default(),
@@ -359,7 +384,7 @@ impl Renderer {
             }),
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: depth(true, wgpu::CompareFunction::Greater),
-            multisample: wgpu::MultisampleState::default(),
+            multisample,
             multiview: None,
         });
         let terrain_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -379,7 +404,7 @@ impl Renderer {
             }),
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: depth(true, wgpu::CompareFunction::Greater),
-            multisample: wgpu::MultisampleState::default(),
+            multisample,
             multiview: None,
         });
         let box_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -399,7 +424,62 @@ impl Renderer {
             }),
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: depth(false, wgpu::CompareFunction::Always),
-            multisample: wgpu::MultisampleState::default(),
+            multisample,
+            multiview: None,
+        });
+
+        // Shadows darken the ground already drawn, each pixel only once however many shapes
+        // cover it: the first to reach a pixel marks it in the stencil, and the rest skip it.
+        let darken = [Some(wgpu::ColorTargetState {
+            format,
+            blend: Some(wgpu::BlendState {
+                color: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::Zero, dst_factor: wgpu::BlendFactor::Src, operation: wgpu::BlendOperation::Add },
+                alpha: wgpu::BlendComponent::REPLACE,
+            }),
+            write_mask: wgpu::ColorWrites::COLOR,
+        })];
+        let once = wgpu::StencilFaceState {
+            compare: wgpu::CompareFunction::Equal,
+            fail_op: wgpu::StencilOperation::Keep,
+            depth_fail_op: wgpu::StencilOperation::Keep,
+            pass_op: wgpu::StencilOperation::IncrementClamp,
+        };
+        let shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("shadows"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_shadow",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<MeshVertex>() as u64,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &mesh_attributes,
+                    },
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<UnitInstanceRaw>() as u64,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &instance_attributes,
+                    },
+                ],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_shadow",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &darken,
+            }),
+            // Flattened onto the ground, a shape's faces overlap both ways up.
+            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: depth_format,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Greater,
+                stencil: wgpu::StencilState { front: once, back: once, read_mask: 0xff, write_mask: 0xff },
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample,
             multiview: None,
         });
 
@@ -433,7 +513,7 @@ impl Renderer {
             }),
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: depth(false, wgpu::CompareFunction::Greater),
-            multisample: wgpu::MultisampleState::default(),
+            multisample,
             multiview: None,
         });
 
@@ -455,15 +535,18 @@ impl Renderer {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        let depth_view = create_depth_view(&device, config.width, config.height);
+        let targets = SceneTargets::new(&device, config.width, config.height, format, depth_format, msaa_samples);
         let instance_buffer = InstanceBuffer::new(&device, 16_384);
         Self {
             surface,
             device,
             queue,
             config,
-            depth_view,
+            depth_format,
+            samples: msaa_samples,
+            targets,
             unit_pipeline,
+            shadow_pipeline,
             terrain_pipeline,
             box_pipeline,
             dome_pipeline,
@@ -549,7 +632,7 @@ impl Renderer {
         self.config.width = width;
         self.config.height = height;
         self.surface.configure(&self.device, &self.config);
-        self.depth_view = create_depth_view(&self.device, width, height);
+        self.targets = SceneTargets::new(&self.device, width, height, self.config.format, self.depth_format, self.samples);
     }
 
     fn prepare(&mut self, scene: &FrameScene<'_>) {
@@ -600,19 +683,24 @@ impl Renderer {
         self.instance_buffer.write(&self.device, &self.queue, &self.flat_instances);
     }
 
-    fn encode(&self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView, depth: &wgpu::TextureView) {
+    fn encode(&self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView, scene_targets: &SceneTargets) {
+        // With several samples per pixel, they are averaged into the target as the pass ends.
+        let (view, resolve_target, store) = match &scene_targets.color {
+            Some(color) => (color, Some(target), wgpu::StoreOp::Discard),
+            None => (target, None, wgpu::StoreOp::Store),
+        };
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("scene"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target,
-                resolve_target: None,
-                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(BACKGROUND), store: wgpu::StoreOp::Store },
+                view,
+                resolve_target,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(BACKGROUND), store },
             })],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: depth,
+                view: &scene_targets.depth,
                 // Reversed Z: the far plane is 0.
                 depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0.0), store: wgpu::StoreOp::Discard }),
-                stencil_ops: None,
+                stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0), store: wgpu::StoreOp::Discard }),
             }),
             timestamp_writes: None,
             occlusion_query_set: None,
@@ -623,10 +711,18 @@ impl Renderer {
         pass.set_index_buffer(self.terrain_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..self.terrain_index_count, 0, 0..1);
 
-        pass.set_pipeline(&self.unit_pipeline);
         pass.set_vertex_buffer(0, self.mesh_vertices.slice(..));
         pass.set_vertex_buffer(1, self.instance_buffer.buffer.slice(..));
         pass.set_index_buffer(self.mesh_indices.slice(..), wgpu::IndexFormat::Uint16);
+        // Shadows go on the bare ground, before the units that cast them stand over them.
+        pass.set_pipeline(&self.shadow_pipeline);
+        pass.set_stencil_reference(0);
+        for ((indices, instances), shape) in self.shape_indices.iter().zip(&self.shape_instances).zip(Shape::ALL) {
+            if !instances.is_empty() && shape.casts_shadow() {
+                pass.draw_indexed(indices.clone(), 0, instances.clone());
+            }
+        }
+        pass.set_pipeline(&self.unit_pipeline);
         for ((indices, instances), shape) in self.shape_indices.iter().zip(&self.shape_instances).zip(Shape::ALL) {
             if !instances.is_empty() && shape != Shape::Dome {
                 pass.draw_indexed(indices.clone(), 0, instances.clone());
@@ -662,7 +758,7 @@ impl Renderer {
         };
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") });
-        self.encode(&mut encoder, &view, &self.depth_view);
+        self.encode(&mut encoder, &view, &self.targets);
         let extra = ui.map_or_else(Vec::new, |ui| self.encode_ui(&mut encoder, &view, ui));
         self.queue.submit(extra.into_iter().chain([encoder.finish()]));
         frame.present();
@@ -691,9 +787,8 @@ impl Renderer {
             mapped_at_creation: false,
         });
         let view = target.create_view(&wgpu::TextureViewDescriptor::default());
-        let depth = create_depth_view(&self.device, width, height);
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("capture") });
-        self.encode(&mut encoder, &view, &depth);
+        self.encode(&mut encoder, &view, &self.targets);
         let extra = ui.map_or_else(Vec::new, |ui| self.encode_ui(&mut encoder, &view, ui));
         encoder.copy_texture_to_buffer(
             target.as_image_copy(),

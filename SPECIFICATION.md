@@ -415,12 +415,14 @@ The camera smoothly scales along an exponential zoom curve:
 * **Near Plane (Close-up):** Altitude = 10 units. Pitch = 45°. Field of view = Perspective 3D.
 * **Far Plane (Orbital):** Altitude = 100,000 units, enough for a 45° vertical field of view to show a maximum-size map. Scales down with smaller maps. Pitch = 89° (nearly top-down orthographic).
 * **Smooth Zooming:** Scroll wheel adjusts target altitude; camera uses exponential decay toward the target to avoid jarring transitions.
-* **Depth Range:** Use a reversed-Z `Depth32Float` buffer so geometry does not flicker across the full altitude range.
+* **Depth Range:** Use a reversed-Z 32-bit float depth buffer so geometry does not flicker across the full altitude range. It carries an 8-bit stencil for shadows (§5.2), falling back to `Depth24PlusStencil8` where `Depth32FloatStencil8` is not supported.
+* **Smooth Edges:** The scene is drawn with 4 samples per pixel where the adapter supports it, and averaged into the window as the pass ends. The interface is drawn afterwards, at one sample.
 * **Camera-Relative Coordinates:** `f32` has a precision of only about 0.008 units at the far edge of a maximum-size map, which would visibly jitter in close-up. Compute camera and interpolated positions in `f64`, subtract the camera position, and send the resulting camera-relative `f32` values to the GPU.
 
 ### 5.2 GPU Instanced Rendering (`src/render/instances.rs` & `shaders.wgsl`)
 * **One Draw Call per Shape:** Instances are grouped by low-poly shape, and each shape is one instanced `wgpu::RenderPass::draw_indexed` call. All 5,000 stress-test units share one shape, and so one call.
 * **Terrain:** A single camera-following grid of 512 × 512 vertices, with vertex spacing that doubles as altitude increases. The vertex shader reads heights from a texture of the height map. Flat shading only.
+* **Shadows:** After the terrain and before the units, every shape that casts a shadow is drawn again from the same instance buffer, flattened onto the ground along the sunlight, so a shadow has its shape's outline. Its vertices take their height from the height map on the same triangles the terrain grid draws, or from the water where that is higher. Shadows multiply the ground's color, and the stencil lets each pixel be darkened only once, however many shapes cover it. They fade with their shapes into tactical dots, and things under water cast none. Shadow-casting is decided per shape (`Shape::casts_shadow`): markers, shield domes, and shells do not.
 * **Simulation Thread:** The simulation runs on its own thread and hands the renderer per-tick snapshots keyed by `SimId`, so a slow tick cannot stall a frame. Rendering never writes to simulation state. Entities present in only one snapshot are drawn at their known position without interpolation.
 * **Instance Buffer Structure:**
   ```rust

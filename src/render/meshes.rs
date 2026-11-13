@@ -138,6 +138,12 @@ impl Shape {
         Self::SelectionBox,
     ];
     pub const COUNT: usize = Self::ALL.len();
+
+    /// Whether the shape throws a shadow on the ground. Markers, see-through domes, and shells
+    /// too small to see do not.
+    pub const fn casts_shadow(self) -> bool {
+        !matches!(self, Self::Dome | Self::SelectionRing | Self::SelectionBox | Self::Shell)
+    }
 }
 
 /// What a part of a shape is made of, which decides its color.
@@ -737,6 +743,16 @@ pub(super) mod tests {
     fn every_vertex_has_a_known_material() {
         let set = MeshSet::build();
         assert!(set.vertices.iter().all(|vertex| vertex.material <= Material::Glow as u32));
+    }
+
+    #[test]
+    fn units_cast_shadows_but_markers_and_domes_do_not() {
+        for shape in [Shape::Commander, Shape::Tank, Shape::Factory, Shape::Ship, Shape::Gunship, Shape::Tree, Shape::Cube] {
+            assert!(shape.casts_shadow(), "{shape:?} should cast a shadow");
+        }
+        for shape in [Shape::Dome, Shape::SelectionRing, Shape::SelectionBox, Shape::Shell] {
+            assert!(!shape.casts_shadow(), "{shape:?} should not cast a shadow");
+        }
     }
 
     /// When zoomed out, each vertex moves to a corner of a dot based on its quadrant, so a shape

@@ -10,7 +10,7 @@ struct Globals {
     terrain_grid: vec4<i32>,
     // selection box in clip space: min x, min y, max x, max y.
     selection_box: vec4<f32>,
-    // terrain height scale, display scale factor, fog texture coordinates per height sample, unused.
+    // terrain height scale, display scale factor, fog texture coordinates per height sample, water level.
     terrain_scale: vec4<f32>,
 };
 
@@ -56,6 +56,16 @@ struct UnitOutput {
     @location(4) morph: f32,
 };
 
+// How far a shape has collapsed towards its tactical dot: 0 for a lit shape, 1 for a dot.
+fn dot_morph(instance: InstanceInput, center: vec3<f32>, center_clip: vec4<f32>) -> f32 {
+    let icon_px = instance.color.a * globals.terrain_scale.y;
+    if (icon_px <= 0.0 || center_clip.w <= 0.0) {
+        return 0.0;
+    }
+    let apparent_size = length(instance.m0.xyz) / max(length(center), 0.001);
+    return 1.0 - smoothstep(globals.viewport_lod.z, globals.viewport_lod.w, apparent_size);
+}
+
 // Colors are chosen as they should look on screen, and lit in linear light.
 fn to_linear(color: vec3<f32>) -> vec3<f32> {
     let low = color / 12.92;
@@ -79,11 +89,7 @@ fn vs_unit(
 
     // Far units collapse to a screen-aligned dot with a minimum size. Rotating faces
     // flatten: the top and bottom become the dot's square, and the sides become lines.
-    var morph = 0.0;
-    if (icon_px > 0.0 && center_clip.w > 0.0) {
-        let apparent_size = length(instance.m0.xyz) / max(length(center), 0.001);
-        morph = 1.0 - smoothstep(globals.viewport_lod.z, globals.viewport_lod.w, apparent_size);
-    }
+    let morph = dot_morph(instance, center, center_clip);
     let corner = sign(position.xy);
     let offset = corner * icon_px * 2.0 / globals.viewport_lod.xy * center_clip.w;
     let dot_clip = vec4<f32>(center_clip.xy + offset, center_clip.z, center_clip.w);
@@ -132,6 +138,79 @@ fn fs_unit(input: UnitOutput) -> @location(0) vec4<f32> {
     let rim = pow(1.0 - max(dot(normal, to_eye), 0.0), 3.0) * 0.18;
     let lit = diffuse + vec3<f32>(shine) + rim * mix(input.albedo, vec3<f32>(1.0), 0.5);
     return vec4<f32>(mix(lit, input.albedo, input.morph), 1.0);
+}
+
+// ---- Shadows ----
+
+// How much of the light a shadow takes away, and how far above the ground it is drawn, so
+// that it stays in front of the ground it lies on.
+const SHADOW_DARKNESS: f32 = 0.42;
+const SHADOW_LIFT: f32 = 0.4;
+// An aircraft's shadow fades as it climbs, down to this share, at this height.
+const HIGH_SHADOW: f32 = 0.55;
+const HIGH_SHADOW_HEIGHT: f32 = 600.0;
+
+fn terrain_sample(sample: vec2<i32>) -> f32 {
+    let last = globals.terrain_grid.w - 1;
+    let clamped = clamp(sample, vec2<i32>(0, 0), vec2<i32>(last, last));
+    return f32(textureLoad(heights, clamped, 0).r) * globals.terrain_scale.x;
+}
+
+// The camera-relative height of the ground under a camera-relative point, on the same
+// triangles the terrain grid draws, or of the water where that is higher.
+fn ground_at(relative: vec2<f32>) -> f32 {
+    let step = globals.terrain_grid.z;
+    let grid = (relative - globals.terrain_origin.xy) / (globals.terrain_origin.w * f32(step));
+    let cell = floor(grid);
+    let along = grid - cell;
+    let first = globals.terrain_grid.xy + vec2<i32>(cell) * step;
+    let a = terrain_sample(first);
+    let b = terrain_sample(first + vec2<i32>(step, 0));
+    let c = terrain_sample(first + vec2<i32>(0, step));
+    let d = terrain_sample(first + vec2<i32>(step, step));
+    // Each grid square is two triangles, split from its (1, 0) corner to its (0, 1) corner.
+    var height = d + (c - d) * (1.0 - along.x) + (b - d) * (1.0 - along.y);
+    if (along.x + along.y <= 1.0) {
+        height = a + (b - a) * along.x + (c - a) * along.y;
+    }
+    return max(height, globals.terrain_scale.w) - globals.terrain_origin.z;
+}
+
+struct ShadowOutput {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) darkness: f32,
+};
+
+// A shape flattened onto the ground along the sunlight, so that its shadow has its outline.
+@vertex
+fn vs_shadow(
+    @location(0) position: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    instance: InstanceInput,
+) -> ShadowOutput {
+    let model = mat4x4<f32>(instance.m0, instance.m1, instance.m2, instance.m3);
+    let center = instance.m3.xyz;
+    var out: ShadowOutput;
+    // Shadows fade with the shapes as they become dots, and nothing under water casts one.
+    let morph = dot_morph(instance, center, globals.view_proj * vec4<f32>(center, 1.0));
+    let water = globals.terrain_scale.w - globals.terrain_origin.z;
+    if (morph >= 1.0 || center.z < water) {
+        out.clip = vec4<f32>(0.0, 0.0, -1.0, 1.0);
+        out.darkness = 0.0;
+        return out;
+    }
+    let point = (model * vec4<f32>(position, 1.0)).xyz;
+    let ground = ground_at(center.xy);
+    let flat = point.xy - LIGHT.xy / LIGHT.z * max(point.z - ground, 0.0);
+    out.clip = globals.view_proj * vec4<f32>(flat, ground_at(flat) + SHADOW_LIFT, 1.0);
+    let height = clamp((center.z - ground) / HIGH_SHADOW_HEIGHT, 0.0, 1.0);
+    out.darkness = SHADOW_DARKNESS * (1.0 - morph) * mix(1.0, HIGH_SHADOW, height);
+    return out;
+}
+
+@fragment
+fn fs_shadow(input: ShadowOutput) -> @location(0) vec4<f32> {
+    return vec4<f32>(vec3<f32>(1.0 - input.darkness), 1.0);
 }
 
 // ---- Shield domes ----
