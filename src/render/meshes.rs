@@ -452,6 +452,65 @@ impl MeshBuilder {
         self.prism(&fore, [-0.2, -0.16], [1.0, 1.0]);
     }
 
+    /// A rounded body along Y, such as a fuselage or an engine, through cross-sections of
+    /// `sides` sides, each `[y, half width, half height, height of its middle]`, centered on `x`.
+    fn body(&mut self, x: f32, stations: &[[f32; 4]], sides: usize) {
+        let ring = |station: [f32; 4]| {
+            (0..sides)
+                .map(|index| {
+                    let angle = index as f32 / sides as f32 * std::f32::consts::TAU;
+                    Vec3::new(x + angle.cos() * station[1], station[0], station[3] + angle.sin() * station[2])
+                })
+                .collect::<Vec<_>>()
+        };
+        for pair in stations.windows(2) {
+            let (from, to) = (ring(pair[0]), ring(pair[1]));
+            let middle = Vec3::new(x, (pair[0][0] + pair[1][0]) * 0.5, (pair[0][3] + pair[1][3]) * 0.5);
+            // As triangles, since neighbouring cross-sections need not be the same shape.
+            for index in 0..sides {
+                let next = (index + 1) % sides;
+                self.face(&[from[index], from[next], to[next]], middle);
+                self.face(&[from[index], to[next], to[index]], middle);
+            }
+        }
+        for station in [stations[0], stations[stations.len() - 1]] {
+            let middle = Vec3::new(x, (stations[0][0] + stations[stations.len() - 1][0]) * 0.5, station[3]);
+            self.face(&ring(station), middle);
+        }
+    }
+
+    /// A pair of wings, from roots `root_x` either side of the middle out to tips at `tip_x`.
+    /// Each chord is `[trailing edge, leading edge]` along Y, and each wing thins from its root's
+    /// half thickness to its tip's, about the height `z`.
+    fn wings(&mut self, root_x: f32, tip_x: f32, root_chord: [f32; 2], tip_chord: [f32; 2], half_thickness: [f32; 2], z: f32) {
+        for side in [-1.0_f32, 1.0] {
+            let (root, tip) = (root_x * side, tip_x * side);
+            let corners = |up: f32| {
+                [
+                    Vec3::new(root, root_chord[0], z + up * half_thickness[0]),
+                    Vec3::new(tip, tip_chord[0], z + up * half_thickness[1]),
+                    Vec3::new(tip, tip_chord[1], z + up * half_thickness[1]),
+                    Vec3::new(root, root_chord[1], z + up * half_thickness[0]),
+                ]
+            };
+            self.cuboid(corners(-1.0), corners(1.0));
+        }
+    }
+
+    /// An upright fin at `x`, from its root chord at height `root_z` up to its tip chord at
+    /// `tip_z`, each `[trailing edge, leading edge]` along Y.
+    fn fin(&mut self, x: f32, root_chord: [f32; 2], root_z: f32, tip_chord: [f32; 2], tip_z: f32, half_thickness: f32) {
+        let corners = |chord: [f32; 2], z: f32| {
+            [
+                Vec3::new(x - half_thickness, chord[0], z),
+                Vec3::new(x + half_thickness, chord[0], z),
+                Vec3::new(x + half_thickness, chord[1], z),
+                Vec3::new(x - half_thickness, chord[1], z),
+            ]
+        };
+        self.cuboid(corners(root_chord, root_z), corners(tip_chord, tip_z));
+    }
+
     /// A gun turret: a team-colored drum with barrels pointing along +Y, or -Y if `aft`.
     fn turret(&mut self, at: [f32; 2], z: [f32; 2], radius: f32, barrels: usize, length: f32, aft: bool) {
         self.paint(Material::Trim);
@@ -757,17 +816,18 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.frustum([0.0, 0.0], [z, z + 0.08], [0.48, 0.48], 12);
             }
         }
+        // A fighter: a team-colored body tapering to a point, delta wings, and a swept fin.
         Shape::Aircraft => {
-            mesh.prism(&[[-0.1, -0.45], [0.1, -0.45], [0.12, 0.1], [0.02, 0.5], [-0.02, 0.5], [-0.12, 0.1]], [-0.1, 0.1], [0.8, 0.7]);
-            mesh.paint(Material::Hull);
-            mesh.prism(&[[-0.5, -0.4], [0.5, -0.4], [0.08, 0.22], [-0.08, 0.22]], [-0.03, 0.03], [1.0, 1.0]);
-            mesh.paint(Material::Trim);
-            mesh.prism(&[[-0.02, -0.45], [0.02, -0.45], [0.02, -0.25], [-0.02, -0.3]], [0.0, 0.32], [1.0, 1.0]);
-            // A dark canopy, and an engine glowing at the tail.
-            mesh.paint(Material::Metal);
-            mesh.bevel([-0.06, 0.12, 0.08], [0.06, 0.34, 0.15], 0.03);
+            mesh.body(0.0, &[[-0.46, 0.065, 0.05, 0.0], [-0.2, 0.09, 0.075, 0.0], [0.12, 0.085, 0.07, 0.0], [0.34, 0.05, 0.045, -0.005], [0.5, 0.006, 0.006, -0.01]], 6);
             mesh.paint(Material::Glow);
-            mesh.block([-0.07, -0.5, -0.06], [0.07, -0.45, 0.06]);
+            mesh.body(0.0, &[[-0.5, 0.05, 0.04, 0.0], [-0.46, 0.062, 0.048, 0.0]], 6);
+            mesh.paint(Material::Hull);
+            mesh.wings(0.07, 0.5, [-0.42, 0.18], [-0.42, -0.3], [0.025, 0.006], -0.01);
+            mesh.wings(0.05, 0.2, [-0.46, -0.32], [-0.47, -0.42], [0.01, 0.004], 0.0);
+            mesh.paint(Material::Trim);
+            mesh.fin(0.0, [-0.44, -0.22], 0.05, [-0.47, -0.37], 0.28, 0.012);
+            mesh.paint(Material::Metal);
+            mesh.body(0.0, &[[0.08, 0.02, 0.012, 0.065], [0.16, 0.042, 0.03, 0.07], [0.27, 0.03, 0.02, 0.058], [0.32, 0.006, 0.005, 0.05]], 6);
         }
         Shape::Scaffold => {
             mesh.paint(Material::Metal);
@@ -814,99 +874,107 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             }
         }
         Shape::AirSuperiority => {
-            mesh.prism(&[[-0.16, -0.42], [0.16, -0.42], [0.14, 0.15], [0.02, 0.5], [-0.02, 0.5], [-0.14, 0.15]], [-0.1, 0.1], [0.8, 0.7]);
+            mesh.body(0.0, &[[-0.38, 0.05, 0.045, 0.02], [-0.1, 0.075, 0.07, 0.02], [0.2, 0.07, 0.065, 0.0], [0.4, 0.04, 0.04, -0.01], [0.5, 0.006, 0.006, -0.015]], 6);
+            for x in [-0.11_f32, 0.11] {
+                mesh.paint(Material::Hull);
+                mesh.body(x, &[[-0.44, 0.055, 0.045, 0.0], [-0.1, 0.065, 0.055, 0.0], [0.14, 0.04, 0.035, -0.01]], 6);
+                mesh.paint(Material::Glow);
+                mesh.body(x, &[[-0.5, 0.045, 0.036, 0.0], [-0.44, 0.055, 0.045, 0.0]], 6);
+            }
             mesh.paint(Material::Hull);
-            mesh.prism(&[[-0.5, -0.32], [0.5, -0.32], [0.48, -0.18], [0.1, 0.25], [-0.1, 0.25], [-0.48, -0.18]], [-0.03, 0.03], [1.0, 1.0]);
-            mesh.prism(&[[-0.3, -0.48], [0.3, -0.48], [0.12, -0.32], [-0.12, -0.32]], [-0.02, 0.02], [1.0, 1.0]);
+            mesh.wings(0.15, 0.5, [-0.3, 0.12], [-0.3, -0.18], [0.022, 0.006], 0.0);
+            mesh.wings(0.15, 0.33, [-0.48, -0.34], [-0.49, -0.43], [0.012, 0.004], 0.0);
             mesh.paint(Material::Trim);
-            for x in [-0.12_f32, 0.12] {
-                mesh.prism(&[[x - 0.02, -0.45], [x + 0.02, -0.45], [x + 0.02, -0.22], [x - 0.02, -0.28]], [0.05, 0.3], [1.0, 1.0]);
+            for x in [-0.11_f32, 0.11] {
+                mesh.fin(x, [-0.42, -0.24], 0.04, [-0.46, -0.36], 0.26, 0.01);
             }
             mesh.paint(Material::Metal);
-            mesh.bevel([-0.06, 0.15, 0.08], [0.06, 0.38, 0.16], 0.03);
-            mesh.paint(Material::Glow);
-            for x in [-0.08_f32, 0.08] {
-                mesh.block([x - 0.06, -0.5, -0.06], [x + 0.06, -0.42, 0.06]);
-            }
+            mesh.body(0.0, &[[0.14, 0.02, 0.012, 0.065], [0.24, 0.045, 0.03, 0.07], [0.36, 0.03, 0.02, 0.05], [0.41, 0.006, 0.005, 0.04]], 6);
         }
+        // A bomber: a thick team-colored body, straight wings with engines under them, and a glazed nose.
         Shape::Bomber => {
-            mesh.prism(&[[-0.14, -0.5], [0.14, -0.5], [0.2, -0.1], [0.18, 0.38], [0.06, 0.5], [-0.06, 0.5], [-0.18, 0.38], [-0.2, -0.1]], [-0.18, 0.16], [0.8, 0.75]);
+            mesh.body(0.0, &[[-0.5, 0.03, 0.03, 0.04], [-0.3, 0.09, 0.09, 0.01], [0.1, 0.14, 0.13, 0.0], [0.35, 0.11, 0.1, -0.01], [0.48, 0.04, 0.04, -0.02]], 6);
             mesh.paint(Material::Hull);
-            mesh.block([-0.5, -0.05, -0.03], [0.5, 0.18, 0.03]);
-            mesh.block([-0.22, -0.5, -0.02], [0.22, -0.36, 0.02]);
+            mesh.wings(0.12, 0.5, [-0.06, 0.2], [0.0, 0.14], [0.03, 0.008], 0.02);
+            mesh.wings(0.02, 0.24, [-0.5, -0.38], [-0.48, -0.42], [0.012, 0.004], 0.04);
             mesh.paint(Material::Trim);
-            mesh.block([-0.02, -0.5, 0.0], [0.02, -0.36, 0.25]);
-            // Engines under the wings, glowing behind, and a dark canopy at the nose.
+            mesh.fin(0.0, [-0.48, -0.3], 0.07, [-0.5, -0.42], 0.3, 0.014);
+            for x in [-0.3_f32, 0.3] {
+                mesh.paint(Material::Metal);
+                mesh.body(x, &[[-0.12, 0.045, 0.04, -0.03], [0.1, 0.055, 0.05, -0.03], [0.27, 0.035, 0.035, -0.03]], 6);
+                mesh.paint(Material::Glow);
+                mesh.body(x, &[[-0.17, 0.036, 0.03, -0.03], [-0.12, 0.045, 0.04, -0.03]], 6);
+            }
             mesh.paint(Material::Metal);
-            for x in [-0.32_f32, 0.32] {
-                mesh.bevel([x - 0.06, -0.1, -0.12], [x + 0.06, 0.24, -0.03], 0.02);
-            }
-            mesh.bevel([-0.09, 0.28, 0.1], [0.09, 0.44, 0.19], 0.03);
-            mesh.paint(Material::Glow);
-            for x in [-0.32_f32, 0.32] {
-                mesh.block([x - 0.05, -0.14, -0.11], [x + 0.05, -0.1, -0.04]);
-            }
+            mesh.body(0.0, &[[0.28, 0.05, 0.025, 0.09], [0.37, 0.065, 0.04, 0.08], [0.45, 0.03, 0.02, 0.04]], 6);
         }
+        // A gunship: a rounded body tapering into a tail boom, stub wings with rocket pods, a
+        // canopy at the nose, and a rotor of four slim team-colored blades.
         Shape::Gunship => {
             mesh.paint(Material::Hull);
-            mesh.prism(&[[-0.14, -0.12], [0.14, -0.12], [0.2, 0.05], [0.16, 0.4], [0.06, 0.48], [-0.06, 0.48], [-0.16, 0.4], [-0.2, 0.05]], [-0.3, 0.05], [0.75, 0.85]);
-            mesh.beam([0.0, -0.5, -0.08], [0.0, -0.1, -0.08], 0.05, 0.05);
+            mesh.body(0.0, &[[-0.12, 0.11, 0.1, -0.13], [0.05, 0.15, 0.14, -0.12], [0.28, 0.13, 0.12, -0.13], [0.42, 0.08, 0.08, -0.16], [0.49, 0.02, 0.02, -0.18]], 6);
+            mesh.body(0.0, &[[-0.5, 0.025, 0.03, -0.07], [-0.12, 0.06, 0.06, -0.1]], 6);
             mesh.paint(Material::Trim);
-            mesh.block([-0.02, -0.5, -0.06], [0.02, -0.4, 0.1]);
-            mesh.bevel([-0.1, -0.05, 0.05], [0.1, 0.3, 0.1], 0.02);
-            // Stub wings with rocket pods, and a dark canopy at the nose.
+            mesh.fin(0.0, [-0.5, -0.4], -0.06, [-0.5, -0.45], 0.1, 0.01);
+            mesh.wings(0.02, 0.14, [-0.5, -0.43], [-0.49, -0.45], [0.008, 0.004], -0.07);
+            mesh.bevel([-0.06, -0.08, -0.01], [0.06, 0.22, 0.03], 0.015);
             mesh.paint(Material::Hull);
-            mesh.block([-0.34, 0.0, -0.14], [0.34, 0.12, -0.1]);
+            mesh.wings(0.12, 0.33, [-0.02, 0.12], [0.02, 0.1], [0.02, 0.01], -0.15);
             mesh.paint(Material::Metal);
-            for x in [-0.3_f32, 0.3] {
-                mesh.beam([x, -0.04, -0.18], [x, 0.2, -0.18], 0.04, 0.04);
+            for x in [-0.31_f32, 0.31] {
+                mesh.body(x, &[[-0.06, 0.028, 0.028, -0.19], [0.17, 0.034, 0.034, -0.19], [0.22, 0.016, 0.016, -0.19]], 6);
             }
-            mesh.bevel([-0.1, 0.32, -0.12], [0.1, 0.46, 0.0], 0.03);
-            // Four team-colored blades on a hub, so that the team shows from above.
+            mesh.body(0.0, &[[0.26, 0.06, 0.03, -0.03], [0.36, 0.085, 0.05, -0.07], [0.46, 0.035, 0.025, -0.13]], 6);
             mesh.moving(motion::SPIN, [0.0; 3], |mesh| {
                 mesh.paint(Material::Metal);
-                mesh.frustum([0.0, 0.0], [0.05, 0.16], [0.05, 0.04], 6);
+                mesh.frustum([0.0, 0.0], [0.03, 0.17], [0.05, 0.04], 6);
                 mesh.paint(Material::Trim);
-                for (x, y) in [(0.33_f32, 0.33_f32), (-0.33, 0.33)] {
-                    mesh.beam([-x, -y, 0.14], [x, y, 0.14], 0.035, 0.01);
+                for index in 0..4 {
+                    let angle = std::f32::consts::FRAC_PI_4 + index as f32 * std::f32::consts::FRAC_PI_2;
+                    let (x, y) = (angle.cos(), angle.sin());
+                    mesh.beam([x * 0.06, y * 0.06, 0.14], [x * 0.47, y * 0.47, 0.14], 0.022, 0.007);
                 }
             });
         }
         Shape::HeavyGunship => {
             mesh.paint(Material::Hull);
-            mesh.prism(&[[-0.14, -0.4], [0.14, -0.4], [0.18, -0.2], [0.18, 0.36], [0.06, 0.48], [-0.06, 0.48], [-0.18, 0.36], [-0.18, -0.2]], [-0.32, 0.0], [0.75, 0.85]);
+            mesh.body(0.0, &[[-0.48, 0.07, 0.07, -0.14], [-0.3, 0.14, 0.13, -0.14], [0.25, 0.14, 0.13, -0.14], [0.4, 0.09, 0.09, -0.17], [0.49, 0.025, 0.025, -0.2]], 6);
             mesh.paint(Material::Trim);
-            mesh.bevel([-0.1, -0.3, 0.0], [0.1, 0.3, 0.06], 0.02);
+            mesh.bevel([-0.06, -0.34, -0.02], [0.06, 0.32, 0.02], 0.015);
+            mesh.fin(0.0, [-0.5, -0.4], -0.08, [-0.5, -0.45], 0.08, 0.012);
             mesh.paint(Material::Hull);
-            mesh.block([-0.36, -0.06, -0.16], [0.36, 0.08, -0.12]);
+            mesh.wings(0.12, 0.34, [-0.1, 0.06], [-0.07, 0.04], [0.02, 0.01], -0.16);
             mesh.paint(Material::Metal);
             for x in [-0.32_f32, 0.32] {
-                mesh.beam([x, -0.1, -0.2], [x, 0.16, -0.2], 0.045, 0.045);
+                mesh.body(x, &[[-0.14, 0.03, 0.03, -0.2], [0.1, 0.036, 0.036, -0.2], [0.15, 0.018, 0.018, -0.2]], 6);
             }
-            mesh.bevel([-0.1, 0.34, -0.12], [0.1, 0.47, -0.02], 0.03);
+            mesh.body(0.0, &[[0.28, 0.06, 0.03, -0.06], [0.37, 0.08, 0.045, -0.09], [0.46, 0.035, 0.025, -0.15]], 6);
             // A rotor at each end, on a mast.
             for y in [-0.26_f32, 0.24] {
                 mesh.moving(motion::SPIN, [0.0, y, 0.0], |mesh| {
                     mesh.paint(Material::Metal);
-                    mesh.frustum([0.0, y], [0.0, 0.14], [0.05, 0.04], 6);
+                    mesh.frustum([0.0, y], [-0.02, 0.15], [0.045, 0.035], 6);
                     mesh.paint(Material::Trim);
-                    for (dx, dy) in [(0.17_f32, 0.17_f32), (-0.17, 0.17)] {
-                        mesh.beam([-dx, y - dy, 0.12], [dx, y + dy, 0.12], 0.03, 0.01);
+                    for index in 0..4 {
+                        let angle = std::f32::consts::FRAC_PI_4 + index as f32 * std::f32::consts::FRAC_PI_2;
+                        let (x, dy) = (angle.cos(), angle.sin());
+                        mesh.beam([x * 0.045, y + dy * 0.045, 0.13], [x * 0.24, y + dy * 0.24, 0.13], 0.018, 0.006);
                     }
                 });
             }
         }
         Shape::StrategicBomber => {
-            mesh.prism(&[[-0.5, -0.3], [-0.25, -0.38], [0.25, -0.38], [0.5, -0.3], [0.08, 0.5], [-0.08, 0.5]], [-0.05, 0.05], [1.0, 1.0]);
+            mesh.wings(0.12, 0.5, [-0.36, 0.3], [-0.42, -0.26], [0.05, 0.012], 0.0);
             mesh.paint(Material::Hull);
-            mesh.prism(&[[-0.12, -0.4], [0.12, -0.4], [0.14, 0.2], [0.04, 0.48], [-0.04, 0.48], [-0.14, 0.2]], [-0.1, 0.14], [0.8, 0.7]);
-            mesh.paint(Material::Metal);
-            mesh.bevel([-0.07, 0.24, 0.1], [0.07, 0.4, 0.17], 0.03);
-            // A row of engines glowing along the trailing edge.
-            mesh.paint(Material::Glow);
-            for x in [-0.3_f32, -0.18, 0.18, 0.3] {
-                mesh.block([x - 0.04, -0.37, -0.03], [x + 0.04, -0.33, 0.04]);
+            mesh.body(0.0, &[[-0.4, 0.1, 0.04, 0.0], [-0.1, 0.15, 0.08, 0.01], [0.2, 0.13, 0.075, 0.0], [0.4, 0.07, 0.05, -0.005], [0.5, 0.008, 0.008, -0.01]], 6);
+            for x in [-0.2_f32, 0.2] {
+                mesh.paint(Material::Metal);
+                mesh.body(x, &[[-0.3, 0.05, 0.032, 0.035], [-0.05, 0.055, 0.04, 0.045], [0.12, 0.03, 0.02, 0.03]], 6);
+                mesh.paint(Material::Glow);
+                mesh.body(x, &[[-0.35, 0.04, 0.026, 0.035], [-0.3, 0.05, 0.032, 0.035]], 6);
             }
+            mesh.paint(Material::Metal);
+            mesh.body(0.0, &[[0.18, 0.03, 0.015, 0.07], [0.26, 0.05, 0.03, 0.07], [0.36, 0.02, 0.012, 0.055]], 6);
         }
         Shape::FlakGun => {
             mesh.block([-0.28, -0.28, -0.1], [0.28, 0.2, 0.2]);
