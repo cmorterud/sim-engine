@@ -511,7 +511,8 @@ impl Renderer {
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 targets: &blended,
             }),
-            primitive: wgpu::PrimitiveState::default(),
+            // Only the near side, so that the far side does not haze over what is inside.
+            primitive: wgpu::PrimitiveState { cull_mode: Some(wgpu::Face::Back), ..Default::default() },
             depth_stencil: depth(false, wgpu::CompareFunction::Greater),
             multisample,
             multiview: None,

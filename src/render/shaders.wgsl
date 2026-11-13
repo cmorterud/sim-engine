@@ -215,11 +215,25 @@ fn fs_shadow(input: ShadowOutput) -> @location(0) vec4<f32> {
 
 // ---- Shield domes ----
 
+// How many hexagons fit across a dome, and the share of its strength each part shows: almost
+// clear where it is seen face on, faint hexagon lines, and a thin bright rim.
+const HEX_ACROSS: f32 = 16.0;
+const DOME_FACE: f32 = 0.04;
+const DOME_HEX: f32 = 0.3;
+const DOME_RIM: f32 = 1.5;
+const DOME_RIM_SHARPNESS: f32 = 6.0;
+// A dome fades out as the camera comes close, from this many radii from its center to this many.
+const DOME_FADE_FAR: f32 = 1.5;
+const DOME_FADE_NEAR: f32 = 1.05;
+
 struct DomeOutput {
     @builtin(position) clip: vec4<f32>,
     @location(0) color: vec4<f32>,
-    @location(1) normal: vec3<f32>,
+    @location(1) @interpolate(flat) sphere_center: vec3<f32>,
     @location(2) relative: vec3<f32>,
+    // Across the dome from above, from -0.5 to 0.5.
+    @location(3) across: vec2<f32>,
+    @location(4) @interpolate(flat) fade: f32,
 };
 
 // Domes never shrink to dots, and their color's last component is how opaque they are.
@@ -231,21 +245,46 @@ fn vs_dome(
 ) -> DomeOutput {
     let model = mat4x4<f32>(instance.m0, instance.m1, instance.m2, instance.m3);
     let relative = (model * vec4<f32>(position, 1.0)).xyz;
+    // The sphere's center is on the ground, at the bottom of the shape's box.
+    let radius = length(instance.m0.xyz) * 0.5;
+    let sphere_center = instance.m3.xyz - instance.m2.xyz * 0.5;
     var out: DomeOutput;
     out.clip = globals.view_proj * vec4<f32>(relative, 1.0);
     out.color = instance.color;
-    out.normal = normalize((model * vec4<f32>(normal, 0.0)).xyz);
+    out.sphere_center = sphere_center;
     out.relative = relative;
+    out.across = position.xy;
+    out.fade = smoothstep(DOME_FADE_NEAR, DOME_FADE_FAR, length(sphere_center) / max(radius, 0.001));
     return out;
+}
+
+// How far a point is from the nearest edge of a grid of hexagons one unit across: 0 on an
+// edge, up to 0.5 in the middle.
+fn hex_edge_distance(point: vec2<f32>) -> f32 {
+    let repeat = vec2<f32>(1.0, 1.7320508);
+    let half_repeat = repeat * 0.5;
+    let first = point - repeat * floor(point / repeat) - half_repeat;
+    let shifted = point - half_repeat;
+    let second = shifted - repeat * floor(shifted / repeat) - half_repeat;
+    let nearest = select(second, first, dot(first, first) < dot(second, second));
+    let folded = abs(nearest);
+    return 0.5 - max(dot(folded, vec2<f32>(0.5, 0.8660254)), folded.x);
 }
 
 @fragment
 fn fs_dome(input: DomeOutput) -> @location(0) vec4<f32> {
-    // Faint where it is seen face on, and bright at the rim, as a bubble looks.
-    let facing = abs(dot(normalize(input.normal), normalize(-input.relative)));
-    let rim = 1.0 - facing;
-    let alpha = input.color.a * (0.2 + 1.6 * rim * rim);
-    return vec4<f32>(input.color.rgb, clamp(alpha, 0.0, 0.85));
+    // Clear where it is seen face on, and bright at the rim, as a bubble looks. The normal is
+    // the true sphere's, so that the rim is smooth across the mesh's flat faces.
+    let normal = normalize(input.relative - input.sphere_center);
+    let facing = abs(dot(normal, normalize(-input.relative)));
+    let rim = pow(1.0 - facing, DOME_RIM_SHARPNESS);
+    let point = input.across * HEX_ACROSS;
+    let blur = length(fwidth(point));
+    var hex = 1.0 - smoothstep(0.0, max(blur * 1.2, 0.02), hex_edge_distance(point));
+    // Lines closer together than a few pixels would shimmer, so they fade out first.
+    hex = hex * (1.0 - smoothstep(0.15, 0.35, blur));
+    let alpha = input.color.a * (DOME_FACE + DOME_HEX * hex + DOME_RIM * rim) * input.fade;
+    return vec4<f32>(input.color.rgb, clamp(alpha, 0.0, 0.8));
 }
 
 // ---- Terrain ----
