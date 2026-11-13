@@ -51,8 +51,8 @@ fn main() {
         MoveClass::Naval | MoveClass::Submarine => 2,
         _ => 0,
     };
-    // Where each row's middle is, for the camera.
-    let mut rows: Vec<(String, [f64; 2], f64)> = Vec::new();
+    // Where each row's middle is, for the camera, and how high above the ground what it shows flies.
+    let mut rows: Vec<(String, [f64; 2], f64, f64)> = Vec::new();
     for (row, name) in ["land", "air", "navy"].into_iter().enumerate() {
         let units: Vec<_> = drawn.iter().filter(|unit| !unit.is_structure() && row_of(unit) == row).collect();
         let y = [1_000, 1_400, 1_820][row];
@@ -64,7 +64,7 @@ fn main() {
         let width = units.len() as i32 * MOBILE_SPACING;
         // Aircraft fly a few hundred units up, so the camera stands well above them.
         let altitude = if row == 1 { f64::from(width) * 0.55 + 600.0 } else { f64::from(width) * 0.55 };
-        rows.push((name.to_string(), [f64::from(600 + width / 2), f64::from(y + RED_BEHIND / 2)], altitude));
+        rows.push((name.to_string(), [f64::from(600 + width / 2), f64::from(y + RED_BEHIND / 2)], altitude, 0.0));
     }
     // Structures, in rows of a set width, Blue's only: they are painted the same way as units.
     let structures: Vec<_> = drawn.iter().filter(|unit| unit.is_structure()).collect();
@@ -89,10 +89,10 @@ fn main() {
     }
     let cell = TERRAIN_CELL_UNITS;
     let middle_y = (row_start + cell_y + tallest) as i32 / 2 * cell;
-    rows.push(("structures".to_string(), [f64::from(80 * cell), f64::from(middle_y)], f64::from(55 * cell)));
-    rows.push(("structures_close".to_string(), [f64::from(55 * cell), f64::from(row_start as i32 * cell + 120)], f64::from(20 * cell)));
-    rows.push(("land_close".to_string(), [800.0, 1_035.0], 260.0));
-    rows.push(("navy_wide".to_string(), [1_500.0, 1_860.0], 700.0));
+    rows.push(("structures".to_string(), [f64::from(80 * cell), f64::from(middle_y)], f64::from(55 * cell), 0.0));
+    rows.push(("structures_close".to_string(), [f64::from(55 * cell), f64::from(row_start as i32 * cell + 120)], f64::from(20 * cell), 0.0));
+    rows.push(("land_close".to_string(), [800.0, 1_035.0], 260.0, 0.0));
+    rows.push(("navy_wide".to_string(), [1_500.0, 1_860.0], 700.0, 0.0));
 
     let snapshot = world.snapshot();
     // `GALLERY_FOCUS=<blueprint key>` adds close-ups of Blue's copy of that unit, near and nearer.
@@ -100,8 +100,10 @@ fn main() {
         let id = blueprints.id(&key).0;
         let unit = snapshot.units.iter().find(|unit| unit.blueprint == id && unit.team == Team::Blue).expect("GALLERY_FOCUS names a unit in the gallery");
         let (x, y, radius) = (f64::from(unit.x) / 4096.0, f64::from(unit.y) / 4096.0, f64::from(unit.radius) / 4096.0);
-        rows.push((format!("{key}_close"), [x, y], radius * 9.0));
-        rows.push((format!("{key}_closer"), [x, y], radius * 4.5));
+        // Aircraft fly well above the ground, so the camera stands above them and aims through them.
+        let above = (f64::from(unit.z) / 4096.0 - 20.0).max(0.0);
+        rows.push((format!("{key}_close"), [x, y], above + radius * 9.0, above));
+        rows.push((format!("{key}_closer"), [x, y], above + radius * 4.5, above));
     }
     if std::env::var_os("GALLERY_DEBUG").is_some() {
         for unit in &snapshot.units {
@@ -121,10 +123,17 @@ fn main() {
     let size = window.inner_size();
     let mut renderer = Renderer::new(Arc::clone(&window), &heights, None);
     renderer.set_water_level(0.0);
-    for (name, focus, altitude) in rows {
+    for (name, focus, altitude, above) in rows {
         let mut camera = Camera::new(f64::from(MAP), [f64::from(size.width), f64::from(size.height)]);
         camera.look_at(focus[0], focus[1], altitude);
         camera.update(0.0, &heights);
+        // The camera looks along +Y and down, so to see something `above` the ground at the
+        // middle of the view, it aims at the ground that far beyond it along the line of sight.
+        if above > 0.0 {
+            let beyond = above / camera.pitch_degrees().to_radians().tan();
+            camera.look_at(focus[0], focus[1] + beyond, altitude);
+            camera.update(0.0, &heights);
+        }
         let mut instances = InstanceBatches::default();
         build_unit_instances(&snapshot.units, &snapshot.units, 1.0, camera.eye(), &[], &looks, &[], &mut Motion::new(), &mut instances);
         let scene = FrameScene { camera: &camera, instances: &instances, selection_box: None };
