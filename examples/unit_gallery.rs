@@ -27,13 +27,48 @@ const RED_BEHIND: i32 = 70;
 /// Ships and naval structures need water: a strip across the map, between these heights.
 const WATER: std::ops::RangeInclusive<i32> = 1_600..=2_100;
 
-/// Flat land 20 above the water, with the strip of water 40 below it.
+/// How high the ground is at a point: flat land 20 above the water, a strip of water 40 below it,
+/// and beyond the structures, a hilly stretch for looking at the ground itself.
+fn ground_height(x: f64, y: f64) -> f64 {
+    if WATER.contains(&(y as i32)) {
+        return -40.0;
+    }
+    let smooth = |from: f64, to: f64, value: f64| {
+        let t = ((value - from) / (to - from)).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    };
+    let hills = smooth(HILLS_START, HILLS_START + 300.0, y);
+    if hills == 0.0 {
+        return 20.0;
+    }
+    // Rolling hills.
+    let rolling = 14.0 * (x / 170.0).sin() * (y / 210.0).cos() + 6.0 * (x / 90.0 + y / 130.0).sin();
+    // A plateau with cliffs all round.
+    let plateau = 55.0 * smooth(2_700.0, 2_730.0, x) * (1.0 - smooth(3_670.0, 3_700.0, x)) * smooth(3_700.0, 3_730.0, y) * (1.0 - smooth(4_370.0, 4_400.0, y));
+    // A gully running north to south.
+    let gully = -18.0 * (-((x - 2_000.0) / 50.0).powi(2)).exp();
+    // A lake with a gentle shore.
+    let from_lake = (x - 1_300.0).hypot(y - 4_000.0);
+    let lake = -45.0 * (1.0 - smooth(330.0, 510.0, from_lake));
+    20.0 + hills * (rolling + plateau + gully + lake)
+}
+
+/// Where the hilly stretch begins, north of the structures.
+const HILLS_START: f64 = 3_300.0;
+
 fn world() -> SimWorld {
     let cells = (MAP / TERRAIN_CELL_UNITS) as usize;
     let samples = cells + 1;
-    let height = |y: usize| if WATER.contains(&(y as i32 * TERRAIN_CELL_UNITS)) { -40 } else { 20 };
-    let heights: Vec<i16> = (0..samples * samples).map(|index| (height(index / samples) << HEIGHT_FRAC_BITS) as i16).collect();
-    let blocked: Vec<bool> = (0..cells * cells).map(|cell| height(cell / cells) < 0 || height(cell / cells + 1) < 0).collect();
+    let cell = f64::from(TERRAIN_CELL_UNITS);
+    let sample_height = |index: usize| ground_height((index % samples) as f64 * cell, (index / samples) as f64 * cell);
+    let heights: Vec<i16> = (0..samples * samples).map(|index| (sample_height(index) * f64::from(1 << HEIGHT_FRAC_BITS)).round() as i16).collect();
+    // Cells with any corner under water are water.
+    let blocked: Vec<bool> = (0..cells * cells)
+        .map(|index| {
+            let (x, y) = (index % cells, index / cells);
+            [(x, y), (x + 1, y), (x, y + 1), (x + 1, y + 1)].iter().any(|&(x, y)| sample_height(y * samples + x) < 0.0)
+        })
+        .collect();
     let terrain = Terrain::from_heights(MAP, heights, &blocked, Fp::ZERO);
     let mut world = SimWorld::with_terrain(SimConfig { map_units: MAP, terrain: TerrainStyle::Flat, ..SimConfig::default() }, 1, terrain);
     world.prepare_map();
@@ -93,6 +128,11 @@ fn main() {
     rows.push(("structures_close".to_string(), [f64::from(55 * cell), f64::from(row_start as i32 * cell + 120)], f64::from(20 * cell), 0.0));
     rows.push(("land_close".to_string(), [800.0, 1_035.0], 260.0, 0.0));
     rows.push(("navy_wide".to_string(), [1_500.0, 1_860.0], 700.0, 0.0));
+    // The ground itself: hills, a plateau with cliffs, a gully, and a lake.
+    rows.push(("terrain".to_string(), [2_400.0, 3_900.0], 1_300.0, 0.0));
+    rows.push(("terrain_cliff".to_string(), [2_950.0, 3_620.0], 320.0, 0.0));
+    rows.push(("terrain_shore".to_string(), [1_700.0, 3_850.0], 300.0, 0.0));
+    rows.push(("terrain_ground".to_string(), [2_300.0, 3_500.0], 90.0, 0.0));
 
     let snapshot = world.snapshot();
     // `GALLERY_FOCUS=<blueprint key>` adds close-ups of Blue's copy of that unit, near and nearer.

@@ -369,6 +369,11 @@ struct TerrainOutput {
     @location(2) fog_coordinates: vec2<f32>,
     // Where it is on the map, for patterns that stay put as the camera moves.
     @location(3) world: vec2<f32>,
+    // The ground's smooth normal, from the height map around the vertex.
+    @location(4) normal: vec3<f32>,
+    // How far the ground around rises above it, per unit of distance: above 0 in hollows and
+    // creases, below 0 on ridges and crests.
+    @location(5) cavity: f32,
 };
 
 // A grid vertex of the terrain, for a grid index: which height sample it stands on, and where.
@@ -386,11 +391,23 @@ fn grid_point(index: u32) -> GridPoint {
     return GridPoint(sample, vec2<f32>(sample - first) * globals.terrain_origin.w);
 }
 
+// How far the ground `reach` samples around rises above `height`, on average, per unit of distance.
+fn rise_around(sample: vec2<i32>, reach: i32, height: f32) -> f32 {
+    let around = terrain_sample(sample + vec2<i32>(reach, 0)) + terrain_sample(sample - vec2<i32>(reach, 0))
+        + terrain_sample(sample + vec2<i32>(0, reach)) + terrain_sample(sample - vec2<i32>(0, reach));
+    return (around * 0.25 - height) / (f32(reach) * globals.terrain_origin.w);
+}
+
 @vertex
 fn vs_terrain(@builtin(vertex_index) index: u32) -> TerrainOutput {
     let point = grid_point(index);
-    let height = f32(textureLoad(heights, point.sample, 0).r) * globals.terrain_scale.x;
+    let height = terrain_sample(point.sample);
     let relative = vec3<f32>(globals.terrain_origin.xy + point.offset, height - globals.terrain_origin.z);
+    // The slope across the neighbouring samples, at the grid's own spacing.
+    let step = globals.terrain_grid.z;
+    let spacing = f32(step) * globals.terrain_origin.w;
+    let across = terrain_sample(point.sample + vec2<i32>(step, 0)) - terrain_sample(point.sample - vec2<i32>(step, 0));
+    let along = terrain_sample(point.sample + vec2<i32>(0, step)) - terrain_sample(point.sample - vec2<i32>(0, step));
 
     var out: TerrainOutput;
     out.clip = globals.view_proj * vec4<f32>(relative, 1.0);
@@ -398,6 +415,9 @@ fn vs_terrain(@builtin(vertex_index) index: u32) -> TerrainOutput {
     out.height = height;
     out.fog_coordinates = vec2<f32>(point.sample) * globals.terrain_scale.z;
     out.world = vec2<f32>(point.sample) * globals.terrain_origin.w;
+    out.normal = normalize(vec3<f32>(-across / (2.0 * spacing), -along / (2.0 * spacing), 1.0));
+    // Fine creases and broad valleys both.
+    out.cavity = rise_around(point.sample, step, height) * 0.4 + rise_around(point.sample, step * 3, height) * 0.6;
     return out;
 }
 
@@ -405,16 +425,25 @@ fn hash2(point: vec2<f32>) -> f32 {
     return fract(sin(dot(point, vec2<f32>(127.1, 311.7))) * 43758.5453);
 }
 
-// Smooth noise from 0 to 1, changing over about one unit of `point`.
-fn value_noise(point: vec2<f32>) -> f32 {
+// Smooth noise from 0 to 1, changing over about one unit of `point`, then how fast it changes
+// along x and along y.
+fn value_noise_slope(point: vec2<f32>) -> vec3<f32> {
     let cell = floor(point);
     let along = fract(point);
     let smooth_along = along * along * (3.0 - 2.0 * along);
+    let slope_along = 6.0 * along * (1.0 - along);
     let a = hash2(cell);
     let b = hash2(cell + vec2<f32>(1.0, 0.0));
     let c = hash2(cell + vec2<f32>(0.0, 1.0));
     let d = hash2(cell + vec2<f32>(1.0, 1.0));
-    return mix(mix(a, b, smooth_along.x), mix(c, d, smooth_along.x), smooth_along.y);
+    let twist = a - b - c + d;
+    let value = a + (b - a) * smooth_along.x + (c - a) * smooth_along.y + twist * smooth_along.x * smooth_along.y;
+    let slope = vec2<f32>(slope_along.x * ((b - a) + twist * smooth_along.y), slope_along.y * ((c - a) + twist * smooth_along.x));
+    return vec3<f32>(value, slope);
+}
+
+fn value_noise(point: vec2<f32>) -> f32 {
+    return value_noise_slope(point).x;
 }
 
 // Ground colors, in linear light.
@@ -423,34 +452,56 @@ const GRASS_HIGH: vec3<f32> = vec3<f32>(0.24, 0.27, 0.14);
 const DIRT: vec3<f32> = vec3<f32>(0.25, 0.21, 0.14);
 const ROCK: vec3<f32> = vec3<f32>(0.30, 0.28, 0.26);
 const SAND: vec3<f32> = vec3<f32>(0.44, 0.40, 0.29);
+const PEBBLE: vec3<f32> = vec3<f32>(0.29, 0.27, 0.24);
 
 @fragment
 fn fs_terrain(input: TerrainOutput) -> @location(0) vec4<f32> {
-    // Flat shading from screen-space derivatives.
-    var normal = normalize(cross(dpdx(input.relative), dpdy(input.relative)));
-    if (normal.z < 0.0) {
-        normal = -normal;
-    }
-    let light = 0.5 + 0.55 * max(dot(normal, LIGHT), 0.0);
-    // Grass, darker in the lows and drier on the heights, in soft patches large and small,
-    // with bare dirt here and there.
+    // Everything here that needs screen-space derivatives or the fog texture comes first,
+    // before any of it depends on the ground.
+    let sight = 0.18 + 0.82 * textureSample(fog_texture, fog_sampler, input.fog_coordinates).r;
+    let footprint = length(fwidth(input.world));
+    let contour = abs(fract(input.height / 8.0) - 0.5);
+    let contour_width = max(fwidth(input.height / 8.0), 0.0001);
+    let strata_coord = input.height / 9.0 + value_noise(input.world / 45.0) * 1.8;
+    let strata_width = fwidth(strata_coord);
+
+    let smooth_normal = normalize(input.normal);
+    // How much close-up detail shows: all of it when a pixel covers well under a unit of
+    // ground, none by the time it covers a unit and a half.
+    let near = 1.0 - smoothstep(0.25, 1.5, footprint);
+    // Small bumps break up the light up close.
+    let bumps = value_noise_slope(input.world / 4.0).yz / 4.0 * 1.4 + value_noise_slope(input.world / 1.3).yz / 1.3 * 0.2;
+    let normal = normalize(smooth_normal + vec3<f32>(-bumps * near, 0.0));
+    let light = 0.42 + 0.66 * max(dot(normal, LIGHT), 0.0);
+
+    // Grass, darker in the lows and drier on the heights, in soft patches with bare dirt here
+    // and there, speckled with lighter and darker grass and small stones up close.
     let t = clamp((input.height + 36.0) / 72.0, 0.0, 1.0);
     let patches = value_noise(input.world / 220.0) * 0.5 + value_noise(input.world / 61.0) * 0.3 + value_noise(input.world / 17.0) * 0.2;
     var base = mix(GRASS_LOW, GRASS_HIGH, t) * (0.91 + 0.18 * patches);
     base = mix(base, DIRT, smoothstep(0.66, 0.82, patches) * 0.3);
-    // Rock where it is steep.
-    let steep = smoothstep(0.18, 0.42, 1.0 - normal.z);
-    base = mix(base, ROCK * (0.9 + 0.2 * patches), steep);
+    let speckle = value_noise(input.world / 1.7);
+    base = base * (1.0 + (speckle - 0.5) * 0.24 * near);
+    let stones = smoothstep(0.88, 0.95, value_noise(input.world / 1.5 + vec2<f32>(17.3, 5.1)));
+    base = mix(base, PEBBLE, stones * near * 0.55);
+    // Rock where it is steep, in layers of lighter and darker stone with dark cracks between.
+    let steep = smoothstep(0.18, 0.42, 1.0 - smooth_normal.z);
+    let band = fract(strata_coord);
+    let layers = mix(0.86, 1.1, smoothstep(0.2, 0.6, band));
+    let crack = 1.0 - smoothstep(0.0, max(0.04, strata_width * 1.5), abs(band - 0.9));
+    base = mix(base, ROCK * layers * (1.0 - 0.22 * crack) * (0.9 + 0.2 * patches), steep);
     // Sand along the shore, a little above the water.
     let above_water = input.height - globals.terrain_scale.w;
     base = mix(base, SAND, (1.0 - smoothstep(1.0, 5.0, above_water)) * (1.0 - steep));
-    // Faint height contours give a sense of shape and scale.
-    let contour = abs(fract(input.height / 8.0) - 0.5);
-    let width = max(fwidth(input.height / 8.0), 0.0001);
-    let line = 1.0 - clamp(contour / width, 0.0, 1.0);
-    // Ground that has never been seen is dark, and ground seen before is dim.
-    let sight = 0.18 + 0.82 * textureSample(fog_texture, fog_sampler, input.fog_coordinates).r;
-    var color = base * light * (1.0 - 0.1 * line);
+
+    // Hollows and the feet of slopes are darker, crests a little lighter, so that the shape of
+    // the land reads from far away.
+    let crease = clamp(input.cavity * 2.5, -0.25, 0.45);
+    let hollows = 1.0 - max(crease, 0.0) * 0.55 + max(-crease, 0.0) * 0.35;
+    // Faint height contours give a sense of scale, on gentle ground only: on a cliff they crowd
+    // together into stripes.
+    let line = (1.0 - clamp(contour / contour_width, 0.0, 1.0)) * (1.0 - steep);
+    var color = base * light * hollows * (1.0 - 0.07 * line);
     // Under water the ground darkens with depth. The water's surface is drawn over it.
     let depth = -above_water;
     if (depth > 0.0) {
