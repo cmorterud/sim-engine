@@ -78,8 +78,46 @@ pub enum Shape {
     ArtilleryGun,
     /// Two long piers with a gantry across them, for building ships between.
     NavalFactory,
-    /// A hull with a pointed bow along +Y, a bridge, and a mast.
-    Ship,
+    /// A slim hull with one gun forward and a short mast, pointing along +Y.
+    Frigate,
+    /// A longer hull with a gun fore and aft, a bridge, and a mast.
+    Destroyer,
+    /// A hull with missile cells fore and aft and a tall radar mast.
+    Cruiser,
+    /// A broad hull with three twin-gun turrets around a stepped tower.
+    Battleship,
+    /// A long, fast hull with two turrets forward and a raked tower.
+    Battlecruiser,
+    /// A low, rounded hull with a tower amidships.
+    Submarine,
+    /// A longer submarine with a row of glowing missile hatches.
+    MissileSubmarine,
+    /// A hull with a tall emitter mast.
+    ShieldBoat,
+    /// The land factory at tier 2: a side hall with two stacks.
+    FactoryT2,
+    /// The land factory at tier 3: a stepped roof under a gantry, with three stacks.
+    FactoryT3,
+    /// An arched hangar with a runway and a control tower.
+    AirFactory,
+    AirFactoryT2,
+    AirFactoryT3,
+    /// The tier 2 power generator: two cooling towers around a glowing core.
+    GeneratorT2,
+    /// The tier 3 power generator: a domed reactor ringed with vents.
+    GeneratorT3,
+    /// The tier 2 extractor: a collar with three pistons.
+    ExtractorT2,
+    /// The tier 3 extractor: a tall collar with a glowing ring and four pistons.
+    ExtractorT3,
+    /// The tier 2 naval factory: a second gantry and a crane.
+    NavalFactoryT2,
+    /// The tier 3 naval factory: tall piers lit along their length, two gantries, and a tower.
+    NavalFactoryT3,
+    /// A heavy fighter with two engines and two tail fins, pointing along +Y.
+    AirSuperiority,
+    /// A long gunship with two rotors, pointing along +Y.
+    HeavyGunship,
     /// A shield's dome: an open half-sphere, drawn see-through.
     Dome,
     /// Flat, around the feet of a selected mobile unit.
@@ -89,7 +127,7 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub const ALL: [Self; 46] = [
+    pub const ALL: [Self; 66] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -132,7 +170,27 @@ impl Shape {
         Self::SamLauncher,
         Self::ArtilleryGun,
         Self::NavalFactory,
-        Self::Ship,
+        Self::Frigate,
+        Self::Destroyer,
+        Self::Cruiser,
+        Self::Battleship,
+        Self::Battlecruiser,
+        Self::Submarine,
+        Self::MissileSubmarine,
+        Self::ShieldBoat,
+        Self::FactoryT2,
+        Self::FactoryT3,
+        Self::AirFactory,
+        Self::AirFactoryT2,
+        Self::AirFactoryT3,
+        Self::GeneratorT2,
+        Self::GeneratorT3,
+        Self::ExtractorT2,
+        Self::ExtractorT3,
+        Self::NavalFactoryT2,
+        Self::NavalFactoryT3,
+        Self::AirSuperiority,
+        Self::HeavyGunship,
         Self::Dome,
         Self::SelectionRing,
         Self::SelectionBox,
@@ -238,6 +296,63 @@ impl MeshBuilder {
         self.cuboid(ring(from), ring(to));
     }
 
+    /// A solid from a flat, convex outline, from one height to another. Each end is the outline
+    /// scaled about its middle, so that a hull can be narrower at the keel than at the deck.
+    fn prism(&mut self, outline: &[[f32; 2]], z: [f32; 2], scale: [f32; 2]) {
+        let middle = outline.iter().fold([0.0, 0.0], |sum, point| [sum[0] + point[0], sum[1] + point[1]]).map(|sum| sum / outline.len() as f32);
+        let ring = |z: f32, scale: f32| outline.iter().map(|point| Vec3::new(middle[0] + (point[0] - middle[0]) * scale, middle[1] + (point[1] - middle[1]) * scale, z)).collect::<Vec<_>>();
+        let (bottom, top) = (ring(z[0], scale[0]), ring(z[1], scale[1]));
+        let part_center = Vec3::new(middle[0], middle[1], (z[0] + z[1]) * 0.5);
+        self.face(&bottom, part_center);
+        self.face(&top, part_center);
+        for index in 0..outline.len() {
+            let next = (index + 1) % outline.len();
+            self.face(&[bottom[index], bottom[next], top[next], top[index]], part_center);
+        }
+    }
+
+    /// A box whose top edges are cut back by `cut`, so that it catches the light along them.
+    fn bevel(&mut self, min: [f32; 3], max: [f32; 3], cut: f32) {
+        self.block(min, [max[0], max[1], max[2] - cut]);
+        let corners = |inset: f32, z: f32| {
+            [
+                Vec3::new(min[0] + inset, min[1] + inset, z),
+                Vec3::new(max[0] - inset, min[1] + inset, z),
+                Vec3::new(max[0] - inset, max[1] - inset, z),
+                Vec3::new(min[0] + inset, max[1] - inset, z),
+            ]
+        };
+        self.cuboid(corners(0.0, max[2] - cut), corners(cut, max[2]));
+    }
+
+    /// A half-round roof along Y, from the side walls at `half_width` up to `rise` above `z`.
+    fn arch(&mut self, half_width: f32, y: [f32; 2], z: f32, rise: f32, segments: usize) {
+        let at = |index: usize, y: f32| {
+            let angle = index as f32 / segments as f32 * std::f32::consts::PI;
+            Vec3::new(angle.cos() * half_width, y, z + angle.sin() * rise)
+        };
+        let part_center = Vec3::new(0.0, (y[0] + y[1]) * 0.5, z);
+        for index in 0..segments {
+            self.face(&[at(index, y[0]), at(index + 1, y[0]), at(index + 1, y[1]), at(index, y[1])], part_center);
+        }
+        for end in y {
+            self.face(&(0..=segments).map(|index| at(index, end)).collect::<Vec<_>>(), part_center);
+        }
+    }
+
+    /// A gun turret: a team-colored drum with barrels pointing along +Y, or -Y if `aft`.
+    fn turret(&mut self, at: [f32; 2], z: [f32; 2], radius: f32, barrels: usize, length: f32, aft: bool) {
+        self.paint(Material::Trim);
+        self.frustum(at, z, [radius, radius * 0.8], 8);
+        self.paint(Material::Metal);
+        let direction = if aft { -1.0 } else { 1.0 };
+        let height = (z[0] + z[1]) * 0.5;
+        for index in 0..barrels {
+            let x = at[0] + (index as f32 - (barrels as f32 - 1.0) * 0.5) * radius * 0.6;
+            self.beam([x, at[1], height], [x, at[1] + direction * (radius + length), height], radius * 0.14, radius * 0.14);
+        }
+    }
+
     /// A round-ish solid from one radius to another. A top radius of zero makes a cone.
     fn frustum(&mut self, center: [f32; 2], z: [f32; 2], radius: [f32; 2], sides: usize) {
         // The small offset keeps vertices off the axes, which dots rely on when zoomed out.
@@ -305,13 +420,20 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Glow);
             mesh.frustum([0.0, 0.4], [0.3, 0.5], [0.04, 0.09], 6);
         }
-        // A narrow two-legged walker.
+        // A narrow two-legged walker, with a gun in its right arm and its left arm raised.
         Shape::Bot => {
-            mesh.block([-0.34, -0.22, -0.02], [0.34, 0.22, 0.42]);
-            mesh.paint(Material::Metal);
-            mesh.beam([0.0, 0.1, 0.2], [0.0, 0.5, 0.2], 0.08, 0.07);
+            mesh.bevel([-0.22, -0.18, -0.02], [0.22, 0.18, 0.36], 0.05);
             mesh.paint(Material::Hull);
-            mesh.block([-0.12, -0.1, 0.42], [0.12, 0.1, 0.5]);
+            mesh.bevel([-0.36, -0.14, 0.18], [-0.22, 0.12, 0.4], 0.04);
+            mesh.bevel([0.22, -0.14, 0.18], [0.36, 0.12, 0.4], 0.04);
+            mesh.beam([-0.3, 0.0, 0.2], [-0.3, 0.28, 0.12], 0.05, 0.05);
+            mesh.beam([0.3, -0.02, 0.2], [0.3, 0.2, 0.18], 0.06, 0.06);
+            mesh.paint(Material::Metal);
+            mesh.beam([0.3, 0.18, 0.18], [0.3, 0.5, 0.18], 0.045, 0.045);
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.1, -0.08, 0.36], [0.1, 0.1, 0.5], 0.03);
+            mesh.paint(Material::Glow);
+            mesh.block([-0.07, 0.1, 0.41], [0.07, 0.12, 0.45]);
         }
         Shape::BotLegs => {
             mesh.paint(Material::Metal);
@@ -326,7 +448,10 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.block([-0.48, -0.5, -0.5], [-0.2, 0.42, -0.18]);
             mesh.block([0.2, -0.5, -0.5], [0.48, 0.42, -0.18]);
             mesh.paint(Material::Hull);
-            mesh.block([-0.3, -0.42, -0.42], [0.3, 0.34, -0.1]);
+            mesh.cuboid(
+                [Vec3::new(-0.3, -0.42, -0.42), Vec3::new(0.3, -0.42, -0.42), Vec3::new(0.3, 0.42, -0.42), Vec3::new(-0.3, 0.42, -0.42)],
+                [Vec3::new(-0.3, -0.42, -0.1), Vec3::new(0.3, -0.42, -0.1), Vec3::new(0.3, 0.22, -0.1), Vec3::new(-0.3, 0.22, -0.1)],
+            );
         }
         // A turret and one long gun.
         Shape::Tank => {
@@ -501,41 +626,107 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             }
         }
         Shape::Aircraft => {
-            mesh.beam([0.0, -0.5, 0.0], [0.0, 0.5, 0.0], 0.14, 0.12);
+            mesh.prism(&[[-0.1, -0.45], [0.1, -0.45], [0.12, 0.1], [0.02, 0.5], [-0.02, 0.5], [-0.12, 0.1]], [-0.1, 0.1], [0.8, 0.7]);
             mesh.paint(Material::Hull);
-            mesh.cuboid(
-                [Vec3::new(-0.5, -0.4, -0.03), Vec3::new(0.5, -0.4, -0.03), Vec3::new(0.06, 0.2, -0.03), Vec3::new(-0.06, 0.2, -0.03)],
-                [Vec3::new(-0.5, -0.4, 0.03), Vec3::new(0.5, -0.4, 0.03), Vec3::new(0.06, 0.2, 0.03), Vec3::new(-0.06, 0.2, 0.03)],
-            );
+            mesh.prism(&[[-0.5, -0.4], [0.5, -0.4], [0.08, 0.22], [-0.08, 0.22]], [-0.03, 0.03], [1.0, 1.0]);
             mesh.paint(Material::Trim);
-            mesh.block([-0.02, -0.5, 0.0], [0.02, -0.3, 0.3]);
+            mesh.prism(&[[-0.02, -0.45], [0.02, -0.45], [0.02, -0.25], [-0.02, -0.3]], [0.0, 0.32], [1.0, 1.0]);
+            // A dark canopy, and an engine glowing at the tail.
+            mesh.paint(Material::Metal);
+            mesh.bevel([-0.06, 0.12, 0.08], [0.06, 0.34, 0.15], 0.03);
+            mesh.paint(Material::Glow);
+            mesh.block([-0.07, -0.5, -0.06], [0.07, -0.45, 0.06]);
+        }
+        Shape::AirSuperiority => {
+            mesh.prism(&[[-0.16, -0.42], [0.16, -0.42], [0.14, 0.15], [0.02, 0.5], [-0.02, 0.5], [-0.14, 0.15]], [-0.1, 0.1], [0.8, 0.7]);
+            mesh.paint(Material::Hull);
+            mesh.prism(&[[-0.5, -0.32], [0.5, -0.32], [0.48, -0.18], [0.1, 0.25], [-0.1, 0.25], [-0.48, -0.18]], [-0.03, 0.03], [1.0, 1.0]);
+            mesh.prism(&[[-0.3, -0.48], [0.3, -0.48], [0.12, -0.32], [-0.12, -0.32]], [-0.02, 0.02], [1.0, 1.0]);
+            mesh.paint(Material::Trim);
+            for x in [-0.12_f32, 0.12] {
+                mesh.prism(&[[x - 0.02, -0.45], [x + 0.02, -0.45], [x + 0.02, -0.22], [x - 0.02, -0.28]], [0.05, 0.3], [1.0, 1.0]);
+            }
+            mesh.paint(Material::Metal);
+            mesh.bevel([-0.06, 0.15, 0.08], [0.06, 0.38, 0.16], 0.03);
+            mesh.paint(Material::Glow);
+            for x in [-0.08_f32, 0.08] {
+                mesh.block([x - 0.06, -0.5, -0.06], [x + 0.06, -0.42, 0.06]);
+            }
         }
         Shape::Bomber => {
-            mesh.beam([0.0, -0.5, 0.0], [0.0, 0.45, 0.0], 0.2, 0.18);
+            mesh.prism(&[[-0.14, -0.5], [0.14, -0.5], [0.2, -0.1], [0.18, 0.38], [0.06, 0.5], [-0.06, 0.5], [-0.18, 0.38], [-0.2, -0.1]], [-0.18, 0.16], [0.8, 0.75]);
             mesh.paint(Material::Hull);
             mesh.block([-0.5, -0.05, -0.03], [0.5, 0.18, 0.03]);
             mesh.block([-0.22, -0.5, -0.02], [0.22, -0.36, 0.02]);
             mesh.paint(Material::Trim);
             mesh.block([-0.02, -0.5, 0.0], [0.02, -0.36, 0.25]);
+            // Engines under the wings, glowing behind, and a dark canopy at the nose.
+            mesh.paint(Material::Metal);
+            for x in [-0.32_f32, 0.32] {
+                mesh.bevel([x - 0.06, -0.1, -0.12], [x + 0.06, 0.24, -0.03], 0.02);
+            }
+            mesh.bevel([-0.09, 0.28, 0.1], [0.09, 0.44, 0.19], 0.03);
+            mesh.paint(Material::Glow);
+            for x in [-0.32_f32, 0.32] {
+                mesh.block([x - 0.05, -0.14, -0.11], [x + 0.05, -0.1, -0.04]);
+            }
         }
         Shape::Gunship => {
             mesh.paint(Material::Hull);
-            mesh.beam([0.0, -0.1, -0.1], [0.0, 0.45, -0.1], 0.2, 0.18);
-            mesh.paint(Material::Hull);
-            mesh.beam([0.0, -0.5, -0.05], [0.0, -0.1, -0.05], 0.05, 0.05);
-            // Team colored, because from above the rotor hides the rest.
+            mesh.prism(&[[-0.14, -0.12], [0.14, -0.12], [0.2, 0.05], [0.16, 0.4], [0.06, 0.48], [-0.06, 0.48], [-0.16, 0.4], [-0.2, 0.05]], [-0.3, 0.05], [0.75, 0.85]);
+            mesh.beam([0.0, -0.5, -0.08], [0.0, -0.1, -0.08], 0.05, 0.05);
             mesh.paint(Material::Trim);
-            mesh.frustum([0.0, 0.0], [0.12, 0.16], [0.44, 0.44], 16);
+            mesh.block([-0.02, -0.5, -0.06], [0.02, -0.4, 0.1]);
+            mesh.bevel([-0.1, -0.05, 0.05], [0.1, 0.3, 0.1], 0.02);
+            // Stub wings with rocket pods, and a dark canopy at the nose.
             mesh.paint(Material::Hull);
-            mesh.frustum([0.0, 0.0], [0.05, 0.12], [0.04, 0.04], 6);
+            mesh.block([-0.34, 0.0, -0.14], [0.34, 0.12, -0.1]);
+            mesh.paint(Material::Metal);
+            for x in [-0.3_f32, 0.3] {
+                mesh.beam([x, -0.04, -0.18], [x, 0.2, -0.18], 0.04, 0.04);
+            }
+            mesh.bevel([-0.1, 0.32, -0.12], [0.1, 0.46, 0.0], 0.03);
+            // Four team-colored blades on a hub, so that the team shows from above.
+            mesh.paint(Material::Metal);
+            mesh.frustum([0.0, 0.0], [0.05, 0.16], [0.05, 0.04], 6);
+            mesh.paint(Material::Trim);
+            for (x, y) in [(0.33_f32, 0.33_f32), (-0.33, 0.33)] {
+                mesh.beam([-x, -y, 0.14], [x, y, 0.14], 0.035, 0.01);
+            }
+        }
+        Shape::HeavyGunship => {
+            mesh.paint(Material::Hull);
+            mesh.prism(&[[-0.14, -0.4], [0.14, -0.4], [0.18, -0.2], [0.18, 0.36], [0.06, 0.48], [-0.06, 0.48], [-0.18, 0.36], [-0.18, -0.2]], [-0.32, 0.0], [0.75, 0.85]);
+            mesh.paint(Material::Trim);
+            mesh.bevel([-0.1, -0.3, 0.0], [0.1, 0.3, 0.06], 0.02);
+            mesh.paint(Material::Hull);
+            mesh.block([-0.36, -0.06, -0.16], [0.36, 0.08, -0.12]);
+            mesh.paint(Material::Metal);
+            for x in [-0.32_f32, 0.32] {
+                mesh.beam([x, -0.1, -0.2], [x, 0.16, -0.2], 0.045, 0.045);
+            }
+            mesh.bevel([-0.1, 0.34, -0.12], [0.1, 0.47, -0.02], 0.03);
+            // A rotor at each end, on a mast.
+            for y in [-0.26_f32, 0.24] {
+                mesh.paint(Material::Metal);
+                mesh.frustum([0.0, y], [0.0, 0.14], [0.05, 0.04], 6);
+                mesh.paint(Material::Trim);
+                for (dx, dy) in [(0.17_f32, 0.17_f32), (-0.17, 0.17)] {
+                    mesh.beam([-dx, y - dy, 0.12], [dx, y + dy, 0.12], 0.03, 0.01);
+                }
+            }
         }
         Shape::StrategicBomber => {
-            mesh.cuboid(
-                [Vec3::new(-0.5, -0.3, -0.05), Vec3::new(0.5, -0.3, -0.05), Vec3::new(0.08, 0.5, -0.05), Vec3::new(-0.08, 0.5, -0.05)],
-                [Vec3::new(-0.5, -0.3, 0.05), Vec3::new(0.5, -0.3, 0.05), Vec3::new(0.08, 0.5, 0.05), Vec3::new(-0.08, 0.5, 0.05)],
-            );
+            mesh.prism(&[[-0.5, -0.3], [-0.25, -0.38], [0.25, -0.38], [0.5, -0.3], [0.08, 0.5], [-0.08, 0.5]], [-0.05, 0.05], [1.0, 1.0]);
             mesh.paint(Material::Hull);
-            mesh.beam([0.0, -0.4, 0.0], [0.0, 0.45, 0.0], 0.14, 0.12);
+            mesh.prism(&[[-0.12, -0.4], [0.12, -0.4], [0.14, 0.2], [0.04, 0.48], [-0.04, 0.48], [-0.14, 0.2]], [-0.1, 0.14], [0.8, 0.7]);
+            mesh.paint(Material::Metal);
+            mesh.bevel([-0.07, 0.24, 0.1], [0.07, 0.4, 0.17], 0.03);
+            // A row of engines glowing along the trailing edge.
+            mesh.paint(Material::Glow);
+            for x in [-0.3_f32, -0.18, 0.18, 0.3] {
+                mesh.block([x - 0.04, -0.37, -0.03], [x + 0.04, -0.33, 0.04]);
+            }
         }
         Shape::FlakGun => {
             mesh.block([-0.28, -0.28, -0.1], [0.28, 0.2, 0.2]);
@@ -567,18 +758,314 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.block([-0.48, -0.08, -0.15], [-0.36, 0.08, 0.25]);
             mesh.block([0.36, -0.08, -0.15], [0.48, 0.08, 0.25]);
         }
-        Shape::Ship => {
+        Shape::Frigate => {
             mesh.paint(Material::Hull);
-            mesh.block([-0.25, -0.5, -0.5], [0.25, 0.25, -0.2]);
-            mesh.cuboid(
-                [Vec3::new(-0.25, 0.25, -0.5), Vec3::new(0.25, 0.25, -0.5), Vec3::new(0.02, 0.5, -0.5), Vec3::new(-0.02, 0.5, -0.5)],
-                [Vec3::new(-0.25, 0.25, -0.2), Vec3::new(0.25, 0.25, -0.2), Vec3::new(0.02, 0.5, -0.2), Vec3::new(-0.02, 0.5, -0.2)],
-            );
+            mesh.prism(&[[-0.13, -0.5], [0.13, -0.5], [0.17, -0.38], [0.17, 0.18], [0.02, 0.5], [-0.02, 0.5], [-0.17, 0.18], [-0.17, -0.38]], [-0.5, -0.2], [0.65, 1.0]);
             mesh.paint(Material::Trim);
-            mesh.block([-0.14, -0.3, -0.2], [0.14, 0.05, 0.12]);
+            mesh.block([-0.1, -0.46, -0.2], [0.1, -0.3, -0.17]);
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.1, -0.24, -0.2], [0.1, 0.02, 0.04], 0.04);
             mesh.paint(Material::Metal);
-            mesh.frustum([0.0, -0.12], [0.12, 0.5], [0.03, 0.02], 6);
-            mesh.beam([0.0, 0.08, -0.12], [0.0, 0.32, -0.08], 0.04, 0.04);
+            mesh.frustum([0.0, -0.12], [0.04, 0.4], [0.025, 0.015], 6);
+            mesh.turret([0.0, 0.16], [-0.2, -0.1], 0.08, 1, 0.16, false);
+        }
+        Shape::Destroyer => {
+            mesh.paint(Material::Hull);
+            mesh.prism(&[[-0.15, -0.5], [0.15, -0.5], [0.2, -0.36], [0.2, 0.22], [0.02, 0.5], [-0.02, 0.5], [-0.2, 0.22], [-0.2, -0.36]], [-0.5, -0.2], [0.65, 1.0]);
+            mesh.bevel([-0.13, -0.18, -0.2], [0.13, 0.12, 0.02], 0.04);
+            mesh.paint(Material::Trim);
+            mesh.bevel([-0.09, 0.02, 0.02], [0.09, 0.12, 0.12], 0.03);
+            mesh.paint(Material::Metal);
+            mesh.frustum([0.0, -0.1], [0.02, 0.18], [0.06, 0.05], 8);
+            mesh.frustum([0.0, -0.02], [0.12, 0.46], [0.022, 0.014], 6);
+            mesh.block([-0.1, -0.03, 0.34], [0.1, -0.01, 0.36]);
+            mesh.turret([0.0, 0.26], [-0.2, -0.1], 0.09, 1, 0.14, false);
+            mesh.turret([0.0, -0.32], [-0.2, -0.1], 0.09, 1, 0.06, true);
+        }
+        Shape::Cruiser => {
+            mesh.paint(Material::Hull);
+            mesh.prism(&[[-0.16, -0.5], [0.16, -0.5], [0.22, -0.34], [0.22, 0.2], [0.02, 0.5], [-0.02, 0.5], [-0.22, 0.2], [-0.22, -0.34]], [-0.5, -0.2], [0.65, 1.0]);
+            mesh.bevel([-0.15, -0.2, -0.2], [0.15, 0.1, 0.06], 0.05);
+            // Missile cells: team-colored decks with dark hatches.
+            for (y0, y1) in [(0.12_f32, 0.3_f32), (-0.44, -0.24)] {
+                mesh.paint(Material::Trim);
+                mesh.block([-0.13, y0, -0.2], [0.13, y1, -0.15]);
+                mesh.paint(Material::Metal);
+                for x in [-0.07_f32, 0.0, 0.07] {
+                    mesh.block([x - 0.025, y0 + 0.03, -0.15], [x + 0.025, y1 - 0.03, -0.14]);
+                }
+            }
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.08, -0.1, 0.06], [0.08, 0.06, 0.2], 0.03);
+            mesh.paint(Material::Metal);
+            mesh.frustum([0.0, -0.04], [0.2, 0.42], [0.025, 0.018], 6);
+            mesh.paint(Material::Trim);
+            mesh.cuboid(
+                [Vec3::new(-0.12, -0.06, 0.36), Vec3::new(0.12, -0.06, 0.36), Vec3::new(0.12, -0.02, 0.36), Vec3::new(-0.12, -0.02, 0.36)],
+                [Vec3::new(-0.12, -0.02, 0.5), Vec3::new(0.12, -0.02, 0.5), Vec3::new(0.12, 0.02, 0.5), Vec3::new(-0.12, 0.02, 0.5)],
+            );
+            mesh.turret([0.0, 0.34], [-0.2, -0.12], 0.07, 1, 0.07, false);
+        }
+        Shape::Battleship => {
+            mesh.paint(Material::Hull);
+            mesh.prism(&[[-0.2, -0.5], [0.2, -0.5], [0.27, -0.38], [0.28, 0.18], [0.04, 0.5], [-0.04, 0.5], [-0.28, 0.18], [-0.27, -0.38]], [-0.5, -0.22], [0.7, 1.0]);
+            mesh.bevel([-0.18, -0.2, -0.22], [0.18, 0.06, 0.0], 0.04);
+            mesh.bevel([-0.12, -0.14, 0.0], [0.12, 0.04, 0.14], 0.03);
+            mesh.paint(Material::Trim);
+            mesh.bevel([-0.07, -0.08, 0.14], [0.07, 0.03, 0.28], 0.025);
+            mesh.paint(Material::Metal);
+            mesh.frustum([0.0, -0.16], [0.0, 0.2], [0.07, 0.06], 8);
+            mesh.frustum([0.0, -0.03], [0.28, 0.5], [0.02, 0.012], 6);
+            mesh.turret([0.0, 0.28], [-0.22, -0.1], 0.11, 2, 0.1, false);
+            mesh.turret([0.0, 0.13], [-0.1, 0.02], 0.11, 2, 0.12, false);
+            mesh.turret([0.0, -0.3], [-0.22, -0.1], 0.11, 2, 0.07, true);
+        }
+        Shape::Battlecruiser => {
+            mesh.paint(Material::Hull);
+            mesh.prism(&[[-0.15, -0.5], [0.15, -0.5], [0.22, -0.36], [0.22, 0.12], [0.02, 0.5], [-0.02, 0.5], [-0.22, 0.12], [-0.22, -0.36]], [-0.5, -0.22], [0.65, 1.0]);
+            // A tower raked back, lower at the stern than at the bow.
+            mesh.cuboid(
+                [Vec3::new(-0.14, -0.3, -0.22), Vec3::new(0.14, -0.3, -0.22), Vec3::new(0.14, 0.02, -0.22), Vec3::new(-0.14, 0.02, -0.22)],
+                [Vec3::new(-0.1, -0.24, 0.0), Vec3::new(0.1, -0.24, 0.0), Vec3::new(0.1, -0.02, 0.12), Vec3::new(-0.1, -0.02, 0.12)],
+            );
+            mesh.paint(Material::Metal);
+            mesh.frustum([0.0, -0.1], [0.0, 0.38], [0.022, 0.014], 6);
+            mesh.paint(Material::Trim);
+            mesh.block([-0.12, -0.46, -0.22], [0.12, -0.34, -0.16]);
+            mesh.turret([0.0, 0.28], [-0.22, -0.1], 0.1, 2, 0.1, false);
+            mesh.turret([0.0, 0.12], [-0.12, 0.0], 0.1, 2, 0.12, false);
+        }
+        Shape::Submarine => {
+            let outline = [[-0.04, -0.5], [0.04, -0.5], [0.12, -0.36], [0.13, 0.24], [0.06, 0.44], [-0.06, 0.44], [-0.13, 0.24], [-0.12, -0.36]];
+            mesh.paint(Material::Hull);
+            mesh.prism(&outline, [-0.5, -0.3], [0.55, 1.0]);
+            mesh.prism(&outline, [-0.3, -0.22], [1.0, 0.7]);
+            mesh.paint(Material::Trim);
+            mesh.bevel([-0.05, 0.0, -0.24], [0.05, 0.2, -0.02], 0.025);
+            mesh.paint(Material::Hull);
+            mesh.block([-0.13, 0.08, -0.08], [0.13, 0.13, -0.06]);
+            mesh.block([-0.12, -0.46, -0.37], [0.12, -0.4, -0.35]);
+            mesh.block([-0.01, -0.46, -0.3], [0.01, -0.38, -0.18]);
+        }
+        Shape::MissileSubmarine => {
+            let outline = [[-0.05, -0.5], [0.05, -0.5], [0.14, -0.36], [0.15, 0.28], [0.07, 0.46], [-0.07, 0.46], [-0.15, 0.28], [-0.14, -0.36]];
+            mesh.paint(Material::Hull);
+            mesh.prism(&outline, [-0.5, -0.28], [0.55, 1.0]);
+            mesh.prism(&outline, [-0.28, -0.2], [1.0, 0.75]);
+            mesh.paint(Material::Trim);
+            mesh.bevel([-0.06, 0.12, -0.22], [0.06, 0.34, 0.02], 0.025);
+            mesh.paint(Material::Hull);
+            mesh.block([-0.15, 0.2, -0.06], [0.15, 0.25, -0.04]);
+            mesh.block([-0.01, -0.47, -0.28], [0.01, -0.38, -0.14]);
+            // Two rows of missile hatches behind the tower.
+            mesh.paint(Material::Glow);
+            for y in [-0.24_f32, -0.12, 0.0] {
+                for x in [-0.05_f32, 0.05] {
+                    mesh.block([x - 0.03, y - 0.035, -0.2], [x + 0.03, y + 0.035, -0.19]);
+                }
+            }
+        }
+        Shape::ShieldBoat => {
+            mesh.paint(Material::Hull);
+            mesh.prism(&[[-0.15, -0.5], [0.15, -0.5], [0.2, -0.36], [0.2, 0.2], [0.03, 0.5], [-0.03, 0.5], [-0.2, 0.2], [-0.2, -0.36]], [-0.5, -0.2], [0.65, 1.0]);
+            mesh.paint(Material::Trim);
+            mesh.block([-0.14, -0.44, -0.2], [0.14, 0.3, -0.17]);
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.12, -0.18, -0.17], [0.12, 0.14, 0.02], 0.04);
+            mesh.paint(Material::Metal);
+            mesh.frustum([0.0, -0.02], [0.02, 0.32], [0.06, 0.04], 8);
+            mesh.paint(Material::Glow);
+            mesh.frustum([0.0, -0.02], [0.3, 0.42], [0.14, 0.14], 10);
+            mesh.frustum([0.0, -0.02], [0.42, 0.5], [0.1, 0.04], 10);
+        }
+        Shape::FactoryT2 => {
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.5, -0.48, -0.5], [0.2, 0.5, 0.05], 0.04);
+            mesh.bevel([0.2, -0.3, -0.5], [0.5, 0.5, -0.1], 0.04);
+            mesh.paint(Material::Trim);
+            for start in [-0.5_f32, -0.15] {
+                let end = start + 0.35;
+                let bottom = [Vec3::new(start, -0.5, 0.05), Vec3::new(end, -0.5, 0.05), Vec3::new(end, 0.3, 0.05), Vec3::new(start, 0.3, 0.05)];
+                let top = [Vec3::new(start, -0.5, 0.05), Vec3::new(end, -0.5, 0.42), Vec3::new(end, 0.3, 0.42), Vec3::new(start, 0.3, 0.05)];
+                mesh.cuboid(bottom, top);
+            }
+            mesh.paint(Material::Glow);
+            mesh.block([-0.4, -0.5, -0.3], [0.1, -0.48, -0.24]);
+            mesh.paint(Material::Metal);
+            for y in [0.05_f32, 0.32] {
+                mesh.frustum([0.36, y], [-0.1, 0.48], [0.07, 0.05], 6);
+            }
+        }
+        Shape::FactoryT3 => {
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.5, -0.5, -0.5], [0.5, 0.5, -0.05], 0.05);
+            mesh.paint(Material::Trim);
+            mesh.bevel([-0.44, -0.44, -0.05], [0.44, 0.2, 0.12], 0.04);
+            mesh.bevel([-0.3, -0.3, 0.12], [0.3, 0.1, 0.26], 0.04);
+            mesh.paint(Material::Glow);
+            mesh.block([-0.44, -0.45, 0.0], [0.44, -0.44, 0.05]);
+            mesh.block([-0.3, -0.31, 0.16], [0.3, -0.3, 0.2]);
+            // A gantry across the roof.
+            mesh.paint(Material::Metal);
+            for x in [-0.46_f32, 0.46] {
+                mesh.block([x - 0.03, -0.1, -0.05], [x + 0.03, -0.04, 0.36]);
+            }
+            mesh.block([-0.49, -0.1, 0.32], [0.49, -0.04, 0.38]);
+            for x in [-0.3_f32, 0.0, 0.3] {
+                mesh.frustum([x, 0.36], [-0.05, 0.5], [0.07, 0.05], 6);
+            }
+        }
+        Shape::AirFactory => {
+            mesh.paint(Material::Hull);
+            mesh.block([-0.5, -0.5, -0.5], [0.5, 0.5, -0.38]);
+            mesh.paint(Material::Trim);
+            mesh.arch(0.32, [-0.44, 0.18], -0.38, 0.6, 8);
+            mesh.paint(Material::Metal);
+            mesh.block([-0.14, 0.18, -0.38], [0.14, 0.5, -0.36]);
+            mesh.paint(Material::Glow);
+            for y in [0.24_f32, 0.34, 0.44] {
+                mesh.block([-0.13, y - 0.015, -0.36], [-0.1, y + 0.015, -0.35]);
+                mesh.block([0.1, y - 0.015, -0.36], [0.13, y + 0.015, -0.35]);
+            }
+            mesh.paint(Material::Hull);
+            mesh.frustum([0.42, 0.36], [-0.38, 0.3], [0.06, 0.05], 6);
+            mesh.paint(Material::Glow);
+            mesh.frustum([0.42, 0.36], [0.3, 0.42], [0.08, 0.06], 6);
+        }
+        Shape::AirFactoryT2 => {
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.5, -0.5, -0.5], [0.5, 0.5, -0.36], 0.03);
+            mesh.paint(Material::Trim);
+            mesh.arch(0.3, [-0.46, 0.2], -0.36, 0.66, 8);
+            mesh.paint(Material::Hull);
+            mesh.bevel([0.32, -0.46, -0.36], [0.48, 0.0, -0.1], 0.03);
+            mesh.bevel([-0.48, -0.46, -0.36], [-0.32, 0.0, -0.1], 0.03);
+            mesh.paint(Material::Metal);
+            mesh.block([-0.14, 0.2, -0.36], [0.14, 0.5, -0.34]);
+            mesh.paint(Material::Glow);
+            for y in [0.26_f32, 0.38] {
+                mesh.block([-0.13, y - 0.015, -0.34], [-0.1, y + 0.015, -0.33]);
+                mesh.block([0.1, y - 0.015, -0.34], [0.13, y + 0.015, -0.33]);
+            }
+            mesh.paint(Material::Hull);
+            mesh.frustum([0.42, 0.36], [-0.36, 0.38], [0.06, 0.05], 6);
+            mesh.paint(Material::Glow);
+            mesh.frustum([0.42, 0.36], [0.38, 0.5], [0.08, 0.06], 6);
+        }
+        Shape::AirFactoryT3 => {
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.5, -0.5, -0.5], [0.5, 0.5, -0.32], 0.04);
+            mesh.paint(Material::Trim);
+            mesh.arch(0.34, [-0.46, 0.22], -0.32, 0.7, 10);
+            mesh.paint(Material::Glow);
+            mesh.block([-0.3, -0.47, -0.3], [0.3, -0.46, -0.24]);
+            mesh.paint(Material::Metal);
+            mesh.block([-0.16, 0.22, -0.32], [0.16, 0.5, -0.3]);
+            mesh.paint(Material::Glow);
+            for y in [0.28_f32, 0.36, 0.44] {
+                mesh.block([-0.15, y - 0.015, -0.3], [-0.12, y + 0.015, -0.29]);
+                mesh.block([0.12, y - 0.015, -0.3], [0.15, y + 0.015, -0.29]);
+            }
+            // A tall tower with a radar dish.
+            mesh.paint(Material::Hull);
+            mesh.frustum([0.42, 0.36], [-0.32, 0.3], [0.07, 0.05], 6);
+            mesh.paint(Material::Trim);
+            mesh.frustum([0.42, 0.36], [0.3, 0.4], [0.08, 0.07], 6);
+            mesh.paint(Material::Metal);
+            mesh.frustum([-0.42, 0.38], [-0.32, 0.36], [0.03, 0.02], 6);
+            mesh.cuboid(
+                [Vec3::new(-0.49, 0.3, 0.32), Vec3::new(-0.35, 0.3, 0.32), Vec3::new(-0.35, 0.34, 0.32), Vec3::new(-0.49, 0.34, 0.32)],
+                [Vec3::new(-0.49, 0.36, 0.48), Vec3::new(-0.35, 0.36, 0.48), Vec3::new(-0.35, 0.4, 0.48), Vec3::new(-0.49, 0.4, 0.48)],
+            );
+        }
+        Shape::GeneratorT2 => {
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.5, -0.36, -0.5], [0.5, 0.36, -0.3], 0.04);
+            for x in [-0.25_f32, 0.25] {
+                mesh.paint(Material::Hull);
+                mesh.frustum([x, 0.0], [-0.3, 0.2], [0.24, 0.13], 10);
+                mesh.paint(Material::Trim);
+                mesh.frustum([x, 0.0], [0.2, 0.5], [0.13, 0.18], 10);
+            }
+            mesh.paint(Material::Glow);
+            mesh.frustum([0.0, 0.0], [-0.3, -0.05], [0.1, 0.07], 8);
+        }
+        Shape::GeneratorT3 => {
+            mesh.paint(Material::Hull);
+            mesh.frustum([0.0, 0.0], [-0.5, -0.2], [0.5, 0.46], 14);
+            mesh.paint(Material::Glow);
+            mesh.frustum([0.0, 0.0], [-0.2, -0.1], [0.4, 0.4], 14);
+            // A dome in three steps.
+            mesh.paint(Material::Trim);
+            mesh.frustum([0.0, 0.0], [-0.1, 0.15], [0.38, 0.32], 14);
+            mesh.frustum([0.0, 0.0], [0.15, 0.35], [0.32, 0.2], 14);
+            mesh.frustum([0.0, 0.0], [0.35, 0.5], [0.2, 0.0], 14);
+            mesh.paint(Material::Metal);
+            for (x, y) in [(0.36_f32, 0.36_f32), (-0.36, 0.36), (-0.36, -0.36), (0.36, -0.36)] {
+                mesh.frustum([x, y], [-0.5, -0.05], [0.07, 0.06], 6);
+            }
+        }
+        Shape::ExtractorT2 => {
+            mesh.frustum([0.0, 0.0], [-0.5, -0.1], [0.5, 0.36], 6);
+            mesh.paint(Material::Metal);
+            for index in 0..3 {
+                let angle = 0.5 + index as f32 / 3.0 * std::f32::consts::TAU;
+                mesh.frustum([angle.cos() * 0.3, angle.sin() * 0.3], [-0.1, 0.3], [0.07, 0.05], 6);
+            }
+            mesh.paint(Material::Glow);
+            mesh.frustum([0.0, 0.0], [-0.1, 0.5], [0.16, 0.0], 6);
+        }
+        Shape::ExtractorT3 => {
+            mesh.frustum([0.0, 0.0], [-0.5, -0.05], [0.5, 0.4], 8);
+            mesh.paint(Material::Glow);
+            mesh.frustum([0.0, 0.0], [-0.05, 0.03], [0.42, 0.42], 12);
+            mesh.paint(Material::Metal);
+            for (x, y) in [(0.27_f32, 0.27_f32), (-0.27, 0.27), (-0.27, -0.27), (0.27, -0.27)] {
+                mesh.frustum([x, y], [0.03, 0.35], [0.06, 0.05], 6);
+            }
+            mesh.paint(Material::Hull);
+            mesh.frustum([0.0, 0.0], [0.03, 0.3], [0.22, 0.16], 8);
+            mesh.paint(Material::Glow);
+            mesh.frustum([0.0, 0.0], [0.3, 0.5], [0.12, 0.0], 8);
+        }
+        Shape::NavalFactoryT2 => {
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.5, -0.5, -0.5], [-0.3, 0.5, -0.12], 0.03);
+            mesh.bevel([0.3, -0.5, -0.5], [0.5, 0.5, -0.12], 0.03);
+            mesh.paint(Material::Trim);
+            mesh.block([-0.3, -0.5, -0.5], [0.3, -0.35, 0.05]);
+            for y in [-0.15_f32, 0.25] {
+                mesh.block([-0.5, y - 0.08, 0.25], [0.5, y + 0.08, 0.38]);
+                mesh.paint(Material::Metal);
+                mesh.block([-0.48, y - 0.06, -0.12], [-0.38, y + 0.06, 0.25]);
+                mesh.block([0.38, y - 0.06, -0.12], [0.48, y + 0.06, 0.25]);
+                mesh.paint(Material::Trim);
+            }
+            mesh.paint(Material::Metal);
+            mesh.frustum([0.4, 0.42], [-0.12, 0.45], [0.05, 0.04], 6);
+            mesh.beam([0.4, 0.42, 0.42], [0.1, 0.42, 0.42], 0.025, 0.025);
+        }
+        Shape::NavalFactoryT3 => {
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.5, -0.5, -0.5], [-0.28, 0.5, -0.05], 0.04);
+            mesh.bevel([0.28, -0.5, -0.5], [0.5, 0.5, -0.05], 0.04);
+            mesh.paint(Material::Glow);
+            for x in [-0.39_f32, 0.39] {
+                mesh.block([x - 0.02, -0.46, -0.05], [x + 0.02, 0.46, -0.04]);
+            }
+            mesh.paint(Material::Trim);
+            mesh.bevel([-0.28, -0.5, -0.5], [0.28, -0.32, 0.1], 0.03);
+            for y in [-0.12_f32, 0.24] {
+                mesh.block([-0.5, y - 0.08, 0.28], [0.5, y + 0.08, 0.4]);
+                mesh.paint(Material::Metal);
+                mesh.block([-0.5, y - 0.06, -0.05], [-0.42, y + 0.06, 0.28]);
+                mesh.block([0.42, y - 0.06, -0.05], [0.5, y + 0.06, 0.28]);
+                mesh.paint(Material::Trim);
+            }
+            mesh.paint(Material::Hull);
+            mesh.frustum([-0.39, 0.42], [-0.05, 0.38], [0.06, 0.05], 6);
+            mesh.paint(Material::Glow);
+            mesh.frustum([-0.39, 0.42], [0.38, 0.5], [0.07, 0.05], 6);
         }
         Shape::AirStaging => {
             mesh.paint(Material::Hull);
@@ -727,6 +1214,14 @@ pub(super) mod tests {
         }
     }
 
+    /// Instances are batched by `shape as usize`, in the order of `Shape::ALL`.
+    #[test]
+    fn all_shapes_are_listed_in_order() {
+        for (index, shape) in Shape::ALL.iter().enumerate() {
+            assert_eq!(*shape as usize, index, "{shape:?} is out of place in Shape::ALL");
+        }
+    }
+
     /// Which materials a shape uses, for tests elsewhere.
     pub fn materials(set: &MeshSet, shape: Shape) -> Vec<Material> {
         let mut found = Vec::new();
@@ -747,7 +1242,7 @@ pub(super) mod tests {
 
     #[test]
     fn units_cast_shadows_but_markers_and_domes_do_not() {
-        for shape in [Shape::Commander, Shape::Tank, Shape::Factory, Shape::Ship, Shape::Gunship, Shape::Tree, Shape::Cube] {
+        for shape in [Shape::Commander, Shape::Tank, Shape::Factory, Shape::Battleship, Shape::Gunship, Shape::Tree, Shape::Cube] {
             assert!(shape.casts_shadow(), "{shape:?} should cast a shadow");
         }
         for shape in [Shape::Dome, Shape::SelectionRing, Shape::SelectionBox, Shape::Shell] {
