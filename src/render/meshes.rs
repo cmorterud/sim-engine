@@ -559,47 +559,80 @@ impl MeshBuilder {
 fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
     match shape {
         Shape::Cube => mesh.block([-0.5; 3], [0.5; 3]),
-        // A broad walking figure with a gun arm: the one unit that must never be missed.
+        // A broad walking figure, the one unit that must never be missed: a team-colored chest
+        // with a glowing core, a backpack, shoulder pads, an arm either side with a gun in the
+        // right, and a helmet with a glowing visor.
         Shape::Commander => {
-            mesh.block([-0.3, -0.2, -0.1], [0.3, 0.2, 0.28]);
-            mesh.paint(Material::Hull);
-            mesh.block([-0.5, -0.12, -0.05], [-0.3, 0.12, 0.26]);
-            mesh.block([0.3, -0.12, -0.05], [0.5, 0.12, 0.26]);
-            mesh.paint(Material::Metal);
-            mesh.moving(motion::RECOIL, [0.4, 0.1, 0.1], |mesh| mesh.beam([0.4, 0.1, 0.1], [0.4, 0.5, 0.1], 0.07, 0.07));
-            mesh.flash([0.4, 0.46, 0.1], 0.06);
-            mesh.paint(Material::Hull);
-            mesh.block([-0.13, -0.1, 0.28], [0.13, 0.13, 0.5]);
-            // A visor across the front of the head, and a core in the chest.
+            mesh.prism(&[[-0.26, -0.15], [0.26, -0.15], [0.3, 0.04], [0.2, 0.2], [-0.2, 0.2], [-0.3, 0.04]], [-0.08, 0.3], [0.75, 1.0]);
             mesh.paint(Material::Glow);
-            mesh.block([-0.1, 0.13, 0.38], [0.1, 0.16, 0.45]);
-            mesh.block([-0.08, 0.2, 0.05], [0.08, 0.23, 0.18]);
+            mesh.block([-0.07, 0.17, 0.08], [0.07, 0.215, 0.2]);
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.17, -0.3, 0.0], [0.17, -0.13, 0.3], 0.04);
+            mesh.paint(Material::Glow);
+            for x in [-0.08_f32, 0.08] {
+                mesh.block([x - 0.035, -0.315, 0.07], [x + 0.035, -0.295, 0.24]);
+            }
+            mesh.paint(Material::Hull);
+            for x in [-0.37_f32, 0.37] {
+                mesh.bevel([x - 0.09, -0.13, 0.16], [x + 0.09, 0.13, 0.34], 0.06);
+                mesh.beam([x, 0.0, 0.18], [x, 0.08, 0.02], 0.06, 0.06);
+            }
+            mesh.bevel([-0.43, 0.06, -0.08], [-0.31, 0.24, 0.04], 0.03);
+            mesh.paint(Material::Metal);
+            mesh.bevel([0.31, 0.0, -0.04], [0.45, 0.28, 0.1], 0.03);
+            mesh.moving(motion::RECOIL, [0.38, 0.0, 0.03], |mesh| mesh.body(0.38, &[[0.26, 0.04, 0.04, 0.03], [0.5, 0.032, 0.032, 0.03]], 6));
+            mesh.flash([0.38, 0.47, 0.03], 0.06);
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.11, -0.08, 0.3], [0.11, 0.12, 0.48], 0.04);
+            mesh.paint(Material::Glow);
+            mesh.block([-0.09, 0.12, 0.37], [0.09, 0.14, 0.43]);
         }
-        // Two legs, with feet that point the way it walks.
+        // A pelvis and two legs, each a thigh, a shin, and a foot pointing the way it walks.
         Shape::CommanderLegs => {
-            for (inner, outer) in [(-0.07_f32, -0.28_f32), (0.07, 0.28)] {
-                let (low, high) = (inner.min(outer), inner.max(outer));
-                mesh.moving(motion::SWING, [(low + high) * 0.5, 0.0, -0.1], |mesh| {
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.21, -0.12, -0.16], [0.21, 0.1, -0.06], 0.03);
+            for x in [-0.17_f32, 0.17] {
+                mesh.moving(motion::SWING, [x, 0.0, -0.12], |mesh| {
                     mesh.paint(Material::Hull);
-                    mesh.block([low, -0.14, -0.5], [high, 0.14, -0.1]);
+                    mesh.beam([x, 0.0, -0.12], [x, 0.06, -0.3], 0.075, 0.07);
                     mesh.paint(Material::Metal);
-                    mesh.block([low, 0.14, -0.5], [high, 0.24, -0.4]);
+                    mesh.beam([x, 0.06, -0.3], [x, -0.02, -0.45], 0.06, 0.055);
+                    mesh.block([x - 0.05, 0.02, -0.34], [x + 0.05, 0.12, -0.26]);
+                    mesh.paint(Material::Hull);
+                    mesh.bevel([x - 0.08, -0.1, -0.5], [x + 0.08, 0.17, -0.42], 0.025);
                 });
             }
         }
-        // A low hull, with a sloped front so that its direction shows.
+        // Tracks with fenders either side of a hull with a sloped front, and a team-colored deck.
         Shape::EngineerHull => {
-            mesh.block([-0.42, -0.5, -0.5], [0.42, 0.3, -0.12]);
             mesh.paint(Material::Metal);
-            mesh.block([-0.36, 0.3, -0.5], [0.36, 0.45, -0.22]);
-        }
-        // A raised construction arm on a turntable.
-        Shape::Engineer => {
+            for (low, high) in [(-0.46_f32, -0.26_f32), (0.26, 0.46)] {
+                mesh.bevel([low, -0.46, -0.5], [high, 0.44, -0.28], 0.04);
+            }
             mesh.paint(Material::Hull);
-            mesh.frustum([0.0, -0.15], [-0.12, 0.05], [0.3, 0.22], 6);
-            mesh.beam([0.0, -0.15, 0.03], [0.0, 0.42, 0.42], 0.07, 0.06);
+            for (low, high) in [(-0.48_f32, -0.24_f32), (0.24, 0.48)] {
+                mesh.block([low, -0.46, -0.28], [high, 0.44, -0.25]);
+            }
+            mesh.cuboid(
+                [Vec3::new(-0.27, -0.42, -0.46), Vec3::new(0.27, -0.42, -0.46), Vec3::new(0.27, 0.42, -0.46), Vec3::new(-0.27, 0.42, -0.46)],
+                [Vec3::new(-0.27, -0.42, -0.18), Vec3::new(0.27, -0.42, -0.18), Vec3::new(0.27, 0.2, -0.18), Vec3::new(-0.27, 0.2, -0.18)],
+            );
+            mesh.paint(Material::Trim);
+            mesh.bevel([-0.23, -0.42, -0.18], [0.23, -0.12, -0.13], 0.02);
+        }
+        // A team-colored turntable carrying a jointed arm, with a tool at its end that glows at work.
+        Shape::Engineer => {
+            mesh.frustum([0.0, -0.12], [-0.12, 0.02], [0.24, 0.2], 8);
+            mesh.paint(Material::Metal);
+            mesh.frustum([0.0, -0.12], [0.02, 0.1], [0.08, 0.07], 6);
+            mesh.paint(Material::Hull);
+            mesh.beam([0.0, -0.12, 0.06], [0.0, 0.12, 0.36], 0.055, 0.05);
+            mesh.beam([0.0, 0.12, 0.36], [0.0, 0.36, 0.3], 0.045, 0.04);
+            mesh.paint(Material::Metal);
+            mesh.block([-0.05, 0.08, 0.3], [0.05, 0.16, 0.42]);
+            mesh.frustum([0.0, 0.38], [0.3, 0.36], [0.05, 0.05], 6);
             mesh.paint(Material::Glow);
-            mesh.moving(motion::PULSE, [0.0, 0.4, 0.4], |mesh| mesh.frustum([0.0, 0.4], [0.3, 0.5], [0.04, 0.09], 6));
+            mesh.moving(motion::PULSE, [0.0, 0.38, 0.25], |mesh| mesh.frustum([0.0, 0.38], [0.18, 0.3], [0.03, 0.07], 6));
         }
         // A narrow two-legged walker, with a gun in its right arm and its left arm raised.
         Shape::Bot => {
@@ -617,44 +650,75 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Glow);
             mesh.block([-0.07, 0.1, 0.41], [0.07, 0.12, 0.45]);
         }
+        // Two legs, each a thigh, a shin, and a foot.
         Shape::BotLegs => {
             mesh.paint(Material::Metal);
-            for (low, high) in [(-0.3_f32, -0.1_f32), (0.1, 0.3)] {
-                mesh.moving(motion::SWING, [(low + high) * 0.5, 0.0, -0.02], |mesh| {
-                    mesh.block([low, -0.12, -0.5], [high, 0.12, -0.02]);
-                    mesh.block([low, 0.12, -0.5], [high, 0.2, -0.42]);
+            mesh.block([-0.17, -0.08, -0.08], [0.17, 0.08, -0.02]);
+            for x in [-0.2_f32, 0.2] {
+                mesh.moving(motion::SWING, [x, 0.0, -0.05], |mesh| {
+                    mesh.paint(Material::Metal);
+                    mesh.beam([x, 0.0, -0.05], [x, 0.05, -0.27], 0.06, 0.055);
+                    mesh.beam([x, 0.05, -0.27], [x, -0.02, -0.44], 0.05, 0.045);
+                    mesh.paint(Material::Hull);
+                    mesh.bevel([x - 0.07, -0.08, -0.5], [x + 0.07, 0.14, -0.43], 0.02);
                 });
             }
         }
-        // A wide hull on two tracks.
+        // A hull with a sloped front and an engine grille, between tracks under fenders.
         Shape::TankHull => {
             mesh.paint(Material::Metal);
-            mesh.block([-0.48, -0.5, -0.5], [-0.2, 0.42, -0.18]);
-            mesh.block([0.2, -0.5, -0.5], [0.48, 0.42, -0.18]);
+            for (low, high) in [(-0.48_f32, -0.24_f32), (0.24, 0.48)] {
+                mesh.bevel([low, -0.5, -0.5], [high, 0.44, -0.24], 0.05);
+            }
             mesh.paint(Material::Hull);
+            for (low, high) in [(-0.5_f32, -0.22_f32), (0.22, 0.5)] {
+                mesh.block([low, -0.5, -0.24], [high, 0.46, -0.21]);
+            }
             mesh.cuboid(
-                [Vec3::new(-0.3, -0.42, -0.42), Vec3::new(0.3, -0.42, -0.42), Vec3::new(0.3, 0.42, -0.42), Vec3::new(-0.3, 0.42, -0.42)],
-                [Vec3::new(-0.3, -0.42, -0.1), Vec3::new(0.3, -0.42, -0.1), Vec3::new(0.3, 0.22, -0.1), Vec3::new(-0.3, 0.22, -0.1)],
+                [Vec3::new(-0.3, -0.44, -0.44), Vec3::new(0.3, -0.44, -0.44), Vec3::new(0.3, 0.44, -0.44), Vec3::new(-0.3, 0.44, -0.44)],
+                [Vec3::new(-0.3, -0.44, -0.1), Vec3::new(0.3, -0.44, -0.1), Vec3::new(0.3, 0.22, -0.1), Vec3::new(-0.3, 0.22, -0.1)],
             );
+            mesh.paint(Material::Metal);
+            for y in [-0.39_f32, -0.32, -0.25] {
+                mesh.block([-0.18, y - 0.022, -0.1], [0.18, y + 0.022, -0.085]);
+            }
         }
-        // A turret and one long gun.
+        // A team-colored turret with a sloped front, a mantlet, a long gun with a muzzle brake,
+        // and a hatch.
         Shape::Tank => {
-            mesh.frustum([0.0, -0.08], [-0.1, 0.16], [0.28, 0.2], 8);
+            mesh.prism(&[[-0.2, -0.28], [0.2, -0.28], [0.25, -0.05], [0.14, 0.12], [-0.14, 0.12], [-0.25, -0.05]], [-0.1, 0.12], [1.0, 0.82]);
             mesh.paint(Material::Metal);
-            mesh.moving(motion::RECOIL, [0.0, 0.1, 0.03], |mesh| mesh.beam([0.0, 0.1, 0.03], [0.0, 0.49, 0.03], 0.05, 0.05));
-            mesh.flash([0.0, 0.46, 0.03], 0.06);
-        }
-        // A small hull with a long barrel pointing up.
-        Shape::ArtilleryHull => {
+            mesh.block([-0.08, 0.1, -0.04], [0.08, 0.16, 0.08]);
+            mesh.moving(motion::RECOIL, [0.0, 0.14, 0.02], |mesh| {
+                mesh.body(0.0, &[[0.14, 0.036, 0.036, 0.02], [0.42, 0.03, 0.03, 0.02]], 6);
+                mesh.body(0.0, &[[0.42, 0.048, 0.048, 0.02], [0.49, 0.048, 0.048, 0.02]], 6);
+            });
+            mesh.flash([0.0, 0.47, 0.02], 0.06);
             mesh.paint(Material::Hull);
-            mesh.block([-0.45, -0.5, -0.5], [0.45, 0.25, -0.2]);
-            mesh.paint(Material::Metal);
-            mesh.block([-0.3, 0.25, -0.5], [0.3, 0.38, -0.3]);
+            mesh.frustum([0.08, -0.13], [0.12, 0.17], [0.06, 0.055], 8);
         }
-        Shape::Artillery => {
-            mesh.block([-0.2, -0.4, -0.2], [0.2, 0.05, 0.02]);
+        // A tracked carriage with spades at the back, to brace against the recoil.
+        Shape::ArtilleryHull => {
             mesh.paint(Material::Metal);
-            mesh.moving(motion::RECOIL, [0.0, -0.2, -0.05], |mesh| mesh.beam([0.0, -0.2, -0.05], [0.0, 0.42, 0.42], 0.08, 0.08));
+            for (low, high) in [(-0.46_f32, -0.26_f32), (0.26, 0.46)] {
+                mesh.bevel([low, -0.46, -0.5], [high, 0.32, -0.26], 0.04);
+            }
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.28, -0.44, -0.46], [0.28, 0.34, -0.2], 0.04);
+            mesh.paint(Material::Metal);
+            for x in [-0.2_f32, 0.2] {
+                mesh.beam([x, -0.4, -0.3], [x * 1.2, -0.45, -0.44], 0.035, 0.02);
+            }
+        }
+        // A team-colored cradle with a heavy barrel raised high, and its recoil cylinder above it.
+        Shape::Artillery => {
+            mesh.bevel([-0.18, -0.38, -0.2], [0.18, 0.02, 0.04], 0.04);
+            mesh.paint(Material::Metal);
+            mesh.frustum([0.0, -0.18], [0.04, 0.12], [0.1, 0.09], 8);
+            mesh.moving(motion::RECOIL, [0.0, -0.22, 0.0], |mesh| {
+                mesh.beam([0.0, -0.22, 0.0], [0.0, 0.42, 0.42], 0.065, 0.065);
+                mesh.beam([0.0, -0.12, 0.09], [0.0, 0.18, 0.29], 0.035, 0.035);
+            });
             mesh.flash([0.0, 0.42, 0.42], 0.07);
         }
         // A wide hall with a sawtooth roof and a smokestack.
@@ -705,18 +769,25 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Trim);
             mesh.frustum([0.0, 0.0], [0.15, 0.5], [0.46, 0.14], 10);
         }
-        // A turret on a pedestal, with a long gun.
+        // A stepped plinth with a team-colored ring, for turrets to stand on.
         Shape::PointDefenseBase => {
             mesh.paint(Material::Hull);
-            mesh.frustum([0.0, 0.0], [-0.5, -0.05], [0.48, 0.22], 8);
+            mesh.frustum([0.0, 0.0], [-0.5, -0.32], [0.48, 0.44], 8);
+            mesh.paint(Material::Trim);
+            mesh.frustum([0.0, 0.0], [-0.32, -0.25], [0.42, 0.4], 8);
+            mesh.paint(Material::Hull);
+            mesh.frustum([0.0, 0.0], [-0.25, -0.05], [0.3, 0.24], 8);
         }
+        // A team-colored turret with a sloped front, a long gun, and a sensor with a glowing eye.
         Shape::PointDefense => {
-            mesh.block([-0.26, -0.3, -0.05], [0.26, 0.2, 0.3]);
+            mesh.prism(&[[-0.2, -0.26], [0.2, -0.26], [0.26, -0.02], [0.16, 0.16], [-0.16, 0.16], [-0.26, -0.02]], [-0.05, 0.28], [1.0, 0.85]);
             mesh.paint(Material::Metal);
-            mesh.moving(motion::RECOIL, [0.0, 0.1, 0.12], |mesh| mesh.beam([0.0, 0.1, 0.12], [0.0, 0.5, 0.12], 0.07, 0.07));
+            mesh.moving(motion::RECOIL, [0.0, 0.12, 0.12], |mesh| mesh.body(0.0, &[[0.12, 0.048, 0.048, 0.12], [0.47, 0.04, 0.04, 0.12]], 6));
             mesh.flash([0.0, 0.46, 0.12], 0.06);
             mesh.paint(Material::Hull);
-            mesh.block([-0.1, -0.2, 0.3], [0.1, 0.05, 0.5]);
+            mesh.bevel([-0.08, -0.2, 0.28], [0.08, 0.0, 0.4], 0.03);
+            mesh.paint(Material::Glow);
+            mesh.block([-0.06, 0.0, 0.32], [0.06, 0.012, 0.36]);
         }
         Shape::Shell => {
             mesh.frustum([0.0, 0.0], [0.0, 0.5], [0.5, 0.0], 4);
