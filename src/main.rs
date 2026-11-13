@@ -16,6 +16,7 @@ use sim_engine::input::orders::{
 use sim_engine::input::selection::{group_center, ControlGroups, Selection};
 use sim_engine::math::fp::{Fp, Vec2Fp};
 use sim_engine::render::camera::{Camera, HeightField};
+use sim_engine::render::effects::Effects;
 use sim_engine::render::instances::{self, InstanceBatches, Motion};
 use sim_engine::render::meshes::Shape;
 use sim_engine::render::pipeline::{FrameScene, Renderer, UiFrame};
@@ -759,6 +760,7 @@ fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
     });
     let mut scene_instances = InstanceBatches::default();
     let mut motion = Motion::new();
+    let mut effects = Effects::new();
     let mut title_timer = Instant::now();
     let mut title_frames = 0u32;
     let mut autotest_selected = false;
@@ -1471,6 +1473,10 @@ fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                             instances::build_projectile_instances(&previous.projectiles, &current.projectiles, alpha, eye, &mut scene_instances);
                             units + current.projectiles.len()
                         };
+                        // Explosions, missile trails, and wakes, made from the snapshots alone.
+                        effects.note_events(previous, current, motion.time);
+                        effects.trail(previous, current, alpha, &looks, Some(f64::from(map.water_level)), motion.time);
+                        effects.build(motion.time, eye, &mut scene_instances);
                         let cell = f64::from(TERRAIN_CELL_UNITS);
                         for &(min, top) in &map.wall_cells {
                             let max = [min[0] + cell, min[1] + cell];

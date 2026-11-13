@@ -116,6 +116,12 @@ pub enum Shape {
     NavalFactoryT3,
     /// Scaffolding around a structure being built: posts at the corners and rails between them.
     Scaffold,
+    /// A ball of fire, glowing, for explosions.
+    Fireball,
+    /// A lumpy cloud of three balls, for smoke and missile trails.
+    Smoke,
+    /// A flat ring of foam on the water, for ships' wakes.
+    Wake,
     /// A heavy fighter with two engines and two tail fins, pointing along +Y.
     AirSuperiority,
     /// A long gunship with two rotors, pointing along +Y.
@@ -129,7 +135,7 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub const ALL: [Self; 67] = [
+    pub const ALL: [Self; 70] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -192,6 +198,9 @@ impl Shape {
         Self::NavalFactoryT2,
         Self::NavalFactoryT3,
         Self::Scaffold,
+        Self::Fireball,
+        Self::Smoke,
+        Self::Wake,
         Self::AirSuperiority,
         Self::HeavyGunship,
         Self::Dome,
@@ -203,7 +212,7 @@ impl Shape {
     /// Whether the shape throws a shadow on the ground. Markers, see-through domes, and shells
     /// too small to see do not.
     pub const fn casts_shadow(self) -> bool {
-        !matches!(self, Self::Dome | Self::SelectionRing | Self::SelectionBox | Self::Shell)
+        !matches!(self, Self::Dome | Self::SelectionRing | Self::SelectionBox | Self::Shell | Self::Fireball | Self::Smoke | Self::Wake)
     }
 
     /// How many turns a second the shape's spinning parts make, if it has any.
@@ -215,6 +224,11 @@ impl Shape {
             Self::AirFactoryT3 => Some(0.3),
             _ => None,
         }
+    }
+
+    /// Whether the shape is a hull that leaves a wake behind it on the water.
+    pub const fn leaves_wake(self) -> bool {
+        matches!(self, Self::Frigate | Self::Destroyer | Self::Cruiser | Self::Battleship | Self::Battlecruiser | Self::Submarine | Self::MissileSubmarine | Self::ShieldBoat)
     }
 
     /// Whether the shape is a pair of legs, which swing as the unit walks.
@@ -291,6 +305,28 @@ impl MeshBuilder {
         draw(self);
         self.motion = before;
         self.pivot = before_pivot;
+    }
+
+    /// A low-poly ball, from pole to pole in `rings` bands of `sides` faces.
+    fn ball(&mut self, center: [f32; 3], radius: f32, sides: usize, rings: usize) {
+        let middle = Vec3::from(center);
+        let at = |ring: usize, side: usize| {
+            let up = -std::f32::consts::FRAC_PI_2 + ring as f32 / rings as f32 * std::f32::consts::PI;
+            let around = 0.3 + side as f32 / sides as f32 * std::f32::consts::TAU;
+            middle + Vec3::new(up.cos() * around.cos(), up.cos() * around.sin(), up.sin()) * radius
+        };
+        for ring in 0..rings {
+            for side in 0..sides {
+                let next = (side + 1) % sides;
+                if ring == 0 {
+                    self.face(&[at(0, 0), at(1, next), at(1, side)], middle);
+                } else if ring + 1 == rings {
+                    self.face(&[at(ring, side), at(ring, next), at(rings, 0)], middle);
+                } else {
+                    self.face(&[at(ring, side), at(ring, next), at(ring + 1, next), at(ring + 1, side)], middle);
+                }
+            }
+        }
     }
 
     /// A muzzle flash around a gun's tip, which shows only just after it fires.
@@ -740,6 +776,28 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Metal);
             mesh.beam([-EDGE + 0.02, -EDGE, -0.48], [EDGE - 0.02, -EDGE, 0.26], 0.012, 0.012);
             mesh.beam([EDGE - 0.02, EDGE, -0.48], [-EDGE + 0.02, EDGE, 0.26], 0.012, 0.012);
+        }
+        Shape::Fireball => {
+            mesh.paint(Material::Glow);
+            mesh.ball([0.0; 3], 0.5, 9, 6);
+        }
+        Shape::Smoke => {
+            mesh.ball([-0.15, -0.12, -0.1], 0.3, 7, 5);
+            mesh.ball([0.18, -0.05, -0.05], 0.3, 7, 5);
+            mesh.ball([0.0, 0.17, 0.12], 0.32, 7, 5);
+        }
+        Shape::Wake => {
+            const SEGMENTS: usize = 12;
+            const INNER: f32 = 0.3;
+            let at = |index: usize, radius: f32, z: f32| {
+                let angle = 0.2 + index as f32 / SEGMENTS as f32 * std::f32::consts::TAU;
+                Vec3::new(angle.cos() * radius, angle.sin() * radius, z)
+            };
+            for index in 0..SEGMENTS {
+                let next = (index + 1) % SEGMENTS;
+                let corners = |z: f32| [at(index, INNER, z), at(next, INNER, z), at(next, 0.5, z), at(index, 0.5, z)];
+                mesh.cuboid(corners(-0.5), corners(0.5));
+            }
         }
         Shape::AirSuperiority => {
             mesh.prism(&[[-0.16, -0.42], [0.16, -0.42], [0.14, 0.15], [0.02, 0.5], [-0.02, 0.5], [-0.14, 0.15]], [-0.1, 0.1], [0.8, 0.7]);

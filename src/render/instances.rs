@@ -17,7 +17,7 @@ const SETTLE_SHARE: f64 = 0.04;
 const WORK_PULSES: f64 = 0.8;
 const WORK_DIP: f64 = 0.25;
 
-const RAW_TO_WORLD: f64 = 1.0 / 4096.0;
+pub(super) const RAW_TO_WORLD: f64 = 1.0 / 4096.0;
 const PROJECTILE_SIZE: f32 = 0.6;
 
 /// On-screen half-size of a unit's tactical dot, in pixels.
@@ -116,7 +116,7 @@ fn instance(center: [f64; 3], size: [f32; 3], heading: [f32; 2], color: [f32; 3]
 
 /// A unit's part, with its hull and glowing parts colored apart from its team color.
 #[allow(clippy::too_many_arguments)]
-fn painted(center: [f64; 3], size: [f32; 3], heading: [f32; 2], trim: [f32; 3], hull: [f32; 3], glow: [f32; 3], icon_px: f32, eye: [f64; 3]) -> UnitInstanceRaw {
+pub(super) fn painted(center: [f64; 3], size: [f32; 3], heading: [f32; 2], trim: [f32; 3], hull: [f32; 3], glow: [f32; 3], icon_px: f32, eye: [f64; 3]) -> UnitInstanceRaw {
     UnitInstanceRaw { hull: bytes(hull), glow: bytes(glow), ..instance(center, size, heading, trim, icon_px, eye) }
 }
 
@@ -237,7 +237,7 @@ fn interpolate(previous: [i32; 3], current: [i32; 3], alpha: f64) -> [f64; 3] {
 
 /// Walks two lists sorted by id, calling `visit` with each current item and its previous
 /// position if it had one. New entities are drawn where they are, without interpolation.
-fn merge_by_id<T>(previous: &[T], current: &[T], id: impl Fn(&T) -> SimId, mut visit: impl FnMut(Option<&T>, &T)) {
+pub(super) fn merge_by_id<T>(previous: &[T], current: &[T], id: impl Fn(&T) -> SimId, mut visit: impl FnMut(Option<&T>, &T)) {
     let mut cursor = 0;
     for item in current {
         while cursor < previous.len() && id(&previous[cursor]) < id(item) {

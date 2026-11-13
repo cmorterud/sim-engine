@@ -3,6 +3,7 @@
 #![allow(clippy::disallowed_types)]
 
 pub mod camera;
+pub mod effects;
 pub mod instances;
 pub mod meshes;
 pub mod pipeline;
