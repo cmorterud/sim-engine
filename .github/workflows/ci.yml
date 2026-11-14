@@ -79,3 +79,29 @@ jobs:
       - name: Check that benchmarks compile
         if: matrix.profile == 'release'
         run: cargo bench --no-run --locked
+
+  # The browser build is published only once every gate passes, so it must be one of them.
+  browser-build:
+    name: Browser build compiles
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown --component clippy
+          rustup default "$RUST_VERSION"
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ env.RUST_VERSION }}-wasm-check-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ env.RUST_VERSION }}-wasm-check-
+
+      - name: Build and lint for the browser
+        run: cargo clippy --locked --release --target wasm32-unknown-unknown --bin sim-engine -- -D warnings
