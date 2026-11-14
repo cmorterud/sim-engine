@@ -77,16 +77,6 @@ jobs:
           curl -sSL "https://github.com/trunk-rs/trunk/releases/download/v${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz" | tar -xz -C /usr/local/bin trunk
           trunk --version
 
-      - uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-${{ env.RUST_VERSION }}-wasm-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ env.RUST_VERSION }}-wasm-
-
       # The page lives under /sim-engine/ on GitHub Pages, so its files are linked from there.
       - name: Build
         run: trunk build --release --locked --public-url /sim-engine/
