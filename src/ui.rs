@@ -381,22 +381,28 @@ pub fn reset_build_tiers(ctx: &egui::Context) {
 /// The size of a build bar's buttons, in points.
 const BAR_BUTTON: f32 = 46.0;
 
-/// A build bar's button: the item's icon, with its tech level in dots, its key in the top left
-/// corner, and `suffix`, such as "auto", in the bottom right.
+/// A build bar's button: the item's symbol, colored by its role, its key in the top left corner,
+/// and `suffix`, such as "auto", in the bottom right.
 fn icon_button(ui: &mut egui::Ui, db: &BlueprintDb, option: BlueprintId, suffix: &str) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(BAR_BUTTON), egui::Sense::click());
     let visuals = ui.style().interact(&response);
     let painter = ui.painter();
     painter.rect(rect, visuals.rounding, visuals.weak_bg_fill, visuals.bg_stroke);
     let unit = db.get(option);
-    icons::draw(painter, rect.center() + Vec2::new(3.0, 1.0), 9.0, Icon::for_key(&unit.key), unit.tier, visuals.text_color());
+    // Large and colored by role, without the map icon's frame and tech dots: the button is the
+    // frame, and the bar's toggle says the level.
+    icons::draw_bar(painter, rect, Icon::for_key(&unit.key));
     if let Some(letter) = blueprint_hotkey(&unit.key) {
         let font = FontId::new(13.0, egui::FontFamily::Name(BOLD.into()));
         painter.text(rect.left_top() + Vec2::new(3.0, 1.0), Align2::LEFT_TOP, hotkeys::key_name(letter), font, visuals.text_color());
     }
     let suffix = suffix.trim().trim_matches(|c| c == '(' || c == ')');
     if !suffix.is_empty() {
-        painter.text(rect.right_bottom() - Vec2::new(3.0, 1.0), Align2::RIGHT_BOTTOM, suffix, FontId::proportional(10.0), Color32::YELLOW);
+        // On a dark backing, since the symbol reaches into the corner.
+        let galley = painter.layout_no_wrap(suffix.to_string(), FontId::proportional(10.0), Color32::YELLOW);
+        let at = Align2::RIGHT_BOTTOM.anchor_size(rect.right_bottom() - Vec2::new(3.0, 1.0), galley.size());
+        painter.rect_filled(at.expand(1.5), 3.0, Color32::from_black_alpha(190));
+        painter.galley(at.min, galley, Color32::YELLOW);
     }
     response
 }

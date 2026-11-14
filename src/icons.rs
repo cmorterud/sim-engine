@@ -216,6 +216,81 @@ impl Icon {
     }
 }
 
+/// What a unit or structure is for, which colors its symbol on the build bar, so that a bar of a
+/// dozen items reads by color first and shape second.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Role {
+    /// Factories, builders, and commanders.
+    Build,
+    Mass,
+    Energy,
+    /// Guns that fire straight at what they see.
+    DirectFire,
+    AntiAir,
+    /// Artillery and missiles, which fire over what is in the way.
+    Indirect,
+    /// Torpedoes and what fires them.
+    Underwater,
+    /// Shields and missile defenses.
+    Protection,
+    /// Radar, sonar, scouts, and stealth.
+    Intel,
+}
+
+impl Role {
+    /// Hues spaced around the wheel, light enough to read on the bar's dark grey.
+    pub const fn color(self) -> Color32 {
+        match self {
+            Self::Build => Color32::from_rgb(245, 165, 70),
+            Self::Mass => Color32::from_rgb(110, 215, 105),
+            Self::Energy => Color32::from_rgb(245, 225, 75),
+            Self::DirectFire => Color32::from_rgb(245, 95, 85),
+            Self::AntiAir => Color32::from_rgb(95, 185, 255),
+            Self::Indirect => Color32::from_rgb(225, 115, 235),
+            Self::Underwater => Color32::from_rgb(60, 215, 180),
+            Self::Protection => Color32::from_rgb(150, 150, 255),
+            Self::Intel => Color32::from_rgb(235, 235, 235),
+        }
+    }
+}
+
+impl Icon {
+    pub const fn role(self) -> Role {
+        match self {
+            Self::Commander | Self::SupportCommander | Self::Engineer | Self::LandFactory | Self::AirFactory | Self::NavalFactory | Self::Gateway | Self::AirStaging | Self::Unknown => Role::Build,
+            Self::Extractor | Self::MassStorage | Self::Fabricator => Role::Mass,
+            Self::Generator | Self::Hydrocarbon | Self::EnergyStorage => Role::Energy,
+            Self::LightBot | Self::Tank | Self::AmphibiousTank | Self::Gunship | Self::Frigate | Self::Destroyer | Self::Cruiser | Self::Battleship | Self::Battlecruiser | Self::PointDefense => Role::DirectFire,
+            Self::MobileAntiAir | Self::Fighter | Self::AntiAirTurret => Role::AntiAir,
+            Self::Artillery | Self::MobileMissile | Self::Bomber | Self::FighterBomber | Self::MissileSubmarine | Self::ArtilleryInstallation | Self::TacticalLauncher | Self::StrategicLauncher | Self::TacticalMissile | Self::StrategicMissile => Role::Indirect,
+            Self::TorpedoBomber | Self::Submarine | Self::TorpedoLauncher => Role::Underwater,
+            Self::ShieldBoat | Self::ShieldGenerator | Self::TacticalDefense | Self::StrategicDefense | Self::AntiNuke => Role::Protection,
+            Self::Scout | Self::Radar | Self::Sonar | Self::Stealth => Role::Intel,
+        }
+    }
+}
+
+/// Draws an icon to fill a build bar button: the symbol alone, large, in its role's color. The
+/// button is the frame, and the bar's tech toggle says the level, so neither is drawn. The top
+/// left corner is left for the button's key.
+pub fn draw_bar(painter: &Painter, rect: Rect, icon: Icon) {
+    for shape in bar_shapes(rect, icon) {
+        painter.add(shape);
+    }
+}
+
+/// The shapes `draw_bar` paints.
+pub fn bar_shapes(rect: Rect, icon: Icon) -> Vec<Shape> {
+    let color = icon.role().color();
+    let size = rect.height() * 0.3;
+    let stroke = Stroke::new((size / 5.5).clamp(1.5, 3.0), color);
+    // Below and right of center, clear of the key in the corner.
+    let center = rect.center() + Vec2::new(rect.width() * 0.06, rect.height() * 0.08);
+    let mut out = Vec::new();
+    symbol(&mut out, center, size, icon, stroke);
+    out
+}
+
 /// Draws an icon: its frame, filled dark and outlined in `color`, its symbol, and a dot beneath
 /// for each tech level. `half` is half the frame's height, in points.
 pub fn draw(painter: &Painter, center: Pos2, half: f32, icon: Icon, tier: u8, color: Color32) {
@@ -299,13 +374,21 @@ fn symbol(out: &mut Vec<Shape>, center: Pos2, size: f32, icon: Icon, stroke: Str
             out.push(line(&[(-0.9, -0.7), (0.9, -0.7), (0.9, 0.1), (-0.9, 0.1), (-0.9, -0.7)]));
             out.push(line(&[(-0.9, 0.6), (-0.45, 0.35), (0.0, 0.6), (0.45, 0.35), (0.9, 0.6)]));
         }
-        Icon::Artillery => out.push(dot(0.0, 0.0, 0.4)),
+        Icon::Artillery => {
+            // A shell lobbed high, from the lower left.
+            out.push(arc(0.25, 0.75, 1.05, 180.0, 285.0));
+            out.push(dot(0.52, -0.26, 0.24));
+            out.push(line(&[(-0.95, 0.85), (0.95, 0.85)]));
+        }
         Icon::MobileMissile => {
             out.push(line(&[(0.0, 0.8), (0.0, -0.8)]));
             out.push(line(&[(-0.45, -0.3), (0.0, -0.8), (0.45, -0.3)]));
             out.push(line(&[(-0.45, 0.8), (0.45, 0.8)]));
         }
-        Icon::MobileAntiAir => out.push(line(&[(-0.9, 0.6), (0.0, -0.7), (0.9, 0.6)])),
+        Icon::MobileAntiAir => {
+            out.push(line(&[(-0.8, 0.0), (0.0, -0.8), (0.8, 0.0)]));
+            out.push(line(&[(-0.8, 0.8), (0.0, 0.0), (0.8, 0.8)]));
+        }
         Icon::Scout => {
             out.push(ring(0.0, 0.0, 0.55));
             out.push(dot(0.0, 0.0, 0.18));
@@ -328,7 +411,10 @@ fn symbol(out: &mut Vec<Shape>, center: Pos2, size: f32, icon: Icon, stroke: Str
             out.push(line(&[(-0.75, 0.0), (0.75, 0.0)]));
             out.push(line(&[(0.0, -0.75), (0.0, 0.75)]));
         }
-        Icon::Frigate => out.push(line(&hull)),
+        Icon::Frigate => {
+            out.push(line(&hull));
+            out.push(dot(0.0, -0.15, 0.22));
+        }
         Icon::Destroyer => {
             out.push(line(&hull));
             out.push(line(&[(0.0, 0.25), (0.0, -0.45)]));
@@ -513,6 +599,31 @@ mod tests {
                 assert_ne!(drawn[first], drawn[second], "{:?} and {:?} look the same", Icon::ALL[first], Icon::ALL[second]);
             }
         }
+    }
+
+    #[test]
+    fn no_two_build_bar_icons_look_alike_and_roles_differ_in_color() {
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::splat(46.0));
+        let drawn: Vec<String> = Icon::ALL.iter().map(|icon| format!("{:?}", bar_shapes(rect, *icon))).collect();
+        for first in 0..drawn.len() {
+            for second in first + 1..drawn.len() {
+                assert_ne!(drawn[first], drawn[second], "{:?} and {:?} look the same on the bar", Icon::ALL[first], Icon::ALL[second]);
+            }
+        }
+        let roles = [Role::Build, Role::Mass, Role::Energy, Role::DirectFire, Role::AntiAir, Role::Indirect, Role::Underwater, Role::Protection, Role::Intel];
+        for first in 0..roles.len() {
+            for second in first + 1..roles.len() {
+                assert_ne!(roles[first].color(), roles[second].color(), "{:?} and {:?} share a color", roles[first], roles[second]);
+            }
+        }
+    }
+
+    #[test]
+    fn a_build_bar_symbol_fills_most_of_its_button() {
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::splat(46.0));
+        let bounds = bar_shapes(rect, Icon::LightBot).iter().fold(Rect::NOTHING, |bounds, shape| bounds.union(shape.visual_bounding_rect()));
+        assert!(bounds.width() > 23.0 && bounds.height() > 23.0, "the symbol is only {bounds:?}");
+        assert!(rect.contains_rect(bounds), "the symbol spills out of its button: {bounds:?}");
     }
 
     #[test]
