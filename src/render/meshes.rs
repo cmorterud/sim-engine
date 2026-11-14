@@ -122,6 +122,8 @@ pub enum Shape {
     Smoke,
     /// A flat ring of foam on the water, for ships' wakes.
     Wake,
+    /// A flat square laid on the ground, for craters and scorch marks, which the shader cuts round.
+    Scar,
     /// A heavy fighter with two engines and two tail fins, pointing along +Y.
     AirSuperiority,
     /// A long gunship with two rotors, pointing along +Y.
@@ -135,7 +137,7 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub const ALL: [Self; 70] = [
+    pub const ALL: [Self; 71] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -201,6 +203,7 @@ impl Shape {
         Self::Fireball,
         Self::Smoke,
         Self::Wake,
+        Self::Scar,
         Self::AirSuperiority,
         Self::HeavyGunship,
         Self::Dome,
@@ -212,7 +215,7 @@ impl Shape {
     /// Whether the shape throws a shadow on the ground. Markers, see-through domes, and shells
     /// too small to see do not.
     pub const fn casts_shadow(self) -> bool {
-        !matches!(self, Self::Dome | Self::SelectionRing | Self::SelectionBox | Self::Shell | Self::Fireball | Self::Smoke | Self::Wake)
+        !matches!(self, Self::Dome | Self::SelectionRing | Self::SelectionBox | Self::Shell | Self::Fireball | Self::Smoke | Self::Wake | Self::Scar)
     }
 
     /// How many turns a second the shape's spinning parts make, if it has any.
@@ -942,6 +945,17 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 let next = (index + 1) % SEGMENTS;
                 let corners = |z: f32| [at(index, INNER, z), at(next, INNER, z), at(next, 0.5, z), at(index, 0.5, z)];
                 mesh.cuboid(corners(-0.5), corners(0.5));
+            }
+        }
+        // A grid, so that it can bend over the ground it lies on.
+        Shape::Scar => {
+            const SQUARES: usize = 6;
+            let at = |index: usize| index as f32 / SQUARES as f32 - 0.5;
+            for y in 0..SQUARES {
+                for x in 0..SQUARES {
+                    let corners = [Vec3::new(at(x), at(y), 0.0), Vec3::new(at(x + 1), at(y), 0.0), Vec3::new(at(x + 1), at(y + 1), 0.0), Vec3::new(at(x), at(y + 1), 0.0)];
+                    mesh.face(&corners, Vec3::new(0.0, 0.0, -1.0));
+                }
             }
         }
         Shape::AirSuperiority => {

@@ -1474,7 +1474,7 @@ fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                             units + current.projectiles.len()
                         };
                         // Explosions, missile trails, and wakes, made from the snapshots alone.
-                        effects.note_events(previous, current, motion.time);
+                        effects.note_events(previous, current, motion.time, &|x, y| map.heights.height_at(x, y), (map.water_level > -1.0e5).then_some(f64::from(map.water_level)));
                         effects.trail(previous, current, alpha, &looks, Some(f64::from(map.water_level)), motion.time);
                         effects.build(motion.time, eye, &mut scene_instances);
                         let cell = f64::from(TERRAIN_CELL_UNITS);

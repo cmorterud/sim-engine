@@ -286,6 +286,105 @@ fn fs_shadow(input: ShadowOutput) -> @location(0) vec4<f32> {
     return vec4<f32>(vec3<f32>(1.0 - input.darkness), 1.0);
 }
 
+// ---- Battle scars ----
+
+struct ScarOutput {
+    @builtin(position) clip: vec4<f32>,
+    // Across the scar, from -1 to 1 either way.
+    @location(0) across: vec2<f32>,
+    // A crater (1) or a scorch mark (0), how strongly it shows, and a number that varies its shape.
+    @location(1) @interpolate(flat) look: vec3<f32>,
+    @location(2) fog_coordinates: vec2<f32>,
+};
+
+const SCORCH: vec3<f32> = vec3<f32>(0.035, 0.03, 0.025);
+const CRATER_BOWL: vec3<f32> = vec3<f32>(0.05, 0.04, 0.03);
+const THROWN_EARTH: vec3<f32> = vec3<f32>(0.19, 0.15, 0.10);
+const SCAR_LIFT: f32 = 0.25;
+
+// A flat square laid over the ground, bending with it, a little above it.
+@vertex
+fn vs_scar(
+    @location(0) position: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    instance: InstanceInput,
+) -> ScarOutput {
+    let model = mat4x4<f32>(instance.m0, instance.m1, instance.m2, instance.m3);
+    let flat = (model * vec4<f32>(position, 1.0)).xy;
+    var out: ScarOutput;
+    out.clip = globals.view_proj * vec4<f32>(flat, ground_at(flat) + SCAR_LIFT, 1.0);
+    out.across = position.xy * 2.0;
+    out.look = instance.color.rgb;
+    let sample = (flat - globals.terrain_origin.xy) / globals.terrain_origin.w + vec2<f32>(globals.terrain_grid.xy);
+    out.fog_coordinates = sample * globals.terrain_scale.z;
+    return out;
+}
+
+@fragment
+fn fs_scar(input: ScarOutput) -> @location(0) vec4<f32> {
+    let sight = 0.18 + 0.82 * textureSample(fog_texture, fog_sampler, input.fog_coordinates).r;
+    let seed = input.look.z * 37.0;
+    // A ragged edge, never quite round.
+    let ragged = (value_noise(input.across * 2.5 + vec2<f32>(seed, seed * 0.7)) - 0.5) * 0.3;
+    let reach = length(input.across) + ragged;
+    var color = SCORCH;
+    var alpha = 0.0;
+    if (input.look.x < 0.5) {
+        // Blackened ground, solid in the middle and streaked outwards towards its edge.
+        let direction = input.across / max(length(input.across), 0.001);
+        let streaks = value_noise(direction * 2.2 + vec2<f32>(seed, -seed));
+        let edge = smoothstep(0.2, 0.9, reach);
+        alpha = (1.0 - smoothstep(0.45 + 0.35 * streaks, 1.0, reach)) * mix(0.8, 0.45 + 0.4 * streaks, edge);
+    } else {
+        // A dark bowl ringed with lighter earth thrown up out of it, and dark spatter beyond.
+        let bowl = 1.0 - smoothstep(0.3, 0.5, reach);
+        let rim = smoothstep(0.4, 0.54, reach) * (1.0 - smoothstep(0.58, 0.74, reach));
+        let spatter = (1.0 - smoothstep(0.7, 1.0, reach)) * 0.25;
+        color = mix(CRATER_BOWL, THROWN_EARTH, rim / max(bowl + rim, 0.001));
+        alpha = max(bowl * 0.72, max(rim * 0.4, spatter));
+    }
+    return vec4<f32>(color * sight, alpha * input.look.y);
+}
+
+// ---- Smoke ----
+
+struct SmokeOutput {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) normal: vec3<f32>,
+    @location(1) albedo: vec3<f32>,
+    @location(2) opacity: f32,
+    @location(3) relative: vec3<f32>,
+};
+
+// Lit softly like the units, and see-through by how opaque the puff is, which the hull
+// color's last byte carries.
+@vertex
+fn vs_smoke(
+    @location(0) position: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    instance: InstanceInput,
+) -> SmokeOutput {
+    let model = mat4x4<f32>(instance.m0, instance.m1, instance.m2, instance.m3);
+    var out: SmokeOutput;
+    let relative = (model * vec4<f32>(position, 1.0)).xyz;
+    out.clip = globals.view_proj * vec4<f32>(relative, 1.0);
+    out.normal = (model * vec4<f32>(normal, 0.0)).xyz;
+    out.albedo = to_linear(instance.color.rgb);
+    out.opacity = instance.hull.a;
+    out.relative = relative;
+    return out;
+}
+
+@fragment
+fn fs_smoke(input: SmokeOutput) -> @location(0) vec4<f32> {
+    let normal = normalize(input.normal);
+    let ambient = mix(GROUND_BOUNCE, SKY, normal.z * 0.5 + 0.5);
+    let lit = input.albedo * (ambient + SUN * 0.8 * max(dot(normal, LIGHT), 0.0));
+    // Thinner towards its edges, as a cloud is, so that its facets do not show.
+    let facing = abs(dot(normal, normalize(-input.relative)));
+    return vec4<f32>(lit, input.opacity * smoothstep(0.05, 0.6, facing));
+}
+
 // ---- Shield domes ----
 
 // How many hexagons fit across a dome, and the share of its strength each part shows: almost

@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use sim_engine::math::fp::{fp_int, Fp, Vec2Fp};
 use sim_engine::render::camera::{Camera, HeightField};
+use sim_engine::render::effects::Effects;
 use sim_engine::render::instances::{build_unit_instances, unit_looks, InstanceBatches, Motion};
 use sim_engine::render::pipeline::{FrameScene, Renderer};
 use sim_engine::sim::blueprints::UnitClass;
@@ -55,6 +56,50 @@ fn ground_height(x: f64, y: f64) -> f64 {
 
 /// Where the hilly stretch begins, north of the structures.
 const HILLS_START: f64 = 3_300.0;
+/// Where a battle has been fought, on the hills, to see the marks it leaves.
+const SCARS: [f64; 2] = [2_300.0, 3_560.0];
+
+/// The marks of a battle around `SCARS`: shells that landed, and units that died and left wrecks.
+fn battlefield() -> Effects {
+    use sim_engine::sim::components::{SimId, WreckKind};
+    use sim_engine::sim::world::{ProjectileKind, ProjectileView, SimSnapshot, UnitView, WreckView};
+    let raw = |value: f64| (value * 4096.0) as i32;
+    let spot = |index: u32, spread: f64| {
+        let angle = f64::from(index) * 2.399;
+        let reach = spread * (f64::from(index) / 40.0).sqrt();
+        [SCARS[0] + angle.cos() * reach, SCARS[1] + angle.sin() * reach]
+    };
+    let mut before = SimSnapshot { tick: 1, ..SimSnapshot::default() };
+    let mut after = SimSnapshot { tick: 2, ..SimSnapshot::default() };
+    for index in 0..40 {
+        let [x, y] = spot(index, 130.0);
+        let kind = if index % 13 == 0 { ProjectileKind::TacticalMissile } else { ProjectileKind::Shell };
+        before.projectiles.push(ProjectileView { id: SimId(1_000 + index), team: Team::Red, x: raw(x), y: raw(y), z: raw(ground_height(x, y) + 1.0), kind, source: SimId(1) });
+    }
+    for index in 0..6 {
+        let [x, y] = spot(index * 7 + 3, 110.0);
+        let (z, radius) = (ground_height(x, y), 4.0 + f64::from(index));
+        before.units.push(UnitView {
+            id: SimId(2_000 + index),
+            team: Team::Blue,
+            x: raw(x),
+            y: raw(y),
+            z: raw(z + radius),
+            radius: raw(radius),
+            blueprint: u16::MAX,
+            health_permille: 0,
+            built_permille: 1000,
+            is_structure: false,
+            facing: [0, 0],
+            aim: [0, 0],
+            working: false,
+        });
+        after.wrecks.push(WreckView { id: SimId(3_000 + index), x: raw(x), y: raw(y), z: raw(z), radius: raw(radius), mass: 1, energy: 0, kind: WreckKind::Debris });
+    }
+    let mut effects = Effects::new();
+    effects.note_events(&before, &after, 0.0, &ground_height, Some(0.0));
+    effects
+}
 
 fn world() -> SimWorld {
     let cells = (MAP / TERRAIN_CELL_UNITS) as usize;
@@ -133,6 +178,8 @@ fn main() {
     rows.push(("terrain_cliff".to_string(), [2_950.0, 3_620.0], 320.0, 0.0));
     rows.push(("terrain_shore".to_string(), [1_700.0, 3_850.0], 300.0, 0.0));
     rows.push(("terrain_ground".to_string(), [2_300.0, 3_500.0], 90.0, 0.0));
+    rows.push(("scars".to_string(), [SCARS[0], SCARS[1] + 40.0], 260.0, 0.0));
+    rows.push(("smoke".to_string(), [SCARS[0], SCARS[1] + 40.0], 260.0, 0.0));
 
     let snapshot = world.snapshot();
     // `GALLERY_FOCUS=<blueprint key>` adds close-ups of Blue's copy of that unit, near and nearer.
@@ -157,6 +204,8 @@ fn main() {
         1.0 / f64::from(1 << HEIGHT_FRAC_BITS),
     );
     let looks = unit_looks(&blueprints);
+    // A battle fought a minute ago, so that only its marks are left.
+    let mut battle = battlefield();
 
     let event_loop = EventLoop::new().expect("event loop starts");
     let window = Arc::new(WindowBuilder::new().with_title("unit gallery").with_inner_size(LogicalSize::new(1440.0, 900.0)).build(&event_loop).expect("window opens"));
@@ -176,6 +225,13 @@ fn main() {
         }
         let mut instances = InstanceBatches::default();
         build_unit_instances(&snapshot.units, &snapshot.units, 1.0, camera.eye(), &[], &looks, &[], &mut Motion::new(), &mut instances);
+        // The battle a moment after it ended, smoke still rising, or a minute after, only marks left.
+        // Drawing forgets what has burned out, so the smoke view has a battle of its own.
+        if name == "smoke" {
+            battlefield().build(1.5, camera.eye(), &mut instances);
+        } else {
+            battle.build(60.0, camera.eye(), &mut instances);
+        }
         let scene = FrameScene { camera: &camera, instances: &instances, selection_box: None, time: 0.0 };
         let path = out.join(format!("{name}.bmp"));
         renderer.capture(&scene, None, &path).expect("capture saves");

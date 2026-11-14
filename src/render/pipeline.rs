@@ -108,10 +108,12 @@ pub struct Renderer {
     targets: SceneTargets,
     unit_pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
+    scar_pipeline: wgpu::RenderPipeline,
     terrain_pipeline: wgpu::RenderPipeline,
     box_pipeline: wgpu::RenderPipeline,
     dome_pipeline: wgpu::RenderPipeline,
     water_pipeline: wgpu::RenderPipeline,
+    smoke_pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     globals_buffer: wgpu::Buffer,
     mesh_vertices: wgpu::Buffer,
@@ -490,6 +492,40 @@ impl Renderer {
             multiview: None,
         });
 
+        // Craters and scorch marks, blended onto the ground before the shadows fall on them.
+        let blended_scars = [Some(wgpu::ColorTargetState { format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::COLOR })];
+        let scar_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("battle scars"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_scar",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<MeshVertex>() as u64,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &mesh_attributes,
+                    },
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<UnitInstanceRaw>() as u64,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &instance_attributes,
+                    },
+                ],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_scar",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &blended_scars,
+            }),
+            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+            depth_stencil: depth(false, wgpu::CompareFunction::Greater),
+            multisample,
+            multiview: None,
+        });
+
         // See-through, so drawn last, tested against the scene but leaving its depth alone.
         let blended = [Some(wgpu::ColorTargetState { format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })];
         let dome_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -548,6 +584,39 @@ impl Renderer {
             multiview: None,
         });
 
+        // Smoke: lit like the units, but see-through, over everything solid.
+        let smoke_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("smoke"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_smoke",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<MeshVertex>() as u64,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &mesh_attributes,
+                    },
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<UnitInstanceRaw>() as u64,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &instance_attributes,
+                    },
+                ],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_smoke",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &blended,
+            }),
+            primitive: wgpu::PrimitiveState { cull_mode: Some(wgpu::Face::Back), ..Default::default() },
+            depth_stencil: depth(false, wgpu::CompareFunction::Greater),
+            multisample,
+            multiview: None,
+        });
+
         let meshes = MeshSet::build();
         let mesh_vertices = device.create_buffer_init(&BufferInitDescriptor {
             label: Some("mesh vertices"),
@@ -578,10 +647,12 @@ impl Renderer {
             targets,
             unit_pipeline,
             shadow_pipeline,
+            scar_pipeline,
             terrain_pipeline,
             box_pipeline,
             dome_pipeline,
             water_pipeline,
+            smoke_pipeline,
             bind_group,
             globals_buffer,
             mesh_vertices,
@@ -748,6 +819,12 @@ impl Renderer {
         pass.set_vertex_buffer(0, self.mesh_vertices.slice(..));
         pass.set_vertex_buffer(1, self.instance_buffer.buffer.slice(..));
         pass.set_index_buffer(self.mesh_indices.slice(..), wgpu::IndexFormat::Uint16);
+        // Battle scars go on the bare ground, under the shadows.
+        let scars = &self.shape_instances[Shape::Scar as usize];
+        if !scars.is_empty() {
+            pass.set_pipeline(&self.scar_pipeline);
+            pass.draw_indexed(self.shape_indices[Shape::Scar as usize].clone(), 0, scars.clone());
+        }
         // Shadows go on the bare ground, before the units that cast them stand over them.
         pass.set_pipeline(&self.shadow_pipeline);
         pass.set_stencil_reference(0);
@@ -758,7 +835,7 @@ impl Renderer {
         }
         pass.set_pipeline(&self.unit_pipeline);
         for ((indices, instances), shape) in self.shape_indices.iter().zip(&self.shape_instances).zip(Shape::ALL) {
-            if !instances.is_empty() && shape != Shape::Dome {
+            if !instances.is_empty() && !matches!(shape, Shape::Dome | Shape::Scar | Shape::Smoke) {
                 pass.draw_indexed(indices.clone(), 0, instances.clone());
             }
         }
@@ -768,6 +845,11 @@ impl Renderer {
             pass.set_index_buffer(self.terrain_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..self.terrain_index_count, 0, 0..1);
             pass.set_index_buffer(self.mesh_indices.slice(..), wgpu::IndexFormat::Uint16);
+        }
+        let smoke = &self.shape_instances[Shape::Smoke as usize];
+        if !smoke.is_empty() {
+            pass.set_pipeline(&self.smoke_pipeline);
+            pass.draw_indexed(self.shape_indices[Shape::Smoke as usize].clone(), 0, smoke.clone());
         }
         let domes = &self.shape_instances[Shape::Dome as usize];
         if !domes.is_empty() {
