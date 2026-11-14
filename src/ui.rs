@@ -2918,9 +2918,9 @@ mod tests {
         current.factories[0] = factory_view(1, vec![upgrade.0], false, 200);
         assert_eq!(able(&current, &[SimId(1)], tank).unwrap(), [SimId(1)]);
         assert_eq!(able(&current, &[SimId(1)], bot).unwrap(), [SimId(1)], "listed once, though both tiers can build it");
-        // The tank is in the bot's slot, at T2.
+        // The tank is in the medium tank's slot, at T2.
         let expected = UiAction::Queue { factories: vec![SimId(1)], blueprint: tank, selected_count: 1, count: 1 };
-        assert_eq!(hotkey_action(&current, &[SimId(1)], &db, 'E', BuildTiers { builder: None, factory: Some(2) }), Some(expected));
+        assert_eq!(hotkey_action(&current, &[SimId(1)], &db, 'C', BuildTiers { builder: None, factory: Some(2) }), Some(expected));
 
         // The other T1 factory has no upgrade queued, so it is left out.
         assert_eq!(able(&current, &[SimId(1), SimId(3)], tank).unwrap(), [SimId(1)]);
@@ -3105,8 +3105,8 @@ mod tests {
         let factories = mixed_factories(&db);
         let tank_level = BuildTiers { builder: None, factory: Some(2) };
         let bot = UiAction::Queue { factories: vec![SimId(1)], blueprint: db.id("t1_light_bot"), selected_count: 1, count: 1 };
-        assert_eq!(hotkey_action(&factories, &[SimId(1)], &db, 'E', tank_level), Some(bot), "a T1 factory shows T1, so no tank");
-        assert_eq!(hotkey_action(&factories, &[SimId(1)], &db, 'C', BuildTiers::default()), None, "nothing in that slot of a factory's bar");
+        assert_eq!(hotkey_action(&factories, &[SimId(1)], &db, 'E', tank_level), Some(bot), "a T1 factory shows T1, so no gatling bot");
+        assert_eq!(hotkey_action(&factories, &[SimId(1)], &db, 'H', BuildTiers::default()), None, "nothing in that slot of a factory's bar");
     }
 
     #[test]
@@ -3122,7 +3122,8 @@ mod tests {
         assert_eq!(hotkey_action(&current, &selected, &db, 'G', T1_BARS), Some(queue("t1_light_artillery", selected.to_vec())));
         assert_eq!(hotkey_action(&current, &selected, &db, 'T', T1_BARS), Some(queue("t1_mobile_aa", selected.to_vec())));
         let t2 = BuildTiers { builder: None, factory: Some(2) };
-        assert_eq!(hotkey_action(&current, &selected, &db, 'E', t2), Some(queue("t2_heavy_tank", vec![SimId(2)])));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'C', t2), Some(queue("t2_heavy_tank", vec![SimId(2)])));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'E', t2), Some(queue("t2_gatling_bot", vec![SimId(2)])));
         assert_eq!(hotkey_action(&current, &selected, &db, 'U', T1_BARS), Some(queue("land_factory_t2", vec![SimId(1), SimId(3)])), "the lowest tier goes first");
         let to_t3 = UiAction::Queue { factories: vec![SimId(2)], blueprint: db.id("land_factory_t3"), selected_count: 1, count: 1 };
         assert_eq!(hotkey_action(&current, &[SimId(2)], &db, 'U', T1_BARS), Some(to_t3));
@@ -3154,7 +3155,7 @@ mod tests {
         let queue = |key: &str| Some(UiAction::Queue { factories: vec![SimId(1)], blueprint: db.id(key), selected_count: 1, count: 1 });
         assert_eq!(hotkey_action(&current, &selected, &db, 'E', BuildTiers::default()), queue("t1_light_bot"), "not the engineer's extractor");
         assert_eq!(hotkey_action(&current, &selected, &db, 'Q', BuildTiers::default()), queue("t1_engineer"));
-        assert_eq!(hotkey_action(&current, &selected, &db, 'C', BuildTiers::default()), None, "the engineer's bar is not shown");
+        assert_eq!(hotkey_action(&current, &selected, &db, 'H', BuildTiers::default()), None, "the engineer's bar is not shown");
     }
 
     #[test]

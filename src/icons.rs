@@ -68,6 +68,11 @@ pub enum Icon {
     TacticalMissile,
     StrategicMissile,
     AntiNuke,
+    LandScout,
+    MobileShield,
+    FieldEngineer,
+    TorpedoBoat,
+    Wall,
     /// Anything without an icon of its own, such as the stress test's plain cubes.
     Unknown,
 }
@@ -85,7 +90,7 @@ pub enum BarGroup {
 }
 
 impl Icon {
-    pub const ALL: [Self; 50] = [
+    pub const ALL: [Self; 55] = [
         Self::Commander,
         Self::SupportCommander,
         Self::Engineer,
@@ -135,6 +140,11 @@ impl Icon {
         Self::TacticalMissile,
         Self::StrategicMissile,
         Self::AntiNuke,
+        Self::LandScout,
+        Self::MobileShield,
+        Self::FieldEngineer,
+        Self::TorpedoBoat,
+        Self::Wall,
         Self::Unknown,
     ];
 
@@ -144,8 +154,14 @@ impl Icon {
             "acu" => Self::Commander,
             "support_commander" => Self::SupportCommander,
             "t1_engineer" | "t2_engineer" | "t3_engineer" => Self::Engineer,
-            "t1_light_bot" => Self::LightBot,
-            "t2_heavy_tank" => Self::Tank,
+            // Bots and tanks of each tier share a symbol.
+            "t1_light_bot" | "t2_gatling_bot" | "t3_heavy_assault_bot" => Self::LightBot,
+            "t1_medium_tank" | "t2_heavy_tank" | "t3_armored_assault_bot" => Self::Tank,
+            "t1_land_scout" => Self::LandScout,
+            "t2_mobile_shield" => Self::MobileShield,
+            "t2_field_engineer" => Self::FieldEngineer,
+            "t2_torpedo_boat" => Self::TorpedoBoat,
+            "wall" => Self::Wall,
             "t2_amphibious_tank" => Self::AmphibiousTank,
             "t1_light_artillery" | "t3_mobile_artillery" => Self::Artillery,
             "t2_mobile_missile_launcher" => Self::MobileMissile,
@@ -175,11 +191,11 @@ impl Icon {
             "mass_storage" => Self::MassStorage,
             "energy_storage" => Self::EnergyStorage,
             key if key.starts_with("mass_fabricator") => Self::Fabricator,
-            "t1_point_defense" | "t2_point_defense" => Self::PointDefense,
+            "t1_point_defense" | "t2_point_defense" | "t3_heavy_point_defense" => Self::PointDefense,
             "t1_aa_turret" | "t2_flak" | "t3_sam" => Self::AntiAirTurret,
             "t2_artillery" | "t3_artillery" => Self::ArtilleryInstallation,
             "t1_torpedo_launcher" | "t2_torpedo_launcher" => Self::TorpedoLauncher,
-            "shield_generator" => Self::ShieldGenerator,
+            "shield_generator" | "t3_heavy_shield" => Self::ShieldGenerator,
             "tactical_missile_launcher" => Self::TacticalLauncher,
             "tactical_missile_defense" => Self::TacticalDefense,
             "strategic_missile_launcher" => Self::StrategicLauncher,
@@ -197,9 +213,9 @@ impl Icon {
     pub const fn frame(self) -> Frame {
         match self {
             Self::Commander | Self::SupportCommander => Frame::Commander,
-            Self::Engineer | Self::LightBot | Self::Tank | Self::AmphibiousTank | Self::Artillery | Self::MobileMissile | Self::MobileAntiAir | Self::Unknown => Frame::Land,
+            Self::Engineer | Self::LightBot | Self::Tank | Self::AmphibiousTank | Self::Artillery | Self::MobileMissile | Self::MobileAntiAir | Self::LandScout | Self::MobileShield | Self::FieldEngineer | Self::Unknown => Frame::Land,
             Self::Scout | Self::Fighter | Self::Bomber | Self::FighterBomber | Self::TorpedoBomber | Self::Gunship => Frame::Air,
-            Self::Frigate | Self::Destroyer | Self::Cruiser | Self::Battleship | Self::Battlecruiser | Self::Submarine | Self::MissileSubmarine | Self::ShieldBoat => Frame::Naval,
+            Self::Frigate | Self::Destroyer | Self::Cruiser | Self::Battleship | Self::Battlecruiser | Self::Submarine | Self::MissileSubmarine | Self::ShieldBoat | Self::TorpedoBoat => Frame::Naval,
             _ => Frame::Structure,
         }
     }
@@ -208,7 +224,7 @@ impl Icon {
         match self {
             Self::LandFactory | Self::AirFactory | Self::NavalFactory | Self::Gateway | Self::AirStaging => BarGroup::Factories,
             Self::Extractor | Self::Generator | Self::Hydrocarbon | Self::MassStorage | Self::EnergyStorage | Self::Fabricator => BarGroup::Resources,
-            Self::PointDefense | Self::AntiAirTurret | Self::TorpedoLauncher | Self::ShieldGenerator | Self::TacticalDefense | Self::StrategicDefense => BarGroup::Defenses,
+            Self::PointDefense | Self::AntiAirTurret | Self::TorpedoLauncher | Self::ShieldGenerator | Self::TacticalDefense | Self::StrategicDefense | Self::Wall => BarGroup::Defenses,
             Self::Radar | Self::Sonar | Self::Stealth => BarGroup::Intel,
             Self::ArtilleryInstallation | Self::TacticalLauncher | Self::StrategicLauncher => BarGroup::Strategic,
             _ => BarGroup::Units,
@@ -257,15 +273,15 @@ impl Role {
 impl Icon {
     pub const fn role(self) -> Role {
         match self {
-            Self::Commander | Self::SupportCommander | Self::Engineer | Self::LandFactory | Self::AirFactory | Self::NavalFactory | Self::Gateway | Self::AirStaging | Self::Unknown => Role::Build,
+            Self::Commander | Self::SupportCommander | Self::Engineer | Self::FieldEngineer | Self::LandFactory | Self::AirFactory | Self::NavalFactory | Self::Gateway | Self::AirStaging | Self::Unknown => Role::Build,
             Self::Extractor | Self::MassStorage | Self::Fabricator => Role::Mass,
             Self::Generator | Self::Hydrocarbon | Self::EnergyStorage => Role::Energy,
             Self::LightBot | Self::Tank | Self::AmphibiousTank | Self::Gunship | Self::Frigate | Self::Destroyer | Self::Cruiser | Self::Battleship | Self::Battlecruiser | Self::PointDefense => Role::DirectFire,
             Self::MobileAntiAir | Self::Fighter | Self::AntiAirTurret => Role::AntiAir,
             Self::Artillery | Self::MobileMissile | Self::Bomber | Self::FighterBomber | Self::MissileSubmarine | Self::ArtilleryInstallation | Self::TacticalLauncher | Self::StrategicLauncher | Self::TacticalMissile | Self::StrategicMissile => Role::Indirect,
-            Self::TorpedoBomber | Self::Submarine | Self::TorpedoLauncher => Role::Underwater,
-            Self::ShieldBoat | Self::ShieldGenerator | Self::TacticalDefense | Self::StrategicDefense | Self::AntiNuke => Role::Protection,
-            Self::Scout | Self::Radar | Self::Sonar | Self::Stealth => Role::Intel,
+            Self::TorpedoBomber | Self::Submarine | Self::TorpedoLauncher | Self::TorpedoBoat => Role::Underwater,
+            Self::ShieldBoat | Self::ShieldGenerator | Self::TacticalDefense | Self::StrategicDefense | Self::AntiNuke | Self::MobileShield | Self::Wall => Role::Protection,
+            Self::Scout | Self::Radar | Self::Sonar | Self::Stealth | Self::LandScout => Role::Intel,
         }
     }
 }
@@ -565,6 +581,36 @@ fn symbol(out: &mut Vec<Shape>, center: Pos2, size: f32, icon: Icon, stroke: Str
             out.push(line(&[(0.0, 0.85), (0.0, -0.85)]));
             out.push(line(&[(-0.5, -0.35), (0.0, -0.85), (0.5, -0.35)]));
             out.push(ring(0.0, 0.2, 0.5));
+        }
+        Icon::LandScout => {
+            // An eye: a lens with a pupil.
+            out.push(line(&[(-0.95, 0.0), (-0.45, -0.45), (0.45, -0.45), (0.95, 0.0), (0.45, 0.45), (-0.45, 0.45), (-0.95, 0.0)]));
+            out.push(dot(0.0, 0.0, 0.25));
+        }
+        Icon::MobileShield => {
+            // A dome over a vehicle.
+            out.push(arc(0.0, 0.45, 0.85, 180.0, 360.0));
+            out.push(line(&[(-0.55, 0.45), (0.55, 0.45), (0.55, 0.8), (-0.55, 0.8), (-0.55, 0.45)]));
+        }
+        Icon::FieldEngineer => {
+            // The engineer's mark with a gun's sight across it.
+            out.push(line(&[(-1.0, 0.0), (1.0, 0.0)]));
+            out.push(line(&[(-0.5, -0.7), (-0.5, 0.7)]));
+            out.push(line(&[(0.5, -0.7), (0.5, 0.7)]));
+            out.push(ring(0.0, 0.0, 0.3));
+        }
+        Icon::TorpedoBoat => {
+            out.push(line(&hull));
+            out.push(line(&[(-0.6, -0.15), (0.45, -0.15)]));
+            out.push(line(&[(0.15, -0.45), (0.5, -0.15), (0.15, 0.15)]));
+        }
+        Icon::Wall => {
+            // Courses of bricks.
+            out.push(line(&[(-0.9, -0.6), (0.9, -0.6), (0.9, 0.6), (-0.9, 0.6), (-0.9, -0.6)]));
+            out.push(line(&[(-0.9, 0.0), (0.9, 0.0)]));
+            out.push(line(&[(0.0, -0.6), (0.0, 0.0)]));
+            out.push(line(&[(-0.45, 0.0), (-0.45, 0.6)]));
+            out.push(line(&[(0.45, 0.0), (0.45, 0.6)]));
         }
         Icon::Unknown => out.push(dot(0.0, 0.0, 0.25)),
     }

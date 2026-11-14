@@ -280,6 +280,17 @@ pub fn unit_look(key: &str) -> UnitLook {
         "land_factory_t3" => look(Shape::FactoryT3, Some([0.10, 0.10, 0.20]), 0.85),
         "t1_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([0.95, 0.80, 0.30]), 1.0) },
         "t1_light_bot" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::Bot, None, 1.0) },
+        "t1_land_scout" => look(Shape::LandScout, Some([0.75, 0.95, 1.00]), 1.0),
+        "t1_medium_tank" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::Tank, Some([0.80, 0.85, 0.70]), 1.0) },
+        "t2_gatling_bot" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::GatlingBot, None, 1.0) },
+        "t2_mobile_shield" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::ShieldEmitter, Some([0.55, 0.85, 1.00]), 1.0) },
+        "t2_field_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([0.95, 0.40, 0.25]), 1.0) },
+        "t3_heavy_assault_bot" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::HeavyAssaultBot, None, 1.0) },
+        "t3_armored_assault_bot" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::ArmoredAssaultBot, Some([0.70, 0.70, 0.75]), 1.0) },
+        "t2_torpedo_boat" => look(Shape::TorpedoBoat, Some([0.40, 0.90, 0.80]), 0.5),
+        "t3_heavy_point_defense" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::HeavyPointDefense, Some([0.95, 0.35, 0.30]), 1.0) },
+        "t3_heavy_shield" => look(Shape::ShieldGenerator, Some([0.45, 0.70, 1.00]), 0.9),
+        "wall" => look(Shape::Wall, Some([0.70, 0.70, 0.70]), 0.9),
         "t1_light_artillery" => UnitLook { base: Some(Shape::ArtilleryHull), ..look(Shape::Artillery, None, 1.0) },
         "t2_heavy_tank" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::Tank, None, 1.0) },
         "t2_amphibious_tank" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::Tank, Some([0.45, 0.65, 0.75]), 1.0) },
@@ -765,6 +776,9 @@ mod tests {
             "t3_spy_plane",
             "t3_air_superiority",
             "t2_flak",
+            "t1_medium_tank",
+            "t2_field_engineer",
+            "t3_heavy_shield",
         ];
         let shapes: Vec<Shape> = drawn().filter(|unit| !shared.contains(&unit.key.as_str())).map(|unit| unit_look(&unit.key).shape).collect();
         for (index, shape) in shapes.iter().enumerate() {

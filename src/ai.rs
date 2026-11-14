@@ -32,6 +32,9 @@ const MAX_FACTORIES: usize = 6;
 /// Mass income, a second, at which the AI takes each step up the tech tree.
 const T2_INCOME: i64 = 8;
 const T3_INCOME: i64 = 30;
+/// The most mobile shields the AI keeps, since each costs as much energy to run as four T1
+/// generators make.
+const MAX_MOBILE_SHIELDS: usize = 2;
 /// Mass income at which it upgrades its other T1 factories to T2.
 const SECOND_T2_INCOME: i64 = 20;
 /// Mass income at which it starts upgrading extractors to T2, and to T3.
@@ -135,6 +138,12 @@ struct Roster {
     shield_boat: BlueprintId,
     battleship: BlueprintId,
     battlecruiser: BlueprintId,
+    torpedo_boat: BlueprintId,
+    medium_tank: BlueprintId,
+    gatling_bot: BlueprintId,
+    mobile_shield: BlueprintId,
+    heavy_assault_bot: BlueprintId,
+    armored_assault_bot: BlueprintId,
     /// Radars by tier: the radar and the T2 radar.
     radars: [BlueprintId; 2],
     shield: BlueprintId,
@@ -179,6 +188,12 @@ impl Roster {
             shield_boat: id("t2_shield_boat"),
             battleship: id("t3_battleship"),
             battlecruiser: id("t3_battlecruiser"),
+            torpedo_boat: id("t2_torpedo_boat"),
+            medium_tank: id("t1_medium_tank"),
+            gatling_bot: id("t2_gatling_bot"),
+            mobile_shield: id("t2_mobile_shield"),
+            heavy_assault_bot: id("t3_heavy_assault_bot"),
+            armored_assault_bot: id("t3_armored_assault_bot"),
             radars: [id("radar"), id("radar_t2")],
             shield: id("shield_generator"),
             tactical_launcher: id("tactical_missile_launcher"),
@@ -1053,6 +1068,18 @@ impl AiBrain {
         let engineers_wanted = self.skill.max_engineers.min(2 + mass_income as usize / 5);
         let rally = self.rally_point();
         let headquarters = forces.headquarters_tier;
+        // Mobile shields cost a great deal of energy to run, so there are never many, and none
+        // are started while energy is short.
+        let mobile_shield = self.roster().mobile_shield;
+        let mut mobile_shields = world
+            .units
+            .iter()
+            .filter(|&&(_, entity)| {
+                world.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team == self.team)
+                    && world.ecs.get::<&Blueprinted>(entity).is_ok_and(|unit| unit.0 == mobile_shield)
+            })
+            .count();
+        let shields_affordable = economy.energy >= economy.energy_capacity / 2 && energy_income >= mass_income * 12;
         for factory in forces.factories.iter().filter(|factory| factory.finished) {
             if !self.rally_set_on.contains(&factory.id) {
                 self.rally_set_on.push(factory.id);
@@ -1111,13 +1138,28 @@ impl AiBrain {
                     roster.mobile_anti_air[usize::from(tier >= 2)]
                 } else {
                 match tier {
-                    1 => {
-                        if self.unit_counter.is_multiple_of(4) { roster.artillery } else { roster.bot }
-                    }
-                    2 => [roster.tank, roster.tank, roster.bot, roster.amphibious, roster.tank, roster.missile_launcher][turn as usize],
-                    _ => [roster.tank, roster.heavy_artillery, roster.tank, roster.amphibious, roster.missile_launcher, roster.tank][turn as usize],
+                    1 => match self.unit_counter % 4 {
+                        0 => roster.artillery,
+                        2 => roster.medium_tank,
+                        _ => roster.bot,
+                    },
+                    // A mobile shield goes with every six units, to cover the rest, up to two.
+                    2 => [roster.tank, roster.gatling_bot, roster.tank, roster.amphibious, roster.mobile_shield, roster.missile_launcher][turn as usize],
+                    _ => [roster.heavy_assault_bot, roster.heavy_artillery, roster.armored_assault_bot, roster.tank, roster.mobile_shield, roster.heavy_assault_bot][turn as usize],
                 }
                 }
+            };
+            let item = if item == mobile_shield {
+                if mobile_shields < MAX_MOBILE_SHIELDS && shields_affordable {
+                    mobile_shields += 1;
+                    item
+                } else if tier >= 3 {
+                    self.roster().heavy_assault_bot
+                } else {
+                    self.roster().tank
+                }
+            } else {
+                item
             };
             commands.push(SimCommand::QueueUnit { factory: factory.id, blueprint: item, count: 1 });
         }
@@ -1212,8 +1254,8 @@ impl AiBrain {
                     let turn = (self.unit_counter % 6) as usize;
                     match tier {
                         1 => [roster.frigate, roster.frigate, roster.submarine][turn % 3],
-                        2 => [roster.destroyer, roster.frigate, roster.cruiser, roster.destroyer, roster.frigate, roster.shield_boat][turn],
-                        _ => [roster.battleship, roster.destroyer, roster.battlecruiser, roster.cruiser, roster.destroyer, roster.shield_boat][turn],
+                        2 => [roster.destroyer, roster.torpedo_boat, roster.cruiser, roster.destroyer, roster.frigate, roster.shield_boat][turn],
+                        _ => [roster.battleship, roster.destroyer, roster.battlecruiser, roster.cruiser, roster.torpedo_boat, roster.shield_boat][turn],
                     }
                 }
             };
@@ -1254,15 +1296,38 @@ impl AiBrain {
         self.fleet_size = (self.fleet_size + 2).min(LARGEST_FLEET);
     }
 
-    /// In a crisis, pauses its extractors, so that what energy there is goes into generators,
-    /// and starts them again once energy is half full.
+    /// In a crisis, pauses its extractors, factories, and everything with upkeep, such as shields
+    /// and radar, so that what energy there is goes into generators, and starts them again once
+    /// energy is half full. Factories still making units, T3 ones above all, drew so much that
+    /// new generators never finished, and a shield and a radar could take all of what little
+    /// came in before anything was built.
     fn command_energy(&self, world: &SimWorld, forces: &Forces, commands: &mut Vec<SimCommand>) {
         let economy = &world.economies[self.team.index()];
         let (paused, running): (Vec<&ExtractorInfo>, Vec<&ExtractorInfo>) = forces.extractor_sites.iter().partition(|extractor| extractor.paused);
-        if forces.energy_crisis && !running.is_empty() {
-            commands.push(SimCommand::SetPaused { units: running.iter().map(|extractor| extractor.id).collect(), paused: true });
-        } else if economy.energy >= economy.energy_capacity / 2 && !paused.is_empty() {
-            commands.push(SimCommand::SetPaused { units: paused.iter().map(|extractor| extractor.id).collect(), paused: false });
+        let factories = forces.factories.iter().chain(&forces.air_factories).chain(&forces.naval_factories).filter(|factory| factory.finished).map(|factory| factory.id);
+        let extractors: Vec<SimId> = forces.extractor_sites.iter().map(|extractor| extractor.id).collect();
+        let upkeep = world
+            .units
+            .iter()
+            .filter(|&&(id, entity)| {
+                !extractors.contains(&id)
+                    && world.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team == self.team)
+                    && world.ecs.get::<&Construction>(entity).is_err()
+                    && world.ecs.get::<&Blueprinted>(entity).is_ok_and(|unit| {
+                        let unit = world.blueprints.get(unit.0);
+                        unit.shield.is_some() || unit.upkeep > Res::ZERO
+                    })
+            })
+            .map(|&(id, _)| id);
+        let (paused_factories, running_factories): (Vec<SimId>, Vec<SimId>) = factories
+            .chain(upkeep)
+            .partition(|&id| world.unit_entity(id).is_some_and(|entity| world.ecs.get::<&crate::sim::components::Paused>(entity).is_ok()));
+        if forces.energy_crisis && !(running.is_empty() && running_factories.is_empty()) {
+            let units = running.iter().map(|extractor| extractor.id).chain(running_factories).collect();
+            commands.push(SimCommand::SetPaused { units, paused: true });
+        } else if economy.energy >= economy.energy_capacity / 2 && !(paused.is_empty() && paused_factories.is_empty()) {
+            let units = paused.iter().map(|extractor| extractor.id).chain(paused_factories).collect();
+            commands.push(SimCommand::SetPaused { units, paused: false });
         }
     }
 

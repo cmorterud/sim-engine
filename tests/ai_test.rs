@@ -250,7 +250,9 @@ fn ai_climbs_the_tech_tree_and_upgrades_its_economy() {
     assert!(count("t2_engineer") >= 1 && count("t3_engineer") >= 1, "no higher-tier engineers");
     assert!(count("mass_extractor_t2") + count("mass_extractor_t3") >= 6, "only {} upgraded extractors", count("mass_extractor_t2") + count("mass_extractor_t3"));
     assert!(count("power_generator_t2") + count("power_generator_t3") >= 1, "no higher-tier generators");
-    assert!(count("t2_heavy_tank") >= 5 && count("t3_mobile_artillery") >= 1, "the army is not keeping up with the tech");
+    let higher_tier = ["t2_heavy_tank", "t2_gatling_bot", "t2_amphibious_tank", "t3_heavy_assault_bot", "t3_armored_assault_bot", "t3_mobile_artillery"].iter().map(|key| count(key)).sum::<usize>();
+    let third_tier = ["t3_heavy_assault_bot", "t3_armored_assault_bot", "t3_mobile_artillery"].iter().map(|key| count(key)).sum::<usize>();
+    assert!(higher_tier >= 5 && third_tier >= 1, "the army is not keeping up with the tech: {higher_tier} of T2 and up, {third_tier} of T3");
     let income = (world.economies[0].mass_income * 10).to_num::<i64>();
     assert!(income >= 60, "mass income is only {income}/s");
 }

@@ -34,6 +34,9 @@ Taken so far:
 * Mass extractor tiers, mass fabricators, and the hydrocarbon power plant (§3), from FAF's UEF units.
 * The T1 air factory, aircraft, and anti-air (§10), from FAF's UEF units, with generic names. How
   far a bomb is let go short of its target is worked out here from its fall.
+* The rest of the UEF's non-experimental units and structures: the Land Scout, Medium Tank, Gatling
+  Bot, Mobile Shield Generator, Field Engineer, Heavy and Armored Assault Bots, Torpedo Boat, Heavy
+  Point Defense, Heavy Shield Generator, and Wall Section, from FAF's UEF units, with generic names.
 
 ## Fonts
 

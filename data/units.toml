@@ -24,7 +24,7 @@ movement = "seabed"
 build_power = 10
 build_range = 200
 # Its engineering suites (the enhancements below) unlock the T2 and T3 structures on its list.
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "radar", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "stealth_field_generator", "strategic_missile_launcher", "strategic_missile_defense", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "naval_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "omni_sensor", "land_factory_t3_support", "air_factory_t3_support", "t2_artillery", "t3_artillery", "naval_factory_t2_support", "naval_factory_t3_support", "t1_sonar", "t1_torpedo_launcher", "t2_sonar", "t2_torpedo_launcher"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "radar", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "stealth_field_generator", "strategic_missile_launcher", "strategic_missile_defense", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "naval_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "omni_sensor", "land_factory_t3_support", "air_factory_t3_support", "t2_artillery", "t3_artillery", "naval_factory_t2_support", "naval_factory_t3_support", "t1_sonar", "t1_torpedo_launcher", "t2_sonar", "t2_torpedo_launcher", "wall", "t3_heavy_point_defense", "t3_heavy_shield"]
 weapon = { range = 440, reload_ticks = 7, projectile_speed = 50, damage = 70, turn_rate = 180 }
 overcharge = { energy = 3000, damage = 12000, structure_damage = 800, reload_ticks = 50 }
 mass_income = 1
@@ -52,7 +52,7 @@ radius = 8
 vision = 360
 build_power = 5
 build_range = 100
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "radar", "hydrocarbon_plant", "air_factory", "naval_factory", "t1_aa_turret", "t1_sonar", "t1_torpedo_launcher"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "radar", "hydrocarbon_plant", "air_factory", "naval_factory", "t1_aa_turret", "t1_sonar", "t1_torpedo_launcher", "wall"]
 
 [[unit]]
 id = "t1_light_bot"
@@ -113,7 +113,7 @@ health = 3200
 footprint = 3
 vision = 400
 build_power = 20
-builds = ["t1_engineer", "t1_light_bot", "t1_light_artillery", "t1_mobile_aa"]
+builds = ["t1_engineer", "t1_light_bot", "t1_light_artillery", "t1_mobile_aa", "t1_land_scout", "t1_medium_tank"]
 upgrades_to = "land_factory_t2"
 factory_kind = "land"
 
@@ -129,7 +129,7 @@ health = 6000
 footprint = 3
 vision = 400
 build_power = 40
-builds = ["t1_engineer", "t2_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_amphibious_tank", "t2_mobile_missile_launcher"]
+builds = ["t1_engineer", "t2_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_amphibious_tank", "t2_mobile_missile_launcher", "t1_land_scout", "t1_medium_tank", "t2_gatling_bot", "t2_mobile_shield", "t2_field_engineer"]
 upgrades_to = "land_factory_t3"
 factory_kind = "land"
 
@@ -327,7 +327,7 @@ health = 10000
 footprint = 3
 vision = 400
 build_power = 90
-builds = ["t1_engineer", "t2_engineer", "t3_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_amphibious_tank", "t2_mobile_missile_launcher", "t3_mobile_artillery"]
+builds = ["t1_engineer", "t2_engineer", "t3_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_amphibious_tank", "t2_mobile_missile_launcher", "t3_mobile_artillery", "t1_land_scout", "t1_medium_tank", "t2_gatling_bot", "t2_mobile_shield", "t2_field_engineer", "t3_heavy_assault_bot", "t3_armored_assault_bot"]
 factory_kind = "land"
 
 [[unit]]
@@ -348,7 +348,7 @@ radius = 9
 vision = 400
 build_power = 12
 build_range = 120
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "radar", "stealth_field_generator", "hydrocarbon_plant", "mass_fabricator", "air_factory", "naval_factory", "t1_aa_turret", "air_staging", "t2_flak", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "t2_artillery", "naval_factory_t2_support", "t1_sonar", "t1_torpedo_launcher", "t2_sonar", "t2_torpedo_launcher"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "radar", "stealth_field_generator", "hydrocarbon_plant", "mass_fabricator", "air_factory", "naval_factory", "t1_aa_turret", "air_staging", "t2_flak", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "t2_artillery", "naval_factory_t2_support", "t1_sonar", "t1_torpedo_launcher", "t2_sonar", "t2_torpedo_launcher", "wall"]
 
 [[unit]]
 id = "t3_engineer"
@@ -368,7 +368,7 @@ radius = 10
 vision = 520
 build_power = 30
 build_range = 140
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "naval_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "omni_sensor", "land_factory_t3_support", "air_factory_t3_support", "t2_artillery", "t3_artillery", "naval_factory_t2_support", "naval_factory_t3_support", "t1_sonar", "t1_torpedo_launcher", "t2_sonar", "t2_torpedo_launcher"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "naval_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "omni_sensor", "land_factory_t3_support", "air_factory_t3_support", "t2_artillery", "t3_artillery", "naval_factory_t2_support", "naval_factory_t3_support", "t1_sonar", "t1_torpedo_launcher", "t2_sonar", "t2_torpedo_launcher", "wall", "t3_heavy_point_defense", "t3_heavy_shield"]
 
 # Intel (GAME_SPECIFICATION.md §9). Ranges are in units, and upkeep is energy per second
 # while running: a team that cannot pay switches its sensors off until it can. The commander
@@ -458,7 +458,7 @@ vision = 520
 movement = "seabed"
 build_power = 56
 build_range = 200
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "naval_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "omni_sensor", "land_factory_t3_support", "air_factory_t3_support", "t2_artillery", "t3_artillery", "naval_factory_t2_support", "naval_factory_t3_support", "t1_sonar", "t1_torpedo_launcher", "t2_sonar", "t2_torpedo_launcher"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "naval_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "omni_sensor", "land_factory_t3_support", "air_factory_t3_support", "t2_artillery", "t3_artillery", "naval_factory_t2_support", "naval_factory_t3_support", "t1_sonar", "t1_torpedo_launcher", "t2_sonar", "t2_torpedo_launcher", "wall", "t3_heavy_point_defense", "t3_heavy_shield"]
 # Three times the commander's fire: 300 a second for its 100, and a little farther.
 weapon = { range = 500, reload_ticks = 10, projectile_speed = 50, damage = 300, turn_rate = 180 }
 mass_income = 1
@@ -838,7 +838,7 @@ vision = 400
 build_power = 40
 factory_kind = "land"
 support = true
-builds = ["t1_engineer", "t2_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_amphibious_tank", "t2_mobile_missile_launcher"]
+builds = ["t1_engineer", "t2_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_amphibious_tank", "t2_mobile_missile_launcher", "t1_land_scout", "t1_medium_tank", "t2_gatling_bot", "t2_mobile_shield", "t2_field_engineer"]
 upgrades_to = "land_factory_t3_support"
 
 [[unit]]
@@ -855,7 +855,7 @@ vision = 400
 build_power = 90
 factory_kind = "land"
 support = true
-builds = ["t1_engineer", "t2_engineer", "t3_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_amphibious_tank", "t2_mobile_missile_launcher", "t3_mobile_artillery"]
+builds = ["t1_engineer", "t2_engineer", "t3_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_amphibious_tank", "t2_mobile_missile_launcher", "t3_mobile_artillery", "t1_land_scout", "t1_medium_tank", "t2_gatling_bot", "t2_mobile_shield", "t2_field_engineer", "t3_heavy_assault_bot", "t3_armored_assault_bot"]
 
 [[unit]]
 id = "air_factory_t2_support"
@@ -1105,7 +1105,7 @@ vision = 400
 build_power = 90
 factory_kind = "naval"
 on_water = true
-builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_shield_boat"]
+builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_shield_boat", "t2_torpedo_boat"]
 upgrades_to = "naval_factory_t3"
 
 [[unit]]
@@ -1122,7 +1122,7 @@ vision = 400
 build_power = 150
 factory_kind = "naval"
 on_water = true
-builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_shield_boat", "t3_battleship", "t3_battlecruiser", "t3_missile_sub"]
+builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_shield_boat", "t3_battleship", "t3_battlecruiser", "t3_missile_sub", "t2_torpedo_boat"]
 
 [[unit]]
 id = "naval_factory_t2_support"
@@ -1139,7 +1139,7 @@ build_power = 90
 factory_kind = "naval"
 support = true
 on_water = true
-builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_shield_boat"]
+builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_shield_boat", "t2_torpedo_boat"]
 upgrades_to = "naval_factory_t3_support"
 
 [[unit]]
@@ -1157,7 +1157,7 @@ build_power = 150
 factory_kind = "naval"
 support = true
 on_water = true
-builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_shield_boat", "t3_battleship", "t3_battlecruiser", "t3_missile_sub"]
+builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_shield_boat", "t3_battleship", "t3_battlecruiser", "t3_missile_sub", "t2_torpedo_boat"]
 
 # Two gauss cannons, a railgun at aircraft, torpedoes, and an anti-torpedo charge.
 [[unit]]
@@ -1666,3 +1666,186 @@ energy = 90000
 build_time = 8400
 mass_income = 10
 energy_income = 1000
+
+# The rest of the UEF's land, naval, and defensive line, from FAF's blueprints with the usual
+# conversion: distances x20, speeds x2 per tick, build times and health as they are, and salvo
+# weapons as one shot at a time with the same damage a second.
+
+[[unit]]
+id = "t1_land_scout"
+name = "Land Scout"
+class = "tank"
+tier = 1
+mass = 12
+energy = 80
+build_time = 60
+health = 29
+speed = 9
+turn_rate = 90
+turn_radius = 10
+radius = 8
+vision = 480
+radar = 880
+weapon = { range = 520, reload_ticks = 20, projectile_speed = 50, damage = 4, turn_rate = 180 }
+
+[[unit]]
+id = "t1_medium_tank"
+name = "Medium Tank"
+class = "tank"
+tier = 1
+mass = 56
+energy = 266
+build_time = 300
+health = 300
+speed = "6.8"
+turn_rate = 90
+turn_radius = 30
+radius = 9
+vision = 400
+weapon = { range = 360, reload_ticks = 10, projectile_speed = 50, damage = 24, turn_rate = 90 }
+
+[[unit]]
+id = "t2_gatling_bot"
+name = "Gatling Bot"
+class = "bot"
+tier = 2
+mass = 200
+energy = 1000
+build_time = 1000
+health = 650
+speed = "5.8"
+turn_rate = 80
+radius = 10
+vision = 400
+# A gatling that fires 15-round bursts, about 37 damage a second, and a grenade launcher.
+weapon = { range = 680, reload_ticks = 4, projectile_speed = 56, damage = 15, turn_rate = 120 }
+extra_weapons = [{ range = 680, reload_ticks = 17, projectile_speed = 26, damage = 50, splash_radius = 40 }]
+
+[[unit]]
+id = "t2_mobile_shield"
+name = "Mobile Shield Generator"
+class = "tank"
+tier = 2
+mass = 220
+energy = 900
+build_time = 660
+health = 150
+speed = 7
+turn_rate = 120
+turn_radius = 20
+radius = 8
+vision = 400
+shield = { radius = 170, health = 3000, regen = 55, recharge_seconds = 24, upkeep = 80 }
+
+[[unit]]
+id = "t2_field_engineer"
+name = "Field Engineer"
+class = "engineer"
+tier = 2
+mass = 225
+energy = 1000
+build_time = 1000
+health = 1040
+speed = 6
+turn_rate = 160
+turn_radius = 10
+radius = 8
+vision = 400
+radar = 880
+upkeep = 15
+build_power = "17.5"
+build_range = 120
+# Builds forward defenses, artillery, and intel, and the T1 factories, and defends itself.
+weapon = { range = 360, reload_ticks = 5, projectile_speed = 120, damage = 15, turn_rate = 180 }
+builds = ["land_factory_t1", "air_factory", "naval_factory", "t1_point_defense", "t2_point_defense", "t1_aa_turret", "t2_flak", "shield_generator", "tactical_missile_defense", "t1_torpedo_launcher", "t2_torpedo_launcher", "t2_artillery", "tactical_missile_launcher", "radar", "radar_t2", "t1_sonar", "t2_sonar", "stealth_field_generator", "wall"]
+
+[[unit]]
+id = "t3_heavy_assault_bot"
+name = "Heavy Assault Bot"
+class = "bot"
+tier = 3
+mass = 480
+energy = 5250
+build_time = 2400
+health = 2400
+speed = "7.6"
+turn_rate = 120
+radius = 13
+vision = 480
+# A personal shield that takes the first hits.
+shield = { radius = 25, health = 700, regen = 20, recharge_seconds = 12, upkeep = 25 }
+weapon = { range = 480, reload_ticks = 3, projectile_speed = 70, damage = 45, turn_rate = 120 }
+
+[[unit]]
+id = "t3_armored_assault_bot"
+name = "Armored Assault Bot"
+class = "bot"
+tier = 3
+mass = 1280
+energy = 14000
+build_time = 4800
+health = 7200
+speed = "4.4"
+turn_rate = 70
+radius = 15
+vision = 520
+weapon = { range = 680, reload_ticks = 43, projectile_speed = 72, damage = 1450, turn_rate = 60 }
+
+[[unit]]
+id = "t2_torpedo_boat"
+name = "Torpedo Boat"
+class = "tank"
+tier = 2
+mass = 750
+energy = 6000
+build_time = 3000
+health = 2000
+speed = 12
+turn_rate = 100
+turn_radius = 40
+radius = 15
+vision = 640
+sonar = 1440
+movement = "naval"
+# Four-torpedo volleys, about 100 damage a second, and decoys against torpedoes.
+weapon = { range = 1100, reload_ticks = 8, projectile_speed = 30, damage = 80, targets = "naval" }
+torpedo_defense = { range = 500, reload_ticks = 25 }
+
+[[unit]]
+id = "t3_heavy_point_defense"
+name = "Heavy Point Defense"
+class = "defense"
+tier = 3
+mass = 2000
+energy = 17600
+build_time = 2000
+health = 6500
+footprint = 2
+vision = 600
+# A gatling cannon: 15-round bursts, about 250 damage a second.
+weapon = { range = 1400, reload_ticks = 7, projectile_speed = 64, damage = 175, splash_radius = 20, turn_rate = 90 }
+
+[[unit]]
+id = "t3_heavy_shield"
+name = "Heavy Shield Generator"
+class = "defense"
+tier = 3
+mass = 3300
+energy = 55000
+build_time = 5000
+health = 500
+footprint = 3
+vision = 400
+shield = { radius = 440, health = 17000, regen = 131, recharge_seconds = 23, upkeep = 400 }
+
+[[unit]]
+id = "wall"
+name = "Wall Section"
+class = "defense"
+tier = 1
+mass = 3
+energy = 20
+build_time = 15
+health = 500
+footprint = 1
+vision = 40

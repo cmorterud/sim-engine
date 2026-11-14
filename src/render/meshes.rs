@@ -128,6 +128,22 @@ pub enum Shape {
     AirSuperiority,
     /// A long gunship with two rotors, pointing along +Y.
     HeavyGunship,
+    /// A light four-wheeled car with a radar mast and a small gun.
+    LandScout,
+    /// A bot's upper body with a gatling arm and a grenade launcher on its shoulder.
+    GatlingBot,
+    /// A shield emitter on a tracked hull: a mast with a glowing ring and an orb.
+    ShieldEmitter,
+    /// A broad armored bot's upper body, with a cannon in each arm and shield emitters.
+    HeavyAssaultBot,
+    /// A bulky bot's upper body, with one heavy cannon over its shoulder.
+    ArmoredAssaultBot,
+    /// A low, fast boat with torpedo tubes along its sides.
+    TorpedoBoat,
+    /// A gatling turret for the heavy point defense.
+    HeavyPointDefense,
+    /// A wall section: a block with crenellations along the top.
+    Wall,
     /// A shield's dome: an open half-sphere, drawn see-through.
     Dome,
     /// Flat, around the feet of a selected mobile unit.
@@ -137,7 +153,7 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub const ALL: [Self; 71] = [
+    pub const ALL: [Self; 79] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -206,6 +222,14 @@ impl Shape {
         Self::Scar,
         Self::AirSuperiority,
         Self::HeavyGunship,
+        Self::LandScout,
+        Self::GatlingBot,
+        Self::ShieldEmitter,
+        Self::HeavyAssaultBot,
+        Self::ArmoredAssaultBot,
+        Self::TorpedoBoat,
+        Self::HeavyPointDefense,
+        Self::Wall,
         Self::Dome,
         Self::SelectionRing,
         Self::SelectionBox,
@@ -225,6 +249,7 @@ impl Shape {
             Self::HeavyGunship => Some(1.7),
             Self::Radar => Some(0.25),
             Self::AirFactoryT3 => Some(0.3),
+            Self::LandScout => Some(0.6),
             _ => None,
         }
     }
@@ -242,7 +267,7 @@ impl Shape {
 
     /// Whether the shape is a hull that leaves a wake behind it on the water.
     pub const fn leaves_wake(self) -> bool {
-        matches!(self, Self::Frigate | Self::Destroyer | Self::Cruiser | Self::Battleship | Self::Battlecruiser | Self::Submarine | Self::MissileSubmarine | Self::ShieldBoat)
+        matches!(self, Self::Frigate | Self::Destroyer | Self::Cruiser | Self::Battleship | Self::Battlecruiser | Self::Submarine | Self::MissileSubmarine | Self::ShieldBoat | Self::TorpedoBoat)
     }
 
     /// Whether the shape is a pair of legs, which swing as the unit walks.
@@ -811,6 +836,136 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.frustum([0.0, 0.0], [-0.25, -0.05], [0.3, 0.24], 8);
         }
         // A team-colored turret with a sloped front, a long gun, and a sensor with a glowing eye.
+        Shape::LandScout => {
+            mesh.paint(Material::Metal);
+            for x in [-0.33_f32, 0.33] {
+                for y in [-0.3_f32, 0.28] {
+                    mesh.bevel([x - 0.08, y - 0.12, -0.5], [x + 0.08, y + 0.12, -0.26], 0.04);
+                }
+            }
+            mesh.paint(Material::Trim);
+            mesh.bevel([-0.26, -0.44, -0.38], [0.26, 0.42, -0.2], 0.05);
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.18, -0.12, -0.2], [0.18, 0.2, -0.02], 0.04);
+            mesh.paint(Material::Glow);
+            mesh.block([-0.14, 0.2, -0.12], [0.14, 0.215, -0.06]);
+            mesh.paint(Material::Metal);
+            mesh.body(0.0, &[[0.2, 0.025, 0.025, -0.06], [0.46, 0.02, 0.02, -0.06]], 6);
+            mesh.flash([0.0, 0.45, -0.06], 0.04);
+            mesh.frustum([0.0, -0.28], [-0.2, 0.3], [0.025, 0.02], 6);
+            mesh.moving(motion::SPIN, [0.0, -0.28, 0.0], |mesh| {
+                mesh.cuboid(
+                    [Vec3::new(-0.16, -0.3, 0.26), Vec3::new(0.16, -0.3, 0.26), Vec3::new(0.16, -0.27, 0.26), Vec3::new(-0.16, -0.27, 0.26)],
+                    [Vec3::new(-0.16, -0.26, 0.4), Vec3::new(0.16, -0.26, 0.4), Vec3::new(0.16, -0.23, 0.4), Vec3::new(-0.16, -0.23, 0.4)],
+                );
+            });
+        }
+        Shape::GatlingBot => {
+            mesh.bevel([-0.22, -0.18, -0.02], [0.22, 0.18, 0.34], 0.05);
+            mesh.paint(Material::Hull);
+            mesh.bevel([0.22, -0.12, 0.08], [0.38, 0.2, 0.3], 0.04);
+            mesh.paint(Material::Metal);
+            mesh.moving(motion::RECOIL, [0.3, 0.2, 0.19], |mesh| {
+                for (dx, dz) in [(-0.035_f32, 0.0_f32), (0.035, 0.0), (0.0, 0.05)] {
+                    mesh.body(0.3 + dx, &[[0.2, 0.02, 0.02, 0.17 + dz], [0.49, 0.018, 0.018, 0.17 + dz]], 5);
+                }
+            });
+            mesh.flash([0.3, 0.48, 0.19], 0.06);
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.38, -0.12, 0.22], [-0.2, 0.14, 0.38], 0.03);
+            mesh.paint(Material::Metal);
+            mesh.body(-0.29, &[[0.14, 0.045, 0.045, 0.3], [0.26, 0.045, 0.045, 0.3]], 6);
+            mesh.paint(Material::Hull);
+            mesh.beam([-0.3, 0.0, 0.18], [-0.3, 0.2, 0.08], 0.05, 0.05);
+            mesh.bevel([-0.1, -0.06, 0.34], [0.1, 0.12, 0.46], 0.03);
+            mesh.paint(Material::Glow);
+            mesh.block([-0.08, 0.12, 0.38], [0.08, 0.135, 0.42]);
+        }
+        Shape::ShieldEmitter => {
+            mesh.bevel([-0.26, -0.32, -0.2], [0.26, 0.3, 0.0], 0.04);
+            mesh.paint(Material::Metal);
+            mesh.frustum([0.0, -0.02], [0.0, 0.32], [0.06, 0.045], 8);
+            mesh.paint(Material::Glow);
+            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
+                mesh.frustum([0.0, -0.02], [0.16, 0.2], [0.24, 0.24], 14);
+                mesh.ball([0.0, -0.02, 0.42], 0.07, 8, 4);
+            });
+            mesh.paint(Material::Hull);
+            mesh.frustum([0.0, -0.02], [0.3, 0.38], [0.12, 0.05], 8);
+        }
+        Shape::HeavyAssaultBot => {
+            mesh.prism(&[[-0.3, -0.18], [0.3, -0.18], [0.34, 0.04], [0.22, 0.22], [-0.22, 0.22], [-0.34, 0.04]], [-0.06, 0.3], [0.8, 1.0]);
+            mesh.paint(Material::Hull);
+            for x in [-0.4_f32, 0.4] {
+                mesh.bevel([x - 0.1, -0.14, 0.04], [x + 0.1, 0.16, 0.26], 0.05);
+            }
+            mesh.paint(Material::Metal);
+            mesh.moving(motion::RECOIL, [0.0, 0.16, 0.14], |mesh| {
+                for x in [-0.4_f32, 0.4] {
+                    mesh.body(x, &[[0.16, 0.05, 0.05, 0.14], [0.48, 0.042, 0.042, 0.14]], 6);
+                }
+            });
+            mesh.flash([0.4, 0.47, 0.14], 0.07);
+            mesh.paint(Material::Glow);
+            for x in [-0.25_f32, 0.25] {
+                mesh.ball([x, -0.04, 0.32], 0.055, 6, 3);
+            }
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.1, -0.04, 0.3], [0.1, 0.14, 0.44], 0.03);
+            mesh.paint(Material::Glow);
+            mesh.block([-0.08, 0.14, 0.35], [0.08, 0.155, 0.4]);
+        }
+        Shape::ArmoredAssaultBot => {
+            mesh.bevel([-0.3, -0.26, -0.04], [0.3, 0.2, 0.3], 0.06);
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.27, 0.2, -0.02], [0.27, 0.27, 0.24], 0.03);
+            mesh.bevel([-0.36, -0.14, 0.18], [-0.18, 0.1, 0.34], 0.03);
+            mesh.paint(Material::Metal);
+            mesh.moving(motion::RECOIL, [0.18, -0.1, 0.38], |mesh| {
+                mesh.body(0.18, &[[-0.12, 0.085, 0.085, 0.38], [0.2, 0.08, 0.08, 0.38], [0.5, 0.06, 0.06, 0.38]], 8);
+            });
+            mesh.flash([0.18, 0.48, 0.38], 0.09);
+            mesh.paint(Material::Glow);
+            mesh.block([-0.22, 0.27, 0.12], [0.06, 0.28, 0.17]);
+        }
+        Shape::TorpedoBoat => {
+            mesh.hull(0.13, 0.18, 0.05);
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.09, -0.12, -0.2], [0.09, 0.12, -0.04], 0.03);
+            mesh.paint(Material::Metal);
+            for x in [-0.1_f32, 0.1] {
+                mesh.body(x, &[[-0.32, 0.03, 0.03, -0.19], [0.06, 0.03, 0.03, -0.19]], 6);
+            }
+            mesh.frustum([0.0, -0.02], [-0.04, 0.26], [0.015, 0.01], 6);
+            mesh.paint(Material::Trim);
+            mesh.block([-0.1, -0.4, -0.2], [0.1, -0.28, -0.19]);
+            mesh.paint(Material::Glow);
+            mesh.ball([0.0, -0.02, 0.27], 0.025, 6, 3);
+        }
+        Shape::HeavyPointDefense => {
+            mesh.prism(&[[-0.26, -0.3], [0.26, -0.3], [0.32, -0.02], [0.2, 0.18], [-0.2, 0.18], [-0.32, -0.02]], [-0.05, 0.3], [1.0, 0.85]);
+            mesh.paint(Material::Metal);
+            mesh.moving(motion::RECOIL, [0.0, 0.16, 0.12], |mesh| {
+                for (dx, dz) in [(-0.045_f32, 0.0_f32), (0.045, 0.0), (0.0, 0.07), (0.0, -0.05)] {
+                    mesh.body(dx, &[[0.16, 0.026, 0.026, 0.12 + dz], [0.48, 0.022, 0.022, 0.12 + dz]], 5);
+                }
+            });
+            mesh.flash([0.0, 0.47, 0.12], 0.08);
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.12, -0.24, 0.3], [0.12, 0.0, 0.42], 0.03);
+            mesh.paint(Material::Glow);
+            mesh.block([-0.1, 0.0, 0.34], [0.1, 0.012, 0.38]);
+        }
+        Shape::Wall => {
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.5, -0.5, -0.5], [0.5, 0.5, 0.25], 0.04);
+            mesh.paint(Material::Trim);
+            mesh.block([-0.5, -0.5, 0.25], [0.5, 0.5, 0.33]);
+            mesh.paint(Material::Hull);
+            for x in [-0.33_f32, 0.0, 0.33] {
+                mesh.block([x - 0.1, -0.5, 0.33], [x + 0.1, 0.5, 0.5]);
+            }
+        }
         Shape::PointDefense => {
             mesh.prism(&[[-0.2, -0.26], [0.2, -0.26], [0.26, -0.02], [0.16, 0.16], [-0.16, 0.16], [-0.26, -0.02]], [-0.05, 0.28], [1.0, 0.85]);
             mesh.paint(Material::Metal);
