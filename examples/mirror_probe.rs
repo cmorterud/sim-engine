@@ -68,6 +68,7 @@ fn describe(world: &SimWorld, team: Team, command: &SimCommand) -> String {
         SimCommand::QueueUnit { blueprint, count, .. } => format!("queue {} x{count}", world.blueprints.get(*blueprint).key),
         SimCommand::Assist { units, .. } => format!("assist x{}", units.len()),
         SimCommand::Reclaim { units, .. } => format!("reclaim x{}", units.len()),
+        SimCommand::Upgrade { units } => format!("upgrade x{}", units.len()),
         other => format!("{other:?}"),
     }
 }
