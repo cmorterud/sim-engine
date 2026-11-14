@@ -1041,7 +1041,10 @@ impl AiBrain {
         let mut upgrade_under_way = forces.factories.iter().any(|factory| factory.upgrading);
         let mut engineers = forces.engineers;
         let mut by_tier = forces.engineers_by_tier;
-        let mut army = forces.combat_units;
+        // Units already being made count against the cap too, or each busy factory adds one
+        // past it. One making an engineer or upgrading counts as well, which only errs small.
+        let busy = |factories: &[FactoryInfo]| factories.iter().filter(|factory| factory.finished && !factory.queue_is_empty).count();
+        let mut army = forces.combat_units + busy(&forces.factories);
         let engineers_wanted = self.skill.max_engineers.min(2 + mass_income as usize / 5);
         let rally = self.rally_point();
         let headquarters = forces.headquarters_tier;
@@ -1173,7 +1176,7 @@ impl AiBrain {
         let mut upgrade_under_way = forces.naval_factories.iter().any(|factory| factory.upgrading);
         let headquarters = forces.naval_headquarters_tier;
         let rally = self.naval_rally();
-        let mut fleet = forces.naval_units;
+        let mut fleet = forces.naval_units + forces.naval_factories.iter().filter(|factory| factory.finished && !factory.queue_is_empty).count();
         for factory in forces.naval_factories.iter().filter(|factory| factory.finished) {
             if let Some(point) = rally.filter(|_| !self.rally_set_on.contains(&factory.id)) {
                 self.rally_set_on.push(factory.id);
@@ -1273,7 +1276,7 @@ impl AiBrain {
         let mut upgrade_under_way = forces.air_factories.iter().any(|factory| factory.upgrading);
         let headquarters = forces.air_headquarters_tier;
         let air_threat = self.air_threat(world);
-        let mut aircraft = forces.aircraft;
+        let mut aircraft = forces.aircraft + forces.air_factories.iter().filter(|factory| factory.finished && !factory.queue_is_empty).count();
         for factory in forces.air_factories.iter().filter(|factory| factory.finished && factory.queue_is_empty) {
             if economy.satisfaction < Res::ONE / 2 || energy_is_low {
                 continue;

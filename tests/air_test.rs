@@ -481,3 +481,33 @@ fn a_fighter_bomber_carpets_the_ground_and_fights_aircraft() {
     assert!(world.unit_health(interceptor).is_none(), "150 a second against 295");
     assert!(generators.iter().all(|&id| world.unit_health(id).is_none()), "1,600 within 60 takes both");
 }
+
+/// On an attack-move, a bomber keeps to the target it picks, pass after pass, as if told to
+/// attack it, instead of bombing whatever is nearest after each pass, and moves on only once it
+/// is destroyed. Moving targets, under fog, slip out of range and sight between passes.
+#[test]
+fn an_attack_moving_bomber_sticks_to_each_target_until_it_is_destroyed() {
+    let config = SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: true, ..SimConfig::default() };
+    let mut world = SimWorld::new(config, 1);
+    let enemies: Vec<SimId> =
+        [(3_000, 2_500), (3_200, 2_600), (2_900, 2_700), (3_300, 2_400), (3_100, 2_900)].into_iter().map(|(x, y)| spawn(&mut world, "t2_heavy_tank", Team::Red, point(x, y))).collect();
+    let bomber = spawn(&mut world, "t1_bomber", Team::Blue, point(1_000, 1_000));
+    world.advance_tick(&[SimCommand::AttackMove { units: vec![bomber], goal: point(4_200, 3_400) }, SimCommand::Move { units: enemies, goal: point(2_000, 4_500) }]);
+    let entity = world.units.iter().find(|unit| unit.0 == bomber).expect("the bomber is alive").1;
+    let mut current: Option<SimId> = None;
+    let mut targets = 0;
+    for tick in 0..1_500 {
+        world.advance_tick(&[]);
+        let target = world.ecs.get::<&sim_engine::sim::components::Combat>(entity).expect("bombers fight").target;
+        if target != current {
+            if let Some(old) = current {
+                assert!(world.unit_health(old).is_none(), "tick {tick}: it left {old:?} for {target:?} with the first still alive");
+            }
+            if target.is_some() {
+                targets += 1;
+            }
+            current = target;
+        }
+    }
+    assert!(targets >= 2, "it moved on to another target once the first was destroyed: {targets}");
+}

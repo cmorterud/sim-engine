@@ -1754,9 +1754,15 @@ impl SimWorld {
                     combat.blocked = None;
                 }
                 let blocked = combat.blocked.map(|(target, _)| target);
-                // Drop a target that has died, moved out of range, or gone out of sight.
+                // Drop a target that has died, moved out of range, or gone out of sight. A bomber
+                // keeps its target until it dies, out of range or sight, as if told to attack it:
+                // each pass carries it past, out of range and out of its own sight, and dropping
+                // the target then sent the next bomb at whatever was nearest. Only a cloak, or a
+                // change that puts the target beyond its bombs, breaks it off.
+                let bomber = bomb_bay.is_some();
                 if let Some(target) = combat.target {
-                    if !locate(target).is_some_and(can_engage) {
+                    let keep = locate(target).is_some_and(|entry| if bomber { can_hit(entry) && !hidden(entry.id) } else { can_engage(entry) });
+                    if !keep {
                         combat.target = None;
                     }
                 }
