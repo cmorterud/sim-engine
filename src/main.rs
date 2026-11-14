@@ -772,6 +772,7 @@ async fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
     }
 
     let egui_context = egui::Context::default();
+    ui::install_fonts(&egui_context);
     let mut egui_state = egui_winit::State::new(
         egui_context.clone(),
         egui::ViewportId::ROOT,
@@ -802,6 +803,8 @@ async fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
     let mut order_drag: Option<(OrderHandle, [f64; 2])> = None;
     // How many cancelled orders the player has been told about.
     let mut cancelled_seen = 0;
+    // The selection last frame, so that a new one opens the build bars at its highest level.
+    let mut last_selected: Vec<SimId> = Vec::new();
     let mut attack_alarm = AttackAlarm::default();
     let mut sound_settings = SoundSettings::default();
     // Test runs stay silent. The game plays on without sound if there is no device. Browsers
@@ -1367,6 +1370,10 @@ async fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                         let snapped_deposit = placement_spot.filter(|cell| open_sites.contains(cell)).map(|cell| site_position(cell, site_footprint, &map.heights));
                         let group_rows = control_groups.in_use(&snapshot.units);
                         let game_paused = session.driver.as_ref().is_some_and(SimDriver::is_paused);
+                        if selection.selected() != last_selected.as_slice() {
+                            ui::reset_build_tiers(&egui_context);
+                            last_selected = selection.selected().to_vec();
+                        }
                         let output = egui_context.run(raw_input, |ctx| {
                             ui::release_keyboard_focus(ctx);
                             ui::placement_grid(ctx, &camera, &grid_lines, f64::from(TERRAIN_CELL_UNITS), pixels_per_point);

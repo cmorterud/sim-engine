@@ -181,6 +181,40 @@ fn find_unit(snapshot: &SimSnapshot, id: SimId) -> Option<&UnitView> {
     snapshot.units.binary_search_by_key(&id, |unit| unit.id).ok().map(|index| &snapshot.units[index])
 }
 
+/// The bold weight of the interface's font, for hotkeys, so that they stand out from the words.
+const BOLD: &str = "bold";
+
+/// Adds the bold font to the interface. Call once, before the first frame.
+pub fn install_fonts(context: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(BOLD.to_owned(), egui::FontData::from_static(include_bytes!("../assets/fonts/Ubuntu-Bold.ttf")));
+    fonts.families.insert(egui::FontFamily::Name(BOLD.into()), vec![BOLD.to_owned()]);
+    context.set_fonts(fonts);
+}
+
+/// A label with each hotkey in it, written in brackets like `[M]`, in bold.
+pub fn bold_keys(text: &str) -> egui::WidgetText {
+    let size = 14.0;
+    let format = |bold: bool| egui::TextFormat {
+        font_id: if bold { FontId::new(size, egui::FontFamily::Name(BOLD.into())) } else { FontId::proportional(size) },
+        // Takes the widget's own text color, as a plain label would.
+        color: Color32::PLACEHOLDER,
+        ..Default::default()
+    };
+    let mut job = egui::text::LayoutJob::default();
+    let mut rest = text;
+    while let Some(start) = rest.find('[') {
+        let Some(length) = rest[start..].find(']').filter(|&length| (2..=12).contains(&length)) else {
+            break;
+        };
+        job.append(&rest[..start], 0.0, format(false));
+        job.append(&rest[start..=start + length], 0.0, format(true));
+        rest = &rest[start + length + 1..];
+    }
+    job.append(rest, 0.0, format(false));
+    job.into()
+}
+
 /// A build menu button: the item's name, with its key in front.
 fn item_label(db: &BlueprintDb, blueprint: BlueprintId) -> String {
     let unit = db.get(blueprint);
@@ -305,10 +339,19 @@ pub fn bar_items(options: &[BlueprintId], tier: u8, db: &BlueprintDb) -> Vec<Blu
 }
 
 /// The tech level a build menu shows: the one last chosen, if the menu has something of it,
-/// or else the lowest it has anything of.
+/// or else the highest it has anything of, the best the selection can build.
 pub fn shown_tier(chosen: Option<u8>, options: &[BlueprintId], db: &BlueprintDb) -> Option<u8> {
     let has = |tier: u8| options.iter().any(|option| db.get(*option).tier == tier);
-    chosen.filter(|tier| has(*tier)).or_else(|| MENU_TIERS.into_iter().find(|tier| has(*tier)))
+    chosen.filter(|tier| has(*tier)).or_else(|| MENU_TIERS.into_iter().rev().find(|tier| has(*tier)))
+}
+
+/// Forgets the tech levels chosen in the build bars, so that a new selection opens them at the
+/// highest level it can build.
+pub fn reset_build_tiers(ctx: &egui::Context) {
+    ctx.data_mut(|data| {
+        data.remove::<u8>(egui::Id::new(BUILDER_TIER_MEMORY));
+        data.remove::<u8>(egui::Id::new(FACTORY_TIER_MEMORY));
+    });
 }
 
 /// One build menu, as a single bar: a toggle for the tech level, then the items of that level,
@@ -347,7 +390,7 @@ fn build_bar(
                 for option in bar_items(options, shown, db) {
                     let extra = extra_hint(option);
                     let hint = if extra.is_empty() { item_details(db, option) } else { format!("{}\n\n{extra}", item_details(db, option)) };
-                    let button = ui.button(format!("{}{}", item_label(db, option), label_suffix(option))).on_hover_text(hint);
+                    let button = ui.button(bold_keys(&format!("{}{}", item_label(db, option), label_suffix(option)))).on_hover_text(hint);
                     if button.clicked() {
                         clicked = Some(BarClick::Left(option));
                     } else if button.secondary_clicked() {
@@ -430,22 +473,22 @@ fn unit_order_row(ui: &mut egui::Ui, armed: Option<ArmedOrder>, overcharge: bool
             _ => true,
         };
         for order in ArmedOrder::ALL.into_iter().filter(offered) {
-            let button = egui::Button::new(format!("[{}] {}", order.letter(), order.name())).selected(armed == Some(order));
+            let button = egui::Button::new(bold_keys(&format!("[{}] {}", order.letter(), order.name()))).selected(armed == Some(order));
             if ui.add(button).on_hover_text(order.description()).clicked() {
                 actions.push(UiAction::Arm(order));
             }
         }
-        if ui.button(format!("[{}] Stop", hotkeys::STOP)).on_hover_text("Drop all orders.").clicked() {
+        if ui.button(bold_keys(&format!("[{}] Stop", hotkeys::STOP))).on_hover_text("Drop all orders.").clicked() {
             actions.push(UiAction::Stop);
         }
         if capture {
-            let button = egui::Button::new("[Ctrl+C] Capture").selected(armed == Some(ArmedOrder::Capture));
+            let button = egui::Button::new(bold_keys("[Ctrl+C] Capture")).selected(armed == Some(ArmedOrder::Capture));
             if ui.add(button).on_hover_text(ArmedOrder::Capture.description()).clicked() {
                 actions.push(UiAction::Arm(ArmedOrder::Capture));
             }
         }
         if teleport {
-            let button = egui::Button::new("[Ctrl+T] Teleport").selected(armed == Some(ArmedOrder::Teleport));
+            let button = egui::Button::new(bold_keys("[Ctrl+T] Teleport")).selected(armed == Some(ArmedOrder::Teleport));
             if ui.add(button).on_hover_text(ArmedOrder::Teleport.description()).clicked() {
                 actions.push(UiAction::Arm(ArmedOrder::Teleport));
             }
@@ -1410,7 +1453,7 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
             let key = if pause_action(snapshot, selected, db).is_none() { format!("[{}] ", hotkeys::PAUSE) } else { String::new() };
             let label = if *on { format!("{key}Cloak") } else { format!("{key}Uncloak") };
             let hint = "Hidden from sight and radar, except from enemies within 100 or with omni on it. Costs energy while on.";
-            if ui.button(label).on_hover_text(hint).clicked() {
+            if ui.button(bold_keys(&label)).on_hover_text(hint).clicked() {
                 actions.push(action);
             }
         }
@@ -1421,7 +1464,7 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
             let label = if *paused { format!("[{}] Pause", hotkeys::PAUSE) } else { format!("[{}] Resume", hotkeys::PAUSE) };
             let hint = "Stops spending and making progress, keeping the queue and what is done so far.";
             ui.horizontal(|ui| {
-                if ui.button(label).on_hover_text(hint).clicked() {
+                if ui.button(bold_keys(&label)).on_hover_text(hint).clicked() {
                     actions.push(action.clone());
                 }
                 if !*paused {
@@ -1436,7 +1479,7 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
             let into = db.get(db.get(BlueprintId(first.blueprint)).upgrades_to.expect("only upgradable units are listed"));
             let label = format!("[{}] Upgrade: {}\n{} mass  {} energy", hotkeys::UPGRADE, into.name, into.mass.to_num::<i64>(), into.energy.to_num::<i64>());
             let hint = "A commander stands still while it upgrades, and a new order cancels it.";
-            if ui.button(label).on_hover_text(hint).clicked() {
+            if ui.button(bold_keys(&label)).on_hover_text(hint).clicked() {
                 actions.push(UiAction::Upgrade { units: upgradable });
             }
         }
@@ -1643,16 +1686,16 @@ fn factory_controls(ui: &mut egui::Ui, menu: &FactoryMenu, db: &BlueprintDb, act
         if let Some((upgrade, able)) = &menu.upgrade {
             let label = format!("[{}] Upgrade to T{}", hotkeys::UPGRADE, db.get(*upgrade).tier);
             let hint = format!("{}{}", partial(able.len()), item_details(db, *upgrade));
-            if ui.button(label).on_hover_text(hint).clicked() {
+            if ui.button(bold_keys(&label)).on_hover_text(hint).clicked() {
                 actions.push(queue_action(menu, able, *upgrade));
             }
         }
         let mut repeat = menu.repeat == RepeatState::On;
-        let checkbox = egui::Checkbox::new(&mut repeat, format!("[{}] Repeat", hotkeys::REPEAT)).indeterminate(menu.repeat == RepeatState::Mixed);
+        let checkbox = egui::Checkbox::new(&mut repeat, bold_keys(&format!("[{}] Repeat", hotkeys::REPEAT))).indeterminate(menu.repeat == RepeatState::Mixed);
         if ui.add(checkbox).clicked() {
             actions.push(repeat_action(menu));
         }
-        if ui.button(format!("[{}] Clear queue", hotkeys::CLEAR_QUEUE)).clicked() {
+        if ui.button(bold_keys(&format!("[{}] Clear queue", hotkeys::CLEAR_QUEUE))).clicked() {
             actions.push(clear_action(menu));
         }
         if total > 1 {
@@ -2519,7 +2562,8 @@ mod tests {
         current.enhancements = vec![(SimId(10), [u16::MAX, db.enhancement_id("t3_engineering").0, u16::MAX])];
         let press = |letter: char, builder: Option<u8>| hotkey_action(&current, &[SimId(10)], &db, letter, BuildTiers { builder, factory: None });
         let place = |key: &str| Some(UiAction::BeginPlacement(db.id(key)));
-        assert_eq!(press('E', None), place("mass_extractor"), "the lowest level at first");
+        assert_eq!(press('E', None), place("mass_extractor_t3"), "the highest level at first");
+        assert_eq!(press('E', Some(1)), place("mass_extractor"));
         // The same kind of thing is on one key at every level.
         assert_eq!(press('E', Some(2)), place("mass_extractor_t2"));
         assert_eq!(press('E', Some(3)), place("mass_extractor_t3"));
@@ -2560,7 +2604,8 @@ mod tests {
     fn the_tier_key_steps_through_the_levels_a_bar_has() {
         let db = BlueprintDb::standard();
         let options: Vec<BlueprintId> = ["power_generator", "shield_generator", "quantum_gateway"].iter().map(|key| db.id(key)).collect();
-        assert_eq!(next_tier(None, &options, &db), Some(2));
+        assert_eq!(next_tier(None, &options, &db), Some(1), "from the highest, shown first, round to the lowest");
+        assert_eq!(next_tier(Some(1), &options, &db), Some(2));
         assert_eq!(next_tier(Some(2), &options, &db), Some(3));
         assert_eq!(next_tier(Some(3), &options, &db), Some(1), "and round again");
         assert_eq!(next_tier(Some(1), &options[..1], &db), Some(1), "with one level, it stays");
@@ -2841,17 +2886,19 @@ mod tests {
         let db = BlueprintDb::standard();
         let current = mixed_factories(&db);
         let selected = [SimId(1), SimId(2), SimId(3)];
+        // Each bar opens at the highest level it has; these keys are about T1.
+        const T1_BARS: BuildTiers = BuildTiers { builder: Some(1), factory: Some(1) };
         let queue = |key: &str, factories: Vec<SimId>| UiAction::Queue { factories, blueprint: db.id(key), selected_count: 3, count: 1 };
-        assert_eq!(hotkey_action(&current, &selected, &db, 'Q', BuildTiers::default()), Some(queue("t1_engineer", selected.to_vec())));
-        assert_eq!(hotkey_action(&current, &selected, &db, 'E', BuildTiers::default()), Some(queue("t1_light_bot", selected.to_vec())));
-        assert_eq!(hotkey_action(&current, &selected, &db, 'G', BuildTiers::default()), Some(queue("t1_light_artillery", selected.to_vec())));
-        assert_eq!(hotkey_action(&current, &selected, &db, 'T', BuildTiers::default()), Some(queue("t1_mobile_aa", selected.to_vec())));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'Q', T1_BARS), Some(queue("t1_engineer", selected.to_vec())));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'E', T1_BARS), Some(queue("t1_light_bot", selected.to_vec())));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'G', T1_BARS), Some(queue("t1_light_artillery", selected.to_vec())));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'T', T1_BARS), Some(queue("t1_mobile_aa", selected.to_vec())));
         let t2 = BuildTiers { builder: None, factory: Some(2) };
         assert_eq!(hotkey_action(&current, &selected, &db, 'E', t2), Some(queue("t2_heavy_tank", vec![SimId(2)])));
-        assert_eq!(hotkey_action(&current, &selected, &db, 'U', BuildTiers::default()), Some(queue("land_factory_t2", vec![SimId(1), SimId(3)])), "the lowest tier goes first");
+        assert_eq!(hotkey_action(&current, &selected, &db, 'U', T1_BARS), Some(queue("land_factory_t2", vec![SimId(1), SimId(3)])), "the lowest tier goes first");
         let to_t3 = UiAction::Queue { factories: vec![SimId(2)], blueprint: db.id("land_factory_t3"), selected_count: 1, count: 1 };
-        assert_eq!(hotkey_action(&current, &[SimId(2)], &db, 'U', BuildTiers::default()), Some(to_t3));
-        assert_eq!(hotkey_action(&current, &selected, &db, 'K', BuildTiers::default()), Some(UiAction::ClearQueue { factories: selected.to_vec() }));
+        assert_eq!(hotkey_action(&current, &[SimId(2)], &db, 'U', T1_BARS), Some(to_t3));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'K', T1_BARS), Some(UiAction::ClearQueue { factories: selected.to_vec() }));
     }
 
     #[test]
@@ -2994,13 +3041,25 @@ mod tests {
     }
 
     #[test]
+    fn hotkeys_are_bold_and_the_rest_is_not() {
+        let egui::WidgetText::LayoutJob(job) = bold_keys("[M] Move, then [Ctrl+C] Capture") else {
+            panic!("a layout job");
+        };
+        let bold: Vec<&str> = job.sections.iter().filter(|section| section.format.font_id.family == egui::FontFamily::Name(BOLD.into())).map(|section| &job.text[section.byte_range.clone()]).collect();
+        assert_eq!(bold, ["[M]", "[Ctrl+C]"]);
+        assert_eq!(job.text, "[M] Move, then [Ctrl+C] Capture", "nothing is lost");
+    }
+
+    #[test]
     fn a_build_menu_shows_one_tech_level_remembering_the_last_one_chosen() {
         let db = BlueprintDb::standard();
         let options: Vec<BlueprintId> = ["power_generator", "mass_extractor", "shield_generator", "strategic_missile_launcher"].iter().map(|key| db.id(key)).collect();
-        assert_eq!(shown_tier(None, &options, &db), Some(1), "the lowest level at first");
-        assert_eq!(shown_tier(Some(3), &options, &db), Some(3));
+        assert_eq!(shown_tier(None, &options, &db), Some(3), "the highest level at first");
+        assert_eq!(shown_tier(Some(1), &options, &db), Some(1));
         let t1_only = &options[..2];
         assert_eq!(shown_tier(Some(3), t1_only, &db), Some(1), "a level with nothing in it falls back");
+        let up_to_t2 = &options[..3];
+        assert_eq!(shown_tier(None, up_to_t2, &db), Some(2), "the best the selection can build");
         assert_eq!(shown_tier(Some(1), &[], &db), None, "no items, no menu");
     }
 
@@ -3063,6 +3122,7 @@ mod tests {
     /// Runs real egui input through the queue row, and returns what came out.
     fn click_first_chip(button: egui::PointerButton) -> (Vec<UiAction>, bool) {
         let ctx = egui::Context::default();
+        install_fonts(&ctx);
         let chips = [QueueChip { label: "1. Mass Extractor".to_string(), remove: UiAction::Restart }];
         let at = egui::pos2(20.0, 16.0);
         let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
@@ -3177,6 +3237,7 @@ mod tests {
             let current = base_with_factories(&db);
             let groups = quick_select_groups(&current, Team::Blue, &db);
             let mut test = Self { ctx: egui::Context::default(), current, groups, state: QuickSelectState::default(), time: 10.0 };
+            install_fonts(&test.ctx);
             test.frame(vec![], egui::Modifiers::NONE);
             test
         }
@@ -3263,6 +3324,7 @@ mod tests {
     #[test]
     fn popup_text_stays_on_one_line_however_little_room_it_has() {
         let ctx = egui::Context::default();
+        install_fonts(&ctx);
         let input = || egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1440.0, 900.0))), ..egui::RawInput::default() };
         let id = egui::Id::new("test popup");
         for _ in 0..3 {
@@ -3368,6 +3430,7 @@ mod tests {
         let groups = vec![(1, vec![SimId(10), SimId(11)]), (0, vec![SimId(12)])];
         let click = |row: usize, modifiers: egui::Modifiers| {
             let ctx = egui::Context::default();
+        install_fonts(&ctx);
             let at = egui::pos2(70.0, 20.0 + row as f32 * 27.0);
             let press = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers };
             let mut actions = Vec::new();
@@ -3430,6 +3493,7 @@ mod tests {
         let menu = factory_menu(&current, &[SimId(1)], &db).unwrap();
         let click = |modifiers: egui::Modifiers| {
             let ctx = egui::Context::default();
+        install_fonts(&ctx);
             // Just past the T1, T2, and T3 toggles, on the first item of the bar.
             let at = egui::pos2(150.0, 15.0);
             let press = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers };
@@ -3479,6 +3543,7 @@ mod tests {
     #[test]
     fn keyboard_focus_never_stays_on_a_button() {
         let ctx = egui::Context::default();
+        install_fonts(&ctx);
         let id = egui::Id::new("button");
         ctx.memory_mut(|memory| memory.request_focus(id));
         assert!(ctx.wants_keyboard_input(), "the test needs a focused button to begin with");

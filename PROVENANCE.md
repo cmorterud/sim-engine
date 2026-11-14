@@ -35,6 +35,12 @@ Taken so far:
 * The T1 air factory, aircraft, and anti-air (§10), from FAF's UEF units, with generic names. How
   far a bomb is let go short of its target is worked out here from its fall.
 
+## Fonts
+
+The bold hotkeys in the interface use Ubuntu Bold (`assets/fonts/Ubuntu-Bold.ttf`), by Canonical,
+the bold weight of the font egui ships with, under the Ubuntu Font Licence 1.0
+(`assets/fonts/UFL.txt`), which allows it to be shipped with the game.
+
 ## Maps from other games
 
 `src/map_import.rs` reads maps made for *Forged Alliance*, from the unzipped folder a player gives:
