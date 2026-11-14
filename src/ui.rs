@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use egui::{Align2, Color32, FontId, Pos2, Rect, Rounding, Stroke, Vec2};
 
+use crate::icons::{self, Icon};
 use crate::input::feedback::{Marker, MarkerKind, OrderFeedback, LABEL_SECONDS};
 use crate::input::hotkeys::{self, blueprint_hotkey};
 use crate::input::orders::PendingBuild;
@@ -331,10 +332,14 @@ pub fn cycle_build_tiers(ctx: &egui::Context, snapshot: &SimSnapshot, selected: 
     });
 }
 
-/// The items a bar shows at a level, in the order of their slots, which give them their keys.
+/// The items a bar shows at a level: by group (factories, then resources, defenses, intel, and
+/// strategic weapons), and within a group in the order of their slots, which give them their keys.
 pub fn bar_items(options: &[BlueprintId], tier: u8, db: &BlueprintDb) -> Vec<BlueprintId> {
     let mut items: Vec<BlueprintId> = options.iter().copied().filter(|option| db.get(*option).tier == tier).collect();
-    items.sort_by_key(|option| hotkeys::build_slot(&db.get(*option).key).map_or(usize::MAX, |(_, slot)| slot));
+    items.sort_by_key(|option| {
+        let key = &db.get(*option).key;
+        (Icon::for_key(key).group(), hotkeys::build_slot(key).map_or(usize::MAX, |(_, slot)| slot))
+    });
     items
 }
 
@@ -354,9 +359,33 @@ pub fn reset_build_tiers(ctx: &egui::Context) {
     });
 }
 
-/// One build menu, as a single bar: a toggle for the tech level, then the items of that level,
-/// each showing only its key and name, with its details on hover. The level chosen is
-/// remembered under `memory`. Returns the item clicked.
+/// The size of a build bar's buttons, in points.
+const BAR_BUTTON: f32 = 46.0;
+
+/// A build bar's button: the item's icon, with its tech level in dots, its key in the top left
+/// corner, and `suffix`, such as "auto", in the bottom right.
+fn icon_button(ui: &mut egui::Ui, db: &BlueprintDb, option: BlueprintId, suffix: &str) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(BAR_BUTTON), egui::Sense::click());
+    let visuals = ui.style().interact(&response);
+    let painter = ui.painter();
+    painter.rect(rect, visuals.rounding, visuals.weak_bg_fill, visuals.bg_stroke);
+    let unit = db.get(option);
+    icons::draw(painter, rect.center() + Vec2::new(3.0, 1.0), 9.0, Icon::for_key(&unit.key), unit.tier, visuals.text_color());
+    if let Some(letter) = blueprint_hotkey(&unit.key) {
+        let font = FontId::new(13.0, egui::FontFamily::Name(BOLD.into()));
+        painter.text(rect.left_top() + Vec2::new(3.0, 1.0), Align2::LEFT_TOP, hotkeys::key_name(letter), font, visuals.text_color());
+    }
+    let suffix = suffix.trim().trim_matches(|c| c == '(' || c == ')');
+    if !suffix.is_empty() {
+        painter.text(rect.right_bottom() - Vec2::new(3.0, 1.0), Align2::RIGHT_BOTTOM, suffix, FontId::proportional(10.0), Color32::YELLOW);
+    }
+    response
+}
+
+/// One build menu, as a single bar: a toggle for the tech level, then the items of that level as
+/// icons, grouped with dividers between, each with its key, and its name and details on hover.
+/// The level chosen is remembered under `memory`. Returns the item clicked.
+///
 /// What was clicked on a build bar: an item, with the left button or the right.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum BarClick {
@@ -387,10 +416,18 @@ fn build_bar(
         ui.separator();
         egui::ScrollArea::horizontal().id_source(memory).show(ui, |ui| {
             ui.horizontal(|ui| {
+                let mut last_group = None;
                 for option in bar_items(options, shown, db) {
+                    let group = Icon::for_key(&db.get(option).key).group();
+                    if last_group.is_some_and(|last| last != group) {
+                        ui.separator();
+                    }
+                    last_group = Some(group);
                     let extra = extra_hint(option);
-                    let hint = if extra.is_empty() { item_details(db, option) } else { format!("{}\n\n{extra}", item_details(db, option)) };
-                    let button = ui.button(bold_keys(&format!("{}{}", item_label(db, option), label_suffix(option)))).on_hover_text(hint);
+                    // The name, after the key, heads the details, since the button shows neither in words.
+                    let details = item_details(db, option).replacen(&db.get(option).name, &item_label(db, option), 1);
+                    let hint = if extra.is_empty() { details } else { format!("{details}\n\n{extra}") };
+                    let button = icon_button(ui, db, option, &label_suffix(option)).on_hover_text(hint);
                     if button.clicked() {
                         clicked = Some(BarClick::Left(option));
                     } else if button.secondary_clicked() {
@@ -1188,17 +1225,18 @@ impl QuickSelectState {
     }
 }
 
-fn quick_row(ui: &mut egui::Ui, text: &str, class: UnitClass, color: Color32, selected: bool) -> egui::Response {
-    bar_row(ui, QUICK_ROW_WIDTH, text, class, color, selected)
+fn quick_row(ui: &mut egui::Ui, text: &str, icon: Icon, color: Color32, selected: bool) -> egui::Response {
+    bar_row(ui, QUICK_ROW_WIDTH, text, icon, color, selected)
 }
 
-fn bar_row(ui: &mut egui::Ui, width: f32, text: &str, class: UnitClass, color: Color32, selected: bool) -> egui::Response {
+fn bar_row(ui: &mut egui::Ui, width: f32, text: &str, icon: Icon, color: Color32, selected: bool) -> egui::Response {
     // Drawn by hand, because a wide button would center its text over the icon.
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 24.0), egui::Sense::click());
     let visuals = ui.style().interact_selectable(&response, selected);
     let painter = ui.painter();
     painter.rect(rect, visuals.rounding, visuals.weak_bg_fill, visuals.bg_stroke);
-    draw_icon(painter, Pos2::new(rect.left() + 17.0, rect.center().y), class, color, selected);
+    // Without the tech level's dots, which the row's text gives instead.
+    icons::draw(painter, Pos2::new(rect.left() + 17.0, rect.center().y), 6.0, icon, 0, if selected { Color32::from_rgb(170, 255, 170) } else { color });
     painter.text(Pos2::new(rect.left() + 34.0, rect.center().y), Align2::LEFT_CENTER, text, FontId::proportional(14.0), visuals.text_color());
     response
 }
@@ -1216,7 +1254,7 @@ fn quick_rows(
 ) {
     let (shift, now) = ui.input(|input| (input.modifiers.shift, input.time));
     if let Some(commander) = groups.commander {
-        if quick_row(ui, "ACU", UnitClass::Commander, color, selected.contains(&commander)).on_hover_text("Click to select. The view stays where it is.").clicked() {
+        if quick_row(ui, "ACU", Icon::Commander, color, selected.contains(&commander)).on_hover_text("Click to select. The view stays where it is.").clicked() {
             actions.push(UiAction::QuickSelect { units: vec![commander], add: shift });
         }
     }
@@ -1224,7 +1262,8 @@ fn quick_rows(
         let open = state.expanded.contains(&family.name);
         let total: usize = family.tiers.iter().map(|tier| tier.units.len()).sum();
         let text = format!("{} {}  x{total}", if open { "-" } else { "+" }, family.name);
-        if quick_row(ui, &text, UnitClass::Factory, color, false).clicked() {
+        let icon = Icon::for_key(&family.name.to_lowercase().replace(' ', "_"));
+        if quick_row(ui, &text, icon, color, false).clicked() {
             if open {
                 state.expanded.remove(&family.name);
             } else {
@@ -1239,7 +1278,7 @@ fn quick_rows(
             ui.horizontal(|ui| {
                 ui.add_space(14.0);
                 let hint = "Click for the closest to your view. Double-click for all.";
-                if quick_row(ui, &tier.label, UnitClass::Factory, color, any_selected).on_hover_text(hint).clicked() {
+                if quick_row(ui, &tier.label, icon, color, any_selected).on_hover_text(hint).clicked() {
                     let row = format!("{} {}", family.name, tier.label.split(' ').next().unwrap_or(""));
                     let units = if state.register_click(&row, now) {
                         tier.units.clone()
@@ -1302,15 +1341,15 @@ pub fn control_group_label(group: usize, members: &[SimId], snapshot: &SimSnapsh
 fn control_group_rows(ui: &mut egui::Ui, groups: &[(usize, Vec<SimId>)], snapshot: &SimSnapshot, db: &BlueprintDb, color: Color32, selected: &[SimId], actions: &mut Vec<UiAction>) {
     let shift = ui.input(|input| input.modifiers.shift);
     for (group, members) in groups {
-        let class = members
+        let icon = members
             .first()
             .and_then(|id| find_unit(snapshot, *id))
             .filter(|unit| unit.blueprint != u16::MAX)
-            .map_or(UnitClass::Bot, |unit| db.get(BlueprintId(unit.blueprint)).class);
+            .map_or(Icon::Unknown, |unit| Icon::for_key(&db.get(BlueprintId(unit.blueprint)).key));
         let any_selected = members.iter().any(|id| selected.contains(id));
         let label = control_group_label(*group, members, snapshot, db);
         let hint = format!("Click or press {group} to select. Hold Shift to add. Ctrl + {group} with nothing selected clears it.");
-        if bar_row(ui, CONTROL_GROUP_ROW_WIDTH, &label, class, color, any_selected).on_hover_text(hint).clicked() {
+        if bar_row(ui, CONTROL_GROUP_ROW_WIDTH, &label, icon, color, any_selected).on_hover_text(hint).clicked() {
             actions.push(UiAction::QuickSelect { units: members.clone(), add: shift });
         }
     }
@@ -2373,65 +2412,16 @@ fn team_color(team: Team) -> Color32 {
     }
 }
 
-/// Draws a tactical icon: a frame in the team's color with a symbol for the unit's role.
-fn draw_icon(painter: &egui::Painter, center: Pos2, class: UnitClass, color: Color32, selected: bool) {
-    let (half_width, half_height) = match class {
-        UnitClass::Commander => (11.0, 8.0),
-        UnitClass::Factory => (9.0, 7.0),
-        _ => (7.0, 5.0),
+/// Draws a unit's icon on the map: its kind's symbol in its frame, in the team's color, or pale
+/// green when selected, with a dot beneath for each tech level.
+fn draw_icon(painter: &egui::Painter, center: Pos2, key: &str, tier: u8, color: Color32, selected: bool) {
+    let icon = Icon::for_key(key);
+    let half = match icon.frame() {
+        icons::Frame::Commander => 7.0,
+        icons::Frame::Structure => 6.5,
+        _ => 5.5,
     };
-    let frame = Rect::from_center_size(center, Vec2::new(half_width * 2.0, half_height * 2.0));
-    let stroke = Stroke::new(1.5_f32, if selected { Color32::from_rgb(170, 255, 170) } else { color });
-    painter.rect_filled(frame, Rounding::ZERO, Color32::from_black_alpha(150));
-    painter.rect_stroke(frame, Rounding::ZERO, stroke);
-    let corner = |x: f32, y: f32| center + Vec2::new(x * half_width, y * half_height);
-    match class {
-        // NATO symbols: an X for infantry, an ellipse for armor, a dot for artillery.
-        UnitClass::Bot => {
-            painter.line_segment([corner(-1.0, -1.0), corner(1.0, 1.0)], stroke);
-            painter.line_segment([corner(-1.0, 1.0), corner(1.0, -1.0)], stroke);
-        }
-        UnitClass::Tank => {
-            painter.line_segment([corner(-0.6, -0.5), corner(0.6, -0.5)], stroke);
-            painter.line_segment([corner(-0.6, 0.5), corner(0.6, 0.5)], stroke);
-            painter.line_segment([corner(-0.6, -0.5), corner(-0.6, 0.5)], stroke);
-            painter.line_segment([corner(0.6, -0.5), corner(0.6, 0.5)], stroke);
-        }
-        UnitClass::Artillery => {
-            painter.circle_filled(center, 2.0, stroke.color);
-        }
-        UnitClass::Engineer => {
-            painter.line_segment([corner(-1.0, 0.0), corner(1.0, 0.0)], stroke);
-            painter.line_segment([corner(-0.5, -0.6), corner(-0.5, 0.6)], stroke);
-            painter.line_segment([corner(0.5, -0.6), corner(0.5, 0.6)], stroke);
-        }
-        UnitClass::Commander => {
-            painter.circle_stroke(center, 4.0, stroke);
-            painter.circle_filled(center, 1.5, stroke.color);
-        }
-        // The commander's ring, without its dot.
-        UnitClass::SupportCommander => {
-            painter.circle_stroke(center, 3.5, stroke);
-        }
-        UnitClass::Factory => {
-            painter.rect_filled(Rect::from_center_size(center, Vec2::new(half_width, half_height)), Rounding::ZERO, stroke.color);
-        }
-        UnitClass::Economy => {
-            painter.line_segment([corner(-0.7, 0.7), corner(0.0, -0.7)], stroke);
-            painter.line_segment([corner(0.0, -0.7), corner(0.7, 0.7)], stroke);
-        }
-        UnitClass::Defense => {
-            painter.line_segment([corner(0.0, -1.0), corner(0.0, 1.0)], stroke);
-            painter.line_segment([corner(-1.0, 0.0), corner(1.0, 0.0)], stroke);
-        }
-        // The NATO aviation symbol: a pair of wings.
-        UnitClass::Air => {
-            painter.line_segment([corner(-0.8, 0.4), corner(0.0, -0.2)], stroke);
-            painter.line_segment([corner(0.0, -0.2), corner(0.8, 0.4)], stroke);
-        }
-        // Never on the map.
-        UnitClass::Ammo => {}
-    }
+    icons::draw(painter, center, half, icon, tier, if selected { Color32::from_rgb(170, 255, 170) } else { color });
 }
 
 /// How far along one of the viewer's own upgrades is, from 0 to 1: an enhancement, an upgrade in
@@ -2480,7 +2470,7 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
         let is_selected = selected.binary_search(&unit.id).is_ok();
         let blueprint = db.get(BlueprintId(unit.blueprint));
         if show_icons {
-            draw_icon(&painter, center, blueprint.class, team_color(unit.team), is_selected);
+            draw_icon(&painter, center, &blueprint.key, blueprint.tier, team_color(unit.team), is_selected);
         }
         if snapshot.paused.binary_search(&unit.id).is_ok() {
             painter.text(center, Align2::CENTER_CENTER, "PAUSED", FontId::proportional(13.0), Color32::YELLOW);
@@ -2491,11 +2481,12 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
         }
         let rank = rank_of(snapshot, unit.id);
         if rank > 0 {
-            // One gold pip per rank, under the unit.
+            // One gold pip per rank, under the unit, and under its icon's tech level dots.
             let spacing = 5.0;
             let left = center.x - spacing * f32::from(rank - 1) / 2.0;
+            let below = if show_icons { 15.0 } else { 10.0 };
             for pip in 0..rank {
-                painter.circle_filled(Pos2::new(left + spacing * f32::from(pip), center.y + 10.0), 2.0, VETERAN);
+                painter.circle_filled(Pos2::new(left + spacing * f32::from(pip), center.y + below), 2.0, VETERAN);
             }
         }
         let hurt = unit.health_permille < 1000;
@@ -2672,6 +2663,10 @@ mod tests {
         // The bar lists its items by slot, which is the order of their keys.
         let bar: Vec<String> = bar_items(&[db.id("radar"), db.id("mass_extractor"), db.id("land_factory_t1")], 1, &db).into_iter().map(|id| db.get(id).key.clone()).collect();
         assert_eq!(bar, ["land_factory_t1", "mass_extractor", "radar"]);
+        // Grouped: factories, then resources, defenses, and intel, whatever their slots.
+        let options: Vec<BlueprintId> = ["radar", "t1_point_defense", "t1_aa_turret", "power_generator", "air_factory", "mass_extractor", "land_factory_t1"].iter().map(|key| db.id(key)).collect();
+        let bar: Vec<String> = bar_items(&options, 1, &db).into_iter().map(|id| db.get(id).key.clone()).collect();
+        assert_eq!(bar, ["land_factory_t1", "air_factory", "mass_extractor", "power_generator", "t1_point_defense", "t1_aa_turret", "radar"]);
     }
 
     #[test]

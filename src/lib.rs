@@ -3,6 +3,7 @@
 pub mod ai;
 pub mod audio;
 pub mod driver;
+pub mod icons;
 pub mod input;
 pub mod map_import;
 pub mod math;
