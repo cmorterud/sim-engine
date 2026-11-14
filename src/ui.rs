@@ -193,6 +193,25 @@ pub fn install_fonts(context: &egui::Context) {
     context.set_fonts(fonts);
 }
 
+/// How long after the pointer stops moving a button's popup shows, in seconds. egui waits half
+/// a second, and first for the pointer to settle, which is slow for a build bar that players
+/// read by sweeping the pointer across it. egui counts the pointer as moving for a moment after
+/// it stops, so popups show about a sixth of a second after it does.
+pub const TOOLTIP_DELAY: f32 = 0.05;
+
+/// After a popup closes, how long the popups of other buttons show without the delay, so that
+/// moving along the bar shows each in turn.
+pub const TOOLTIP_GRACE: f32 = 0.5;
+
+/// Sets the interface's popup timing, on top of egui's style.
+pub fn install_style(context: &egui::Context) {
+    context.style_mut(|style| {
+        style.interaction.tooltip_delay = TOOLTIP_DELAY;
+        style.interaction.tooltip_grace_time = TOOLTIP_GRACE;
+        style.interaction.show_tooltips_only_when_still = false;
+    });
+}
+
 /// A label with each hotkey in it, written in brackets like `[M]`, in bold.
 pub fn bold_keys(text: &str) -> egui::WidgetText {
     let size = 14.0;
@@ -3216,6 +3235,42 @@ mod tests {
         assert_eq!(actions, [UiAction::Restart], "a right-click should remove the order");
         assert!(over_panel, "the interface must claim the click, or it would also order units to move");
         assert!(click_first_chip(egui::PointerButton::Primary).0.is_empty());
+    }
+
+    /// Whether a button's popup shows once the pointer has rested on it for `rest` seconds.
+    fn popup_shows_after(rest: f64, styled: bool) -> bool {
+        let ctx = egui::Context::default();
+        if styled {
+            install_style(&ctx);
+        }
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
+        let mut shown = false;
+        // Frames at 60 per second, from ten seconds in, since egui counts a popup as recently
+        // shown at the very start. The pointer sweeps in from the left for six frames, ending on
+        // the button, then rests there.
+        const SWEEP: u32 = 6;
+        let frames = SWEEP + (rest * 60.0).round() as u32;
+        for frame in 0..=frames {
+            let events = if frame <= SWEEP { vec![egui::Event::PointerMoved(egui::pos2(30.0 - 8.0 * (SWEEP - frame) as f32, 20.0))] } else { vec![] };
+            let input = egui::RawInput { screen_rect: Some(screen), events, time: Some(10.0 + f64::from(frame) / 60.0), ..egui::RawInput::default() };
+            shown = false;
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let _ = ui.add_sized([46.0, 46.0], egui::Button::new("B")).on_hover_ui(|ui| {
+                        shown = true;
+                        ui.label("popup");
+                    });
+                });
+            });
+        }
+        shown
+    }
+
+    #[test]
+    fn a_build_button_popup_shows_after_a_short_rest_on_it() {
+        assert!(!popup_shows_after(0.0, true), "a popup should not flash up as the pointer sweeps past");
+        assert!(popup_shows_after(0.15, true), "the popup should show within a sixth of a second");
+        assert!(!popup_shows_after(0.15, false), "egui's own delay is longer, so this test would not catch a missing style");
     }
 
     fn base_with_factories(db: &BlueprintDb) -> SimSnapshot {
