@@ -32,6 +32,11 @@ const SLOT_EXTRA_TICKS: i64 = 40;
 const FORMATION_PATIENCE_TICKS: u32 = 100;
 /// How long a unit passes over a target that the ground stops its shots at.
 pub(super) const BLOCKED_TARGET_TICKS: u32 = 50;
+/// How far beyond its range a unit on an attack-move walks straight at a target it is chasing,
+/// before it needs a route there.
+const DIRECT_CHASE_UNITS: i32 = 400;
+/// How long a unit passes over a target it could not reach when it chased it.
+const UNREACHABLE_CHASE_TICKS: u32 = 300;
 /// How far below the ground a ground attack aims: a sixteenth of a unit.
 const GROUND_AIM_DEPTH: Fp = Fp::from_bits(256);
 /// Long enough for a bomb to fall from any aircraft's height.
@@ -635,6 +640,7 @@ impl SimWorld {
                 projectile_splash: spawn.projectile_splash,
                 target: None,
                 forced_target: None,
+                chasing: false,
                 blocked: None,
                 ground_target: None,
                 enabled: true,
@@ -986,7 +992,8 @@ impl SimWorld {
         self.clear_unit_plans(&armed);
         for &id in &armed {
             let (_, entity) = self.find_unit(id).expect("just checked");
-            self.ecs.get::<&mut Combat>(entity).expect("just checked").forced_target = Some(target);
+            let mut combat = self.ecs.get::<&mut Combat>(entity).expect("just checked");
+            (combat.forced_target, combat.chasing) = (Some(target), false);
         }
         self.assign_route(&armed, OrderKind::Attack, position.xy(), Some(target));
     }
@@ -1265,10 +1272,11 @@ impl SimWorld {
         let max_coordinate = terrain.max_coordinate_raw();
         let disabled = &self.disabled;
         let mut unreachable = Vec::new();
-        let mut query = self.ecs.query_mut::<(&mut Position, &mut Velocity, &UnitStats, &mut Order, &Combat, Option<&mut Turning>)>();
+        let mut chases = Vec::new();
+        let mut query = self.ecs.query_mut::<(&mut Position, &mut Velocity, &UnitStats, &mut Order, &Combat, Option<&mut Turning>, Option<&Builder>)>();
         let mut view = query.view();
         for (index, &(id, entity)) in units.iter().enumerate() {
-            let (position, velocity, stats, order, combat, turning) = view.get_mut(entity).expect("unit list only holds live units");
+            let (position, velocity, stats, order, combat, turning, builder) = view.get_mut(entity).expect("unit list only holds live units");
             if stats.is_structure || stats.move_class == MoveClass::Air {
                 continue;
             }
@@ -1305,9 +1313,31 @@ impl SimWorld {
                 continue;
             }
 
+            // On an attack-move, a target that has left range is chased. While it is near and the
+            // way to it open, the unit walks straight at it; otherwise it is given an attack order
+            // on it, which finds a way.
+            let chasing_toward = combat
+                .target
+                .filter(|_| order.kind == OrderKind::AttackMove && builder.is_none())
+                .and_then(|target| {
+                    let entry = grid.entry(units.binary_search_by_key(&target, |unit| unit.0).ok()?);
+                    Some((target, Vec2Fp::new(Fp::from_bits(entry.x), Fp::from_bits(entry.y)), Fp::from_bits(entry.radius)))
+                })
+                .filter(|&(_, point, radius)| !within(here, point, combat.range + radius))
+                .and_then(|(target, point, radius)| {
+                    let direction = (point - here).normalized();
+                    let open = within(here, point, combat.range + radius + fp_int(DIRECT_CHASE_UNITS)) && passable(here + direction.scaled(stats.radius + stats.max_speed));
+                    if !open {
+                        chases.push((target, id));
+                    }
+                    open.then_some(point)
+                });
+
             // Steering from the unit's order.
             let mut desired = Vec2Fp::ZERO;
-            if order.kind != OrderKind::Idle {
+            if let Some(point) = chasing_toward {
+                desired = (point - here).normalized().scaled(stats.max_speed);
+            } else if order.kind != OrderKind::Idle {
                 let goal = flow.goal(order.route).unwrap_or(here);
                 let arrive_radius = flow.arrive_radius(order.route).unwrap_or(Fp::ZERO);
                 // A flow field ends at the goal's cell, so the last steps are a straight walk.
@@ -1387,7 +1417,9 @@ impl SimWorld {
 
             // A unit with a turn rate can only go the way it faces.
             if let Some(turning) = turning {
-                let heading_for = if order.kind == OrderKind::Idle {
+                let heading_for = if let Some(point) = chasing_toward {
+                    point
+                } else if order.kind == OrderKind::Idle {
                     here
                 } else {
                     order.slot.filter(|_| desired != Vec2Fp::ZERO).unwrap_or_else(|| flow.goal(order.route).unwrap_or(here))
@@ -1471,16 +1503,60 @@ impl SimWorld {
             }
         }
         self.step_aircraft();
+        self.start_chases(chases);
         self.cancel_unreachable(unreachable);
+    }
+
+    /// Sends units on an attack-move after targets too far, or too hard, to walk straight at: each
+    /// is given an attack order on its target, and its move waits at the front of its queue, still holding
+    /// its route, until the target is destroyed. Units after the same target share a route.
+    /// `chases` lists (target, unit) pairs.
+    fn start_chases(&mut self, mut chases: Vec<(SimId, SimId)>) {
+        chases.sort_unstable();
+        for group in chases.chunk_by(|first, second| first.0 == second.0) {
+            let target = group[0].0;
+            let Some(position) = self.unit_position(target) else {
+                continue;
+            };
+            let units: Vec<SimId> = group.iter().map(|&(_, unit)| unit).collect();
+            for (id, order) in self.plan_orders(&units, OrderKind::Attack, position.xy(), Some(target), false, false) {
+                let (_, entity) = self.find_unit(id).expect("it just chose its target");
+                let paused = std::mem::replace(&mut *self.ecs.get::<&mut Order>(entity).expect("units have orders"), order);
+                let queued = self.ecs.get::<&mut OrderQueue>(entity).map(|mut queue| queue.0.insert(0, paused)).is_ok();
+                if !queued {
+                    self.ecs.insert_one(entity, OrderQueue(vec![paused])).expect("unit is live");
+                    let at = self.order_queues.partition_point(|queue| queue.0 < id);
+                    self.order_queues.insert(at, (id, entity));
+                }
+                let mut combat = self.ecs.get::<&mut Combat>(entity).expect("it has a weapon");
+                (combat.forced_target, combat.chasing) = (Some(target), true);
+            }
+        }
     }
 
     /// Finishes cancelling orders that cannot be reached. A forced target goes with its order,
     /// and a patrol ends, since it would only try the same thing again. Builders drop the task
     /// that led there later this tick.
-    fn cancel_unreachable(&mut self, units: Vec<SimId>) {
+    fn cancel_unreachable(&mut self, mut units: Vec<SimId>) {
+        // A chase that cannot reach its target gives it up for a while, and the unit goes back
+        // to its move, which was not cancelled.
+        let tick = self.current_tick;
+        units.retain(|&id| {
+            let (_, entity) = self.find_unit(id).expect("the unit just moved");
+            let Ok(mut combat) = self.ecs.get::<&mut Combat>(entity) else {
+                return true;
+            };
+            let Some(target) = combat.forced_target.filter(|_| combat.chasing) else {
+                return true;
+            };
+            (combat.forced_target, combat.chasing, combat.target) = (None, false, None);
+            combat.blocked = Some((target, tick + UNREACHABLE_CHASE_TICKS));
+            false
+        });
         for &id in &units {
             let (_, entity) = self.find_unit(id).expect("the unit just moved");
             if let Ok(mut combat) = self.ecs.get::<&mut Combat>(entity) {
+                combat.chasing = false;
                 combat.forced_target = None;
                 combat.ground_target = None;
             }
@@ -1663,14 +1739,14 @@ impl SimWorld {
             Option<&super::components::Adjacency>,
             Option<&mut super::components::ExtraWeapons>,
             Option<&super::components::Torpedo>,
-            (Option<&super::components::TractorBeam>, Option<&super::components::StunWeapon>),
+            (Option<&super::components::TractorBeam>, Option<&super::components::StunWeapon>, &Order, Option<&Builder>),
         )>();
         let mut view = query.view();
         let disabled = &self.disabled;
         let grabs = &mut self.pending_grabs;
         grabs.clear();
         for (index, &(id, entity)) in units.iter().enumerate() {
-            let (stats, combat, turret, turning, mut overcharge, overcharge_order, mut launcher, anti_air, bomb_bay, flight, artillery, adjacency, extras, torpedo, (tractor, stun_weapon)) =
+            let (stats, combat, turret, turning, mut overcharge, overcharge_order, mut launcher, anti_air, bomb_bay, flight, artillery, adjacency, extras, torpedo, (tractor, stun_weapon, order, builder)) =
                 view.get_mut(entity).expect("unit list only holds live units");
             combat.ticks_until_ready = combat.ticks_until_ready.saturating_sub(1);
             if let Some(weapon) = overcharge.as_mut() {
@@ -1744,7 +1820,7 @@ impl SimWorld {
                 match locate(forced) {
                     Some(entry) => combat.target = can_engage(entry).then_some(forced),
                     None => {
-                        combat.forced_target = None;
+                        (combat.forced_target, combat.chasing) = (None, false);
                         combat.target = None;
                         finished_attacks.push(id);
                     }
@@ -1754,14 +1830,20 @@ impl SimWorld {
                     combat.blocked = None;
                 }
                 let blocked = combat.blocked.map(|(target, _)| target);
-                // Drop a target that has died, moved out of range, or gone out of sight. A bomber
-                // keeps its target until it dies, out of range or sight, as if told to attack it:
-                // each pass carries it past, out of range and out of its own sight, and dropping
-                // the target then sent the next bomb at whatever was nearest. Only a cloak, or a
-                // change that puts the target beyond its bombs, breaks it off.
-                let bomber = bomb_bay.is_some();
+                // Drop a target that has died, moved out of range, or gone out of sight. On an
+                // attack-move, a unit keeps its target until it dies, out of range or sight, as if
+                // told to attack it, and goes after it. So does a bomber on any order: each pass
+                // carries it past, out of range and out of its own sight, and dropping the target
+                // then sent the next bomb at whatever was nearest. Only a cloak, or a change that
+                // puts the target beyond its weapon, breaks it off.
+                // Movement does the chasing. Builders are left out, since their walks are among
+                // their tasks.
+                let sticky = bomb_bay.is_some() || (order.kind == OrderKind::AttackMove && builder.is_none());
                 if let Some(target) = combat.target {
-                    let keep = locate(target).is_some_and(|entry| if bomber { can_hit(entry) && !hidden(entry.id) } else { can_engage(entry) });
+                    // Not one too close for artillery, which could neither fire nor chase it.
+                    let keep = locate(target).is_some_and(|entry| {
+                        can_engage(entry) || (sticky && can_hit(entry) && !hidden(entry.id) && far_enough(squared_distance(entry.x, entry.y)))
+                    });
                     if !keep {
                         combat.target = None;
                     }
@@ -2919,6 +3001,10 @@ impl SimWorld {
         write_fp(hasher, combat.projectile_splash);
         hasher.write(&combat.target.map_or(u32::MAX, |target| target.0).to_le_bytes());
         hasher.write(&combat.forced_target.map_or(u32::MAX, |target| target.0).to_le_bytes());
+        // Written only while chasing, so that checksums from before chases still hold.
+        if combat.chasing {
+            hasher.write(&[3]);
+        }
         let (blocked, blocked_until) = combat.blocked.map_or((u32::MAX, 0), |(target, until)| (target.0, until));
         hasher.write(&blocked.to_le_bytes());
         hasher.write(&blocked_until.to_le_bytes());

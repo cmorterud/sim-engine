@@ -331,6 +331,8 @@ impl Difficulty {
                 think_interval: THINK_INTERVAL * 3,
                 income_share: (1, 2),
                 max_engineers: 3,
+                // None: its engineers stay within the 3, and replacements come at the factory's tier.
+                tier_engineers: (0, 0),
                 max_factories: 2,
                 max_point_defenses: 1,
                 first_wave: 6,
@@ -347,6 +349,7 @@ impl Difficulty {
                 think_interval: THINK_INTERVAL,
                 income_share: (1, 1),
                 max_engineers: MAX_ENGINEERS,
+                tier_engineers: (T2_ENGINEERS, T3_ENGINEERS),
                 max_factories: MAX_FACTORIES,
                 max_point_defenses: MAX_POINT_DEFENSES,
                 first_wave: FIRST_WAVE,
@@ -372,6 +375,8 @@ struct Skill {
     /// to expand and to climb the tech tree.
     income_share: (i64, i64),
     max_engineers: usize,
+    /// Higher-tier engineers it keeps on top of `max_engineers`, at T2 or above and at T3.
+    tier_engineers: (usize, usize),
     max_factories: usize,
     max_point_defenses: usize,
     first_wave: usize,
@@ -1083,10 +1088,10 @@ impl AiBrain {
                 engineers += 1;
                 by_tier[engineer_tier] += 1;
                 roster.engineers[engineer_tier]
-            } else if tier == 2 && by_tier[1] + by_tier[2] < T2_ENGINEERS {
+            } else if tier == 2 && by_tier[1] + by_tier[2] < self.skill.tier_engineers.0 {
                 by_tier[1] += 1;
                 roster.engineers[1]
-            } else if tier == 3 && by_tier[2] < T3_ENGINEERS {
+            } else if tier == 3 && by_tier[2] < self.skill.tier_engineers.1 {
                 by_tier[2] += 1;
                 roster.engineers[2]
             } else if upgrade_wanted && !upgrade_under_way {
