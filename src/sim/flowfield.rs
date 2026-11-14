@@ -21,7 +21,7 @@ const UNREACHED: u32 = u32::MAX;
 const NO_SLOT: u32 = u32::MAX;
 const DIR_NONE: u8 = 255;
 
-/// Fixed neighbor order, which also serves as the tie-break order.
+/// Fixed neighbor order. Ties between them go to the one nearer the map's center (`nearer_center`).
 const NEIGHBORS: [(i32, i32); 8] = [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, 1), (1, -1), (-1, -1)];
 const STEP_COST: [u32; 8] = [10, 10, 10, 10, 14, 14, 14, 14];
 const OPPOSITE: [u8; 8] = [1, 0, 3, 2, 7, 6, 5, 4];
@@ -128,8 +128,20 @@ impl SectorSearch {
         }
     }
 
+    /// Adds a cell on the sector's edge that leads out of it. Of two equally good ways out of
+    /// one cell, such as a corner on two borders, it keeps the one leading nearer the center.
+    fn seed_exit(&mut self, local: usize, value: u32, direction: u8, origin: (usize, usize), cells: usize) {
+        if value == self.values[local] && nearer_center(origin, cells, local, direction, self.directions[local]) {
+            self.directions[local] = direction;
+        } else {
+            self.seed(local, value, direction);
+        }
+    }
+
     /// Runs Dijkstra outward from the seeds. Heap keys are unique `(value, cell)`
-    /// pairs, so pop order, and therefore every tie-break, is fully determined.
+    /// pairs, so pop order is fully determined. Of two equally short ways from a cell, the one
+    /// whose next step is nearer the map's center wins, not whichever was found first: then on
+    /// a map with 180° symmetry, mirror-image cells point in mirror-image directions.
     fn run(&mut self, cost: &[u8], cells: usize, origin: (usize, usize)) {
         let local_cost = |lx: i32, ly: i32| cost[(origin.1 + ly as usize) * cells + origin.0 + lx as usize];
         let size = SECTOR_CELLS as i32;
@@ -157,11 +169,15 @@ impl SectorSearch {
                 }
                 let next = value + STEP_COST[direction] * u32::from(neighbor_cost);
                 let neighbor = ny as usize * SECTOR_CELLS + nx as usize;
+                // Stepping from the neighbor back to this cell is the way to the goal.
+                let back = OPPOSITE[direction];
                 if next < self.values[neighbor] {
                     self.values[neighbor] = next;
-                    // Stepping from the neighbor back to this cell is the way to the goal.
-                    self.directions[neighbor] = OPPOSITE[direction];
+                    self.directions[neighbor] = back;
                     self.heap.push(Reverse((u64::from(next) << 32) | neighbor as u64));
+                } else if next == self.values[neighbor] && nearer_center(origin, cells, neighbor, back, self.directions[neighbor]) {
+                    // Its value is unchanged, so nothing beyond it changes.
+                    self.directions[neighbor] = back;
                 }
             }
         }
@@ -736,7 +752,11 @@ impl FlowField {
         if route.goal_sector == sector {
             self.search.seed(local_index(route.goal_cell, origin), 0, DIR_NONE);
         }
-        let mut best_onward: Option<(u32, u32)> = None;
+        // The nearest of the sectors the route goes on into, and any as near, all of which are
+        // prepared: a unit heading diagonally can tie two, and preparing only the first in the
+        // portal list left a unit on one side of the map waiting where its mirror image did not.
+        let mut best_onward: Option<u32> = None;
+        let mut onward_sectors: Vec<u32> = Vec::new();
         for &portal_id in &self.sector_portals[sector as usize] {
             let index = portal_id as usize;
             let distance = route.portal_distance[index];
@@ -746,8 +766,12 @@ impl FlowField {
             if distance == UNREACHED || onward == sector {
                 continue;
             }
-            if best_onward.is_none_or(|(best, _)| distance < best) {
-                best_onward = Some((distance, onward));
+            if best_onward.is_none_or(|best| distance < best) {
+                best_onward = Some(distance);
+                onward_sectors.clear();
+            }
+            if best_onward == Some(distance) && !onward_sectors.contains(&onward) {
+                onward_sectors.push(onward);
             }
             let portal = &self.portals[index];
             let exit = portal.exit_direction(sector);
@@ -771,7 +795,7 @@ impl FlowField {
                 if value == UNREACHED {
                     value = distance;
                 }
-                self.search.seed(local_index(here, origin), value, exit);
+                self.search.seed_exit(local_index(here, origin), value, exit, origin, cells);
             }
         }
         self.search.run(cost, cells, origin);
@@ -791,8 +815,8 @@ impl FlowField {
         let route = self.routes.get_mut(&id).expect("route exists");
         route.field_slots[sector as usize] = slot;
 
-        // Prepare the next sector along the route, so that units rarely wait at a border.
-        if let Some((_, onward)) = best_onward {
+        // Prepare the next sectors along the route, so that units rarely wait at a border.
+        for onward in onward_sectors {
             let onward_slot = route.field_slots[onward as usize];
             if onward_slot == NO_SLOT && !route.queued[onward as usize] {
                 route.queued[onward as usize] = true;
@@ -869,6 +893,28 @@ fn class_cost(terrain: &Terrain, class: MoveClass) -> &[u8] {
     terrain.cost_grid(class).expect("land, naval, and amphibious cost grids exist")
 }
 
+/// Whether a step from a sector's cell in `direction` is preferred over one in `other`, when
+/// both are equally short: the one ending nearer the map's center, and of two equally near, the
+/// one turning anticlockwise about it. A 180° turn of the map leaves both rules as they are,
+/// unlike any fixed order of directions, so mirror-image cells choose mirror-image steps. The
+/// second matters on the line through the center, where the two sides' starts often lie.
+fn nearer_center(origin: (usize, usize), cells: usize, local: usize, direction: u8, other: u8) -> bool {
+    if other == DIR_NONE || direction == DIR_NONE {
+        return false;
+    }
+    // In half cells, from the center, so that everything stays whole.
+    let side = cells as i64;
+    let x = 2 * (origin.0 + local % SECTOR_CELLS) as i64 + 1 - side;
+    let y = 2 * (origin.1 + local / SECTOR_CELLS) as i64 + 1 - side;
+    let key = |direction: u8| {
+        let (dx, dy) = NEIGHBORS[direction as usize];
+        let (dx, dy) = (i64::from(dx), i64::from(dy));
+        let (nx, ny) = (x + 2 * dx, y + 2 * dy);
+        (nx * nx + ny * ny, -(x * dy - y * dx))
+    };
+    key(direction) < key(other)
+}
+
 fn local_index(cell: (usize, usize), origin: (usize, usize)) -> usize {
     (cell.1 - origin.1) * SECTOR_CELLS + (cell.0 - origin.0)
 }
@@ -889,7 +935,8 @@ fn uniform_cost(cost: &[u8], cells: usize, origin: (usize, usize)) -> Option<u8>
 }
 
 /// Finds the closest passable cell to a point, searching outward in square rings.
-/// Ties resolve in a fixed scan order.
+/// Of equally close cells, the one nearest the map's center wins, so that on a map with 180°
+/// symmetry the two sides' searches pick mirror images of each other.
 pub fn nearest_passable_cell(terrain: &Terrain, point: Vec2Fp) -> Option<(usize, usize)> {
     nearest_passable_cell_for(terrain, MoveClass::Land, point)
 }
@@ -908,12 +955,18 @@ pub fn nearest_passable_cell_for(terrain: &Terrain, class: MoveClass, point: Vec
     let (cx, cy) = terrain.cell_of(point);
     let (cx, cy) = (cx as i64, cy as i64);
     // Square rings outward, visiting only each ring's own cells. The nearest on a ring wins,
-    // and of equals the first in row order, the lowest row and then the lowest column.
+    // and of equals the one nearest the center, measured in half cells so that it stays whole,
+    // and of those, which mirror each other across the line through the point and the center,
+    // the one anticlockwise of it. Breaking ties by row and column instead favored one corner
+    // of the map over the other; a 180° turn of the map leaves these rules as they are.
+    let (px, py) = (2 * cx + 1 - cells, 2 * cy + 1 - cells);
     for ring in 0..cells {
-        let mut best: Option<(i64, i64, i64)> = None;
+        let mut best: Option<(i64, i64, i64, i64, i64)> = None;
         let mut consider = |x: i64, y: i64| {
             if (0..cells).contains(&x) && (0..cells).contains(&y) && cost[(y * cells + x) as usize] != COST_IMPASSABLE {
-                let candidate = ((x - cx).pow(2) + (y - cy).pow(2), y, x);
+                let (hx, hy) = (2 * x + 1 - cells, 2 * y + 1 - cells);
+                let turn = px * (hy - py) - py * (hx - px);
+                let candidate = ((x - cx).pow(2) + (y - cy).pow(2), hx * hx + hy * hy, -turn, y, x);
                 if best.is_none_or(|current| candidate < current) {
                     best = Some(candidate);
                 }
@@ -931,7 +984,7 @@ pub fn nearest_passable_cell_for(terrain: &Terrain, class: MoveClass, point: Vec
                 consider(cx + ring, y);
             }
         }
-        if let Some((_, y, x)) = best {
+        if let Some((_, _, _, y, x)) = best {
             return Some((x as usize, y as usize));
         }
     }
@@ -1003,15 +1056,19 @@ mod tests {
         let cells = terrain.cells_per_side() as i64;
         let (cx, cy) = terrain.cell_of(point);
         let (cx, cy) = (cx as i64, cy as i64);
+        let (px, py) = (2 * cx + 1 - cells, 2 * cy + 1 - cells);
         for ring in 0..cells {
-            let mut best: Option<(i64, (usize, usize))> = None;
+            // Nearest, then nearest the center, then anticlockwise of the point; and the cell.
+            type Best = ((i64, i64, i64), (usize, usize));
+            let mut best: Option<Best> = None;
             for y in (cy - ring).max(0)..=(cy + ring).min(cells - 1) {
                 for x in (cx - ring).max(0)..=(cx + ring).min(cells - 1) {
                     let on_ring = (x - cx).abs() == ring || (y - cy).abs() == ring;
                     if on_ring && cost[(y * cells + x) as usize] != COST_IMPASSABLE {
-                        let distance = (x - cx).pow(2) + (y - cy).pow(2);
-                        if best.is_none_or(|(closest, _)| distance < closest) {
-                            best = Some((distance, (x as usize, y as usize)));
+                        let (hx, hy) = (2 * x + 1 - cells, 2 * y + 1 - cells);
+                        let key = ((x - cx).pow(2) + (y - cy).pow(2), hx * hx + hy * hy, -(px * (hy - py) - py * (hx - px)));
+                        if best.is_none_or(|(closest, _)| key < closest) {
+                            best = Some((key, (x as usize, y as usize)));
                         }
                     }
                 }
@@ -1037,6 +1094,26 @@ mod tests {
         }
         for point in [point(600, 600), point(0, 2_559), point(1_220, 1_000)] {
             assert_eq!(nearest_passable_cell(&terrain, point), nearest_by_squares(&terrain, point));
+        }
+    }
+
+    #[test]
+    fn on_a_map_turned_180_degrees_onto_itself_the_nearest_cells_mirror_each_other() {
+        let mut terrain = flat(SECTOR_UNITS * 2);
+        // Each block with its mirror image: the map is 2,560 across.
+        for (min_x, min_y, max_x, max_y) in [(300, 300, 900, 900), (1_200, 0, 1_240, 1_000), (0, 1_500, 700, 1_700)] {
+            terrain.add_box_obstacle(rect(min_x, min_y, max_x, max_y));
+            terrain.add_box_obstacle(rect(2_560 - max_x, 2_560 - max_y, 2_560 - min_x, 2_560 - min_y));
+        }
+        let last = terrain.cells_per_side() - 1;
+        let mirror = |(x, y): (usize, usize)| (last - x, last - y);
+        let mut rng = SimRng::new(4);
+        for _ in 0..400 {
+            // Cell centers, whose mirror images are cell centers too.
+            let (x, y) = (rng.below(128) as i32 * 20 + 10, rng.below(128) as i32 * 20 + 10);
+            let found = nearest_passable_cell(&terrain, point(x, y)).expect("there is open ground");
+            let mirrored = nearest_passable_cell(&terrain, point(2_560 - x, 2_560 - y)).expect("there is open ground");
+            assert_eq!(mirror(found), mirrored, "from ({x}, {y})");
         }
     }
 

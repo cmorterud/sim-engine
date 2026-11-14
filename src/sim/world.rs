@@ -400,6 +400,8 @@ pub struct SimWorld {
     pub config: SimConfig,
     pub current_tick: u32,
     pub next_sim_id: u32,
+    /// How many units each team has had, which sets each new unit's `UnitStats::phase`.
+    pub units_spawned: [u32; 2],
     /// Sorted by `SimId`: spawns append, despawns retain order. Any loop whose order
     /// can affect results iterates these, never a `hecs` query.
     pub units: Vec<(SimId, hecs::Entity)>,
@@ -525,6 +527,7 @@ impl SimWorld {
             config,
             current_tick: 0,
             next_sim_id: 0,
+            units_spawned: [0; 2],
             units: Vec::new(),
             projectiles: Vec::new(),
             obstacles: Vec::new(),
@@ -612,6 +615,8 @@ impl SimWorld {
         assert!(self.terrain.in_bounds(spawn.position), "unit spawned outside the map");
         assert!(self.terrain.passable_for(move_class, spawn.position), "unit spawned where it cannot be");
         let id = self.next_id();
+        let phase = self.units_spawned[spawn.team.index()];
+        self.units_spawned[spawn.team.index()] += 1;
         // Ships float on the water.
         let ground = match move_class {
             MoveClass::Naval | MoveClass::Hover => self.terrain.height_at(spawn.position).max(self.terrain.water_level()),
@@ -629,6 +634,7 @@ impl SimWorld {
                 move_class,
                 is_structure: spawn.is_structure,
                 vision: spawn.vision,
+                phase,
             },
             Health { current: spawn.health, max: spawn.health },
             Combat {
@@ -1641,12 +1647,12 @@ impl SimWorld {
         self.visibility.set_tick(tick);
         let mut query = self.ecs.query::<&UnitStats>();
         let view = query.view();
-        for (index, &(id, entity)) in self.units.iter().enumerate() {
+        for (index, &(_, entity)) in self.units.iter().enumerate() {
+            let stats = view.get(entity).expect("unit list only holds live units");
             // Everyone looks on the first ticks, so that a new match starts with sight.
-            if tick >= VISION_REFRESH_TICKS && id.0.wrapping_add(tick) % VISION_REFRESH_TICKS != 0 {
+            if tick >= VISION_REFRESH_TICKS && !stats.phase.wrapping_add(tick).is_multiple_of(VISION_REFRESH_TICKS) {
                 continue;
             }
-            let stats = view.get(entity).expect("unit list only holds live units");
             let entry = self.spatial_grid.entry(index);
             self.visibility.stamp_disc(stats.team, entry.x, entry.y, stats.vision);
         }
@@ -1663,7 +1669,8 @@ impl SimWorld {
     fn step_sensors(&mut self, tick: u32) {
         for index in 0..self.intel.len() {
             let (id, entity) = self.intel[index];
-            if tick >= VISION_REFRESH_TICKS && id.0.wrapping_add(tick) % VISION_REFRESH_TICKS != 0 {
+            let phase = self.ecs.get::<&UnitStats>(entity).map_or(0, |stats| stats.phase);
+            if tick >= VISION_REFRESH_TICKS && !phase.wrapping_add(tick).is_multiple_of(VISION_REFRESH_TICKS) {
                 continue;
             }
             let running = self.ecs.get::<&Intel>(entity).is_ok_and(|intel| intel.running) && self.ecs.get::<&Construction>(entity).is_err();
@@ -1864,7 +1871,7 @@ impl SimWorld {
 
                 // Searches are spread across ticks. Rings grow outward, so units at the
                 // front of a battle stop early with the nearest enemy. Mobile units come first.
-                if combat.target.is_none() && picks_targets && id.0.wrapping_add(tick) % TARGET_SEARCH_INTERVAL == 0 {
+                if combat.target.is_none() && picks_targets && stats.phase.wrapping_add(tick).is_multiple_of(TARGET_SEARCH_INTERVAL) {
                     let mut ring = (8i64 << FP_FRAC_BITS).max(range / 8);
                     loop {
                         let radius = ring.min(range);
@@ -2103,7 +2110,7 @@ impl SimWorld {
                         weapon.target = forced;
                     } else if !weapon.target.and_then(locate).is_some_and(usable) {
                         weapon.target = None;
-                        if id.0.wrapping_add(tick) % TARGET_SEARCH_INTERVAL == 0 {
+                        if stats.phase.wrapping_add(tick).is_multiple_of(TARGET_SEARCH_INTERVAL) {
                             let mut best: Option<(bool, i64, SimId)> = None;
                             let mut consider = |other: &super::spatial::GridEntry| {
                                 if usable(other) {
@@ -3004,6 +3011,7 @@ impl SimWorld {
         write_fp(hasher, stats.radius);
         hasher.write(&[stats.team as u8, stats.move_class as u8, u8::from(stats.is_structure)]);
         write_fp(hasher, stats.vision);
+        hasher.write(&stats.phase.to_le_bytes());
         write_fp(hasher, health.current);
         write_fp(hasher, health.max);
         write_fp(hasher, combat.range);

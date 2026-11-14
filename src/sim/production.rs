@@ -1665,7 +1665,8 @@ impl SimWorld {
             if tasks > 0 {
                 continue;
             }
-            if is_builder && id.0.wrapping_add(self.current_tick) % PATROL_SEARCH_INTERVAL == 0 {
+            let phase = self.ecs.get::<&UnitStats>(entity).map_or(0, |stats| stats.phase);
+            if is_builder && phase.wrapping_add(self.current_tick).is_multiple_of(PATROL_SEARCH_INTERVAL) {
                 if let Some(task) = self.find_patrol_work(entity) {
                     self.set_order(id, Order::IDLE);
                     self.ecs.get::<&mut Builder>(entity).expect("just checked").tasks.push(task);

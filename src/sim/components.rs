@@ -52,6 +52,11 @@ pub struct UnitStats {
     pub is_structure: bool,
     /// Sight radius, when fog of war is on.
     pub vision: Fp,
+    /// How many units its team had before it. Work spread over several ticks, such as looking
+    /// for targets, is staggered by this rather than by `SimId`: the two sides' ids interleave,
+    /// so a unit and its mirror image would look on different ticks, and whichever team had the
+    /// lower ids won more often.
+    pub phase: u32,
 }
 
 #[derive(Copy, Clone, Debug)]

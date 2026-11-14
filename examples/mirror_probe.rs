@@ -69,6 +69,10 @@ fn describe(world: &SimWorld, team: Team, command: &SimCommand) -> String {
         SimCommand::Assist { units, .. } => format!("assist x{}", units.len()),
         SimCommand::Reclaim { units, .. } => format!("reclaim x{}", units.len()),
         SimCommand::Upgrade { units } => format!("upgrade x{}", units.len()),
+        SimCommand::Patrol { units, points, queued } => {
+            let points: Vec<String> = points.iter().map(|at| point(team, *at)).collect();
+            format!("patrol x{} through {points:?}, queued {queued}", units.len())
+        }
         other => format!("{other:?}"),
     }
 }

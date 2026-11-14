@@ -99,6 +99,8 @@ fn a_support_commander_builds_t3_structures_and_earns_its_keep() {
     world.ecs.get::<&mut sim_engine::sim::components::Health>(world.unit_entity(support).unwrap()).unwrap().current = Fp::from_bits(1);
     world.ecs.get::<&mut Combat>(world.unit_entity(support).unwrap()).unwrap().range = Fp::ZERO;
     let tank = spawn(&mut world, "t2_heavy_tank", Team::Red, point(1_200, 1_000));
+    // Told to, since left to itself it may pick the silo's site, which is right beside it.
+    world.advance_tick(&[SimCommand::Attack { units: vec![tank], target: support }]);
     run(&mut world, 100);
     assert!(world.unit_entity(support).is_none());
     assert_eq!(world.economies[0].mass_income, mass);

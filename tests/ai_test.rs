@@ -343,6 +343,10 @@ fn ai_puts_up_radar_shields_and_missiles_and_overcharges_what_comes_close() {
         world.advance_tick(&commands);
         keep_red_alive(&mut world);
         keep_standing(&mut world);
+        // Overcharge needs the energy stored, and whether a big build happens to be emptying
+        // the store just now is down to timing that has nothing to do with what is tested here.
+        let economy = &mut world.economies[Team::Blue.index()];
+        economy.energy = economy.energy_capacity;
     }
     assert!(fired_at, "the missile launcher never fired at the Red generator");
     assert!(overcharged, "the commander never overcharged the Red tank");
