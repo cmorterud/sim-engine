@@ -80,3 +80,9 @@ cargo run --release -- --autotest 60 --fast-forward 10000   # Opens a window for
 Every push to `main` also runs the soak on GitHub's runners (`.github/workflows/soak.yml`): the 200 skirmish matches in eight shards of 25 seeds, and 24 matches on each bundled map, all from one release build. The run's summary page adds up wins by side, unfinished matches, and replay mismatches per map. Tick times are reported there but do not fail the run (`--no-tick-gate`), since a shared runner's other load would fail it falsely; the benchmarks check speed locally. Start a soak by hand from the Actions tab, or with `gh workflow run soak.yml`.
 
 The stored checksums in `tests/golden/` change whenever simulation behavior changes on purpose. Update them with `UPDATE_GOLDEN=1 cargo test --release --test determinism_test`, then confirm that the x86-64 run still matches.
+
+## License and credits
+
+sim-engine is free software under the [GNU General Public License, version 3](LICENSE).
+
+It is inspired by *Supreme Commander: Forged Alliance* and is not affiliated with or endorsed by its makers or by Forged Alliance Forever. It contains no code, art, sound, or maps from either. Some unit and enhancement names follow the original's for now, as placeholders until the game has its own names and look (GAME_SPECIFICATION.md §20). [`PROVENANCE.md`](PROVENANCE.md) records everything taken from elsewhere, such as starting balance numbers. The map downloader fetches maps from Forged Alliance Forever's public map vault for your own use; no maps are included in or hosted by this repository.

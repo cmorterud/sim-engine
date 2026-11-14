@@ -1,6 +1,6 @@
 # Provenance
 
-This is a non-commercial, open-source game inspired by *Supreme Commander: Forged Alliance*. It is
+This is a non-commercial, open-source game, under the GNU General Public License version 3 (`LICENSE`), inspired by *Supreme Commander: Forged Alliance*. It is
 its own game: its own engine, written from scratch, and, before any public release, its own names
 and look (GAME_SPECIFICATION.md §20). This file records what was taken from elsewhere, so that it
 stays deliberate and easy to replace.
