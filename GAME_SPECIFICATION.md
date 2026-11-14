@@ -369,6 +369,7 @@ Issuing a `Patrol` order across waypoints turns units into automated patrol guar
 ## 17. Opponents & Multiplayer
 
 * **First Playable:** One human against a scripted AI. The AI issues commands through the same `SimCommand` interface as a player and sees only what its team's intel allows.
+* **Difficulty:** The player's opponent is Easy unless they ask for Normal (`--ai normal`, or `?ai=normal` in the browser). Easy keeps a small economy and army, at most 3 engineers, 2 land factories, 16 land combat units, 4 aircraft, 3 ships, and 1 point defense, decides every 3 seconds instead of every second, and plans as if it had half its income, so it climbs the tech tree late. It defends from the start but attacks only after 12 minutes, in waves of 6 growing to 12, and never fires missiles or overcharge or sends its commander. Planning on half its income alone made it stronger, not weaker: it stopped spending on its economy and tech and put everything into early units, and beat Normal in all six test matches. With the caps, Normal fields at least half as many units again by 20 minutes. AI-vs-AI matches, and so the soak, always play Normal.
 * **Automated Matches:** AI-vs-AI matches run headlessly, serving as full-match regression tests and as the first tool for balance tuning.
 * **Multiplayer (Later):** Lockstep over the network, exchanging only commands and comparing checksums to detect desyncs. Matchmaking, lobbies, and transports are not yet specified.
 

@@ -303,8 +303,94 @@ struct Sighting {
     is_submerged: bool,
 }
 
+/// How hard the AI plays. The player's opponent is easy unless asked otherwise. AI-vs-AI
+/// matches, the soak among them, always play normally, so that they keep testing all of it.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Difficulty {
+    /// A small economy and a small army, slow to react and to climb the tech tree, waiting
+    /// twelve minutes before it attacks and then in small waves, and without missiles,
+    /// overcharge, or its commander in the fight.
+    Easy,
+    /// Everything it knows.
+    Normal,
+}
+
+impl Difficulty {
+    /// From its name, as given on the command line or in the page address.
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "easy" => Some(Self::Easy),
+            "normal" => Some(Self::Normal),
+            _ => None,
+        }
+    }
+
+    const fn skill(self) -> Skill {
+        match self {
+            Self::Easy => Skill {
+                think_interval: THINK_INTERVAL * 3,
+                income_share: (1, 2),
+                max_engineers: 3,
+                max_factories: 2,
+                max_point_defenses: 1,
+                first_wave: 6,
+                largest_wave: 12,
+                max_army: 16,
+                max_aircraft: 4,
+                max_fleet: 3,
+                first_attack_tick: 7_200,
+                commander_push_ticks: u32::MAX,
+                missiles: false,
+                overcharge: false,
+            },
+            Self::Normal => Skill {
+                think_interval: THINK_INTERVAL,
+                income_share: (1, 1),
+                max_engineers: MAX_ENGINEERS,
+                max_factories: MAX_FACTORIES,
+                max_point_defenses: MAX_POINT_DEFENSES,
+                first_wave: FIRST_WAVE,
+                largest_wave: LARGEST_WAVE,
+                max_army: usize::MAX,
+                max_aircraft: usize::MAX,
+                max_fleet: usize::MAX,
+                first_attack_tick: 0,
+                commander_push_ticks: COMMANDER_PUSH_TICKS,
+                missiles: true,
+                overcharge: true,
+            },
+        }
+    }
+}
+
+/// What a difficulty changes.
+#[derive(Copy, Clone, Debug)]
+struct Skill {
+    /// How often it decides anything, in ticks.
+    think_interval: u32,
+    /// The share of its real income it plans as if it had, as a fraction: less makes it slower
+    /// to expand and to climb the tech tree.
+    income_share: (i64, i64),
+    max_engineers: usize,
+    max_factories: usize,
+    max_point_defenses: usize,
+    first_wave: usize,
+    largest_wave: usize,
+    /// The most land combat units, aircraft, and ships it keeps.
+    max_army: usize,
+    max_aircraft: usize,
+    max_fleet: usize,
+    /// It defends from the start, but sets out to attack only from this tick.
+    first_attack_tick: u32,
+    /// When its commander starts joining full-size waves.
+    commander_push_ticks: u32,
+    missiles: bool,
+    overcharge: bool,
+}
+
 pub struct AiBrain {
     team: Team,
+    skill: Skill,
     home: Vec2Fp,
     enemy_home: Vec2Fp,
     /// +1 for Blue, -1 for Red, whose plan is Blue's turned about the map's center.
@@ -333,16 +419,22 @@ struct NavalPlan {
 }
 
 impl AiBrain {
-    /// A brain for one team, with both teams' starts from the map.
+    /// A brain for one team, with both teams' starts from the map, playing normally.
     pub fn new(team: Team, seed: u64, starts: [Vec2Fp; 2]) -> Self {
+        Self::with_difficulty(team, seed, starts, Difficulty::Normal)
+    }
+
+    pub fn with_difficulty(team: Team, seed: u64, starts: [Vec2Fp; 2], difficulty: Difficulty) -> Self {
+        let skill = difficulty.skill();
         Self {
             team,
+            skill,
             home: starts[team.index()],
             enemy_home: starts[team.enemy().index()],
             side: if team == Team::Blue { 1 } else { -1 },
             // Both teams draw the same numbers, so that on a mirrored map they make mirrored choices.
             rng: SimRng::new(seed ^ 0xA5A5_5A5A),
-            wave_size: FIRST_WAVE,
+            wave_size: skill.first_wave,
             gathered: (0, 0),
             deposit_attempts: Vec::new(),
             roster: None,
@@ -362,7 +454,7 @@ impl AiBrain {
 
     /// Decides this tick's orders. Returns nothing on ticks when it is not this team's turn.
     pub fn think(&mut self, world: &SimWorld) -> Vec<SimCommand> {
-        if !world.current_tick.is_multiple_of(THINK_INTERVAL) || world.match_result.is_some() {
+        if !world.current_tick.is_multiple_of(self.skill.think_interval) || world.match_result.is_some() {
             return Vec::new();
         }
         if self.roster.is_none() {
@@ -384,9 +476,18 @@ impl AiBrain {
         self.command_army(world, &forces, &sightings, &mut commands);
         self.command_air(world, &forces, &sightings, &mut commands);
         self.command_fleet(&forces, &sightings, &mut commands);
-        self.command_missiles(world, &forces, &sightings, &mut commands);
-        self.command_overcharge(world, &forces, &sightings, &mut commands);
+        if self.skill.missiles {
+            self.command_missiles(world, &forces, &sightings, &mut commands);
+        }
+        if self.skill.overcharge {
+            self.command_overcharge(world, &forces, &sightings, &mut commands);
+        }
         commands
+    }
+
+    /// An income, a second, as the AI plans with it: all of it, or less when it plays easy.
+    const fn planned_income(&self, income: i64) -> i64 {
+        income * self.skill.income_share.0 / self.skill.income_share.1
     }
 
     fn roster(&self) -> &Roster {
@@ -614,7 +715,7 @@ impl AiBrain {
     ) -> Option<(BlueprintId, (u32, u32))> {
         let roster = self.roster();
         let economy = &world.economies[self.team.index()];
-        let per_second = |value: Res| (value * 10).to_num::<i64>();
+        let per_second = |value: Res| self.planned_income((value * 10).to_num::<i64>());
         let (mass_income, energy_income) = (per_second(economy.mass_income), per_second(economy.energy_income));
         let count_planned = |blueprint: BlueprintId| planned_blueprints.iter().filter(|item| **item == blueprint).count();
         // The best generator this builder can make for the income, and the factory: a support
@@ -667,7 +768,7 @@ impl AiBrain {
             return Some((roster.extractor, cell));
         }
 
-        let factories_wanted = (1 + mass_income as usize / 10).min(MAX_FACTORIES);
+        let factories_wanted = (1 + mass_income as usize / 10).min(self.skill.max_factories);
         if factories_total < factories_wanted && economy.mass > Res::from_num(150) {
             if let Some(cell) = self.site_near_home(world, factory, 1, planned) {
                 return Some((factory, cell));
@@ -765,7 +866,7 @@ impl AiBrain {
                     return Some((roster.storage, cell));
                 }
             }
-            if forces.point_defenses + count_planned(roster.point_defense) < MAX_POINT_DEFENSES {
+            if forces.point_defenses + count_planned(roster.point_defense) < self.skill.max_point_defenses {
                 if let Some(cell) = self.site_towards_enemy(world, roster.point_defense, planned) {
                     return Some((roster.point_defense, cell));
                 }
@@ -935,12 +1036,13 @@ impl AiBrain {
 
     fn command_factories(&mut self, world: &SimWorld, forces: &Forces, commands: &mut Vec<SimCommand>) {
         let economy = world.economies[self.team.index()];
-        let mass_income = (economy.mass_income * 10).to_num::<i64>();
-        let energy_income = (economy.energy_income * 10).to_num::<i64>();
+        let mass_income = self.planned_income((economy.mass_income * 10).to_num::<i64>());
+        let energy_income = self.planned_income((economy.energy_income * 10).to_num::<i64>());
         let mut upgrade_under_way = forces.factories.iter().any(|factory| factory.upgrading);
         let mut engineers = forces.engineers;
         let mut by_tier = forces.engineers_by_tier;
-        let engineers_wanted = MAX_ENGINEERS.min(2 + mass_income as usize / 5);
+        let mut army = forces.combat_units;
+        let engineers_wanted = self.skill.max_engineers.min(2 + mass_income as usize / 5);
         let rally = self.rally_point();
         let headquarters = forces.headquarters_tier;
         for factory in forces.factories.iter().filter(|factory| factory.finished) {
@@ -988,6 +1090,10 @@ impl AiBrain {
                 upgrade_under_way = true;
                 upgrade.expect("just checked")
             } else {
+                if army >= self.skill.max_army {
+                    continue;
+                }
+                army += 1;
                 self.unit_counter += 1;
                 let air_threat = self.air_threat(world);
                 let roster = self.roster();
@@ -1062,11 +1168,12 @@ impl AiBrain {
     /// Naval factories upgrade with the economy, one at a time, and build the fleet.
     fn command_naval_factories(&mut self, world: &SimWorld, forces: &Forces, commands: &mut Vec<SimCommand>) {
         let economy = world.economies[self.team.index()];
-        let mass_income = (economy.mass_income * 10).to_num::<i64>();
-        let energy_income = (economy.energy_income * 10).to_num::<i64>();
+        let mass_income = self.planned_income((economy.mass_income * 10).to_num::<i64>());
+        let energy_income = self.planned_income((economy.energy_income * 10).to_num::<i64>());
         let mut upgrade_under_way = forces.naval_factories.iter().any(|factory| factory.upgrading);
         let headquarters = forces.naval_headquarters_tier;
         let rally = self.naval_rally();
+        let mut fleet = forces.naval_units;
         for factory in forces.naval_factories.iter().filter(|factory| factory.finished) {
             if let Some(point) = rally.filter(|_| !self.rally_set_on.contains(&factory.id)) {
                 self.rally_set_on.push(factory.id);
@@ -1088,6 +1195,10 @@ impl AiBrain {
                     into
                 }
                 None => {
+                    if fleet >= self.skill.max_fleet {
+                        continue;
+                    }
+                    fleet += 1;
                     self.unit_counter += 1;
                     let roster = self.roster();
                     let turn = (self.unit_counter % 6) as usize;
@@ -1156,12 +1267,13 @@ impl AiBrain {
     /// great deal of energy, so none are started while energy is short.
     fn command_air_factories(&mut self, world: &SimWorld, forces: &Forces, commands: &mut Vec<SimCommand>) {
         let economy = world.economies[self.team.index()];
-        let mass_income = (economy.mass_income * 10).to_num::<i64>();
-        let energy_income = (economy.energy_income * 10).to_num::<i64>();
+        let mass_income = self.planned_income((economy.mass_income * 10).to_num::<i64>());
+        let energy_income = self.planned_income((economy.energy_income * 10).to_num::<i64>());
         let energy_is_low = economy.energy < economy.energy_capacity / 2;
         let mut upgrade_under_way = forces.air_factories.iter().any(|factory| factory.upgrading);
         let headquarters = forces.air_headquarters_tier;
         let air_threat = self.air_threat(world);
+        let mut aircraft = forces.aircraft;
         for factory in forces.air_factories.iter().filter(|factory| factory.finished && factory.queue_is_empty) {
             if economy.satisfaction < Res::ONE / 2 || energy_is_low {
                 continue;
@@ -1179,6 +1291,10 @@ impl AiBrain {
                     into
                 }
                 None => {
+                    if aircraft >= self.skill.max_aircraft {
+                        continue;
+                    }
+                    aircraft += 1;
                     self.air_counter += 1;
                     let roster = self.roster();
                     let fighter = if tier >= 3 { roster.air_superiority } else { roster.interceptor };
@@ -1221,7 +1337,7 @@ impl AiBrain {
     /// Extractors near home upgrade first, a few at a time as income grows, unless energy is short.
     fn command_upgrades(&mut self, world: &SimWorld, forces: &Forces, commands: &mut Vec<SimCommand>) {
         let economy = world.economies[self.team.index()];
-        let mass_income = (economy.mass_income * 10).to_num::<i64>();
+        let mass_income = self.planned_income((economy.mass_income * 10).to_num::<i64>());
         // Upgrades pay for themselves, so they go ahead while factories spend all the mass, but
         // not into a stall, which would slow everything.
         if mass_income < EXTRACTOR_T2_INCOME || economy.satisfaction < Res::ONE * 9 / 10 {
@@ -1289,12 +1405,15 @@ impl AiBrain {
             commands.push(SimCommand::AttackMove { units: forces.idle_combat.clone(), goal: at });
             return;
         }
+        if world.current_tick < self.skill.first_attack_tick {
+            return;
+        }
         let gathered = forces.idle_combat.len();
         if gathered > self.gathered.0 {
             self.gathered = (gathered, world.current_tick);
         }
         let stopped_growing = world.current_tick - self.gathered.1 >= WAVE_PATIENCE_TICKS;
-        if gathered < self.wave_size && !(stopped_growing && gathered >= FIRST_WAVE) {
+        if gathered < self.wave_size && !(stopped_growing && gathered >= self.skill.first_wave) {
             return;
         }
         // Send a wave at what can be seen, then the enemy's base, then search their deposits.
@@ -1309,7 +1428,7 @@ impl AiBrain {
             .or_else(|| sightings.iter().filter(reachable).find(|enemy| enemy.is_structure))
             .or_else(|| sightings.iter().find(reachable))
             .map(|enemy| enemy.position);
-        let full_strength = gathered >= LARGEST_WAVE;
+        let full_strength = gathered >= self.skill.largest_wave;
         let goal = target.unwrap_or_else(|| self.search_point(world, full_strength));
         // Not in formation: waves at the slowest unit's pace arrived late enough that, in 200
         // AI-vs-AI matches, 6 went past the time limit, against none with each at its own speed.
@@ -1317,12 +1436,12 @@ impl AiBrain {
         // A long, even game is one a defended base keeps winning. The commander joins a
         // full-size wave, which either breaks the enemy's base or loses the commander.
         let on_land = world.terrain.height_at(goal) >= world.terrain.water_level();
-        if full_strength && world.current_tick >= COMMANDER_PUSH_TICKS && on_land {
+        if full_strength && world.current_tick >= self.skill.commander_push_ticks && on_land {
             wave.extend(forces.commander);
         }
         commands.push(SimCommand::AttackMove { units: wave, goal });
         if gathered >= self.wave_size {
-            self.wave_size = (self.wave_size + self.wave_size / 4 + 1).min(LARGEST_WAVE);
+            self.wave_size = (self.wave_size + self.wave_size / 4 + 1).min(self.skill.largest_wave);
         }
         self.gathered = (0, world.current_tick);
     }

@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use web_time::Instant;
 
-use sim_engine::ai::{advance_ai_vs_ai, AiBrain};
+use sim_engine::ai::{advance_ai_vs_ai, AiBrain, Difficulty};
 use sim_engine::driver::{CommandSource, DriverOptions, DriverResult, SimDriver, TICK_DURATION};
 use sim_engine::audio::{self, AttackAlarm, SoundEngine, SoundSettings};
 use sim_engine::input::feedback::{MarkerKind, OrderFeedback};
@@ -78,6 +78,7 @@ Usage: sim-engine [options]
   --map <name>         Play on a map that comes with the game: highland or twin_passes
   --map <folder>       Or on a Forged Alliance map from your own files (the unzipped folder
                        with its .scmap and _save.lua), for any of the modes above
+  --ai <easy|normal>   How hard the AI opponent plays (default easy)
   --starts <a>,<b>     With --map, which armies' starts Blue and Red take (default 1,2)
 
 Controls:
@@ -142,6 +143,8 @@ struct Options {
     sound_check: bool,
     map: Option<PathBuf>,
     starts: Option<(usize, usize)>,
+    /// How hard the AI opponent plays: easy unless asked otherwise.
+    difficulty: Option<Difficulty>,
 }
 
 /// In the browser, options come from the page's address instead: `?map=highland`, `?seed=7`,
@@ -154,6 +157,7 @@ fn parse_options() -> Result<Options, String> {
     options.map = params.get("map").map(PathBuf::from);
     options.seed = params.get("seed").and_then(|seed| seed.parse().ok());
     options.battle = params.has("battle");
+    options.difficulty = params.get("ai").and_then(|name| Difficulty::from_name(&name));
     Ok(options)
 }
 
@@ -176,6 +180,7 @@ fn parse_options() -> Result<Options, String> {
             "--seed" => options.seed = Some(number("--seed", value("--seed")?)?),
             "--sound-check" => options.sound_check = true,
             "--map" => options.map = Some(PathBuf::from(value("--map")?)),
+            "--ai" => options.difficulty = Some(Difficulty::from_name(&value("--ai")?).ok_or("--ai needs easy or normal")?),
             "--starts" => {
                 let text = value("--starts")?;
                 let pair = text.split_once(',').and_then(|(a, b)| Some((a.trim().parse().ok()?, b.trim().parse().ok()?)));
@@ -719,13 +724,14 @@ async fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
     let is_match = !battle;
     let autotest_seconds = options.autotest_seconds;
     let fast_forward = options.fast_forward;
+    let difficulty = options.difficulty.unwrap_or(Difficulty::Easy);
 
     let mut autotest = autotest_seconds.map(|seconds| Autotest::new(seconds, options.capture_dir.clone()));
     let source = match (autotest_seconds, battle) {
         (Some(seconds), true) => CommandSource::Script { seed, ticks: fast_forward + seconds * 10 },
         (Some(seconds), false) => CommandSource::AiVsAi { seed, ticks: fast_forward + seconds * 10 },
         (None, true) => CommandSource::Player,
-        (None, false) => CommandSource::PlayerVsAi { seed },
+        (None, false) => CommandSource::PlayerVsAi { seed, difficulty },
     };
     let driver_options = DriverOptions { viewer: is_match.then_some(PLAYER_TEAM), fast_forward_ticks: fast_forward, start_paused: false };
     let mut session = Session::start(scenario, source, driver_options);
@@ -1484,7 +1490,7 @@ async fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                                     attack_alarm = AttackAlarm::default();
                                     control_groups = ControlGroups::default();
                                     order_drag = None;
-                                    session = Session::start(map_source.scenario(seed), CommandSource::PlayerVsAi { seed }, driver_options);
+                                    session = Session::start(map_source.scenario(seed), CommandSource::PlayerVsAi { seed, difficulty }, driver_options);
                                     selection.clear();
                                     placing = None;
                                     line_start = None;

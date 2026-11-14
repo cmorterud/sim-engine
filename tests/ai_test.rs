@@ -1,6 +1,6 @@
 //! The scripted opponent: full matches, replays, and playing by the player's rules.
 
-use sim_engine::ai::{play_match, replay_match, AiBrain};
+use sim_engine::ai::{advance_ai_vs_ai, play_match, replay_match, AiBrain, Difficulty};
 use sim_engine::sim::commands::SimCommand;
 use sim_engine::math::fp::{fp_int, Fp, Vec2Fp};
 use sim_engine::sim::components::{Blueprinted, Position, Team, UnitStats};
@@ -530,4 +530,57 @@ fn after_losing_every_generator_the_ai_pauses_its_extractors_and_rebuilds_its_po
     assert!(paused, "its extractors were paused, so that energy went into generators");
     assert!(resumed, "and started again once energy was back");
     assert!(generators(&world) >= 2, "only {} generators rebuilt", generators(&world));
+}
+
+/// Mobile units a team has: its army, aircraft, ships, engineers, and commander.
+fn mobile_units(world: &SimWorld, team: Team) -> usize {
+    world.snapshot().units.iter().filter(|unit| unit.team == team && !unit.is_structure).count()
+}
+
+/// The player's default opponent must be easy to beat: it keeps a small army, so that by twenty
+/// minutes a normal AI, on either side, fields half as many again.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn an_easy_ai_keeps_a_small_army() {
+    // 16 land units, 4 aircraft, 3 ships, 3 engineers, and the commander.
+    const EASY_MOST: usize = 27;
+    for seed in [1, 2, 3] {
+        for easy in [Team::Blue, Team::Red] {
+            let mut world = scenario::skirmish(seed).world;
+            let difficulty = |team: Team| if team == easy { Difficulty::Easy } else { Difficulty::Normal };
+            let mut brains = [Team::Blue, Team::Red].map(|team| AiBrain::with_difficulty(team, seed, world.starts, difficulty(team)));
+            while world.current_tick < 12_000 && world.match_result.is_none() {
+                advance_ai_vs_ai(&mut world, &mut brains);
+                if world.current_tick.is_multiple_of(600) {
+                    assert!(mobile_units(&world, easy) <= EASY_MOST, "seed {seed}: easy {easy:?} has {} units at tick {}", mobile_units(&world, easy), world.current_tick);
+                }
+            }
+            let (weak, strong) = (mobile_units(&world, easy), mobile_units(&world, easy.enemy()));
+            assert!(strong * 2 >= weak * 3, "seed {seed}: normal has {strong} units to easy {easy:?}'s {weak}");
+        }
+    }
+}
+
+/// Easy is still a game: it builds a base and an army, and attacks, but not in the first
+/// twelve minutes.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn an_easy_ai_builds_and_attacks_but_not_at_once() {
+    let mut world = scenario::skirmish(4).world;
+    let mut brain = AiBrain::with_difficulty(Team::Blue, 4, world.starts, Difficulty::Easy);
+    let mut first_attack = None;
+    // Twenty minutes, against nobody, so that nothing calls it to defend.
+    for _ in 0..12_000 {
+        let commands = brain.think(&world);
+        if first_attack.is_none() && commands.iter().any(|command| matches!(command, SimCommand::AttackMove { .. })) {
+            first_attack = Some(world.current_tick);
+        }
+        world.advance_tick(&commands);
+    }
+    let factories: usize = ["land_factory_t1", "land_factory_t2", "land_factory_t3", "land_factory_t2_support", "land_factory_t3_support"].iter().map(|key| count_owned(&world, Team::Blue, key)).sum();
+    assert!(factories >= 1, "it built a factory");
+    let extractors: usize = ["mass_extractor", "mass_extractor_t2", "mass_extractor_t3"].iter().map(|key| count_owned(&world, Team::Blue, key)).sum();
+    assert!(extractors >= 4, "it took deposits: {extractors}");
+    let first_attack = first_attack.expect("it attacked");
+    assert!(first_attack >= 7_200, "it attacked at tick {first_attack}, before twelve minutes");
 }

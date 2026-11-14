@@ -16,7 +16,7 @@ use std::{
 
 use web_time::Instant;
 
-use crate::ai::{advance_ai_vs_ai, AiBrain};
+use crate::ai::{advance_ai_vs_ai, AiBrain, Difficulty};
 use crate::sim::commands::SimCommand;
 use crate::sim::components::Team;
 use crate::sim::scenario::{advance_scripted, Scenario};
@@ -31,8 +31,9 @@ pub enum CommandSource {
     Player,
     /// `scenario::advance_scripted`, stopping after a fixed number of ticks.
     Script { seed: u64, ticks: u32 },
-    /// The player commands Blue through `SimDriver::send`, against a scripted Red.
-    PlayerVsAi { seed: u64 },
+    /// The player commands Blue through `SimDriver::send`, against a scripted Red that plays
+    /// at `difficulty`.
+    PlayerVsAi { seed: u64, difficulty: Difficulty },
     /// Two scripted opponents, stopping after a fixed number of ticks or at the end of the match.
     AiVsAi { seed: u64, ticks: u32 },
 }
@@ -221,11 +222,12 @@ fn step(world: &mut SimWorld, source: CommandSource, opening: &[SimCommand], com
 
 /// The two AI opponents, for sources that have them.
 fn brains_for(world: &SimWorld, source: CommandSource) -> [AiBrain; 2] {
-    let seed = match source {
-        CommandSource::PlayerVsAi { seed } | CommandSource::AiVsAi { seed, .. } => seed,
-        CommandSource::Player | CommandSource::Script { .. } => 0,
+    let (seed, difficulty) = match source {
+        CommandSource::PlayerVsAi { seed, difficulty } => (seed, difficulty),
+        CommandSource::AiVsAi { seed, .. } => (seed, Difficulty::Normal),
+        CommandSource::Player | CommandSource::Script { .. } => (0, Difficulty::Normal),
     };
-    [AiBrain::new(Team::Blue, seed, world.starts), AiBrain::new(Team::Red, seed, world.starts)]
+    [AiBrain::with_difficulty(Team::Blue, seed, world.starts, difficulty), AiBrain::with_difficulty(Team::Red, seed, world.starts, difficulty)]
 }
 
 /// Whether a source with a set length has run its course.

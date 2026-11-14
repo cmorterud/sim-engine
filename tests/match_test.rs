@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use sim_engine::ai::Difficulty;
 use sim_engine::driver::{CommandSource, DriverOptions, SimDriver};
 use sim_engine::input::orders::{placement_cell, right_click_orders, RightClick};
 use sim_engine::render::camera::Camera;
@@ -17,7 +18,7 @@ const VIEW: Option<Team> = Some(Team::Blue);
 
 fn start_session() -> SimDriver {
     let options = DriverOptions { viewer: VIEW, fast_forward_ticks: 0, start_paused: false };
-    SimDriver::start_with(scenario::skirmish(SEED), CommandSource::PlayerVsAi { seed: SEED }, false, options)
+    SimDriver::start_with(scenario::skirmish(SEED), CommandSource::PlayerVsAi { seed: SEED, difficulty: Difficulty::Normal }, false, options)
 }
 
 /// Waits until a condition holds on a new snapshot, or the tick limit passes.
