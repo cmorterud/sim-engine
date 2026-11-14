@@ -3,7 +3,9 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use web_time::Instant;
 
 use sim_engine::ai::{advance_ai_vs_ai, AiBrain};
 use sim_engine::driver::{CommandSource, DriverOptions, DriverResult, SimDriver, TICK_DURATION};
@@ -30,7 +32,9 @@ use sim_engine::sim::world::{PlanStep, PlanStepKind, SensorRangeView, ShieldView
 use sim_engine::soak::run_soak;
 use sim_engine::sim::components::BuildTask;
 use sim_engine::ui::{self, ArmedOrder, DraggableOrder, OrderHandle, QuickSelectState, UiAction};
-use winit::dpi::{LogicalSize, PhysicalPosition};
+#[cfg(not(target_arch = "wasm32"))]
+use winit::dpi::LogicalSize;
+use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, Event, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
@@ -53,6 +57,8 @@ const MIN_ORDER_DRAG_PIXELS: f64 = 6.0;
 /// How long the Shift view of everyone's orders takes to fade after letting go, in seconds.
 const ORDERS_FADE_SECONDS: f64 = 1.0;
 
+// The browser build takes its options from the page address instead.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 const USAGE: &str = "\
 Usage: sim-engine [options]
 
@@ -138,6 +144,20 @@ struct Options {
     starts: Option<(usize, usize)>,
 }
 
+/// In the browser, options come from the page's address instead: `?map=highland`, `?seed=7`,
+/// and `?battle` for the stress test.
+#[cfg(target_arch = "wasm32")]
+fn parse_options() -> Result<Options, String> {
+    let mut options = Options::default();
+    let search = web_sys::window().and_then(|window| window.location().search().ok()).unwrap_or_default();
+    let params = web_sys::UrlSearchParams::new_with_str(&search).map_err(|_| "the page address cannot be read".to_string())?;
+    options.map = params.get("map").map(PathBuf::from);
+    options.seed = params.get("seed").and_then(|seed| seed.parse().ok());
+    options.battle = params.has("battle");
+    Ok(options)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn parse_options() -> Result<Options, String> {
     let mut options = Options::default();
     let mut args = std::env::args().skip(1);
@@ -169,6 +189,12 @@ fn parse_options() -> Result<Options, String> {
 }
 
 fn main() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        console_error_panic_hook::set_once();
+        let _ = console_log::init_with_level(log::Level::Warn);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
     let options = match parse_options() {
         Ok(options) => options,
@@ -213,7 +239,11 @@ fn main() {
         run_headless(seed, ticks, options.battle, &map_source);
         return;
     }
-    run_windowed(seed, options, map_source);
+    #[cfg(not(target_arch = "wasm32"))]
+    pollster::block_on(run_windowed(seed, options, map_source));
+    // The browser cannot block while the graphics device starts, so the game starts once it has.
+    #[cfg(target_arch = "wasm32")]
+    wasm_bindgen_futures::spawn_local(run_windowed(seed, options, map_source));
 }
 
 fn make_scenario(seed: u64, battle: bool, map: &MapSource) -> Scenario {
@@ -681,7 +711,7 @@ fn ground_point(ground: Option<[f64; 2]>, heights: &HeightField) -> Option<[f64;
     ground.map(|ground| [ground[0], ground[1], heights.height_at(ground[0], ground[1])])
 }
 
-fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
+async fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
     let battle = options.battle;
     let scenario = make_scenario(seed, battle, &map_source);
     let player_start = scenario.world.starts[PLAYER_TEAM.index()];
@@ -701,15 +731,18 @@ fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
     let mut session = Session::start(scenario, source, driver_options);
 
     let event_loop = EventLoop::new().expect("event loop starts");
-    let window = Arc::new(
-        WindowBuilder::new()
-            .with_title("sim-engine")
-            .with_inner_size(LogicalSize::new(1440.0, 900.0))
-            .build(&event_loop)
-            .expect("window opens"),
-    );
+    let builder = WindowBuilder::new().with_title("sim-engine");
+    #[cfg(not(target_arch = "wasm32"))]
+    let builder = builder.with_inner_size(LogicalSize::new(1440.0, 900.0));
+    // In the browser, a canvas the page sizes, which keeps the keys and right-clicks it is given.
+    #[cfg(target_arch = "wasm32")]
+    let builder = {
+        use winit::platform::web::WindowBuilderExtWebSys;
+        builder.with_append(true).with_prevent_default(true).with_focusable(true)
+    };
+    let window = Arc::new(builder.build(&event_loop).expect("window opens"));
     let size = window.inner_size();
-    let mut renderer = Renderer::new(Arc::clone(&window), &map.heights, map.fog_side);
+    let mut renderer = Renderer::new_async(Arc::clone(&window), &map.heights, map.fog_side).await;
     renderer.set_water_level(map.water_level);
     let mut camera = Camera::new(map.map_units, [f64::from(size.width), f64::from(size.height)]);
     if is_match {
@@ -750,8 +783,9 @@ fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
     let mut cancelled_seen = 0;
     let mut attack_alarm = AttackAlarm::default();
     let mut sound_settings = SoundSettings::default();
-    // Test runs stay silent. The game plays on without sound if there is no device.
-    let sound = (is_match && autotest_seconds.is_none()).then(SoundEngine::start).and_then(|started| match started {
+    // Test runs stay silent. The game plays on without sound if there is no device. Browsers
+    // only allow sound after the player clicks, so the browser build is silent for now.
+    let sound = (is_match && autotest_seconds.is_none() && !cfg!(target_arch = "wasm32")).then(SoundEngine::start).and_then(|started| match started {
         Ok(engine) => Some(engine),
         Err(error) => {
             eprintln!("playing without sound: {error}");
@@ -768,8 +802,7 @@ fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
     let looks = instances::unit_looks(&map.blueprints);
 
     event_loop.set_control_flow(ControlFlow::Poll);
-    event_loop
-        .run(move |event, target| match event {
+    let handle_event = move |event: Event<()>, target: &winit::event_loop::EventLoopWindowTarget<()>| match event {
             Event::AboutToWait => window.request_redraw(),
             Event::WindowEvent { event, .. } => {
                 let response = egui_state.on_window_event(&window, &event);
@@ -1593,6 +1626,13 @@ fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                 }
             }
             _ => {}
-        })
-        .expect("event loop runs");
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    event_loop.run(handle_event).expect("event loop runs");
+    // The browser's event loop runs on after this returns, driven by the page.
+    #[cfg(target_arch = "wasm32")]
+    {
+        use winit::platform::web::EventLoopExtWebSys;
+        event_loop.spawn(handle_event);
+    }
 }

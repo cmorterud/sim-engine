@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>sim-engine</title>
+  <!-- trunk builds the game for the browser and wires it in here. -->
+  <link data-trunk rel="rust" data-bin="sim-engine" data-wasm-opt="3" />
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #05060a; color: #c8ccd4; font: 15px system-ui, sans-serif; }
+    /* The game sizes its drawing to whatever the canvas is given: the whole page. */
+    canvas { width: 100% !important; height: 100% !important; display: block; outline: none; }
+    #status { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 16px; }
+    body:has(canvas) #status { display: none; }
+  </style>
+</head>
+<body>
+  <div id="status">
+    <p>Loading sim-engine&hellip;<br><small>Needs a browser with WebGL2. Add <code>?map=highland</code> or <code>?map=twin_passes</code> to the address for the other maps.</small></p>
+  </div>
+</body>
+</html>

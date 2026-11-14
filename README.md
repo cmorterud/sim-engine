@@ -13,6 +13,14 @@ cargo run --release              # A skirmish against the AI
 cargo run --release -- --battle  # The 5,000-unit stress test
 ```
 
+Or play in the browser at **https://codymorterud.com/sim-engine/**, in any browser with WebGL2. Add `?map=highland` or `?map=twin_passes` to the address for the other maps, `?seed=7` for another seed, or `?battle` for the stress test. Every push to `main` rebuilds and publishes it (`.github/workflows/pages.yml`). The browser build is the same game, but it has no sound yet, cannot load maps from your files, and is slower, so huge battles may stutter. To build it yourself:
+
+```bash
+rustup target add wasm32-unknown-unknown
+cargo install trunk --locked
+trunk serve --release    # then open http://127.0.0.1:8080
+```
+
 Destroy the enemy commander to win. Yours explodes if it dies, and your whole team goes with it.
 
 1. Press Space to select your commander. Choose a structure from the bottom panel, then left-click the ground to place it.

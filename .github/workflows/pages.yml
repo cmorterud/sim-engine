@@ -1,0 +1,74 @@
+name: Web build
+
+# Builds the game for the browser and publishes it on GitHub Pages, so that it can be played
+# from a link: https://codymorterud.com/sim-engine/
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Only the newest push is worth publishing.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  RUST_VERSION: "1.99.1"
+  TRUNK_VERSION: "0.22.1"
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  build:
+    name: Build for the browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown
+          rustup default "$RUST_VERSION"
+
+      # trunk builds the game, runs wasm-bindgen, and writes the page, from index.html.
+      - name: Install trunk
+        run: |
+          curl -sSL "https://github.com/trunk-rs/trunk/releases/download/v${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz" | tar -xz -C /usr/local/bin trunk
+          trunk --version
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ env.RUST_VERSION }}-wasm-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ env.RUST_VERSION }}-wasm-
+
+      # The page lives under /sim-engine/ on GitHub Pages, so its files are linked from there.
+      - name: Build
+        run: trunk build --release --locked --public-url /sim-engine/
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
+
+  deploy:
+    name: Publish
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

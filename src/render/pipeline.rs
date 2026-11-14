@@ -4,7 +4,9 @@ use std::fs;
 use std::io;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use web_time::Instant;
 
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
@@ -175,29 +177,40 @@ impl Renderer {
     }
 
     /// `fog_side` is the size of the fog of war grid, if the session has fog.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(window: Arc<Window>, heights: &HeightField, fog_side: Option<usize>) -> Self {
+        pollster::block_on(Self::new_async(window, heights, fog_side))
+    }
+
+    /// As `new`, for where waiting on the graphics device must not block, as in the browser.
+    pub async fn new_async(window: Arc<Window>, heights: &HeightField, fog_side: Option<usize>) -> Self {
         let size = window.inner_size();
         let icon_scale = window.scale_factor() as f32;
+        // In the browser, WebGL2, which every current browser has. This version of wgpu asks
+        // WebGPU for a limit that browsers have since dropped, so they refuse the device.
+        let backends = if cfg!(target_arch = "wasm32") { wgpu::Backends::GL } else { wgpu::Backends::PRIMARY };
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::PRIMARY,
+            backends,
             ..Default::default()
         });
         let surface = instance.create_surface(window).expect("window supports a surface");
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        let adapter = instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: Some(&surface),
             force_fallback_adapter: false,
-        }))
+        }).await
         .expect("a graphics adapter is available");
         log::info!("adapter: {:?}", adapter.get_info());
-        let (device, queue) = pollster::block_on(adapter.request_device(
+        let (device, queue) = adapter.request_device(
             &wgpu::DeviceDescriptor {
                 label: Some("device"),
                 required_features: adapter.features() & wgpu::Features::DEPTH32FLOAT_STENCIL8,
-                required_limits: wgpu::Limits::default(),
+                // A browser's GPU may offer less than the native defaults, as WebGL2 does: ask for
+                // what it has, which is more than the game needs.
+                required_limits: if cfg!(target_arch = "wasm32") { adapter.limits() } else { wgpu::Limits::default() },
             },
             None,
-        ))
+        ).await
         .expect("the graphics device is available");
 
         let capabilities = surface.get_capabilities(&adapter);

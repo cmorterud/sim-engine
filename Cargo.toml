@@ -39,6 +39,21 @@ log = "0.4"
 env_logger = "0.11"
 cpal = "0.18.2"
 
+# Clocks that also work in the browser, where std::time::Instant panics.
+web-time = "1"
+
+# The browser build: started from JavaScript, drawing with WebGPU or WebGL2 into a canvas.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wgpu = { version = "0.20", features = ["webgl"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Window", "Location", "UrlSearchParams"] }
+console_error_panic_hook = "0.1"
+console_log = "1"
+# A dependency of a dependency picks random numbers (never in the simulation), and needs the
+# browser's source for them.
+getrandom = { version = "0.2", features = ["js"] }
+
 [dev-dependencies]
 criterion = "0.5"
 
