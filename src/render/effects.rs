@@ -199,18 +199,23 @@ impl Effects {
             if still_there.is_some() {
                 return;
             }
-            let size = match projectile.kind {
+            let least: f32 = match projectile.kind {
                 ProjectileKind::Shell => 2.5,
                 ProjectileKind::Overcharge => 8.0,
                 ProjectileKind::TacticalMissile => 14.0,
                 ProjectileKind::StrategicMissile => 220.0,
             };
+            // The fireball is as wide as the blast that does the damage, so that a bomb or a
+            // heavy shell shows how far it reaches.
+            let blast = (f64::from(projectile.splash) * RAW_TO_WORLD * 2.0) as f32;
+            let size = least.max(blast);
             let at = raw_point(projectile.x, projectile.y, projectile.z);
             self.explode(at, size, time, u64::from(projectile.id.0));
             // Shells that land leave a crater, and a strategic missile scorches a wide circle.
             if let Some(spot) = marks(at, SCAR_REACH) {
                 let strategic = projectile.kind == ProjectileKind::StrategicMissile;
-                self.scar(spot, if strategic { size * 0.6 } else { size.max(2.5) * 1.4 }, !strategic, time, u64::from(projectile.id.0));
+                let radius = if strategic { size * 0.6 } else { (least * 1.4).max(blast * 0.55) };
+                self.scar(spot, radius, !strategic, time, u64::from(projectile.id.0));
             }
         });
         // A unit that dies leaves a wreck where it stood. One that only goes out of sight does not.
@@ -362,7 +367,7 @@ mod tests {
     }
 
     fn shell(id: u32, kind: ProjectileKind) -> ProjectileView {
-        ProjectileView { id: SimId(id), team: Team::Blue, x: 4096 * 100, y: 0, z: 4096 * 5, kind, source: SimId(1) }
+        ProjectileView { id: SimId(id), team: Team::Blue, x: 4096 * 100, y: 0, z: 4096 * 5, kind, source: SimId(1), splash: 0 }
     }
 
     fn unit(id: u32) -> UnitView {
@@ -400,6 +405,24 @@ mod tests {
         assert_eq!(count(&mut effects, 0.01, Shape::Fireball), 1, "one hit, however many frames show it");
         assert_eq!(count(&mut effects, 5.0, Shape::Fireball), 0, "and it burns out");
         assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn a_blast_is_as_wide_as_the_damage_it_does() {
+        let mut before = snapshot(1);
+        let mut bomb = shell(5, ProjectileKind::Shell);
+        bomb.splash = 4096 * 12;
+        bomb.z = 4096;
+        before.projectiles = vec![bomb];
+        let mut effects = Effects::new();
+        effects.note_events(&before, &snapshot(2), 0.0, &|_, _| 0.0, None);
+        let mut out = InstanceBatches::default();
+        effects.build(0.0, [0.0; 3], &mut out);
+        let fireball = out.shape(Shape::Fireball)[0];
+        let width = fireball.model_matrix[0][0].hypot(fireball.model_matrix[0][1]);
+        assert!(width >= 20.0, "a blast reaching 12 is about 24 across, not {width}");
+        let crater = scars(&mut effects, 1.0)[0];
+        assert!(crater.model_matrix[0][0].hypot(crater.model_matrix[0][1]) >= 24.0, "and leaves a crater as wide");
     }
 
     #[test]

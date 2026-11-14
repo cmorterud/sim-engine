@@ -763,7 +763,7 @@ mod tests {
     }
 
     fn shell(id: u32, source: u32) -> ProjectileView {
-        ProjectileView { id: SimId(id), team: Team::Blue, x: 0, y: 0, z: 0, kind: ProjectileKind::Shell, source: SimId(source) }
+        ProjectileView { id: SimId(id), team: Team::Blue, x: 0, y: 0, z: 0, kind: ProjectileKind::Shell, source: SimId(source), splash: 0 }
     }
 
     /// A unit kicks back as a new shell of its own appears, and settles again after.

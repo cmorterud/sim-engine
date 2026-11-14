@@ -203,6 +203,9 @@ pub struct ProjectileView {
     pub kind: ProjectileKind,
     /// The unit that fired it, so that a new shell shows that unit firing.
     pub source: SimId,
+    /// How far its blast reaches when it lands, as raw `Fp` bits: zero for a direct hit. For
+    /// drawing an explosion of the right size.
+    pub splash: i32,
 }
 
 /// What a projectile is, for drawing it.
@@ -3043,7 +3046,7 @@ impl SimWorld {
                     (None, Some(_)) => ProjectileKind::TacticalMissile,
                     (None, None) => ProjectileKind::Shell,
                 };
-                seen(projectile.source_team, x, y).then_some(ProjectileView { id, team: projectile.source_team, x, y, z, kind, source: projectile.source })
+                seen(projectile.source_team, x, y).then_some(ProjectileView { id, team: projectile.source_team, x, y, z, kind, source: projectile.source, splash: projectile.splash_radius.to_bits() })
             })
             .collect();
         let wrecks = self
