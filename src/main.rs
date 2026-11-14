@@ -148,21 +148,25 @@ struct Options {
 }
 
 /// In the browser, options come from the page's address instead: `?map=highland`, `?seed=7`,
-/// and `?battle` for the stress test.
+/// and `?battle` for the stress test. `map=skirmish` is the generated map, as no map is. An
+/// address without options shows the page's map choice (index.html), so the game waits.
 #[cfg(target_arch = "wasm32")]
-fn parse_options() -> Result<Options, String> {
+fn parse_options() -> Result<Option<Options>, String> {
     let mut options = Options::default();
     let search = web_sys::window().and_then(|window| window.location().search().ok()).unwrap_or_default();
+    if search.trim_start_matches('?').is_empty() {
+        return Ok(None);
+    }
     let params = web_sys::UrlSearchParams::new_with_str(&search).map_err(|_| "the page address cannot be read".to_string())?;
-    options.map = params.get("map").map(PathBuf::from);
+    options.map = params.get("map").filter(|name| name != "skirmish").map(PathBuf::from);
     options.seed = params.get("seed").and_then(|seed| seed.parse().ok());
     options.battle = params.has("battle");
     options.difficulty = params.get("ai").and_then(|name| Difficulty::from_name(&name));
-    Ok(options)
+    Ok(Some(options))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn parse_options() -> Result<Options, String> {
+fn parse_options() -> Result<Option<Options>, String> {
     let mut options = Options::default();
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -190,7 +194,7 @@ fn parse_options() -> Result<Options, String> {
             other => return Err(format!("unknown option {other}\n\n{USAGE}")),
         }
     }
-    Ok(options)
+    Ok(Some(options))
 }
 
 fn main() {
@@ -202,7 +206,9 @@ fn main() {
     #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
     let options = match parse_options() {
-        Ok(options) => options,
+        Ok(Some(options)) => options,
+        // The page is asking which map to play.
+        Ok(None) => return,
         Err(message) => {
             println!("{message}");
             return;

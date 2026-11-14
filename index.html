@@ -4,19 +4,174 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>sim-engine</title>
-  <!-- trunk builds the game for the browser and wires it in here. -->
+  <!-- trunk builds the game for the browser and wires it in here. It loads while the player
+       picks a map, and starts only when the address has options (see parse_options). -->
   <link data-trunk rel="rust" data-bin="sim-engine" data-wasm-opt="3" />
+  <link data-trunk rel="copy-dir" href="assets/web/maps" />
   <style>
-    html, body { margin: 0; height: 100%; overflow: hidden; background: #05060a; color: #c8ccd4; font: 15px system-ui, sans-serif; }
+    :root {
+      --bg: #05060a;
+      --panel: #10131b;
+      --panel-raised: #171b26;
+      --line: #262c3a;
+      --text: #c8ccd4;
+      --text-strong: #eef0f4;
+      --muted: #8a91a0;
+      --accent: #3c78ff;
+      --accent-strong: #5b8eff;
+    }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, sans-serif; }
     /* The game sizes its drawing to whatever the canvas is given: the whole page. */
     canvas { width: 100% !important; height: 100% !important; display: block; outline: none; }
     #status { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 16px; }
-    body:has(canvas) #status { display: none; }
+    body:has(canvas) #status, body:has(canvas) #landing { display: none; }
+    [hidden] { display: none !important; }
+
+    #landing { position: fixed; inset: 0; overflow-y: auto; }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 40px 16px 56px; box-sizing: border-box; }
+    header h1 { margin: 0; font-size: 34px; letter-spacing: 0.02em; color: var(--text-strong); }
+    header p { margin: 6px 0 0; color: var(--muted); max-width: 60ch; }
+    h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 32px 0 12px; font-weight: 600; }
+
+    .maps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 14px; border: 0; padding: 0; margin: 0; min-width: 0; }
+    .map { position: relative; display: block; cursor: pointer; background: var(--panel); border: 2px solid var(--line); border-radius: 10px; overflow: hidden; transition: border-color 0.12s, transform 0.12s; }
+    .map:hover { border-color: #3a4256; }
+    .map input { position: absolute; opacity: 0; pointer-events: none; }
+    .map:has(input:checked) { border-color: var(--accent); box-shadow: 0 0 0 3px rgb(60 120 255 / 0.25); }
+    .map:has(input:focus-visible) { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
+    .map img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; image-rendering: pixelated; background: #1b2418; }
+    .map .text { display: block; padding: 10px 12px 12px; }
+    .map strong { display: block; color: var(--text-strong); font-size: 16px; }
+    .map .facts { color: var(--muted); font-size: 13px; }
+    .map .about { margin: 6px 0 0; font-size: 13.5px; }
+
+    .row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 14px 28px; }
+    .field { display: grid; align-content: start; gap: 6px; }
+    .field label, .field .label { font-size: 13px; color: var(--muted); }
+    select, input[type=number] { font: inherit; color: var(--text-strong); background: var(--panel-raised); border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; min-width: 180px; }
+    select:focus-visible, input:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
+    .hint { font-size: 12.5px; color: var(--muted); }
+
+    details { margin-top: 18px; }
+    summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+    details .row { margin-top: 12px; }
+
+    .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 22px; margin-top: 32px; }
+    button.play { font: inherit; font-weight: 600; font-size: 17px; color: #fff; background: var(--accent); border: 0; border-radius: 9px; padding: 12px 34px; cursor: pointer; }
+    button.play:hover { background: var(--accent-strong); }
+    a { color: var(--accent-strong); }
+    .note { color: var(--muted); font-size: 13px; margin-top: 28px; }
+    .keys { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 13.5px; margin: 0; }
+    .keys dt { color: var(--text-strong); }
+    .keys dd { margin: 0; }
   </style>
 </head>
 <body>
-  <div id="status">
-    <p>Loading sim-engine&hellip;<br><small>Needs a browser with WebGL2. Add <code>?map=highland</code> or <code>?map=twin_passes</code> to the address for the other maps.</small></p>
+  <div id="landing" hidden>
+    <div class="wrap">
+      <header>
+        <h1>sim-engine</h1>
+        <p>A real-time strategy game of factories, engineers, and armies of hundreds. Build an economy, out-produce your opponent, and destroy their commander to win.</p>
+      </header>
+
+      <form id="setup" method="get">
+        <h2 id="map-heading">Map</h2>
+        <fieldset class="maps" aria-labelledby="map-heading">
+          <label class="map">
+            <input type="radio" name="map" value="skirmish" checked>
+            <img src="maps/skirmish.png" alt="Skirmish map from above: rolling hills, with two walls across the middle">
+            <span class="text">
+              <strong>Skirmish</strong>
+              <span class="facts">10 km &middot; 24 mass deposits</span>
+              <p class="about">Rolling hills, with a choke point between two walls in the middle. Generated from the seed, so a new seed gives a new map.</p>
+            </span>
+          </label>
+          <label class="map">
+            <input type="radio" name="map" value="highland">
+            <img src="maps/highland.png" alt="Highland map from above: hills and craters scattered with rocks">
+            <span class="text">
+              <strong>Highland</strong>
+              <span class="facts">10 km &middot; 50 mass deposits</span>
+              <p class="about">Open hills pocked with craters and boulder fields. Short distances, so armies meet early.</p>
+            </span>
+          </label>
+          <label class="map">
+            <input type="radio" name="map" value="twin_passes">
+            <img src="maps/twin_passes.png" alt="Twin Passes map from above: a river down the middle with two land bridges">
+            <span class="text">
+              <strong>Twin Passes</strong>
+              <span class="facts">20 km &middot; 80 mass deposits</span>
+              <p class="about">A river splits the map, crossed by two land bridges. Hold the passes, or take to the water and the air.</p>
+            </span>
+          </label>
+        </fieldset>
+
+        <h2>Opponents</h2>
+        <div class="row">
+          <div class="field">
+            <label for="opponents">AI opponents</label>
+            <select id="opponents" aria-describedby="opponents-hint">
+              <option value="1" selected>1</option>
+            </select>
+            <span class="hint" id="opponents-hint">One for now: matches are one on one.</span>
+          </div>
+          <div class="field">
+            <label for="ai">Difficulty</label>
+            <select id="ai" name="ai">
+              <option value="easy" selected>Easy</option>
+              <option value="normal">Normal</option>
+            </select>
+          </div>
+        </div>
+
+        <details>
+          <summary>More options</summary>
+          <div class="row">
+            <div class="field">
+              <label for="seed">Seed</label>
+              <input id="seed" name="seed" type="number" min="0" step="1" inputmode="numeric" placeholder="Default">
+              <span class="hint">The same seed plays out the same way.</span>
+            </div>
+          </div>
+        </details>
+
+        <div class="actions">
+          <button class="play" type="submit">Play</button>
+          <a href="?battle">Or watch a 5,000-unit battle</a>
+        </div>
+      </form>
+
+      <h2>Controls</h2>
+      <dl class="keys">
+        <dt>Space</dt><dd>Select your commander, then pick a structure from the bottom bar and left-click to place it</dd>
+        <dt>Left-click, drag</dt><dd>Select units</dd>
+        <dt>Right-click</dt><dd>Move, attack, assist, or reclaim</dd>
+        <dt>Scroll</dt><dd>Zoom, from the ground to the whole map</dd>
+        <dt>WASD, arrow keys</dt><dd>Pan the view</dd>
+        <dt>Letter keys</dt><dd>The key in the corner of each button. Hover over a button for what it does</dd>
+      </dl>
+      <p class="note">Plays best with a mouse and keyboard, in a browser with WebGL2. The browser's back button returns here. <a href="https://github.com/cmorterud/sim-engine">Source on GitHub</a>.</p>
+    </div>
   </div>
+
+  <div id="status" hidden>
+    <p>Loading sim-engine&hellip;<br><small>Needs a browser with WebGL2.</small></p>
+  </div>
+
+  <script>
+    // With options in the address the game starts; without, this page asks for them.
+    const playing = location.search.length > 1;
+    document.getElementById(playing ? 'status' : 'landing').hidden = false;
+    // Leave out empty fields, so that a blank seed means the default one.
+    document.getElementById('setup').addEventListener('submit', (event) => {
+      for (const field of event.target.elements) {
+        if (field.name && field.value === '') field.disabled = true;
+      }
+    });
+    // Coming back with the back button restores the form; re-enable what submitting disabled.
+    window.addEventListener('pageshow', () => {
+      for (const field of document.getElementById('setup').elements) field.disabled = false;
+    });
+  </script>
 </body>
 </html>

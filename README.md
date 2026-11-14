@@ -13,7 +13,7 @@ cargo run --release              # A skirmish against the AI, which plays easy (
 cargo run --release -- --battle  # The 5,000-unit stress test
 ```
 
-Or play in the browser at **https://codymorterud.com/sim-engine/**, in any browser with WebGL2. Add `?map=highland` or `?map=twin_passes` to the address for the other maps, `?seed=7` for another seed, `?ai=normal` for a harder opponent, or `?battle` for the stress test. It is rebuilt and published once a push to `main` passes CI and the soak (`.github/workflows/pages.yml`), and CI checks that the browser build compiles. The browser build is the same game, but it has no sound yet, cannot load maps from your files, and is slower, so huge battles may stutter. To build it yourself:
+Or play in the browser at **https://codymorterud.com/sim-engine/**, in any browser with WebGL2. The page asks for a map, the AI's difficulty, and optionally a seed, with a picture of each map (drawn by `examples/map_picture.rs` into `assets/web/maps`). Its choices go in the address, so a game can be linked to directly: `?map=highland`, `?map=twin_passes`, or `?map=skirmish` for the maps, `?seed=7` for another seed, `?ai=normal` for a harder opponent, or `?battle` for the stress test. Without any of these, the page shows the choices and the game waits. It is rebuilt and published once a push to `main` passes CI and the soak (`.github/workflows/pages.yml`), and CI checks that the browser build compiles. The browser build is the same game, but it has no sound yet, cannot load maps from your files, and is slower, so huge battles may stutter. To build it yourself:
 
 ```bash
 rustup target add wasm32-unknown-unknown

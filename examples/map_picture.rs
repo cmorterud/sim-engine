@@ -2,12 +2,51 @@
 //! ground brown, water blue, trees green, rocks grey, deposits cyan, Blue's start blue and Red's red.
 //!
 //! `cargo run --release --example map_picture -- highland highland.ppm`
+//!
+//! `skirmish` draws the generated skirmish map, from the seed the game starts with unless a
+//! third argument gives another.
+use sim_engine::math::fp::{Fp, Vec2Fp};
 use sim_engine::sim::components::WreckKind;
 use sim_engine::sim::config::TERRAIN_CELL_UNITS;
+use sim_engine::sim::scenario::MapData;
+
+/// The seed the game starts the skirmish map from, as in main.rs.
+const DEFAULT_SEED: u64 = 0x5EED_2026;
+
+/// The generated skirmish map, in the form a bundled map takes: its ground, its walls as blocked
+/// cells, its deposits, and its starts.
+fn skirmish_map(seed: u64) -> MapData {
+    let world = sim_engine::sim::scenario::skirmish(seed).world;
+    let map_units = world.config.map_units;
+    let cells = (map_units / TERRAIN_CELL_UNITS) as usize;
+    let center = |index: usize| Fp::from_num(index as i32 * TERRAIN_CELL_UNITS + TERRAIN_CELL_UNITS / 2);
+    let blocked = (0..cells * cells)
+        .map(|index| {
+            let point = Vec2Fp::new(center(index % cells), center(index / cells));
+            !world.terrain.is_passable(point) || world.obstacles.iter().any(|wall| wall.contains(point))
+        })
+        .collect();
+    MapData {
+        name: "skirmish".to_string(),
+        map_units,
+        heights: world.terrain.heights().to_vec(),
+        blocked,
+        water_level: Fp::from_num(-1000),
+        deposits: world.deposits.clone(),
+        vents: Vec::new(),
+        starts: world.starts,
+        scenery: Vec::new(),
+    }
+}
+
 fn main() {
     let name = std::env::args().nth(1).expect("map name");
     let out = std::env::args().nth(2).expect("output file");
-    let map = sim_engine::sim::maps::bundled(&name).expect("a bundled map");
+    let map = if name == "skirmish" {
+        skirmish_map(std::env::args().nth(3).and_then(|seed| seed.parse().ok()).unwrap_or(DEFAULT_SEED))
+    } else {
+        sim_engine::sim::maps::bundled(&name).expect("a bundled map")
+    };
     let cells = (map.map_units / TERRAIN_CELL_UNITS) as usize;
     let samples = cells + 1;
     let (low, high) = (*map.heights.iter().min().unwrap() as f32, *map.heights.iter().max().unwrap() as f32);
