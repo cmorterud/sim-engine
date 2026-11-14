@@ -638,14 +638,29 @@ fn add_patrol_point(selection: &Selection, camera: &Camera, map: &MapInfo, feedb
 }
 
 /// Sends the selection on patrol through the points so far.
-fn start_patrol(session: &Session, selection: &Selection, map: &MapInfo, feedback: &mut OrderFeedback, points: &mut Vec<Vec2Fp>) {
+/// Sends a patrol through the clicked points, starting where each unit is, or with Shift, where
+/// it will be once its queued orders are done, so that it walks back there each time round.
+fn start_patrol(session: &Session, selection: &Selection, map: &MapInfo, feedback: &mut OrderFeedback, points: &mut Vec<Vec2Fp>, queued: bool) {
     let units = mobile_units(selection.selected(), &session.current.units, &map.blueprints);
     let points = std::mem::take(points);
     if units.is_empty() {
         feedback.show_rejected(None, "No units selected that can patrol");
-    } else {
-        let order = SimCommand::Patrol { units, points };
-        feedback.show_orders(std::slice::from_ref(&order), None, &map.blueprints, "");
+        return;
+    }
+    let raw = |x: i32, y: i32| Vec2Fp::new(Fp::from_bits(x), Fp::from_bits(y));
+    let orders: Vec<SimCommand> = units
+        .iter()
+        .filter_map(|&id| {
+            let unit = session.current.units.iter().find(|unit| unit.id == id)?;
+            let last_step = queued.then(|| session.current.plans.iter().find(|plan| plan.id == id).and_then(|plan| plan.steps.last())).flatten();
+            let start = last_step.map_or(raw(unit.x, unit.y), |step| raw(step.x, step.y));
+            Some(SimCommand::Patrol { units: vec![id], points: std::iter::once(start).chain(points.iter().copied()).collect(), queued })
+        })
+        .collect();
+    // One line for the whole group, as if it were one order, counting each unit's own start.
+    let summary = SimCommand::Patrol { units: units.clone(), points: std::iter::once(Vec2Fp::ZERO).chain(points.iter().copied()).collect(), queued };
+    feedback.show_orders(std::slice::from_ref(&summary), None, &map.blueprints, "");
+    for order in orders {
         session.send(order);
     }
 }
@@ -976,7 +991,7 @@ async fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                                 placing = None;
                             } else if armed == Some(ArmedOrder::Patrol) && !patrol_points.is_empty() {
                                 armed = None;
-                                start_patrol(&session, &selection, &map, &mut feedback, &mut patrol_points);
+                                start_patrol(&session, &selection, &map, &mut feedback, &mut patrol_points, shift_held);
                             } else if armed.take().is_some() || placing.take().is_some() {
                                 // Right-click only cancels what was armed.
                                 patrol_points.clear();
@@ -1031,7 +1046,7 @@ async fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                                     patrol_held = false;
                                     if !patrol_points.is_empty() {
                                         armed = None;
-                                        start_patrol(&session, &selection, &map, &mut feedback, &mut patrol_points);
+                                        start_patrol(&session, &selection, &map, &mut feedback, &mut patrol_points, shift_held);
                                     } else if ui::has_mobile_units(&session.current, selection.selected()) {
                                         // A tap, with no points placed while holding it.
                                         armed = Some(ArmedOrder::Patrol);

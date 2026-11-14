@@ -342,7 +342,7 @@ fn patrolling_aircraft_stay_up_refuel_when_low_and_go_back_to_their_patrol() {
     let mut world = world();
     world.spawn_finished_structure(world.blueprints.id("air_staging"), Team::Blue, 100, 100).unwrap();
     let interceptor = spawn(&mut world, "t1_interceptor", Team::Blue, point(1_000, 1_000));
-    world.advance_tick(&[SimCommand::Patrol { units: vec![interceptor], points: vec![point(1_000, 1_000), point(4_000, 1_000)] }]);
+    world.advance_tick(&[SimCommand::Patrol { units: vec![interceptor], points: vec![point(1_000, 1_000), point(4_000, 1_000)], queued: false }]);
     for _ in 0..300 {
         world.advance_tick(&[]);
         assert!(flight(&world, interceptor).airborne(), "a patrol never lands");

@@ -80,7 +80,7 @@ pub fn describe(command: &SimCommand, blueprints: &BlueprintDb) -> Option<(Marke
         SimCommand::Refit { units, staging } => (MarkerKind::Support, format!("Refuel: {}", unit_count(units)), Some(*staging)),
         SimCommand::Reclaim { units, .. } => (MarkerKind::Support, format!("Reclaim: {}", unit_count(units)), None),
         SimCommand::SetRally { .. } => (MarkerKind::Rally, "Rally point set".to_string(), None),
-        SimCommand::Patrol { units, points } => {
+        SimCommand::Patrol { units, points, .. } => {
             (MarkerKind::Patrol, format!("Patrol: {} points, {}", points.len(), unit_count(units)), None)
         }
         SimCommand::Build { blueprint, .. } => (MarkerKind::Build, format!("Build: {}", blueprints.get(*blueprint).name), None),

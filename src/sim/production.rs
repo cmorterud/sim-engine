@@ -493,17 +493,24 @@ impl SimWorld {
 
     pub(super) fn apply_production_command(&mut self, command: &SimCommand) {
         match command {
-            SimCommand::Patrol { units, points } => {
+            SimCommand::Patrol { units, points, queued } => {
                 if points.is_empty() {
                     return;
                 }
-                self.clear_unit_plans(units);
+                if !*queued {
+                    self.clear_unit_plans(units);
+                }
                 for &id in units {
                     if self.find_unit(id).is_none() {
                         continue;
                     }
                     let (_, entity) = self.find_unit(id).expect("just checked");
-                    self.set_order(id, Order::IDLE);
+                    if *queued {
+                        // A patrol never ends by itself, so one queued after another replaces it.
+                        self.end_patrol(id, entity);
+                    } else {
+                        self.set_order(id, Order::IDLE);
+                    }
                     self.ecs.insert_one(entity, Patrol { points: points.clone(), next: 0 }).expect("unit is live");
                     // Keep the list sorted, since it is usually a small, recent change.
                     let at = self.patrols.partition_point(|patrol| patrol.0 < id);
@@ -1665,7 +1672,8 @@ impl SimWorld {
                     continue;
                 }
             }
-            if !is_idle {
+            // A queued patrol waits for the moves ahead of it.
+            if !is_idle || self.ecs.get::<&OrderQueue>(entity).is_ok_and(|queue| !queue.0.is_empty()) {
                 continue;
             }
             let mut patrol = self.ecs.get::<&mut Patrol>(entity).expect("patrol list only holds patrols");

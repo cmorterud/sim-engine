@@ -566,7 +566,7 @@ fn patrolling_engineers_reclaim_on_their_own_then_carry_on() {
     set_resources(&mut world, Team::Blue, 0, 1_000);
 
     let engineer = world.spawn_mobile(engineer_blueprint, Team::Blue, point(900, 1_100));
-    world.advance_tick(&[SimCommand::Patrol { units: vec![engineer], points: vec![point(800, 1_100), point(1_200, 1_100)] }]);
+    world.advance_tick(&[SimCommand::Patrol { units: vec![engineer], points: vec![point(800, 1_100), point(1_200, 1_100)], queued: false }]);
     run(&mut world, 300);
     assert!(world.wrecks.is_empty(), "the patrol should have found the wreck");
     let task = world.ecs.get::<&Builder>(entity(&world, engineer)).unwrap().tasks.first().copied();
@@ -583,7 +583,7 @@ fn patrolling_combat_units_loop_through_their_points() {
     let mut world = test_world();
     let bot = id(&world, "t1_light_bot");
     let unit = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
-    world.advance_tick(&[SimCommand::Patrol { units: vec![unit], points: vec![point(1_100, 1_000), point(1_000, 1_000)] }]);
+    world.advance_tick(&[SimCommand::Patrol { units: vec![unit], points: vec![point(1_100, 1_000), point(1_000, 1_000)], queued: false }]);
     let mut visited_far = false;
     let mut returned = false;
     for _ in 0..200 {
@@ -786,7 +786,7 @@ fn plans_show_moves_attacks_patrols_and_support() {
         SimCommand::Move { units: vec![walker], goal: point(3_000, 1_000) },
         SimCommand::AttackMove { units: vec![attacker], goal: point(3_000, 1_500) },
         SimCommand::Attack { units: vec![fighter], target: enemy },
-        SimCommand::Patrol { units: vec![patroller], points: vec![point(1_300, 1_200), point(1_500, 1_200)] },
+        SimCommand::Patrol { units: vec![patroller], points: vec![point(1_300, 1_200), point(1_500, 1_200)], queued: false },
         SimCommand::Assist { units: vec![helper], target: site },
     ]);
     world.advance_tick(&[]);
@@ -1512,7 +1512,7 @@ fn queueing_an_order_ends_a_patrol_and_only_builders_take_queued_tasks() {
     let (bot, engineer_blueprint) = (id(&world, "t1_light_bot"), id(&world, "t1_engineer"));
     let unit = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
     let engineer = world.spawn_mobile(engineer_blueprint, Team::Blue, point(1_000, 1_100));
-    world.advance_tick(&[SimCommand::Patrol { units: vec![unit], points: vec![point(1_200, 1_000), point(1_000, 1_000)] }]);
+    world.advance_tick(&[SimCommand::Patrol { units: vec![unit], points: vec![point(1_200, 1_000), point(1_000, 1_000)], queued: false }]);
     run(&mut world, 5);
     assert_eq!(world.patrols.len(), 1);
     let goal = point(1_500, 1_500);
@@ -1640,7 +1640,7 @@ fn patrols_and_attacks_and_follow_orders_have_no_handles() {
     let follower = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_200));
     let enemy = world.spawn_mobile(bot, Team::Red, point(3_000, 3_000));
     world.advance_tick(&[
-        SimCommand::Patrol { units: vec![patroller], points: vec![point(1_200, 1_000), point(1_000, 1_000)] },
+        SimCommand::Patrol { units: vec![patroller], points: vec![point(1_200, 1_000), point(1_000, 1_000)], queued: false },
         SimCommand::Attack { units: vec![attacker], target: enemy },
         SimCommand::Follow { units: vec![follower], target: patroller },
     ]);

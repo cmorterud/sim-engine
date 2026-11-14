@@ -314,7 +314,7 @@ fn a_patrol_with_an_unreachable_point_ends() {
     let mut world = flat_world();
     seal_off(&mut world, (100, 100), (110, 110));
     let unit = world.spawn_unit(standard_unit(Team::Blue, point(300, 300)));
-    world.advance_tick(&[SimCommand::Patrol { units: vec![unit], points: vec![cell_point(105, 105), point(800, 300)] }]);
+    world.advance_tick(&[SimCommand::Patrol { units: vec![unit], points: vec![cell_point(105, 105), point(800, 300)], queued: false }]);
     for _ in 0..40 {
         world.advance_tick(&[]);
     }
@@ -569,4 +569,33 @@ fn mirror_image_moves_stay_mirror_images() {
             assert_eq!(mirror(position(&world, unit)), position(&world, twin), "{key} left its mirror image at tick {tick}");
         }
     }
+}
+
+/// A patrol given with Shift waits for the orders ahead of it, then loops from where they end.
+#[test]
+fn a_queued_patrol_starts_after_the_queued_moves() {
+    let mut world = flat_world();
+    let unit = world.spawn_unit(standard_unit(Team::Blue, point(300, 300)));
+    let (stop, far) = (point(800, 300), point(800, 800));
+    world.advance_tick(&[SimCommand::QueueMove { units: vec![unit], goal: stop, attack: false }]);
+    world.advance_tick(&[SimCommand::Patrol { units: vec![unit], points: vec![stop, far], queued: true }]);
+    let distance = |world: &SimWorld, to: Vec2Fp| sqrt_wide(world.unit_position(unit).unwrap().xy().distance_squared(&to));
+    // It goes to the end of its queued move first, never cutting across to the patrol's far end.
+    let mut reached_stop = None;
+    let mut reached_far = None;
+    for tick in 0..3_000 {
+        world.advance_tick(&[]);
+        if reached_stop.is_none() {
+            assert!(distance(&world, far) > fp_int(60), "it cut the queued move short");
+            if distance(&world, stop) < fp_int(30) {
+                reached_stop = Some(tick);
+            }
+        } else if reached_far.is_none() && distance(&world, far) < fp_int(30) {
+            reached_far = Some(tick);
+        } else if reached_far.is_some() && distance(&world, stop) < fp_int(30) {
+            // And comes back round to where the queue ended.
+            return;
+        }
+    }
+    panic!("it did not loop back: reached the stop at {reached_stop:?}, the far end at {reached_far:?}");
 }

@@ -1317,7 +1317,7 @@ impl AiBrain {
     /// outlying deposit or the enemy's base, and fly home afterwards.
     fn command_air(&mut self, world: &SimWorld, forces: &Forces, sightings: &[Sighting], commands: &mut Vec<SimCommand>) {
         if !forces.idle_fighters.is_empty() {
-            commands.push(SimCommand::Patrol { units: forces.idle_fighters.clone(), points: vec![self.home, self.rally_point()] });
+            commands.push(SimCommand::Patrol { units: forces.idle_fighters.clone(), points: vec![self.home, self.rally_point()], queued: false });
         }
         if forces.idle_strike.len() < self.air_wave_size {
             return;

@@ -106,7 +106,7 @@ fn mirrored_order(world: &SimWorld, team: Team, command: &SimCommand) -> String 
         SimCommand::Reclaim { units, .. } => format!("reclaim x{}", units.len()),
         SimCommand::Upgrade { units } => format!("upgrade x{}", units.len()),
         SimCommand::SetPaused { units, paused } => format!("pause {paused} x{}", units.len()),
-        SimCommand::Patrol { units, points } => format!("patrol x{} {:?}", units.len(), points.iter().map(|at| point(*at)).collect::<Vec<_>>()),
+        SimCommand::Patrol { units, points, .. } => format!("patrol x{} {:?}", units.len(), points.iter().map(|at| point(*at)).collect::<Vec<_>>()),
         SimCommand::QueueMove { units, goal, attack } => format!("queue-move x{} to {:?} {attack}", units.len(), point(*goal)),
         SimCommand::SetRepeat { repeat, .. } => format!("repeat {repeat}"),
         SimCommand::Attack { units, .. } => format!("attack x{}", units.len()),
@@ -282,7 +282,7 @@ fn ai_takes_to_the_air_and_answers_enemy_aircraft_with_anti_air() {
     let bomber = world.blueprints.id("t1_bomber");
     for index in 0..3 {
         let raider = world.spawn_mobile(bomber, Team::Red, Vec2Fp::new(home.x + fp_int(200 + index * 40), home.y + fp_int(200)));
-        world.advance_tick(&[SimCommand::Patrol { units: vec![raider], points: vec![Vec2Fp::new(home.x + fp_int(200), home.y + fp_int(200)), Vec2Fp::new(home.x + fp_int(400), home.y + fp_int(300))] }]);
+        world.advance_tick(&[SimCommand::Patrol { units: vec![raider], points: vec![Vec2Fp::new(home.x + fp_int(200), home.y + fp_int(200)), Vec2Fp::new(home.x + fp_int(400), home.y + fp_int(300))], queued: false }]);
     }
     for _ in 0..3_000 {
         let commands = brain.think(&world);

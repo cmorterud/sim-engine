@@ -18,7 +18,8 @@ pub enum SimCommand {
     /// Shells that land on debris destroy it, and the mass in it with it.
     AttackGround { units: Vec<SimId>, point: Vec2Fp },
     /// Repeat a route. Combat units attack-move along it; engineers also reclaim and repair.
-    Patrol { units: Vec<SimId>, points: Vec<Vec2Fp> },
+    /// Queued, it begins once what is already ordered is done, instead of replacing it.
+    Patrol { units: Vec<SimId>, points: Vec<Vec2Fp>, queued: bool },
     /// Go there after finishing what is already ordered. A group shares one route, and ends
     /// up in a formation there.
     QueueMove { units: Vec<SimId>, goal: Vec2Fp, attack: bool },
