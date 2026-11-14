@@ -3,14 +3,14 @@ use std::hash::Hasher;
 use std::sync::Arc;
 use twox_hash::XxHash64;
 
-use super::blueprints::{BlueprintDb, Res};
+use super::blueprints::{BlueprintDb, Res, UnitClass};
 use super::air::{bomb_lands_on, BOMB_GRAVITY};
 use super::combat::{entry_hit, firing_solution, missile_velocity, probe_terrain, shot_is_clear, sphere_entry, GRAVITY};
 use super::commands::SimCommand;
 use super::components::{BuildTask, AntiAir, Artillery, BombBay, Falling, Flight, Homing,
     Blueprinted, Builder, Combat, Construction, Factory, Footprint, Health, MoveClass, Order, OrderKind, OrderQueue, Patrol,
     Intel, Launcher, Missile, Stunning, MissileDefense, Upgrading, Overcharged, OverchargeOrder, OverchargeWeapon, Paused, Position, Projectile, Shield, SimId, Team, Turning, Turret, UnitStats, Velocity, Veterancy,
-    Wreck, WreckKind, rotate_toward,
+    Wreck, WreckKind, rotate_toward, LeavingFactory,
 };
 use super::config::{SimConfig, TARGET_SEARCH_INTERVAL, TERRAIN_CELL_UNITS, WRECK_HEALTH_PERMILLE, WRECK_MASS_PERMILLE};
 use super::flowfield::{nearest_passable_cell_for, FlowField, FlowSample};
@@ -87,6 +87,9 @@ pub struct UnitView {
     pub aim: [i32; 2],
     /// A factory making something, or a builder at work, with the power to do it. For drawing.
     pub working: bool,
+    /// What a factory is building, as a raw blueprint id, and how far along it is in
+    /// thousandths, so that it shows in the bay. Anyone who can see the factory sees it.
+    pub assembling: Option<(u16, u16)>,
 }
 
 /// A factory's production state, for the build menu. Only for the viewer's team.
@@ -615,8 +618,14 @@ impl SimWorld {
 
     /// Aircraft can start anywhere on the map, even over water or cliffs.
     pub(super) fn spawn_unit_as(&mut self, spawn: UnitSpawn, move_class: MoveClass) -> SimId {
-        assert!(self.terrain.in_bounds(spawn.position), "unit spawned outside the map");
         assert!(self.terrain.passable_for(move_class, spawn.position), "unit spawned where it cannot be");
+        self.spawn_unit_anywhere(spawn, move_class)
+    }
+
+    /// Spawns a unit even where it could not move, such as a factory's bay, which it then
+    /// drives out of.
+    pub(super) fn spawn_unit_anywhere(&mut self, spawn: UnitSpawn, move_class: MoveClass) -> SimId {
+        assert!(self.terrain.in_bounds(spawn.position), "unit spawned outside the map");
         let id = self.next_id();
         let phase = self.units_spawned[spawn.team.index()];
         self.units_spawned[spawn.team.index()] += 1;
@@ -1233,7 +1242,7 @@ impl SimWorld {
                 travel.leader = goal;
                 return true;
             }
-            let direction = if self.flow_field.goal_cell(route) == Some(self.terrain.cell_of(leader)) {
+            let direction = if self.flow_field.goal_cell(route) == Some(self.terrain.unit_cell_of(leader)) {
                 (goal - leader).normalized()
             } else {
                 match self.flow_field.sample(route, tick, leader, &self.terrain) {
@@ -1295,10 +1304,12 @@ impl SimWorld {
         let disabled = &self.disabled;
         let mut unreachable = Vec::new();
         let mut chases = Vec::new();
-        let mut query = self.ecs.query_mut::<(&mut Position, &mut Velocity, &UnitStats, &mut Order, &Combat, Option<&mut Turning>, Option<&Builder>)>();
+        // Units that have driven out of their factory, with where they were sent.
+        let mut left_factory = Vec::new();
+        let mut query = self.ecs.query_mut::<(&mut Position, &mut Velocity, &UnitStats, &mut Order, &Combat, Option<&mut Turning>, Option<&Builder>, Option<&LeavingFactory>)>();
         let mut view = query.view();
         for (index, &(id, entity)) in units.iter().enumerate() {
-            let (position, velocity, stats, order, combat, turning, builder) = view.get_mut(entity).expect("unit list only holds live units");
+            let (position, velocity, stats, order, combat, turning, builder, leaving) = view.get_mut(entity).expect("unit list only holds live units");
             if stats.is_structure || stats.move_class == MoveClass::Air {
                 continue;
             }
@@ -1317,6 +1328,26 @@ impl SimWorld {
                 MoveClass::Submarine => terrain.water_level() - stats.radius * 2,
                 _ => terrain.height_at(point),
             };
+
+            // Just built: drive straight out of the factory's open end, facing the way out, and
+            // only then follow orders.
+            if let Some(leaving) = leaving {
+                velocity.0 = Vec3Fp::ZERO;
+                let remaining = sqrt_wide(here.distance_squared(&leaving.exit));
+                let speed = stats.max_speed.max(Fp::ONE);
+                let next = if remaining <= speed {
+                    left_factory.push((id, entity, leaving.rally));
+                    leaving.exit
+                } else {
+                    let direction = (leaving.exit - here).normalized();
+                    if let Some(turning) = turning {
+                        turning.facing = direction;
+                    }
+                    here + direction.scaled(speed)
+                };
+                position.0 = Vec3Fp::new(next.x, next.y, surface(next) + stats.radius);
+                continue;
+            }
 
             // A structure was placed on top of this unit: walk straight out, through it if need be.
             if !passable(here) {
@@ -1364,8 +1395,8 @@ impl SimWorld {
                 let arrive_radius = flow.arrive_radius(order.route).unwrap_or(Fp::ZERO);
                 // A flow field ends at the goal's cell, so the last steps are a straight walk.
                 // If the goal itself cannot be walked to, reaching that cell is as close as it gets.
-                let in_goal_cell = flow.goal_cell(order.route) == Some(terrain.cell_of(here));
-                let goal_is_here = in_goal_cell && terrain.in_bounds(goal) && terrain.cell_of(goal) == terrain.cell_of(here);
+                let in_goal_cell = flow.goal_cell(order.route) == Some(terrain.unit_cell_of(here));
+                let goal_is_here = in_goal_cell && terrain.in_bounds(goal) && terrain.unit_cell_of(goal) == terrain.unit_cell_of(here);
                 let arrived = here.distance_squared(&goal) <= wide_mul(arrive_radius, arrive_radius) || (in_goal_cell && !goal_is_here);
                 let walk_to_goal = |speed: Fp| {
                     let direction = (goal - here).normalized();
@@ -1522,6 +1553,14 @@ impl SimWorld {
             }
             if next != here {
                 position.0 = Vec3Fp::new(next.x, next.y, surface(next) + stats.radius);
+            }
+        }
+        // Out of the factory: to the rally point, unless given an order on the way out.
+        for (id, entity, rally) in left_factory {
+            let _ = self.ecs.remove_one::<LeavingFactory>(entity);
+            let idle = self.ecs.get::<&Order>(entity).is_ok_and(|order| order.kind == OrderKind::Idle);
+            if let (Some(point), true) = (rally, idle) {
+                self.assign_route(&[id], OrderKind::Move, point, None);
             }
         }
         self.step_aircraft();
@@ -3145,6 +3184,13 @@ impl SimWorld {
                     facing: turning.map_or([0, 0], |turning| [turning.facing.x.to_bits(), turning.facing.y.to_bits()]),
                     aim: turret.map_or([0, 0], |turret| [turret.facing.x.to_bits(), turret.facing.y.to_bits()]),
                     working: producing || builders.binary_search(&id).is_ok(),
+                    assembling: factory.and_then(|factory| {
+                        let item = *factory.queue.first()?;
+                        // Upgrades and missiles are not built in the bay.
+                        let made = self.blueprints.get(item);
+                        (!made.is_factory() && made.class != UnitClass::Ammo)
+                            .then(|| (item.0, (factory.progress.to_bits() * 1000 / Res::ONE.to_bits()).clamp(0, 1000) as u16))
+                    }),
                 })
             })
             .collect();

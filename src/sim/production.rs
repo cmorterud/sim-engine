@@ -137,9 +137,10 @@ fn fp_to_res(value: Fp) -> Res {
     Res::from_bits(i64::from(value.to_bits()) << 12)
 }
 
-/// A factory's four exits, best first: the side facing `toward` first. When two sides face it
-/// equally, the one clockwise of it wins. Both measures turn with the map, so a factory on a
-/// mirrored map picks the mirrored exit.
+/// A factory's exits, best first: its two open ends, east and west, the one facing `toward`
+/// first, then its closed sides, for when both ends are blocked. When two face it equally,
+/// the one clockwise of it wins. Both measures turn with the map, so a factory on a mirrored
+/// map picks the mirrored exit.
 fn exit_order(center: Vec2Fp, toward: Vec2Fp) -> [(i32, i32); 4] {
     let (dx, dy) = (toward.x - center.x, toward.y - center.y);
     let mut exits = [(0, -1), (1, 0), (0, 1), (-1, 0)];
@@ -150,7 +151,7 @@ fn exit_order(center: Vec2Fp, toward: Vec2Fp) -> [(i32, i32); 4] {
         (_, 1) => along_y,
         _ => -along_y,
     };
-    exits.sort_by_key(|&(x, y)| (std::cmp::Reverse(pick(x, y, dx, dy)), std::cmp::Reverse(pick(x, y, dy, -dx))));
+    exits.sort_by_key(|&(x, y)| (x == 0, std::cmp::Reverse(pick(x, y, dx, dy)), std::cmp::Reverse(pick(x, y, dy, -dx))));
     exits
 }
 
@@ -185,9 +186,14 @@ impl SimWorld {
 
     /// Spawns a finished mobile unit.
     pub fn spawn_mobile(&mut self, blueprint: BlueprintId, team: Team, position: Vec2Fp) -> SimId {
+        self.spawn_mobile_inner(blueprint, team, position, false)
+    }
+
+    /// `in_bay`: spawned in a factory's bay, where it could not otherwise be, to drive out.
+    fn spawn_mobile_inner(&mut self, blueprint: BlueprintId, team: Team, position: Vec2Fp, in_bay: bool) -> SimId {
         let spawn = self.blueprint_spawn(blueprint, team, position);
         let move_class = self.blueprints.get(blueprint).move_class();
-        let id = self.spawn_unit_as(spawn, move_class);
+        let id = if in_bay { self.spawn_unit_anywhere(spawn, move_class) } else { self.spawn_unit_as(spawn, move_class) };
         let entity = self.find_unit(id).expect("just spawned").1;
         match move_class {
             super::components::MoveClass::Submarine => self.submarines.push((id, entity)),
@@ -1520,9 +1526,16 @@ impl SimWorld {
         let Some(exit) = exit else {
             return;
         };
-        let id = self.spawn_mobile(finished, team, exit);
-        if let Some(point) = rally {
-            self.assign_route(&[id], OrderKind::Move, point, None);
+        // It is built in the bay, so it starts there. An aircraft lifts off and flies; anything
+        // else drives out of the open end first (`LeavingFactory`), then heads for the rally.
+        let flies = unit.move_class() == super::components::MoveClass::Air;
+        let id = self.spawn_mobile_inner(finished, team, center, true);
+        if flies {
+            // With no rally point, it clears the pad for the next.
+            self.assign_route(&[id], OrderKind::Move, rally.unwrap_or(exit), None);
+        } else {
+            let entity = self.find_unit(id).expect("just spawned").1;
+            self.ecs.insert_one(entity, super::components::LeavingFactory { exit, rally }).expect("just spawned");
         }
     }
 
@@ -2162,6 +2175,15 @@ impl SimWorld {
         if let Ok(weapon) = self.ecs.get::<&super::components::StunWeapon>(entity) {
             hasher.write(&[35]);
             hasher.write(&weapon.0.to_le_bytes());
+        }
+        if let Ok(leaving) = self.ecs.get::<&super::components::LeavingFactory>(entity) {
+            hasher.write(&[61]);
+            hasher.write(&leaving.exit.x.to_bits().to_le_bytes());
+            hasher.write(&leaving.exit.y.to_bits().to_le_bytes());
+            if let Some(rally) = leaving.rally {
+                hasher.write(&rally.x.to_bits().to_le_bytes());
+                hasher.write(&rally.y.to_bits().to_le_bytes());
+            }
         }
         if let Ok(patrol) = self.ecs.get::<&Patrol>(entity) {
             hasher.write(&[7]);

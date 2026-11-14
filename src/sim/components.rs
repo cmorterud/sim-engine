@@ -114,6 +114,14 @@ pub enum OrderKind {
     Attack,
 }
 
+/// A unit just finished in a factory, driving out of its bay: straight to `exit`, through the
+/// factory's open end, before it heads for `rally` or follows an order given meanwhile.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct LeavingFactory {
+    pub exit: Vec2Fp,
+    pub rally: Option<Vec2Fp>,
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Order {
     pub kind: OrderKind,

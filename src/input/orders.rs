@@ -507,6 +507,7 @@ mod tests {
             is_structure: unit.is_structure(),
             facing: [0, 0], aim: [0, 0],
             working: false,
+            assembling: None,
         }
     }
 

@@ -5,7 +5,7 @@ use sim_engine::input::orders::{pending_builds, placement_is_valid, PlacementMap
 use sim_engine::math::fp::{fp_int, Fp, Vec2Fp, Vec3Fp};
 use sim_engine::sim::blueprints::{BlueprintId, Res};
 use sim_engine::sim::commands::SimCommand;
-use sim_engine::sim::components::{Blueprinted, BuildTask, Builder, Combat, Construction, Factory, Health, Order, OrderKind, Projectile, SimId, Team};
+use sim_engine::sim::components::{Blueprinted, BuildTask, Builder, Combat, Construction, Factory, Health, LeavingFactory, Order, OrderKind, Projectile, SimId, Team};
 use sim_engine::sim::config::{SimConfig, TerrainStyle};
 use sim_engine::sim::scenario::{self, skirmish_start};
 use sim_engine::sim::world::{MatchResult, PlanStepKind, SimWorld};
@@ -317,6 +317,13 @@ fn a_factory_under_construction_holds_its_orders_until_it_is_built() {
     }
     assert_eq!(world.units.len(), 5, "both queued units should have been built");
     let newest = world.units.iter().map(|unit| unit.0).max().unwrap();
+    // It drives out of the factory first, then heads for the rally point.
+    let mut ticks = 0;
+    while world.ecs.get::<&LeavingFactory>(entity(&world, newest)).is_ok() {
+        world.advance_tick(&[]);
+        ticks += 1;
+        assert!(ticks < 100, "the new unit never left the factory");
+    }
     let order = *world.ecs.get::<&Order>(entity(&world, newest)).unwrap();
     assert_ne!(order.kind, OrderKind::Idle, "the new unit should head for the rally point");
 }

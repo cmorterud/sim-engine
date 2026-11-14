@@ -98,6 +98,8 @@ fn glowing(color: [f32; 3]) -> [f32; 3] {
 
 /// A unit's facing as a unit vector, which is where a shape's +Y axis points.
 const NORTH: [f32; 2] = [0.0, 1.0];
+/// What a factory is building faces one of the bay's open ends.
+const EAST: [f32; 2] = [1.0, 0.0];
 
 fn instance(center: [f64; 3], size: [f32; 3], heading: [f32; 2], color: [f32; 3], icon_px: f32, eye: [f64; 3]) -> UnitInstanceRaw {
     let [x, y] = heading;
@@ -258,11 +260,14 @@ pub struct UnitLook {
     pub height_share: f32,
     /// A lower part that faces the way the unit moves, under a `shape` that can face its work.
     pub base: Option<Shape>,
+    /// How wide a mobile unit is drawn, in world units, for drawing it in a factory's bay
+    /// before it exists. Zero from `unit_look`, which knows only the key; `unit_looks` sets it.
+    pub size: f32,
 }
 
 /// Maps a blueprint to its look. Unknown keys fall back to a plain cube.
 pub fn unit_look(key: &str) -> UnitLook {
-    let look = |shape, tint, height_share| UnitLook { shape, tint, height_share, base: None };
+    let look = |shape, tint, height_share| UnitLook { shape, tint, height_share, base: None, size: 0.0 };
     match key {
         "acu" => UnitLook { base: Some(Shape::CommanderLegs), ..look(Shape::Commander, Some([1.00, 1.00, 1.00]), 1.0) },
         "support_commander" => UnitLook { base: Some(Shape::CommanderLegs), ..look(Shape::Commander, Some([0.70, 0.75, 0.85]), 1.0) },
@@ -349,7 +354,7 @@ pub fn unit_look(key: &str) -> UnitLook {
 
 /// Per-blueprint looks, indexed by raw blueprint id.
 pub fn unit_looks(blueprints: &BlueprintDb) -> Vec<UnitLook> {
-    blueprints.iter().map(|unit| unit_look(&unit.key)).collect()
+    blueprints.iter().map(|unit| UnitLook { size: unit.radius.to_num::<f32>() * 2.0, ..unit_look(&unit.key) }).collect()
 }
 
 /// Units with no heading yet face the middle of the map.
@@ -496,6 +501,24 @@ pub fn build_unit_instances(
                 let frame = [center[0], center[1], ground + f64::from(full) * 0.5];
                 out.push(Shape::Scaffold, painted(frame, [size * 1.04, size * 1.04, full], NORTH, color, hull, glow, NO_ICON, eye));
             }
+            // What a factory is building stands in its bay, rising from the floor as it is built,
+            // in its team's colors but unlit and dim, until it drives or flies out.
+            if let (Some((item, permille)), Some(floor), true) = (unit.assembling, shape.bay_floor(), unit.built_permille >= 1000) {
+                if let Some(made) = looks.get(usize::from(item)).filter(|made| made.size > 0.0) {
+                    let ground = center[2] - f64::from(height) * 0.5;
+                    let progress = f32::from(permille) / 1000.0;
+                    let rise = made.size * (0.2 + 0.8 * progress);
+                    let at = [center[0], center[1], ground + f64::from(height * floor + rise * 0.5)];
+                    let dim = 0.55 + 0.45 * progress;
+                    let made_trim = color.map(|channel| channel * dim);
+                    let made_hull = armor(color, made.tint).map(|channel| channel * dim);
+                    let extent = [made.size, made.size, rise];
+                    if let Some(base) = made.base {
+                        out.push(base, painted(at, extent, EAST, made_trim, made_hull, made_hull, NO_ICON, eye));
+                    }
+                    out.push(made.shape, painted(at, extent, EAST, made_trim, made_hull, made_hull, NO_ICON, eye));
+                }
+            }
         } else {
             // The body faces the way the simulation says. Units that turn instantly, such as the
             // stress test's cubes, have no facing, so they are turned here as before.
@@ -621,6 +644,7 @@ mod tests {
             is_structure: false,
             facing: [0, 0], aim: [0, 0],
             working: false,
+            assembling: None,
         }
     }
 
@@ -832,6 +856,30 @@ mod tests {
         assert_eq!(frames.len(), 1);
         let site_height = out.shape(Shape::Generator)[0].model_matrix[2][2];
         assert!(frames[0].model_matrix[2][2] > site_height, "the scaffold is as tall as the finished building");
+    }
+
+    /// What a factory is building stands in its bay, rising as it is built, but not in a
+    /// factory that is itself still going up.
+    #[test]
+    fn a_factory_shows_what_it_is_building_in_its_bay() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let mut factory = unit(1, 0);
+        factory.blueprint = db.id("land_factory_t1").0;
+        factory.is_structure = true;
+        factory.radius = 30 << 12;
+        let bot = db.id("t1_light_bot").0;
+        let draw = |factory: UnitView| {
+            let mut out = InstanceBatches::default();
+            build_unit_instances(&[], &[factory], 0.0, [0.0; 3], &[], &looks, &[], &mut Motion::new(), &mut out);
+            out.shape(Shape::Bot).iter().map(|instance| instance.model_matrix[2][2]).collect::<Vec<f32>>()
+        };
+        assert!(draw(factory).is_empty(), "an idle factory's bay is empty");
+        let early = draw(UnitView { assembling: Some((bot, 100)), ..factory });
+        let late = draw(UnitView { assembling: Some((bot, 900)), ..factory });
+        assert_eq!((early.len(), late.len()), (1, 1), "the bot stands in the bay");
+        assert!(late[0] > early[0], "it rises as it is built: {early:?} then {late:?}");
+        assert!(draw(UnitView { assembling: Some((bot, 500)), built_permille: 500, ..factory }).is_empty(), "not while the factory is unfinished");
     }
 
     /// Working lights shine while a unit works, and dim when it stops.

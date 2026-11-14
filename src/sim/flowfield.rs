@@ -672,7 +672,7 @@ impl FlowField {
             match locate(target) {
                 None => route.follow = None,
                 Some(position) => {
-                    if terrain.cell_of(position) != route.goal_cell {
+                    if terrain.unit_cell_of(position) != route.goal_cell {
                         route.last_reroute_tick = tick;
                         reroutes.push((id, position));
                     }
@@ -690,7 +690,7 @@ impl FlowField {
         if self.held_elsewhere(id) {
             return self.holder_mut(id).map_or(FlowSample::Hold, |other| other.sample(id, tick, position, terrain));
         }
-        let cell = terrain.cell_of(position);
+        let cell = terrain.unit_cell_of(position);
         let sector = self.sector_of_cell(cell);
         let origin = self.sector_origin(sector);
         let Some(route) = self.routes.get_mut(&id) else {
@@ -952,7 +952,7 @@ pub fn nearest_passable_cell_for(terrain: &Terrain, class: MoveClass, point: Vec
         },
     );
     let cells = terrain.cells_per_side() as i64;
-    let (cx, cy) = terrain.cell_of(point);
+    let (cx, cy) = terrain.unit_cell_of(point);
     let (cx, cy) = (cx as i64, cy as i64);
     // Square rings outward, visiting only each ring's own cells. The nearest on a ring wins,
     // and of equals the one nearest the center, measured in half cells so that it stays whole,
@@ -1054,7 +1054,7 @@ mod tests {
     fn nearest_by_squares(terrain: &Terrain, point: Vec2Fp) -> Option<(usize, usize)> {
         let cost = land_cost(terrain);
         let cells = terrain.cells_per_side() as i64;
-        let (cx, cy) = terrain.cell_of(point);
+        let (cx, cy) = terrain.unit_cell_of(point);
         let (cx, cy) = (cx as i64, cy as i64);
         let (px, py) = (2 * cx + 1 - cells, 2 * cy + 1 - cells);
         for ring in 0..cells {

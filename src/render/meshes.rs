@@ -229,6 +229,17 @@ impl Shape {
         }
     }
 
+    /// For a factory, how high the floor of its bay is, as a share of its height: where what it
+    /// builds stands while it is built. A dock builds ships afloat, at its foot.
+    pub const fn bay_floor(self) -> Option<f32> {
+        match self {
+            Self::Factory | Self::FactoryT2 | Self::FactoryT3 => Some(0.06),
+            Self::AirFactory | Self::AirFactoryT2 | Self::AirFactoryT3 => Some(0.07),
+            Self::NavalFactory | Self::NavalFactoryT2 | Self::NavalFactoryT3 => Some(0.0),
+            _ => None,
+        }
+    }
+
     /// Whether the shape is a hull that leaves a wake behind it on the water.
     pub const fn leaves_wake(self) -> bool {
         matches!(self, Self::Frigate | Self::Destroyer | Self::Cruiser | Self::Battleship | Self::Battlecruiser | Self::Submarine | Self::MissileSubmarine | Self::ShieldBoat)
@@ -724,31 +735,49 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             });
             mesh.flash([0.0, 0.42, 0.42], 0.07);
         }
-        // A wide hall with a sawtooth roof and a smokestack.
+        // An open-air assembly bay: a floor open at both ends, east and west, between long walls,
+        // under a gantry crane, so that what it builds can be seen and drives out either end.
         Shape::Factory => {
+            // The floor of the bay, and ramps down from both of its open ends, east and west.
             mesh.paint(Material::Hull);
-            mesh.block([-0.5, -0.5, -0.5], [0.5, 0.5, 0.05]);
-            mesh.paint(Material::Trim);
-            for start in [-0.5_f32, -0.17, 0.16] {
-                let end = start + 0.33;
-                let bottom = [
-                    Vec3::new(start, -0.5, 0.05),
-                    Vec3::new(end, -0.5, 0.05),
-                    Vec3::new(end, 0.3, 0.05),
-                    Vec3::new(start, 0.3, 0.05),
-                ];
-                let top = [
-                    Vec3::new(start, -0.5, 0.05),
-                    Vec3::new(end, -0.5, 0.4),
-                    Vec3::new(end, 0.3, 0.4),
-                    Vec3::new(start, 0.3, 0.05),
-                ];
-                mesh.cuboid(bottom, top);
+            mesh.block([-0.42, -0.5, -0.5], [0.42, 0.5, -0.44]);
+            for side in [-1.0_f32, 1.0] {
+                let (inner, outer) = (0.42 * side, 0.5 * side);
+                let (low, high) = (inner.min(outer), inner.max(outer));
+                let z = |x: f32| if (x - inner).abs() < 1e-6 { -0.44 } else { -0.495 };
+                mesh.cuboid(
+                    [Vec3::new(low, -0.34, -0.5), Vec3::new(high, -0.34, -0.5), Vec3::new(high, 0.34, -0.5), Vec3::new(low, 0.34, -0.5)],
+                    [Vec3::new(low, -0.34, z(low)), Vec3::new(high, -0.34, z(high)), Vec3::new(high, 0.34, z(high)), Vec3::new(low, 0.34, z(low))],
+                );
             }
-            mesh.paint(Material::Metal);
-            mesh.frustum([0.32, 0.4], [0.05, 0.5], [0.09, 0.06], 6);
+            // Guide lights along the floor, lit while it builds.
             mesh.paint(Material::Glow);
-            mesh.moving(motion::PULSE, [0.0; 3], |mesh| mesh.block([-0.45, 0.34, 0.05], [0.18, 0.4, 0.09]));
+            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
+                for y in [-0.33_f32, 0.33] {
+                    mesh.block([-0.4, y - 0.01, -0.44], [0.4, y + 0.01, -0.43]);
+                }
+            });
+
+            // Walls down the long sides, north and south, with the team's stripe along the top.
+            for y in [-0.5_f32, 0.36] {
+                mesh.paint(Material::Hull);
+                mesh.bevel([-0.44, y, -0.44], [0.44, y + 0.14, -0.14], 0.03);
+                mesh.paint(Material::Trim);
+                mesh.block([-0.44, y, -0.14], [0.44, y + 0.14, -0.1]);
+            }
+            // A gantry crane across the bay, with its hoist over the middle.
+            mesh.paint(Material::Metal);
+            for y in [-0.47_f32, 0.39] {
+                mesh.block([-0.04, y, -0.1], [0.04, y + 0.08, 0.3]);
+            }
+            mesh.block([-0.05, -0.47, 0.26], [0.05, 0.47, 0.34]);
+            mesh.paint(Material::Trim);
+            mesh.block([-0.07, -0.08, 0.14], [0.07, 0.08, 0.26]);
+            mesh.paint(Material::Glow);
+            mesh.moving(motion::PULSE, [0.0; 3], |mesh| mesh.block([-0.025, -0.025, 0.09], [0.025, 0.025, 0.14]));
+            // A smokestack at the west end of the north wall.
+            mesh.paint(Material::Metal);
+            mesh.frustum([-0.36, 0.43], [-0.1, 0.42], [0.05, 0.04], 6);
         }
         // A squat hexagonal collar with a central drill spike.
         Shape::Extractor => {
@@ -1082,18 +1111,42 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Hull);
             mesh.block([-0.12, -0.45, 0.0], [0.12, -0.3, 0.12]);
         }
+        // A dock: two piers with a slip of open water between them, open at both ends, under a crane.
         Shape::NavalFactory => {
+            // Piers down the long sides, north and south, with open water between them: a slip
+            // open at both ends, east and west, where ships are built afloat and sail out.
             mesh.paint(Material::Hull);
-            mesh.block([-0.5, -0.5, -0.5], [-0.3, 0.5, -0.15]);
-            mesh.block([0.3, -0.5, -0.5], [0.5, 0.5, -0.15]);
-            mesh.paint(Material::Trim);
-            mesh.block([-0.3, -0.5, -0.5], [0.3, -0.35, 0.05]);
-            mesh.block([-0.5, -0.1, 0.25], [0.5, 0.1, 0.4]);
+            for y in [-0.5_f32, 0.32] {
+                mesh.bevel([-0.5, y, -0.5], [0.5, y + 0.18, -0.32], 0.03);
+            }
+            // Bollards along the piers' inner edges.
             mesh.paint(Material::Metal);
-            mesh.block([-0.48, -0.08, -0.15], [-0.36, 0.08, 0.25]);
-            mesh.block([0.36, -0.08, -0.15], [0.48, 0.08, 0.25]);
+            for y in [-0.33_f32, 0.33] {
+                for x in [-0.4_f32, -0.2, 0.0, 0.2, 0.4] {
+                    mesh.frustum([x, y], [-0.32, -0.28], [0.015, 0.015], 6);
+                }
+            }
+            // Buoy lights at the open ends.
             mesh.paint(Material::Glow);
-            mesh.moving(motion::PULSE, [0.0; 3], |mesh| mesh.block([-0.4, -0.03, 0.4], [0.4, 0.03, 0.42]));
+            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
+                for x in [-0.48_f32, 0.48] {
+                    for y in [-0.3_f32, 0.3] {
+                        mesh.block([x - 0.02, y - 0.02, -0.34], [x + 0.02, y + 0.02, -0.3]);
+                    }
+                }
+            });
+
+            // A crane on rails along the piers, its jib across the slip.
+            mesh.paint(Material::Metal);
+            for y in [-0.45_f32, 0.37] {
+                mesh.block([-0.04, y, -0.32], [0.04, y + 0.08, 0.2]);
+            }
+            mesh.block([-0.05, -0.45, 0.16], [0.05, 0.45, 0.24]);
+            mesh.paint(Material::Trim);
+            mesh.block([-0.07, -0.07, 0.06], [0.07, 0.07, 0.16]);
+            // A dock office with the team's colors on the north pier.
+            mesh.paint(Material::Trim);
+            mesh.bevel([-0.42, 0.36, -0.32], [-0.2, 0.48, -0.12], 0.02);
         }
         Shape::Frigate => {
             mesh.hull(0.1, 0.16, 0.06);
@@ -1246,115 +1299,245 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.frustum([0.0, -0.08], [0.3, 0.42], [0.1, 0.1], 10);
             mesh.frustum([0.0, -0.08], [0.42, 0.5], [0.07, 0.03], 10);
         }
+        // The T2 bay: higher buttressed walls with windows, two cranes, and two stacks.
         Shape::FactoryT2 => {
+            // The floor of the bay, and ramps down from both of its open ends, east and west.
             mesh.paint(Material::Hull);
-            mesh.bevel([-0.5, -0.48, -0.5], [0.2, 0.5, 0.05], 0.04);
-            mesh.bevel([0.2, -0.3, -0.5], [0.5, 0.5, -0.1], 0.04);
-            mesh.paint(Material::Trim);
-            for start in [-0.5_f32, -0.15] {
-                let end = start + 0.35;
-                let bottom = [Vec3::new(start, -0.5, 0.05), Vec3::new(end, -0.5, 0.05), Vec3::new(end, 0.3, 0.05), Vec3::new(start, 0.3, 0.05)];
-                let top = [Vec3::new(start, -0.5, 0.05), Vec3::new(end, -0.5, 0.42), Vec3::new(end, 0.3, 0.42), Vec3::new(start, 0.3, 0.05)];
-                mesh.cuboid(bottom, top);
-            }
-            mesh.paint(Material::Glow);
-            mesh.moving(motion::PULSE, [0.0; 3], |mesh| mesh.block([-0.4, -0.5, -0.3], [0.1, -0.48, -0.24]));
-            mesh.paint(Material::Metal);
-            for y in [0.05_f32, 0.32] {
-                mesh.frustum([0.36, y], [-0.1, 0.48], [0.07, 0.05], 6);
-            }
-        }
-        Shape::FactoryT3 => {
-            mesh.paint(Material::Hull);
-            mesh.bevel([-0.5, -0.5, -0.5], [0.5, 0.5, -0.05], 0.05);
-            mesh.paint(Material::Trim);
-            mesh.bevel([-0.44, -0.44, -0.05], [0.44, 0.2, 0.12], 0.04);
-            mesh.bevel([-0.3, -0.3, 0.12], [0.3, 0.1, 0.26], 0.04);
-            mesh.paint(Material::Glow);
-            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
-                mesh.block([-0.44, -0.45, 0.0], [0.44, -0.44, 0.05]);
-                mesh.block([-0.3, -0.31, 0.16], [0.3, -0.3, 0.2]);
-            });
-            // A gantry across the roof.
-            mesh.paint(Material::Metal);
-            for x in [-0.46_f32, 0.46] {
-                mesh.block([x - 0.03, -0.1, -0.05], [x + 0.03, -0.04, 0.36]);
-            }
-            mesh.block([-0.49, -0.1, 0.32], [0.49, -0.04, 0.38]);
-            for x in [-0.3_f32, 0.0, 0.3] {
-                mesh.frustum([x, 0.36], [-0.05, 0.5], [0.07, 0.05], 6);
-            }
-        }
-        Shape::AirFactory => {
-            mesh.paint(Material::Hull);
-            mesh.block([-0.5, -0.5, -0.5], [0.5, 0.5, -0.38]);
-            mesh.paint(Material::Trim);
-            mesh.arch(0.32, [-0.44, 0.18], -0.38, 0.6, 8);
-            mesh.paint(Material::Metal);
-            mesh.block([-0.14, 0.18, -0.38], [0.14, 0.5, -0.36]);
-            mesh.paint(Material::Glow);
-            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
-                for y in [0.24_f32, 0.34, 0.44] {
-                    mesh.block([-0.13, y - 0.015, -0.36], [-0.1, y + 0.015, -0.35]);
-                    mesh.block([0.1, y - 0.015, -0.36], [0.13, y + 0.015, -0.35]);
-                }
-            });
-            mesh.paint(Material::Hull);
-            mesh.frustum([0.42, 0.36], [-0.38, 0.3], [0.06, 0.05], 6);
-            mesh.paint(Material::Glow);
-            mesh.frustum([0.42, 0.36], [0.3, 0.42], [0.08, 0.06], 6);
-        }
-        Shape::AirFactoryT2 => {
-            mesh.paint(Material::Hull);
-            mesh.bevel([-0.5, -0.5, -0.5], [0.5, 0.5, -0.36], 0.03);
-            mesh.paint(Material::Trim);
-            mesh.arch(0.3, [-0.46, 0.2], -0.36, 0.66, 8);
-            mesh.paint(Material::Hull);
-            mesh.bevel([0.32, -0.46, -0.36], [0.48, 0.0, -0.1], 0.03);
-            mesh.bevel([-0.48, -0.46, -0.36], [-0.32, 0.0, -0.1], 0.03);
-            mesh.paint(Material::Metal);
-            mesh.block([-0.14, 0.2, -0.36], [0.14, 0.5, -0.34]);
-            mesh.paint(Material::Glow);
-            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
-                for y in [0.26_f32, 0.38] {
-                    mesh.block([-0.13, y - 0.015, -0.34], [-0.1, y + 0.015, -0.33]);
-                    mesh.block([0.1, y - 0.015, -0.34], [0.13, y + 0.015, -0.33]);
-                }
-            });
-            mesh.paint(Material::Hull);
-            mesh.frustum([0.42, 0.36], [-0.36, 0.38], [0.06, 0.05], 6);
-            mesh.paint(Material::Glow);
-            mesh.frustum([0.42, 0.36], [0.38, 0.5], [0.08, 0.06], 6);
-        }
-        Shape::AirFactoryT3 => {
-            mesh.paint(Material::Hull);
-            mesh.bevel([-0.5, -0.5, -0.5], [0.5, 0.5, -0.32], 0.04);
-            mesh.paint(Material::Trim);
-            mesh.arch(0.34, [-0.46, 0.22], -0.32, 0.7, 10);
-            mesh.paint(Material::Glow);
-            mesh.moving(motion::PULSE, [0.0; 3], |mesh| mesh.block([-0.3, -0.47, -0.3], [0.3, -0.46, -0.24]));
-            mesh.paint(Material::Metal);
-            mesh.block([-0.16, 0.22, -0.32], [0.16, 0.5, -0.3]);
-            mesh.paint(Material::Glow);
-            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
-                for y in [0.28_f32, 0.36, 0.44] {
-                    mesh.block([-0.15, y - 0.015, -0.3], [-0.12, y + 0.015, -0.29]);
-                    mesh.block([0.12, y - 0.015, -0.3], [0.15, y + 0.015, -0.29]);
-                }
-            });
-            // A tall tower with a radar dish.
-            mesh.paint(Material::Hull);
-            mesh.frustum([0.42, 0.36], [-0.32, 0.3], [0.07, 0.05], 6);
-            mesh.paint(Material::Trim);
-            mesh.frustum([0.42, 0.36], [0.3, 0.4], [0.08, 0.07], 6);
-            mesh.paint(Material::Metal);
-            mesh.frustum([-0.42, 0.38], [-0.32, 0.36], [0.03, 0.02], 6);
-            mesh.moving(motion::SPIN, [-0.42, 0.36, 0.0], |mesh| {
+            mesh.block([-0.42, -0.5, -0.5], [0.42, 0.5, -0.44]);
+            for side in [-1.0_f32, 1.0] {
+                let (inner, outer) = (0.42 * side, 0.5 * side);
+                let (low, high) = (inner.min(outer), inner.max(outer));
+                let z = |x: f32| if (x - inner).abs() < 1e-6 { -0.44 } else { -0.495 };
                 mesh.cuboid(
-                    [Vec3::new(-0.48, 0.3, 0.32), Vec3::new(-0.36, 0.3, 0.32), Vec3::new(-0.36, 0.34, 0.32), Vec3::new(-0.48, 0.34, 0.32)],
-                    [Vec3::new(-0.48, 0.36, 0.46), Vec3::new(-0.36, 0.36, 0.46), Vec3::new(-0.36, 0.4, 0.46), Vec3::new(-0.48, 0.4, 0.46)],
+                    [Vec3::new(low, -0.34, -0.5), Vec3::new(high, -0.34, -0.5), Vec3::new(high, 0.34, -0.5), Vec3::new(low, 0.34, -0.5)],
+                    [Vec3::new(low, -0.34, z(low)), Vec3::new(high, -0.34, z(high)), Vec3::new(high, 0.34, z(high)), Vec3::new(low, 0.34, z(low))],
+                );
+            }
+            // Guide lights along the floor, lit while it builds.
+            mesh.paint(Material::Glow);
+            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
+                for y in [-0.33_f32, 0.33] {
+                    mesh.block([-0.4, y - 0.01, -0.44], [0.4, y + 0.01, -0.43]);
+                }
+            });
+
+            // Higher walls with buttresses, a row of windows, and the team's stripe.
+            for (y, outward) in [(-0.47_f32, -1.0_f32), (0.31, 1.0)] {
+                mesh.paint(Material::Hull);
+                mesh.bevel([-0.46, y, -0.44], [0.46, y + 0.16, 0.0], 0.03);
+                for x in [-0.3_f32, 0.0, 0.3] {
+                    let face = if outward < 0.0 { y } else { y + 0.16 };
+                    mesh.bevel([x - 0.04, face.min(face + 0.03 * outward), -0.44], [x + 0.04, face.max(face + 0.03 * outward), -0.08], 0.01);
+                }
+                mesh.paint(Material::Glow);
+                let inner = if outward < 0.0 { y + 0.16 } else { y };
+                mesh.block([-0.4, inner - 0.005, -0.2], [0.4, inner + 0.005, -0.14]);
+                mesh.paint(Material::Trim);
+                mesh.block([-0.46, y, 0.0], [0.46, y + 0.16, 0.05]);
+            }
+            // Two gantry cranes, with their hoists.
+            for x in [-0.2_f32, 0.2] {
+                mesh.paint(Material::Metal);
+                for y in [-0.47_f32, 0.39] {
+                    mesh.block([x - 0.035, y, 0.05], [x + 0.035, y + 0.08, 0.34]);
+                }
+                mesh.block([x - 0.045, -0.47, 0.3], [x + 0.045, 0.47, 0.38]);
+                mesh.paint(Material::Trim);
+                mesh.block([x - 0.06, -0.07, 0.2], [x + 0.06, 0.07, 0.3]);
+            }
+            mesh.paint(Material::Glow);
+            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
+                for x in [-0.2_f32, 0.2] {
+                    mesh.block([x - 0.02, -0.02, 0.15], [x + 0.02, 0.02, 0.2]);
+                }
+            });
+            // Two smokestacks on the north wall.
+            mesh.paint(Material::Metal);
+            for x in [-0.38_f32, 0.38] {
+                mesh.frustum([x, 0.42], [0.05, 0.48], [0.055, 0.045], 6);
+            }
+        }
+        // The T3 bay: sloped armored walls, a heavy double gantry with a cab, a tower, and stacks.
+        Shape::FactoryT3 => {
+            // The floor of the bay, and ramps down from both of its open ends, east and west.
+            mesh.paint(Material::Hull);
+            mesh.block([-0.42, -0.5, -0.5], [0.42, 0.5, -0.44]);
+            for side in [-1.0_f32, 1.0] {
+                let (inner, outer) = (0.42 * side, 0.5 * side);
+                let (low, high) = (inner.min(outer), inner.max(outer));
+                let z = |x: f32| if (x - inner).abs() < 1e-6 { -0.44 } else { -0.495 };
+                mesh.cuboid(
+                    [Vec3::new(low, -0.34, -0.5), Vec3::new(high, -0.34, -0.5), Vec3::new(high, 0.34, -0.5), Vec3::new(low, 0.34, -0.5)],
+                    [Vec3::new(low, -0.34, z(low)), Vec3::new(high, -0.34, z(high)), Vec3::new(high, 0.34, z(high)), Vec3::new(low, 0.34, z(low))],
+                );
+            }
+            // Guide lights along the floor, lit while it builds.
+            mesh.paint(Material::Glow);
+            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
+                for y in [-0.33_f32, 0.33] {
+                    mesh.block([-0.4, y - 0.01, -0.44], [0.4, y + 0.01, -0.43]);
+                }
+            });
+
+            // Heavy walls with sloped armor, inside faces lit, and the team's stripe on top.
+            for (y, outward) in [(-0.5_f32, -1.0_f32), (0.32, 1.0)] {
+                let (outer, inner) = if outward < 0.0 { (y, y + 0.18) } else { (y + 0.18, y) };
+                let top_outer = outer - 0.07 * outward;
+                mesh.paint(Material::Hull);
+                let (low, high) = (outer.min(inner), outer.max(inner));
+                let (top_low, top_high) = (top_outer.min(inner), top_outer.max(inner));
+                mesh.cuboid(
+                    [Vec3::new(-0.47, low, -0.44), Vec3::new(0.47, low, -0.44), Vec3::new(0.47, high, -0.44), Vec3::new(-0.47, high, -0.44)],
+                    [Vec3::new(-0.47, top_low, 0.06), Vec3::new(0.47, top_low, 0.06), Vec3::new(0.47, top_high, 0.06), Vec3::new(-0.47, top_high, 0.06)],
+                );
+                mesh.paint(Material::Glow);
+                mesh.block([-0.42, inner - 0.006, -0.3], [0.42, inner + 0.006, -0.25]);
+                mesh.block([-0.42, inner - 0.006, -0.1], [0.42, inner + 0.006, -0.06]);
+                mesh.paint(Material::Trim);
+                mesh.block([-0.47, top_low, 0.06], [0.47, top_high, 0.1]);
+            }
+            // A heavy double gantry with an operator's cab, spanning the bay.
+            mesh.paint(Material::Metal);
+            for x in [-0.12_f32, 0.12] {
+                for y in [-0.47_f32, 0.38] {
+                    mesh.block([x - 0.04, y, 0.1], [x + 0.04, y + 0.09, 0.4]);
+                }
+                mesh.block([x - 0.05, -0.47, 0.36], [x + 0.05, 0.47, 0.44]);
+            }
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.17, -0.12, 0.26], [0.17, 0.12, 0.36], 0.02);
+            mesh.paint(Material::Glow);
+            mesh.block([-0.14, -0.125, 0.3], [0.14, -0.115, 0.34]);
+            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
+                for x in [-0.08_f32, 0.08] {
+                    mesh.block([x - 0.02, -0.02, 0.2], [x + 0.02, 0.02, 0.26]);
+                }
+            });
+            // A control tower at the north-east corner, and three stacks.
+            mesh.paint(Material::Hull);
+            mesh.frustum([0.42, 0.42], [0.1, 0.4], [0.06, 0.05], 6);
+            mesh.paint(Material::Glow);
+            mesh.frustum([0.42, 0.42], [0.4, 0.47], [0.075, 0.07], 6);
+            mesh.paint(Material::Metal);
+            for x in [-0.4_f32, -0.26, -0.12] {
+                mesh.frustum([x, 0.42], [0.1, 0.5], [0.045, 0.035], 6);
+            }
+        }
+        // An open deck with a lit round pad, where aircraft are built and lift off, a hangar
+        // behind it, and a control tower.
+        Shape::AirFactory => {
+            // A deck, with a round pad in the middle for what it builds, ringed with lights.
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.5, -0.5, -0.5], [0.5, 0.5, -0.44], 0.02);
+            mesh.paint(Material::Metal);
+            mesh.frustum([0.0, 0.0], [-0.44, -0.43], [0.31, 0.31], 20);
+            mesh.paint(Material::Glow);
+            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
+                for step in 0..10 {
+                    let angle = step as f32 / 10.0 * std::f32::consts::TAU;
+                    let (x, y) = (angle.cos() * 0.33, angle.sin() * 0.33);
+                    mesh.block([x - 0.015, y - 0.015, -0.44], [x + 0.015, y + 0.015, -0.42]);
+                }
+            });
+            // Painted lines across the pad.
+            mesh.paint(Material::Trim);
+            mesh.block([-0.22, -0.02, -0.43], [0.22, 0.02, -0.425]);
+
+            // A hangar along the north edge, open towards the pad.
+            mesh.paint(Material::Trim);
+            mesh.arch(0.42, [0.36, 0.5], -0.44, 0.42, 10);
+            // A control tower in the south-east corner.
+            mesh.paint(Material::Hull);
+            mesh.frustum([0.41, -0.41], [-0.44, 0.12], [0.06, 0.05], 6);
+            mesh.paint(Material::Glow);
+            mesh.frustum([0.41, -0.41], [0.12, 0.22], [0.085, 0.075], 6);
+            mesh.paint(Material::Metal);
+            mesh.frustum([0.41, -0.41], [0.22, 0.32], [0.012, 0.01], 4);
+        }
+        // The T2 deck: a larger hangar, and two towers joined by approach lights.
+        Shape::AirFactoryT2 => {
+            // A deck, with a round pad in the middle for what it builds, ringed with lights.
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.5, -0.5, -0.5], [0.5, 0.5, -0.44], 0.02);
+            mesh.paint(Material::Metal);
+            mesh.frustum([0.0, 0.0], [-0.44, -0.43], [0.31, 0.31], 20);
+            mesh.paint(Material::Glow);
+            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
+                for step in 0..10 {
+                    let angle = step as f32 / 10.0 * std::f32::consts::TAU;
+                    let (x, y) = (angle.cos() * 0.33, angle.sin() * 0.33);
+                    mesh.block([x - 0.015, y - 0.015, -0.44], [x + 0.015, y + 0.015, -0.42]);
+                }
+            });
+            // Painted lines across the pad.
+            mesh.paint(Material::Trim);
+            mesh.block([-0.22, -0.02, -0.43], [0.22, 0.02, -0.425]);
+
+            // A larger hangar, with a lit sign over its door.
+            mesh.paint(Material::Trim);
+            mesh.arch(0.44, [0.34, 0.5], -0.44, 0.5, 12);
+            mesh.paint(Material::Glow);
+            mesh.block([-0.2, 0.335, -0.06], [0.2, 0.345, -0.02]);
+            // Control towers in both southern corners, joined by a gantry of approach lights.
+            for x in [-0.41_f32, 0.41] {
+                mesh.paint(Material::Hull);
+                mesh.frustum([x, -0.41], [-0.44, 0.2], [0.06, 0.05], 6);
+                mesh.paint(Material::Glow);
+                mesh.frustum([x, -0.41], [0.2, 0.3], [0.08, 0.07], 6);
+            }
+            mesh.paint(Material::Metal);
+            mesh.block([-0.41, -0.43, 0.0], [0.41, -0.39, 0.04]);
+            mesh.paint(Material::Glow);
+            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
+                for x in [-0.24_f32, -0.08, 0.08, 0.24] {
+                    mesh.block([x - 0.02, -0.43, -0.02], [x + 0.02, -0.39, 0.0]);
+                }
+            });
+        }
+        // The T3 deck: a great hangar of two bays, a tall tower with a turning dish, and fuel tanks.
+        Shape::AirFactoryT3 => {
+            // A deck, with a round pad in the middle for what it builds, ringed with lights.
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.5, -0.5, -0.5], [0.5, 0.5, -0.44], 0.02);
+            mesh.paint(Material::Metal);
+            mesh.frustum([0.0, 0.0], [-0.44, -0.43], [0.31, 0.31], 20);
+            mesh.paint(Material::Glow);
+            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
+                for step in 0..10 {
+                    let angle = step as f32 / 10.0 * std::f32::consts::TAU;
+                    let (x, y) = (angle.cos() * 0.33, angle.sin() * 0.33);
+                    mesh.block([x - 0.015, y - 0.015, -0.44], [x + 0.015, y + 0.015, -0.42]);
+                }
+            });
+            // Painted lines across the pad.
+            mesh.paint(Material::Trim);
+            mesh.block([-0.22, -0.02, -0.43], [0.22, 0.02, -0.425]);
+
+            // A great hangar along the north edge, divided into two bays.
+            mesh.paint(Material::Trim);
+            mesh.arch(0.46, [0.3, 0.5], -0.44, 0.62, 14);
+            mesh.paint(Material::Hull);
+            mesh.block([-0.03, 0.29, -0.44], [0.03, 0.31, 0.16]);
+            mesh.paint(Material::Glow);
+            mesh.block([-0.44, 0.295, -0.1], [0.44, 0.305, -0.06]);
+            // A tall tower with a turning radar dish, in the south-west corner.
+            mesh.paint(Material::Hull);
+            mesh.frustum([-0.41, -0.41], [-0.44, 0.28], [0.07, 0.05], 6);
+            mesh.paint(Material::Glow);
+            mesh.frustum([-0.41, -0.41], [0.28, 0.36], [0.09, 0.08], 6);
+            mesh.paint(Material::Metal);
+            mesh.frustum([-0.41, -0.41], [0.36, 0.42], [0.02, 0.015], 6);
+            mesh.moving(motion::SPIN, [-0.41, -0.41, 0.0], |mesh| {
+                mesh.cuboid(
+                    [Vec3::new(-0.48, -0.43, 0.4), Vec3::new(-0.34, -0.43, 0.4), Vec3::new(-0.34, -0.4, 0.4), Vec3::new(-0.48, -0.4, 0.4)],
+                    [Vec3::new(-0.48, -0.39, 0.5), Vec3::new(-0.34, -0.39, 0.5), Vec3::new(-0.34, -0.36, 0.5), Vec3::new(-0.48, -0.36, 0.5)],
                 );
             });
+            // Fuel tanks in the south-east corner.
+            mesh.paint(Material::Hull);
+            for x in [0.3_f32, 0.42] {
+                mesh.frustum([x, -0.42], [-0.44, -0.2], [0.05, 0.05], 8);
+            }
         }
         Shape::GeneratorT2 => {
             mesh.paint(Material::Hull);
@@ -1406,48 +1589,104 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Glow);
             mesh.frustum([0.0, 0.0], [0.3, 0.5], [0.12, 0.0], 8);
         }
+        // The T2 dock: two cranes and a covered workshop.
         Shape::NavalFactoryT2 => {
+            // Piers down the long sides, north and south, with open water between them: a slip
+            // open at both ends, east and west, where ships are built afloat and sail out.
             mesh.paint(Material::Hull);
-            mesh.bevel([-0.5, -0.5, -0.5], [-0.3, 0.5, -0.12], 0.03);
-            mesh.bevel([0.3, -0.5, -0.5], [0.5, 0.5, -0.12], 0.03);
-            mesh.paint(Material::Trim);
-            mesh.block([-0.3, -0.5, -0.5], [0.3, -0.35, 0.05]);
-            for y in [-0.15_f32, 0.25] {
-                mesh.block([-0.5, y - 0.08, 0.25], [0.5, y + 0.08, 0.38]);
-                mesh.paint(Material::Glow);
-                mesh.moving(motion::PULSE, [0.0; 3], |mesh| mesh.block([-0.4, y - 0.03, 0.38], [0.4, y + 0.03, 0.4]));
-                mesh.paint(Material::Metal);
-                mesh.block([-0.48, y - 0.06, -0.12], [-0.38, y + 0.06, 0.25]);
-                mesh.block([0.38, y - 0.06, -0.12], [0.48, y + 0.06, 0.25]);
-                mesh.paint(Material::Trim);
+            for y in [-0.5_f32, 0.32] {
+                mesh.bevel([-0.5, y, -0.5], [0.5, y + 0.18, -0.32], 0.03);
             }
+            // Bollards along the piers' inner edges.
             mesh.paint(Material::Metal);
-            mesh.frustum([0.4, 0.42], [-0.12, 0.45], [0.05, 0.04], 6);
-            mesh.beam([0.4, 0.42, 0.42], [0.1, 0.42, 0.42], 0.025, 0.025);
-        }
-        Shape::NavalFactoryT3 => {
-            mesh.paint(Material::Hull);
-            mesh.bevel([-0.5, -0.5, -0.5], [-0.28, 0.5, -0.05], 0.04);
-            mesh.bevel([0.28, -0.5, -0.5], [0.5, 0.5, -0.05], 0.04);
+            for y in [-0.33_f32, 0.33] {
+                for x in [-0.4_f32, -0.2, 0.0, 0.2, 0.4] {
+                    mesh.frustum([x, y], [-0.32, -0.28], [0.015, 0.015], 6);
+                }
+            }
+            // Buoy lights at the open ends.
             mesh.paint(Material::Glow);
             mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
-                for x in [-0.39_f32, 0.39] {
-                    mesh.block([x - 0.02, -0.46, -0.05], [x + 0.02, 0.46, -0.04]);
+                for x in [-0.48_f32, 0.48] {
+                    for y in [-0.3_f32, 0.3] {
+                        mesh.block([x - 0.02, y - 0.02, -0.34], [x + 0.02, y + 0.02, -0.3]);
+                    }
                 }
             });
-            mesh.paint(Material::Trim);
-            mesh.bevel([-0.28, -0.5, -0.5], [0.28, -0.32, 0.1], 0.03);
-            for y in [-0.12_f32, 0.24] {
-                mesh.block([-0.5, y - 0.08, 0.28], [0.5, y + 0.08, 0.4]);
+
+            // Two cranes, and a covered workshop on the north pier.
+            for x in [-0.22_f32, 0.22] {
                 mesh.paint(Material::Metal);
-                mesh.block([-0.5, y - 0.06, -0.05], [-0.42, y + 0.06, 0.28]);
-                mesh.block([0.42, y - 0.06, -0.05], [0.5, y + 0.06, 0.28]);
+                for y in [-0.45_f32, 0.37] {
+                    mesh.block([x - 0.035, y, -0.32], [x + 0.035, y + 0.08, 0.26]);
+                }
+                mesh.block([x - 0.045, -0.45, 0.22], [x + 0.045, 0.45, 0.3]);
                 mesh.paint(Material::Trim);
+                mesh.block([x - 0.06, -0.06, 0.12], [x + 0.06, 0.06, 0.22]);
+            }
+            mesh.paint(Material::Trim);
+            mesh.arch(0.18, [0.34, 0.5], -0.32, 0.22, 8);
+            mesh.paint(Material::Glow);
+            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
+                for x in [-0.22_f32, 0.22] {
+                    mesh.block([x - 0.02, -0.02, 0.08], [x + 0.02, 0.02, 0.12]);
+                }
+            });
+            mesh.paint(Material::Metal);
+            mesh.frustum([0.4, -0.42], [-0.32, 0.1], [0.04, 0.03], 6);
+        }
+        // The T3 dock: a heavy gantry with a cab over the whole slip, lit seawalls, and a tower.
+        Shape::NavalFactoryT3 => {
+            // Piers down the long sides, north and south, with open water between them: a slip
+            // open at both ends, east and west, where ships are built afloat and sail out.
+            mesh.paint(Material::Hull);
+            for y in [-0.5_f32, 0.32] {
+                mesh.bevel([-0.5, y, -0.5], [0.5, y + 0.18, -0.32], 0.03);
+            }
+            // Bollards along the piers' inner edges.
+            mesh.paint(Material::Metal);
+            for y in [-0.33_f32, 0.33] {
+                for x in [-0.4_f32, -0.2, 0.0, 0.2, 0.4] {
+                    mesh.frustum([x, y], [-0.32, -0.28], [0.015, 0.015], 6);
+                }
+            }
+            // Buoy lights at the open ends.
+            mesh.paint(Material::Glow);
+            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
+                for x in [-0.48_f32, 0.48] {
+                    for y in [-0.3_f32, 0.3] {
+                        mesh.block([x - 0.02, y - 0.02, -0.34], [x + 0.02, y + 0.02, -0.3]);
+                    }
+                }
+            });
+
+            // A heavy gantry over the whole slip, with an operator's cab, and lit seawalls.
+            mesh.paint(Material::Metal);
+            for x in [-0.36_f32, 0.36] {
+                for y in [-0.46_f32, 0.37] {
+                    mesh.block([x - 0.04, y, -0.32], [x + 0.04, y + 0.09, 0.34]);
+                }
+            }
+            mesh.paint(Material::Trim);
+            for y in [-0.42_f32, 0.38] {
+                mesh.block([-0.4, y, 0.3], [0.4, y + 0.05, 0.38]);
+            }
+            mesh.paint(Material::Metal);
+            for x in [-0.12_f32, 0.12] {
+                mesh.block([x - 0.04, -0.42, 0.32], [x + 0.04, 0.43, 0.38]);
             }
             mesh.paint(Material::Hull);
-            mesh.frustum([-0.39, 0.42], [-0.05, 0.38], [0.06, 0.05], 6);
+            mesh.bevel([-0.16, -0.1, 0.2], [0.16, 0.1, 0.32], 0.02);
             mesh.paint(Material::Glow);
-            mesh.frustum([-0.39, 0.42], [0.38, 0.5], [0.07, 0.05], 6);
+            mesh.block([-0.13, -0.105, 0.24], [0.13, -0.095, 0.29]);
+            for y in [-0.325_f32, 0.325] {
+                mesh.block([-0.48, y - 0.006, -0.38], [0.48, y + 0.006, -0.34]);
+            }
+            // A control tower on the north pier.
+            mesh.paint(Material::Hull);
+            mesh.frustum([-0.42, 0.42], [-0.32, 0.2], [0.06, 0.05], 6);
+            mesh.paint(Material::Glow);
+            mesh.frustum([-0.42, 0.42], [0.2, 0.28], [0.075, 0.07], 6);
         }
         Shape::AirStaging => {
             mesh.paint(Material::Hull);

@@ -385,6 +385,7 @@ mod tests {
             facing: [0, 0],
             aim: [0, 0],
             working: false,
+            assembling: None,
         }
     }
 

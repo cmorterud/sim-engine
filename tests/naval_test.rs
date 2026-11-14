@@ -4,7 +4,7 @@
 use sim_engine::math::fp::{fp_int, Fp, Vec2Fp};
 use sim_engine::sim::blueprints::Res;
 use sim_engine::sim::commands::SimCommand;
-use sim_engine::sim::components::{Blueprinted, OrderKind, SimId, Team};
+use sim_engine::sim::components::{Blueprinted, LeavingFactory, OrderKind, SimId, Team};
 use sim_engine::sim::config::{SimConfig, TerrainStyle};
 use sim_engine::sim::terrain::{Terrain, HEIGHT_FRAC_BITS};
 use sim_engine::sim::world::SimWorld;
@@ -128,6 +128,14 @@ fn a_naval_factory_goes_on_the_water_and_launches_its_ships_onto_it() {
         world.units.iter().map(|unit| unit.0).find(|&id| world.ecs.get::<&Blueprinted>(world.unit_entity(id).unwrap()).is_ok_and(|unit| unit.0 == frigate))
     });
     let ship = built.expect("it should build a frigate");
+    // It is built in the dock, then sails out of its open end onto the water.
+    for _ in 0..100 {
+        if world.ecs.get::<&LeavingFactory>(world.unit_entity(ship).unwrap()).is_err() {
+            break;
+        }
+        world.advance_tick(&[]);
+    }
+    assert!(world.ecs.get::<&LeavingFactory>(world.unit_entity(ship).unwrap()).is_err(), "the frigate never left the dock");
     assert!(on_water(&world, ship), "launched onto the water");
     // An engineer cannot place one on land either.
     let engineer = spawn(&mut world, "t1_engineer", Team::Blue, point(1_000, 1_000));

@@ -40,13 +40,17 @@ fn show(world: &mut SimWorld, team: Team, e: hecs::Entity) {
     let c = *world.ecs.get::<&Combat>(e).unwrap();
     let s = if team == Team::Red { -1.0 } else { 1.0 };
     let (px, py) = flip(team, p.x.to_num(), p.y.to_num());
-    let cell = world.terrain.cell_of(p.xy());
+    // The cell a unit follows its route from.
+    let cell = world.terrain.unit_cell_of(p.xy());
     let tick = world.current_tick;
     let sample = if o.kind == sim_engine::sim::components::OrderKind::Idle {
         "idle".to_string()
     } else {
         let sample = world.flow_field.sample(o.route, tick, p.xy(), &world.terrain);
-        format!("{sample:?}").replace("Vec2Fp ", "")
+        let goal = world.flow_field.goal(o.route).map(|goal| flip(team, goal.x.to_num(), goal.y.to_num()));
+        let slot = o.slot.map(|slot| flip(team, slot.x.to_num(), slot.y.to_num()));
+        let radius = world.flow_field.arrive_radius(o.route).map(|radius| radius.to_num::<f64>());
+        format!("{sample:?} goal {goal:?} goal cell {:?} arrive {radius:?} slot {slot:?}", world.flow_field.goal_cell(o.route)).replace("Vec2Fp ", "")
     };
     let target = |id: Option<sim_engine::sim::components::SimId>| {
         id.and_then(|id| world.unit_position(id)).map(|q| {

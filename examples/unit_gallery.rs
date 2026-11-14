@@ -93,6 +93,7 @@ fn battlefield() -> Effects {
             facing: [0, 0],
             aim: [0, 0],
             working: false,
+            assembling: None,
         });
         after.wrecks.push(WreckView { id: SimId(3_000 + index), x: raw(x), y: raw(y), z: raw(z), radius: raw(radius), mass: 1, energy: 0, kind: WreckKind::Debris });
     }
@@ -181,7 +182,18 @@ fn main() {
     rows.push(("scars".to_string(), [SCARS[0], SCARS[1] + 40.0], 260.0, 0.0));
     rows.push(("smoke".to_string(), [SCARS[0], SCARS[1] + 40.0], 260.0, 0.0));
 
-    let snapshot = world.snapshot();
+    let mut snapshot = world.snapshot();
+    // Each factory shows the first thing it builds in its bay, two thirds done, and gets a close-up.
+    for unit in &mut snapshot.units {
+        let made = blueprints.get(sim_engine::sim::blueprints::BlueprintId(unit.blueprint));
+        if made.is_factory() {
+            unit.assembling = made.builds.iter().find(|item| !blueprints.get(**item).is_factory()).map(|item| (item.0, 660));
+            let (x, y, radius) = (f64::from(unit.x) / 4096.0, f64::from(unit.y) / 4096.0, f64::from(unit.radius) / 4096.0);
+            if unit.team == Team::Blue && rows.iter().all(|row| row.0 != format!("{}_bay", made.key)) {
+                rows.push((format!("{}_bay", made.key), [x, y], radius * 5.0, 0.0));
+            }
+        }
+    }
     // `GALLERY_FOCUS=<blueprint key>` adds close-ups of Blue's copy of that unit, near and nearer.
     if let Ok(key) = std::env::var("GALLERY_FOCUS") {
         let id = blueprints.id(&key).0;

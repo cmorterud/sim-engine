@@ -129,11 +129,11 @@ impl Terrain {
     pub fn passable_for(&self, class: MoveClass, point: Vec2Fp) -> bool {
         match class {
             MoveClass::Naval | MoveClass::Submarine => {
-                let (x, y) = self.cell_of(point);
+                let (x, y) = self.unit_cell_of(point);
                 self.naval_cost[y * self.cells + x] != COST_IMPASSABLE
             }
             MoveClass::Hover | MoveClass::Seabed => {
-                let (x, y) = self.cell_of(point);
+                let (x, y) = self.unit_cell_of(point);
                 self.amphibious_cost[y * self.cells + x] != COST_IMPASSABLE
             }
             MoveClass::Air => true,
@@ -254,8 +254,33 @@ impl Terrain {
         (x as usize, y as usize)
     }
 
+    /// The cell a unit is in, for moving it: whether it may stand there, and which way its flow
+    /// field sends it. A point on, or within a few raw bits of, the line between two cells
+    /// belongs to the one nearer the map's center, so that a unit and its mirror image through
+    /// the center are in mirror-image cells.
+    /// `cell_of` rounds down, which put Blue's unit exactly on a line in the cell east of it and
+    /// Red's mirror image in the cell east of it too, one apart from the mirror, and the two went
+    /// different ways. "Within a few raw bits", because fixed-point rounding is not symmetric
+    /// under negation, and one side's unit can stop a bit short of the line its mirror is on.
+    pub fn unit_cell_of(&self, point: Vec2Fp) -> (usize, usize) {
+        const ON_LINE_RAW: i64 = 8;
+        let max = self.cells as i64 - 1;
+        let half = self.cells as i64 * CELL_RAW / 2;
+        let axis = |raw: i64| {
+            let line = (raw + CELL_RAW / 2).div_euclid(CELL_RAW);
+            let cell = if (raw - line * CELL_RAW).abs() <= ON_LINE_RAW {
+                // The cell on the center's side of the line.
+                if raw > half { line - 1 } else { line }
+            } else {
+                raw.div_euclid(CELL_RAW)
+            };
+            cell.clamp(0, max)
+        };
+        (axis(i64::from(point.x.to_bits())) as usize, axis(i64::from(point.y.to_bits())) as usize)
+    }
+
     pub fn is_passable(&self, point: Vec2Fp) -> bool {
-        let (x, y) = self.cell_of(point);
+        let (x, y) = self.unit_cell_of(point);
         self.land_cost[y * self.cells + x] != COST_IMPASSABLE
     }
 
