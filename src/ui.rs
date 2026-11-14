@@ -14,7 +14,7 @@ use crate::math::fp::Fp;
 use crate::render::camera::Camera;
 use crate::sim::blueprints::{BlueprintDb, BlueprintId, Enhancement, EnhancementId, FactoryKind, Res, Slot, Targets, UnitClass, WeaponKind, TICKS_PER_SECOND};
 use crate::sim::components::{BuildTask, OrderKind, SimId, Team};
-use crate::sim::world::{MatchResult, PlanStepKind, SimSnapshot, UnitRatesView, UnitView};
+use crate::sim::world::{EconomyView, MatchResult, PlanStepKind, SimSnapshot, UnitRatesView, UnitView};
 
 /// Trails are capped so that a large selection stays readable and cheap to draw.
 const MAX_TRAIL_UNITS: usize = 64;
@@ -176,6 +176,12 @@ pub enum UiAction {
     /// Several at once, from one key that several options share.
     Batch(Vec<UiAction>),
     Restart,
+    /// Watch the match from everyone's sight (`None`) or one team's.
+    SetView(Option<Team>),
+    /// Play a watched match at this many ticks for each tick of real time.
+    SetSpeed(u32),
+    /// Watch the match for this seed instead.
+    WatchSeed(u64),
 }
 
 fn find_unit(snapshot: &SimSnapshot, id: SimId) -> Option<&UnitView> {
@@ -1800,6 +1806,147 @@ pub fn match_end_window(ctx: &egui::Context, result: MatchResult, player: Team, 
         });
 }
 
+/// What the watch bar shows of a watched match, and what it can change.
+pub struct WatchState<'a> {
+    /// The map's name, as players see it.
+    pub map: &'a str,
+    pub seed: u64,
+    /// Whose sight the match is seen through: `None` for everything.
+    pub view: Option<Team>,
+    pub speed: u32,
+    pub paused: bool,
+}
+
+/// The views a watcher can pick, in the order V steps through them.
+pub const WATCH_VIEWS: [Option<Team>; 3] = [None, Some(Team::Blue), Some(Team::Red)];
+
+/// The speeds a watcher can pick, which - and = step through.
+pub const WATCH_SPEEDS: [u32; 5] = [1, 2, 4, 8, 16];
+
+const BLUE_TEXT: Color32 = Color32::from_rgb(120, 165, 255);
+const RED_TEXT: Color32 = Color32::from_rgb(255, 120, 105);
+
+/// The view after `view`, for the V key.
+pub fn next_watch_view(view: Option<Team>) -> Option<Team> {
+    let index = WATCH_VIEWS.iter().position(|candidate| *candidate == view).unwrap_or(0);
+    WATCH_VIEWS[(index + 1) % WATCH_VIEWS.len()]
+}
+
+/// The speed one step faster (`faster`) or slower than `speed`, staying within the choices.
+pub fn step_watch_speed(speed: u32, faster: bool) -> u32 {
+    let index = WATCH_SPEEDS.iter().position(|&candidate| candidate >= speed).unwrap_or(WATCH_SPEEDS.len() - 1);
+    let index = if faster { (index + 1).min(WATCH_SPEEDS.len() - 1) } else { index.saturating_sub(1) };
+    WATCH_SPEEDS[index]
+}
+
+fn view_name(view: Option<Team>) -> &'static str {
+    match view {
+        None => "Everything",
+        Some(Team::Blue) => "Blue",
+        Some(Team::Red) => "Red",
+    }
+}
+
+/// The bars of a watched AI-vs-AI match. At the top, the match and both teams' economies, or
+/// when seeing through one team's eyes, that team's economy as its player would see it. At the
+/// bottom, whose sight to see through, how fast to play, and pause.
+pub fn watch_bar(ctx: &egui::Context, snapshot: &SimSnapshot, state: &WatchState, actions: &mut Vec<UiAction>) {
+    if state.paused {
+        egui::Area::new(egui::Id::new("paused")).anchor(Align2::CENTER_TOP, Vec2::new(0.0, 80.0)).interactable(false).show(ctx, |ui| {
+            ui.label(egui::RichText::new("PAUSED").size(32.0).strong().color(Color32::from_rgb(255, 230, 140)));
+        });
+    }
+    egui::TopBottomPanel::top("watch").show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(format!("Watching {}, seed {}", state.map, state.seed)).strong());
+            let team_line = |ui: &mut egui::Ui, team: Team, economy: &EconomyView, units: Option<usize>| {
+                ui.separator();
+                let color = if team == Team::Blue { BLUE_TEXT } else { RED_TEXT };
+                let name = if team == Team::Blue { "Blue" } else { "Red" };
+                let mut text = format!("{name}   Mass {} +{}/s   Energy {} +{}/s", economy.mass, economy.mass_income, economy.energy, economy.energy_income);
+                if let Some(units) = units {
+                    text.push_str(&format!("   {units} units"));
+                }
+                ui.colored_label(color, text);
+            };
+            let mobile = |team: Team| snapshot.units.iter().filter(|unit| unit.team == team && !unit.is_structure).count();
+            match (state.view, &snapshot.team_economies) {
+                (None, Some(economies)) => {
+                    team_line(ui, Team::Blue, &economies[0], Some(mobile(Team::Blue)));
+                    team_line(ui, Team::Red, &economies[1], Some(mobile(Team::Red)));
+                }
+                (Some(team), _) => team_line(ui, team, &snapshot.economy, Some(mobile(team))),
+                // The first snapshot from another view has not come yet.
+                (None, None) => {}
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let seconds = snapshot.tick / 10;
+                ui.label(format!("{}:{:02}", seconds / 60, seconds % 60));
+            });
+        });
+    });
+    egui::TopBottomPanel::bottom("watch controls").show(ctx, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(bold_keys("See [V]"));
+            for view in WATCH_VIEWS {
+                let hint = match view {
+                    None => "Everything on the map, with no fog of war, and both teams' economies.".to_string(),
+                    Some(team) => format!("Only what {} sees, with its fog of war and economy, as if playing as {}.", view_name(view), if team == Team::Blue { "Blue" } else { "Red" }),
+                };
+                if ui.selectable_label(state.view == view, view_name(view)).on_hover_text(hint).clicked() && state.view != view {
+                    actions.push(UiAction::SetView(view));
+                }
+            }
+            ui.separator();
+            ui.label(bold_keys("Speed [-] [=]"));
+            for speed in WATCH_SPEEDS {
+                if ui.selectable_label(state.speed == speed, format!("{speed}x")).on_hover_text(format!("{speed} seconds of the match each second")).clicked() && state.speed != speed {
+                    actions.push(UiAction::SetSpeed(speed));
+                }
+            }
+            ui.separator();
+            let label = if state.paused { "[Space] Resume" } else { "[Space] Pause" };
+            if ui.button(bold_keys(label)).clicked() {
+                actions.push(UiAction::TogglePause);
+            }
+            ui.separator();
+            ui.label("The match the soak plays for this map and seed, which plays out the same every time.");
+        });
+    });
+}
+
+/// The end of a watched match: who won, and what to watch next. `stopped` says the match ran
+/// to the soak's time limit without a winner.
+pub fn watch_end_window(ctx: &egui::Context, result: Option<MatchResult>, stopped: bool, tick: u32, seed: u64, actions: &mut Vec<UiAction>) {
+    let title = match result {
+        Some(MatchResult::Winner(Team::Blue)) => "Blue wins",
+        Some(MatchResult::Winner(Team::Red)) => "Red wins",
+        Some(MatchResult::Draw) => "Draw",
+        None if stopped => "Unfinished",
+        None => return,
+    };
+    let seconds = tick / 10;
+    egui::Window::new(title)
+        .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+        .collapsible(false)
+        .resizable(false)
+        .show(ctx, |ui| {
+            ui.label(match result {
+                Some(MatchResult::Winner(_)) => format!("The other commander was destroyed at {}:{:02}.", seconds / 60, seconds % 60),
+                Some(MatchResult::Draw) => format!("Both commanders were destroyed at {}:{:02}.", seconds / 60, seconds % 60),
+                None => format!("No commander had fallen by {}:{:02}, where the soak stops a match.", seconds / 60, seconds % 60),
+            });
+            ui.horizontal(|ui| {
+                if ui.button("Watch again").clicked() {
+                    actions.push(UiAction::Restart);
+                }
+                if ui.button(format!("Watch seed {}", seed + 1)).clicked() {
+                    actions.push(UiAction::WatchSeed(seed + 1));
+                }
+            });
+        });
+}
+
 /// A small floating reminder that the next click will attack-move.
 pub fn armed_order_hint(ctx: &egui::Context, order: ArmedOrder) {
     egui::Area::new(egui::Id::new("armed order hint"))
@@ -3277,6 +3424,18 @@ mod tests {
         assert!(!popup_shows_after(0.0, true), "a popup should not flash up as the pointer sweeps past");
         assert!(popup_shows_after(0.15, true), "the popup should show within a sixth of a second");
         assert!(!popup_shows_after(0.15, false), "egui's own delay is longer, so this test would not catch a missing style");
+    }
+
+    #[test]
+    fn the_watch_keys_step_through_views_and_speeds_within_bounds() {
+        assert_eq!(next_watch_view(None), Some(Team::Blue));
+        assert_eq!(next_watch_view(Some(Team::Blue)), Some(Team::Red));
+        assert_eq!(next_watch_view(Some(Team::Red)), None);
+        assert_eq!(step_watch_speed(1, true), 2);
+        assert_eq!(step_watch_speed(16, true), 16);
+        assert_eq!(step_watch_speed(1, false), 1);
+        assert_eq!(step_watch_speed(8, false), 4);
+        assert_eq!(*WATCH_SPEEDS.last().expect("speeds"), crate::driver::MAX_SPEED);
     }
 
     fn base_with_factories(db: &BlueprintDb) -> SimSnapshot {

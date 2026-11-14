@@ -324,6 +324,9 @@ pub struct SimSnapshot {
     /// The rank of each veteran the viewer can see, sorted by `SimId`.
     pub veterans: Vec<(SimId, u8)>,
     pub economy: EconomyView,
+    /// Both teams' economies, Blue's then Red's, for a watcher who sees everything: only in
+    /// snapshots for no one side.
+    pub team_economies: Option<[EconomyView; 2]>,
     /// Present when fog of war is on: one byte per cell, for the renderer.
     pub fog: Option<Arc<Vec<u8>>>,
     pub match_result: Option<MatchResult>,
@@ -3323,6 +3326,7 @@ impl SimWorld {
         let order_stops = viewer.map_or_else(Vec::new, |viewer| self.order_stops_for(viewer));
         let rates = viewer.map_or_else(Vec::new, |viewer| self.rates_for(viewer));
         let economy = viewer.map_or_else(EconomyView::default, |viewer| self.economies[viewer.index()].view());
+        let team_economies = viewer.is_none().then(|| [self.economies[0].view(), self.economies[1].view()]);
         let fog = match viewer {
             Some(viewer) if self.config.fog_of_war => Some(Arc::new(self.visibility.fog_bytes(viewer))),
             _ => None,
@@ -3378,6 +3382,7 @@ impl SimWorld {
                 })
                 .collect(),
             economy,
+            team_economies,
             fog,
             match_result: self.match_result,
         }

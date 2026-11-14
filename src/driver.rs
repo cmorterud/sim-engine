@@ -24,6 +24,33 @@ use crate::sim::world::{SimSnapshot, SimWorld};
 
 pub const TICK_DURATION: Duration = Duration::from_millis(100);
 
+/// The fastest a watched match can play, in ticks per tick of real time.
+pub const MAX_SPEED: u32 = 16;
+
+/// A viewer as one number, for sharing between threads: 0 for everything, 1 Blue, 2 Red.
+#[cfg(not(target_arch = "wasm32"))]
+const fn viewer_code(viewer: Option<Team>) -> u8 {
+    match viewer {
+        None => 0,
+        Some(Team::Blue) => 1,
+        Some(Team::Red) => 2,
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+const fn viewer_from_code(code: u8) -> Option<Team> {
+    match code {
+        1 => Some(Team::Blue),
+        2 => Some(Team::Red),
+        _ => None,
+    }
+}
+
+/// How long a tick lasts at a speed.
+fn tick_interval(speed: u32) -> Duration {
+    TICK_DURATION / speed.clamp(1, MAX_SPEED)
+}
+
 /// Where commands come from.
 #[derive(Copy, Clone, Debug)]
 pub enum CommandSource {
@@ -35,6 +62,7 @@ pub enum CommandSource {
     /// at `difficulty`.
     PlayerVsAi { seed: u64, difficulty: Difficulty },
     /// Two scripted opponents, stopping after a fixed number of ticks or at the end of the match.
+    /// The same match the soak plays for the seed, so watching one replays it.
     AiVsAi { seed: u64, ticks: u32 },
 }
 
@@ -47,6 +75,9 @@ pub struct DriverOptions {
     pub fast_forward_ticks: u32,
     /// Starts with the clock stopped, after any fast-forward.
     pub start_paused: bool,
+    /// Keeps the last snapshot coming once the command source is done, instead of ending, so
+    /// that a watcher can still look it over from either side. Test runs end, so they report.
+    pub linger: bool,
 }
 
 /// The simulation's state when its thread ended.
@@ -63,7 +94,16 @@ pub struct SimDriver {
     tick_micros: Arc<AtomicU32>,
     stop: Arc<AtomicBool>,
     paused: Arc<AtomicBool>,
+    controls: Arc<Controls>,
     thread: Option<JoinHandle<DriverResult>>,
+}
+
+/// What a watcher can change while a match runs: whose sight snapshots show, and how fast
+/// ticks come. Neither reaches the simulation, so neither changes how the match plays out.
+#[cfg(not(target_arch = "wasm32"))]
+struct Controls {
+    viewer: std::sync::atomic::AtomicU8,
+    speed: AtomicU32,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -82,10 +122,12 @@ impl SimDriver {
         let thread_stop = Arc::clone(&stop);
         let paused = Arc::new(AtomicBool::new(options.start_paused));
         let thread_paused = Arc::clone(&paused);
+        let controls = Arc::new(Controls { viewer: std::sync::atomic::AtomicU8::new(viewer_code(options.viewer)), speed: AtomicU32::new(1) });
+        let thread_controls = Arc::clone(&controls);
         let thread = thread::Builder::new()
             .name("simulation".into())
             .spawn(move || {
-                run(scenario, source, paced, options, &command_receiver, &snapshot_sender, &thread_micros, &thread_stop, &thread_paused)
+                run(scenario, source, paced, options, &command_receiver, &snapshot_sender, &thread_micros, &thread_stop, &thread_paused, &thread_controls)
             })
             .expect("simulation thread starts");
         Self {
@@ -94,6 +136,7 @@ impl SimDriver {
             tick_micros,
             stop,
             paused,
+            controls,
             thread: Some(thread),
         }
     }
@@ -116,6 +159,24 @@ impl SimDriver {
 
     pub fn is_paused(&self) -> bool {
         self.paused.load(Ordering::Relaxed)
+    }
+
+    /// Changes whose sight the snapshots show, from the next one on, even while paused.
+    pub fn set_viewer(&self, viewer: Option<Team>) {
+        self.controls.viewer.store(viewer_code(viewer), Ordering::Relaxed);
+    }
+
+    pub fn viewer(&self) -> Option<Team> {
+        viewer_from_code(self.controls.viewer.load(Ordering::Relaxed))
+    }
+
+    /// Sets how many ticks run for each tick of real time, from 1 to `MAX_SPEED`.
+    pub fn set_speed(&self, speed: u32) {
+        self.controls.speed.store(speed.clamp(1, MAX_SPEED), Ordering::Relaxed);
+    }
+
+    pub fn speed(&self) -> u32 {
+        self.controls.speed.load(Ordering::Relaxed)
     }
 
     pub fn last_tick_micros(&self) -> u32 {
@@ -152,6 +213,7 @@ fn run(
     tick_micros: &AtomicU32,
     stop: &AtomicBool,
     paused: &AtomicBool,
+    controls: &Controls,
 ) -> DriverResult {
     let Scenario { mut world, opening_commands } = scenario;
     let mut brains = brains_for(&world, source);
@@ -161,32 +223,42 @@ fn run(
         }
         step(&mut world, source, &opening_commands, commands.try_iter().collect(), &mut brains);
     }
-    let _ = snapshots.send(Arc::new(world.snapshot_for(options.viewer)));
+    let mut viewer = viewer_from_code(controls.viewer.load(Ordering::Relaxed));
+    let _ = snapshots.send(Arc::new(world.snapshot_for(viewer)));
     let mut next_tick = Instant::now();
     loop {
         if stop.load(Ordering::Relaxed) {
             break;
         }
-        if paused.load(Ordering::Relaxed) {
-            // Nothing changes, so no snapshot is sent: the last one stays on screen.
+        let wanted = viewer_from_code(controls.viewer.load(Ordering::Relaxed));
+        if paused.load(Ordering::Relaxed) || source_done(&world, source) {
+            // Nothing changes, so no snapshot is sent and the last one stays on screen, unless
+            // the watcher asks for another side's view of it.
+            if wanted != viewer {
+                viewer = wanted;
+                if snapshots.send(Arc::new(world.snapshot_for(viewer))).is_err() {
+                    break;
+                }
+            }
+            if source_done(&world, source) && !paused.load(Ordering::Relaxed) && !options.linger {
+                break;
+            }
             thread::sleep(TICK_DURATION / 10);
             next_tick = Instant::now();
             continue;
         }
+        viewer = wanted;
         let started = Instant::now();
-        if source_done(&world, source) {
-            break;
-        }
         // A finished match stays on screen until the player leaves it.
         if world.match_result.is_none() {
             step(&mut world, source, &opening_commands, commands.try_iter().collect(), &mut brains);
         }
         tick_micros.store(started.elapsed().as_micros() as u32, Ordering::Relaxed);
-        if snapshots.send(Arc::new(world.snapshot_for(options.viewer))).is_err() {
+        if snapshots.send(Arc::new(world.snapshot_for(viewer))).is_err() {
             break;
         }
         if paced {
-            next_tick += TICK_DURATION;
+            next_tick += tick_interval(controls.speed.load(Ordering::Relaxed));
             let now = Instant::now();
             if next_tick > now {
                 thread::sleep(next_tick - now);
@@ -252,6 +324,8 @@ struct Inline {
     opening: Vec<SimCommand>,
     brains: [AiBrain; 2],
     viewer: Option<Team>,
+    speed: u32,
+    linger: bool,
     paced: bool,
     paused: bool,
     finished: bool,
@@ -285,6 +359,8 @@ impl SimDriver {
                 opening: opening_commands,
                 brains,
                 viewer: options.viewer,
+                speed: 1,
+                linger: options.linger,
                 paced,
                 paused: options.start_paused,
                 finished: false,
@@ -316,6 +392,29 @@ impl SimDriver {
         self.state.borrow().paused
     }
 
+    /// Changes whose sight the snapshots show, at once, even while paused.
+    pub fn set_viewer(&self, viewer: Option<Team>) {
+        let mut state = self.state.borrow_mut();
+        if state.viewer != viewer {
+            state.viewer = viewer;
+            let snapshot = Arc::new(state.world.snapshot_for(viewer));
+            state.snapshots.push_back(snapshot);
+        }
+    }
+
+    pub fn viewer(&self) -> Option<Team> {
+        self.state.borrow().viewer
+    }
+
+    /// Sets how many ticks run for each tick of real time, from 1 to `MAX_SPEED`.
+    pub fn set_speed(&self, speed: u32) {
+        self.state.borrow_mut().speed = speed.clamp(1, MAX_SPEED);
+    }
+
+    pub fn speed(&self) -> u32 {
+        self.state.borrow().speed
+    }
+
     pub fn last_tick_micros(&self) -> u32 {
         self.state.borrow().tick_micros
     }
@@ -333,20 +432,32 @@ impl SimDriver {
 
 #[cfg(target_arch = "wasm32")]
 impl Inline {
-    /// Runs the tick that is due, if any. A frame never runs more than one, so a slow tick
-    /// slows the game instead of stalling the page to catch up.
+    /// Runs the ticks that are due, if any: at most one a frame at normal speed, and when sped
+    /// up, at most the speed's worth and no more than `FRAME_TICK_BUDGET` of work, so slow
+    /// ticks slow the game instead of stalling the page to catch up.
     fn advance(&mut self) {
+        const FRAME_TICK_BUDGET: Duration = Duration::from_millis(12);
+        let started = Instant::now();
+        for _ in 0..self.speed {
+            if !self.advance_one() || started.elapsed() > FRAME_TICK_BUDGET {
+                break;
+            }
+        }
+    }
+
+    /// Runs one tick if one is due, and returns whether it did.
+    fn advance_one(&mut self) -> bool {
         let now = Instant::now();
         if self.paused || self.finished {
             self.next_tick = now;
-            return;
+            return false;
         }
         if self.paced && now < self.next_tick {
-            return;
+            return false;
         }
         if source_done(&self.world, self.source) {
-            self.finished = true;
-            return;
+            self.finished = !self.linger;
+            return false;
         }
         let started = Instant::now();
         // A finished match stays on screen until the player leaves it.
@@ -356,6 +467,8 @@ impl Inline {
         }
         self.tick_micros = started.elapsed().as_micros() as u32;
         self.snapshots.push_back(Arc::new(self.world.snapshot_for(self.viewer)));
-        self.next_tick = if self.next_tick + TICK_DURATION > now { self.next_tick + TICK_DURATION } else { now + TICK_DURATION };
+        let interval = tick_interval(self.speed);
+        self.next_tick = if self.next_tick + interval > now { self.next_tick + interval } else { now + interval };
+        true
     }
 }

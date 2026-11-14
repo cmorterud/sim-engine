@@ -51,6 +51,7 @@
     select, input[type=number] { font: inherit; color: var(--text-strong); background: var(--panel-raised); border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; min-width: 180px; }
     select:focus-visible, input:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
     .hint { font-size: 12.5px; color: var(--muted); }
+    .field .hint { max-width: 30ch; }
 
     details { margin-top: 18px; }
     summary { cursor: pointer; color: var(--muted); font-size: 14px; }
@@ -59,6 +60,11 @@
     .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 22px; margin-top: 32px; }
     button.play { font: inherit; font-weight: 600; font-size: 17px; color: #fff; background: var(--accent); border: 0; border-radius: 9px; padding: 12px 34px; cursor: pointer; }
     button.play:hover { background: var(--accent-strong); }
+    button.play.secondary { background: var(--panel-raised); border: 1px solid var(--accent); }
+    button.play.secondary:hover { background: #1f2638; }
+    .lede { margin: 0 0 14px; max-width: 70ch; }
+    kbd { font: 12px ui-monospace, monospace; color: var(--text-strong); background: var(--panel-raised); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
+    #watch { margin-top: 8px; }
     a { color: var(--accent-strong); }
     .note { color: var(--muted); font-size: 13px; margin-top: 28px; }
     .keys { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 13.5px; margin: 0; }
@@ -138,6 +144,39 @@
         <div class="actions">
           <button class="play" type="submit">Play</button>
           <a href="?battle">Or watch a 5,000-unit battle</a>
+        </div>
+      </form>
+
+      <form id="watch" method="get">
+        <input type="hidden" name="watch" value="1">
+        <h2>Watch an AI match</h2>
+        <p class="lede">Two AIs play each other, the same match the game's soak test plays for a map and seed, so a seed always plays out the same way. See everything, or only what one side sees, as if playing as them.</p>
+        <div class="row">
+          <div class="field">
+            <label for="watch-map">Map</label>
+            <select id="watch-map" name="map">
+              <option value="skirmish" selected>Skirmish</option>
+              <option value="highland">Highland</option>
+              <option value="twin_passes">Twin Passes</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="watch-seed">Seed</label>
+            <input id="watch-seed" name="seed" type="number" min="1" step="1" inputmode="numeric" value="1" required aria-describedby="watch-seed-hint">
+            <span class="hint" id="watch-seed-hint">The soak plays seeds 1&ndash;200 on Skirmish, 1&ndash;120 on the others.</span>
+          </div>
+          <div class="field">
+            <label for="watch-view">See</label>
+            <select id="watch-view" name="view">
+              <option value="all" selected>Everything</option>
+              <option value="blue">Blue's sight</option>
+              <option value="red">Red's sight</option>
+            </select>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="play secondary" type="submit">Watch</button>
+          <span class="hint">In the match: <kbd>V</kbd> switches whose sight, <kbd>-</kbd> and <kbd>=</kbd> change the speed up to 16x, and <kbd>Space</kbd> pauses.</span>
         </div>
       </form>
 

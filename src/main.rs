@@ -52,6 +52,24 @@ const OBSTACLE_DRAW_HEIGHT: f64 = 18.0;
 const STARTING_ALTITUDE: f64 = 900.0;
 /// How close the camera can get in a skirmish. Stress test units are far smaller, and keep the camera's own limit.
 const SKIRMISH_MIN_ALTITUDE: f64 = 130.0;
+/// How high a watcher who sees everything starts, as a share of the highest the camera goes.
+const WATCH_ALTITUDE_FRACTION: f64 = 0.55;
+
+/// The soak's match for a seed, played out to the soak's time limit.
+const fn watch_source(seed: u64) -> CommandSource {
+    CommandSource::AiVsAi { seed, ticks: sim_engine::soak::MATCH_TICK_LIMIT }
+}
+
+/// A map's file name as players see it: `twin_passes` as Twin Passes.
+fn display_name(name: &str) -> String {
+    name.split('_')
+        .map(|word| {
+            let mut letters = word.chars();
+            letters.next().map_or_else(String::new, |first| first.to_uppercase().chain(letters).collect())
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
 /// A Shift-press on an order's icon that moves less than this is only a click.
 const MIN_ORDER_DRAG_PIXELS: f64 = 6.0;
 /// How long the Shift view of everyone's orders takes to fade after letting go, in seconds.
@@ -80,6 +98,10 @@ Usage: sim-engine [options]
                        with its .scmap and _save.lua), for any of the modes above
   --ai <easy|normal>   How hard the AI opponent plays (default easy)
   --starts <a>,<b>     With --map, which armies' starts Blue and Red take (default 1,2)
+  --watch              Watch the AI-vs-AI match the soak plays for --map and --seed,
+                       seeing everything. V switches to Blue's or Red's sight, - and =
+                       change the speed, and Space pauses
+  --view <all|blue|red>  With --watch, whose sight to start with (default all)
 
 Controls:
   Left-drag or click   Select your units
@@ -145,10 +167,24 @@ struct Options {
     starts: Option<(usize, usize)>,
     /// How hard the AI opponent plays: easy unless asked otherwise.
     difficulty: Option<Difficulty>,
+    /// Watch the soak's AI-vs-AI match for the map and seed instead of playing.
+    watch: bool,
+    /// Whose sight a watched match starts in: `None` for everything.
+    view: Option<Team>,
+}
+
+/// A view by name, for --view and ?view=: everything, or one team's sight.
+fn parse_view(name: &str) -> Option<Option<Team>> {
+    match name {
+        "all" => Some(None),
+        "blue" => Some(Some(Team::Blue)),
+        "red" => Some(Some(Team::Red)),
+        _ => None,
+    }
 }
 
 /// In the browser, options come from the page's address instead: `?map=highland`, `?seed=7`,
-/// and `?battle` for the stress test. `map=skirmish` is the generated map, as no map is. An
+/// `?battle` for the stress test, and `?watch` with `&view=blue` to watch an AI match. `map=skirmish` is the generated map, as no map is. An
 /// address without options shows the page's map choice (index.html), so the game waits.
 #[cfg(target_arch = "wasm32")]
 fn parse_options() -> Result<Option<Options>, String> {
@@ -162,6 +198,8 @@ fn parse_options() -> Result<Option<Options>, String> {
     options.seed = params.get("seed").and_then(|seed| seed.parse().ok());
     options.battle = params.has("battle");
     options.difficulty = params.get("ai").and_then(|name| Difficulty::from_name(&name));
+    options.watch = params.has("watch");
+    options.view = params.get("view").and_then(|name| parse_view(&name)).flatten();
     Ok(Some(options))
 }
 
@@ -185,6 +223,8 @@ fn parse_options() -> Result<Option<Options>, String> {
             "--sound-check" => options.sound_check = true,
             "--map" => options.map = Some(PathBuf::from(value("--map")?)),
             "--ai" => options.difficulty = Some(Difficulty::from_name(&value("--ai")?).ok_or("--ai needs easy or normal")?),
+            "--watch" => options.watch = true,
+            "--view" => options.view = parse_view(&value("--view")?).ok_or("--view needs all, blue, or red")?,
             "--starts" => {
                 let text = value("--starts")?;
                 let pair = text.split_once(',').and_then(|(a, b)| Some((a.trim().parse().ok()?, b.trim().parse().ok()?)));
@@ -737,10 +777,18 @@ fn ground_point(ground: Option<[f64; 2]>, heights: &HeightField) -> Option<[f64;
     ground.map(|ground| [ground[0], ground[1], heights.height_at(ground[0], ground[1])])
 }
 
-async fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
+async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     let battle = options.battle;
+    // Watching plays the soak's match for the seed, with no player, seen from any side.
+    let watching = options.watch && !battle;
+    let mut watch_view = options.view;
+    let map_name = match &map_source {
+        MapSource::Skirmish => "Skirmish".to_string(),
+        MapSource::Imported(map) => display_name(&map.name),
+    };
     let scenario = make_scenario(seed, battle, &map_source);
-    let player_start = scenario.world.starts[PLAYER_TEAM.index()];
+    // A watcher seeing through one team's eyes starts at its base, as its player would.
+    let player_start = scenario.world.starts[if watching { watch_view.unwrap_or(PLAYER_TEAM) } else { PLAYER_TEAM }.index()];
     let map = read_map(&scenario);
     let is_match = !battle;
     let autotest_seconds = options.autotest_seconds;
@@ -752,9 +800,11 @@ async fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
         (Some(seconds), true) => CommandSource::Script { seed, ticks: fast_forward + seconds * 10 },
         (Some(seconds), false) => CommandSource::AiVsAi { seed, ticks: fast_forward + seconds * 10 },
         (None, true) => CommandSource::Player,
+        (None, false) if watching => watch_source(seed),
         (None, false) => CommandSource::PlayerVsAi { seed, difficulty },
     };
-    let driver_options = DriverOptions { viewer: is_match.then_some(PLAYER_TEAM), fast_forward_ticks: fast_forward, start_paused: false };
+    let viewer = if watching { watch_view } else { is_match.then_some(PLAYER_TEAM) };
+    let mut driver_options = DriverOptions { viewer, fast_forward_ticks: fast_forward, start_paused: false, linger: watching && autotest_seconds.is_none() };
     let mut session = Session::start(scenario, source, driver_options);
 
     let event_loop = EventLoop::new().expect("event loop starts");
@@ -776,6 +826,12 @@ async fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
         camera.set_min_altitude(SKIRMISH_MIN_ALTITUDE);
         camera.look_at(raw_to_world(player_start.x.to_bits()), raw_to_world(player_start.y.to_bits()), STARTING_ALTITUDE);
     }
+    // A watcher who sees everything starts over the middle, high enough for both bases.
+    if watching && watch_view.is_none() {
+        camera.look_at(map.map_units / 2.0, map.map_units / 2.0, camera.max_altitude() * WATCH_ALTITUDE_FRACTION);
+    }
+    // Whether the fog has been cleared for seeing everything, since snapshots then carry none.
+    let mut fog_cleared = false;
 
     let egui_context = egui::Context::default();
     ui::install_fonts(&egui_context);
@@ -816,7 +872,7 @@ async fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
     let mut sound_settings = SoundSettings::default();
     // Test runs stay silent. The game plays on without sound if there is no device. Browsers
     // only allow sound after the player clicks, so the browser build is silent for now.
-    let sound = (is_match && autotest_seconds.is_none() && !cfg!(target_arch = "wasm32")).then(SoundEngine::start).and_then(|started| match started {
+    let sound = (is_match && !watching && autotest_seconds.is_none() && !cfg!(target_arch = "wasm32")).then(SoundEngine::start).and_then(|started| match started {
         Ok(engine) => Some(engine),
         Err(error) => {
             eprintln!("playing without sound: {error}");
@@ -857,6 +913,8 @@ async fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                         let anchor = camera.screen_to_ground(selection.cursor(), &map.heights);
                         camera.zoom(steps, anchor);
                     }
+                    // A watcher selects nothing and gives no orders.
+                    WindowEvent::MouseInput { .. } if watching => {}
                     WindowEvent::MouseInput { state: ElementState::Released, button: MouseButton::Left, .. } if order_drag.is_some() => {
                         let (handle, start) = order_drag.take().expect("just checked");
                         placing = None;
@@ -1021,6 +1079,20 @@ async fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                             PhysicalKey::Code(KeyCode::KeyS | KeyCode::ArrowDown) => held_keys[1] = pressed,
                             PhysicalKey::Code(KeyCode::KeyA | KeyCode::ArrowLeft) => held_keys[2] = pressed,
                             PhysicalKey::Code(KeyCode::KeyD | KeyCode::ArrowRight) => held_keys[3] = pressed,
+                            // A watcher's keys: pause, whose sight, and speed. No other key
+                            // gives orders.
+                            PhysicalKey::Code(code) if watching => {
+                                if pressed && !event.repeat {
+                                    let speed = session.driver.as_ref().map_or(1, SimDriver::speed);
+                                    match code {
+                                        KeyCode::Space => hotkey_actions.push(UiAction::TogglePause),
+                                        KeyCode::KeyV => hotkey_actions.push(UiAction::SetView(ui::next_watch_view(watch_view))),
+                                        KeyCode::Minus => hotkey_actions.push(UiAction::SetSpeed(ui::step_watch_speed(speed, false))),
+                                        KeyCode::Equal => hotkey_actions.push(UiAction::SetSpeed(ui::step_watch_speed(speed, true))),
+                                        _ => {}
+                                    }
+                                }
+                            }
                             PhysicalKey::Code(KeyCode::Escape) if pressed && order_drag.is_some() => {
                                 order_drag = None;
                                 placing = None;
@@ -1188,15 +1260,26 @@ async fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                                 arrived = true;
                             }
                             if arrived {
-                                if let Some(fog) = &session.current.fog {
-                                    renderer.update_fog(fog);
+                                match (&session.current.fog, map.fog_side) {
+                                    (Some(fog), _) => {
+                                        renderer.update_fog(fog);
+                                        fog_cleared = false;
+                                    }
+                                    // Seeing everything: no fog anywhere.
+                                    (None, Some(side)) if !fog_cleared => {
+                                        renderer.update_fog(&vec![u8::MAX; side * side]);
+                                        fog_cleared = true;
+                                    }
+                                    (None, _) => {}
                                 }
                                 let units = &session.current.units;
                                 motion.retain(|id| units.binary_search_by_key(id, |unit| unit.id).is_ok());
                             }
                         }
                         selection.retain_alive(&session.current.units);
-                        let alpha = ((now - session.current_arrived).as_secs_f64() / TICK_DURATION.as_secs_f64()).clamp(0.0, 1.0);
+                        // A watched match sped up has ticks closer together.
+                        let speed = session.driver.as_ref().map_or(1, SimDriver::speed);
+                        let alpha = ((now - session.current_arrived).as_secs_f64() * f64::from(speed) / TICK_DURATION.as_secs_f64()).clamp(0.0, 1.0);
 
                         let pan_x = f64::from(u8::from(held_keys[3])) - f64::from(u8::from(held_keys[2]));
                         let pan_y = f64::from(u8::from(held_keys[0])) - f64::from(u8::from(held_keys[1]));
@@ -1420,7 +1503,14 @@ async fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                             if (armed.is_some() || placing.is_some()) && order_drag.is_none() {
                                 ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
                             }
-                            if is_match {
+                            if watching {
+                                ui::world_overlay(ctx, &camera, &snapshot, &selected, &map.blueprints, pixels_per_point);
+                                let speed = session.driver.as_ref().map_or(1, SimDriver::speed);
+                                let state = ui::WatchState { map: &map_name, seed, view: watch_view, speed, paused: game_paused };
+                                ui::watch_bar(ctx, &snapshot, &state, &mut actions);
+                                let stopped = snapshot.tick >= sim_engine::soak::MATCH_TICK_LIMIT;
+                                ui::watch_end_window(ctx, snapshot.match_result, stopped, snapshot.tick, seed, &mut actions);
+                            } else if is_match {
                                 ui::world_overlay(ctx, &camera, &snapshot, &selected, &map.blueprints, pixels_per_point);
                                 let sound_label = sound.as_ref().map(|_| sound_settings.label());
                                 ui::resource_bar(ctx, &snapshot, sound_label.as_deref(), game_paused, &mut actions);
@@ -1524,11 +1614,32 @@ async fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                                     }
                                 }
                                 UiAction::Batch(_) => unreachable!("batches were flattened above"),
+                                UiAction::SetView(view) => {
+                                    watch_view = view;
+                                    driver_options.viewer = view;
+                                    if let Some(driver) = &session.driver {
+                                        driver.set_viewer(view);
+                                    }
+                                }
+                                UiAction::SetSpeed(speed) => {
+                                    if let Some(driver) = &session.driver {
+                                        driver.set_speed(speed);
+                                    }
+                                }
+                                UiAction::WatchSeed(next) => {
+                                    seed = next;
+                                    let speed = session.driver.as_ref().map_or(1, SimDriver::speed);
+                                    session = Session::start(map_source.scenario(seed), watch_source(seed), driver_options);
+                                    if let Some(driver) = &session.driver {
+                                        driver.set_speed(speed);
+                                    }
+                                }
                                 UiAction::Restart => {
                                     attack_alarm = AttackAlarm::default();
                                     control_groups = ControlGroups::default();
                                     order_drag = None;
-                                    session = Session::start(map_source.scenario(seed), CommandSource::PlayerVsAi { seed, difficulty }, driver_options);
+                                    let source = if watching { watch_source(seed) } else { CommandSource::PlayerVsAi { seed, difficulty } };
+                                    session = Session::start(map_source.scenario(seed), source, driver_options);
                                     selection.clear();
                                     placing = None;
                                     line_start = None;

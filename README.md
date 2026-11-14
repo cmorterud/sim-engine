@@ -87,6 +87,8 @@ cargo run --release -- --autotest 60 --fast-forward 10000   # Opens a window for
 
 Every push to `main` also runs the soak on GitHub's runners (`.github/workflows/soak.yml`): the 200 skirmish matches and 120 on each bundled map, in shards of 25 seeds, one runner each, all from one release build. The run's summary page adds up wins by side, unfinished matches, and replay mismatches per map, with the chance of a split at least that lopsided between equally strong sides (a p below 0.05 suggests a real lean). Tick times are reported there but do not fail the run (`--no-tick-gate`), since a shared runner's other load would fail it falsely; the benchmarks check speed locally. Start a soak by hand from the Actions tab, or with `gh workflow run soak.yml`; its inputs set the matches per map and per runner, for example `gh workflow run soak.yml -f bundled_matches=500` for a closer look at a map's fairness.
 
+Any soak match can be watched: the simulation and the AIs are deterministic, so the map and seed alone replay it. `cargo run --release -- --watch --map highland --seed 223` shows everything, with both teams' economies; `--view blue` or `--view red` starts in one side's sight instead. In the match, V steps between everything, Blue, and Red, - and = change the speed up to 16x, and Space pauses. In the browser, use the page's Watch section, or `?watch&map=highland&seed=223&view=all`.
+
 The stored checksums in `tests/golden/` change whenever simulation behavior changes on purpose. Update them with `UPDATE_GOLDEN=1 cargo test --release --test determinism_test`, then confirm that the x86-64 run still matches.
 
 ## License and credits
