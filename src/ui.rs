@@ -2799,7 +2799,10 @@ mod tests {
         assert_eq!(press('V', Some(2)), place("t2_flak"));
         assert_eq!(press('V', Some(3)), place("t3_sam"));
         assert_eq!(press('\'', Some(3)), place("quantum_gateway"));
-        assert_eq!(press('T', Some(2)), None, "no storage at T2");
+        assert_eq!(press('T', Some(2)), place("engineering_station"), "storage's key, which no T2 item had");
+        assert_eq!(press('T', Some(3)), None, "the T3 station is only an upgrade");
+        assert_eq!(press('\'', Some(1)), place("wall"));
+        assert_eq!(press('C', Some(3)), place("t3_heavy_point_defense"));
         // A support factory needs a headquarters, and there is none.
         assert_eq!(press('Q', Some(2)), None);
         // A bot can build nothing, so N mutes instead.

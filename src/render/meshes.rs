@@ -144,6 +144,8 @@ pub enum Shape {
     HeavyPointDefense,
     /// A wall section: a block with crenellations along the top.
     Wall,
+    /// An engineering station: a pad with a tower, and a drone hovering over it.
+    EngineeringStation,
     /// A shield's dome: an open half-sphere, drawn see-through.
     Dome,
     /// Flat, around the feet of a selected mobile unit.
@@ -153,7 +155,7 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub const ALL: [Self; 79] = [
+    pub const ALL: [Self; 80] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -230,6 +232,7 @@ impl Shape {
         Self::TorpedoBoat,
         Self::HeavyPointDefense,
         Self::Wall,
+        Self::EngineeringStation,
         Self::Dome,
         Self::SelectionRing,
         Self::SelectionBox,
@@ -955,6 +958,25 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.bevel([-0.12, -0.24, 0.3], [0.12, 0.0, 0.42], 0.03);
             mesh.paint(Material::Glow);
             mesh.block([-0.1, 0.0, 0.34], [0.1, 0.012, 0.38]);
+        }
+        Shape::EngineeringStation => {
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.5, -0.5, -0.5], [0.5, 0.5, -0.38], 0.03);
+            mesh.paint(Material::Trim);
+            mesh.frustum([-0.18, -0.18], [-0.38, 0.12], [0.16, 0.12], 8);
+            mesh.paint(Material::Metal);
+            mesh.frustum([-0.18, -0.18], [0.12, 0.3], [0.04, 0.03], 6);
+            mesh.beam([-0.18, -0.18, 0.28], [0.22, 0.18, 0.34], 0.025, 0.025);
+            // The drone, over the pad, lit while it works.
+            mesh.paint(Material::Hull);
+            mesh.bevel([0.12, 0.08, 0.24], [0.34, 0.3, 0.32], 0.02);
+            mesh.paint(Material::Glow);
+            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
+                mesh.ball([0.23, 0.19, 0.21], 0.04, 6, 3);
+                for (x, y) in [(-0.4_f32, -0.4_f32), (0.4, -0.4), (-0.4, 0.4), (0.4, 0.4)] {
+                    mesh.block([x - 0.02, y - 0.02, -0.38], [x + 0.02, y + 0.02, -0.36]);
+                }
+            });
         }
         Shape::Wall => {
             mesh.paint(Material::Hull);

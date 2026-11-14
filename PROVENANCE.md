@@ -36,7 +36,8 @@ Taken so far:
   far a bomb is let go short of its target is worked out here from its fall.
 * The rest of the UEF's non-experimental units and structures: the Land Scout, Medium Tank, Gatling
   Bot, Mobile Shield Generator, Field Engineer, Heavy and Armored Assault Bots, Torpedo Boat, Heavy
-  Point Defense, Heavy Shield Generator, and Wall Section, from FAF's UEF units, with generic names.
+  Point Defense, Heavy Shield Generator, Wall Section, and Engineering Stations, from FAF's UEF
+  units, with generic names. The stations' drones are folded into the station's own build power.
 
 ## Fonts
 

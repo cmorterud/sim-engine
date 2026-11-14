@@ -291,6 +291,8 @@ pub fn unit_look(key: &str) -> UnitLook {
         "t3_heavy_point_defense" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::HeavyPointDefense, Some([0.95, 0.35, 0.30]), 1.0) },
         "t3_heavy_shield" => look(Shape::ShieldGenerator, Some([0.45, 0.70, 1.00]), 0.9),
         "wall" => look(Shape::Wall, Some([0.70, 0.70, 0.70]), 0.9),
+        "engineering_station" => look(Shape::EngineeringStation, Some([0.95, 0.75, 0.30]), 0.8),
+        "engineering_station_t3" => look(Shape::EngineeringStation, Some([0.95, 0.55, 0.20]), 0.95),
         "t1_light_artillery" => UnitLook { base: Some(Shape::ArtilleryHull), ..look(Shape::Artillery, None, 1.0) },
         "t2_heavy_tank" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::Tank, None, 1.0) },
         "t2_amphibious_tank" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::Tank, Some([0.45, 0.65, 0.75]), 1.0) },
@@ -779,6 +781,7 @@ mod tests {
             "t1_medium_tank",
             "t2_field_engineer",
             "t3_heavy_shield",
+            "engineering_station_t3",
         ];
         let shapes: Vec<Shape> = drawn().filter(|unit| !shared.contains(&unit.key.as_str())).map(|unit| unit_look(&unit.key).shape).collect();
         for (index, shape) in shapes.iter().enumerate() {

@@ -73,6 +73,7 @@ pub enum Icon {
     FieldEngineer,
     TorpedoBoat,
     Wall,
+    EngineeringStation,
     /// Anything without an icon of its own, such as the stress test's plain cubes.
     Unknown,
 }
@@ -90,7 +91,7 @@ pub enum BarGroup {
 }
 
 impl Icon {
-    pub const ALL: [Self; 55] = [
+    pub const ALL: [Self; 56] = [
         Self::Commander,
         Self::SupportCommander,
         Self::Engineer,
@@ -145,6 +146,7 @@ impl Icon {
         Self::FieldEngineer,
         Self::TorpedoBoat,
         Self::Wall,
+        Self::EngineeringStation,
         Self::Unknown,
     ];
 
@@ -162,6 +164,7 @@ impl Icon {
             "t2_field_engineer" => Self::FieldEngineer,
             "t2_torpedo_boat" => Self::TorpedoBoat,
             "wall" => Self::Wall,
+            "engineering_station" | "engineering_station_t3" => Self::EngineeringStation,
             "t2_amphibious_tank" => Self::AmphibiousTank,
             "t1_light_artillery" | "t3_mobile_artillery" => Self::Artillery,
             "t2_mobile_missile_launcher" => Self::MobileMissile,
@@ -222,7 +225,7 @@ impl Icon {
 
     pub const fn group(self) -> BarGroup {
         match self {
-            Self::LandFactory | Self::AirFactory | Self::NavalFactory | Self::Gateway | Self::AirStaging => BarGroup::Factories,
+            Self::LandFactory | Self::AirFactory | Self::NavalFactory | Self::Gateway | Self::AirStaging | Self::EngineeringStation => BarGroup::Factories,
             Self::Extractor | Self::Generator | Self::Hydrocarbon | Self::MassStorage | Self::EnergyStorage | Self::Fabricator => BarGroup::Resources,
             Self::PointDefense | Self::AntiAirTurret | Self::TorpedoLauncher | Self::ShieldGenerator | Self::TacticalDefense | Self::StrategicDefense | Self::Wall => BarGroup::Defenses,
             Self::Radar | Self::Sonar | Self::Stealth => BarGroup::Intel,
@@ -273,7 +276,7 @@ impl Role {
 impl Icon {
     pub const fn role(self) -> Role {
         match self {
-            Self::Commander | Self::SupportCommander | Self::Engineer | Self::FieldEngineer | Self::LandFactory | Self::AirFactory | Self::NavalFactory | Self::Gateway | Self::AirStaging | Self::Unknown => Role::Build,
+            Self::Commander | Self::SupportCommander | Self::Engineer | Self::FieldEngineer | Self::EngineeringStation | Self::LandFactory | Self::AirFactory | Self::NavalFactory | Self::Gateway | Self::AirStaging | Self::Unknown => Role::Build,
             Self::Extractor | Self::MassStorage | Self::Fabricator => Role::Mass,
             Self::Generator | Self::Hydrocarbon | Self::EnergyStorage => Role::Energy,
             Self::LightBot | Self::Tank | Self::AmphibiousTank | Self::Gunship | Self::Frigate | Self::Destroyer | Self::Cruiser | Self::Battleship | Self::Battlecruiser | Self::PointDefense => Role::DirectFire,
@@ -611,6 +614,13 @@ fn symbol(out: &mut Vec<Shape>, center: Pos2, size: f32, icon: Icon, stroke: Str
             out.push(line(&[(0.0, -0.6), (0.0, 0.0)]));
             out.push(line(&[(-0.45, 0.0), (-0.45, 0.6)]));
             out.push(line(&[(0.45, 0.0), (0.45, 0.6)]));
+        }
+        Icon::EngineeringStation => {
+            // A tower with a drone circling it.
+            out.push(line(&[(-0.5, 0.85), (0.5, 0.85)]));
+            out.push(line(&[(0.0, 0.85), (0.0, -0.1)]));
+            out.push(arc(0.0, -0.1, 0.8, 200.0, 340.0));
+            out.push(dot(0.55, -0.55, 0.2));
         }
         Icon::Unknown => out.push(dot(0.0, 0.0, 0.25)),
     }

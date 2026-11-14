@@ -409,6 +409,9 @@ pub struct Blueprint {
     pub factory_kind: Option<FactoryKind>,
     /// A support factory: cheaper, and it needs a headquarters of its kind and tier.
     pub support: bool,
+    /// An engineering station: a structure whose build power helps whatever friendly
+    /// construction, production, or repair is within its build range, by itself.
+    pub assists: bool,
     pub adjacency_giver: Option<AdjacencyGiver>,
     /// FAF's size class, from 0 for SIZE4 to 4 for SIZE20, which picks the adjacency bonuses it gets.
     pub adjacency_size: usize,
@@ -673,6 +676,8 @@ struct RawUnit {
     factory_kind: Option<String>,
     #[serde(default)]
     support: bool,
+    #[serde(default)]
+    assists: bool,
     /// What it gives its neighbors, such as "t1_power" or "mass_storage".
     adjacency: Option<String>,
     /// FAF's size class: 4, 8, 12, 16, or 20. Without one, 16 for factories, and otherwise from
@@ -1051,6 +1056,7 @@ impl BlueprintDb {
                     Some(other) => return Err(context(format!("unknown factory kind {other:?}"))),
                 },
                 support: unit.support,
+                assists: unit.assists,
                 adjacency_giver: match unit.adjacency.as_deref() {
                     None => None,
                     Some("t1_power") => Some(AdjacencyGiver::T1Power),

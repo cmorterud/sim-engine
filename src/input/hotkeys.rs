@@ -46,7 +46,7 @@ pub fn build_slot(key: &str) -> Option<(Bar, usize)> {
         "land_factory_t1" | "land_factory_t2_support" | "land_factory_t3_support" => (Builder, 0),
         "mass_extractor" | "mass_extractor_t2" | "mass_extractor_t3" => (Builder, 1),
         "power_generator" | "power_generator_t2" | "power_generator_t3" => (Builder, 2),
-        "mass_storage" => (Builder, 3),
+        "mass_storage" | "engineering_station" | "engineering_station_t3" => (Builder, 3),
         "t1_point_defense" | "t2_point_defense" | "t3_heavy_point_defense" => (Builder, 4),
         "radar" | "radar_t2" | "omni_sensor" => (Builder, 5),
         "t1_aa_turret" | "t2_flak" | "t3_sam" => (Builder, 6),

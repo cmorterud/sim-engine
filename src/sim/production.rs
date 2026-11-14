@@ -15,7 +15,7 @@ use super::config::{
 };
 use super::spatial::{GridEntry, Layer};
 use super::world::{BuildQueueView, EconomyView, OrderStopView, PlanStep, UnitRatesView, PlanStepKind, SimWorld, UnitPlanView, UnitSpawn, WorkLinkView};
-use crate::math::fp::{fp_int, wide_mul, Fp, Vec2Fp};
+use crate::math::fp::{fp_int, wide_mul, Fp, FpWide, Vec2Fp};
 
 /// A new site starts with this share of its health, so that it exists to be shot at.
 const SITE_STARTING_HEALTH_PERMILLE: i32 = 10;
@@ -478,8 +478,9 @@ impl SimWorld {
             let factory = Factory { power, queue: Vec::new(), repeat: false, progress: Res::ZERO, rally: None };
             self.ecs.insert_one(entity, factory).expect("entity was just spawned");
             self.factories.push((id, entity));
-        } else if power > Fp::ZERO && !unit.is_structure() {
-            // A structure's build power only drives its own upgrades.
+        } else if power > Fp::ZERO && (!unit.is_structure() || unit.assists) {
+            // A structure's build power only drives its own upgrades, but for an engineering
+            // station's, which helps whatever is in reach.
             self.ecs.insert_one(entity, Builder { power, range, tasks: Vec::new() }).expect("entity was just spawned");
             self.builders.push((id, entity));
         }
@@ -916,6 +917,7 @@ impl SimWorld {
             return;
         }
         self.step_patrols();
+        self.step_stations();
 
         for economy in &mut self.economies {
             economy.mass_reclaimed = Res::ZERO;
@@ -1164,6 +1166,11 @@ impl SimWorld {
                 }
             }
             TaskStep::MoveTo(goal) => {
+                // An engineering station cannot go to work out of its reach, so it lets it go.
+                if self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.is_structure) {
+                    self.ecs.get::<&mut Builder>(entity).expect("builder list only holds builders").tasks.remove(0);
+                    return;
+                }
                 let idle = self.ecs.get::<&Order>(entity).expect("units have orders").kind == OrderKind::Idle;
                 if idle {
                     self.assign_route(&[id], OrderKind::Move, goal, None);
@@ -1697,6 +1704,77 @@ impl SimWorld {
             let kind = if is_builder { OrderKind::Move } else { OrderKind::AttackMove };
             self.assign_route(&[id], kind, goal, None);
         }
+    }
+
+    /// Engineering stations look for work within their reach every so often while they have
+    /// none, and give up assisting a factory once it has nothing left to make.
+    fn step_stations(&mut self) {
+        for index in 0..self.builders.len() {
+            let (_, entity) = self.builders[index];
+            let Ok(stats) = self.ecs.get::<&UnitStats>(entity).map(|stats| *stats) else {
+                continue;
+            };
+            if !stats.is_structure || self.ecs.get::<&Construction>(entity).is_ok() || self.ecs.get::<&Paused>(entity).is_ok() {
+                continue;
+            }
+            if !stats.phase.wrapping_add(self.current_tick).is_multiple_of(PATROL_SEARCH_INTERVAL) {
+                continue;
+            }
+            let current = self.ecs.get::<&Builder>(entity).ok().and_then(|builder| builder.tasks.first().copied());
+            if let Some(BuildTask::Assist { target }) = current {
+                let idle_factory = self.find_unit(target).is_some_and(|(_, target)| {
+                    self.ecs.get::<&Factory>(target).is_ok_and(|factory| factory.queue.is_empty()) || self.ecs.get::<&Paused>(target).is_ok()
+                });
+                if idle_factory {
+                    self.ecs.get::<&mut Builder>(entity).expect("builder list only holds builders").tasks.clear();
+                }
+            }
+            let has_work = self.ecs.get::<&Builder>(entity).is_ok_and(|builder| !builder.tasks.is_empty());
+            if !has_work {
+                if let Some(task) = self.find_station_work(entity) {
+                    self.ecs.get::<&mut Builder>(entity).expect("builder list only holds builders").tasks.push(task);
+                }
+            }
+        }
+    }
+
+    /// What an engineering station helps with: the nearest friendly construction site, factory
+    /// at work, or upgrade within its reach, or failing that, the nearest damaged friend. Ties go
+    /// to the lowest id.
+    fn find_station_work(&self, entity: hecs::Entity) -> Option<BuildTask> {
+        let here = self.ecs.get::<&Position>(entity).ok()?.0.xy();
+        let team = self.ecs.get::<&UnitStats>(entity).ok()?.team;
+        let range = self.ecs.get::<&Builder>(entity).ok()?.range;
+        let mut best_build: Option<(FpWide, SimId, BuildTask)> = None;
+        let mut best_repair: Option<(FpWide, SimId, BuildTask)> = None;
+        let mut consider = |other: &GridEntry| {
+            if other.entity == entity {
+                return;
+            }
+            let position = Vec2Fp::new(Fp::from_bits(other.x), Fp::from_bits(other.y));
+            let reach = range + Fp::from_bits(other.radius);
+            let distance = here.distance_squared(&position);
+            if distance > wide_mul(reach, reach) {
+                return;
+            }
+            let paused = self.ecs.get::<&Paused>(other.entity).is_ok();
+            let building = !paused
+                && (self.ecs.get::<&Construction>(other.entity).is_ok()
+                    || self.ecs.get::<&Upgrading>(other.entity).is_ok()
+                    || self.ecs.get::<&Factory>(other.entity).is_ok_and(|factory| !factory.queue.is_empty()));
+            let damaged = self.ecs.get::<&Health>(other.entity).is_ok_and(|health| health.current < health.max) && self.ecs.get::<&Construction>(other.entity).is_err();
+            let better = |best: &Option<(FpWide, SimId, BuildTask)>| best.as_ref().is_none_or(|&(closest, id, _)| (distance, other.id) < (closest, id));
+            if building && better(&best_build) {
+                best_build = Some((distance, other.id, BuildTask::Assist { target: other.id }));
+            } else if damaged && better(&best_repair) {
+                best_repair = Some((distance, other.id, BuildTask::Repair { target: other.id }));
+            }
+        };
+        let (x, y) = (here.x.to_bits(), here.y.to_bits());
+        let search = range + Fp::from_bits(self.max_structure_radius().max(self.max_mobile_radius()));
+        self.spatial_grid.for_each_candidate(Some(team), Layer::Structure, x, y, search.to_bits(), &mut consider);
+        self.spatial_grid.for_each_candidate(Some(team), Layer::Mobile, x, y, search.to_bits(), &mut consider);
+        best_build.or(best_repair).map(|(_, _, task)| task)
     }
 
     /// The nearest wreck, construction site, or damaged friend. Ties go to the lowest id.
