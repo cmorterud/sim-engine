@@ -1189,8 +1189,13 @@ impl SimWorld {
             for &(id, _, _) in &travel.members {
                 let (_, entity) = self.find_unit(id).expect("members hold the route, so they are alive");
                 let order = *self.ecs.get::<&Order>(entity).expect("units have orders");
+                let combat = self.ecs.get::<&Combat>(entity).ok().map(|combat| *combat);
                 if order.route != route {
-                    waiting += 1;
+                    // A member chasing a target by route is away fighting, not still finishing
+                    // an earlier order, and the group goes on without it.
+                    if !combat.is_some_and(|combat| combat.chasing) {
+                        waiting += 1;
+                    }
                     continue;
                 }
                 let here = self.ecs.get::<&Position>(entity).expect("units have positions").0.xy();
@@ -1199,7 +1204,15 @@ impl SimWorld {
                 if !within(here, spot, travel.lag_distance) && !within(here, goal, approach) {
                     lagging += 1;
                 }
-                fighting |= order.kind == OrderKind::AttackMove && self.ecs.get::<&Combat>(entity).is_ok_and(|combat| combat.target.is_some());
+                // Only a member firing at its target holds the group. One chasing a target out of
+                // range would hold it for as long as the chase takes, so it catches up after.
+                let firing = combat.and_then(|combat| combat.target.map(|target| (combat.range, target))).is_some_and(|(range, target)| {
+                    self.find_unit(target).is_some_and(|(_, target)| {
+                        let radius = self.ecs.get::<&UnitStats>(target).map_or(Fp::ZERO, |stats| stats.radius);
+                        self.ecs.get::<&Position>(target).is_ok_and(|position| within(here, position.0.xy(), range + radius))
+                    })
+                });
+                fighting |= order.kind == OrderKind::AttackMove && firing;
             }
             let behind = lagging * 4 > travel.members.len();
             travel.held_ticks = if behind { travel.held_ticks.saturating_add(1) } else { 0 };

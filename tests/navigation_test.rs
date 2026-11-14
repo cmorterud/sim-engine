@@ -464,6 +464,33 @@ fn a_formation_attack_move_stops_the_whole_group_to_fight() {
 }
 
 #[test]
+fn a_formation_attack_move_goes_on_while_a_member_chases_a_target_away() {
+    let mut world = flat_world();
+    let units = mixed_group(&mut world);
+    // A fast, tough enemy beside the group that runs off the other way and never fires.
+    let enemy = world.spawn_unit(UnitSpawn { health: fp_int(1_000_000), range: Fp::ZERO, ..standard_unit(Team::Red, point(420, 420)) });
+    let enemy_entity = world.unit_entity(enemy).unwrap();
+    world.ecs.get::<&mut sim_engine::sim::components::UnitStats>(enemy_entity).unwrap().max_speed = fp_int(12);
+    world.advance_tick(&[
+        SimCommand::FormationMove { units: units.clone(), goal: point(3_000, 2_000), attack: true, queued: false },
+        SimCommand::Move { units: vec![enemy], goal: point(100, 4_900) },
+    ]);
+    let start = world.formations.values().next().expect("a formation was planned").leader;
+    let mut chased = false;
+    for _ in 0..600 {
+        world.advance_tick(&[]);
+        chased |= units.iter().any(|unit| {
+            let combat = *world.ecs.get::<&sim_engine::sim::components::Combat>(world.unit_entity(*unit).unwrap()).unwrap();
+            combat.target == Some(enemy) || combat.forced_target == Some(enemy)
+        });
+    }
+    assert!(chased, "someone went after the enemy");
+    assert!(world.unit_health(enemy).is_some(), "and it is still running");
+    let leader = world.formations.values().next().map_or(point(3_000, 2_000), |travel| travel.leader);
+    assert!(sqrt_wide(leader.distance_squared(&start)) > fp_int(800), "the group waited for the chase: its leader is at {leader:?}, from {start:?}");
+}
+
+#[test]
 fn a_queued_formation_waits_for_everyone_to_finish_first() {
     let mut world = flat_world();
     let units = mixed_group(&mut world);
