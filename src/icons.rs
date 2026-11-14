@@ -74,6 +74,7 @@ pub enum Icon {
     TorpedoBoat,
     Wall,
     EngineeringStation,
+    Transport,
     /// Anything without an icon of its own, such as the stress test's plain cubes.
     Unknown,
 }
@@ -91,7 +92,7 @@ pub enum BarGroup {
 }
 
 impl Icon {
-    pub const ALL: [Self; 56] = [
+    pub const ALL: [Self; 57] = [
         Self::Commander,
         Self::SupportCommander,
         Self::Engineer,
@@ -147,6 +148,7 @@ impl Icon {
         Self::TorpedoBoat,
         Self::Wall,
         Self::EngineeringStation,
+        Self::Transport,
         Self::Unknown,
     ];
 
@@ -165,6 +167,7 @@ impl Icon {
             "t2_torpedo_boat" => Self::TorpedoBoat,
             "wall" => Self::Wall,
             "engineering_station" | "engineering_station_t3" => Self::EngineeringStation,
+            "t1_light_transport" | "t2_transport" | "t3_heavy_transport" => Self::Transport,
             "t2_amphibious_tank" => Self::AmphibiousTank,
             "t1_light_artillery" | "t3_mobile_artillery" => Self::Artillery,
             "t2_mobile_missile_launcher" => Self::MobileMissile,
@@ -217,7 +220,7 @@ impl Icon {
         match self {
             Self::Commander | Self::SupportCommander => Frame::Commander,
             Self::Engineer | Self::LightBot | Self::Tank | Self::AmphibiousTank | Self::Artillery | Self::MobileMissile | Self::MobileAntiAir | Self::LandScout | Self::MobileShield | Self::FieldEngineer | Self::Unknown => Frame::Land,
-            Self::Scout | Self::Fighter | Self::Bomber | Self::FighterBomber | Self::TorpedoBomber | Self::Gunship => Frame::Air,
+            Self::Scout | Self::Fighter | Self::Bomber | Self::FighterBomber | Self::TorpedoBomber | Self::Gunship | Self::Transport => Frame::Air,
             Self::Frigate | Self::Destroyer | Self::Cruiser | Self::Battleship | Self::Battlecruiser | Self::Submarine | Self::MissileSubmarine | Self::ShieldBoat | Self::TorpedoBoat => Frame::Naval,
             _ => Frame::Structure,
         }
@@ -276,7 +279,7 @@ impl Role {
 impl Icon {
     pub const fn role(self) -> Role {
         match self {
-            Self::Commander | Self::SupportCommander | Self::Engineer | Self::FieldEngineer | Self::EngineeringStation | Self::LandFactory | Self::AirFactory | Self::NavalFactory | Self::Gateway | Self::AirStaging | Self::Unknown => Role::Build,
+            Self::Commander | Self::SupportCommander | Self::Engineer | Self::FieldEngineer | Self::EngineeringStation | Self::Transport | Self::LandFactory | Self::AirFactory | Self::NavalFactory | Self::Gateway | Self::AirStaging | Self::Unknown => Role::Build,
             Self::Extractor | Self::MassStorage | Self::Fabricator => Role::Mass,
             Self::Generator | Self::Hydrocarbon | Self::EnergyStorage => Role::Energy,
             Self::LightBot | Self::Tank | Self::AmphibiousTank | Self::Gunship | Self::Frigate | Self::Destroyer | Self::Cruiser | Self::Battleship | Self::Battlecruiser | Self::PointDefense => Role::DirectFire,
@@ -621,6 +624,12 @@ fn symbol(out: &mut Vec<Shape>, center: Pos2, size: f32, icon: Icon, stroke: Str
             out.push(line(&[(0.0, 0.85), (0.0, -0.1)]));
             out.push(arc(0.0, -0.1, 0.8, 200.0, 340.0));
             out.push(dot(0.55, -0.55, 0.2));
+        }
+        Icon::Transport => {
+            // A box with an arrow up out of it: something lifted and carried.
+            out.push(line(&[(-0.7, 0.1), (0.7, 0.1), (0.7, 0.85), (-0.7, 0.85), (-0.7, 0.1)]));
+            out.push(line(&[(0.0, -0.1), (0.0, -0.9)]));
+            out.push(line(&[(-0.4, -0.5), (0.0, -0.9), (0.4, -0.5)]));
         }
         Icon::Unknown => out.push(dot(0.0, 0.0, 0.25)),
     }

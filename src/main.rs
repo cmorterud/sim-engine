@@ -142,6 +142,8 @@ Controls:
   N                    Mute or unmute, unless a builder that can build a gateway is selected
   - and =              Sound quieter and louder, unless a missile silo is selected
   Space                Jump to your commander
+  Right-click a transport  With land units selected, board it
+  Ctrl + U             Unload the selected transports where you click next
   Ctrl + P             Pause or resume the game. Orders given while paused wait for
                        it to resume. Command works too, and so does the Pause button
   Scroll               Zoom, towards the cursor
@@ -992,6 +994,20 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                             armed = None;
                                         }
                                     }
+                                    ArmedOrder::Unload => {
+                                        let transports = ui::loaded_transports(&session.current, selection.selected());
+                                        let ground = camera.screen_to_ground(selection.cursor(), &map.heights);
+                                        match ground {
+                                            _ if transports.is_empty() => feedback.show_rejected(None, "No transports selected with anything on board"),
+                                            Some(point) => {
+                                                armed = None;
+                                                let order = SimCommand::Unload { transports, point: Vec2Fp::new(Fp::from_num(point[0]), Fp::from_num(point[1])) };
+                                                feedback.show_orders(std::slice::from_ref(&order), ground_point(ground, &map.heights), &map.blueprints, "");
+                                                session.send(order);
+                                            }
+                                            None => feedback.show_rejected(None, "Click the ground to unload"),
+                                        }
+                                    }
                                     ArmedOrder::Teleport => {
                                         let units = ui::teleporters(&session.current, selection.selected(), &map.blueprints);
                                         let ground = camera.screen_to_ground(selection.cursor(), &map.heights);
@@ -1187,6 +1203,16 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                 }
                             }
                             // Ctrl+T arms a teleport, and Ctrl+K starts or stops a self-destruct.
+                            PhysicalKey::Code(KeyCode::KeyU) if pressed && !event.repeat && command_held && is_match => {
+                                if ui::loaded_transports(&session.current, selection.selected()).is_empty() {
+                                    feedback.show_rejected(None, "No transports selected with anything on board");
+                                } else {
+                                    armed = Some(ArmedOrder::Unload);
+                                    placing = None;
+                                    line_start = None;
+                                    patrol_points.clear();
+                                }
+                            }
                             PhysicalKey::Code(KeyCode::KeyT) if pressed && !event.repeat && command_held && is_match => {
                                 if ui::teleporters(&session.current, selection.selected(), &map.blueprints).is_empty() {
                                     feedback.show_rejected(None, "No units selected that can teleport");

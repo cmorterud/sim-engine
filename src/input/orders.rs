@@ -121,6 +121,23 @@ pub fn right_click_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
             commands.push(SimCommand::Refit { units: aircraft, staging: target });
             return commands;
         }
+        // Land units sent to a finished transport board it.
+        let transport = unit.blueprint != u16::MAX && unit.built_permille == 1000 && click.blueprints.get(BlueprintId(unit.blueprint)).transport.is_some();
+        let riders: Vec<SimId> = parts
+            .mobile
+            .iter()
+            .copied()
+            .filter(|id| {
+                click.units.binary_search_by_key(id, |unit| unit.id).ok().is_some_and(|index| {
+                    let unit = &click.units[index];
+                    unit.blueprint != u16::MAX && crate::sim::transport::transport_size(click.blueprints.get(BlueprintId(unit.blueprint))).is_some()
+                })
+            })
+            .collect();
+        if transport && !riders.is_empty() {
+            commands.push(SimCommand::Load { units: riders, transport: target });
+            return commands;
+        }
     }
     if let (Some(target), false) = (friend, parts.builders.is_empty()) {
         let index = click.units.binary_search_by_key(&target, |unit| unit.id).expect("found in this list");
@@ -689,6 +706,20 @@ mod tests {
         let camera = camera();
         assert!(assist_orders(&click_for(&[SimId(1)], &units, &db, &camera, [2_000.0, 2_050.0])).is_empty(), "the enemy is not a friend");
         assert!(assist_orders(&click_for(&[SimId(1)], &units, &db, &camera, [2_000.0, 1_950.0])).is_empty(), "it is the only one selected");
+    }
+
+    #[test]
+    fn right_clicking_a_transport_with_land_units_selected_boards_them() {
+        let db = db();
+        let units = [
+            view(1, Team::Blue, db.id("t1_light_bot"), &db, 2_000.0, 1_950.0),
+            view(2, Team::Blue, db.id("t2_heavy_tank"), &db, 2_030.0, 1_950.0),
+            view(3, Team::Blue, db.id("t1_interceptor"), &db, 2_060.0, 1_950.0),
+            view(4, Team::Blue, db.id("t1_light_transport"), &db, 2_000.0, 2_050.0),
+        ];
+        let camera = camera();
+        let orders = click_at(&[SimId(1), SimId(2), SimId(3)], &units, &[], &db, &camera, [2_000.0, 2_050.0]);
+        assert_eq!(orders, [SimCommand::Load { units: vec![SimId(1), SimId(2)], transport: SimId(4) }], "the interceptor cannot board");
     }
 
     #[test]

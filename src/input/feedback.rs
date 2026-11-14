@@ -78,6 +78,8 @@ pub fn describe(command: &SimCommand, blueprints: &BlueprintDb) -> Option<(Marke
         SimCommand::Repair { units, target } => (MarkerKind::Support, format!("Repair: {}", unit_count(units)), Some(*target)),
         SimCommand::Capture { units, target } => (MarkerKind::Attack, format!("Capture: {}", unit_count(units)), Some(*target)),
         SimCommand::Refit { units, staging } => (MarkerKind::Support, format!("Refuel: {}", unit_count(units)), Some(*staging)),
+        SimCommand::Load { units, transport } => (MarkerKind::Support, format!("Board: {}", unit_count(units)), Some(*transport)),
+        SimCommand::Unload { transports, .. } => (MarkerKind::Move, format!("Unload: {}", unit_count(transports)), None),
         SimCommand::Reclaim { units, .. } => (MarkerKind::Support, format!("Reclaim: {}", unit_count(units)), None),
         SimCommand::SetRally { .. } => (MarkerKind::Rally, "Rally point set".to_string(), None),
         SimCommand::Patrol { units, points, .. } => {

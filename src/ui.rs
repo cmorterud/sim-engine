@@ -83,6 +83,8 @@ pub enum ArmedOrder {
     Teleport,
     /// Not on a letter: Ctrl+C, for builders.
     Capture,
+    /// Not on a letter: Ctrl+U, for transports with something on board.
+    Unload,
 }
 
 impl ArmedOrder {
@@ -99,6 +101,7 @@ impl ArmedOrder {
             Self::Overcharge => hotkeys::OVERCHARGE,
             Self::Teleport => 'T',
             Self::Capture => 'C',
+            Self::Unload => 'U',
         }
     }
 
@@ -113,6 +116,7 @@ impl ArmedOrder {
             Self::Overcharge => "Overcharge",
             Self::Teleport => "Teleport",
             Self::Capture => "Capture",
+            Self::Unload => "Unload",
         }
     }
 
@@ -127,6 +131,7 @@ impl ArmedOrder {
             Self::Overcharge => "Spend stored energy on one shot that destroys almost any unit. Weak against structures.",
             Self::Teleport => "Charge up, standing still, and jump to a spot you can see or have on radar. Costs a great deal of energy, more the farther it goes, and aborts if the energy runs out. Lands on enemy units destroy them.",
             Self::Capture => "Take over an enemy unit or structure, in half its build time at your builders' build power, for its energy cost. Stopping starts it over. Commanders cannot be captured.",
+            Self::Unload => "Fly there and set down everything on board around the spot. To load, select land units and right-click the transport.",
         }
     }
 
@@ -142,6 +147,7 @@ impl ArmedOrder {
             Self::Overcharge => "Overcharge: left-click an enemy. Right-click or Esc to cancel.",
             Self::Teleport => "Teleport: left-click open ground you can see or have on radar. Right-click or Esc to cancel.",
             Self::Capture => "Capture: left-click an enemy unit or structure. Right-click or Esc to cancel.",
+            Self::Unload => "Unload: left-click where to set the cargo down. Right-click or Esc to cancel.",
         }
     }
 }
@@ -524,6 +530,21 @@ pub fn stock_status(snapshot: &SimSnapshot, id: SimId, db: &BlueprintDb) -> Opti
     Some(format!("{stock} {word}{} ready", if stock == 1 { "" } else { "s" }))
 }
 
+/// The selected transports with anything on board.
+pub fn loaded_transports(snapshot: &SimSnapshot, selected: &[SimId]) -> Vec<SimId> {
+    selected.iter().copied().filter(|id| snapshot.cargo.iter().any(|&(transport, count)| transport == *id && count > 0)).collect()
+}
+
+/// How many units a transport carries.
+pub fn cargo_status(snapshot: &SimSnapshot, id: SimId) -> Option<String> {
+    let &(_, count) = snapshot.cargo.iter().find(|(transport, _)| *transport == id)?;
+    Some(match count {
+        0 => "empty".to_string(),
+        1 => "carrying 1 unit".to_string(),
+        count => format!("carrying {count} units"),
+    })
+}
+
 /// Whether anything selected has a gun, and so can attack the ground.
 pub fn has_weapons(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb) -> bool {
     selected
@@ -532,8 +553,19 @@ pub fn has_weapons(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb)
         .any(|unit| unit.blueprint == u16::MAX || db.get(BlueprintId(unit.blueprint)).weapon.is_some())
 }
 
-#[allow(clippy::fn_params_excessive_bools)]
-fn unit_order_row(ui: &mut egui::Ui, armed: Option<ArmedOrder>, overcharge: bool, weapons: bool, teleport: bool, capture: bool, actions: &mut Vec<UiAction>) {
+/// Which of the orders that only some units can give the selection can.
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Copy, Clone)]
+struct OrderOffers {
+    overcharge: bool,
+    weapons: bool,
+    teleport: bool,
+    capture: bool,
+    unload: bool,
+}
+
+fn unit_order_row(ui: &mut egui::Ui, armed: Option<ArmedOrder>, offers: &OrderOffers, actions: &mut Vec<UiAction>) {
+    let OrderOffers { overcharge, weapons, teleport, capture, unload } = *offers;
     ui.horizontal_wrapped(|ui| {
         let offered = |order: &ArmedOrder| match order {
             ArmedOrder::Overcharge => overcharge,
@@ -559,6 +591,12 @@ fn unit_order_row(ui: &mut egui::Ui, armed: Option<ArmedOrder>, overcharge: bool
             let button = egui::Button::new(bold_keys("[Ctrl+T] Teleport")).selected(armed == Some(ArmedOrder::Teleport));
             if ui.add(button).on_hover_text(ArmedOrder::Teleport.description()).clicked() {
                 actions.push(UiAction::Arm(ArmedOrder::Teleport));
+            }
+        }
+        if unload {
+            let button = egui::Button::new(bold_keys("[Ctrl+U] Unload")).selected(armed == Some(ArmedOrder::Unload));
+            if ui.add(button).on_hover_text(ArmedOrder::Unload.description()).clicked() {
+                actions.push(UiAction::Arm(ArmedOrder::Unload));
             }
         }
     });
@@ -1494,7 +1532,8 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
             let shield = shield_status(snapshot, first.id).map_or(String::new(), |status| format!(", {status}"));
             let stock = stock_status(snapshot, first.id, db).map_or(String::new(), |status| format!(", {status}"));
             let intel = intel_status(snapshot, first.id).map_or(String::new(), |status| format!(", {status}"));
-            format!("{}: {}% health{veteran}{shield}{stock}{intel}", unit.name, first.health_permille / 10)
+            let cargo = cargo_status(snapshot, first.id).map_or(String::new(), |status| format!(", {status}"));
+            format!("{}: {}% health{veteran}{shield}{stock}{intel}{cargo}", unit.name, first.health_permille / 10)
         } else {
             format!("{} units selected", units.len())
         };
@@ -1513,7 +1552,14 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
 
         if has_mobile_units(snapshot, selected) {
             let teleport = !teleporters(snapshot, selected, db).is_empty();
-            unit_order_row(ui, armed, has_overcharge(snapshot, selected, db), has_weapons(snapshot, selected, db), teleport, has_mobile_builders(snapshot, selected, db), actions);
+            let offers = OrderOffers {
+                overcharge: has_overcharge(snapshot, selected, db),
+                weapons: has_weapons(snapshot, selected, db),
+                teleport,
+                capture: has_mobile_builders(snapshot, selected, db),
+                unload: !loaded_transports(snapshot, selected).is_empty(),
+            };
+            unit_order_row(ui, armed, &offers, actions);
         }
         if let Some(action) = cloak_action(snapshot, selected) {
             let UiAction::SetCloak { on, .. } = &action else {

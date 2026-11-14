@@ -146,6 +146,9 @@ pub enum Shape {
     Wall,
     /// An engineering station: a pad with a tower, and a drone hovering over it.
     EngineeringStation,
+    /// An air transport, pointing along +Y: a long body with a cargo bay under it and a fan
+    /// in a ring at each side.
+    Transport,
     /// A shield's dome: an open half-sphere, drawn see-through.
     Dome,
     /// Flat, around the feet of a selected mobile unit.
@@ -155,7 +158,7 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub const ALL: [Self; 80] = [
+    pub const ALL: [Self; 81] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -233,6 +236,7 @@ impl Shape {
         Self::HeavyPointDefense,
         Self::Wall,
         Self::EngineeringStation,
+        Self::Transport,
         Self::Dome,
         Self::SelectionRing,
         Self::SelectionBox,
@@ -958,6 +962,20 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.bevel([-0.12, -0.24, 0.3], [0.12, 0.0, 0.42], 0.03);
             mesh.paint(Material::Glow);
             mesh.block([-0.1, 0.0, 0.34], [0.1, 0.012, 0.38]);
+        }
+        Shape::Transport => {
+            mesh.body(0.0, &[[-0.48, 0.06, 0.07, 0.04], [-0.2, 0.13, 0.12, 0.04], [0.3, 0.13, 0.12, 0.04], [0.48, 0.06, 0.07, 0.06]], 8);
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.11, -0.3, -0.16], [0.11, 0.3, -0.04], 0.03);
+            mesh.paint(Material::Metal);
+            for x in [-0.36_f32, 0.36] {
+                mesh.beam([x * 0.35, 0.0, 0.04], [x, 0.0, 0.04], 0.03, 0.02);
+                mesh.frustum([x, 0.0], [-0.02, 0.1], [0.14, 0.14], 12);
+            }
+            mesh.paint(Material::Glow);
+            mesh.block([-0.05, 0.42, 0.06], [0.05, 0.44, 0.1]);
+            mesh.paint(Material::Hull);
+            mesh.fin(0.0, [-0.48, -0.36], 0.1, [-0.46, -0.4], 0.26, 0.015);
         }
         Shape::EngineeringStation => {
             mesh.paint(Material::Hull);

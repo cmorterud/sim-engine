@@ -474,6 +474,10 @@ impl SimWorld {
         if unit.air_staging.is_some() {
             self.air_stagings.push((id, entity));
         }
+        if unit.transport.is_some() {
+            self.ecs.insert_one(entity, super::components::Transport::default()).expect("entity was just spawned");
+            self.transports.push((id, entity));
+        }
         if is_factory {
             let factory = Factory { power, queue: Vec::new(), repeat: false, progress: Res::ZERO, rally: None };
             self.ecs.insert_one(entity, factory).expect("entity was just spawned");
@@ -715,6 +719,8 @@ impl SimWorld {
             | SimCommand::Teleport { .. }
             | SimCommand::SelfDestruct { .. }
             | SimCommand::Refit { .. }
+            | SimCommand::Load { .. }
+            | SimCommand::Unload { .. }
             | SimCommand::AttackMove { .. }
             | SimCommand::QueueMove { .. }
             | SimCommand::FormationMove { .. }
@@ -2253,6 +2259,28 @@ impl SimWorld {
         if let Ok(weapon) = self.ecs.get::<&super::components::StunWeapon>(entity) {
             hasher.write(&[35]);
             hasher.write(&weapon.0.to_le_bytes());
+        }
+        if let Ok(transport) = self.ecs.get::<&super::components::Transport>(entity) {
+            hasher.write(&[62]);
+            hasher.write(&(transport.cargo.len() as u64).to_le_bytes());
+            for id in &transport.cargo {
+                hasher.write(&id.0.to_le_bytes());
+            }
+            if let Some((point, route)) = transport.unload {
+                hasher.write(&point.x.to_bits().to_le_bytes());
+                hasher.write(&point.y.to_bits().to_le_bytes());
+                hasher.write(&route.to_le_bytes());
+            }
+        }
+        if let Ok(boarding) = self.ecs.get::<&super::components::Boarding>(entity) {
+            hasher.write(&[63]);
+            hasher.write(&boarding.transport.0.to_le_bytes());
+            hasher.write(&boarding.route.to_le_bytes());
+        }
+        if let Ok(carried) = self.ecs.get::<&super::components::Carried>(entity) {
+            hasher.write(&[64]);
+            hasher.write(&carried.transport.0.to_le_bytes());
+            hasher.write(&carried.lists.to_le_bytes());
         }
         if let Ok(leaving) = self.ecs.get::<&super::components::LeavingFactory>(entity) {
             hasher.write(&[61]);

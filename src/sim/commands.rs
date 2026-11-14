@@ -62,6 +62,11 @@ pub enum SimCommand {
     /// Start a field enhancement on each of these that can take it (GAME_SPECIFICATION.md §2.1).
     /// One in the same slot that it does not build on is removed first.
     Enhance { units: Vec<SimId>, enhancement: EnhancementId },
+    /// Board a transport: the land units walk to it as it comes to them, and get in as they
+    /// reach it, while there is room.
+    Load { units: Vec<SimId>, transport: SimId },
+    /// Fly to a spot and set down everything on board around it.
+    Unload { transports: Vec<SimId>, point: Vec2Fp },
     /// Charge a teleport to a spot the team can sense, for each of these with a teleporter.
     Teleport { units: Vec<SimId>, point: Vec2Fp },
     /// Start counting down to blowing up, or stop counting for those that already are.

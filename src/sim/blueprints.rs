@@ -242,6 +242,14 @@ pub struct FlightDef {
     pub hovers: bool,
 }
 
+/// An aircraft that carries land units (GAME_SPECIFICATION.md §10).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct TransportDef {
+    /// Room by size of what it carries: T1 land units, T2, and T3 and support commanders.
+    /// Mixed loads share the room: each small unit takes a `small`th of it, and so on.
+    pub slots: [u32; 3],
+}
+
 /// A pad where aircraft land to refuel and be repaired (GAME_SPECIFICATION.md §10).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct AirStagingDef {
@@ -405,6 +413,8 @@ pub struct Blueprint {
     /// Anti-torpedo charges: they shoot down enemy torpedoes within range, one each reload.
     pub torpedo_defense: Option<TorpedoDefenseDef>,
     pub air_staging: Option<AirStagingDef>,
+    /// An air transport, which carries land units (GAME_SPECIFICATION.md §10).
+    pub transport: Option<TransportDef>,
     /// For factories.
     pub factory_kind: Option<FactoryKind>,
     /// A support factory: cheaper, and it needs a headquarters of its kind and tier.
@@ -556,6 +566,14 @@ struct RawFlight {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct RawTransport {
+    small: u32,
+    medium: u32,
+    large: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawAirStaging {
     slots: u8,
     /// Health a second, for each aircraft.
@@ -672,6 +690,7 @@ struct RawUnit {
     torpedo_defense: Option<RawTorpedoDefense>,
     death_storm: Option<RawStorm>,
     air_staging: Option<RawAirStaging>,
+    transport: Option<RawTransport>,
     /// "land" or "air".
     factory_kind: Option<String>,
     #[serde(default)]
@@ -1048,6 +1067,7 @@ impl BlueprintDb {
                     Some(defense) => Some(TorpedoDefenseDef { range: defense.range.fp().map_err(context)?, reload_ticks: defense.reload_ticks }),
                 },
                 air_staging,
+                transport: unit.transport.as_ref().map(|transport| TransportDef { slots: [transport.small.max(1), transport.medium.max(1), transport.large.max(1)] }),
                 factory_kind: match unit.factory_kind.as_deref() {
                     None => None,
                     Some("land") => Some(FactoryKind::Land),

@@ -114,6 +114,30 @@ pub enum OrderKind {
     Attack,
 }
 
+/// An air transport: the land units it carries, in the order they boarded, and where it is
+/// to set them down, with the route it was given to get there.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Transport {
+    pub cargo: Vec<SimId>,
+    pub unload: Option<(Vec2Fp, u32)>,
+}
+
+/// A land unit on its way to board a transport, by the route it was given to follow it. Any
+/// other order, which replaces the route, calls it off.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Boarding {
+    pub transport: SimId,
+    pub route: u32,
+}
+
+/// A unit inside a transport, off the map until it is set down. `lists` records which of the
+/// world's lists it was in, so that it goes back into the same ones.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Carried {
+    pub transport: SimId,
+    pub lists: u32,
+}
+
 /// A unit just finished in a factory, driving out of its bay: straight to `exit`, through the
 /// factory's open end, before it heads for `rally` or follows an order given meanwhile.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

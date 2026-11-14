@@ -2,6 +2,7 @@
 #![deny(clippy::float_arithmetic)]
 
 pub mod air;
+pub mod transport;
 pub mod blueprints;
 pub mod combat;
 pub mod commands;

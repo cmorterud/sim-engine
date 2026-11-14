@@ -38,6 +38,7 @@ Taken so far:
   Bot, Mobile Shield Generator, Field Engineer, Heavy and Armored Assault Bots, Torpedo Boat, Heavy
   Point Defense, Heavy Shield Generator, Wall Section, and Engineering Stations, from FAF's UEF
   units, with generic names. The stations' drones are folded into the station's own build power.
+* The three air transports and their room by size class, from FAF's UEF units, with generic names.
 
 ## Fonts
 

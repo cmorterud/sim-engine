@@ -72,7 +72,7 @@ pub fn build_slot(key: &str) -> Option<(Bar, usize)> {
         "t1_light_artillery" | "t2_mobile_missile_launcher" | "t3_mobile_artillery" | "t1_bomber" | "t2_fighter_bomber" | "t3_strategic_bomber" | "t2_cruiser" | "t3_battlecruiser" => (Factory, 2),
         "t1_mobile_aa" | "t2_mobile_flak" | "t2_gunship" | "t3_heavy_gunship" | "t1_attack_sub" | "t2_shield_boat" | "t3_missile_sub" => (Factory, 3),
         "t1_medium_tank" | "t2_heavy_tank" | "t3_armored_assault_bot" | "t2_torpedo_boat" => (Factory, 4),
-        "t1_land_scout" | "t2_mobile_shield" => (Factory, 5),
+        "t1_land_scout" | "t2_mobile_shield" | "t1_light_transport" | "t2_transport" | "t3_heavy_transport" => (Factory, 5),
         "t2_amphibious_tank" => (Factory, 6),
         "t2_field_engineer" => (Factory, 7),
         _ => return None,

@@ -10,7 +10,7 @@ use super::commands::SimCommand;
 use super::components::{BuildTask, AntiAir, Artillery, BombBay, Falling, Flight, Homing,
     Blueprinted, Builder, Combat, Construction, Factory, Footprint, Health, MoveClass, Order, OrderKind, OrderQueue, Patrol,
     Intel, Launcher, Missile, Stunning, MissileDefense, Upgrading, Overcharged, OverchargeOrder, OverchargeWeapon, Paused, Position, Projectile, Shield, SimId, Team, Turning, Turret, UnitStats, Velocity, Veterancy,
-    Wreck, WreckKind, rotate_toward, LeavingFactory,
+    Wreck, WreckKind, rotate_toward, LeavingFactory, Transport,
 };
 use super::config::{SimConfig, TARGET_SEARCH_INTERVAL, TERRAIN_CELL_UNITS, WRECK_HEALTH_PERMILLE, WRECK_MASS_PERMILLE};
 use super::flowfield::{nearest_passable_cell_for, FlowField, FlowSample};
@@ -278,6 +278,9 @@ pub struct SimSnapshot {
     pub interceptions: Vec<[[i32; 3]; 2]>,
     /// Missiles built and waiting in the viewer's silos, by silo, sorted by `SimId`.
     pub stocks: Vec<(SimId, u32)>,
+    /// How many units each of the viewer's transports carries, sorted by `SimId`. Everyone's,
+    /// for a viewer who sees everything.
+    pub cargo: Vec<(SimId, u32)>,
     /// Enemy contacts on the viewer's radar that it cannot see, real and decoy alike, as raw
     /// `Fp` positions. Nothing says which is which.
     pub blips: Vec<[i32; 3]>,
@@ -457,6 +460,12 @@ pub struct SimWorld {
     /// Submarines, and units that walk the seabed, sorted by `SimId`.
     pub submarines: Vec<(SimId, hecs::Entity)>,
     pub seabed_walkers: Vec<(SimId, hecs::Entity)>,
+    /// Air transports, sorted by `SimId`.
+    pub transports: Vec<(SimId, hecs::Entity)>,
+    /// Land units on their way to board a transport, sorted by `SimId`.
+    pub boarding: Vec<(SimId, hecs::Entity)>,
+    /// Units inside transports, off the map and out of `units`, sorted by `SimId`.
+    pub carried: Vec<(SimId, hecs::Entity)>,
     pub air_stagings: Vec<(SimId, hecs::Entity)>,
     /// Units that are stunned or held in a tractor beam, and units with tractor beams, sorted by
     /// `SimId`. Worked out from what is hashed, so they are not hashed themselves.
@@ -563,6 +572,9 @@ impl SimWorld {
             aircraft: Vec::new(),
             submarines: Vec::new(),
             seabed_walkers: Vec::new(),
+            transports: Vec::new(),
+            boarding: Vec::new(),
+            carried: Vec::new(),
             torpedo_defenses: Vec::new(),
             air_stagings: Vec::new(),
             disabled: Vec::new(),
@@ -717,6 +729,7 @@ impl SimWorld {
         self.step_commands(commands);
         self.rebuild_grid();
         self.step_movement();
+        self.step_transports();
         self.rebuild_grid();
         self.step_visibility();
         self.step_combat();
@@ -771,6 +784,8 @@ impl SimWorld {
                 SimCommand::Teleport { units, point } => self.command_teleport(units, *point),
                 SimCommand::SelfDestruct { units } => self.command_self_destruct(units),
                 SimCommand::Refit { units, staging } => self.command_refit(units, *staging),
+                SimCommand::Load { units, transport } => self.command_load(units, *transport),
+                SimCommand::Unload { transports, point } => self.command_unload(transports, *point),
                 other => self.apply_production_command(other),
             }
         }
@@ -2758,6 +2773,11 @@ impl SimWorld {
                 let id = self.dead_units[index];
                 let (_, entity) = self.find_unit(id).expect("dead units are still listed");
                 self.release_dead_units_orders(entity);
+                // What a transport carries goes down with it.
+                let cargo = self.ecs.get::<&Transport>(entity).map(|transport| transport.cargo.clone()).unwrap_or_default();
+                for carried in cargo {
+                    self.destroy_carried(carried);
+                }
                 self.remove_unit(entity);
             }
             let dead = &self.dead_units;
@@ -2782,6 +2802,8 @@ impl SimWorld {
             self.submarines.retain(alive);
             self.torpedo_defenses.retain(alive);
             self.seabed_walkers.retain(alive);
+            self.transports.retain(alive);
+            self.boarding.retain(alive);
             self.air_stagings.retain(alive);
             self.disabled.retain(alive);
             self.tractors.retain(alive);
@@ -2903,6 +2925,16 @@ impl SimWorld {
     /// Despawns a dead unit, leaving a wreck if it had any mass in it.
     /// Hands back routes held by orders that will now never start. The list of queues is
     /// tidied up with the other lists afterwards.
+    /// Releases the routes held by a unit's queued walks and moves.
+    pub(super) fn release_unit_plans(&mut self, entity: hecs::Entity) {
+        self.release_dead_units_orders(entity);
+    }
+
+    /// Removes a unit that is in no list, such as one inside a transport, leaving its wreckage.
+    pub(super) fn remove_carried_unit(&mut self, entity: hecs::Entity) {
+        self.remove_unit(entity);
+    }
+
     fn release_dead_units_orders(&mut self, entity: hecs::Entity) {
         if let Ok(builder) = self.ecs.get::<&Builder>(entity) {
             for task in &builder.tasks {
@@ -3003,6 +3035,15 @@ impl SimWorld {
         for &(id, entity) in &self.units {
             hasher.write(&id.0.to_le_bytes());
             self.hash_unit(entity, &mut hasher);
+        }
+        // Nothing is written without carried units, so checksums from before transports still hold.
+        if !self.carried.is_empty() {
+            hasher.write(&[4]);
+            hasher.write(&(self.carried.len() as u64).to_le_bytes());
+            for &(id, entity) in &self.carried {
+                hasher.write(&id.0.to_le_bytes());
+                self.hash_unit(entity, &mut hasher);
+            }
         }
         hasher.write(&(self.projectiles.len() as u64).to_le_bytes());
         for &(id, entity) in &self.projectiles {
@@ -3256,6 +3297,12 @@ impl SimWorld {
             })
             .collect();
         let interceptions = self.interceptions.iter().copied().filter(|[from, to]| viewer.is_none_or(|viewer| seen(viewer.enemy(), from[0], from[1]) || seen(viewer.enemy(), to[0], to[1]))).collect();
+        let cargo = self
+            .transports
+            .iter()
+            .filter(|&&(_, entity)| viewer.is_none_or(|viewer| self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team == viewer)))
+            .map(|&(id, entity)| (id, self.ecs.get::<&Transport>(entity).map_or(0, |transport| transport.cargo.len() as u32)))
+            .collect();
         let stocks = viewer.map_or_else(Vec::new, |viewer| {
             self.factories
                 .iter()
@@ -3396,6 +3443,7 @@ impl SimWorld {
             shields,
             interceptions,
             stocks,
+            cargo,
             blips,
             sensor_ranges,
             cloaks,

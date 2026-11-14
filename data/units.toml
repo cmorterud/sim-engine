@@ -573,7 +573,7 @@ health = 4000
 footprint = 3
 vision = 400
 build_power = 20
-builds = ["t1_air_scout", "t1_interceptor", "t1_bomber"]
+builds = ["t1_air_scout", "t1_interceptor", "t1_bomber", "t1_light_transport"]
 upgrades_to = "air_factory_t2"
 factory_kind = "air"
 
@@ -668,7 +668,7 @@ health = 8000
 footprint = 3
 vision = 400
 build_power = 40
-builds = ["t1_air_scout", "t1_interceptor", "t1_bomber", "t2_gunship", "t2_fighter_bomber", "t2_torpedo_bomber"]
+builds = ["t1_air_scout", "t1_interceptor", "t1_bomber", "t2_gunship", "t2_fighter_bomber", "t2_torpedo_bomber", "t1_light_transport", "t2_transport"]
 upgrades_to = "air_factory_t3"
 factory_kind = "air"
 
@@ -684,7 +684,7 @@ health = 16000
 footprint = 3
 vision = 400
 build_power = 120
-builds = ["t1_air_scout", "t1_interceptor", "t1_bomber", "t2_gunship", "t2_fighter_bomber", "t2_torpedo_bomber", "t3_spy_plane", "t3_air_superiority", "t3_strategic_bomber", "t3_heavy_gunship"]
+builds = ["t1_air_scout", "t1_interceptor", "t1_bomber", "t2_gunship", "t2_fighter_bomber", "t2_torpedo_bomber", "t3_spy_plane", "t3_air_superiority", "t3_strategic_bomber", "t3_heavy_gunship", "t1_light_transport", "t2_transport", "t3_heavy_transport"]
 
 # Hovers over what it attacks and fires down on it.
 factory_kind = "air"
@@ -871,7 +871,7 @@ vision = 400
 build_power = 40
 factory_kind = "air"
 support = true
-builds = ["t1_air_scout", "t1_interceptor", "t1_bomber", "t2_gunship", "t2_fighter_bomber", "t2_torpedo_bomber"]
+builds = ["t1_air_scout", "t1_interceptor", "t1_bomber", "t2_gunship", "t2_fighter_bomber", "t2_torpedo_bomber", "t1_light_transport", "t2_transport"]
 upgrades_to = "air_factory_t3_support"
 
 [[unit]]
@@ -888,7 +888,7 @@ vision = 400
 build_power = 120
 factory_kind = "air"
 support = true
-builds = ["t1_air_scout", "t1_interceptor", "t1_bomber", "t2_gunship", "t2_fighter_bomber", "t2_torpedo_bomber", "t3_spy_plane", "t3_air_superiority", "t3_strategic_bomber", "t3_heavy_gunship"]
+builds = ["t1_air_scout", "t1_interceptor", "t1_bomber", "t2_gunship", "t2_fighter_bomber", "t2_torpedo_bomber", "t3_spy_plane", "t3_air_superiority", "t3_strategic_bomber", "t3_heavy_gunship", "t1_light_transport", "t2_transport", "t3_heavy_transport"]
 
 [[unit]]
 id = "power_generator_t2"
@@ -1882,3 +1882,53 @@ vision = 400
 build_power = 50
 build_range = 300
 assists = true
+
+# Air transports: they carry land units, small (T1), medium (T2), or large (T3 and support
+# commanders), with mixed loads sharing the room.
+[[unit]]
+id = "t1_light_transport"
+name = "Light Air Transport"
+class = "air"
+tier = 1
+mass = 120
+energy = 4800
+build_time = 800
+health = 500
+speed = "21.5"
+radius = 12
+vision = 640
+flight = { elevation = 200, turn_rate = 90, fuel = 600, hovers = true }
+transport = { small = 6, medium = 2, large = 1 }
+
+[[unit]]
+id = "t2_transport"
+name = "Air Transport"
+class = "air"
+tier = 2
+mass = 330
+energy = 13200
+build_time = 2640
+health = 1675
+speed = 29
+radius = 16
+vision = 640
+flight = { elevation = 200, turn_rate = 90, fuel = 600, hovers = true }
+transport = { small = 14, medium = 6, large = 3 }
+weapon = { range = 400, reload_ticks = 5, projectile_speed = 120, damage = 12 }
+
+[[unit]]
+id = "t3_heavy_transport"
+name = "Heavy Air Transport"
+class = "air"
+tier = 3
+mass = 1400
+energy = 52500
+build_time = 5250
+health = 4500
+speed = 35
+radius = 20
+vision = 640
+flight = { elevation = 220, turn_rate = 80, fuel = 800, hovers = true }
+transport = { small = 28, medium = 12, large = 6 }
+shield = { radius = 85, health = 3000, regen = 30, recharge_seconds = 35, upkeep = 0 }
+weapon = { range = 440, reload_ticks = 5, projectile_speed = 120, damage = 20 }
