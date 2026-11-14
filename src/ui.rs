@@ -2103,6 +2103,66 @@ pub fn draw_sensor_coverage(ctx: &egui::Context, camera: &Camera, heights: &crat
     }
 }
 
+/// The ranges a structure reaches, for showing while it is placed: each with a name and color.
+pub fn placement_ranges(unit: &crate::sim::blueprints::Blueprint) -> Vec<(&'static str, f64, Color32)> {
+    let world = |value: Fp| value.to_num::<f64>();
+    let mut ranges = Vec::new();
+    let weapon = Color32::from_rgb(255, 110, 90);
+    if let Some(gun) = &unit.weapon {
+        ranges.push(("Weapon", world(gun.range), weapon));
+        if gun.min_range > Fp::ZERO {
+            ranges.push(("Too close to hit", world(gun.min_range), weapon.gamma_multiply(0.6)));
+        }
+    }
+    for gun in &unit.extra_weapons {
+        ranges.push(("Weapon", world(gun.range), Color32::from_rgb(255, 170, 90)));
+    }
+    if let Some(shield) = &unit.shield {
+        ranges.push(("Shield", world(shield.radius), Color32::from_rgb(120, 190, 255)));
+    }
+    if let Some(defense) = &unit.missile_defense {
+        ranges.push(("Missile defense", world(defense.range), Color32::from_rgb(255, 220, 120)));
+    }
+    if let Some(defense) = &unit.torpedo_defense {
+        ranges.push(("Torpedo defense", world(defense.range), Color32::from_rgb(120, 220, 230)));
+    }
+    ranges.push(("Radar", world(unit.radar), Color32::from_rgb(120, 230, 140)));
+    ranges.push(("Sonar", world(unit.sonar), Color32::from_rgb(90, 200, 255)));
+    ranges.push(("Omni", world(unit.omni), Color32::from_rgb(200, 140, 255)));
+    ranges.push(("Stealth field", world(unit.stealth_field), Color32::from_rgb(190, 190, 200)));
+    ranges.retain(|range| range.1 > 0.0);
+    // One ring for ranges that coincide, under the first name.
+    ranges.dedup_by(|later, earlier| (later.1 - earlier.1).abs() < 0.5 && later.0 == earlier.0);
+    ranges
+}
+
+/// While a structure is being placed, rings on the ground for each range it will reach, around
+/// where it would go, each named at its top.
+pub fn draw_placement_ranges(ctx: &egui::Context, camera: &Camera, heights: &crate::render::camera::HeightField, center: [f64; 2], ranges: &[(&'static str, f64, Color32)], pixels_per_point: f32) {
+    const SEGMENTS: usize = 96;
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    let to_points = |point: [f64; 2]| {
+        let world = [point[0], point[1], heights.height_at(point[0], point[1]) + 1.5];
+        camera.world_to_screen(world).map(|pixels| Pos2::new(pixels[0] as f32 / pixels_per_point, pixels[1] as f32 / pixels_per_point))
+    };
+    for &(name, radius, color) in ranges {
+        let at = |index: usize| {
+            let angle = index as f64 / SEGMENTS as f64 * std::f64::consts::TAU;
+            to_points([center[0] + angle.cos() * radius, center[1] + angle.sin() * radius])
+        };
+        for index in 0..SEGMENTS {
+            if let (Some(from), Some(to)) = (at(index), at(index + 1)) {
+                painter.line_segment([from, to], Stroke::new(3.5_f32, Color32::BLACK.gamma_multiply(0.35)));
+                painter.line_segment([from, to], Stroke::new(1.8_f32, color));
+            }
+        }
+        // The label sits at the ring's far side from the camera, where it is least in the way.
+        if let Some(top) = to_points([center[0], center[1] + radius]) {
+            painter.text(top + Vec2::new(0.0, -3.0), Align2::CENTER_BOTTOM, format!("{name} {}", radius.round() as i64), FontId::proportional(12.0), color);
+        }
+    }
+}
+
 /// Radar contacts the viewer cannot see, as small triangles that say nothing of what they are.
 pub fn draw_blips(ctx: &egui::Context, camera: &Camera, blips: &[[i32; 3]], pixels_per_point: f32) {
     let painter = ctx.layer_painter(egui::LayerId::background());
@@ -3038,6 +3098,17 @@ mod tests {
         assert!(interceptor.contains("Speed 300 a second, flies at 280"), "{interceptor}");
         let extractor = item_details(&db, db.id("mass_extractor"));
         assert!(extractor.contains("Built on a mass deposit"), "{extractor}");
+    }
+
+    #[test]
+    fn placing_shows_the_ranges_a_structure_reaches() {
+        let db = BlueprintDb::standard();
+        let names = |key: &str| placement_ranges(db.get(db.id(key))).into_iter().map(|range| range.0).collect::<Vec<_>>();
+        assert!(names("radar").contains(&"Radar"));
+        assert!(names("t1_point_defense").contains(&"Weapon"));
+        assert!(names("shield_generator").contains(&"Shield"));
+        assert!(names("t2_artillery").contains(&"Too close to hit"), "artillery cannot hit what is close");
+        assert!(names("mass_storage").is_empty(), "a storage reaches nothing");
     }
 
     #[test]

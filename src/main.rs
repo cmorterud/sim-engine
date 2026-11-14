@@ -1385,6 +1385,15 @@ async fn run_windowed(seed: u64, options: Options, map_source: MapSource) {
                             ui::draw_teleports(ctx, &camera, &map.heights, &snapshot.teleports, pixels_per_point);
                             ui::draw_exotic(ctx, &camera, &map.heights, &snapshot, pixels_per_point);
                             ui::draw_sensor_coverage(ctx, &camera, &map.heights, &snapshot.sensor_ranges, pixels_per_point);
+                            // What the structure being placed will reach, around where it would go.
+                            if let (Some(blueprint), Some(cell)) = (placing, placement_spot) {
+                                let unit = map.blueprints.get(blueprint);
+                                let ranges = ui::placement_ranges(unit);
+                                if !ranges.is_empty() {
+                                    let center = site_position(cell, unit.footprint, &map.heights);
+                                    ui::draw_placement_ranges(ctx, &camera, &map.heights, [center[0], center[1]], &ranges, pixels_per_point);
+                                }
+                            }
                             ui::draw_blips(ctx, &camera, &snapshot.blips, pixels_per_point);
                             ui::order_trails(ctx, &camera, &trails, pixels_per_point);
                             match &order_drag {
