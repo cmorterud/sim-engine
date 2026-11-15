@@ -26,7 +26,7 @@ Destroy the enemy commander to win. Yours explodes if it dies, and your whole te
 1. Press Space to select your commander. Choose a structure from the bottom panel, then left-click the ground to place it.
 2. Mass extractors go on the teal deposits, and snap to the nearest free one near the cursor. Power generators supply energy. Land factories build units.
 3. Click a factory to queue units. Every build menu is one bar: pick T1, T2, or T3 at its left to see that level's items, and hover over an item for its cost and what it does. Factories build in the open: you can watch each unit take shape in the bay, then drive out of the end facing the rally point (aircraft lift off their pad). Right-click the ground with a factory selected to set its rally point. With several factories selected, every order goes to all of them that can follow it. A factory still under construction takes orders too, and starts on them once it is built. Once an upgrade is queued, the factory can also queue what the upgrade unlocks, which waits for it to finish.
-4. If the top bar says STALL, you are spending faster than you earn, and everything slows down.
+4. If a row of the economy panel at the top left glows red and says Stalled, you are spending faster than you earn, and everything slows down.
 
 | Control | Action |
 | :--- | :--- |

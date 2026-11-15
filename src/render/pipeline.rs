@@ -20,7 +20,15 @@ use super::meshes::{MeshSet, MeshVertex, Shape};
 const MAX_TERRAIN_GRID: u32 = 1025;
 /// Samples per pixel, for smooth edges, where the graphics adapter supports it.
 const MSAA_SAMPLES: u32 = 4;
-const BACKGROUND: wgpu::Color = wgpu::Color { r: 0.015, g: 0.02, b: 0.035, a: 1.0 };
+/// Off the map: near black, so that the map stands out like a lit table.
+const BACKGROUND: wgpu::Color = wgpu::Color { r: 0.006, g: 0.008, b: 0.011, a: 1.0 };
+
+/// How strongly what is in sight is washed pale against the darker land out of sight: a third as
+/// strong up close, all of it from halfway out, where the vision bubbles are what the map is read by.
+pub fn strategic_share(zoom_from_closest: f64) -> f32 {
+    let t = ((zoom_from_closest - 0.28) / 0.22).clamp(0.0, 1.0);
+    (0.35 + 0.65 * t * t * (3.0 - 2.0 * t)) as f32
+}
 
 /// The size-to-distance ratios where a unit is fully a dot, and fully a cube. Based on
 /// apparent size, so that large units stay solid for longer. About 4 and 8 pixels at 1080p.
@@ -800,7 +808,7 @@ impl Renderer {
             terrain_grid: [first[0], first[1], step, self.samples_per_side],
             selection_box,
             terrain_scale: [self.height_scale, self.icon_scale, self.fog_scale, self.water_level],
-            water: [scene.time, self.grid_size as f32, 0.0, 0.0],
+            water: [scene.time, self.grid_size as f32, strategic_share(camera.zoom_from_closest()), 0.0],
         };
         self.queue.write_buffer(&self.globals_buffer, 0, bytemuck::bytes_of(&globals));
         self.flat_instances.clear();

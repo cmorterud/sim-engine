@@ -558,7 +558,8 @@ const PEBBLE: vec3<f32> = vec3<f32>(0.29, 0.27, 0.24);
 fn fs_terrain(input: TerrainOutput) -> @location(0) vec4<f32> {
     // Everything here that needs screen-space derivatives or the fog texture comes first,
     // before any of it depends on the ground.
-    let sight = 0.18 + 0.82 * textureSample(fog_texture, fog_sampler, input.fog_coordinates).r;
+    let fog = textureSample(fog_texture, fog_sampler, input.fog_coordinates).r;
+    let sight = 0.18 + 0.82 * fog;
     let footprint = length(fwidth(input.world));
     let contour = abs(fract(input.height / 8.0) - 0.5);
     let contour_width = max(fwidth(input.height / 8.0), 0.0001);
@@ -607,7 +608,28 @@ fn fs_terrain(input: TerrainOutput) -> @location(0) vec4<f32> {
     if (depth > 0.0) {
         color = color * mix(0.85, 0.35, clamp(depth / 60.0, 0.0, 1.0));
     }
-    return vec4<f32>(color * sight, 1.0);
+    return vec4<f32>(strategic_sight(color * sight, fog, input.fog_coordinates), 1.0);
+}
+
+// What is in sight gets a pale wash, fullest when zoomed out, so that the viewer's vision reads
+// as bright bubbles over the darker land it cannot see. Without fog of war there is nothing to show.
+fn strategic_sight(color: vec3<f32>, fog: f32, coordinates: vec2<f32>) -> vec3<f32> {
+    let has_fog = select(0.0, 1.0, globals.terrain_scale.z > 0.0);
+    var wash = 0.0;
+    if (globals.water.z > 0.0 && has_fog > 0.0) {
+        // The fog grid is coarse, so its cells would show as steps. Averaging a ring of samples
+        // and taking a narrow band of the result rounds them into smooth bubbles.
+        let texel = 1.0 / vec2<f32>(textureDimensions(fog_texture));
+        var total = textureSampleLevel(fog_texture, fog_sampler, coordinates, 0.0).r * 2.0;
+        for (var index = 0; index < 10; index = index + 1) {
+            let angle = f32(index) * 0.6283185;
+            let offset = vec2<f32>(cos(angle), sin(angle)) * texel * 1.6;
+            total = total + textureSampleLevel(fog_texture, fog_sampler, coordinates + offset, 0.0).r;
+        }
+        wash = globals.water.z * smoothstep(0.72, 0.8, total / 12.0);
+    }
+    let dimmed = color * mix(1.0, 0.82, globals.water.z * has_fog * (1.0 - wash));
+    return mix(dimmed, dimmed * 0.74 + vec3<f32>(0.25, 0.24, 0.12), wash * 0.85);
 }
 
 // ---- Water ----
@@ -670,8 +692,9 @@ fn fs_water(input: WaterOutput) -> @location(0) vec4<f32> {
     let foam = edge * smoothstep(0.35, 0.6, ripple + edge * 0.4);
     color = mix(color, FOAM_COLOR, foam * 0.8);
     let alpha = clamp(mix(0.35, 0.9, deep) + foam * 0.5 + fresnel * 0.2, 0.0, 0.95);
-    let sight = 0.18 + 0.82 * textureSample(fog_texture, fog_sampler, input.fog_coordinates).r;
-    return vec4<f32>(color * sight, alpha);
+    let fog = textureSample(fog_texture, fog_sampler, input.fog_coordinates).r;
+    let sight = 0.18 + 0.82 * fog;
+    return vec4<f32>(strategic_sight(color * sight, fog, input.fog_coordinates), alpha);
 }
 
 // ---- Selection box ----

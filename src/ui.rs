@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use egui::{Align2, Color32, FontId, Pos2, Rect, Rounding, Stroke, Vec2};
 
+use crate::hud::{self, Glyph};
 use crate::icons::{self, Icon};
 use crate::input::feedback::{Marker, MarkerKind, OrderFeedback, LABEL_SECONDS};
 use crate::input::hotkeys::{self, blueprint_hotkey};
@@ -58,10 +59,6 @@ const BEAM_RECLAIM: Color32 = Color32::from_rgb(150, 255, 170);
 const QUICK_DOUBLE_CLICK_SECONDS: f64 = 0.4;
 /// How many units a factory queues at once with Shift held.
 const SHIFT_QUEUE_COUNT: u32 = 5;
-const QUICK_ROW_WIDTH: f32 = 170.0;
-const CONTROL_GROUP_ROW_WIDTH: f32 = 220.0;
-/// The queue row's height, in points: one row of buttons, whether or not anything is queued.
-const QUEUE_ROW_HEIGHT: f32 = 24.0;
 /// How many pulses are on a work beam at once.
 const BEAM_PULSES: usize = 5;
 /// How long a pulse takes to travel along a beam, in seconds.
@@ -221,6 +218,7 @@ pub fn install_style(context: &egui::Context) {
         style.interaction.tooltip_delay = TOOLTIP_DELAY;
         style.interaction.tooltip_grace_time = TOOLTIP_GRACE;
         style.interaction.show_tooltips_only_when_still = false;
+        crate::hud::apply_visuals(style);
     });
 }
 
@@ -396,27 +394,37 @@ const BAR_BUTTON: f32 = 46.0;
 /// A build bar's button: the item's symbol, colored by its role, its key in the top left corner,
 /// and `suffix`, such as "auto", in the bottom right.
 fn icon_button(ui: &mut egui::Ui, db: &BlueprintDb, option: BlueprintId, suffix: &str) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(Vec2::splat(BAR_BUTTON), egui::Sense::click());
-    let visuals = ui.style().interact(&response);
-    let painter = ui.painter();
-    painter.rect(rect, visuals.rounding, visuals.weak_bg_fill, visuals.bg_stroke);
     let unit = db.get(option);
-    // Large and colored by role, without the map icon's frame and tech dots: the button is the
-    // frame, and the bar's toggle says the level.
-    icons::draw_bar(painter, rect, Icon::for_key(&unit.key));
-    if let Some(letter) = blueprint_hotkey(&unit.key) {
-        let font = FontId::new(13.0, egui::FontFamily::Name(BOLD.into()));
-        painter.text(rect.left_top() + Vec2::new(3.0, 1.0), Align2::LEFT_TOP, hotkeys::key_name(letter), font, visuals.text_color());
-    }
-    let suffix = suffix.trim().trim_matches(|c| c == '(' || c == ')');
-    if !suffix.is_empty() {
-        // On a dark backing, since the symbol reaches into the corner.
-        let galley = painter.layout_no_wrap(suffix.to_string(), FontId::proportional(10.0), Color32::YELLOW);
-        let at = Align2::RIGHT_BOTTOM.anchor_size(rect.right_bottom() - Vec2::new(3.0, 1.0), galley.size());
-        painter.rect_filled(at.expand(1.5), 3.0, Color32::from_black_alpha(190));
-        painter.galley(at.min, galley, Color32::YELLOW);
-    }
-    response
+    let suffix = suffix.trim().trim_matches(|c| c == '(' || c == ')').to_string();
+    hud::square_button(ui, Vec2::splat(BAR_BUTTON), false, true, |painter, rect| {
+        // Large and colored by role, without the map icon's frame and tech dots: the button is the
+        // frame, and the bar's toggle says the level.
+        icons::draw_bar(painter, rect, Icon::for_key(&unit.key));
+        if let Some(letter) = blueprint_hotkey(&unit.key) {
+            let font = FontId::new(14.0, egui::FontFamily::Name(BOLD.into()));
+            hud::outlined_text(painter, rect.right_bottom() + Vec2::new(-2.0, 0.0), Align2::RIGHT_BOTTOM, &hotkeys::key_name(letter), font, Color32::WHITE);
+        }
+        if !suffix.is_empty() {
+            hud::outlined_text(painter, rect.left_top() + Vec2::new(2.0, 1.0), Align2::LEFT_TOP, &suffix, FontId::proportional(10.0), Color32::YELLOW);
+        }
+    })
+}
+
+/// The tech level toggles at the start of a build bar, stacked, filling its height.
+fn tier_toggles(ui: &mut egui::Ui, id: egui::Id, options: &[BlueprintId], shown: u8, db: &BlueprintDb) {
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = 2.0;
+        for tier in MENU_TIERS {
+            let available = options.iter().any(|option| db.get(*option).tier == tier);
+            let toggle = hud::square_button(ui, Vec2::new(28.0, (BAR_BUTTON - 4.0) / 3.0), tier == shown, available, |painter, rect| {
+                let color = if tier == shown { Color32::WHITE } else { hud::DIM_TEXT };
+                painter.text(rect.center(), Align2::CENTER_CENTER, format!("T{tier}"), FontId::new(11.0, egui::FontFamily::Name(BOLD.into())), color);
+            });
+            if toggle.on_hover_text(format!("Show what can be built at tech level {tier}. [{}] shows the next level.", hotkeys::CYCLE_TIER)).clicked() {
+                ui.ctx().data_mut(|data| data.insert_temp(id, tier));
+            }
+        }
+    });
 }
 
 /// One build menu, as a single bar: a toggle for the tech level, then the items of that level as
@@ -443,14 +451,8 @@ fn build_bar(
     let shown = shown_tier(chosen, options, db)?;
     let mut clicked = None;
     ui.horizontal(|ui| {
-        for tier in MENU_TIERS {
-            let available = options.iter().any(|option| db.get(*option).tier == tier);
-            let toggle = ui.add_enabled(available, egui::SelectableLabel::new(tier == shown, format!("T{tier}")));
-            if toggle.on_hover_text(format!("Show what can be built at tech level {tier}. [{}] shows the next level.", hotkeys::CYCLE_TIER)).clicked() {
-                ui.ctx().data_mut(|data| data.insert_temp(id, tier));
-            }
-        }
-        ui.separator();
+        ui.spacing_mut().item_spacing.x = 4.0;
+        tier_toggles(ui, id, options, shown, db);
         egui::ScrollArea::horizontal().id_source(memory).show(ui, |ui| {
             ui.horizontal(|ui| {
                 let mut last_group = None;
@@ -564,42 +566,66 @@ struct OrderOffers {
     unload: bool,
 }
 
-fn unit_order_row(ui: &mut egui::Ui, armed: Option<ArmedOrder>, offers: &OrderOffers, actions: &mut Vec<UiAction>) {
+/// The size of the order and toggle buttons, in points.
+const ORDER_BUTTON: f32 = 36.0;
+
+/// An order or toggle button: its glyph, its key in the corner, and its name and description on
+/// hover.
+fn glyph_button(ui: &mut egui::Ui, glyph: Glyph, key: &str, chosen: bool, hint: &str) -> egui::Response {
+    hud::square_button(ui, Vec2::splat(ORDER_BUTTON), chosen, true, |painter, rect| {
+        hud::draw_glyph(painter, rect.shrink(2.0), glyph);
+        if !key.is_empty() {
+            let size = if key.chars().count() > 1 { 9.0 } else { 12.0 };
+            hud::outlined_text(painter, rect.right_bottom() + Vec2::new(-1.0, 1.0), Align2::RIGHT_BOTTOM, key, FontId::new(size, egui::FontFamily::Name(BOLD.into())), Color32::WHITE);
+        }
+    })
+    .on_hover_text(bold_keys(hint))
+}
+
+const fn order_glyph(order: ArmedOrder) -> Glyph {
+    match order {
+        ArmedOrder::Move => Glyph::Move,
+        ArmedOrder::AttackMove => Glyph::AttackMove,
+        ArmedOrder::Formation => Glyph::Formation,
+        ArmedOrder::AttackGround => Glyph::AttackGround,
+        ArmedOrder::Patrol => Glyph::Patrol,
+        ArmedOrder::Assist => Glyph::Assist,
+        ArmedOrder::Overcharge => Glyph::Overcharge,
+        ArmedOrder::Teleport => Glyph::Teleport,
+        ArmedOrder::Capture => Glyph::Capture,
+        ArmedOrder::Unload => Glyph::Unload,
+    }
+}
+
+/// The unit orders, as glyph buttons: the armed one lit.
+fn unit_order_buttons(ui: &mut egui::Ui, armed: Option<ArmedOrder>, offers: &OrderOffers, actions: &mut Vec<UiAction>) {
     let OrderOffers { overcharge, weapons, teleport, capture, unload } = *offers;
-    ui.horizontal_wrapped(|ui| {
-        let offered = |order: &ArmedOrder| match order {
-            ArmedOrder::Overcharge => overcharge,
-            ArmedOrder::AttackGround => weapons,
-            _ => true,
-        };
-        for order in ArmedOrder::ALL.into_iter().filter(offered) {
-            let button = egui::Button::new(bold_keys(&format!("[{}] {}", order.letter(), order.name()))).selected(armed == Some(order));
-            if ui.add(button).on_hover_text(order.description()).clicked() {
-                actions.push(UiAction::Arm(order));
-            }
+    let offered = |order: &ArmedOrder| match order {
+        ArmedOrder::Overcharge => overcharge,
+        ArmedOrder::AttackGround => weapons,
+        _ => true,
+    };
+    let mut arm = |ui: &mut egui::Ui, order: ArmedOrder, key: &str| {
+        let hint = format!("[{key}] {}\n{}", order.name(), order.description());
+        if glyph_button(ui, order_glyph(order), key, armed == Some(order), &hint).clicked() {
+            actions.push(UiAction::Arm(order));
         }
-        if ui.button(bold_keys(&format!("[{}] Stop", hotkeys::STOP))).on_hover_text("Drop all orders.").clicked() {
-            actions.push(UiAction::Stop);
-        }
-        if capture {
-            let button = egui::Button::new(bold_keys("[Ctrl+C] Capture")).selected(armed == Some(ArmedOrder::Capture));
-            if ui.add(button).on_hover_text(ArmedOrder::Capture.description()).clicked() {
-                actions.push(UiAction::Arm(ArmedOrder::Capture));
-            }
-        }
-        if teleport {
-            let button = egui::Button::new(bold_keys("[Ctrl+T] Teleport")).selected(armed == Some(ArmedOrder::Teleport));
-            if ui.add(button).on_hover_text(ArmedOrder::Teleport.description()).clicked() {
-                actions.push(UiAction::Arm(ArmedOrder::Teleport));
-            }
-        }
-        if unload {
-            let button = egui::Button::new(bold_keys("[Ctrl+U] Unload")).selected(armed == Some(ArmedOrder::Unload));
-            if ui.add(button).on_hover_text(ArmedOrder::Unload.description()).clicked() {
-                actions.push(UiAction::Arm(ArmedOrder::Unload));
-            }
-        }
-    });
+    };
+    for order in ArmedOrder::ALL.into_iter().filter(offered) {
+        arm(ui, order, &order.letter().to_string());
+    }
+    if capture {
+        arm(ui, ArmedOrder::Capture, "^C");
+    }
+    if teleport {
+        arm(ui, ArmedOrder::Teleport, "^T");
+    }
+    if unload {
+        arm(ui, ArmedOrder::Unload, "^U");
+    }
+    if glyph_button(ui, Glyph::Stop, &hotkeys::STOP.to_string(), false, &format!("[{}] Stop\nDrop all orders.", hotkeys::STOP)).clicked() {
+        actions.push(UiAction::Stop);
+    }
 }
 
 /// Whether the viewer can sense a spot, and so teleport there: it is in sight, or within the
@@ -1132,8 +1158,33 @@ pub fn draw_dragged_order(ctx: &egui::Context, camera: &Camera, handle: &OrderHa
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct QueueChip {
     pub label: String,
+    /// What its button shows.
+    pub icon: ChipIcon,
+    /// How many of it there are, for a factory's items.
+    pub count: u32,
+    /// How far along it is, in thousandths, if started.
+    pub progress: Option<u16>,
     /// What right-clicking it does.
     pub remove: UiAction,
+}
+
+/// What a queue entry's button shows: the item's icon, or the order's glyph.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ChipIcon {
+    Item(BlueprintId),
+    Order(Glyph),
+}
+
+/// What shows on a builder's queued order.
+fn task_icon(task: &BuildTask) -> ChipIcon {
+    match *task {
+        BuildTask::Build { blueprint, .. } => ChipIcon::Item(blueprint),
+        BuildTask::Assist { .. } => ChipIcon::Order(Glyph::Assist),
+        BuildTask::Reclaim { .. } => ChipIcon::Order(Glyph::Reclaim),
+        BuildTask::Repair { .. } => ChipIcon::Order(Glyph::Repair),
+        BuildTask::Capture { .. } => ChipIcon::Order(Glyph::Capture),
+        BuildTask::Walk { order, .. } => ChipIcon::Order(if order.kind == OrderKind::AttackMove { Glyph::AttackMove } else { Glyph::Move }),
+    }
 }
 
 /// What a builder's order is called on screen.
@@ -1167,40 +1218,58 @@ pub fn queue_chips(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb)
         .into_iter()
         .enumerate()
         .map(|(position, (task, units))| {
-            let built = match task {
-                BuildTask::Build { site: Some(site), .. } => find_unit(snapshot, site).map_or(String::new(), |site| format!(" {}%", site.built_permille / 10)),
-                _ => String::new(),
+            let progress = match task {
+                BuildTask::Build { site: Some(site), .. } => find_unit(snapshot, site).map(|site| site.built_permille),
+                _ => None,
             };
-            QueueChip { label: format!("{}. {}{built}", position + 1, task_name(&task, db)), remove: UiAction::CancelTask { units, task } }
+            let built = progress.map_or(String::new(), |permille| format!(" {}%", permille / 10));
+            QueueChip { label: format!("{}. {}{built}", position + 1, task_name(&task, db)), icon: task_icon(&task), count: 1, progress, remove: UiAction::CancelTask { units, task } }
         })
         .collect();
 
     if let Some(menu) = factory_menu(snapshot, selected, db) {
-        for &(item, count) in &menu.queue {
+        for (index, &(item, count)) in menu.queue.iter().enumerate() {
             let holding = |id: &&SimId| snapshot.factories.iter().any(|factory| factory.id == **id && factory.queue.contains(&item.0));
             let factories: Vec<SimId> = menu.factories.iter().filter(holding).copied().collect();
             let name = &db.get(item).name;
             let label = if count > 1 { format!("{name} x{count}") } else { name.clone() };
-            chips.push(QueueChip { label, remove: UiAction::RemoveQueued { factories, blueprint: item } });
+            let progress = if index == 0 { menu.progress_permille } else { None };
+            chips.push(QueueChip { label, icon: ChipIcon::Item(item), count, progress, remove: UiAction::RemoveQueued { factories, blueprint: item } });
         }
     }
     chips
 }
 
-/// The queue, always one row high, empty or not, so that queuing the first item does not push
-/// the build bar above it up: long queues scroll sideways instead of wrapping onto more rows.
-fn queue_chip_row(ui: &mut egui::Ui, chips: &[QueueChip], actions: &mut Vec<UiAction>) {
+/// The size of a queue entry's button, in points.
+const QUEUE_BUTTON: f32 = 34.0;
+
+/// The queue, as a row of buttons with how many and how far along, always one row high, empty
+/// or not, so that queuing the first item does not move the bar: long queues scroll sideways.
+fn queue_chip_row(ui: &mut egui::Ui, chips: &[QueueChip], db: &BlueprintDb, actions: &mut Vec<UiAction>) {
     ui.horizontal(|ui| {
-        ui.set_min_height(QUEUE_ROW_HEIGHT);
-        ui.label("Queue:");
+        ui.set_min_height(QUEUE_BUTTON);
+        ui.spacing_mut().item_spacing.x = 3.0;
         if chips.is_empty() {
-            ui.weak("empty");
+            ui.label(egui::RichText::new("Queue empty").color(hud::DIM_TEXT).size(12.0));
             return;
         }
         egui::ScrollArea::horizontal().id_source("queue row").show(ui, |ui| {
             ui.horizontal(|ui| {
                 for chip in chips {
-                    if ui.button(&chip.label).on_hover_text("Right-click to remove").secondary_clicked() {
+                    let button = hud::square_button(ui, Vec2::splat(QUEUE_BUTTON), false, true, |painter, rect| {
+                        match chip.icon {
+                            ChipIcon::Item(blueprint) => icons::draw_bar(painter, rect, Icon::for_key(&db.get(blueprint).key)),
+                            ChipIcon::Order(glyph) => hud::draw_glyph(painter, rect.shrink(3.0), glyph),
+                        }
+                        if chip.count > 1 {
+                            hud::outlined_text(painter, rect.right_bottom() + Vec2::new(-1.0, 1.0), Align2::RIGHT_BOTTOM, &chip.count.to_string(), FontId::new(13.0, egui::FontFamily::Name(BOLD.into())), Color32::WHITE);
+                        }
+                        if let Some(progress) = chip.progress {
+                            let bar = Rect::from_min_max(Pos2::new(rect.left() + 1.0, rect.bottom() - 4.0), Pos2::new(rect.right() - 1.0, rect.bottom() - 1.0));
+                            hud::meter(painter, bar, f32::from(progress) / 1000.0, BUILDING);
+                        }
+                    });
+                    if button.on_hover_text(format!("{}\nRight-click to remove", chip.label)).secondary_clicked() {
                         actions.push(chip.remove.clone());
                     }
                 }
@@ -1303,20 +1372,23 @@ impl QuickSelectState {
     }
 }
 
-fn quick_row(ui: &mut egui::Ui, text: &str, icon: Icon, color: Color32, selected: bool) -> egui::Response {
-    bar_row(ui, QUICK_ROW_WIDTH, text, icon, color, selected)
-}
+/// The size of the quick select bar's buttons, in points.
+const QUICK_BUTTON: f32 = 48.0;
+/// The height of a tier's button, under its kind of factory.
+const QUICK_TIER_HEIGHT: f32 = 24.0;
 
-fn bar_row(ui: &mut egui::Ui, width: f32, text: &str, icon: Icon, color: Color32, selected: bool) -> egui::Response {
-    // Drawn by hand, because a wide button would center its text over the icon.
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 24.0), egui::Sense::click());
-    let visuals = ui.style().interact_selectable(&response, selected);
-    let painter = ui.painter();
-    painter.rect(rect, visuals.rounding, visuals.weak_bg_fill, visuals.bg_stroke);
-    // Without the tech level's dots, which the row's text gives instead.
-    icons::draw(painter, Pos2::new(rect.left() + 17.0, rect.center().y), 6.0, icon, 0, if selected { Color32::from_rgb(170, 255, 170) } else { color });
-    painter.text(Pos2::new(rect.left() + 34.0, rect.center().y), Align2::LEFT_CENTER, text, FontId::proportional(14.0), visuals.text_color());
-    response
+/// A big square with a unit's symbol, and a count in its corner.
+fn quick_square(ui: &mut egui::Ui, icon: Icon, count: Option<usize>, chosen: bool, health: Option<u16>) -> egui::Response {
+    hud::square_button(ui, Vec2::splat(QUICK_BUTTON), chosen, true, |painter, rect| {
+        icons::draw_bar(painter, rect.shrink(2.0), icon);
+        if let Some(count) = count {
+            hud::outlined_text(painter, rect.right_bottom() + Vec2::new(-2.0, 1.0), Align2::RIGHT_BOTTOM, &count.to_string(), FontId::new(16.0, egui::FontFamily::Name(BOLD.into())), Color32::WHITE);
+        }
+        if let Some(permille) = health {
+            let bar = Rect::from_min_max(Pos2::new(rect.left() + 2.0, rect.bottom() - 5.0), Pos2::new(rect.right() - 2.0, rect.bottom() - 1.0));
+            hud::meter(painter, bar, f32::from(permille) / 1000.0, HEALTHY);
+        }
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1324,24 +1396,26 @@ fn quick_rows(
     ui: &mut egui::Ui,
     snapshot: &SimSnapshot,
     groups: &QuickSelect,
-    color: Color32,
+    _color: Color32,
     selected: &[SimId],
     view_center: [f64; 2],
     state: &mut QuickSelectState,
     actions: &mut Vec<UiAction>,
 ) {
+    ui.spacing_mut().item_spacing = Vec2::splat(4.0);
     let (shift, now) = ui.input(|input| (input.modifiers.shift, input.time));
     if let Some(commander) = groups.commander {
-        if quick_row(ui, "ACU", Icon::Commander, color, selected.contains(&commander)).on_hover_text("Click to select. The view stays where it is.").clicked() {
+        let health = find_unit(snapshot, commander).map(|unit| unit.health_permille);
+        if quick_square(ui, Icon::Commander, None, selected.contains(&commander), health).on_hover_text("ACU: click to select. The view stays where it is.").clicked() {
             actions.push(UiAction::QuickSelect { units: vec![commander], add: shift });
         }
     }
     for family in &groups.families {
         let open = state.expanded.contains(&family.name);
         let total: usize = family.tiers.iter().map(|tier| tier.units.len()).sum();
-        let text = format!("{} {}  x{total}", if open { "-" } else { "+" }, family.name);
         let icon = Icon::for_key(&family.name.to_lowercase().replace(' ', "_"));
-        if quick_row(ui, &text, icon, color, false).clicked() {
+        let hint = format!("{}: {total}. Click to {} the tech levels.", family.name, if open { "hide" } else { "show" });
+        if quick_square(ui, icon, Some(total), open, None).on_hover_text(hint).clicked() {
             if open {
                 state.expanded.remove(&family.name);
             } else {
@@ -1353,24 +1427,25 @@ fn quick_rows(
         }
         for tier in &family.tiers {
             let any_selected = tier.units.iter().any(|id| selected.contains(id));
-            ui.horizontal(|ui| {
-                ui.add_space(14.0);
-                let hint = "Click for the closest to your view. Double-click for all.";
-                if quick_row(ui, &tier.label, icon, color, any_selected).on_hover_text(hint).clicked() {
-                    let row = format!("{} {}", family.name, tier.label.split(' ').next().unwrap_or(""));
-                    let units = if state.register_click(&row, now) {
-                        tier.units.clone()
-                    } else {
-                        closest_unit(snapshot, &tier.units, view_center).into_iter().collect()
-                    };
-                    actions.push(UiAction::QuickSelect { units, add: shift });
-                }
+            let hint = "Click for the closest to your view. Double-click for all.";
+            let button = hud::square_button(ui, Vec2::new(QUICK_BUTTON, QUICK_TIER_HEIGHT), any_selected, true, |painter, rect| {
+                painter.text(rect.center(), Align2::CENTER_CENTER, tier.label.replace(" x", " \u{d7}"), FontId::proportional(12.0), hud::TEXT);
             });
+            if button.on_hover_text(hint).clicked() {
+                let row = format!("{} {}", family.name, tier.label.split(' ').next().unwrap_or(""));
+                let units = if state.register_click(&row, now) {
+                    tier.units.clone()
+                } else {
+                    closest_unit(snapshot, &tier.units, view_center).into_iter().collect()
+                };
+                actions.push(UiAction::QuickSelect { units, add: shift });
+            }
         }
     }
 }
 
-/// The bar on the right: select the commander or factories from anywhere, without moving the view.
+/// The column on the right, under the score panel: select the commander or factories from
+/// anywhere, without moving the view.
 #[allow(clippy::too_many_arguments)]
 pub fn quick_select_bar(
     ctx: &egui::Context,
@@ -1386,12 +1461,13 @@ pub fn quick_select_bar(
     if groups.commander.is_none() && groups.families.is_empty() {
         return;
     }
-    egui::Area::new(egui::Id::new("quick select")).anchor(Align2::RIGHT_TOP, Vec2::new(-8.0, 36.0)).show(ctx, |ui| {
-        egui::Frame::popup(ui.style()).show(ui, |ui| {
-            quick_rows(ui, snapshot, &groups, team_color(team), selected, view_center, state, actions);
-        });
+    egui::Area::new(egui::Id::new("quick select")).anchor(Align2::RIGHT_TOP, Vec2::new(-8.0, QUICK_SELECT_TOP)).show(ctx, |ui| {
+        quick_rows(ui, snapshot, &groups, team_color(team), selected, view_center, state, actions);
     });
 }
+
+/// How far down the screen the quick select column starts, clear of the score panel.
+const QUICK_SELECT_TOP: f32 = 132.0;
 
 /// A label that never wraps. A popup near the middle of the screen has little room by default,
 /// which would otherwise squeeze its text into a tall, narrow column.
@@ -1416,32 +1492,47 @@ pub fn control_group_label(group: usize, members: &[SimId], snapshot: &SimSnapsh
     format!("{group}: {what}")
 }
 
-fn control_group_rows(ui: &mut egui::Ui, groups: &[(usize, Vec<SimId>)], snapshot: &SimSnapshot, db: &BlueprintDb, color: Color32, selected: &[SimId], actions: &mut Vec<UiAction>) {
+fn control_group_rows(ui: &mut egui::Ui, groups: &[(usize, Vec<SimId>)], snapshot: &SimSnapshot, db: &BlueprintDb, _color: Color32, selected: &[SimId], actions: &mut Vec<UiAction>) {
     let shift = ui.input(|input| input.modifiers.shift);
-    for (group, members) in groups {
-        let icon = members
-            .first()
-            .and_then(|id| find_unit(snapshot, *id))
-            .filter(|unit| unit.blueprint != u16::MAX)
-            .map_or(Icon::Unknown, |unit| Icon::for_key(&db.get(BlueprintId(unit.blueprint)).key));
-        let any_selected = members.iter().any(|id| selected.contains(id));
-        let label = control_group_label(*group, members, snapshot, db);
-        let hint = format!("Click or press {group} to select. Hold Shift to add. Ctrl + {group} with nothing selected clears it.");
-        if bar_row(ui, CONTROL_GROUP_ROW_WIDTH, &label, icon, color, any_selected).on_hover_text(hint).clicked() {
-            actions.push(UiAction::QuickSelect { units: members.clone(), add: shift });
+    ui.spacing_mut().item_spacing = Vec2::splat(4.0);
+    ui.horizontal(|ui| {
+        for (group, members) in groups {
+            let icon = members
+                .first()
+                .and_then(|id| find_unit(snapshot, *id))
+                .filter(|unit| unit.blueprint != u16::MAX)
+                .map_or(Icon::Unknown, |unit| Icon::for_key(&db.get(BlueprintId(unit.blueprint)).key));
+            let any_selected = members.iter().any(|id| selected.contains(id));
+            let label = control_group_label(*group, members, snapshot, db);
+            let hint = format!("{label}\nClick or press {group} to select. Hold Shift to add. Ctrl + {group} with nothing selected clears it.");
+            let button = hud::square_button(ui, Vec2::new(CONTROL_GROUP_WIDTH, CONTROL_GROUP_HEIGHT), any_selected, true, |painter, rect| {
+                icons::draw_bar(painter, Rect::from_min_max(rect.left_top() + Vec2::new(0.0, 12.0), rect.right_bottom()), icon);
+                let bold = |size| FontId::new(size, egui::FontFamily::Name(BOLD.into()));
+                hud::outlined_text(painter, rect.left_top() + Vec2::new(3.0, 0.0), Align2::LEFT_TOP, &group.to_string(), bold(16.0), Color32::WHITE);
+                hud::outlined_text(painter, rect.right_bottom() + Vec2::new(-2.0, 1.0), Align2::RIGHT_BOTTOM, &members.len().to_string(), bold(12.0), hud::TEXT);
+            });
+            if button.on_hover_text(hint).clicked() {
+                actions.push(UiAction::QuickSelect { units: members.clone(), add: shift });
+            }
         }
-    }
+    });
 }
 
-/// The bar on the left: the saved control groups, and what is in them.
+const CONTROL_GROUP_WIDTH: f32 = 46.0;
+const CONTROL_GROUP_HEIGHT: f32 = 56.0;
+
+/// The squares under the economy panel: the saved control groups, and what is in them.
 pub fn control_group_bar(ctx: &egui::Context, groups: &[(usize, Vec<SimId>)], snapshot: &SimSnapshot, team: Team, db: &BlueprintDb, selected: &[SimId], actions: &mut Vec<UiAction>) {
     if groups.is_empty() {
         return;
     }
-    egui::Area::new(egui::Id::new("control groups")).anchor(Align2::LEFT_TOP, Vec2::new(8.0, 36.0)).show(ctx, |ui| {
-        egui::Frame::popup(ui.style()).show(ui, |ui| control_group_rows(ui, groups, snapshot, db, team_color(team), selected, actions));
+    egui::Area::new(egui::Id::new("control groups")).anchor(Align2::LEFT_TOP, Vec2::new(8.0, CONTROL_GROUPS_TOP)).show(ctx, |ui| {
+        control_group_rows(ui, groups, snapshot, db, team_color(team), selected, actions);
     });
 }
+
+/// How far down the control groups start, clear of the economy panel.
+const CONTROL_GROUPS_TOP: f32 = 96.0;
 
 /// The text alert that goes with the "ACU under attack" sound.
 pub fn commander_alert(ctx: &egui::Context, strength: f32) {
@@ -1469,183 +1560,396 @@ pub fn release_keyboard_focus(ctx: &egui::Context) {
     });
 }
 
-/// The bar across the top of the screen.
-pub fn resource_bar(ctx: &egui::Context, snapshot: &SimSnapshot, sound: Option<&str>, paused: bool, actions: &mut Vec<UiAction>) {
-    if paused {
-        egui::Area::new(egui::Id::new("paused")).anchor(Align2::CENTER_TOP, Vec2::new(0.0, 80.0)).interactable(false).show(ctx, |ui| {
-            ui.label(egui::RichText::new("PAUSED").size(32.0).strong().color(Color32::from_rgb(255, 230, 140)));
-        });
+/// The match clock, as hours, minutes, and seconds.
+pub fn clock_text(tick: u32) -> String {
+    let seconds = tick / 10;
+    format!("{:02}:{:02}:{:02}", seconds / 3600, seconds / 60 % 60, seconds % 60)
+}
+
+/// How wide the economy panel's contents are, in points.
+const ECONOMY_WIDTH: f32 = 300.0;
+/// How tall one resource's row is.
+const ECONOMY_ROW: f32 = 30.0;
+
+/// One resource's row: its mark, how full its store is, the net rate in large figures, and income
+/// over spending at the end. Lit red while it is what stalls building.
+#[allow(clippy::too_many_arguments)]
+fn economy_row(ui: &mut egui::Ui, energy: bool, stored: i64, capacity: i64, income: i64, demand: i64, stalling: bool) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ECONOMY_WIDTH, ECONOMY_ROW), egui::Sense::hover());
+    let painter = ui.painter();
+    if stalling {
+        let pulse = 0.5 + 0.5 * (ui.input(|input| input.time) * 4.0).sin() as f32;
+        painter.rect_filled(rect.expand2(Vec2::new(4.0, 1.0)), 2.0, hud::LOSS.gamma_multiply(0.18 + 0.12 * pulse));
     }
-    egui::TopBottomPanel::top("resources").show(ctx, |ui| {
+    let color = if energy { hud::ENERGY } else { hud::MASS };
+    hud::resource_mark(painter, Pos2::new(rect.left() + 9.0, rect.center().y - 1.0), 8.5, energy);
+    let bar = Rect::from_min_size(Pos2::new(rect.left() + 24.0, rect.top() + 4.0), Vec2::new(118.0, 6.0));
+    let share = if capacity > 0 { stored as f32 / capacity as f32 } else { 0.0 };
+    hud::meter(painter, bar, share, color);
+    let small = FontId::proportional(11.0);
+    painter.text(Pos2::new(bar.left(), bar.bottom() + 2.0), Align2::LEFT_TOP, stored.to_string(), small.clone(), hud::TEXT);
+    painter.text(Pos2::new(bar.right(), bar.bottom() + 2.0), Align2::RIGHT_TOP, capacity.to_string(), small.clone(), hud::DIM_TEXT);
+    let net = income - demand;
+    let net_color = if net < 0 { hud::LOSS } else if net == 0 { hud::TEXT } else { hud::GAIN };
+    painter.text(Pos2::new(bar.right() + 8.0, rect.center().y), Align2::LEFT_CENTER, hud::signed(net), FontId::proportional(22.0), net_color);
+    painter.text(Pos2::new(rect.right(), rect.top() + 1.0), Align2::RIGHT_TOP, format!("+{income}"), small.clone(), hud::GAIN);
+    painter.text(Pos2::new(rect.right(), rect.bottom() - 1.0), Align2::RIGHT_BOTTOM, format!("-{demand}"), small, hud::LOSS);
+}
+
+/// Both resources, one row each, and what a stall slows building to. `title` names whose
+/// economy it is, when watching.
+fn economy_rows(ui: &mut egui::Ui, economy: &EconomyView, title: Option<(&str, Color32)>) {
+    ui.spacing_mut().item_spacing.y = 2.0;
+    if let Some((name, color)) = title {
+        ui.label(egui::RichText::new(name).color(color).strong().size(12.0));
+    }
+    let stalled = economy.satisfaction_permille < 1000;
+    economy_row(ui, false, economy.mass, economy.mass_capacity, economy.mass_income, economy.mass_demand, stalled && economy.mass == 0);
+    economy_row(ui, true, economy.energy, economy.energy_capacity, economy.energy_income, economy.energy_demand, stalled && economy.energy == 0);
+    if stalled {
+        ui.label(egui::RichText::new(format!("Stalled: building at {}%", economy.satisfaction_permille / 10)).color(STALLED).size(12.0));
+    }
+}
+
+/// A team's row in the score panel: its color, its name, and, right-aligned, `detail`.
+fn score_row(ui: &mut egui::Ui, color: Color32, name: &str, detail: &str, detail_color: Color32) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(SCORE_WIDTH, 17.0), egui::Sense::hover());
+    let painter = ui.painter();
+    let swatch = Rect::from_center_size(Pos2::new(rect.left() + 6.0, rect.center().y), Vec2::splat(9.0));
+    painter.rect(swatch, 1.0, color, Stroke::new(1.0_f32, Color32::from_black_alpha(160)));
+    painter.text(Pos2::new(rect.left() + 16.0, rect.center().y), Align2::LEFT_CENTER, name, FontId::proportional(13.0), hud::TEXT);
+    painter.text(Pos2::new(rect.right(), rect.center().y), Align2::RIGHT_CENTER, detail, FontId::proportional(12.0), detail_color);
+}
+
+const SCORE_WIDTH: f32 = 250.0;
+
+/// The score panel's first line: the clock, and on the right `right`.
+fn score_header(ui: &mut egui::Ui, tick: u32, right: &str) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(SCORE_WIDTH, 18.0), egui::Sense::hover());
+    let painter = ui.painter();
+    painter.circle_stroke(Pos2::new(rect.left() + 6.0, rect.center().y), 5.5, Stroke::new(1.4_f32, hud::CLOCK));
+    painter.line_segment([Pos2::new(rect.left() + 6.0, rect.center().y), Pos2::new(rect.left() + 6.0, rect.center().y - 3.5)], Stroke::new(1.4_f32, hud::CLOCK));
+    painter.text(Pos2::new(rect.left() + 16.0, rect.center().y), Align2::LEFT_CENTER, clock_text(tick), FontId::proportional(13.0), hud::CLOCK);
+    painter.text(Pos2::new(rect.right(), rect.center().y), Align2::RIGHT_CENTER, right, FontId::proportional(12.0), hud::DIM_TEXT);
+}
+
+/// A thin line across a panel.
+fn panel_rule(ui: &mut egui::Ui) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(SCORE_WIDTH, 5.0), egui::Sense::hover());
+    ui.painter().line_segment([rect.left_center(), rect.right_center()], Stroke::new(1.0_f32, hud::RIM.gamma_multiply(0.5)));
+}
+
+/// "Playing", or how the match ended for a team.
+fn team_state(result: Option<MatchResult>, team: Team) -> (&'static str, Color32) {
+    match result {
+        Some(MatchResult::Winner(winner)) if winner == team => ("Victorious", hud::GAIN),
+        Some(_) => ("Defeated", hud::DIM_TEXT),
+        None => ("Playing", hud::TEXT),
+    }
+}
+
+fn paused_banner(ctx: &egui::Context) {
+    egui::Area::new(egui::Id::new("paused")).anchor(Align2::CENTER_TOP, Vec2::new(0.0, 136.0)).interactable(false).show(ctx, |ui| {
+        ui.label(egui::RichText::new("PAUSED").size(32.0).strong().color(Color32::from_rgb(255, 230, 140)));
+    });
+}
+
+/// The panels along the top of the screen: the economy at the top left, game controls in the
+/// middle, and the clock, the players, and the map at the top right.
+pub fn resource_bar(ctx: &egui::Context, snapshot: &SimSnapshot, map: &str, sound: Option<&str>, paused: bool, actions: &mut Vec<UiAction>) {
+    if paused {
+        paused_banner(ctx);
+    }
+    hud::panel(ctx, "economy", Align2::LEFT_TOP, Vec2::new(4.0, 4.0), |ui| economy_rows(ui, &snapshot.economy, None));
+    hud::panel(ctx, "game controls", Align2::CENTER_TOP, Vec2::new(0.0, 4.0), |ui| {
         ui.horizontal(|ui| {
-            let economy = &snapshot.economy;
-            let stalled = economy.satisfaction_permille < 1000;
-            let line = |name: &str, stored: i64, capacity: i64, income: i64, demand: i64| {
-                format!("{name} {stored}/{capacity}   +{income}/s  -{demand}/s")
-            };
-            let row = |ui: &mut egui::Ui, text: String, is_low: bool, base: Color32| {
-                ui.colored_label(if is_low && stalled { STALLED } else { base }, text);
-            };
-            row(
-                ui,
-                line("Mass", economy.mass, economy.mass_capacity, economy.mass_income, economy.mass_demand),
-                economy.mass == 0,
-                Color32::from_rgb(120, 230, 170),
-            );
-            ui.separator();
-            row(
-                ui,
-                line("Energy", economy.energy, economy.energy_capacity, economy.energy_income, economy.energy_demand),
-                economy.energy == 0,
-                Color32::from_rgb(250, 220, 110),
-            );
-            if stalled {
-                ui.separator();
-                ui.colored_label(STALLED, format!("STALL: building at {}%", economy.satisfaction_permille / 10));
+            ui.spacing_mut().item_spacing.x = 6.0;
+            let (glyph, hint) = if paused { (Glyph::Resume, "[Ctrl+P] Resume\nRestart the game clock.") } else { (Glyph::Pause, "[Ctrl+P] Pause\nStop the game clock. Orders given while paused are carried out on resuming.") };
+            if glyph_button(ui, glyph, "", paused, hint).clicked() {
+                actions.push(UiAction::TogglePause);
             }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let seconds = snapshot.tick / 10;
-                ui.label(format!("{}:{:02}", seconds / 60, seconds % 60));
-                let (label, hint) = if paused { ("Resume", "Restart the game (Ctrl+P)") } else { ("Pause", "Stop the game clock. Orders given while paused are carried out on resuming (Ctrl+P)") };
-                if ui.button(label).on_hover_text(hint).clicked() {
-                    actions.push(UiAction::TogglePause);
-                }
-                if let Some(sound) = sound {
-                    ui.separator();
-                    ui.label(sound);
-                }
-            });
+            if let Some(sound) = sound {
+                hud::square_button(ui, Vec2::splat(ORDER_BUTTON), false, true, |painter, rect| hud::draw_glyph(painter, rect.shrink(2.0), Glyph::Sound)).on_hover_text(sound);
+            }
+        });
+    });
+    hud::panel(ctx, "score", Align2::RIGHT_TOP, Vec2::new(-4.0, 4.0), |ui| {
+        ui.spacing_mut().item_spacing.y = 2.0;
+        let mine = snapshot.units.iter().filter(|unit| unit.team == Team::Blue && unit.blueprint != u16::MAX).count();
+        score_header(ui, snapshot.tick, &format!("{mine} units"));
+        panel_rule(ui);
+        let (state, state_color) = team_state(snapshot.match_result, Team::Blue);
+        score_row(ui, BLUE, "Blue (you)", state, state_color);
+        let (state, state_color) = team_state(snapshot.match_result, Team::Red);
+        score_row(ui, RED, "Red (AI)", state, state_color);
+        panel_rule(ui);
+        ui.vertical_centered(|ui| {
+            ui.label(egui::RichText::new(format!("Map: {map}")).size(12.0).color(hud::DIM_TEXT));
         });
     });
 }
 
-/// The panel along the bottom: what is selected, and what it can build.
-pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb, armed: Option<ArmedOrder>, actions: &mut Vec<UiAction>) {
-    if selected.is_empty() {
+/// The height of the command bar along the bottom, in points.
+pub const COMMAND_BAR_HEIGHT: f32 = 108.0;
+/// The width of the order box at the command bar's left, for eight buttons a row.
+const ORDER_BOX_WIDTH: f32 = 8.0 * ORDER_BUTTON + 7.0 * 4.0 + 20.0;
+/// The width of the selection's details panel, above the order box.
+const INFO_WIDTH: f32 = ORDER_BOX_WIDTH - 22.0;
+
+/// The selection, grouped by kind, in the order each kind was first selected.
+pub fn selection_groups(snapshot: &SimSnapshot, selected: &[SimId]) -> Vec<(u16, Vec<SimId>)> {
+    let mut groups: Vec<(u16, Vec<SimId>)> = Vec::new();
+    for unit in selected.iter().filter_map(|id| find_unit(snapshot, *id)).filter(|unit| unit.blueprint != u16::MAX) {
+        match groups.iter_mut().find(|(blueprint, _)| *blueprint == unit.blueprint) {
+            Some((_, units)) => units.push(unit.id),
+            None => groups.push((unit.blueprint, vec![unit.id])),
+        }
+    }
+    groups
+}
+
+/// What is selected, in a panel above the order box: its symbol, name, health, what it makes and
+/// spends, and anything under way, such as an upgrade.
+fn selection_info(ui: &mut egui::Ui, snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb, menu: Option<&FactoryMenu>, actions: &mut Vec<UiAction>) {
+    let units: Vec<&UnitView> = selected.iter().filter_map(|id| find_unit(snapshot, *id)).collect();
+    let Some(first) = units.first() else {
+        return;
+    };
+    ui.set_width(INFO_WIDTH);
+    ui.spacing_mut().item_spacing.y = 3.0;
+    if first.blueprint == u16::MAX {
+        ui.label(format!("{} units selected", units.len()));
         return;
     }
-    egui::TopBottomPanel::bottom("commands").min_height(64.0).show(ctx, |ui| {
-        ui.add_space(4.0);
-        let units: Vec<&UnitView> = selected.iter().filter_map(|id| find_unit(snapshot, *id)).collect();
-        let Some(first) = units.first() else {
-            return;
-        };
-        if first.blueprint == u16::MAX {
-            ui.label(format!("{} units selected", units.len()));
-            return;
+    let unit = db.get(BlueprintId(first.blueprint));
+    let same_kind = units.iter().all(|other| other.blueprint == first.blueprint);
+    ui.horizontal(|ui| {
+        let (portrait, _) = ui.allocate_exact_size(Vec2::splat(52.0), egui::Sense::hover());
+        for shape in hud::face_shapes(portrait, false, false, true) {
+            ui.painter().add(shape);
         }
-        let summary = if units.len() == 1 {
-            let unit = db.get(BlueprintId(first.blueprint));
-            let rank = rank_of(snapshot, first.id);
-            let veteran = if rank > 0 { format!(", veteran rank {rank}") } else { String::new() };
-            let shield = shield_status(snapshot, first.id).map_or(String::new(), |status| format!(", {status}"));
-            let stock = stock_status(snapshot, first.id, db).map_or(String::new(), |status| format!(", {status}"));
-            let intel = intel_status(snapshot, first.id).map_or(String::new(), |status| format!(", {status}"));
-            let cargo = cargo_status(snapshot, first.id).map_or(String::new(), |status| format!(", {status}"));
-            format!("{}: {}% health{veteran}{shield}{stock}{intel}{cargo}", unit.name, first.health_permille / 10)
-        } else {
-            format!("{} units selected", units.len())
-        };
-        ui.horizontal(|ui| {
-            ui.strong(summary);
+        icons::draw_bar(ui.painter(), portrait.shrink(2.0), Icon::for_key(&unit.key));
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 2.0;
+            let width = ui.available_width() - if menu.is_some_and(|menu| !menu.queue.is_empty()) { 52.0 } else { 0.0 };
+            let title = match (units.len(), same_kind) {
+                (1, _) => unit.name.clone(),
+                (count, true) => format!("{} \u{d7}{count}", unit.name),
+                (count, false) => format!("{count} units"),
+            };
+            ui.label(egui::RichText::new(title).strong().size(14.0).color(hud::TEXT));
+            // Health, as a bar with the figures on it for one unit, or the average for several.
+            let permille = units.iter().map(|unit| u32::from(unit.health_permille)).sum::<u32>() / units.len() as u32;
+            let (bar, _) = ui.allocate_exact_size(Vec2::new(width.max(80.0), 13.0), egui::Sense::hover());
+            hud::meter(ui.painter(), bar, permille as f32 / 1000.0, HEALTHY);
+            let text = if units.len() == 1 {
+                let most = unit.health.to_num::<i64>();
+                format!("{} / {most}", most * i64::from(permille) / 1000)
+            } else {
+                format!("{}%", permille / 10)
+            };
+            hud::outlined_text(ui.painter(), bar.center(), Align2::CENTER_CENTER, &text, FontId::proportional(11.0), Color32::WHITE);
+            if units.len() == 1 {
+                let rank = rank_of(snapshot, first.id);
+                let mut notes: Vec<String> = Vec::new();
+                if rank > 0 {
+                    notes.push(format!("veteran rank {rank}"));
+                }
+                notes.extend(shield_status(snapshot, first.id));
+                notes.extend(stock_status(snapshot, first.id, db));
+                notes.extend(intel_status(snapshot, first.id));
+                notes.extend(cargo_status(snapshot, first.id));
+                if !notes.is_empty() {
+                    ui.label(egui::RichText::new(notes.join(", ")).size(11.0).color(hud::DIM_TEXT));
+                }
+            }
             let rates = selection_rates(snapshot, selected, db);
             if !rates.output.is_empty() {
-                ui.separator();
-                ui.colored_label(HEALTHY, rates.output);
+                ui.label(egui::RichText::new(rates.output).size(11.0).color(HEALTHY));
             }
             if !rates.spending.is_empty() {
-                ui.separator();
-                ui.colored_label(SPENDING, rates.spending);
+                ui.label(egui::RichText::new(rates.spending).size(11.0).color(SPENDING));
             }
         });
-
-        if has_mobile_units(snapshot, selected) {
-            let teleport = !teleporters(snapshot, selected, db).is_empty();
-            let offers = OrderOffers {
-                overcharge: has_overcharge(snapshot, selected, db),
-                weapons: has_weapons(snapshot, selected, db),
-                teleport,
-                capture: has_mobile_builders(snapshot, selected, db),
-                unload: !loaded_transports(snapshot, selected).is_empty(),
-            };
-            unit_order_row(ui, armed, &offers, actions);
-        }
-        if let Some(action) = cloak_action(snapshot, selected) {
-            let UiAction::SetCloak { on, .. } = &action else {
-                unreachable!("cloak_action only returns a cloak");
-            };
-            // O pauses first, when there is something to pause.
-            let key = if pause_action(snapshot, selected, db).is_none() { format!("[{}] ", hotkeys::PAUSE) } else { String::new() };
-            let label = if *on { format!("{key}Cloak") } else { format!("{key}Uncloak") };
-            let hint = "Hidden from sight and radar, except from enemies within 100 or with omni on it. Costs energy while on.";
-            if ui.button(bold_keys(&label)).on_hover_text(hint).clicked() {
-                actions.push(action);
-            }
-        }
-        if let Some(action) = pause_action(snapshot, selected, db) {
-            let UiAction::SetPaused { paused, .. } = &action else {
-                unreachable!("pause_action only returns a pause");
-            };
-            let label = if *paused { format!("[{}] Pause", hotkeys::PAUSE) } else { format!("[{}] Resume", hotkeys::PAUSE) };
-            let hint = "Stops spending and making progress, keeping the queue and what is done so far.";
-            ui.horizontal(|ui| {
-                if ui.button(bold_keys(&label)).on_hover_text(hint).clicked() {
-                    actions.push(action.clone());
+        // What the factories are making, and how far along.
+        if let Some((item, _)) = menu.and_then(|menu| menu.queue.first()) {
+            ui.vertical(|ui| {
+                let (rect, _) = ui.allocate_exact_size(Vec2::splat(44.0), egui::Sense::hover());
+                for shape in hud::face_shapes(rect, false, false, true) {
+                    ui.painter().add(shape);
                 }
-                if !*paused {
-                    ui.colored_label(Color32::YELLOW, "Paused");
-                }
+                icons::draw_bar(ui.painter(), rect.shrink(2.0), Icon::for_key(&db.get(*item).key));
+                let progress = menu.and_then(|menu| menu.progress_permille).unwrap_or(0);
+                ui.label(egui::RichText::new(format!("{}%", progress / 10)).size(12.0).color(hud::TEXT));
             });
         }
+    });
 
-        // An upgrade in place: what it costs, or how far along it is.
+    for &(id, permille) in snapshot.upgrades.iter().filter(|(id, _)| selected.contains(id)) {
+        if let Some(unit) = find_unit(snapshot, id) {
+            let into = db.get(BlueprintId(unit.blueprint)).upgrades_to.map_or("", |into| db.get(into).name.as_str());
+            ui.colored_label(UPGRADING, format!("Upgrading to {into}: {}%", permille / 10));
+        }
+    }
+    for &(id, enhancement, permille) in snapshot.enhancing.iter().filter(|(id, _, _)| selected.contains(id)) {
+        if find_unit(snapshot, id).is_some() {
+            ui.colored_label(SPENDING, format!("Enhancing: {} {}%", db.enhancement(EnhancementId(enhancement)).name, permille / 10));
+        }
+    }
+    for &(_, _, permille) in snapshot.teleports.iter().filter(|(id, _, _)| selected.contains(id)) {
+        ui.colored_label(SPENDING, format!("Teleport charging: {}%", permille / 10));
+    }
+    for &(_, ticks) in snapshot.self_destructs.iter().filter(|(id, _)| selected.contains(id)) {
+        let seconds = (i64::from(ticks) + TICKS_PER_SECOND - 1) / TICKS_PER_SECOND;
+        ui.colored_label(Color32::from_rgb(255, 90, 70), format!("Self-destruct in {seconds} s (Ctrl+K to cancel)"));
+    }
+    if selected.iter().any(|id| snapshot.paused.binary_search(id).is_ok()) {
+        ui.colored_label(Color32::YELLOW, "Paused");
+    }
+    if let Some(menu) = menu {
+        if let Some(note) = construction_note(menu.unfinished, menu.factories.len()) {
+            ui.label(egui::RichText::new(note).size(11.0).color(hud::DIM_TEXT));
+        }
+        if menu.queue.is_empty() {
+            ui.label(egui::RichText::new("Queue is empty. Right-click the ground to set a rally point.").size(11.0).color(hud::DIM_TEXT));
+        }
+    }
+    enhancement_rows(ui, snapshot, selected, db, actions);
+}
+
+/// The toggles after the orders: pause, cloak, upgrade, and a factory's repeat and clear.
+fn toggle_buttons(ui: &mut egui::Ui, snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb, menu: Option<&FactoryMenu>, actions: &mut Vec<UiAction>) {
+    let pause = pause_action(snapshot, selected, db);
+    if let Some(action) = &pause {
+        let UiAction::SetPaused { paused, .. } = action else {
+            unreachable!("pause_action only returns a pause");
+        };
+        let (glyph, name) = if *paused { (Glyph::Pause, "Pause") } else { (Glyph::Resume, "Resume") };
+        let hint = format!("[{}] {name}\nStops spending and making progress, keeping the queue and what is done so far.", hotkeys::PAUSE);
+        if glyph_button(ui, glyph, &hotkeys::PAUSE.to_string(), !*paused, &hint).clicked() {
+            actions.push(action.clone());
+        }
+    }
+    if let Some(action) = cloak_action(snapshot, selected) {
+        let UiAction::SetCloak { on, .. } = &action else {
+            unreachable!("cloak_action only returns a cloak");
+        };
+        // O pauses first, when there is something to pause.
+        let key = if pause.is_none() { hotkeys::PAUSE.to_string() } else { String::new() };
+        let name = if *on { "Cloak" } else { "Uncloak" };
+        let hint = format!("{name}\nHidden from sight and radar, except from enemies within 100 or with omni on it. Costs energy while on.");
+        if glyph_button(ui, Glyph::Cloak, &key, !*on, &hint).clicked() {
+            actions.push(action);
+        }
+    }
+    let key = hotkeys::UPGRADE.to_string();
+    if let Some((upgrade, able)) = menu.and_then(|menu| menu.upgrade.as_ref()) {
+        let menu = menu.expect("an upgrade comes from a factory menu");
+        let partial = if able.len() < menu.factories.len() { format!("{} of {} factories can build this.\n", able.len(), menu.factories.len()) } else { String::new() };
+        let hint = format!("[{key}] Upgrade to T{}\n{partial}{}", db.get(*upgrade).tier, item_details(db, *upgrade));
+        if glyph_button(ui, Glyph::Upgrade, &key, false, &hint).clicked() {
+            actions.push(queue_action(menu, able, *upgrade));
+        }
+    } else {
         let upgradable = upgradable_units(snapshot, selected, db);
         if let Some(first) = upgradable.first().and_then(|id| find_unit(snapshot, *id)) {
             let into = db.get(db.get(BlueprintId(first.blueprint)).upgrades_to.expect("only upgradable units are listed"));
-            let label = format!("[{}] Upgrade: {}\n{} mass  {} energy", hotkeys::UPGRADE, into.name, into.mass.to_num::<i64>(), into.energy.to_num::<i64>());
-            let hint = "A commander stands still while it upgrades, and a new order cancels it.";
-            if ui.button(bold_keys(&label)).on_hover_text(hint).clicked() {
+            let hint = format!(
+                "[{key}] Upgrade: {}\n{} mass  {} energy\nA commander stands still while it upgrades, and a new order cancels it.",
+                into.name,
+                into.mass.to_num::<i64>(),
+                into.energy.to_num::<i64>()
+            );
+            if glyph_button(ui, Glyph::Upgrade, &key, false, &hint).clicked() {
                 actions.push(UiAction::Upgrade { units: upgradable });
             }
         }
-        for &(id, permille) in snapshot.upgrades.iter().filter(|(id, _)| selected.contains(id)) {
-            if let Some(unit) = find_unit(snapshot, id) {
-                let into = db.get(BlueprintId(unit.blueprint)).upgrades_to.map_or("", |into| db.get(into).name.as_str());
-                ui.colored_label(SPENDING, format!("Upgrading to {into}: {}%", permille / 10));
+    }
+    if let Some(menu) = menu {
+        let mixed = if menu.repeat == RepeatState::Mixed { "\nSome of the selected factories repeat and some do not." } else { "" };
+        let hint = format!("[{}] Repeat\nBuild the queue over and over.{mixed}", hotkeys::REPEAT);
+        if glyph_button(ui, Glyph::Repeat, &hotkeys::REPEAT.to_string(), menu.repeat == RepeatState::On, &hint).clicked() {
+            actions.push(repeat_action(menu));
+        }
+        let hint = format!("[{}] Clear queue", hotkeys::CLEAR_QUEUE);
+        if glyph_button(ui, Glyph::ClearQueue, &hotkeys::CLEAR_QUEUE.to_string(), false, &hint).clicked() {
+            actions.push(clear_action(menu));
+        }
+    }
+}
+
+/// The selection's kinds, as icons with how many of each: clicking one selects only those.
+fn selection_group_bar(ui: &mut egui::Ui, snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb, actions: &mut Vec<UiAction>) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        for (blueprint, units) in selection_groups(snapshot, selected) {
+            let unit = db.get(BlueprintId(blueprint));
+            let button = hud::square_button(ui, Vec2::splat(BAR_BUTTON), false, true, |painter, rect| {
+                icons::draw_bar(painter, rect, Icon::for_key(&unit.key));
+                hud::outlined_text(painter, rect.right_bottom() + Vec2::new(-2.0, 1.0), Align2::RIGHT_BOTTOM, &units.len().to_string(), FontId::new(15.0, egui::FontFamily::Name(BOLD.into())), Color32::WHITE);
+            });
+            if button.on_hover_text(format!("{} \u{d7}{}\nClick to select only these.", unit.name, units.len())).clicked() {
+                actions.push(UiAction::QuickSelect { units, add: false });
             }
         }
+    });
+}
 
-        enhancement_rows(ui, snapshot, selected, db, actions);
-        for &(id, enhancement, permille) in snapshot.enhancing.iter().filter(|(id, _, _)| selected.contains(id)) {
-            if find_unit(snapshot, id).is_some() {
-                ui.colored_label(SPENDING, format!("Enhancing: {} {}%", db.enhancement(EnhancementId(enhancement)).name, permille / 10));
-            }
+/// The bar along the bottom: orders and toggles at the left, then what the selection can build,
+/// or what it is made of, over its queue. Above the orders, a panel says what is selected.
+pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb, armed: Option<ArmedOrder>, actions: &mut Vec<UiAction>) {
+    let menu = factory_menu(snapshot, selected, db);
+    let known = selected.iter().filter_map(|id| find_unit(snapshot, *id)).any(|unit| unit.blueprint != u16::MAX);
+    if !selected.is_empty() {
+        egui::Area::new(egui::Id::new("selection info")).anchor(Align2::LEFT_BOTTOM, Vec2::new(4.0, -(COMMAND_BAR_HEIGHT + 2.0))).show(ctx, |ui| {
+            hud::framed(ui, Vec2::new(11.0, 9.0), |ui| selection_info(ui, snapshot, selected, db, menu.as_ref(), actions));
+        });
+    }
+    egui::TopBottomPanel::bottom("commands").frame(egui::Frame::none()).show_separator_line(false).resizable(false).exact_height(COMMAND_BAR_HEIGHT).show(ctx, |ui| {
+        let full = ui.max_rect();
+        let orders = Rect::from_min_size(full.min + Vec2::new(4.0, 2.0), Vec2::new(ORDER_BOX_WIDTH, full.height() - 6.0));
+        let main = Rect::from_min_max(Pos2::new(orders.right() + 6.0, orders.top()), Pos2::new(full.right() - 4.0, orders.bottom()));
+        for shape in hud::panel_shapes(orders).into_iter().chain(hud::panel_shapes(main)) {
+            ui.painter().add(shape);
         }
-        for &(_, _, permille) in snapshot.teleports.iter().filter(|(id, _, _)| selected.contains(id)) {
-            ui.colored_label(SPENDING, format!("Teleport charging: {}%", permille / 10));
-        }
-        for &(_, ticks) in snapshot.self_destructs.iter().filter(|(id, _)| selected.contains(id)) {
-            let seconds = (i64::from(ticks) + TICKS_PER_SECOND - 1) / TICKS_PER_SECOND;
-            ui.colored_label(Color32::from_rgb(255, 90, 70), format!("Self-destruct in {seconds} s (Ctrl+K to cancel)"));
-        }
-
-        // Only one build bar is shown: a factory's, if one is selected.
-        match factory_menu(snapshot, selected, db) {
-            Some(menu) => factory_controls(ui, &menu, db, actions),
-            None => {
-                let options = builder_options(snapshot, selected, db);
-                if let Some(BarClick::Left(option)) = build_bar(ui, BUILDER_TIER_MEMORY, &options, db, |_| String::new(), |_| String::new()) {
-                    actions.push(UiAction::BeginPlacement(option));
+        ui.allocate_ui_at_rect(orders.shrink2(Vec2::new(10.0, 10.0)), |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::splat(4.0);
+                if has_mobile_units(snapshot, selected) {
+                    let offers = OrderOffers {
+                        overcharge: has_overcharge(snapshot, selected, db),
+                        weapons: has_weapons(snapshot, selected, db),
+                        teleport: !teleporters(snapshot, selected, db).is_empty(),
+                        capture: has_mobile_builders(snapshot, selected, db),
+                        unload: !loaded_transports(snapshot, selected).is_empty(),
+                    };
+                    unit_order_buttons(ui, armed, &offers, actions);
                 }
+                toggle_buttons(ui, snapshot, selected, db, menu.as_ref(), actions);
+            });
+        });
+        ui.allocate_ui_at_rect(main.shrink2(Vec2::new(10.0, 8.0)), |ui| {
+            ui.spacing_mut().item_spacing.y = 4.0;
+            if !known {
+                ui.label(egui::RichText::new(if selected.is_empty() { "Nothing selected" } else { "Selected units out of sight" }).color(hud::DIM_TEXT));
+                return;
             }
-        }
-
-        // Anything that can have a queue always shows the row, so the panel never changes height.
-        let chips = queue_chips(snapshot, selected, db);
-        let queues = factory_menu(snapshot, selected, db).is_some() || !builder_options(snapshot, selected, db).is_empty();
-        if queues || !chips.is_empty() {
-            queue_chip_row(ui, &chips, actions);
-        }
+            // One bar: a factory's, if one is selected, else the builders', else the selection.
+            let options = builder_options(snapshot, selected, db);
+            match &menu {
+                Some(menu) => factory_controls(ui, menu, db, actions),
+                None if !options.is_empty() => {
+                    if let Some(BarClick::Left(option)) = build_bar(ui, BUILDER_TIER_MEMORY, &options, db, |_| String::new(), |_| String::new()) {
+                        actions.push(UiAction::BeginPlacement(option));
+                    }
+                }
+                None => selection_group_bar(ui, snapshot, selected, db, actions),
+            }
+            let chips = queue_chips(snapshot, selected, db);
+            if menu.is_some() || !options.is_empty() || !chips.is_empty() {
+                queue_chip_row(ui, &chips, db, actions);
+            }
+        });
     });
 }
 
@@ -1808,36 +2112,6 @@ fn factory_controls(ui: &mut egui::Ui, menu: &FactoryMenu, db: &BlueprintDb, act
         Some(BarClick::Right(option)) if missile(option) => actions.push(auto_build_action(menu, able(option), option)),
         _ => {}
     }
-    ui.horizontal(|ui| {
-        if let Some((upgrade, able)) = &menu.upgrade {
-            let label = format!("[{}] Upgrade to T{}", hotkeys::UPGRADE, db.get(*upgrade).tier);
-            let hint = format!("{}{}", partial(able.len()), item_details(db, *upgrade));
-            if ui.button(bold_keys(&label)).on_hover_text(hint).clicked() {
-                actions.push(queue_action(menu, able, *upgrade));
-            }
-        }
-        let mut repeat = menu.repeat == RepeatState::On;
-        let checkbox = egui::Checkbox::new(&mut repeat, bold_keys(&format!("[{}] Repeat", hotkeys::REPEAT))).indeterminate(menu.repeat == RepeatState::Mixed);
-        if ui.add(checkbox).clicked() {
-            actions.push(repeat_action(menu));
-        }
-        if ui.button(bold_keys(&format!("[{}] Clear queue", hotkeys::CLEAR_QUEUE))).clicked() {
-            actions.push(clear_action(menu));
-        }
-        if total > 1 {
-            ui.label(format!("{total} factories:"));
-        }
-        if menu.queue.is_empty() {
-            ui.label("Queue is empty. Right-click the ground to set a rally point.");
-        } else {
-            if let Some(progress) = menu.progress_permille {
-                ui.add(egui::ProgressBar::new(f32::from(progress) / 1000.0).desired_width(100.0));
-            }
-        }
-    });
-    if let Some(note) = construction_note(menu.unfinished, total) {
-        ui.label(note);
-    }
 }
 
 pub fn match_end_window(ctx: &egui::Context, result: MatchResult, player: Team, actions: &mut Vec<UiAction>) {
@@ -1908,65 +2182,74 @@ fn view_name(view: Option<Team>) -> &'static str {
 /// bottom, whose sight to see through, how fast to play, and pause.
 pub fn watch_bar(ctx: &egui::Context, snapshot: &SimSnapshot, state: &WatchState, actions: &mut Vec<UiAction>) {
     if state.paused {
-        egui::Area::new(egui::Id::new("paused")).anchor(Align2::CENTER_TOP, Vec2::new(0.0, 80.0)).interactable(false).show(ctx, |ui| {
-            ui.label(egui::RichText::new("PAUSED").size(32.0).strong().color(Color32::from_rgb(255, 230, 140)));
+        paused_banner(ctx);
+    }
+    let team_name = |team: Team| if team == Team::Blue { "Blue" } else { "Red" };
+    let team_text = |team: Team| if team == Team::Blue { BLUE_TEXT } else { RED_TEXT };
+    // The economies at the top left: both, or the one seen through.
+    let economies: Vec<(Team, &EconomyView)> = match (state.view, &snapshot.team_economies) {
+        (None, Some(economies)) => vec![(Team::Blue, &economies[0]), (Team::Red, &economies[1])],
+        (Some(team), _) => vec![(team, &snapshot.economy)],
+        // The first snapshot from another view has not come yet.
+        (None, None) => Vec::new(),
+    };
+    if !economies.is_empty() {
+        hud::panel(ctx, "economy", Align2::LEFT_TOP, Vec2::new(4.0, 4.0), |ui| {
+            for (team, economy) in &economies {
+                economy_rows(ui, economy, Some((team_name(*team), team_text(*team))));
+            }
         });
     }
-    egui::TopBottomPanel::top("watch").show(ctx, |ui| {
+    hud::panel(ctx, "watch controls", Align2::CENTER_TOP, Vec2::new(0.0, 4.0), |ui| {
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(format!("Watching {}, seed {}", state.map, state.seed)).strong());
-            let team_line = |ui: &mut egui::Ui, team: Team, economy: &EconomyView, units: Option<usize>| {
-                ui.separator();
-                let color = if team == Team::Blue { BLUE_TEXT } else { RED_TEXT };
-                let name = if team == Team::Blue { "Blue" } else { "Red" };
-                let mut text = format!("{name}   Mass {} +{}/s   Energy {} +{}/s", economy.mass, economy.mass_income, economy.energy, economy.energy_income);
-                if let Some(units) = units {
-                    text.push_str(&format!("   {units} units"));
-                }
-                ui.colored_label(color, text);
-            };
-            let mobile = |team: Team| snapshot.units.iter().filter(|unit| unit.team == team && !unit.is_structure).count();
-            match (state.view, &snapshot.team_economies) {
-                (None, Some(economies)) => {
-                    team_line(ui, Team::Blue, &economies[0], Some(mobile(Team::Blue)));
-                    team_line(ui, Team::Red, &economies[1], Some(mobile(Team::Red)));
-                }
-                (Some(team), _) => team_line(ui, team, &snapshot.economy, Some(mobile(team))),
-                // The first snapshot from another view has not come yet.
-                (None, None) => {}
+            ui.spacing_mut().item_spacing.x = 4.0;
+            let (glyph, hint) = if state.paused { (Glyph::Resume, "[Space] Resume") } else { (Glyph::Pause, "[Space] Pause") };
+            if glyph_button(ui, glyph, "", state.paused, hint).clicked() {
+                actions.push(UiAction::TogglePause);
             }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let seconds = snapshot.tick / 10;
-                ui.label(format!("{}:{:02}", seconds / 60, seconds % 60));
-            });
-        });
-    });
-    egui::TopBottomPanel::bottom("watch controls").show(ctx, |ui| {
-        ui.horizontal_wrapped(|ui| {
+            ui.add_space(6.0);
             ui.label(bold_keys("See [V]"));
             for view in WATCH_VIEWS {
                 let hint = match view {
                     None => "Everything on the map, with no fog of war, and both teams' economies.".to_string(),
-                    Some(team) => format!("Only what {} sees, with its fog of war and economy, as if playing as {}.", view_name(view), if team == Team::Blue { "Blue" } else { "Red" }),
+                    Some(team) => format!("Only what {} sees, with its fog of war and economy, as if playing as {}.", view_name(view), team_name(team)),
                 };
                 if ui.selectable_label(state.view == view, view_name(view)).on_hover_text(hint).clicked() && state.view != view {
                     actions.push(UiAction::SetView(view));
                 }
             }
-            ui.separator();
+            ui.add_space(6.0);
             ui.label(bold_keys("Speed [-] [=]"));
             for speed in WATCH_SPEEDS {
                 if ui.selectable_label(state.speed == speed, format!("{speed}x")).on_hover_text(format!("{speed} seconds of the match each second")).clicked() && state.speed != speed {
                     actions.push(UiAction::SetSpeed(speed));
                 }
             }
-            ui.separator();
-            let label = if state.paused { "[Space] Resume" } else { "[Space] Pause" };
-            if ui.button(bold_keys(label)).clicked() {
-                actions.push(UiAction::TogglePause);
-            }
-            ui.separator();
-            ui.label("The match the soak plays for this map and seed, which plays out the same every time.");
+        });
+    });
+    hud::panel(ctx, "score", Align2::RIGHT_TOP, Vec2::new(-4.0, 4.0), |ui| {
+        ui.spacing_mut().item_spacing.y = 2.0;
+        score_header(ui, snapshot.tick, &format!("{}x", state.speed));
+        panel_rule(ui);
+        let units = |team: Team| snapshot.units.iter().filter(|unit| unit.team == team && unit.blueprint != u16::MAX).count();
+        for team in [Team::Blue, Team::Red] {
+            let economy = match (&snapshot.team_economies, state.view) {
+                (Some(economies), None) => Some(&economies[team as usize]),
+                (_, Some(seen)) if seen == team => Some(&snapshot.economy),
+                _ => None,
+            };
+            let (playing, _) = team_state(snapshot.match_result, team);
+            let detail = match economy {
+                Some(economy) => format!("{} units   +{} mass   {playing}", units(team), economy.mass_income),
+                None => playing.to_string(),
+            };
+            score_row(ui, team_color(team), &format!("{} (AI)", team_name(team)), &detail, hud::TEXT);
+        }
+        panel_rule(ui);
+        ui.label(egui::RichText::new("Observer").strong().color(Color32::from_rgb(255, 170, 60)));
+        ui.vertical_centered(|ui| {
+            ui.label(egui::RichText::new(format!("Map: {}   seed {}", state.map, state.seed)).size(12.0).color(hud::DIM_TEXT))
+                .on_hover_text("The match the soak plays for this map and seed, which plays out the same every time.");
         });
     });
 }
@@ -2006,7 +2289,7 @@ pub fn watch_end_window(ctx: &egui::Context, result: Option<MatchResult>, stoppe
 /// A small floating reminder that the next click will attack-move.
 pub fn armed_order_hint(ctx: &egui::Context, order: ArmedOrder) {
     egui::Area::new(egui::Id::new("armed order hint"))
-        .anchor(Align2::CENTER_TOP, Vec2::new(0.0, 36.0))
+        .anchor(Align2::CENTER_TOP, Vec2::new(0.0, 62.0))
         .interactable(false)
         .show(ctx, |ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
@@ -2083,7 +2366,7 @@ pub fn order_feedback(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsh
         let remaining = (1.0 - label.age / LABEL_SECONDS) as f32;
         let color = marker_color(label.kind).gamma_multiply((remaining * 3.0).min(1.0));
         egui::Area::new(egui::Id::new("order feedback"))
-            .anchor(Align2::CENTER_TOP, Vec2::new(0.0, 80.0))
+            .anchor(Align2::CENTER_TOP, Vec2::new(0.0, 100.0))
             .interactable(false)
             .show(ctx, |ui| {
                 egui::Frame::popup(ui.style()).multiply_with_opacity((remaining * 3.0).min(1.0)).show(ui, |ui| {
@@ -2374,7 +2657,7 @@ pub fn draw_sensor_coverage(ctx: &egui::Context, camera: &Camera, heights: &crat
 pub fn placement_ranges(unit: &crate::sim::blueprints::Blueprint) -> Vec<(&'static str, f64, Color32)> {
     let world = |value: Fp| value.to_num::<f64>();
     let mut ranges = Vec::new();
-    let weapon = Color32::from_rgb(255, 110, 90);
+    let weapon = Color32::from_rgb(255, 212, 72);
     // Each weapon by what it shoots at: ground, aircraft, or ships.
     let kind = |gun: &crate::sim::blueprints::WeaponDef| match gun.targets {
         crate::sim::blueprints::Targets::Air => ("Anti-air", Color32::from_rgb(110, 200, 255)),
@@ -2386,7 +2669,7 @@ pub fn placement_ranges(unit: &crate::sim::blueprints::Blueprint) -> Vec<(&'stat
         let (name, color) = kind(gun);
         ranges.push((name, world(gun.range), color));
         if gun.min_range > Fp::ZERO {
-            ranges.push(("Too close to hit", world(gun.min_range), weapon.gamma_multiply(0.6)));
+            ranges.push(("Too close to hit", world(gun.min_range), Color32::from_rgb(255, 96, 84)));
         }
     }
     for gun in &unit.extra_weapons {
@@ -2421,20 +2704,113 @@ pub fn draw_placement_ranges(ctx: &egui::Context, camera: &Camera, heights: &cra
 /// The most selected units whose ranges are drawn, so that a whole army does not bury the map.
 const MOST_RANGES_SHOWN: usize = 60;
 
+/// A circle on the ground: its center and radius, in world units.
+type Circle = ([f64; 2], f64);
+
 /// Rings for the ranges of what is selected, mobile units and structures alike: weapons,
-/// anti-air, torpedoes, shields, missile defense, radar, sonar, omni, and stealth. Each kind of
-/// unit is labelled once, on the first of them, so a selected group is not a wall of text.
+/// anti-air, torpedoes, shields, missile defense, radar, sonar, omni, and stealth. Rings of the
+/// same kind merge into one outline around the group, so a selected army shows where it reaches
+/// rather than a tangle of circles. Each kind is labelled once, up close.
 pub fn draw_selection_ranges(ctx: &egui::Context, camera: &Camera, heights: &crate::render::camera::HeightField, snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb, pixels_per_point: f32) {
-    let mut labelled: Vec<u16> = Vec::new();
+    let mut kinds: Vec<(&'static str, Color32, Vec<Circle>)> = Vec::new();
     for unit in selected.iter().filter_map(|id| find_unit(snapshot, *id)).filter(|unit| unit.blueprint != u16::MAX).take(MOST_RANGES_SHOWN) {
-        let ranges = placement_ranges(db.get(BlueprintId(unit.blueprint)));
-        if ranges.is_empty() {
-            continue;
-        }
-        let label = !labelled.contains(&unit.blueprint);
-        labelled.push(unit.blueprint);
         let center = [f64::from(unit.x) / 4096.0, f64::from(unit.y) / 4096.0];
-        draw_range_rings(ctx, camera, heights, center, &ranges, label, pixels_per_point);
+        for (name, radius, color) in placement_ranges(db.get(BlueprintId(unit.blueprint))) {
+            match kinds.iter_mut().find(|(existing, shade, _)| *existing == name && *shade == color) {
+                Some((_, _, circles)) => circles.push((center, radius)),
+                None => kinds.push((name, color, vec![(center, radius)])),
+            }
+        }
+    }
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    let to_points = |point: [f64; 2]| {
+        let world = [point[0], point[1], heights.height_at(point[0], point[1]) + 1.5];
+        camera.world_to_screen(world).map(|pixels| Pos2::new(pixels[0] as f32 / pixels_per_point, pixels[1] as f32 / pixels_per_point))
+    };
+    let labels = camera.altitude() < ICON_ALTITUDE;
+    for (name, color, circles) in &kinds {
+        for [from, to] in coverage_outline(circles) {
+            if let (Some(from), Some(to)) = (to_points(from), to_points(to)) {
+                painter.line_segment([from, to], Stroke::new(3.5_f32, Color32::BLACK.gamma_multiply(0.35)));
+                painter.line_segment([from, to], Stroke::new(1.8_f32, *color));
+            }
+        }
+        // On the ring's far side from the camera, where it is least in the way.
+        let &(center, radius) = circles.iter().max_by(|a, b| (a.0[1] + a.1).total_cmp(&(b.0[1] + b.1))).expect("a kind has a ring");
+        if let Some(top) = to_points([center[0], center[1] + radius]).filter(|_| labels) {
+            painter.text(top + Vec2::new(0.0, -3.0), Align2::CENTER_BOTTOM, format!("{name} {}", radius.round() as i64), FontId::proportional(12.0), *color);
+        }
+    }
+}
+
+/// Off the map, a floor of dark panels with a few lights, fading in as the camera pulls out; and
+/// along the map's edge, a glowing rim, so that the map reads as a lit table.
+pub fn draw_map_frame(ctx: &egui::Context, camera: &Camera, heights: &crate::render::camera::HeightField, pixels_per_point: f32) {
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    let size = (heights.samples() - 1) as f64 * heights.cell_units();
+    let to_points = |x: f64, y: f64, z: f64| camera.world_to_screen([x, y, z]).map(|pixels| Pos2::new(pixels[0] as f32 / pixels_per_point, pixels[1] as f32 / pixels_per_point));
+    let screen = ctx.screen_rect();
+
+    let floor = ((camera.zoom_from_closest() - 0.3) / 0.2).clamp(0.0, 1.0) as f32;
+    if floor > 0.0 {
+        const TILES: i32 = 10;
+        const RING: i32 = 7;
+        let tile = size / f64::from(TILES);
+        let floor_height = -40.0;
+        for ty in -RING..TILES + RING {
+            for tx in -RING..TILES + RING {
+                if (0..TILES).contains(&tx) && (0..TILES).contains(&ty) {
+                    continue;
+                }
+                let inset = tile * 0.035;
+                let (x0, y0) = (f64::from(tx) * tile + inset, f64::from(ty) * tile + inset);
+                let (x1, y1) = (x0 + tile - 2.0 * inset, y0 + tile - 2.0 * inset);
+                let corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)].map(|(x, y)| to_points(x, y, floor_height));
+                let Some(corners) = corners.into_iter().collect::<Option<Vec<Pos2>>>() else {
+                    continue;
+                };
+                let bounds = Rect::from_points(&corners);
+                if !bounds.intersects(screen) {
+                    continue;
+                }
+                // Every panel the same, but for a few with lights or a recess, picked from where
+                // the panel is so that they stay put.
+                let hash = (tx.wrapping_mul(73_856_093) ^ ty.wrapping_mul(19_349_663)).unsigned_abs();
+                let fill = if hash % 7 == 0 { Color32::from_rgb(10, 12, 15) } else { Color32::from_rgb(17, 20, 25) };
+                painter.add(egui::Shape::convex_polygon(corners.clone(), fill.gamma_multiply(floor), Stroke::new(1.0_f32, Color32::from_rgb(30, 36, 44).gamma_multiply(floor))));
+                if hash % 5 == 0 || hash % 11 == 0 {
+                    // A pair of small lights along one side.
+                    let along = |share: f32, lift: f32| corners[0] + (corners[1] - corners[0]) * share + (corners[3] - corners[0]) * lift;
+                    let lift = if hash % 2 == 0 { 0.18 } else { 0.82 };
+                    for start in [0.36_f32, 0.52] {
+                        painter.line_segment([along(start, lift), along(start + 0.1, lift)], Stroke::new(3.0_f32, Color32::from_rgb(120, 190, 230).gamma_multiply(0.55 * floor)));
+                    }
+                }
+            }
+        }
+    }
+
+    // The rim: wide and faint, then narrower and brighter, with a white core.
+    const PER_EDGE: usize = 48;
+    let mut rim: Vec<Option<Pos2>> = Vec::with_capacity(PER_EDGE * 4 + 1);
+    let corners = [(0.0, 0.0), (size, 0.0), (size, size), (0.0, size)];
+    for edge in 0..4 {
+        let (from, to) = (corners[edge], corners[(edge + 1) % 4]);
+        for step in 0..PER_EDGE {
+            let share = step as f64 / PER_EDGE as f64;
+            let (x, y) = (from.0 + (to.0 - from.0) * share, from.1 + (to.1 - from.1) * share);
+            rim.push(to_points(x, y, heights.height_at(x, y) + 2.0));
+        }
+    }
+    rim.push(rim[0]);
+    let glow = Color32::from_rgb(150, 222, 255);
+    for (width, strength) in [(22.0_f32, 0.07_f32), (11.0, 0.16), (5.5, 0.5), (2.4, 0.0)] {
+        let color = if strength == 0.0 { Color32::from_rgb(230, 248, 255) } else { glow.gamma_multiply(strength) };
+        for pair in rim.windows(2) {
+            if let [Some(from), Some(to)] = pair {
+                painter.line_segment([*from, *to], Stroke::new(width, color));
+            }
+        }
     }
 }
 
@@ -2684,7 +3060,7 @@ pub fn placement_grid(ctx: &egui::Context, camera: &Camera, lines: &[([f64; 3], 
 /// A small floating reminder of the placement in progress.
 pub fn placement_hint(ctx: &egui::Context, db: &BlueprintDb, blueprint: BlueprintId) {
     egui::Area::new(egui::Id::new("placement hint"))
-        .anchor(Align2::CENTER_TOP, Vec2::new(0.0, 36.0))
+        .anchor(Align2::CENTER_TOP, Vec2::new(0.0, 62.0))
         .interactable(false)
         .show(ctx, |ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
@@ -2811,8 +3187,8 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
     }
     if show_icons {
         painter.text(
-            Pos2::new(8.0, viewport.bottom() - 8.0),
-            Align2::LEFT_BOTTOM,
+            Pos2::new(viewport.right() - 8.0, viewport.bottom() - COMMAND_BAR_HEIGHT - 6.0),
+            Align2::RIGHT_BOTTOM,
             format!("{} visible units", snapshot.units.len()),
             FontId::proportional(12.0),
             Color32::from_white_alpha(120),
@@ -3485,16 +3861,17 @@ mod tests {
     fn click_first_chip(button: egui::PointerButton) -> (Vec<UiAction>, bool) {
         let ctx = egui::Context::default();
         install_fonts(&ctx);
-        let chips = [QueueChip { label: "1. Mass Extractor".to_string(), remove: UiAction::Restart }];
-        // Past the "Queue:" label, on the first chip.
-        let at = egui::pos2(100.0, 16.0);
+        let db = BlueprintDb::standard();
+        let chips = [QueueChip { label: "1. Mass Extractor".to_string(), icon: ChipIcon::Item(db.id("mass_extractor")), count: 1, progress: None, remove: UiAction::Restart }];
+        // On the first chip, which starts the row.
+        let at = egui::pos2(24.0, 24.0);
         let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
         let input = |events: Vec<egui::Event>| egui::RawInput { screen_rect: Some(screen), events, ..egui::RawInput::default() };
         let press = |pressed: bool| egui::Event::PointerButton { pos: at, button, pressed, modifiers: egui::Modifiers::NONE };
         let mut actions = Vec::new();
         let mut run = |events: Vec<egui::Event>| {
             let _ = ctx.run(input(events), |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| queue_chip_row(ui, &chips, &mut actions));
+                egui::CentralPanel::default().show(ctx, |ui| queue_chip_row(ui, &chips, &db, &mut actions));
             });
         };
         run(vec![]);
@@ -3505,6 +3882,53 @@ mod tests {
         run(vec![press(false)]);
         run(vec![]);
         (actions, over_panel)
+    }
+
+    #[test]
+    fn the_clock_reads_hours_minutes_and_seconds() {
+        assert_eq!(clock_text(0), "00:00:00");
+        assert_eq!(clock_text(3_090), "00:05:09");
+        assert_eq!(clock_text(37_250), "01:02:05");
+    }
+
+    #[test]
+    fn the_selection_is_grouped_by_kind_in_the_order_first_selected() {
+        let db = BlueprintDb::standard();
+        let mut current = commander_and_engineer(&db);
+        let mut second_bot = unit(13, 0.0);
+        second_bot.blueprint = db.id("t1_light_bot").0;
+        current.units.push(second_bot);
+        let groups = selection_groups(&current, &[SimId(12), SimId(10), SimId(13), SimId(99)]);
+        let bot = db.id("t1_light_bot").0;
+        assert_eq!(groups, [(bot, vec![SimId(12), SimId(13)]), (db.id("acu").0, vec![SimId(10)])], "unknown units are left out");
+    }
+
+    #[test]
+    fn vision_is_washed_pale_more_strongly_zoomed_out() {
+        use crate::render::pipeline::strategic_share;
+        assert_eq!(strategic_share(0.0), 0.35, "up close, a third as strong, so the ground keeps most of its color");
+        assert_eq!(strategic_share(0.2), 0.35);
+        assert_eq!(strategic_share(1.0), 1.0);
+        let steps: Vec<f32> = (0..=20).map(|step| strategic_share(f64::from(step) / 20.0)).collect();
+        assert!(steps.windows(2).all(|pair| pair[0] <= pair[1]), "it only grows as the camera pulls out");
+    }
+
+    /// Clicks the first order button through real egui input.
+    #[test]
+    fn clicking_an_order_button_arms_it_and_the_armed_order_stays_lit() {
+        let ctx = egui::Context::default();
+        install_fonts(&ctx);
+        let offers = OrderOffers { overcharge: false, weapons: true, teleport: false, capture: false, unload: false };
+        let at = egui::pos2(8.0 + ORDER_BUTTON / 2.0, 8.0 + ORDER_BUTTON / 2.0);
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
+        let mut actions = Vec::new();
+        for events in [vec![], vec![egui::Event::PointerMoved(at)], vec![egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE }], vec![egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE }]] {
+            let input = egui::RawInput { screen_rect: Some(screen), events, ..egui::RawInput::default() };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| ui.horizontal(|ui| unit_order_buttons(ui, Some(ArmedOrder::Patrol), &offers, &mut actions)));
+            });
+        }
+        assert_eq!(actions, [UiAction::Arm(ArmedOrder::Move)]);
     }
 
     #[test]
@@ -3685,9 +4109,11 @@ mod tests {
             actions
         }
 
-        /// Row 0 is the ACU, row 1 the factory kind, and rows 2 and 3 its tiers.
+        /// Row 0 is the ACU, row 1 the factory kind, and rows 2 and 3 its tiers: two big squares,
+        /// then two short buttons, each 4 points apart, inside the panel's 8 point margin.
         fn click(&mut self, row: usize, modifiers: egui::Modifiers) -> Vec<UiAction> {
-            let at = egui::pos2(70.0, 20.0 + row as f32 * 27.0);
+            let middles = [32.0, 84.0, 124.0, 152.0];
+            let at = egui::pos2(32.0, middles[row]);
             let press = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers };
             let mut actions = self.frame(vec![egui::Event::PointerMoved(at)], modifiers);
             actions.extend(self.frame(vec![press(true)], modifiers));
@@ -3855,7 +4281,8 @@ mod tests {
         let click = |row: usize, modifiers: egui::Modifiers| {
             let ctx = egui::Context::default();
         install_fonts(&ctx);
-            let at = egui::pos2(70.0, 20.0 + row as f32 * 27.0);
+            // The squares sit side by side, 46 points wide and 4 apart.
+            let at = egui::pos2(31.0 + row as f32 * 50.0, 36.0);
             let press = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers };
             let mut actions = Vec::new();
             for events in [vec![], vec![egui::Event::PointerMoved(at)], vec![press(true)], vec![press(false)], vec![]] {
@@ -3918,8 +4345,8 @@ mod tests {
         let click = |modifiers: egui::Modifiers| {
             let ctx = egui::Context::default();
         install_fonts(&ctx);
-            // Just past the T1, T2, and T3 toggles, on the first item of the bar.
-            let at = egui::pos2(150.0, 15.0);
+            // Just past the stacked T1, T2, and T3 toggles, on the first item of the bar.
+            let at = egui::pos2(62.0, 31.0);
             let press = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers };
             let mut actions = Vec::new();
             for events in [vec![], vec![egui::Event::PointerMoved(at)], vec![press(true)], vec![press(false)], vec![]] {

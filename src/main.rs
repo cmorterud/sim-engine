@@ -1496,6 +1496,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                         }
                         let output = egui_context.run(raw_input, |ctx| {
                             ui::release_keyboard_focus(ctx);
+                            ui::draw_map_frame(ctx, &camera, &map.heights, pixels_per_point);
                             ui::placement_grid(ctx, &camera, &grid_lines, f64::from(TERRAIN_CELL_UNITS), pixels_per_point);
                             ui::deposit_highlights(ctx, &camera, &open_deposits, snapped_deposit, pixels_per_point);
                             ui::pending_build_outlines(ctx, &camera, &pending, pixels_per_point);
@@ -1548,7 +1549,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                             } else if is_match {
                                 ui::world_overlay(ctx, &camera, &snapshot, &selected, &map.blueprints, pixels_per_point);
                                 let sound_label = sound.as_ref().map(|_| sound_settings.label());
-                                ui::resource_bar(ctx, &snapshot, sound_label.as_deref(), game_paused, &mut actions);
+                                ui::resource_bar(ctx, &snapshot, &map_name, sound_label.as_deref(), game_paused, &mut actions);
                                 ui::commander_alert(ctx, attack_alarm.alert_strength());
                                 ui::control_group_bar(ctx, &group_rows, &snapshot, PLAYER_TEAM, &map.blueprints, &selected, &mut actions);
                                 ui::quick_select_bar(ctx, &snapshot, PLAYER_TEAM, &map.blueprints, &selected, camera.focus(), &mut quick_select, &mut actions);
