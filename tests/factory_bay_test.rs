@@ -128,3 +128,18 @@ fn anyone_who_sees_a_factory_sees_what_it_is_building_and_how_far_along() {
     world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: id(&world, "land_factory_t2"), count: 1 }]);
     assert_eq!(assembling(&world), None);
 }
+
+#[test]
+fn anyone_who_sees_a_factory_sees_it_upgrading_and_how_far_along() {
+    let mut world = test_world();
+    let factory = world.spawn_finished_structure(id(&world, "land_factory_t1"), Team::Blue, 50, 50).unwrap();
+    let t2 = id(&world, "land_factory_t2");
+    world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: t2, count: 1 }]);
+    let upgrade = |world: &SimWorld| world.snapshot_for(Some(Team::Red)).units.iter().find(|unit| unit.id == factory).and_then(|unit| unit.upgrade);
+    let early = upgrade(&world).expect("the upgrade shows");
+    assert_eq!(early.0, t2.0);
+    for _ in 0..100 {
+        world.advance_tick(&[]);
+    }
+    assert!(upgrade(&world).expect("still upgrading").1 > early.1, "and how far along it is");
+}

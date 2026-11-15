@@ -517,6 +517,26 @@ pub fn build_unit_instances(
                 let frame = [center[0], center[1], ground + f64::from(full) * 0.5];
                 out.push(Shape::Scaffold, painted(frame, [size * 1.04, size * 1.04, full], NORTH, color, hull, glow, NO_ICON, eye));
             }
+            // An upgrade shows the next tier going up through the structure as it progresses,
+            // unlit, inside scaffolding as tall as it will be.
+            if let (Some((into, permille)), true) = (unit.upgrade, unit.built_permille >= 1000) {
+                if let Some(next) = looks.get(usize::from(into)) {
+                    let progress = f32::from(permille) / 1000.0;
+                    let ground = center[2] - f64::from(height) * 0.5;
+                    let full = size * next.height_share;
+                    let rising = full * (0.1 + 0.9 * progress);
+                    let at = [center[0], center[1], ground + f64::from(rising) * 0.5];
+                    let next_hull = armor(color, next.tint).map(|channel| channel * (0.6 + 0.4 * progress));
+                    let next_trim = color.map(|channel| channel * (0.6 + 0.4 * progress));
+                    let grown = size * 1.02;
+                    if let Some(base) = next.base {
+                        out.push(base, painted(at, [grown, grown, rising], NORTH, next_trim, next_hull, next_hull, NO_ICON, eye));
+                    }
+                    out.push(next.shape, painted(at, [grown, grown, rising], NORTH, next_trim, next_hull, next_hull, NO_ICON, eye));
+                    let frame = [center[0], center[1], ground + f64::from(full) * 0.5];
+                    out.push(Shape::Scaffold, painted(frame, [size * 1.06, size * 1.06, full], NORTH, color, hull, hull, NO_ICON, eye));
+                }
+            }
             // What a factory is building stands in its bay, rising from the floor as it is built,
             // in its team's colors but unlit and dim, until it drives or flies out.
             if let (Some((item, permille)), Some(floor), true) = (unit.assembling, shape.bay_floor(), unit.built_permille >= 1000) {
@@ -661,6 +681,7 @@ mod tests {
             facing: [0, 0], aim: [0, 0],
             working: false,
             assembling: None,
+            upgrade: None,
         }
     }
 
@@ -878,6 +899,28 @@ mod tests {
         assert_eq!(frames.len(), 1);
         let site_height = out.shape(Shape::Generator)[0].model_matrix[2][2];
         assert!(frames[0].model_matrix[2][2] > site_height, "the scaffold is as tall as the finished building");
+    }
+
+    /// A structure's upgrade shows the next tier rising through it as the upgrade goes on.
+    #[test]
+    fn an_upgrade_shows_the_next_tier_rising_through_the_structure() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let mut factory = unit(1, 0);
+        factory.blueprint = db.id("land_factory_t1").0;
+        factory.is_structure = true;
+        factory.radius = 40 << 12;
+        let into = db.id("land_factory_t2").0;
+        let heights = |factory: UnitView| {
+            let mut out = InstanceBatches::default();
+            build_unit_instances(&[], &[factory], 0.0, [0.0; 3], &[], &looks, &[], &mut Motion::new(), &mut out);
+            out.shape(Shape::FactoryT2).iter().map(|instance| instance.model_matrix[2][2]).collect::<Vec<f32>>()
+        };
+        assert!(heights(factory).is_empty(), "no upgrade, no T2 shape");
+        let early = heights(UnitView { upgrade: Some((into, 100)), ..factory });
+        let late = heights(UnitView { upgrade: Some((into, 900)), ..factory });
+        assert_eq!((early.len(), late.len()), (1, 1));
+        assert!(late[0] > early[0], "it rises as the upgrade goes on");
     }
 
     /// What a factory is building stands in its bay, rising as it is built, but not in a

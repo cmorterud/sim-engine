@@ -16,7 +16,8 @@ use super::camera::{Camera, HeightField};
 use super::instances::{InstanceBatches, UnitInstanceRaw};
 use super::meshes::{MeshSet, MeshVertex, Shape};
 
-const TERRAIN_GRID_SIZE: u32 = 512;
+/// The most terrain samples a side the grid holds: enough for a 20 km map at full detail.
+const MAX_TERRAIN_GRID: u32 = 1025;
 /// Samples per pixel, for smooth edges, where the graphics adapter supports it.
 const MSAA_SAMPLES: u32 = 4;
 const BACKGROUND: wgpu::Color = wgpu::Color { r: 0.015, g: 0.02, b: 0.035, a: 1.0 };
@@ -40,8 +41,7 @@ struct Globals {
     water: [f32; 4],
 }
 
-fn terrain_indices() -> Vec<u32> {
-    let size = TERRAIN_GRID_SIZE;
+fn terrain_indices(size: u32) -> Vec<u32> {
     let mut indices = Vec::with_capacity(((size - 1) * (size - 1) * 6) as usize);
     for y in 0..size - 1 {
         for x in 0..size - 1 {
@@ -128,6 +128,8 @@ pub struct Renderer {
     flat_instances: Vec<UnitInstanceRaw>,
     shape_instances: Vec<std::ops::Range<u32>>,
     samples_per_side: i32,
+    /// Samples a side in the terrain grid: the whole map, unless it is larger than the grid.
+    grid_size: u32,
     cell_units: f64,
     height_scale: f32,
     /// Ground below this height is drawn as water.
@@ -641,7 +643,11 @@ impl Renderer {
             contents: bytemuck::cast_slice(&meshes.indices),
             usage: wgpu::BufferUsages::INDEX,
         });
-        let grid_indices = terrain_indices();
+        // As many samples a side as the map has, so that the ground, and the shore where the
+        // water meets it, is drawn at full detail at every zoom. A coarser grid zoomed out drew
+        // a curving coast as straight lines, which changed shape as the camera came down.
+        let grid_size = (heights.samples() as u32).clamp(2, MAX_TERRAIN_GRID);
+        let grid_indices = terrain_indices(grid_size);
         let terrain_index_buffer = device.create_buffer_init(&BufferInitDescriptor {
             label: Some("terrain indices"),
             contents: bytemuck::cast_slice(&grid_indices),
@@ -677,6 +683,7 @@ impl Renderer {
             flat_instances: Vec::new(),
             shape_instances: Vec::with_capacity(Shape::COUNT),
             samples_per_side: heights.samples() as i32,
+            grid_size,
             cell_units: heights.cell_units(),
             height_scale: heights.units_per_step() as f32,
             water_level: -1.0e6,
@@ -757,17 +764,22 @@ impl Renderer {
         let eye = camera.eye();
         let viewport = camera.viewport();
 
-        // The grid's spacing doubles with altitude, and its first sample snaps to that
-        // spacing so that hills do not shimmer as the camera moves.
-        let cells = f64::from(TERRAIN_GRID_SIZE - 1);
-        let wanted_reach = camera.altitude() * 16.0;
-        let wanted_step = (wanted_reach / (cells * self.cell_units)).ceil().max(1.0) as i32;
-        let step = (wanted_step as u32).next_power_of_two().min((self.samples_per_side - 1).max(1) as u32) as i32;
-        let focus = camera.focus();
-        let half_span = (TERRAIN_GRID_SIZE as i32 / 2) * step;
-        let center = |value: f64| (value / self.cell_units) as i32;
-        let snapped = |value: i32| (value - half_span).div_euclid(step) * step;
-        let first = [snapped(center(focus[0])), snapped(center(focus[1]))];
+        // A grid covering the whole map draws every sample. Only on a map too big for it does
+        // its spacing double with altitude, its first sample snapping to that spacing so that
+        // hills do not shimmer as the camera moves.
+        let (first, step) = if self.grid_size as i32 >= self.samples_per_side {
+            ([0, 0], 1)
+        } else {
+            let cells = f64::from(self.grid_size - 1);
+            let wanted_reach = camera.altitude() * 16.0;
+            let wanted_step = (wanted_reach / (cells * self.cell_units)).ceil().max(1.0) as i32;
+            let step = (wanted_step as u32).next_power_of_two().min((self.samples_per_side - 1).max(1) as u32) as i32;
+            let focus = camera.focus();
+            let half_span = (self.grid_size as i32 / 2) * step;
+            let center = |value: f64| (value / self.cell_units) as i32;
+            let snapped = |value: i32| (value - half_span).div_euclid(step) * step;
+            ([snapped(center(focus[0])), snapped(center(focus[1]))], step)
+        };
 
         let selection_box = scene.selection_box.map_or([0.0; 4], |(min, max)| {
             let x = |value: f64| (value / viewport[0] * 2.0 - 1.0) as f32;
@@ -788,7 +800,7 @@ impl Renderer {
             terrain_grid: [first[0], first[1], step, self.samples_per_side],
             selection_box,
             terrain_scale: [self.height_scale, self.icon_scale, self.fog_scale, self.water_level],
-            water: [scene.time, 0.0, 0.0, 0.0],
+            water: [scene.time, self.grid_size as f32, 0.0, 0.0],
         };
         self.queue.write_buffer(&self.globals_buffer, 0, bytemuck::bytes_of(&globals));
         self.flat_instances.clear();
@@ -983,9 +995,11 @@ mod tests {
 
     #[test]
     fn terrain_grid_indices_stay_in_range() {
-        let indices = terrain_indices();
-        let vertices = TERRAIN_GRID_SIZE * TERRAIN_GRID_SIZE;
-        assert!(indices.iter().all(|&index| index < vertices));
+        for size in [2, 513, MAX_TERRAIN_GRID] {
+            let indices = terrain_indices(size);
+            assert!(indices.iter().all(|&index| index < size * size));
+            assert_eq!(indices.len() as u32, (size - 1) * (size - 1) * 6);
+        }
     }
 
     #[test]

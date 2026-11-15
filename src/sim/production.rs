@@ -1558,6 +1558,7 @@ impl SimWorld {
             economy.extractor_upkeep = Res::ZERO;
         }
         let mut adjacency_updates = Vec::with_capacity(self.structures.len());
+        let mut links = Vec::new();
         for &(id, entity) in &self.structures {
             if self.ecs.get::<&Construction>(entity).is_ok() {
                 continue;
@@ -1565,7 +1566,7 @@ impl SimWorld {
             let blueprint = self.ecs.get::<&Blueprinted>(entity).expect("structures have blueprints").0;
             let footprint = *self.ecs.get::<&Footprint>(entity).expect("structures have footprints");
             let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team;
-            let bonus = self.adjacency_of(id, blueprint, footprint, team);
+            let bonus = self.adjacency_of(id, blueprint, footprint, team, &mut links);
             adjacency_updates.push((entity, bonus));
             let unit = self.blueprints.get(blueprint);
             // An extractor makes mass for energy, and a paused one makes nothing and needs nothing.
@@ -1585,6 +1586,8 @@ impl SimWorld {
                 economy.extractor_upkeep += Adjacency::less(unit.upkeep, bonus.upkeep_discount);
             }
         }
+        links.sort_unstable();
+        self.adjacency_links = links;
         for (entity, bonus) in adjacency_updates {
             *self.ecs.get::<&mut Adjacency>(entity).expect("structures have adjacency") = bonus;
         }
@@ -1613,7 +1616,9 @@ impl SimWorld {
     }
 
     /// Finds the finished, friendly structures touching a footprint's edges.
-    fn adjacency_of(&self, id: SimId, blueprint: BlueprintId, footprint: Footprint, team: Team) -> Adjacency {
+    /// Also adds to `links` each neighbor that gives this structure a bonus it uses, as (giver,
+    /// receiver), for drawing.
+    fn adjacency_of(&self, id: SimId, blueprint: BlueprintId, footprint: Footprint, team: Team, links: &mut Vec<(SimId, SimId)>) -> Adjacency {
         let unit = self.blueprints.get(blueprint);
         let Footprint { cell_x, cell_y, size } = footprint;
         let mut neighbors: Vec<SimId> = Vec::new();
@@ -1651,6 +1656,17 @@ impl SimWorld {
             let other = self.blueprints.get(self.ecs.get::<&Blueprinted>(entity).expect("structures have blueprints").0);
             if let Some(giver) = other.adjacency_giver {
                 let bonus = giver.bonus();
+                // Only a bonus this structure has a use for counts as a link worth showing.
+                let builds = unit.is_factory() || unit.build_power > Fp::ZERO;
+                let upkeep = unit.upkeep > Res::ZERO || unit.shield.is_some();
+                let used = (builds && (bonus.energy_active[size] != 0 || bonus.mass_active[size] != 0))
+                    || (upkeep && bonus.upkeep[size] != 0)
+                    || (unit.mass_income > Res::ZERO && bonus.mass_output[size] != 0)
+                    || (unit.energy_income > Res::ZERO && bonus.energy_output[size] != 0)
+                    || (artillery && (bonus.weapon_energy[size] != 0 || bonus.rate_of_fire[size] != 0));
+                if used {
+                    links.push((neighbor, id));
+                }
                 adjacency.energy_cost_discount += bonus.energy_active[size];
                 adjacency.mass_cost_discount += bonus.mass_active[size];
                 adjacency.upkeep_discount += bonus.upkeep[size];

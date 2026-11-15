@@ -386,6 +386,7 @@ mod tests {
             aim: [0, 0],
             working: false,
             assembling: None,
+            upgrade: None,
         }
     }
 

@@ -1931,3 +1931,19 @@ fn the_skirmish_map_has_mirrored_forests_and_rocks_clear_of_bases_and_deposits()
         }
     }
 }
+
+/// Structures sharing adjacency bonuses they use show as linked, for the cables drawn between
+/// them: a generator beside a factory, which builds for less energy, but not beside a wall,
+/// which has no use for it.
+#[test]
+fn adjacency_links_show_bonuses_that_are_used() {
+    let mut world = test_world();
+    let factory = world.spawn_finished_structure(id(&world, "land_factory_t1"), Team::Blue, 50, 50).unwrap();
+    let generator = world.spawn_finished_structure(id(&world, "power_generator"), Team::Blue, 49, 50).unwrap();
+    let wall = world.spawn_finished_structure(id(&world, "wall"), Team::Blue, 48, 50).unwrap();
+    world.advance_tick(&[]);
+    assert!(world.adjacency_links.contains(&(generator, factory)), "the generator gives the factory cheaper energy");
+    assert!(!world.adjacency_links.iter().any(|&(_, receiver)| receiver == wall), "a wall uses nothing");
+    assert_eq!(world.snapshot_for(Some(Team::Blue)).adjacency.len(), world.adjacency_links.len());
+    assert!(world.snapshot_for(Some(Team::Red)).adjacency.is_empty(), "the enemy sees none of it");
+}

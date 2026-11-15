@@ -12,7 +12,7 @@ struct Globals {
     selection_box: vec4<f32>,
     // terrain height scale, display scale factor, fog texture coordinates per height sample, water level.
     terrain_scale: vec4<f32>,
-    // the simulation's time in seconds, for waves, then nothing yet.
+    // the simulation's time in seconds, for waves, then the terrain grid's samples a side.
     water: vec4<f32>,
 };
 
@@ -22,7 +22,6 @@ struct Globals {
 @group(0) @binding(3) var fog_sampler: sampler;
 
 const LIGHT: vec3<f32> = vec3<f32>(0.38, 0.27, 0.88);
-const TERRAIN_GRID_SIZE: u32 = 512u;
 
 // ---- Units, projectiles, and obstacles ----
 
@@ -482,7 +481,9 @@ struct GridPoint {
 };
 
 fn grid_point(index: u32) -> GridPoint {
-    let grid = vec2<i32>(i32(index % TERRAIN_GRID_SIZE), i32(index / TERRAIN_GRID_SIZE));
+    // The grid's samples a side: the whole map's, up to its limit.
+    let size = u32(globals.water.y);
+    let grid = vec2<i32>(i32(index % size), i32(index / size));
     let first = globals.terrain_grid.xy;
     let last = globals.terrain_grid.w - 1;
     // Vertices beyond the map edge collapse onto it, so that the grid never leaves the map.

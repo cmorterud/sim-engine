@@ -100,6 +100,10 @@ pub struct UnitView {
     /// What a factory is building, as a raw blueprint id, and how far along it is in
     /// thousandths, so that it shows in the bay. Anyone who can see the factory sees it.
     pub assembling: Option<(u16, u16)>,
+    /// What a structure is upgrading into, as a raw blueprint id, and how far along it is in
+    /// thousandths, so that it shows changing as it goes. A factory's upgrade is the head of its
+    /// queue. Anyone who can see it sees it.
+    pub upgrade: Option<(u16, u16)>,
 }
 
 /// A factory's production state, for the build menu. Only for the viewer's team.
@@ -291,6 +295,9 @@ pub struct SimSnapshot {
     /// How many units each of the viewer's transports carries, sorted by `SimId`. Everyone's,
     /// for a viewer who sees everything.
     pub cargo: Vec<(SimId, u32)>,
+    /// The viewer's structures sharing adjacency bonuses, as the giver's and the receiver's
+    /// centers, raw `Fp` bits with ground height. Everyone's, for a viewer who sees everything.
+    pub adjacency: Vec<([i32; 3], [i32; 3])>,
     /// Enemy contacts on the viewer's radar that it cannot see, real and decoy alike, as raw
     /// `Fp` positions. Nothing says which is which.
     pub blips: Vec<[i32; 3]>,
@@ -470,6 +477,9 @@ pub struct SimWorld {
     /// Submarines, and units that walk the seabed, sorted by `SimId`.
     pub submarines: Vec<(SimId, hecs::Entity)>,
     pub seabed_walkers: Vec<(SimId, hecs::Entity)>,
+    /// Structures giving neighbors adjacency bonuses they use, as (giver, receiver), sorted.
+    /// Worked out with the economy from the structures there, so not hashed.
+    pub adjacency_links: Vec<(SimId, SimId)>,
     /// Air transports, sorted by `SimId`.
     pub transports: Vec<(SimId, hecs::Entity)>,
     /// Land units on their way to board a transport, sorted by `SimId`.
@@ -584,6 +594,7 @@ impl SimWorld {
             aircraft: Vec::new(),
             submarines: Vec::new(),
             seabed_walkers: Vec::new(),
+            adjacency_links: Vec::new(),
             transports: Vec::new(),
             boarding: Vec::new(),
             carried: Vec::new(),
@@ -3351,6 +3362,14 @@ impl SimWorld {
                         (!made.is_factory() && made.class != UnitClass::Ammo)
                             .then(|| (item.0, (factory.progress.to_bits() * 1000 / Res::ONE.to_bits()).clamp(0, 1000) as u16))
                     }),
+                    upgrade: {
+                        let share = |progress: Res| (progress.to_bits() * 1000 / Res::ONE.to_bits()).clamp(0, 1000) as u16;
+                        let from_queue = factory.and_then(|factory| {
+                            let item = *factory.queue.first()?;
+                            self.blueprints.get(item).is_factory().then(|| (item.0, share(factory.progress)))
+                        });
+                        from_queue.or_else(|| self.ecs.get::<&Upgrading>(entity).ok().map(|upgrading| (upgrading.into.0, share(upgrading.progress))))
+                    },
                 })
             })
             .collect();
@@ -3421,6 +3440,23 @@ impl SimWorld {
             .iter()
             .filter(|&&(_, entity)| viewer.is_none_or(|viewer| self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team == viewer)))
             .map(|&(id, entity)| (id, self.ecs.get::<&Transport>(entity).map_or(0, |transport| transport.cargo.len() as u32)))
+            .collect();
+        let adjacency = self
+            .adjacency_links
+            .iter()
+            .filter_map(|&(giver, receiver)| {
+                let (_, giver_entity) = self.find_unit(giver)?;
+                let (_, receiver_entity) = self.find_unit(receiver)?;
+                let team = self.ecs.get::<&UnitStats>(giver_entity).ok()?.team;
+                if viewer.is_some_and(|viewer| viewer != team) {
+                    return None;
+                }
+                let at = |entity: hecs::Entity| self.ecs.get::<&Position>(entity).ok().map(|position| {
+                    let ground = self.terrain.height_at(position.0.xy());
+                    [position.0.x.to_bits(), position.0.y.to_bits(), ground.to_bits()]
+                });
+                Some((at(giver_entity)?, at(receiver_entity)?))
+            })
             .collect();
         let stocks = viewer.map_or_else(Vec::new, |viewer| {
             self.factories
@@ -3563,6 +3599,7 @@ impl SimWorld {
             interceptions,
             stocks,
             cargo,
+            adjacency,
             blips,
             sensor_ranges,
             cloaks,

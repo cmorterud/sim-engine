@@ -2375,14 +2375,23 @@ pub fn placement_ranges(unit: &crate::sim::blueprints::Blueprint) -> Vec<(&'stat
     let world = |value: Fp| value.to_num::<f64>();
     let mut ranges = Vec::new();
     let weapon = Color32::from_rgb(255, 110, 90);
+    // Each weapon by what it shoots at: ground, aircraft, or ships.
+    let kind = |gun: &crate::sim::blueprints::WeaponDef| match gun.targets {
+        crate::sim::blueprints::Targets::Air => ("Anti-air", Color32::from_rgb(110, 200, 255)),
+        crate::sim::blueprints::Targets::Naval => ("Torpedoes", Color32::from_rgb(90, 220, 190)),
+        crate::sim::blueprints::Targets::Both => ("Weapon (and air)", weapon),
+        crate::sim::blueprints::Targets::Ground => ("Weapon", weapon),
+    };
     if let Some(gun) = &unit.weapon {
-        ranges.push(("Weapon", world(gun.range), weapon));
+        let (name, color) = kind(gun);
+        ranges.push((name, world(gun.range), color));
         if gun.min_range > Fp::ZERO {
             ranges.push(("Too close to hit", world(gun.min_range), weapon.gamma_multiply(0.6)));
         }
     }
     for gun in &unit.extra_weapons {
-        ranges.push(("Weapon", world(gun.range), Color32::from_rgb(255, 170, 90)));
+        let (name, color) = kind(gun);
+        ranges.push((name, world(gun.range), color.gamma_multiply(0.85)));
     }
     if let Some(shield) = &unit.shield {
         ranges.push(("Shield", world(shield.radius), Color32::from_rgb(120, 190, 255)));
@@ -2406,6 +2415,30 @@ pub fn placement_ranges(unit: &crate::sim::blueprints::Blueprint) -> Vec<(&'stat
 /// While a structure is being placed, rings on the ground for each range it will reach, around
 /// where it would go, each named at its top.
 pub fn draw_placement_ranges(ctx: &egui::Context, camera: &Camera, heights: &crate::render::camera::HeightField, center: [f64; 2], ranges: &[(&'static str, f64, Color32)], pixels_per_point: f32) {
+    draw_range_rings(ctx, camera, heights, center, ranges, true, pixels_per_point);
+}
+
+/// The most selected units whose ranges are drawn, so that a whole army does not bury the map.
+const MOST_RANGES_SHOWN: usize = 60;
+
+/// Rings for the ranges of what is selected, mobile units and structures alike: weapons,
+/// anti-air, torpedoes, shields, missile defense, radar, sonar, omni, and stealth. Each kind of
+/// unit is labelled once, on the first of them, so a selected group is not a wall of text.
+pub fn draw_selection_ranges(ctx: &egui::Context, camera: &Camera, heights: &crate::render::camera::HeightField, snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb, pixels_per_point: f32) {
+    let mut labelled: Vec<u16> = Vec::new();
+    for unit in selected.iter().filter_map(|id| find_unit(snapshot, *id)).filter(|unit| unit.blueprint != u16::MAX).take(MOST_RANGES_SHOWN) {
+        let ranges = placement_ranges(db.get(BlueprintId(unit.blueprint)));
+        if ranges.is_empty() {
+            continue;
+        }
+        let label = !labelled.contains(&unit.blueprint);
+        labelled.push(unit.blueprint);
+        let center = [f64::from(unit.x) / 4096.0, f64::from(unit.y) / 4096.0];
+        draw_range_rings(ctx, camera, heights, center, &ranges, label, pixels_per_point);
+    }
+}
+
+fn draw_range_rings(ctx: &egui::Context, camera: &Camera, heights: &crate::render::camera::HeightField, center: [f64; 2], ranges: &[(&'static str, f64, Color32)], labels: bool, pixels_per_point: f32) {
     const SEGMENTS: usize = 96;
     let painter = ctx.layer_painter(egui::LayerId::background());
     let to_points = |point: [f64; 2]| {
@@ -2424,8 +2457,36 @@ pub fn draw_placement_ranges(ctx: &egui::Context, camera: &Camera, heights: &cra
             }
         }
         // The label sits at the ring's far side from the camera, where it is least in the way.
-        if let Some(top) = to_points([center[0], center[1] + radius]) {
+        if let Some(top) = to_points([center[0], center[1] + radius]).filter(|_| labels) {
             painter.text(top + Vec2::new(0.0, -3.0), Align2::CENTER_BOTTOM, format!("{name} {}", radius.round() as i64), FontId::proportional(12.0), color);
+        }
+    }
+}
+
+/// Adjacency bonuses, as cables laid on the ground between the structures sharing them, with
+/// pulses running from the giver to the receiver. Only up close: zoomed out to icons, they would
+/// be clutter.
+pub fn draw_adjacency(ctx: &egui::Context, camera: &Camera, links: &[([i32; 3], [i32; 3])], pixels_per_point: f32) {
+    if links.is_empty() || camera.altitude() >= ICON_ALTITUDE {
+        return;
+    }
+    const CABLE: Color32 = Color32::from_rgb(120, 230, 255);
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    let raw = |value: i32| f64::from(value) / 4096.0;
+    let to_points = |point: [f64; 3]| camera.world_to_screen(point).map(|pixels| Pos2::new(pixels[0] as f32 / pixels_per_point, pixels[1] as f32 / pixels_per_point));
+    let time = ctx.input(|input| input.time);
+    for &(giver, receiver) in links {
+        let (from, to) = ([raw(giver[0]), raw(giver[1]), raw(giver[2]) + 1.0], [raw(receiver[0]), raw(receiver[1]), raw(receiver[2]) + 1.0]);
+        let (Some(start), Some(end)) = (to_points(from), to_points(to)) else {
+            continue;
+        };
+        painter.line_segment([start, end], Stroke::new(4.0_f32, Color32::from_black_alpha(140)));
+        painter.line_segment([start, end], Stroke::new(1.6_f32, CABLE.gamma_multiply(0.75)));
+        // Two pulses a second, running down the cable.
+        let phase = ((time * 0.8).fract()) as f32;
+        for offset in [0.0_f32, 0.5] {
+            let along = (phase + offset).fract();
+            painter.circle_filled(start + (end - start) * along, 2.4, CABLE);
         }
     }
 }
@@ -2783,6 +2844,7 @@ mod tests {
             facing: [0, 0], aim: [0, 0],
             working: false,
             assembling: None,
+            upgrade: None,
         }
     }
 
@@ -3487,6 +3549,19 @@ mod tests {
         assert!(!popup_shows_after(0.0, true), "a popup should not flash up as the pointer sweeps past");
         assert!(popup_shows_after(0.15, true), "the popup should show within a sixth of a second");
         assert!(!popup_shows_after(0.15, false), "egui's own delay is longer, so this test would not catch a missing style");
+    }
+
+    #[test]
+    fn ranges_say_what_each_weapon_shoots_at_and_include_sensors() {
+        let db = BlueprintDb::standard();
+        let names = |key: &str| placement_ranges(db.get(db.id(key))).iter().map(|range| range.0).collect::<Vec<_>>();
+        assert!(names("t1_interceptor").contains(&"Anti-air"));
+        assert!(names("t2_fighter_bomber").contains(&"Radar"), "the fighter-bomber's radar shows");
+        assert!(names("t1_attack_sub").contains(&"Torpedoes"));
+        assert!(names("t2_heavy_tank").contains(&"Weapon"));
+        assert!(names("radar").contains(&"Radar"));
+        assert!(names("stealth_field_generator").contains(&"Stealth field"));
+        assert!(names("acu").contains(&"Omni"));
     }
 
     #[test]

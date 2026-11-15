@@ -1514,6 +1514,11 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                     ui::draw_placement_ranges(ctx, &camera, &map.heights, [center[0], center[1]], &ranges, pixels_per_point);
                                 }
                             }
+                            ui::draw_adjacency(ctx, &camera, &snapshot.adjacency, pixels_per_point);
+                            // What the selection reaches, while nothing is being placed.
+                            if placing.is_none() {
+                                ui::draw_selection_ranges(ctx, &camera, &map.heights, &snapshot, &selected, &map.blueprints, pixels_per_point);
+                            }
                             ui::draw_blips(ctx, &camera, &snapshot.blips, pixels_per_point);
                             ui::order_trails(ctx, &camera, &trails, pixels_per_point);
                             match &order_drag {
