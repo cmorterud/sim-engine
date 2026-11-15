@@ -922,6 +922,13 @@ impl Renderer {
 
     /// Draws a scene offscreen and saves it as a 24-bit BMP, for test runs.
     pub fn capture(&mut self, scene: &FrameScene<'_>, ui: Option<&UiFrame>, path: &Path) -> io::Result<()> {
+        let (width, height, pixels) = self.capture_rgba(scene, ui);
+        fs::write(path, encode_bmp(&pixels, width, height, width * 4, true))
+    }
+
+    /// Draws a scene offscreen and returns its width, height, and pixels, four bytes each in
+    /// red, green, blue, alpha order, row by row from the top.
+    pub fn capture_rgba(&mut self, scene: &FrameScene<'_>, ui: Option<&UiFrame>) -> (u32, u32, Vec<u8>) {
         self.prepare(scene);
         let (width, height) = (self.config.width, self.config.height);
         let extent = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
@@ -958,10 +965,23 @@ impl Renderer {
         let slice = readback.slice(..);
         slice.map_async(wgpu::MapMode::Read, |result| result.expect("capture buffer maps"));
         self.device.poll(wgpu::Maintain::Wait);
-        let swap_channels = matches!(self.config.format, wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Rgba8UnormSrgb);
-        let bmp = encode_bmp(&slice.get_mapped_range(), width, height, bytes_per_row, swap_channels);
+        let is_rgba = matches!(self.config.format, wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Rgba8UnormSrgb);
+        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+        {
+            let mapped = slice.get_mapped_range();
+            for y in 0..height {
+                let row = &mapped[(y * bytes_per_row) as usize..(y * bytes_per_row + width * 4) as usize];
+                for pixel in row.as_chunks::<4>().0 {
+                    if is_rgba {
+                        pixels.extend_from_slice(&[pixel[0], pixel[1], pixel[2], 255]);
+                    } else {
+                        pixels.extend_from_slice(&[pixel[2], pixel[1], pixel[0], 255]);
+                    }
+                }
+            }
+        }
         readback.unmap();
-        fs::write(path, bmp)
+        (width, height, pixels)
     }
 }
 

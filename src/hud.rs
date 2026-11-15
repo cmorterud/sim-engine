@@ -2,6 +2,9 @@
 //! the vector glyphs drawn on order buttons. `ui` lays the panels out; this only paints.
 #![allow(clippy::disallowed_types)]
 
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
 use egui::epaint::{Mesh, PathShape};
 use egui::{Align2, Color32, FontId, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, Vec2};
 
@@ -384,6 +387,67 @@ pub fn apply_visuals(style: &mut egui::Style) {
     }
 }
 
+/// Every unit's portrait, rendered by `examples/portrait_sheet.rs`, and which tile is whose.
+const PORTRAIT_SHEET: &[u8] = include_bytes!("../assets/portraits.png");
+const PORTRAIT_INDEX: &str = include_str!("../assets/portraits.txt");
+const PORTRAITS: &str = "unit portraits";
+
+/// The portraits, once loaded: the sheet, and where on it each unit's tile is.
+#[derive(Clone)]
+struct Portraits {
+    texture: egui::TextureHandle,
+    tiles: BTreeMap<String, Rect>,
+}
+
+/// The portrait index: the tile size, the tiles a row, and the units' keys, tile by tile.
+pub fn portrait_index() -> (usize, usize, Vec<&'static str>) {
+    let mut lines = PORTRAIT_INDEX.lines();
+    let mut header = lines.next().unwrap_or("").split_whitespace().map(|value| value.parse::<usize>().unwrap_or(1));
+    let (tile, columns) = (header.next().unwrap_or(1), header.next().unwrap_or(1));
+    (tile, columns, lines.filter(|line| !line.is_empty()).collect())
+}
+
+/// Loads the portraits into the interface. Call once, before the first frame; without it,
+/// buttons show the units' symbols instead.
+pub fn install_portraits(ctx: &egui::Context) {
+    let decoder = png::Decoder::new(PORTRAIT_SHEET);
+    let Ok(mut reader) = decoder.read_info() else {
+        return;
+    };
+    let mut pixels = vec![0; reader.output_buffer_size()];
+    let Ok(frame) = reader.next_frame(&mut pixels) else {
+        return;
+    };
+    let size = [frame.width as usize, frame.height as usize];
+    let image = egui::ColorImage::from_rgba_unmultiplied(size, &pixels[..frame.buffer_size()]);
+    let texture = ctx.load_texture(PORTRAITS, image, egui::TextureOptions::LINEAR);
+    let (tile, columns, keys) = portrait_index();
+    let (width, height) = (size[0] as f32, size[1] as f32);
+    let tiles = keys
+        .into_iter()
+        .enumerate()
+        .map(|(index, key)| {
+            let corner = Pos2::new(((index % columns) * tile) as f32 / width, ((index / columns) * tile) as f32 / height);
+            (key.to_string(), Rect::from_min_size(corner, Vec2::new(tile as f32 / width, tile as f32 / height)))
+        })
+        .collect();
+    ctx.data_mut(|data| data.insert_temp(egui::Id::new(PORTRAITS), Arc::new(Portraits { texture, tiles })));
+}
+
+/// Draws a unit's portrait filling `rect`, if the portraits are loaded and it has one. Returns
+/// whether it did.
+pub fn draw_portrait(painter: &egui::Painter, rect: Rect, key: &str) -> bool {
+    let portraits = painter.ctx().data(|data| data.get_temp::<Arc<Portraits>>(egui::Id::new(PORTRAITS)));
+    let Some(portraits) = portraits else {
+        return false;
+    };
+    let Some(uv) = portraits.tiles.get(key) else {
+        return false;
+    };
+    painter.image(portraits.texture.id(), rect, *uv, Color32::WHITE);
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -398,6 +462,21 @@ mod tests {
         assert_eq!(compact(47_569), "47.6k");
         assert_eq!(compact(669_000), "669k");
         assert_eq!(compact(-1_250_000), "-1.2M");
+    }
+
+    #[test]
+    fn the_portrait_sheet_has_a_tile_for_every_unit_and_structure() {
+        let db = crate::sim::blueprints::BlueprintDb::standard();
+        let (tile, columns, keys) = portrait_index();
+        assert_eq!((tile, columns), (96, 12));
+        for unit in db.iter().filter(|unit| unit.class != crate::sim::blueprints::UnitClass::Ammo) {
+            assert!(keys.contains(&unit.key.as_str()), "{} has no portrait: run `cargo run --release --example portrait_sheet`", unit.key);
+        }
+        let decoder = png::Decoder::new(PORTRAIT_SHEET);
+        let reader = decoder.read_info().expect("the sheet is a PNG");
+        let info = reader.info();
+        assert_eq!(info.width as usize, columns * tile);
+        assert!(info.height as usize >= keys.len().div_ceil(columns) * tile, "every tile fits on the sheet");
     }
 
     #[test]

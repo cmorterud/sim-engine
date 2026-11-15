@@ -39,6 +39,9 @@ log = "0.4"
 env_logger = "0.11"
 cpal = "0.18.2"
 
+# The unit portrait atlas (assets/portraits.png), read at startup and written by its generator.
+png = "0.17"
+
 # Clocks that also work in the browser, where std::time::Instant panics.
 web-time = "1"
 

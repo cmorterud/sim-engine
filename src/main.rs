@@ -833,6 +833,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     let egui_context = egui::Context::default();
     ui::install_fonts(&egui_context);
     ui::install_style(&egui_context);
+    sim_engine::hud::install_portraits(&egui_context);
     let mut egui_state = egui_winit::State::new(
         egui_context.clone(),
         egui::ViewportId::ROOT,

@@ -388,6 +388,18 @@ pub fn reset_build_tiers(ctx: &egui::Context) {
     });
 }
 
+/// A unit's picture on a button: its portrait, with its map symbol small in the top left corner
+/// in its role's color, or the symbol alone, large, if there is no portrait.
+fn unit_art(painter: &egui::Painter, rect: Rect, key: &str) {
+    let icon = Icon::for_key(key);
+    if hud::draw_portrait(painter, rect, key) {
+        let half = (rect.height() * 0.1).clamp(3.5, 6.0);
+        icons::draw(painter, rect.left_top() + Vec2::new(half + 2.0, half + 2.0), half, icon, 0, icon.role().color());
+    } else {
+        icons::draw_bar(painter, rect, icon);
+    }
+}
+
 /// The size of a build bar's buttons, in points.
 const BAR_BUTTON: f32 = 46.0;
 
@@ -397,15 +409,14 @@ fn icon_button(ui: &mut egui::Ui, db: &BlueprintDb, option: BlueprintId, suffix:
     let unit = db.get(option);
     let suffix = suffix.trim().trim_matches(|c| c == '(' || c == ')').to_string();
     hud::square_button(ui, Vec2::splat(BAR_BUTTON), false, true, |painter, rect| {
-        // Large and colored by role, without the map icon's frame and tech dots: the button is the
-        // frame, and the bar's toggle says the level.
-        icons::draw_bar(painter, rect, Icon::for_key(&unit.key));
+        // The bar's toggle says the level, so there are no tech dots.
+        unit_art(painter, rect, &unit.key);
         if let Some(letter) = blueprint_hotkey(&unit.key) {
             let font = FontId::new(14.0, egui::FontFamily::Name(BOLD.into()));
             hud::outlined_text(painter, rect.right_bottom() + Vec2::new(-2.0, 0.0), Align2::RIGHT_BOTTOM, &hotkeys::key_name(letter), font, Color32::WHITE);
         }
         if !suffix.is_empty() {
-            hud::outlined_text(painter, rect.left_top() + Vec2::new(2.0, 1.0), Align2::LEFT_TOP, &suffix, FontId::proportional(10.0), Color32::YELLOW);
+            hud::outlined_text(painter, rect.left_bottom() + Vec2::new(2.0, 0.0), Align2::LEFT_BOTTOM, &suffix, FontId::proportional(10.0), Color32::YELLOW);
         }
     })
 }
@@ -1268,7 +1279,7 @@ fn queue_chip_row(ui: &mut egui::Ui, chips: &[QueueChip], db: &BlueprintDb, acti
                 for chip in chips {
                     let button = hud::square_button(ui, Vec2::splat(QUEUE_BUTTON), false, true, |painter, rect| {
                         match chip.icon {
-                            ChipIcon::Item(blueprint) => icons::draw_bar(painter, rect, Icon::for_key(&db.get(blueprint).key)),
+                            ChipIcon::Item(blueprint) => unit_art(painter, rect, &db.get(blueprint).key),
                             ChipIcon::Order(glyph) => hud::draw_glyph(painter, rect.shrink(3.0), glyph),
                         }
                         if chip.count > 1 {
@@ -1388,9 +1399,9 @@ const QUICK_BUTTON: f32 = 48.0;
 const QUICK_TIER_HEIGHT: f32 = 24.0;
 
 /// A big square with a unit's symbol, and a count in its corner.
-fn quick_square(ui: &mut egui::Ui, icon: Icon, count: Option<usize>, chosen: bool, health: Option<u16>) -> egui::Response {
+fn quick_square(ui: &mut egui::Ui, key: &str, count: Option<usize>, chosen: bool, health: Option<u16>) -> egui::Response {
     hud::square_button(ui, Vec2::splat(QUICK_BUTTON), chosen, true, |painter, rect| {
-        icons::draw_bar(painter, rect.shrink(2.0), icon);
+        unit_art(painter, rect.shrink(1.0), key);
         if let Some(count) = count {
             hud::outlined_text(painter, rect.right_bottom() + Vec2::new(-2.0, 1.0), Align2::RIGHT_BOTTOM, &count.to_string(), FontId::new(16.0, egui::FontFamily::Name(BOLD.into())), Color32::WHITE);
         }
@@ -1405,6 +1416,7 @@ fn quick_square(ui: &mut egui::Ui, icon: Icon, count: Option<usize>, chosen: boo
 fn quick_rows(
     ui: &mut egui::Ui,
     snapshot: &SimSnapshot,
+    db: &BlueprintDb,
     groups: &QuickSelect,
     _color: Color32,
     selected: &[SimId],
@@ -1414,18 +1426,20 @@ fn quick_rows(
 ) {
     ui.spacing_mut().item_spacing = Vec2::splat(4.0);
     let (shift, now) = ui.input(|input| (input.modifiers.shift, input.time));
+    let key_of = |id: SimId| find_unit(snapshot, id).filter(|unit| unit.blueprint != u16::MAX).map_or_else(String::new, |unit| db.get(BlueprintId(unit.blueprint)).key.clone());
     if let Some(commander) = groups.commander {
         let health = find_unit(snapshot, commander).map(|unit| unit.health_permille);
-        if quick_square(ui, Icon::Commander, None, selected.contains(&commander), health).on_hover_text("ACU: click to select. The view stays where it is.").clicked() {
+        if quick_square(ui, &key_of(commander), None, selected.contains(&commander), health).on_hover_text("ACU: click to select. The view stays where it is.").clicked() {
             actions.push(UiAction::QuickSelect { units: vec![commander], add: shift });
         }
     }
     for family in &groups.families {
         let open = state.expanded.contains(&family.name);
         let total: usize = family.tiers.iter().map(|tier| tier.units.len()).sum();
-        let icon = Icon::for_key(&family.name.to_lowercase().replace(' ', "_"));
+        // The family's lowest tier, which the portrait shows.
+        let key = family.tiers.first().and_then(|tier| tier.units.first()).map_or_else(|| family.name.to_lowercase().replace(' ', "_"), |id| key_of(*id));
         let hint = format!("{}: {total}. Click to {} the tech levels.", family.name, if open { "hide" } else { "show" });
-        if quick_square(ui, icon, Some(total), open, None).on_hover_text(hint).clicked() {
+        if quick_square(ui, &key, Some(total), open, None).on_hover_text(hint).clicked() {
             if open {
                 state.expanded.remove(&family.name);
             } else {
@@ -1472,7 +1486,7 @@ pub fn quick_select_bar(
         return;
     }
     egui::Area::new(egui::Id::new("quick select")).anchor(Align2::RIGHT_TOP, Vec2::new(-8.0, QUICK_SELECT_TOP)).show(ctx, |ui| {
-        quick_rows(ui, snapshot, &groups, team_color(team), selected, view_center, state, actions);
+        quick_rows(ui, snapshot, db, &groups, team_color(team), selected, view_center, state, actions);
     });
 }
 
@@ -1507,16 +1521,12 @@ fn control_group_rows(ui: &mut egui::Ui, groups: &[(usize, Vec<SimId>)], snapsho
     ui.spacing_mut().item_spacing = Vec2::splat(4.0);
     ui.horizontal(|ui| {
         for (group, members) in groups {
-            let icon = members
-                .first()
-                .and_then(|id| find_unit(snapshot, *id))
-                .filter(|unit| unit.blueprint != u16::MAX)
-                .map_or(Icon::Unknown, |unit| Icon::for_key(&db.get(BlueprintId(unit.blueprint)).key));
+            let key = members.first().and_then(|id| find_unit(snapshot, *id)).filter(|unit| unit.blueprint != u16::MAX).map_or("", |unit| db.get(BlueprintId(unit.blueprint)).key.as_str());
             let any_selected = members.iter().any(|id| selected.contains(id));
             let label = control_group_label(*group, members, snapshot, db);
             let hint = format!("{label}\nClick or press {group} to select. Hold Shift to add. Ctrl + {group} with nothing selected clears it.");
             let button = hud::square_button(ui, Vec2::new(CONTROL_GROUP_WIDTH, CONTROL_GROUP_HEIGHT), any_selected, true, |painter, rect| {
-                icons::draw_bar(painter, Rect::from_min_max(rect.left_top() + Vec2::new(0.0, 12.0), rect.right_bottom()), icon);
+                unit_art(painter, Rect::from_center_size(rect.center() + Vec2::new(0.0, 6.0), Vec2::splat(rect.width() - 2.0)), key);
                 let bold = |size| FontId::new(size, egui::FontFamily::Name(BOLD.into()));
                 hud::outlined_text(painter, rect.left_top() + Vec2::new(3.0, 0.0), Align2::LEFT_TOP, &group.to_string(), bold(16.0), Color32::WHITE);
                 hud::outlined_text(painter, rect.right_bottom() + Vec2::new(-2.0, 1.0), Align2::RIGHT_BOTTOM, &members.len().to_string(), bold(12.0), hud::TEXT);
@@ -1738,7 +1748,7 @@ fn selection_info(ui: &mut egui::Ui, snapshot: &SimSnapshot, selected: &[SimId],
         for shape in hud::face_shapes(portrait, false, false, true) {
             ui.painter().add(shape);
         }
-        icons::draw_bar(ui.painter(), portrait.shrink(2.0), Icon::for_key(&unit.key));
+        unit_art(ui.painter(), portrait.shrink(1.0), &unit.key);
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
             let width = ui.available_width() - if menu.is_some_and(|menu| !menu.queue.is_empty()) { 52.0 } else { 0.0 };
@@ -1788,7 +1798,7 @@ fn selection_info(ui: &mut egui::Ui, snapshot: &SimSnapshot, selected: &[SimId],
                 for shape in hud::face_shapes(rect, false, false, true) {
                     ui.painter().add(shape);
                 }
-                icons::draw_bar(ui.painter(), rect.shrink(2.0), Icon::for_key(&db.get(*item).key));
+                unit_art(ui.painter(), rect.shrink(1.0), &db.get(*item).key);
                 let progress = menu.and_then(|menu| menu.progress_permille).unwrap_or(0);
                 ui.label(egui::RichText::new(format!("{}%", progress / 10)).size(12.0).color(hud::TEXT));
             });
@@ -1895,7 +1905,7 @@ fn selection_group_bar(ui: &mut egui::Ui, snapshot: &SimSnapshot, selected: &[Si
         for (blueprint, units) in selection_groups(snapshot, selected) {
             let unit = db.get(BlueprintId(blueprint));
             let button = hud::square_button(ui, Vec2::splat(BAR_BUTTON), false, true, |painter, rect| {
-                icons::draw_bar(painter, rect, Icon::for_key(&unit.key));
+                unit_art(painter, rect, &unit.key);
                 hud::outlined_text(painter, rect.right_bottom() + Vec2::new(-2.0, 1.0), Align2::RIGHT_BOTTOM, &units.len().to_string(), FontId::new(15.0, egui::FontFamily::Name(BOLD.into())), Color32::WHITE);
             });
             if button.on_hover_text(format!("{} \u{d7}{}\nClick to select only these.", unit.name, units.len())).clicked() {
@@ -4130,7 +4140,7 @@ mod tests {
             let (current, groups, state) = (&self.current, &self.groups, &mut self.state);
             let _ = self.ctx.run(input, |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    quick_rows(ui, current, groups, BLUE, &[], [680.0, 0.0], state, &mut actions);
+                    quick_rows(ui, current, &BlueprintDb::standard(), groups, BLUE, &[], [680.0, 0.0], state, &mut actions);
                 });
             });
             actions
