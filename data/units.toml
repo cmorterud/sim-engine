@@ -1293,7 +1293,8 @@ sonar = 1200
 movement = "submarine"
 weapon = { range = 640, reload_ticks = 40, projectile_speed = 30, damage = 150, targets = "naval" }
 
-# Fifteen torpedoes of 150 a run, as five of 450, so that anti-torpedo charges stop some of a run.
+# Five torpedoes of 150 a run, every 10 seconds: FAF's unit database counts its 3 projectiles a
+# fire once, not three times, so 15 a run was three times too many.
 [[unit]]
 id = "t2_torpedo_bomber"
 name = "Torpedo Bomber"
@@ -1308,7 +1309,7 @@ radius = 12
 vision = 640
 sonar = 880
 flight = { elevation = 240, turn_rate = 90, break_off = 400, fuel = 600 }
-weapon = { range = 840, reload_ticks = 20, projectile_speed = 30, damage = 450, targets = "naval" }
+weapon = { range = 840, reload_ticks = 20, projectile_speed = 30, damage = 150, targets = "naval" }
 
 [[unit]]
 id = "t1_sonar"

@@ -287,11 +287,13 @@ fn a_torpedo_bomber_sinks_a_ship() {
     combat(&mut world, destroyer);
     let bomber = spawn(&mut world, "t2_torpedo_bomber", Team::Blue, point(1_000, 1_000));
     world.advance_tick(&[SimCommand::Attack { units: vec![bomber], target: destroyer }]);
-    let sunk = (0..900).any(|_| {
+    // Five torpedoes of 150 every 10 seconds, less the one its charge stops, against 7,200: about
+    // twelve runs, as in FAF, where one torpedo bomber is slow work against a destroyer.
+    let sunk = (0..1_800).any(|_| {
         world.advance_tick(&[]);
         world.unit_health(destroyer).is_none()
     });
-    assert!(sunk, "five torpedoes of 450 every 10 seconds, less what its charges stop, against 7,200");
+    assert!(sunk, "a torpedo bomber should sink an undefended destroyer within three minutes");
 }
 
 #[test]
