@@ -26,7 +26,10 @@ build_range = 200
 # Its engineering suites (the enhancements below) unlock the T2 and T3 structures on its list.
 builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "radar", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "stealth_field_generator", "strategic_missile_launcher", "strategic_missile_defense", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "naval_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "omni_sensor", "land_factory_t3_support", "air_factory_t3_support", "t2_artillery", "t3_artillery", "naval_factory_t2_support", "naval_factory_t3_support", "t1_sonar", "t1_torpedo_launcher", "t2_sonar", "t2_torpedo_launcher", "wall", "t3_heavy_point_defense", "t3_heavy_shield", "engineering_station"]
 weapon = { range = 440, reload_ticks = 7, projectile_speed = 50, damage = 70, turn_rate = 180 }
-overcharge = { energy = 3000, damage = 12000, structure_damage = 800, reload_ticks = 50 }
+# FAF's Overcharge: 7,500 in store to fire; on landing, up to 90% of the store at 6 energy a point,
+# from 1,250 to 15,000 damage, as much as the toughest enemy there takes; 400 to commanders, 800
+# to structures, a blast of 50, and a look 54 round for the toughest.
+overcharge = { energy_required = 7500, energy_share_permille = 900, energy_per_damage = 6, min_damage = 1250, max_damage = 15000, commander_damage = 400, structure_damage = 800, splash_radius = 50, search_radius = 54, reload_ticks = 33 }
 mass_income = 1
 energy_income = 20
 mass_storage = 650

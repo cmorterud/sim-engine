@@ -350,13 +350,7 @@ impl SimWorld {
             self.ecs.insert_one(entity, Turning::new(facing, rate, radius)).expect("entity was just spawned");
         }
         if let Some(overcharge) = unit.overcharge {
-            let weapon = OverchargeWeapon {
-                energy: overcharge.energy,
-                damage: overcharge.damage,
-                structure_damage: overcharge.structure_damage,
-                reload_ticks: overcharge.reload_ticks,
-                ticks_until_ready: 0,
-            };
+            let weapon = OverchargeWeapon { def: overcharge, ticks_until_ready: 0 };
             self.ecs.insert_one(entity, weapon).expect("entity was just spawned");
         }
         if let Some(flight) = unit.flight {

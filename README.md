@@ -49,7 +49,7 @@ Destroy the enemy commander to win. Yours explodes if it dies, and your whole te
 | Shift + left-click | Queue a structure, and keep placing. With M, F, J, or Y armed, queue that order and stay armed |
 | Shift + left-drag | Queue a row of structures, and keep placing |
 | X | Stop: drop all orders |
-| L, then left-click an enemy | Overcharge with the commander: 3,000 stored energy for a shot that destroys almost any unit, but does little to structures |
+| L, then left-click an enemy | Overcharge with the commander, as in FAF: it needs 7,500 energy in store (build energy storage), and spends what it takes to destroy what it hits, 6 energy a point of damage, up to 90% of the store. 400 to commanders and 800 to structures |
 | O | Pause or resume the selected factories and construction sites. They keep their queue and progress |
 | Ctrl + 1 to 0 | Save the selection as a group, or clear the group if nothing is selected. Command works too |
 | 1 to 0, or click it in the bar on the left | Select that group, and press the key again quickly to jump the camera to it. Hold Shift on the bar to add it to the selection |

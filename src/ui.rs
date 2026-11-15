@@ -128,7 +128,7 @@ impl ArmedOrder {
             Self::AttackGround => "Keep firing at a spot, even out of sight, until given another order. Shells that land on debris destroy it, so the enemy cannot reclaim it.",
             Self::Patrol => "Repeat a route. Combat units fight along it, and engineers also reclaim and repair.",
             Self::Assist => "Stay with a friendly unit and protect it. Builders also help it build.",
-            Self::Overcharge => "Spend stored energy on one shot that destroys almost any unit. Weak against structures.",
+            Self::Overcharge => "Needs 7,500 energy in store. Spends what destroys the toughest enemy where it lands, 6 energy a point of damage, up to 90% of the store and 15,000 damage. Does 400 to commanders and 800 to structures.",
             Self::Teleport => "Charge up, standing still, and jump to a spot you can see or have on radar. Costs a great deal of energy, more the farther it goes, and aborts if the energy runs out. Lands on enemy units destroy them.",
             Self::Capture => "Take over an enemy unit or structure, in half its build time at your builders' build power, for its energy cost. Stopping starts it over. Commanders cannot be captured.",
             Self::Unload => "Fly there and set down everything on board around the spot. To load, select land units and right-click the transport.",

@@ -91,11 +91,10 @@ const MOST_SHIELDS: usize = 4;
 const TMD_INCOME: i64 = 20;
 const MOST_TMDS: usize = 3;
 const TACTICAL_LAUNCHER_INCOME: i64 = 25;
-/// The commander keeps this much energy on top of an Overcharge shot, fires only above this
-/// share of its health, and never at what is this close to the enemy commander.
-const OVERCHARGE_RESERVE: i64 = 1_000;
+/// Energy income a second at which an AI that overcharges puts up an energy storage.
+const OVERCHARGE_STORAGE_INCOME: i64 = 300;
+/// The commander overcharges only above this share of its health.
 const OVERCHARGE_HEALTH_PERCENT: i32 = 50;
-const OVERCHARGE_CLEARANCE_UNITS: i32 = 900;
 /// A radar blip this far above the ground or the water is an aircraft, which the army leaves alone.
 const BLIP_GROUND_HEIGHT: i32 = 30;
 
@@ -138,6 +137,7 @@ struct Roster {
     shield_boat: BlueprintId,
     battleship: BlueprintId,
     battlecruiser: BlueprintId,
+    energy_storage: BlueprintId,
     torpedo_boat: BlueprintId,
     medium_tank: BlueprintId,
     gatling_bot: BlueprintId,
@@ -189,6 +189,7 @@ impl Roster {
             battleship: id("t3_battleship"),
             battlecruiser: id("t3_battlecruiser"),
             torpedo_boat: id("t2_torpedo_boat"),
+            energy_storage: id("energy_storage"),
             medium_tank: id("t1_medium_tank"),
             gatling_bot: id("t2_gatling_bot"),
             mobile_shield: id("t2_mobile_shield"),
@@ -253,6 +254,7 @@ struct Forces {
     generators: usize,
     generators_building: usize,
     storages: usize,
+    energy_storages: usize,
     point_defenses: usize,
     /// Finished radars that could upgrade, and whether they are, and all radars.
     radar_sites: Vec<(SimId, bool)>,
@@ -642,6 +644,8 @@ impl AiBrain {
                         forces.air_stagings += 1;
                     } else if blueprint == roster.storage {
                         forces.storages += 1;
+                    } else if blueprint == roster.energy_storage {
+                        forces.energy_storages += 1;
                     } else if blueprint == roster.point_defense {
                         forces.point_defenses += 1;
                     } else if roster.radars.contains(&blueprint) {
@@ -877,6 +881,18 @@ impl AiBrain {
                 if let Some(cell) = self.site_near_home(world, roster.tactical_launcher, 1, planned) {
                     return Some((roster.tactical_launcher, cell));
                 }
+            }
+        }
+
+        // Overcharge needs 7,500 energy in store, more than a commander holds by itself, so an AI
+        // that overcharges puts up one energy storage once its income can fill it.
+        if self.skill.overcharge
+            && energy_income >= OVERCHARGE_STORAGE_INCOME
+            && forces.energy_storages + count_planned(roster.energy_storage) == 0
+            && world.can_build(builder, roster.energy_storage)
+        {
+            if let Some(cell) = self.site_near_home(world, roster.energy_storage, 1, planned) {
+                return Some((roster.energy_storage, cell));
             }
         }
 
@@ -1548,9 +1564,9 @@ impl AiBrain {
         }
     }
 
-    /// The commander overcharges the costliest enemy unit in its gun's range, away from the
-    /// enemy commander, when the energy for the shot is there with some to spare and it is
-    /// above half health. One shot destroys anything mobile.
+    /// The commander overcharges the costliest enemy unit in its gun's range, other than the
+    /// enemy commander, which takes little from it, when the energy the shot needs is in store
+    /// and it is above half health. The shot spends what it takes to destroy its target.
     fn command_overcharge(&self, world: &SimWorld, forces: &Forces, sightings: &[Sighting], commands: &mut Vec<SimCommand>) {
         let Some(commander) = forces.commander else {
             return;
@@ -1565,7 +1581,7 @@ impl AiBrain {
             return;
         };
         let economy = &world.economies[self.team.index()];
-        if weapon.ticks_until_ready > 0 || economy.energy < weapon.energy + Res::from_num(OVERCHARGE_RESERVE) {
+        if weapon.ticks_until_ready > 0 || economy.energy < weapon.def.energy_required {
             return;
         }
         let health = *world.ecs.get::<&crate::sim::components::Health>(entity).expect("units have health");
@@ -1577,21 +1593,13 @@ impl AiBrain {
         let Some(reach) = world.ecs.get::<&Combat>(entity).ok().map(|combat| combat.range) else {
             return;
         };
-        // Never the enemy commander, nor anything near it. The shot kills a commander, and a
-        // commander's reactor takes the other with it when they die close together: a match
-        // the AI could have won ends drawn.
         let enemy_commander = world.commanders[self.team.enemy().index()];
-        let clearance = fp_int(OVERCHARGE_CLEARANCE_UNITS);
-        let near_enemy_commander = |position: Vec2Fp| {
-            sightings.iter().any(|enemy| Some(enemy.id) == enemy_commander && enemy.position.distance_squared(&position) <= wide_mul(clearance, clearance))
-        };
         let worth = |id: SimId| {
             world.unit_entity(id).and_then(|entity| world.ecs.get::<&Blueprinted>(entity).ok().map(|unit| world.blueprints.get(unit.0).mass)).unwrap_or(Res::ZERO)
         };
         let target = sightings
             .iter()
             .filter(|enemy| !enemy.is_structure && !enemy.is_air && Some(enemy.id) != enemy_commander && enemy.position.distance_squared(&at) <= wide_mul(reach, reach))
-            .filter(|enemy| !near_enemy_commander(enemy.position))
             .max_by_key(|enemy| (worth(enemy.id), std::cmp::Reverse(enemy.position.distance_squared(&at)), std::cmp::Reverse(enemy.id)));
         if let Some(enemy) = target {
             commands.push(SimCommand::Overcharge { unit: commander, target: enemy.id });

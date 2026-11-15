@@ -324,11 +324,23 @@ pub struct TorpedoDefenseDef {
 /// The commander's Overcharge: a shot paid for from stored energy, that destroys almost any
 /// mobile unit but does little to structures.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+/// The commander's Overcharge, by FAF's rule (GAME_SPECIFICATION.md §2.1): it fires only with
+/// `energy_required` in store, and when the shell lands, it spends what it needs to destroy
+/// the toughest enemy where it lands, within `min_damage` and `max_damage` and what a share
+/// of the store can pay for, at `energy_per_damage` a point.
 pub struct OverchargeDef {
-    pub energy: Res,
-    pub damage: Fp,
-    /// The most one shot does to a structure.
+    pub energy_required: Res,
+    /// The most of the store one shot may spend, in thousandths.
+    pub energy_share_permille: u32,
+    pub energy_per_damage: u32,
+    pub min_damage: Fp,
+    pub max_damage: Fp,
+    /// What it does to a commander, and to a structure or a structure's dome, at most.
+    pub commander_damage: Fp,
     pub structure_damage: Fp,
+    /// Its blast, and how far round where it lands it looks for the toughest enemy.
+    pub splash_radius: Fp,
+    pub search_radius: Fp,
     pub reload_ticks: u32,
 }
 
@@ -601,9 +613,15 @@ struct RawTorpedoDefense {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawOvercharge {
-    energy: Number,
-    damage: Number,
+    energy_required: Number,
+    energy_share_permille: u32,
+    energy_per_damage: u32,
+    min_damage: Number,
+    max_damage: Number,
+    commander_damage: Number,
     structure_damage: Number,
+    splash_radius: Number,
+    search_radius: Number,
     reload_ticks: u32,
 }
 
@@ -950,9 +968,15 @@ impl BlueprintDb {
             let overcharge = match &unit.overcharge {
                 None => None,
                 Some(overcharge) => Some(OverchargeDef {
-                    energy: overcharge.energy.res().map_err(context)?,
-                    damage: overcharge.damage.fp().map_err(context)?,
+                    energy_required: overcharge.energy_required.res().map_err(context)?,
+                    energy_share_permille: overcharge.energy_share_permille.min(1000),
+                    energy_per_damage: overcharge.energy_per_damage.max(1),
+                    min_damage: overcharge.min_damage.fp().map_err(context)?,
+                    max_damage: overcharge.max_damage.fp().map_err(context)?,
+                    commander_damage: overcharge.commander_damage.fp().map_err(context)?,
                     structure_damage: overcharge.structure_damage.fp().map_err(context)?,
+                    splash_radius: overcharge.splash_radius.fp().map_err(context)?,
+                    search_radius: overcharge.search_radius.fp().map_err(context)?,
                     reload_ticks: overcharge.reload_ticks,
                 }),
             };

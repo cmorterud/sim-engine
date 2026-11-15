@@ -324,7 +324,14 @@ fn ai_puts_up_radar_shields_and_missiles_and_overcharges_what_comes_close() {
     let target = (0..40)
         .find_map(|step| world.spawn_finished_structure(generator, Team::Red, (home_cell.0 + 25 + step % 8) as u32, (home_cell.1 + 25 + step / 8) as u32))
         .expect("room for a Red generator");
-    // Kept standing, like Red's commander, so that the base's other guns do not end it first.
+    // Kept standing, like Red's commander, so that the base's other guns do not end it first,
+    // and tough enough that no single shot, such as an armored assault bot's, ends it either.
+    {
+        let entity = world.unit_entity(target).unwrap();
+        let mut health = world.ecs.get::<&mut sim_engine::sim::components::Health>(entity).unwrap();
+        health.max = fp_int(50_000);
+        health.current = health.max;
+    }
     let keep_standing = |world: &mut SimWorld| {
         if let Some(entity) = world.unit_entity(target) {
             let mut health = world.ecs.get::<&mut sim_engine::sim::components::Health>(entity).unwrap();
@@ -356,7 +363,7 @@ fn ai_puts_up_radar_shields_and_missiles_and_overcharges_what_comes_close() {
 
 #[test]
 fn the_commander_never_overcharges_the_enemy_commander() {
-    // The shot would kill it, and its reactor's blast would take Blue's commander too: a draw.
+    // A commander takes only 400 from it, so the shot is better spent on anything else.
     let mut world = scenario::skirmish(5).world;
     let mut brain = AiBrain::new(Team::Blue, 5, world.starts);
     let (blue, red) = (world.commanders[0].unwrap(), world.commanders[1].unwrap());

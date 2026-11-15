@@ -983,9 +983,9 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                                 armed = None;
                                             }
                                             // It waits for the energy, so say so.
-                                            let cost = map.blueprints.iter().find_map(|unit| unit.overcharge).map_or(0, |overcharge| overcharge.energy.to_num::<i64>());
-                                            if session.current.economy.energy < cost {
-                                                feedback.show_rejected(None, &format!("Overcharge is waiting for {cost} energy"));
+                                            let needed = map.blueprints.iter().find_map(|unit| unit.overcharge).map_or(0, |overcharge| overcharge.energy_required.to_num::<i64>());
+                                            if session.current.economy.energy < needed {
+                                                feedback.show_rejected(None, &format!("Overcharge is waiting for {needed} energy in store"));
                                             }
                                         }
                                     }

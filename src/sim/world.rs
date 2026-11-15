@@ -66,6 +66,16 @@ pub enum MatchResult {
     Draw,
 }
 
+/// An Overcharge shell that landed, where, and on whose dome if it struck one.
+#[derive(Copy, Clone, Debug)]
+struct OverchargeImpact {
+    def: super::blueprints::OverchargeDef,
+    source: SimId,
+    team: Team,
+    point: (i32, i32),
+    dome: Option<SimId>,
+}
+
 /// Read-only unit state for the renderer. Values are raw `Fp` bits.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct UnitView {
@@ -376,8 +386,8 @@ struct PendingShot {
     speed: Fp,
     damage: Fp,
     splash: Fp,
-    /// For an Overcharge shell, the most it does to a structure.
-    overcharge: Option<Fp>,
+    /// For an Overcharge shell, its rule, worked out where it lands.
+    overcharge: Option<super::blueprints::OverchargeDef>,
     missile: Option<MissileShot>,
     /// A shot at an aircraft, that steers itself to it.
     homing: Option<SimId>,
@@ -510,6 +520,8 @@ pub struct SimWorld {
     pending_explosions: Vec<Explosion>,
     /// Shells that came down on a shield this tick, and what they do to it.
     pending_shield_hits: Vec<(SimId, Fp)>,
+    /// Overcharge shells that landed this tick, to be worked out once the shells have all moved.
+    pending_overcharges: Vec<OverchargeImpact>,
     /// Blasts and shells that land on the ground this tick, which also hit debris.
     pending_wreck_blasts: Vec<Explosion>,
     dead_units: Vec<SimId>,
@@ -601,6 +613,7 @@ impl SimWorld {
             pending_explosions: Vec::new(),
             pending_wreck_blasts: Vec::new(),
             pending_shield_hits: Vec::new(),
+            pending_overcharges: Vec::new(),
             dead_units: Vec::new(),
             dead_projectiles: Vec::new(),
         }
@@ -734,6 +747,7 @@ impl SimWorld {
         self.step_visibility();
         self.step_combat();
         self.step_projectiles();
+        self.resolve_overcharges();
         self.step_production();
         self.step_cleanup();
         self.current_tick += 1;
@@ -2005,8 +2019,8 @@ impl SimWorld {
             if let (Some(target), Some(weapon), true) = (overcharge_target, overcharge.as_mut(), can_fire) {
                 let economy = &mut economies[stats.team.index()];
                 if let Some(entry) = locate(target).filter(|entry| can_engage(entry)) {
-                    if aimed && weapon.ticks_until_ready == 0 && economy.energy >= weapon.energy {
-                        economy.energy -= weapon.energy;
+                    // By FAF's rule, nothing is spent until the shell lands.
+                    if aimed && weapon.ticks_until_ready == 0 && economy.energy >= weapon.def.energy_required {
                         let raw = |x: i32, y: i32, z: i32| Vec3Fp::new(Fp::from_bits(x), Fp::from_bits(y), Fp::from_bits(z));
                         shots.push(PendingShot {
                             source: id,
@@ -2014,9 +2028,9 @@ impl SimWorld {
                             from: raw(me.x, me.y, me.z),
                             to: raw(entry.x, entry.y, entry.z),
                             speed: combat.projectile_speed,
-                            damage: weapon.damage,
+                            damage: weapon.def.max_damage,
                             splash: Fp::ZERO,
-                            overcharge: Some(weapon.structure_damage),
+                            overcharge: Some(weapon.def),
                             missile: None,
                             homing: None,
                             bomb: None,
@@ -2024,7 +2038,7 @@ impl SimWorld {
                             underwater: false,
                             stun: 0,
                         });
-                        weapon.ticks_until_ready = weapon.reload_ticks;
+                        weapon.ticks_until_ready = weapon.def.reload_ticks;
                         finished_overcharges.push(id);
                     }
                 }
@@ -2355,9 +2369,9 @@ impl SimWorld {
                     allied_safe_ticks: if friendly_fire { solution.flight_ticks } else { 0 },
                 },
             );
-            if let Some(structure_damage) = shot.overcharge {
+            if let Some(def) = shot.overcharge {
                 let entity = self.projectiles.last().filter(|last| last.0 == projectile).expect("just spawned").1;
-                self.ecs.insert_one(entity, Overcharged { structure_damage }).expect("just spawned");
+                self.ecs.insert_one(entity, Overcharged { def }).expect("just spawned");
             }
             if shot.stun > 0 {
                 let entity = self.projectiles.last().filter(|last| last.0 == projectile).expect("just spawned").1;
@@ -2499,6 +2513,7 @@ impl SimWorld {
         }
         let domes = if self.shields.is_empty() { Vec::new() } else { self.standing_domes() };
         let shield_hits = &mut self.pending_shield_hits;
+        let overcharges = &mut self.pending_overcharges;
         let terrain = &self.terrain;
         let grid = &self.spatial_grid;
         let hits = &mut self.pending_hits;
@@ -2622,8 +2637,17 @@ impl SimWorld {
                 .filter_map(|(index, dome)| sphere_entry(start, step, dome.center, dome.radius).map(|along| (along, index)))
                 .min();
             let first = |along: i32| best.is_none_or(|unit| along <= unit.0) && probe.hit.is_none_or(|ground| along <= ground);
+            let point_at = |along: i32| {
+                let part = |value: Fp| ((i64::from(value.to_bits()) * i64::from(along)) >> FP_FRAC_BITS) as i32;
+                (start.x.to_bits() + part(step.x), start.y.to_bits() + part(step.y))
+            };
             if let Some((along, struck)) = dome_hit.filter(|(along, _)| first(*along)) {
-                let damage = overcharged.map_or(projectile.damage, |overcharged| projectile.damage.min(overcharged.structure_damage));
+                if let Some(overcharged) = overcharged {
+                    overcharges.push(OverchargeImpact { def: overcharged.def, source: projectile.source, team: projectile.source_team, point: point_at(along), dome: Some(domes[struck].id) });
+                    dead.push(id);
+                    continue;
+                }
+                let damage = projectile.damage;
                 shield_hits.push((domes[struck].id, damage));
                 if projectile.splash_radius > Fp::ZERO {
                     let part = |value: Fp| (i128::from(value.to_bits()) * i128::from(along)) >> FP_FRAC_BITS;
@@ -2648,15 +2672,13 @@ impl SimWorld {
 
             match (best, probe.hit) {
                 (Some((along, _, target, is_structure)), terrain_hit) if terrain_hit.is_none_or(|ground| along <= ground) => {
-                    if splash {
+                    if let Some(overcharged) = overcharged {
+                        overcharges.push(OverchargeImpact { def: overcharged.def, source: projectile.source, team: projectile.source_team, point: point_at(along), dome: None });
+                    } else if splash {
                         explosions.extend([Some(blast), core].into_iter().flatten());
                     } else {
-                        // Overcharge does little to structures.
-                        let damage = match overcharged {
-                            Some(overcharged) if is_structure => projectile.damage.min(overcharged.structure_damage),
-                            _ => projectile.damage,
-                        };
-                        hits.push((target, damage, Some(projectile.source)));
+                        let _ = is_structure;
+                        hits.push((target, projectile.damage, Some(projectile.source)));
                         if stun > 0 {
                             stuns.push((target, stun));
                         }
@@ -2664,7 +2686,9 @@ impl SimWorld {
                     dead.push(id);
                 }
                 (_, Some(ground)) => {
-                    if splash {
+                    if let Some(overcharged) = overcharged {
+                        overcharges.push(OverchargeImpact { def: overcharged.def, source: projectile.source, team: projectile.source_team, point: point_at(ground), dome: None });
+                    } else if splash {
                         explosions.extend([Some(blast), core].into_iter().flatten());
                     } else {
                         // A shell that comes down on bare ground hits any debris lying there.
@@ -2682,6 +2706,93 @@ impl SimWorld {
             }
         }
 
+    }
+
+    /// Works out the Overcharge shells that landed this tick, by FAF's rule: each may spend a
+    /// share of the energy in store, split between the team's shells in flight, at so much a
+    /// point of damage, up to its most; of that, it spends only what destroys the toughest enemy
+    /// unit where it lands, and never less than its least. Against a lone commander, a structure,
+    /// or a structure's dome, it does the least, and against a mobile unit's dome, what brings
+    /// the dome down. The energy goes when it lands. Its blast hurts only enemies, commanders and
+    /// structures at most their own amounts.
+    fn resolve_overcharges(&mut self) {
+        if self.pending_overcharges.is_empty() {
+            return;
+        }
+        for impact in std::mem::take(&mut self.pending_overcharges) {
+            let def = impact.def;
+            let team = impact.team;
+            let in_flight = 1 + self
+                .projectiles
+                .iter()
+                .filter(|&&(id, entity)| {
+                    self.dead_projectiles.binary_search(&id).is_err()
+                        && self.ecs.get::<&Overcharged>(entity).is_ok()
+                        && self.ecs.get::<&Projectile>(entity).is_ok_and(|projectile| projectile.source_team == team)
+                })
+                .count() as i64;
+            let stored = self.economies[team.index()].energy.max(Res::ZERO);
+            let affordable = stored * i64::from(def.energy_share_permille) / 1000 / in_flight / i64::from(def.energy_per_damage);
+            let affordable = Fp::from_num(affordable.min(Res::from_num(def.max_damage)));
+            let (x, y) = impact.point;
+            // How much the toughest enemy there takes to destroy.
+            let mut ideal = Fp::ZERO;
+            match impact.dome.and_then(|owner| self.find_unit(owner)) {
+                Some((_, owner)) => {
+                    let structure = self.ecs.get::<&UnitStats>(owner).is_ok_and(|stats| stats.is_structure);
+                    if !structure {
+                        ideal = self.ecs.get::<&Shield>(owner).map_or(Fp::ZERO, |shield| shield.max_health);
+                    }
+                }
+                None => {
+                    let reach = i64::from(def.search_radius.to_bits());
+                    let commanders = self.commanders;
+                    let ecs = &self.ecs;
+                    let mut consider = |other: &super::spatial::GridEntry| {
+                        let (dx, dy) = (i64::from(other.x - x), i64::from(other.y - y));
+                        let within = reach + i64::from(other.radius);
+                        if dx * dx + dy * dy > within * within || commanders.contains(&Some(other.id)) {
+                            return;
+                        }
+                        let health = ecs.get::<&Health>(other.entity).map_or(Fp::ZERO, |health| health.current);
+                        let shield = ecs.get::<&Shield>(other.entity).ok().filter(|shield| shield.is_up()).map_or(Fp::ZERO, |shield| shield.health);
+                        ideal = ideal.max(health.saturating_add(shield));
+                    };
+                    self.spatial_grid.for_each_candidate(Some(team.enemy()), Layer::Mobile, x, y, (def.search_radius + Fp::from_bits(self.max_mobile_radius)).to_bits(), &mut consider);
+                }
+            }
+            if ideal == Fp::ZERO {
+                ideal = def.min_damage;
+            }
+            let damage = if stored < def.energy_required { affordable } else { affordable.min(ideal).max(def.min_damage) };
+            let drain = (Res::from_num(damage) * i64::from(def.energy_per_damage)).min(stored);
+            self.economies[team.index()].energy -= drain;
+            if let Some(owner) = impact.dome {
+                let structure = self.find_unit(owner).is_some_and(|(_, owner)| self.ecs.get::<&UnitStats>(owner).is_ok_and(|stats| stats.is_structure));
+                self.pending_shield_hits.push((owner, if structure { damage.min(def.structure_damage) } else { damage }));
+                continue;
+            }
+            let reach = i64::from(def.splash_radius.to_bits());
+            let (commanders, hits) = (self.commanders, &mut self.pending_hits);
+            let mut consider = |other: &super::spatial::GridEntry| {
+                let (dx, dy) = (i64::from(other.x - x), i64::from(other.y - y));
+                let within = reach + i64::from(other.radius);
+                if dx * dx + dy * dy > within * within {
+                    return;
+                }
+                let dealt = if commanders.contains(&Some(other.id)) {
+                    damage.min(def.commander_damage)
+                } else if other.is_structure {
+                    damage.min(def.structure_damage)
+                } else {
+                    damage
+                };
+                hits.push((other.entity, dealt, Some(impact.source)));
+            };
+            let search = def.splash_radius + Fp::from_bits(self.max_mobile_radius.max(self.max_structure_radius));
+            self.spatial_grid.for_each_candidate(Some(team.enemy()), Layer::Mobile, x, y, search.to_bits(), &mut consider);
+            self.spatial_grid.for_each_candidate(Some(team.enemy()), Layer::Structure, x, y, search.to_bits(), &mut consider);
+        }
     }
 
     /// Queues a hit on every unit within a blast, friend or foe, and on the debris there.
@@ -3137,7 +3248,7 @@ impl SimWorld {
         let (position, projectile, overcharged) = query.get().expect("projectiles have every component");
         if let Some(overcharged) = overcharged {
             hasher.write(&[1]);
-            write_fp(hasher, overcharged.structure_damage);
+            write_fp(hasher, overcharged.def.structure_damage);
         }
 
         write_vec3(hasher, position.0);

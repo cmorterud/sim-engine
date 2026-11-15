@@ -450,10 +450,7 @@ impl Turning {
 /// The commander's Overcharge weapon, ready to fire again after its own reload.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct OverchargeWeapon {
-    pub energy: Res,
-    pub damage: Fp,
-    pub structure_damage: Fp,
-    pub reload_ticks: u32,
+    pub def: super::blueprints::OverchargeDef,
     pub ticks_until_ready: u32,
 }
 
@@ -463,10 +460,10 @@ pub struct OverchargeOrder {
     pub target: SimId,
 }
 
-/// Marks an Overcharge shell. It does at most this much to a structure.
+/// Marks an Overcharge shell, whose damage and cost are worked out where it lands.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Overcharged {
-    pub structure_damage: Fp,
+    pub def: super::blueprints::OverchargeDef,
 }
 
 /// Experience from destroying enemies, and the rank it has earned, from 1 to 5. Units with

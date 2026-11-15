@@ -293,29 +293,59 @@ fn commander_facing(enemy: &str, energy: i64) -> (SimWorld, SimId, SimId) {
     };
     world.ecs.get::<&mut Combat>(world.unit_entity(target).unwrap()).unwrap().range = Fp::ZERO;
     let economy = &mut world.economies[0];
-    economy.energy_capacity = Res::from_num(10_000);
-    economy.base_energy_capacity = Res::from_num(10_000);
+    economy.energy_capacity = Res::from_num(200_000);
+    economy.base_energy_capacity = Res::from_num(200_000);
     economy.energy = Res::from_num(energy);
     (world, commander, target)
 }
 
-#[test]
-fn overcharge_destroys_a_heavy_tank_in_one_shot_and_costs_its_energy() {
-    let (mut world, commander, target) = commander_facing("t2_heavy_tank", 9_000);
+/// Fires one Overcharge at the target, and returns the most energy that left the store in one
+/// tick, which is the tick it landed, and the damage the target took.
+fn overcharge_once(world: &mut SimWorld, commander: SimId, target: SimId) -> (f64, Fp) {
+    let full = world.ecs.get::<&Health>(world.unit_entity(target).unwrap()).unwrap().current;
     world.advance_tick(&[SimCommand::Overcharge { unit: commander, target }]);
-    // The commander also earns a little energy every tick, so look at the tick it fires.
     let mut biggest_drop = 0.0_f64;
     for _ in 0..120 {
         let before = world.economies[0].energy.to_num::<f64>();
         world.advance_tick(&[]);
         biggest_drop = biggest_drop.max(before - world.economies[0].energy.to_num::<f64>());
-        if world.unit_entity(target).is_none() {
+        if biggest_drop > 100.0 {
             break;
         }
     }
+    let left = world.unit_entity(target).map_or(Fp::ZERO, |entity| world.ecs.get::<&Health>(entity).unwrap().current);
+    (biggest_drop, full - left)
+}
+
+#[test]
+fn overcharge_spends_only_what_destroys_its_target_and_at_least_its_least() {
+    // A heavy tank has 900 health, under the least a shot does, 1,250, which costs 7,500.
+    let (mut world, commander, target) = commander_facing("t2_heavy_tank", 100_000);
+    let (drop, _) = overcharge_once(&mut world, commander, target);
     assert!(world.unit_entity(target).is_none(), "one shot should destroy a heavy tank");
-    assert!((2_990.0..=3_000.0).contains(&biggest_drop), "it should cost 3,000 energy, not {biggest_drop}");
+    assert!((7_400.0..=7_500.0).contains(&drop), "the least shot costs 7,500 energy, not {drop}");
     assert!(world.ecs.get::<&OverchargeOrder>(world.unit_entity(commander).unwrap()).is_err(), "the order is done");
+}
+
+#[test]
+fn overcharge_does_what_the_store_can_pay_for_against_something_tough() {
+    // 7,200 health: with 9,000 in store, 90% of it pays for 1,350 damage, all of which it spends.
+    let (mut world, commander, target) = commander_facing("t3_armored_assault_bot", 9_000);
+    let (drop, dealt) = overcharge_once(&mut world, commander, target);
+    assert!((dealt.to_num::<f64>() - 1_350.0).abs() < 2.0, "it does 1,350, not {dealt}");
+    assert!((drop - 8_100.0).abs() < 20.0, "and spends 8,100, not {drop}");
+    // With plenty in store, it spends what destroys it: 7,200 damage, for 43,200.
+    let (mut world, commander, target) = commander_facing("t3_armored_assault_bot", 100_000);
+    let (drop, _) = overcharge_once(&mut world, commander, target);
+    assert!(world.unit_entity(target).is_none(), "destroyed");
+    assert!((drop - 43_200.0).abs() < 50.0, "for 43,200 energy, not {drop}");
+}
+
+#[test]
+fn overcharge_does_little_to_a_commander() {
+    let (mut world, commander, target) = commander_facing("acu", 100_000);
+    let (_, dealt) = overcharge_once(&mut world, commander, target);
+    assert_eq!(dealt, fp_int(400), "a commander takes 400");
 }
 
 #[test]
@@ -326,6 +356,9 @@ fn overcharge_waits_for_the_energy_and_then_fires() {
     assert!(world.unit_entity(target).is_some(), "it cannot fire without the energy");
     assert!(world.ecs.get::<&OverchargeOrder>(world.unit_entity(commander).unwrap()).is_ok(), "it keeps waiting");
     world.economies[0].energy = Res::from_num(4_000);
+    run_ticks(&mut world, 60);
+    assert!(world.unit_entity(target).is_some(), "it needs 7,500 in store, more than a commander alone holds");
+    world.economies[0].energy = Res::from_num(8_000);
     run_ticks(&mut world, 60);
     assert!(world.unit_entity(target).is_none(), "it fires once the energy is there");
 }
