@@ -23,12 +23,12 @@ const COMMANDER_PUSH_TICKS: u32 = 21_000;
 /// From here, half an hour in, any wave of at least twice the first counts as full strength, so
 /// that it goes for the base and the commander comes along: two even sides trading waves of 20
 /// to 40 against each other's defenses otherwise played to the time limit.
-const LATE_PUSH_TICKS: u32 = 30_000;
+const LATE_PUSH_TICKS: u32 = 26_000;
 /// From here, near the soak's 40,000-tick limit, there are no more waves: everything idle, the
 /// commander too, goes straight for the enemy commander, or failing sight of it, the enemy's
 /// start. Even sides otherwise still traded to the limit now and then, a different seed after
 /// each change.
-const SUDDEN_DEATH_TICKS: u32 = 34_000;
+const SUDDEN_DEATH_TICKS: u32 = 30_000;
 /// Enemy deposits farther than this from the enemy's start are raided rather than its base.
 const RAID_DISTANCE_UNITS: i32 = 2_000;
 const FIRST_WAVE: usize = 10;

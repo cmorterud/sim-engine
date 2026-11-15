@@ -1959,14 +1959,17 @@ impl SimWorld {
                     let keep = locate(target).is_some_and(|entry| {
                         can_engage(entry) || (sticky && can_hit(entry) && !hidden(entry.id) && far_enough(squared_distance(entry.x, entry.y)))
                     });
-                    if !keep {
+                    // Nor one it cannot fire at now: a commander walking the seabed on an
+                    // attack-move stopped for a target it could never shoot, and stood there
+                    // under the water for the rest of the match.
+                    if !keep || !can_fire {
                         combat.target = None;
                     }
                 }
 
                 // Searches are spread across ticks. Rings grow outward, so units at the
                 // front of a battle stop early with the nearest enemy. Mobile units come first.
-                if combat.target.is_none() && picks_targets && stats.phase.wrapping_add(tick).is_multiple_of(TARGET_SEARCH_INTERVAL) {
+                if combat.target.is_none() && picks_targets && can_fire && stats.phase.wrapping_add(tick).is_multiple_of(TARGET_SEARCH_INTERVAL) {
                     let mut ring = (8i64 << FP_FRAC_BITS).max(range / 8);
                     loop {
                         let radius = ring.min(range);

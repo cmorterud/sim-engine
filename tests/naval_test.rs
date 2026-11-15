@@ -370,6 +370,25 @@ fn a_commander_walks_the_seabed_hidden_and_silent() {
 }
 
 #[test]
+fn a_commander_on_an_attack_move_under_the_water_walks_on_past_what_it_cannot_shoot() {
+    // On an attack-move, a unit stops for a target. A commander on the seabed cannot fire, so
+    // it took the frigate as one anyway, and stood under the water for the rest of the match.
+    let mut world = lake_world();
+    let commander = spawn(&mut world, "acu", Team::Blue, point(1_200, 1_000));
+    let frigate = spawn(&mut world, "t1_frigate", Team::Red, point(2_000, 1_250));
+    world.ecs.get::<&mut sim_engine::sim::components::Combat>(world.unit_entity(frigate).unwrap()).unwrap().range = Fp::ZERO;
+    let goal = point(2_600, 1_000);
+    world.advance_tick(&[SimCommand::AttackMove { units: vec![commander], goal }]);
+    let mut was_under = false;
+    for _ in 0..600 {
+        world.advance_tick(&[]);
+        was_under |= world.unit_position(commander).unwrap().z < Fp::ZERO;
+    }
+    assert!(was_under, "it should cross along the bottom");
+    assert!(distance(&world, commander, goal) < 200, "it stopped under the water, {} from its goal", distance(&world, commander, goal));
+}
+
+#[test]
 fn only_torpedoes_reach_a_commander_under_the_water() {
     let mut world = lake_world();
     let commander = spawn(&mut world, "acu", Team::Blue, point(2_000, 1_000));
