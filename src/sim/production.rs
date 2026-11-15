@@ -46,6 +46,10 @@ pub struct Economy {
     /// The share of that energy paid this tick, from 0 to 1. Extractors make that share of
     /// their mass, so an energy stall slows them all alike, as in the original.
     pub extractor_efficiency: Res,
+    /// Everything reclaimed so far, for the economy panel. Nothing in the simulation reads it,
+    /// so it is left out of the state hash.
+    pub mass_reclaimed_total: Res,
+    pub energy_reclaimed_total: Res,
 }
 
 impl Economy {
@@ -89,6 +93,10 @@ impl Economy {
             mass_demand: per_second(self.mass_demand),
             energy_demand: per_second(self.energy_demand),
             satisfaction_permille: (self.satisfaction.to_bits() * 1000 / Res::ONE.to_bits()).clamp(0, 1000) as u16,
+            mass_reclaim: per_second(self.mass_reclaimed),
+            energy_reclaim: per_second(self.energy_reclaimed),
+            mass_reclaimed: self.mass_reclaimed_total.to_num(),
+            energy_reclaimed: self.energy_reclaimed_total.to_num(),
         }
     }
 }
@@ -1160,6 +1168,8 @@ impl SimWorld {
                 let economy = &mut self.economies[team.index()];
                 economy.mass_reclaimed += mass;
                 economy.energy_reclaimed += energy;
+                economy.mass_reclaimed_total += mass;
+                economy.energy_reclaimed_total += energy;
                 if finished {
                     self.ecs.despawn(wreck_entity).expect("task checked the wreck");
                     self.wrecks.retain(|wreck| wreck.0 != target);

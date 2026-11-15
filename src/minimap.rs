@@ -1,6 +1,7 @@
 //! The minimap: the whole map in a framed panel under the economy, with the land shaded by
 //! height, what is out of sight darkened, every unit and blip as a dot, and the camera's view
-//! outlined. Clicking or dragging on it moves the camera there.
+//! outlined. Clicking or dragging on it moves the camera there, and right-clicking sends the
+//! selection there.
 #![allow(clippy::disallowed_types)]
 
 use egui::{Align2, Color32, Pos2, Rect, Sense, Stroke, Vec2};
@@ -168,13 +169,20 @@ impl Minimap {
                     painter.add(egui::Shape::closed_line(corners, Stroke::new(1.4_f32, Color32::WHITE)));
                 }
                 painter.rect_stroke(rect, 0.0, Stroke::new(1.0_f32, hud::RIM.gamma_multiply(0.7)));
-                if response.is_pointer_button_down_on() {
+                // Only the left button moves the view: the right gives orders.
+                if response.is_pointer_button_down_on() && ui.input(|input| input.pointer.primary_down()) {
                     if let Some(spot) = response.interact_pointer_pos() {
                         let [x, y] = from_minimap(rect, map_size, spot);
                         actions.push(UiAction::CenterCamera([x.round() as i32, y.round() as i32]));
                     }
                 }
-                response.on_hover_text("Click or drag to move the view.");
+                if response.secondary_clicked() {
+                    if let Some(spot) = response.interact_pointer_pos() {
+                        let [x, y] = from_minimap(rect, map_size, spot);
+                        actions.push(UiAction::MinimapOrder([x.round() as i32, y.round() as i32]));
+                    }
+                }
+                response.on_hover_text("Click or drag to move the view. Right-click to send the selection there: Shift queues, Alt attack-moves, Ctrl keeps formation.");
             });
         });
         ctx.data_mut(|data| data.insert_temp(egui::Id::new(BELOW_MINIMAP), area.response.rect.bottom() + 6.0));
@@ -230,6 +238,34 @@ mod tests {
         let back = from_minimap(rect, size, spot);
         assert!((back[0] - point[0]).abs() < 1e-6 && (back[1] - point[1]).abs() < 1e-6);
         assert_eq!(from_minimap(rect, size, Pos2::new(-50.0, 500.0)), [0.0, size], "a drag past the edge stops at it");
+    }
+
+    /// Clicks the middle of the minimap through real egui input, and returns what came out.
+    fn click_middle(button: egui::PointerButton) -> Vec<UiAction> {
+        let heights = bowl();
+        let mut camera = Camera::new(640.0, [800.0, 600.0]);
+        camera.look_at(320.0, 320.0, 300.0);
+        camera.update(0.0, &heights);
+        let snapshot = SimSnapshot::default();
+        let ctx = egui::Context::default();
+        let mut minimap = Minimap::default();
+        // The panel sits at (4, 96), and the map starts inside its 8 point margin.
+        let at = Pos2::new(12.0 + MINIMAP_SIZE / 2.0, 104.0 + MINIMAP_SIZE / 2.0);
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 800.0));
+        let press = |pressed| egui::Event::PointerButton { pos: at, button, pressed, modifiers: egui::Modifiers::NONE };
+        let mut actions = Vec::new();
+        for events in [vec![], vec![egui::Event::PointerMoved(at)], vec![press(true)], vec![press(false)], vec![]] {
+            let input = egui::RawInput { screen_rect: Some(screen), events, ..egui::RawInput::default() };
+            let _ = ctx.run(input, |ctx| minimap.show(ctx, &camera, &heights, 0.0, &snapshot, None, &mut actions));
+        }
+        actions
+    }
+
+    #[test]
+    fn clicking_the_minimap_moves_the_view_and_right_clicking_sends_the_selection() {
+        let left = click_middle(egui::PointerButton::Primary);
+        assert!(!left.is_empty() && left.iter().all(|action| *action == UiAction::CenterCamera([320, 320])), "{left:?}");
+        assert_eq!(click_middle(egui::PointerButton::Secondary), [UiAction::MinimapOrder([320, 320])]);
     }
 
     #[test]

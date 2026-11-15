@@ -212,6 +212,11 @@ pub struct EconomyView {
     pub energy_demand: i64,
     /// How much of demand is being met, in thousandths.
     pub satisfaction_permille: u16,
+    /// What reclaim is bringing in now, a second, and what it has brought in all match.
+    pub mass_reclaim: i64,
+    pub energy_reclaim: i64,
+    pub mass_reclaimed: i64,
+    pub energy_reclaimed: i64,
 }
 
 /// Read-only projectile state for the renderer. Values are raw `Fp` bits.

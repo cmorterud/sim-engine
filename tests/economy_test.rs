@@ -552,14 +552,22 @@ fn engineers_reclaim_wrecks_into_mass() {
     world.advance_tick(&[SimCommand::Reclaim { units: vec![engineer], target: wreck_id }]);
     // The wreck holds 81% of 30 mass, or 24.3. It takes time to walk there and 2.4 s to eat.
     let mut saw_reclaim_link = false;
+    let mut most_reclaim_rate = 0;
     for _ in 0..400 {
         world.advance_tick(&[]);
-        saw_reclaim_link |= world.snapshot_for(Some(Team::Blue)).work_links.iter().any(|link| link.builder == engineer && link.reclaim);
+        let snapshot = world.snapshot_for(Some(Team::Blue));
+        saw_reclaim_link |= snapshot.work_links.iter().any(|link| link.builder == engineer && link.reclaim);
+        most_reclaim_rate = most_reclaim_rate.max(snapshot.economy.mass_reclaim);
     }
     assert!(saw_reclaim_link, "reclaiming should show as work");
     assert!(world.wrecks.is_empty(), "the wreck should be gone");
     let mass = world.economies[0].mass.to_num::<f64>();
     assert!((24.2..=24.4).contains(&mass), "reclaimed {mass} mass");
+    // The economy panel shows reclaim coming in while it lasts, and the total once it is done.
+    let economy = world.snapshot_for(Some(Team::Blue)).economy;
+    assert!(most_reclaim_rate > 0, "reclaim showed no rate");
+    assert_eq!(economy.mass_reclaim, 0, "nothing is being reclaimed now");
+    assert_eq!(economy.mass_reclaimed, 24, "all of it, in whole units");
     assert!(world.ecs.get::<&Builder>(entity(&world, engineer)).unwrap().tasks.is_empty());
 }
 

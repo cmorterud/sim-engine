@@ -662,6 +662,32 @@ fn issue_planned_orders(
     ordered
 }
 
+/// Orders the selection to a point picked on the minimap: a move, or with Alt an attack-move.
+/// Nothing on the map is under the cursor, so it never attacks, assists, or reclaims.
+#[allow(clippy::too_many_arguments)]
+fn issue_minimap_order(session: &Session, selection: &Selection, camera: &Camera, map: &MapInfo, feedback: &mut OrderFeedback, point: [f64; 2], attack_move: bool, queued: bool, formation: bool) {
+    let ground = Some(point);
+    let click = RightClick {
+        selected: selection.selected(),
+        units: &session.current.units,
+        wrecks: &session.current.wrecks,
+        blueprints: &map.blueprints,
+        team: PLAYER_TEAM,
+        camera,
+        cursor: [f64::MIN, f64::MIN],
+        ground,
+        attack_move,
+    };
+    let orders = if attack_move { right_click_orders(&click) } else { move_orders(&click) };
+    let orders = if queued { queued_commands(orders, &session.current.units) } else { orders };
+    let orders = if formation { formation_commands(orders) } else { orders };
+    let reason = if selection.selected().is_empty() { "No units selected" } else { "The selected units cannot move" };
+    feedback.show_orders(&orders, ground_point(ground, &map.heights), &map.blueprints, reason);
+    for order in orders {
+        session.send(order);
+    }
+}
+
 /// Orders the selection from a click, and shows what happened.
 #[allow(clippy::too_many_arguments)]
 fn issue_click_orders(
@@ -1549,14 +1575,14 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                 ui::world_overlay(ctx, &camera, &snapshot, &selected, &map.blueprints, pixels_per_point);
                                 let speed = session.driver.as_ref().map_or(1, SimDriver::speed);
                                 let state = ui::WatchState { map: &map_name, seed, view: watch_view, speed, paused: game_paused };
-                                ui::watch_bar(ctx, &snapshot, &state, &mut actions);
+                                ui::watch_bar(ctx, &snapshot, &map.blueprints, &state, &mut actions);
                                 minimap.show(ctx, &camera, &map.heights, f64::from(map.water_level), &snapshot, map.fog_side, &mut actions);
                                 let stopped = snapshot.tick >= sim_engine::soak::MATCH_TICK_LIMIT;
                                 ui::watch_end_window(ctx, snapshot.match_result, stopped, snapshot.tick, seed, &mut actions);
                             } else if is_match {
                                 ui::world_overlay(ctx, &camera, &snapshot, &selected, &map.blueprints, pixels_per_point);
                                 let sound_label = sound.as_ref().map(|_| sound_settings.label());
-                                ui::resource_bar(ctx, &snapshot, &map_name, sound_label.as_deref(), game_paused, &mut actions);
+                                ui::resource_bar(ctx, &snapshot, &map.blueprints, &map_name, sound_label.as_deref(), game_paused, &mut actions);
                                 minimap.show(ctx, &camera, &map.heights, f64::from(map.water_level), &snapshot, map.fog_side, &mut actions);
                                 ui::commander_alert(ctx, attack_alarm.alert_strength());
                                 ui::control_group_bar(ctx, &group_rows, &snapshot, PLAYER_TEAM, &map.blueprints, &selected, &mut actions);
@@ -1634,6 +1660,10 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                 }
                                 UiAction::TogglePause => toggle_pause(&session),
                                 UiAction::CenterCamera([x, y]) => camera.look_at(f64::from(x), f64::from(y), 0.0),
+                                UiAction::MinimapOrder([x, y]) if is_match => {
+                                    issue_minimap_order(&session, &selection, &camera, &map, &mut feedback, [f64::from(x), f64::from(y)], alt_held, shift_held, command_held);
+                                }
+                                UiAction::MinimapOrder(_) => {}
                                 UiAction::SetPaused { units, paused } => {
                                     let word = if paused { "Paused" } else { "Resumed" };
                                     feedback.set_label(MarkerKind::Build, format!("{word}: {}", units.len()));

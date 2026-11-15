@@ -51,8 +51,8 @@ pub const BUILDER_FAMILIES: [(char, &[&str]); 8] = [
             "quantum_gateway",
         ],
     ),
-    ('E', &["mass_extractor", "mass_extractor_t2", "mass_extractor_t3", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "mass_storage"]),
-    ('S', &["power_generator", "power_generator_t2", "power_generator_t3", "energy_storage"]),
+    ('E', &["mass_extractor", "mass_extractor_t2", "mass_extractor_t3", "mass_fabricator", "mass_fabricator_t3", "mass_storage"]),
+    ('S', &["power_generator", "power_generator_t2", "power_generator_t3", "hydrocarbon_plant", "energy_storage"]),
     ('D', &["t1_point_defense", "t2_point_defense", "t3_heavy_point_defense", "t1_aa_turret", "t2_flak", "t3_sam", "t1_torpedo_launcher", "t2_torpedo_launcher"]),
     ('A', &["t2_artillery", "t3_artillery", "tactical_missile_launcher", "strategic_missile_launcher"]),
     ('Z', &["radar", "radar_t2", "omni_sensor", "t1_sonar", "t2_sonar", "stealth_field_generator"]),
@@ -262,7 +262,7 @@ mod tests {
         same(&["radar", "t1_sonar", "radar_t2", "t2_sonar", "omni_sensor"], 'Z');
         same(&["t1_point_defense", "t1_aa_turret", "t2_point_defense", "t2_flak", "t3_heavy_point_defense", "t3_sam"], 'D');
         same(&["mass_extractor", "mass_storage"], 'E');
-        same(&["power_generator", "energy_storage"], 'S');
+        same(&["power_generator", "hydrocarbon_plant", "energy_storage"], 'S');
         // Land comes first, so the key starts on a land factory.
         assert!(builder_family("land_factory_t1").unwrap().1 < builder_family("air_factory").unwrap().1);
         assert!(builder_family("radar").unwrap().1 < builder_family("t1_sonar").unwrap().1);

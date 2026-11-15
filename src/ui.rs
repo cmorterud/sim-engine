@@ -166,6 +166,9 @@ pub enum UiAction {
     TogglePause,
     /// Move the camera to look at this world point, in whole units, keeping its height.
     CenterCamera([i32; 2]),
+    /// Order the selection to this world point, in whole units, as a right-click on the ground
+    /// there would, with the same keys for queuing, attack-moving, and formation.
+    MinimapOrder([i32; 2]),
     /// From the quick select bar: select these, or add them to the selection.
     QuickSelect { units: Vec<SimId>, add: bool },
     /// Remove one order from these builders' queues.
@@ -1068,6 +1071,31 @@ pub fn selection_rates(snapshot: &SimSnapshot, selected: &[SimId], db: &Blueprin
     SelectionRates { output: output.join(", "), spending }
 }
 
+/// What the selection makes less what it uses, in tenths a second, mass then energy, if any of
+/// it reports rates.
+pub fn selection_net(snapshot: &SimSnapshot, selected: &[SimId]) -> Option<(i32, i32)> {
+    let mut net = None;
+    for id in selected {
+        if let Ok(index) = snapshot.rates.binary_search_by_key(id, |rates| rates.id) {
+            let rates = snapshot.rates[index];
+            let (mass, energy) = net.unwrap_or((0, 0));
+            net = Some((mass + rates.mass_income - rates.mass_use, energy + rates.energy_income - rates.energy_use));
+        }
+    }
+    net
+}
+
+/// The selection's build power, all together.
+pub fn selection_build_power(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb) -> i64 {
+    selected.iter().filter_map(|id| find_unit(snapshot, *id)).filter(|unit| unit.blueprint != u16::MAX).map(|unit| db.get(BlueprintId(unit.blueprint)).build_power.to_num::<i64>()).sum()
+}
+
+/// A tenths figure, signed, with one decimal: "+2.5", "-14.1".
+fn signed_tenths(tenths: i32) -> String {
+    let sign = if tenths < 0 { "-" } else { "+" };
+    format!("{sign}{}.{}", tenths.unsigned_abs() / 10, tenths.unsigned_abs() % 10)
+}
+
 /// An order that can be picked up and put somewhere else.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DraggableOrder {
@@ -1487,13 +1515,21 @@ pub fn quick_select_bar(
     if groups.commander.is_none() && groups.families.is_empty() {
         return;
     }
-    egui::Area::new(egui::Id::new("quick select")).anchor(Align2::RIGHT_TOP, Vec2::new(-8.0, QUICK_SELECT_TOP)).show(ctx, |ui| {
+    let top = ctx.data(|data| data.get_temp::<f32>(egui::Id::new(BELOW_SCORE))).unwrap_or(QUICK_SELECT_TOP);
+    egui::Area::new(egui::Id::new("quick select")).anchor(Align2::RIGHT_TOP, Vec2::new(-8.0, top)).show(ctx, |ui| {
         quick_rows(ui, snapshot, db, &groups, team_color(team), selected, view_center, state, actions);
     });
 }
 
-/// How far down the screen the quick select column starts, clear of the score panel.
+/// How far down the screen the quick select column starts, until the score panel says where it
+/// ends.
 const QUICK_SELECT_TOP: f32 = 132.0;
+const BELOW_SCORE: &str = "below score";
+
+/// Remembers where the score panel ends, so that the quick select column sits under it.
+fn note_score_bottom(ctx: &egui::Context, bottom: f32) {
+    ctx.data_mut(|data| data.insert_temp(egui::Id::new(BELOW_SCORE), bottom + 6.0));
+}
 
 /// A label that never wraps. A popup near the middle of the screen has little room by default,
 /// which would otherwise squeeze its text into a tall, narrow column.
@@ -1591,15 +1627,15 @@ pub fn clock_text(tick: u32) -> String {
 }
 
 /// How wide the economy panel's contents are, in points.
-const ECONOMY_WIDTH: f32 = 300.0;
+const ECONOMY_WIDTH: f32 = 340.0;
 /// How tall one resource's row is.
 const ECONOMY_ROW: f32 = 30.0;
 
 /// One resource's row: its mark, how full its store is, the net rate in large figures, and income
 /// over spending at the end. Lit red while it is what stalls building.
 #[allow(clippy::too_many_arguments)]
-fn economy_row(ui: &mut egui::Ui, energy: bool, stored: i64, capacity: i64, income: i64, demand: i64, stalling: bool) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(ECONOMY_WIDTH, ECONOMY_ROW), egui::Sense::hover());
+fn economy_row(ui: &mut egui::Ui, energy: bool, stored: i64, capacity: i64, income: i64, demand: i64, reclaim: (i64, i64), stalling: bool) {
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(ECONOMY_WIDTH, ECONOMY_ROW), egui::Sense::hover());
     let painter = ui.painter();
     if stalling {
         let pulse = 0.5 + 0.5 * (ui.input(|input| input.time) * 4.0).sin() as f32;
@@ -1616,8 +1652,17 @@ fn economy_row(ui: &mut egui::Ui, energy: bool, stored: i64, capacity: i64, inco
     let net = income - demand;
     let net_color = if net < 0 { hud::LOSS } else if net == 0 { hud::TEXT } else { hud::GAIN };
     painter.text(Pos2::new(bar.right() + 8.0, rect.center().y), Align2::LEFT_CENTER, hud::signed(net), FontId::proportional(22.0), net_color);
+    // Reclaim: what it brings in now, over all it has brought in.
+    let (rate, total) = reclaim;
+    painter.text(Pos2::new(rect.right() - 54.0, rect.top() + 1.0), Align2::RIGHT_TOP, format!("+{rate}"), small.clone(), hud::DIM_TEXT);
+    painter.text(Pos2::new(rect.right() - 54.0, rect.bottom() - 1.0), Align2::RIGHT_BOTTOM, hud::compact(total), small.clone(), hud::DIM_TEXT);
     painter.text(Pos2::new(rect.right(), rect.top() + 1.0), Align2::RIGHT_TOP, format!("+{income}"), small.clone(), hud::GAIN);
     painter.text(Pos2::new(rect.right(), rect.bottom() - 1.0), Align2::RIGHT_BOTTOM, format!("-{demand}"), small, hud::LOSS);
+    let name = if energy { "Energy" } else { "Mass" };
+    response.on_hover_text(format!(
+        "{name}: {stored} stored of {capacity}.\nNet {} a second: {income} coming in, {demand} going out.\nReclaim: {rate} a second now, {total} in all.",
+        hud::signed(income - demand)
+    ));
 }
 
 /// Both resources, one row each, and what a stall slows building to. `title` names whose
@@ -1628,24 +1673,49 @@ fn economy_rows(ui: &mut egui::Ui, economy: &EconomyView, title: Option<(&str, C
         ui.label(egui::RichText::new(name).color(color).strong().size(12.0));
     }
     let stalled = economy.satisfaction_permille < 1000;
-    economy_row(ui, false, economy.mass, economy.mass_capacity, economy.mass_income, economy.mass_demand, stalled && economy.mass == 0);
-    economy_row(ui, true, economy.energy, economy.energy_capacity, economy.energy_income, economy.energy_demand, stalled && economy.energy == 0);
+    economy_row(ui, false, economy.mass, economy.mass_capacity, economy.mass_income, economy.mass_demand, (economy.mass_reclaim, economy.mass_reclaimed), stalled && economy.mass == 0);
+    economy_row(ui, true, economy.energy, economy.energy_capacity, economy.energy_income, economy.energy_demand, (economy.energy_reclaim, economy.energy_reclaimed), stalled && economy.energy == 0);
     if stalled {
         ui.label(egui::RichText::new(format!("Stalled: building at {}%", economy.satisfaction_permille / 10)).color(STALLED).size(12.0));
     }
 }
 
-/// A team's row in the score panel: its color, its name, and, right-aligned, `detail`.
-fn score_row(ui: &mut egui::Ui, color: Color32, name: &str, detail: &str, detail_color: Color32) {
+/// A team's row in the score panel: its color and name, then its figures in columns, each
+/// right-aligned under the header's: units, mass income, army value, and how it is doing.
+fn score_row(ui: &mut egui::Ui, color: Color32, name: &str, figures: [String; 3], state: (&str, Color32)) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(SCORE_WIDTH, 17.0), egui::Sense::hover());
     let painter = ui.painter();
     let swatch = Rect::from_center_size(Pos2::new(rect.left() + 6.0, rect.center().y), Vec2::splat(9.0));
     painter.rect(swatch, 1.0, color, Stroke::new(1.0_f32, Color32::from_black_alpha(160)));
     painter.text(Pos2::new(rect.left() + 16.0, rect.center().y), Align2::LEFT_CENTER, name, FontId::proportional(13.0), hud::TEXT);
-    painter.text(Pos2::new(rect.right(), rect.center().y), Align2::RIGHT_CENTER, detail, FontId::proportional(12.0), detail_color);
+    for (figure, column) in figures.iter().zip(SCORE_COLUMNS) {
+        painter.text(Pos2::new(rect.left() + column, rect.center().y), Align2::RIGHT_CENTER, figure, FontId::proportional(12.0), hud::TEXT);
+    }
+    painter.text(Pos2::new(rect.right(), rect.center().y), Align2::RIGHT_CENTER, state.0, FontId::proportional(12.0), state.1);
 }
 
-const SCORE_WIDTH: f32 = 250.0;
+/// The score panel's column headings, over the figures of `score_row`.
+fn score_columns(ui: &mut egui::Ui) {
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(SCORE_WIDTH, 14.0), egui::Sense::hover());
+    let painter = ui.painter();
+    for (heading, column) in ["Units", "Mass/s", "Army"].iter().zip(SCORE_COLUMNS) {
+        painter.text(Pos2::new(rect.left() + column, rect.center().y), Align2::RIGHT_CENTER, heading, FontId::proportional(10.5), hud::DIM_TEXT);
+    }
+    response.on_hover_text("Units: how many it has that you can see. Mass/s: its mass income. Army: the mass its mobile units cost. A team out of sight shows only what you can see of it.");
+}
+
+/// Where each figure of a score row ends, from the row's left.
+const SCORE_COLUMNS: [f32; 3] = [150.0, 196.0, 240.0];
+
+const SCORE_WIDTH: f32 = 300.0;
+
+/// A team's figures for its score row: units that can be seen, its mass income if known, and
+/// the mass its mobile units that can be seen cost.
+fn team_figures(snapshot: &SimSnapshot, team: Team, db: &BlueprintDb, income: Option<i64>) -> [String; 3] {
+    let units: Vec<&UnitView> = snapshot.units.iter().filter(|unit| unit.team == team && unit.blueprint != u16::MAX).collect();
+    let army: i64 = units.iter().filter(|unit| !unit.is_structure).map(|unit| db.get(BlueprintId(unit.blueprint)).mass.to_num::<i64>()).sum();
+    [units.len().to_string(), income.map_or_else(|| "?".to_string(), |income| format!("+{income}")), hud::compact(army)]
+}
 
 /// The score panel's first line: the clock, and on the right `right`.
 fn score_header(ui: &mut egui::Ui, tick: u32, right: &str) {
@@ -1680,7 +1750,7 @@ fn paused_banner(ctx: &egui::Context) {
 
 /// The panels along the top of the screen: the economy at the top left, game controls in the
 /// middle, and the clock, the players, and the map at the top right.
-pub fn resource_bar(ctx: &egui::Context, snapshot: &SimSnapshot, map: &str, sound: Option<&str>, paused: bool, actions: &mut Vec<UiAction>) {
+pub fn resource_bar(ctx: &egui::Context, snapshot: &SimSnapshot, db: &BlueprintDb, map: &str, sound: Option<&str>, paused: bool, actions: &mut Vec<UiAction>) {
     if paused {
         paused_banner(ctx);
     }
@@ -1698,20 +1768,20 @@ pub fn resource_bar(ctx: &egui::Context, snapshot: &SimSnapshot, map: &str, soun
             }
         });
     });
-    hud::panel(ctx, "score", Align2::RIGHT_TOP, Vec2::new(-4.0, 4.0), |ui| {
+    let ((), score) = hud::panel_rect(ctx, "score", Align2::RIGHT_TOP, Vec2::new(-4.0, 4.0), |ui| {
         ui.spacing_mut().item_spacing.y = 2.0;
         let mine = snapshot.units.iter().filter(|unit| unit.team == Team::Blue && unit.blueprint != u16::MAX).count();
         score_header(ui, snapshot.tick, &format!("{mine} units"));
         panel_rule(ui);
-        let (state, state_color) = team_state(snapshot.match_result, Team::Blue);
-        score_row(ui, BLUE, "Blue (you)", state, state_color);
-        let (state, state_color) = team_state(snapshot.match_result, Team::Red);
-        score_row(ui, RED, "Red (AI)", state, state_color);
+        score_columns(ui);
+        score_row(ui, BLUE, "Blue (you)", team_figures(snapshot, Team::Blue, db, Some(snapshot.economy.mass_income)), team_state(snapshot.match_result, Team::Blue));
+        score_row(ui, RED, "Red (AI)", team_figures(snapshot, Team::Red, db, None), team_state(snapshot.match_result, Team::Red));
         panel_rule(ui);
         ui.vertical_centered(|ui| {
             ui.label(egui::RichText::new(format!("Map: {map}")).size(12.0).color(hud::DIM_TEXT));
         });
     });
+    note_score_bottom(ctx, score.bottom());
 }
 
 /// The height of the command bar along the bottom, in points.
@@ -1788,12 +1858,38 @@ fn selection_info(ui: &mut egui::Ui, snapshot: &SimSnapshot, selected: &[SimId],
                     ui.label(egui::RichText::new(notes.join(", ")).size(11.0).color(hud::DIM_TEXT));
                 }
             }
-            let rates = selection_rates(snapshot, selected, db);
-            if !rates.output.is_empty() {
-                ui.label(egui::RichText::new(rates.output).size(11.0).color(HEALTHY));
-            }
-            if !rates.spending.is_empty() {
-                ui.label(egui::RichText::new(rates.spending).size(11.0).color(SPENDING));
+            // What it makes or uses, and its build power, each by its mark.
+            let net = selection_net(snapshot, selected);
+            let power = selection_build_power(snapshot, selected, db);
+            if net.is_some() || power > 0 {
+                let rates = selection_rates(snapshot, selected, db);
+                let hint = [rates.output, rates.spending].into_iter().filter(|line| !line.is_empty()).collect::<Vec<_>>().join("\n");
+                let (row, _) = ui.allocate_exact_size(Vec2::new(width.max(80.0), 16.0), egui::Sense::hover());
+                let painter = ui.painter();
+                let font = FontId::proportional(12.0);
+                let mut x = row.left() + 7.0;
+                let figure = |painter: &egui::Painter, x: &mut f32, text: String, color: Color32| {
+                    let galley = painter.layout_no_wrap(text, font.clone(), color);
+                    let width = galley.size().x;
+                    painter.galley(Pos2::new(*x, row.center().y - galley.size().y / 2.0), galley, color);
+                    *x += width + 12.0;
+                };
+                if let Some((mass, energy)) = net {
+                    hud::resource_mark(painter, Pos2::new(x, row.center().y), 6.0, false);
+                    x += 9.0;
+                    figure(painter, &mut x, signed_tenths(mass), if mass < 0 { hud::LOSS } else { hud::GAIN });
+                    hud::resource_mark(painter, Pos2::new(x, row.center().y), 6.0, true);
+                    x += 9.0;
+                    figure(painter, &mut x, signed_tenths(energy), if energy < 0 { hud::LOSS } else { hud::GAIN });
+                }
+                if power > 0 {
+                    hud::draw_glyph(painter, Rect::from_center_size(Pos2::new(x + 2.0, row.center().y), Vec2::splat(15.0)), Glyph::Repair);
+                    x += 11.0;
+                    figure(painter, &mut x, power.to_string(), hud::TEXT);
+                }
+                if !hint.is_empty() {
+                    ui.interact(row, ui.id().with("selection rates"), egui::Sense::hover()).on_hover_text(hint);
+                }
             }
         });
         // What the factories are making, and how far along.
@@ -2205,7 +2301,7 @@ fn view_name(view: Option<Team>) -> &'static str {
 /// The bars of a watched AI-vs-AI match. At the top, the match and both teams' economies, or
 /// when seeing through one team's eyes, that team's economy as its player would see it. At the
 /// bottom, whose sight to see through, how fast to play, and pause.
-pub fn watch_bar(ctx: &egui::Context, snapshot: &SimSnapshot, state: &WatchState, actions: &mut Vec<UiAction>) {
+pub fn watch_bar(ctx: &egui::Context, snapshot: &SimSnapshot, db: &BlueprintDb, state: &WatchState, actions: &mut Vec<UiAction>) {
     if state.paused {
         paused_banner(ctx);
     }
@@ -2253,23 +2349,19 @@ pub fn watch_bar(ctx: &egui::Context, snapshot: &SimSnapshot, state: &WatchState
             }
         });
     });
-    hud::panel(ctx, "score", Align2::RIGHT_TOP, Vec2::new(-4.0, 4.0), |ui| {
+    let ((), score) = hud::panel_rect(ctx, "score", Align2::RIGHT_TOP, Vec2::new(-4.0, 4.0), |ui| {
         ui.spacing_mut().item_spacing.y = 2.0;
         score_header(ui, snapshot.tick, &format!("{}x", state.speed));
         panel_rule(ui);
-        let units = |team: Team| snapshot.units.iter().filter(|unit| unit.team == team && unit.blueprint != u16::MAX).count();
+        score_columns(ui);
         for team in [Team::Blue, Team::Red] {
             let economy = match (&snapshot.team_economies, state.view) {
                 (Some(economies), None) => Some(&economies[team as usize]),
                 (_, Some(seen)) if seen == team => Some(&snapshot.economy),
                 _ => None,
             };
-            let (playing, _) = team_state(snapshot.match_result, team);
-            let detail = match economy {
-                Some(economy) => format!("{} units   +{} mass   {playing}", units(team), economy.mass_income),
-                None => playing.to_string(),
-            };
-            score_row(ui, team_color(team), &format!("{} (AI)", team_name(team)), &detail, hud::TEXT);
+            let figures = team_figures(snapshot, team, db, economy.map(|economy| economy.mass_income));
+            score_row(ui, team_color(team), &format!("{} (AI)", team_name(team)), figures, team_state(snapshot.match_result, team));
         }
         panel_rule(ui);
         ui.label(egui::RichText::new("Observer").strong().color(Color32::from_rgb(255, 170, 60)));
@@ -2278,6 +2370,7 @@ pub fn watch_bar(ctx: &egui::Context, snapshot: &SimSnapshot, state: &WatchState
                 .on_hover_text("The match the soak plays for this map and seed, which plays out the same every time.");
         });
     });
+    note_score_bottom(ctx, score.bottom());
 }
 
 /// The end of a watched match: who won, and what to watch next. `stopped` says the match ran
@@ -3925,6 +4018,33 @@ mod tests {
         run(vec![press(false)]);
         run(vec![]);
         (actions, over_panel)
+    }
+
+    #[test]
+    fn the_selection_panel_shows_net_rates_and_build_power() {
+        let db = BlueprintDb::standard();
+        let mut current = commander_and_engineer(&db);
+        current.rates = vec![
+            UnitRatesView { id: SimId(10), mass_income: 10, energy_income: 200, mass_use: 0, energy_use: 0 },
+            UnitRatesView { id: SimId(11), mass_income: 0, energy_income: 0, mass_use: 151, energy_use: 30 },
+        ];
+        assert_eq!(selection_net(&current, &[SimId(10), SimId(11)]), Some((-141, 170)));
+        assert_eq!(selection_net(&current, &[SimId(12)]), None, "the bot reports no rates");
+        let power = |key: &str| db.get(db.id(key)).build_power.to_num::<i64>();
+        assert_eq!(selection_build_power(&current, &[SimId(10), SimId(11), SimId(12)], &db), power("acu") + power("t1_engineer"));
+        assert_eq!(signed_tenths(-141), "-14.1");
+        assert_eq!(signed_tenths(25), "+2.5");
+        assert_eq!(signed_tenths(0), "+0.0");
+    }
+
+    #[test]
+    fn a_teams_score_counts_what_can_be_seen_and_hides_an_unknown_income() {
+        let db = BlueprintDb::standard();
+        let current = base_with_factories(&db);
+        let [units, income, army] = team_figures(&current, Team::Blue, &db, Some(26));
+        assert_eq!((units.as_str(), income.as_str()), ("6", "+26"));
+        assert_eq!(army, db.get(db.id("acu")).mass.to_num::<i64>().to_string(), "only mobile units count towards the army");
+        assert_eq!(team_figures(&current, Team::Red, &db, None)[1], "?");
     }
 
     #[test]
