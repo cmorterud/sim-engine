@@ -529,3 +529,23 @@ fn a_fighter_bomber_bombs_under_fog_of_war_on_attack_and_attack_move() {
         assert!(alive < 3, "attack-move {attack_move}: it bombed nothing");
     }
 }
+
+/// Aircraft in flight keep apart: two sent the same way from the same spot spread out instead
+/// of flying as one.
+#[test]
+fn aircraft_in_flight_keep_apart() {
+    let mut world = world();
+    let first = spawn(&mut world, "t1_interceptor", Team::Blue, point(1_000, 1_000));
+    let second = spawn(&mut world, "t1_interceptor", Team::Blue, point(1_002, 1_000));
+    world.advance_tick(&[SimCommand::Move { units: vec![first, second], goal: point(4_000, 3_000) }]);
+    let mut closest = i64::MAX;
+    for tick in 0..200 {
+        world.advance_tick(&[]);
+        if tick > 60 {
+            let (a, b) = (world.unit_position(first).unwrap().xy(), world.unit_position(second).unwrap().xy());
+            closest = closest.min(sim_engine::math::fp::sqrt_wide(a.distance_squared(&b)).to_num::<i64>());
+        }
+    }
+    let radius = world.blueprints.get(world.blueprints.id("t1_interceptor")).radius.to_num::<i64>();
+    assert!(closest >= radius * 2, "they stay at least their width apart, not {closest}");
+}

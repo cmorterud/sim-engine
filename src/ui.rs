@@ -60,8 +60,8 @@ const QUICK_DOUBLE_CLICK_SECONDS: f64 = 0.4;
 const SHIFT_QUEUE_COUNT: u32 = 5;
 const QUICK_ROW_WIDTH: f32 = 170.0;
 const CONTROL_GROUP_ROW_WIDTH: f32 = 220.0;
-/// How tall the queue can grow before it scrolls, in points.
-const QUEUE_MAX_HEIGHT: f32 = 60.0;
+/// The queue row's height, in points: one row of buttons, whether or not anything is queued.
+const QUEUE_ROW_HEIGHT: f32 = 24.0;
 /// How many pulses are on a work beam at once.
 const BEAM_PULSES: usize = 5;
 /// How long a pulse takes to travel along a beam, in seconds.
@@ -1187,15 +1187,24 @@ pub fn queue_chips(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb)
     chips
 }
 
+/// The queue, always one row high, empty or not, so that queuing the first item does not push
+/// the build bar above it up: long queues scroll sideways instead of wrapping onto more rows.
 fn queue_chip_row(ui: &mut egui::Ui, chips: &[QueueChip], actions: &mut Vec<UiAction>) {
-    // Long queues scroll, so that the panel cannot cover the map.
-    egui::ScrollArea::vertical().max_height(QUEUE_MAX_HEIGHT).show(ui, |ui| {
-        ui.horizontal_wrapped(|ui| {
-            for chip in chips {
-                if ui.button(&chip.label).on_hover_text("Right-click to remove").secondary_clicked() {
-                    actions.push(chip.remove.clone());
+    ui.horizontal(|ui| {
+        ui.set_min_height(QUEUE_ROW_HEIGHT);
+        ui.label("Queue:");
+        if chips.is_empty() {
+            ui.weak("empty");
+            return;
+        }
+        egui::ScrollArea::horizontal().id_source("queue row").show(ui, |ui| {
+            ui.horizontal(|ui| {
+                for chip in chips {
+                    if ui.button(&chip.label).on_hover_text("Right-click to remove").secondary_clicked() {
+                        actions.push(chip.remove.clone());
+                    }
                 }
-            }
+            });
         });
     });
 }
@@ -1631,9 +1640,10 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
             }
         }
 
+        // Anything that can have a queue always shows the row, so the panel never changes height.
         let chips = queue_chips(snapshot, selected, db);
-        if !chips.is_empty() {
-            ui.label("Queue (right-click to remove):");
+        let queues = factory_menu(snapshot, selected, db).is_some() || !builder_options(snapshot, selected, db).is_empty();
+        if queues || !chips.is_empty() {
             queue_chip_row(ui, &chips, actions);
         }
     });
@@ -2697,7 +2707,8 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
         if snapshot.stunned.binary_search(&unit.id).is_ok() {
             painter.text(center + Vec2::new(0.0, 16.0), Align2::CENTER_CENTER, "STUNNED", FontId::proportional(12.0), STUNNED);
         }
-        let rank = rank_of(snapshot, unit.id);
+        // Only on what is selected: on every veteran at once, the pips cluttered the battlefield.
+        let rank = if is_selected { rank_of(snapshot, unit.id) } else { 0 };
         if rank > 0 {
             // One gold pip per rank, under the unit, and under its icon's tech level dots.
             let spacing = 5.0;
@@ -3413,7 +3424,8 @@ mod tests {
         let ctx = egui::Context::default();
         install_fonts(&ctx);
         let chips = [QueueChip { label: "1. Mass Extractor".to_string(), remove: UiAction::Restart }];
-        let at = egui::pos2(20.0, 16.0);
+        // Past the "Queue:" label, on the first chip.
+        let at = egui::pos2(100.0, 16.0);
         let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
         let input = |events: Vec<egui::Event>| egui::RawInput { screen_rect: Some(screen), events, ..egui::RawInput::default() };
         let press = |pressed: bool| egui::Event::PointerButton { pos: at, button, pressed, modifiers: egui::Modifiers::NONE };

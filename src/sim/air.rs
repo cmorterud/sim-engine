@@ -317,6 +317,73 @@ impl SimWorld {
             position.0 = Vec3Fp::new(next.x, next.y, flying_height(terrain, next, flight.altitude.max(stats.radius)));
             velocity.0 = Vec3Fp::new(step.x, step.y, Fp::ZERO);
         }
+        self.separate_aircraft();
+    }
+
+    /// Aircraft in flight keep a little apart, so that two sent the same way do not fly as one:
+    /// any two closer than their radii and a margin are pushed apart, a third of the overlap a
+    /// tick, so that they spread without jittering. In order along x, so only near neighbors are
+    /// compared. Divisions round toward zero, so mirror-image pairs move in mirror image.
+    fn separate_aircraft(&mut self) {
+        const MARGIN_RAW: i64 = 4 << 12;
+        let mut flying: Vec<(i64, i64, i64, SimId, hecs::Entity)> = self
+            .aircraft
+            .iter()
+            .filter_map(|&(id, entity)| {
+                let flight = self.ecs.get::<&Flight>(entity).ok()?;
+                if flight.altitude <= Fp::ZERO {
+                    return None;
+                }
+                let position = self.ecs.get::<&Position>(entity).ok()?.0;
+                let radius = self.ecs.get::<&UnitStats>(entity).ok()?.radius;
+                Some((i64::from(position.x.to_bits()), i64::from(position.y.to_bits()), i64::from(radius.to_bits()), id, entity))
+            })
+            .collect();
+        if flying.len() < 2 {
+            return;
+        }
+        flying.sort_unstable_by_key(|&(x, _, _, id, _)| (x, id));
+        let widest = flying.iter().map(|aircraft| aircraft.2).max().unwrap_or(0);
+        let mut pushes = vec![(0_i64, 0_i64); flying.len()];
+        for first in 0..flying.len() {
+            let (x, y, radius, id, _) = flying[first];
+            for second in first + 1..flying.len() {
+                let (other_x, other_y, other_radius, other_id, _) = flying[second];
+                if other_x - x > radius + widest + MARGIN_RAW {
+                    break;
+                }
+                let contact = radius + other_radius + MARGIN_RAW;
+                let (dx, dy) = (x - other_x, y - other_y);
+                let distance_squared = dx * dx + dy * dy;
+                if distance_squared >= contact * contact {
+                    continue;
+                }
+                let distance = (distance_squared as u64).isqrt() as i64;
+                let overlap = contact - distance;
+                let (push_x, push_y) = if distance == 0 {
+                    // Exactly together: apart along a direction from their ids.
+                    let sign = if id < other_id { 1 } else { -1 };
+                    (sign * overlap / 6, 0)
+                } else {
+                    (dx * overlap / distance / 6, dy * overlap / distance / 6)
+                };
+                pushes[first].0 += push_x;
+                pushes[first].1 += push_y;
+                pushes[second].0 -= push_x;
+                pushes[second].1 -= push_y;
+            }
+        }
+        let max = i64::from(self.terrain.max_coordinate_raw());
+        for (index, &(_, _, _, _, entity)) in flying.iter().enumerate() {
+            let (push_x, push_y) = pushes[index];
+            if push_x == 0 && push_y == 0 {
+                continue;
+            }
+            let mut position = self.ecs.get::<&mut Position>(entity).expect("aircraft are live units");
+            let x = (i64::from(position.0.x.to_bits()) + push_x).clamp(0, max) as i32;
+            let y = (i64::from(position.0.y.to_bits()) + push_y).clamp(0, max) as i32;
+            position.0 = Vec3Fp::new(Fp::from_bits(x), Fp::from_bits(y), position.0.z);
+        }
     }
 }
 

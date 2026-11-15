@@ -30,6 +30,9 @@ pub struct Visibility {
     current_tick: u32,
 }
 
+/// How out-of-sight ground is drawn: one grey for all of it.
+pub const FOG_OUT_OF_SIGHT: u8 = 90;
+
 impl Visibility {
     pub fn new(map_units: i32) -> Self {
         let side = (map_units / VISIBILITY_CELL_UNITS) as usize + 1;
@@ -125,15 +128,13 @@ impl Visibility {
         stamp != 0 && stamp + VISION_REFRESH_TICKS > self.current_tick + 1
     }
 
-    /// One byte per cell for the renderer: 255 visible, 90 explored, 0 never seen.
+    /// One byte per cell for the renderer: 255 in sight, and one grey, 90, everywhere out of
+    /// it, whether once seen or never. Two greys made ground a unit had just stopped seeing,
+    /// one that died say, look different from the rest of what is out of sight.
     pub fn fog_bytes(&self, team: Team) -> Vec<u8> {
         self.stamps[team.index()]
             .iter()
-            .map(|&stamp| match stamp {
-                0 => 0,
-                stamp if stamp + VISION_REFRESH_TICKS > self.current_tick + 1 => 255,
-                _ => 90,
-            })
+            .map(|&stamp| if stamp != 0 && stamp + VISION_REFRESH_TICKS > self.current_tick + 1 { 255 } else { FOG_OUT_OF_SIGHT })
             .collect()
     }
 

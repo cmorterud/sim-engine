@@ -172,6 +172,22 @@ pub fn right_click_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
     commands
 }
 
+/// A patrol for each unit, from where it starts it to the points and back round: from where it
+/// stands, or, queued, from where it will be once the orders ahead of it are done, as with any
+/// other queued order.
+pub fn patrol_commands(units: &[SimId], snapshot: &crate::sim::world::SimSnapshot, points: &[Vec2Fp], queued: bool) -> Vec<SimCommand> {
+    let raw = |x: i32, y: i32| Vec2Fp::new(Fp::from_bits(x), Fp::from_bits(y));
+    units
+        .iter()
+        .filter_map(|&id| {
+            let unit = snapshot.units.iter().find(|unit| unit.id == id)?;
+            let last_step = queued.then(|| snapshot.plans.iter().find(|plan| plan.id == id).and_then(|plan| plan.steps.last())).flatten();
+            let start = last_step.map_or(raw(unit.x, unit.y), |step| raw(step.x, step.y));
+            Some(SimCommand::Patrol { units: vec![id], points: std::iter::once(start).chain(points.iter().copied()).collect(), queued })
+        })
+        .collect()
+}
+
 /// The same orders, to carry out after what units are already doing. An attack becomes an
 /// attack-move to where the target is now. A rally point or a follow order has no end to
 /// wait for, so those stay as they are.

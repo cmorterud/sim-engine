@@ -695,16 +695,7 @@ fn start_patrol(session: &Session, selection: &Selection, map: &MapInfo, feedbac
         feedback.show_rejected(None, "No units selected that can patrol");
         return;
     }
-    let raw = |x: i32, y: i32| Vec2Fp::new(Fp::from_bits(x), Fp::from_bits(y));
-    let orders: Vec<SimCommand> = units
-        .iter()
-        .filter_map(|&id| {
-            let unit = session.current.units.iter().find(|unit| unit.id == id)?;
-            let last_step = queued.then(|| session.current.plans.iter().find(|plan| plan.id == id).and_then(|plan| plan.steps.last())).flatten();
-            let start = last_step.map_or(raw(unit.x, unit.y), |step| raw(step.x, step.y));
-            Some(SimCommand::Patrol { units: vec![id], points: std::iter::once(start).chain(points.iter().copied()).collect(), queued })
-        })
-        .collect();
+    let orders = sim_engine::input::orders::patrol_commands(&units, &session.current, &points, queued);
     // One line for the whole group, as if it were one order, counting each unit's own start.
     let summary = SimCommand::Patrol { units: units.clone(), points: std::iter::once(Vec2Fp::ZERO).chain(points.iter().copied()).collect(), queued };
     feedback.show_orders(std::slice::from_ref(&summary), None, &map.blueprints, "");
@@ -855,6 +846,10 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     let clock = Instant::now();
     let mut feedback = OrderFeedback::default();
     let mut patrol_points: Vec<Vec2Fp> = Vec::new();
+    // Whether Shift was held at any point while placing the patrol: a patrol shift-clicked
+    // into place is queued after what the units are already doing, even if Shift is let go
+    // before it starts, as any other queued order would be.
+    let mut patrol_queued = false;
     let mut patrol_held = false;
     let mut pause_chord = false;
     let mut last_frame = Instant::now();
@@ -975,6 +970,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                         }
                                     }
                                     ArmedOrder::Patrol => {
+                                        patrol_queued |= shift_held;
                                         add_patrol_point(&selection, &camera, &map, &mut feedback, &mut patrol_points, "right-click or press P to start");
                                     }
                                     ArmedOrder::Overcharge => {
@@ -1075,11 +1071,13 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                 placing = None;
                             } else if armed == Some(ArmedOrder::Patrol) && !patrol_points.is_empty() {
                                 armed = None;
-                                start_patrol(&session, &selection, &map, &mut feedback, &mut patrol_points, shift_held);
+                                start_patrol(&session, &selection, &map, &mut feedback, &mut patrol_points, shift_held || std::mem::take(&mut patrol_queued));
                             } else if armed.take().is_some() || placing.take().is_some() {
                                 // Right-click only cancels what was armed.
                                 patrol_points.clear();
+                                    patrol_queued = false;
                             } else if patrol_held {
+                                patrol_queued |= shift_held;
                                 add_patrol_point(&selection, &camera, &map, &mut feedback, &mut patrol_points, "release P to start");
                             } else {
                                 // Ctrl (or Cmd) makes a move a formation move.
@@ -1117,6 +1115,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                 line_start = None;
                                 let was_armed = armed.take().is_some();
                                 patrol_points.clear();
+                                    patrol_queued = false;
                                 if placing.take().is_none() && !was_armed {
                                     selection.clear();
                                 }
@@ -1144,7 +1143,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                     patrol_held = false;
                                     if !patrol_points.is_empty() {
                                         armed = None;
-                                        start_patrol(&session, &selection, &map, &mut feedback, &mut patrol_points, shift_held);
+                                        start_patrol(&session, &selection, &map, &mut feedback, &mut patrol_points, shift_held || std::mem::take(&mut patrol_queued));
                                     } else if ui::has_mobile_units(&session.current, selection.selected()) {
                                         // A tap, with no points placed while holding it.
                                         armed = Some(ArmedOrder::Patrol);
@@ -1188,6 +1187,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                         placing = None;
                                         line_start = None;
                                         patrol_points.clear();
+                                    patrol_queued = false;
                                     }
                                 }
                             }
@@ -1198,6 +1198,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                     placing = None;
                                     line_start = None;
                                     patrol_points.clear();
+                                    patrol_queued = false;
                                 } else {
                                     feedback.show_rejected(None, "No builders selected");
                                 }
@@ -1211,6 +1212,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                     placing = None;
                                     line_start = None;
                                     patrol_points.clear();
+                                    patrol_queued = false;
                                 }
                             }
                             PhysicalKey::Code(KeyCode::KeyT) if pressed && !event.repeat && command_held && is_match => {
@@ -1221,6 +1223,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                     placing = None;
                                     line_start = None;
                                     patrol_points.clear();
+                                    patrol_queued = false;
                                 }
                             }
                             PhysicalKey::Code(KeyCode::KeyK) if pressed && !event.repeat && command_held && is_match => {
@@ -1362,6 +1365,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                             armed = None;
                             if !patrol_held {
                                 patrol_points.clear();
+                                    patrol_queued = false;
                             }
                         }
 
@@ -1569,6 +1573,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                     line_start = None;
                                     armed = None;
                                     patrol_points.clear();
+                                    patrol_queued = false;
                                 }
                                 UiAction::Queue { factories, blueprint, selected_count, count } => {
                                     let unit = &map.blueprints.get(blueprint).name;
@@ -1596,6 +1601,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                     placing = None;
                                     line_start = None;
                                     patrol_points.clear();
+                                    patrol_queued = false;
                                 }
                                 UiAction::Stop => stop_selection(&session, &selection, &mut feedback),
                                 UiAction::SetCloak { units, on } => {
@@ -1628,6 +1634,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                     placing = None;
                                     line_start = None;
                                     patrol_points.clear();
+                                    patrol_queued = false;
                                 }
                                 UiAction::CancelTask { units, task } => {
                                     feedback.set_label(MarkerKind::Build, format!("{} removed", ui::task_name(&task, &map.blueprints)));
@@ -1671,6 +1678,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                     line_start = None;
                                     armed = None;
                                     patrol_points.clear();
+                                    patrol_queued = false;
                                 }
                             }
                         }

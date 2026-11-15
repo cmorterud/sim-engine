@@ -1209,7 +1209,8 @@ vision = 1280
 radar = 3040
 sonar = 2400
 movement = "naval"
-weapon = { kind = "tactical_missile", automatic = true, range = 3000, reload_ticks = 25, projectile_speed = 18, damage = 300, splash_radius = 40, cruise_height = 60 }
+# Cruise missiles climb high and come down on their target, as in FAF; they are not direct fire.
+weapon = { kind = "tactical_missile", automatic = true, range = 3000, reload_ticks = 25, projectile_speed = 18, damage = 300, splash_radius = 40, cruise_height = 400 }
 extra_weapons = [
     { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 200, splash_radius = 40, turn_rate = 90 },
     { range = 1400, reload_ticks = 20, projectile_speed = 90, damage = 1000, splash_radius = 6, targets = "air", turn_rate = 180 },

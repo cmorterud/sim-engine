@@ -626,3 +626,36 @@ fn a_queued_patrol_starts_after_the_queued_moves() {
     }
     panic!("it did not loop back: reached the stop at {reached_stop:?}, the far end at {reached_far:?}");
 }
+
+/// A queued patrol starts where the orders ahead of it end, as any queued order does: the unit
+/// finishes its queue, then patrols from there to the points and back. Unqueued, it starts from
+/// where the unit stands.
+#[test]
+fn a_queued_patrol_starts_where_the_queue_ends() {
+    use sim_engine::input::orders::patrol_commands;
+    let config = sim_engine::sim::config::SimConfig { map_units: 5_120, terrain: sim_engine::sim::config::TerrainStyle::Flat, ..Default::default() };
+    let mut world = sim_engine::sim::world::SimWorld::new(config, 1);
+    let tank = world.spawn_mobile(world.blueprints.id("t2_heavy_tank"), sim_engine::sim::components::Team::Blue, sim_engine::math::fp::Vec2Fp::new(fp_int(1_000), fp_int(1_000)));
+    let at = |x: i32, y: i32| sim_engine::math::fp::Vec2Fp::new(fp_int(x), fp_int(y));
+    world.advance_tick(&[SimCommand::QueueMove { units: vec![tank], goal: at(2_000, 1_000), attack: false }]);
+    let snapshot = world.snapshot_for(Some(sim_engine::sim::components::Team::Blue));
+    let queued = patrol_commands(&[tank], &snapshot, &[at(2_000, 2_000)], true);
+    let SimCommand::Patrol { points, queued: true, .. } = &queued[0] else { panic!("a queued patrol") };
+    assert_eq!(points[0], at(2_000, 1_000), "from the end of the queued move, not from where it stands");
+    let now = patrol_commands(&[tank], &snapshot, &[at(2_000, 2_000)], false);
+    let SimCommand::Patrol { points, queued: false, .. } = &now[0] else { panic!("a patrol") };
+    assert_eq!(points[0], at(1_000, 1_000), "unqueued, from where it stands");
+    // And it does so: down the queue first, then round the patrol.
+    world.advance_tick(&queued);
+    let mut reached_start = false;
+    let mut reached_point = false;
+    for _ in 0..1_500 {
+        world.advance_tick(&[]);
+        let here = world.unit_position(tank).unwrap().xy();
+        reached_start |= here.distance_squared(&at(2_000, 1_000)) < sim_engine::math::fp::wide_mul(fp_int(60), fp_int(60));
+        if reached_start {
+            reached_point |= here.distance_squared(&at(2_000, 2_000)) < sim_engine::math::fp::wide_mul(fp_int(60), fp_int(60));
+        }
+    }
+    assert!(reached_start && reached_point, "it finished the queued move, then patrolled on");
+}
