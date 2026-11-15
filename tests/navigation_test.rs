@@ -479,8 +479,9 @@ fn a_formation_attack_move_goes_on_while_a_member_chases_a_target_away() {
     let mut chased = false;
     for _ in 0..600 {
         world.advance_tick(&[]);
-        chased |= units.iter().any(|unit| {
-            let combat = *world.ecs.get::<&sim_engine::sim::components::Combat>(world.unit_entity(*unit).unwrap()).unwrap();
+        // A member may fall to a friend's stray shell: artillery scatters, and friendly fire is on.
+        chased |= units.iter().filter_map(|unit| world.unit_entity(*unit)).any(|entity| {
+            let combat = *world.ecs.get::<&sim_engine::sim::components::Combat>(entity).unwrap();
             combat.target == Some(enemy) || combat.forced_target == Some(enemy)
         });
     }
