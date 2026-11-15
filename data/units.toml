@@ -230,7 +230,7 @@ vision = 480
 build_power = 80
 builds = ["tactical_missile"]
 max_stock = 6
-weapon = { range = 5120, reload_ticks = 150, projectile_speed = 18, damage = 1500, splash_radius = 40, kind = "tactical_missile", cruise_height = 60 }
+weapon = { range = 5120, reload_ticks = 150, projectile_speed = 28, damage = 1500, splash_radius = 40, kind = "tactical_missile", cruise_height = 60 }
 
 # 30 seconds at the launcher's own build power.
 [[unit]]
@@ -1211,7 +1211,8 @@ radar = 3040
 sonar = 2400
 movement = "naval"
 # Cruise missiles climb high and come down on their target, as in FAF; they are not direct fire.
-weapon = { kind = "tactical_missile", automatic = true, range = 3000, reload_ticks = 25, projectile_speed = 18, damage = 300, splash_radius = 40, cruise_height = 400 }
+# They fly at FAF's top speed for each missile, doubled for ticks: 28 to 40 a tick.
+weapon = { kind = "tactical_missile", automatic = true, range = 3000, reload_ticks = 25, projectile_speed = 32, damage = 300, splash_radius = 40, cruise_height = 400 }
 extra_weapons = [
     { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 200, splash_radius = 40, turn_rate = 90, spread = 10 },
     { range = 1400, reload_ticks = 20, projectile_speed = 90, damage = 1000, splash_radius = 6, targets = "air", turn_rate = 180 },
@@ -1435,7 +1436,7 @@ build_power = 1080
 builds = ["strategic_missile"]
 max_stock = 3
 weapon = { range = 8200, reload_ticks = 100, projectile_speed = 25, damage = 500, splash_radius = 800, inner_damage = 70000, inner_radius = 600, kind = "strategic_missile", cruise_height = 500 }
-extra_weapons = [{ kind = "tactical_missile", automatic = true, range = 5120, reload_ticks = 100, projectile_speed = 18, damage = 2000, splash_radius = 60, cruise_height = 60 }]
+extra_weapons = [{ kind = "tactical_missile", automatic = true, range = 5120, reload_ticks = 100, projectile_speed = 32, damage = 2000, splash_radius = 60, cruise_height = 60 }]
 
 # FAF's Flapjack: it fires cruise missiles on its own at what is in range, as artillery does,
 # and cannot hit what is closer than 240. Two of 300 a volley, as one every 5 seconds.
@@ -1453,7 +1454,7 @@ turn_rate = 90
 turn_radius = 20
 radius = 11
 vision = 360
-weapon = { kind = "tactical_missile", automatic = true, artillery = true, min_range = 240, range = 1300, reload_ticks = 50, projectile_speed = 18, damage = 300, splash_radius = 20, cruise_height = 40 }
+weapon = { kind = "tactical_missile", automatic = true, artillery = true, min_range = 240, range = 1300, reload_ticks = 50, projectile_speed = 40, damage = 300, splash_radius = 20, cruise_height = 40 }
 
 # Field enhancements (GAME_SPECIFICATION.md §2.1), with Forged Alliance Forever's numbers for its
 # commander. A commander has three slots, and one enhancement in each: a new one replaces what is

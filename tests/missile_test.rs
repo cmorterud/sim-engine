@@ -80,8 +80,8 @@ fn a_tactical_launcher_fires_only_on_order_and_only_missiles_it_has_built() {
     // Ordered, it fires, and one 1,500-damage missile is enough.
     world.advance_tick(&[SimCommand::Attack { units: vec![launcher], target }]);
     let took = run_until(&mut world, 300, |world| !alive(world, target)).expect("the missile should destroy it");
-    // About 90 ticks of flight at 18 a tick, plus the climb.
-    assert!(took > 60, "it arrived after only {took} ticks");
+    // About 57 ticks of flight at FAF's 28 a tick over the 1,600, plus the climb: not at once.
+    assert!(took > 45, "it arrived after only {took} ticks");
 
     // With none left, an order waits for one to be built.
     let next = structure(&mut world, "power_generator", Team::Red, 100, 30);
