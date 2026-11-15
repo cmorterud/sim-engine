@@ -1653,9 +1653,14 @@ impl AiBrain {
         let station = self.roster().engineering_stations[0];
         match forces.factories.iter().find(|factory| factory.finished) {
             Some(factory) => {
+                // The search runs on the plan, which Red sees turned around: a factory's cell
+                // given as it is on the map sent Red's engineers to build beside Blue's base.
                 let size = footprint(world, factory.blueprint);
-                let center = (factory.cell.0 as i32 + size / 2, factory.cell.1 as i32 + size / 2);
-                self.search_site(world, station, 1, center, planned)
+                // The footprint's exact middle, which turns into its partner's.
+                let edge = |cell: u32| fp_int(cell as i32 * TERRAIN_CELL_UNITS + size * TERRAIN_CELL_UNITS / 2);
+                let middle = Vec2Fp::new(edge(factory.cell.0), edge(factory.cell.1));
+                let on_plan = self.plan_position(world, middle);
+                self.search_site(world, station, 1, cell_i32(cell_of(on_plan)), planned)
             }
             None => self.site_near_home(world, station, 1, planned),
         }
