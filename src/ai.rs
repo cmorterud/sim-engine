@@ -24,6 +24,11 @@ const COMMANDER_PUSH_TICKS: u32 = 21_000;
 /// that it goes for the base and the commander comes along: two even sides trading waves of 20
 /// to 40 against each other's defenses otherwise played to the time limit.
 const LATE_PUSH_TICKS: u32 = 30_000;
+/// From here, near the soak's 40,000-tick limit, there are no more waves: everything idle, the
+/// commander too, goes straight for the enemy commander, or failing sight of it, the enemy's
+/// start. Even sides otherwise still traded to the limit now and then, a different seed after
+/// each change.
+const SUDDEN_DEATH_TICKS: u32 = 34_000;
 /// Enemy deposits farther than this from the enemy's start are raided rather than its base.
 const RAID_DISTANCE_UNITS: i32 = 2_000;
 const FIRST_WAVE: usize = 10;
@@ -1855,6 +1860,18 @@ impl AiBrain {
             self.gathered = (gathered, world.current_tick);
         }
         let stopped_growing = world.current_tick - self.gathered.1 >= WAVE_PATIENCE_TICKS;
+        let sudden_death = world.current_tick >= SUDDEN_DEATH_TICKS.max(self.skill.commander_push_ticks);
+        if sudden_death {
+            let enemy_commander = world.commanders[self.team.enemy().index()];
+            let goal = sightings.iter().find(|enemy| Some(enemy.id) == enemy_commander && !enemy.is_submerged).map_or(self.enemy_home, |enemy| enemy.position);
+            let mut everyone = forces.idle_combat.clone();
+            if !commander_enhancing(world, forces) && world.terrain.height_at(goal) >= world.terrain.water_level() {
+                everyone.extend(forces.commander);
+            }
+            commands.push(SimCommand::AttackMove { units: everyone, goal });
+            self.gathered = (0, world.current_tick);
+            return;
+        }
         if gathered < self.wave_size && !(stopped_growing && gathered >= self.skill.first_wave) {
             return;
         }
