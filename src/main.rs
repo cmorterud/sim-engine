@@ -139,15 +139,19 @@ Controls:
   Ctrl + 1 to 0        Save the selection as a group, or clear it if nothing is selected.
                        Command works too
   1 to 0               Select that group, and press again quickly to jump the camera to it
-  N                    Mute or unmute, unless a builder that can build a gateway is selected
-  - and =              Sound quieter and louder, unless a missile silo is selected
+  W E S D A Z C V     With builders: place a structure. Related ones share a key, and
+                       pressing it again moves on to the next: W factories, E mass,
+                       S energy, D defenses and anti-air, A artillery and missiles,
+                       Z radar and sonar, C shields and missile defense, V support
+  N                    Mute or unmute
+  - and =              Sound quieter and louder
   Space                Jump to your commander
   Right-click a transport  With land units selected, board it
   Ctrl + U             Unload the selected transports where you click next
   Ctrl + P             Pause or resume the game. Orders given while paused wait for
                        it to resume. Command works too, and so does the Pause button
   Scroll               Zoom, towards the cursor
-  WASD or arrow keys   Pan
+  Arrow keys           Pan
   Esc                  Cancel placement or attack-move, or clear the selection
 
 A marker and a line of text confirm each order. A click that shows nothing never reached
@@ -1089,10 +1093,10 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                     WindowEvent::KeyboardInput { event, .. } if !response.consumed => {
                         let pressed = event.state == ElementState::Pressed;
                         match event.physical_key {
-                            PhysicalKey::Code(KeyCode::KeyW | KeyCode::ArrowUp) => held_keys[0] = pressed,
-                            PhysicalKey::Code(KeyCode::KeyS | KeyCode::ArrowDown) => held_keys[1] = pressed,
-                            PhysicalKey::Code(KeyCode::KeyA | KeyCode::ArrowLeft) => held_keys[2] = pressed,
-                            PhysicalKey::Code(KeyCode::KeyD | KeyCode::ArrowRight) => held_keys[3] = pressed,
+                            PhysicalKey::Code(KeyCode::ArrowUp) => held_keys[0] = pressed,
+                            PhysicalKey::Code(KeyCode::ArrowDown) => held_keys[1] = pressed,
+                            PhysicalKey::Code(KeyCode::ArrowLeft) => held_keys[2] = pressed,
+                            PhysicalKey::Code(KeyCode::ArrowRight) => held_keys[3] = pressed,
                             // A watcher's keys: pause, whose sight, and speed. No other key
                             // gives orders.
                             PhysicalKey::Code(code) if watching => {
@@ -1243,7 +1247,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                             }
                             // N builds what is in its slot of the build bar shown, and mutes otherwise.
                             PhysicalKey::Code(KeyCode::KeyN) if pressed && !event.repeat && !command_held => {
-                                match ui::hotkey_action(&session.current, selection.selected(), &map.blueprints, 'N', ui::build_tiers(&egui_context)) {
+                                match ui::hotkey_action(&session.current, selection.selected(), &map.blueprints, 'N', ui::build_tiers(&egui_context), placing) {
                                     Some(action) => hotkey_actions.push(ui::with_shift(action, shift_held, &map.blueprints)),
                                     None => sound_settings.toggle_mute(),
                                 }
@@ -1251,7 +1255,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                             // - and = build what is in their slots of the bar shown, and set the volume otherwise.
                             PhysicalKey::Code(code @ (KeyCode::Minus | KeyCode::Equal)) if pressed && !command_held => {
                                 let letter = hotkeys::letter_for(code).expect("both are panel keys");
-                                match ui::hotkey_action(&session.current, selection.selected(), &map.blueprints, letter, ui::build_tiers(&egui_context)) {
+                                match ui::hotkey_action(&session.current, selection.selected(), &map.blueprints, letter, ui::build_tiers(&egui_context), placing) {
                                     Some(action) => hotkey_actions.push(ui::with_shift(action, shift_held, &map.blueprints)),
                                     None if code == KeyCode::Minus => sound_settings.quieter(),
                                     None => sound_settings.louder(),
@@ -1264,7 +1268,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                             // Command and Control belong to the system: Command-Q must not start a factory.
                             PhysicalKey::Code(code) if pressed && !event.repeat && !command_held => {
                                 if let Some(letter) = hotkeys::letter_for(code) {
-                                    match ui::hotkey_action(&session.current, selection.selected(), &map.blueprints, letter, ui::build_tiers(&egui_context)) {
+                                    match ui::hotkey_action(&session.current, selection.selected(), &map.blueprints, letter, ui::build_tiers(&egui_context), placing) {
                                         Some(action) => hotkey_actions.push(ui::with_shift(action, shift_held, &map.blueprints)),
                                         None if selection.selected().is_empty() => feedback.show_rejected(None, "No units selected"),
                                         None => feedback.show_rejected(None, "Not available for this selection"),

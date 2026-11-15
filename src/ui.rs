@@ -367,7 +367,7 @@ pub fn bar_items(options: &[BlueprintId], tier: u8, db: &BlueprintDb) -> Vec<Blu
     let mut items: Vec<BlueprintId> = options.iter().copied().filter(|option| db.get(*option).tier == tier).collect();
     items.sort_by_key(|option| {
         let key = &db.get(*option).key;
-        (Icon::for_key(key).group(), hotkeys::build_slot(key).map_or(usize::MAX, |(_, slot)| slot))
+        hotkeys::bar_order(key).unwrap_or((usize::MAX, usize::MAX))
     });
     items
 }
@@ -457,7 +457,8 @@ fn build_bar(
             ui.horizontal(|ui| {
                 let mut last_group = None;
                 for option in bar_items(options, shown, db) {
-                    let group = Icon::for_key(&db.get(option).key).group();
+                    // A divider between families, which share a key.
+                    let group = hotkeys::bar_order(&db.get(option).key).map(|(family, _)| family);
                     if last_group.is_some_and(|last| last != group) {
                         ui.separator();
                     }
@@ -885,7 +886,9 @@ fn clear_action(menu: &FactoryMenu) -> UiAction {
 /// What a command panel key does for this selection: the same as its button, or `None`
 /// if the panel has no such option right now.
 /// What a key does for the selection. A build key picks from the level each bar shows.
-pub fn hotkey_action(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb, letter: char, tiers: BuildTiers) -> Option<UiAction> {
+/// What a key does for the selection. `placing` is the structure being placed, if any: a
+/// builder's family key moves on from it to the next of the family.
+pub fn hotkey_action(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb, letter: char, tiers: BuildTiers, placing: Option<BlueprintId>) -> Option<UiAction> {
     // O switches things off and on: it pauses what can be paused, or else toggles a cloak.
     if letter == hotkeys::PAUSE {
         return pause_action(snapshot, selected, db).or_else(|| cloak_action(snapshot, selected));
@@ -906,9 +909,16 @@ pub fn hotkey_action(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintD
     // With a factory selected, the build keys are its bar's, and a builder's bar is not shown.
     let Some(menu) = factory_menu(snapshot, selected, db) else {
         let options = builder_options(snapshot, selected, db);
-        let shown = shown_tier(tiers.builder, &options, db);
-        if let Some(option) = options.into_iter().filter(|option| Some(db.get(*option).tier) == shown).find(|option| is_key(*option)) {
-            return Some(UiAction::BeginPlacement(option));
+        let Some(shown) = shown_tier(tiers.builder, &options, db) else {
+            let units = upgradable_units(snapshot, selected, db);
+            return (letter == hotkeys::UPGRADE && !units.is_empty()).then_some(UiAction::Upgrade { units });
+        };
+        // The family on this key, in the bar's order: the first, or the one after what is
+        // being placed, round to the first again.
+        let family: Vec<BlueprintId> = bar_items(&options, shown, db).into_iter().filter(|option| is_key(*option)).collect();
+        if !family.is_empty() {
+            let next = placing.and_then(|current| family.iter().position(|option| *option == current)).map_or(0, |index| (index + 1) % family.len());
+            return Some(UiAction::BeginPlacement(family[next]));
         }
         let units = upgradable_units(snapshot, selected, db);
         return (letter == hotkeys::UPGRADE && !units.is_empty()).then_some(UiAction::Upgrade { units });
@@ -3265,13 +3275,13 @@ mod tests {
         let mut current = snapshot(vec![structure(1, "land_factory_t1"), structure(2, "air_factory"), structure(3, "quantum_gateway"), structure(4, "tactical_missile_launcher")], vec![]);
         current.factories = (1..=4).map(|id| factory_view(id, vec![], false, 0)).collect();
         let queue = |factory: u32, key: &str, selected_count: usize| UiAction::Queue { factories: vec![SimId(factory)], blueprint: db.id(key), selected_count, count: 1 };
-        let both = hotkey_action(&current, &[SimId(1), SimId(2)], &db, 'Q', BuildTiers::default()).expect("the first slot");
+        let both = hotkey_action(&current, &[SimId(1), SimId(2)], &db, 'Q', BuildTiers::default(), None).expect("the first slot");
         assert_eq!(both, UiAction::Batch(vec![queue(1, "t1_engineer", 2), queue(2, "t1_air_scout", 2)]), "an engineer in the land factory and a scout in the air factory");
         let UiAction::Batch(shifted) = with_shift(both, true, &db) else { panic!("still a batch") };
         assert!(shifted.iter().all(|action| matches!(action, UiAction::Queue { count: SHIFT_QUEUE_COUNT, .. })));
         // A gateway's and a silo's only items are in their first slot too.
-        assert_eq!(hotkey_action(&current, &[SimId(3)], &db, 'Q', BuildTiers::default()), Some(queue(3, "support_commander", 1)));
-        assert_eq!(hotkey_action(&current, &[SimId(4)], &db, 'Q', BuildTiers::default()), Some(queue(4, "tactical_missile", 1)));
+        assert_eq!(hotkey_action(&current, &[SimId(3)], &db, 'Q', BuildTiers::default(), None), Some(queue(3, "support_commander", 1)));
+        assert_eq!(hotkey_action(&current, &[SimId(4)], &db, 'Q', BuildTiers::default(), None), Some(queue(4, "tactical_missile", 1)));
     }
 
     #[test]
@@ -3279,29 +3289,24 @@ mod tests {
         let db = BlueprintDb::standard();
         let mut current = commander_and_engineer(&db);
         current.enhancements = vec![(SimId(10), [u16::MAX, db.enhancement_id("t3_engineering").0, u16::MAX])];
-        let press = |letter: char, builder: Option<u8>| hotkey_action(&current, &[SimId(10)], &db, letter, BuildTiers { builder, factory: None });
+        let press = |letter: char, builder: Option<u8>| hotkey_action(&current, &[SimId(10)], &db, letter, BuildTiers { builder, factory: None }, None);
         let place = |key: &str| Some(UiAction::BeginPlacement(db.id(key)));
         assert_eq!(press('E', None), place("mass_extractor_t3"), "the highest level at first");
         assert_eq!(press('E', Some(1)), place("mass_extractor"));
         // The same kind of thing is on one key at every level.
         assert_eq!(press('E', Some(2)), place("mass_extractor_t2"));
         assert_eq!(press('E', Some(3)), place("mass_extractor_t3"));
-        assert_eq!(press('G', Some(3)), place("power_generator_t3"));
+        assert_eq!(press('S', Some(3)), place("power_generator_t3"));
         assert_eq!(press('Z', Some(2)), place("radar_t2"));
         assert_eq!(press('Z', Some(3)), place("omni_sensor"));
-        assert_eq!(press('C', Some(2)), place("t2_point_defense"));
-        assert_eq!(press('V', Some(1)), place("t1_aa_turret"));
-        assert_eq!(press('V', Some(2)), place("t2_flak"));
-        assert_eq!(press('V', Some(3)), place("t3_sam"));
-        assert_eq!(press('\'', Some(3)), place("quantum_gateway"));
-        assert_eq!(press('T', Some(2)), place("engineering_station"), "storage's key, which no T2 item had");
-        assert_eq!(press('T', Some(3)), None, "the T3 station is only an upgrade");
-        assert_eq!(press('\'', Some(1)), place("wall"));
-        assert_eq!(press('C', Some(3)), place("t3_heavy_point_defense"));
-        // A support factory needs a headquarters, and there is none.
-        assert_eq!(press('Q', Some(2)), None);
+        assert_eq!(press('D', Some(2)), place("t2_point_defense"));
+        assert_eq!(press('D', Some(3)), place("t3_heavy_point_defense"));
+        assert_eq!(press('W', Some(3)), place("quantum_gateway"), "a support factory needs a headquarters, and there is none");
+        assert_eq!(press('V', Some(2)), place("engineering_station"));
+        assert_eq!(press('V', Some(1)), place("wall"));
+        assert_eq!(press('Q', Some(1)), None, "Q is a factory's key");
         // A bot can build nothing, so N mutes instead.
-        assert_eq!(hotkey_action(&current, &[SimId(12)], &db, 'N', BuildTiers::default()), None);
+        assert_eq!(hotkey_action(&current, &[SimId(12)], &db, 'N', BuildTiers::default(), None), None);
     }
 
     #[test]
@@ -3418,7 +3423,7 @@ mod tests {
         assert_eq!(able(&current, &[SimId(1)], bot).unwrap(), [SimId(1)], "listed once, though both tiers can build it");
         // The tank is in the medium tank's slot, at T2.
         let expected = UiAction::Queue { factories: vec![SimId(1)], blueprint: tank, selected_count: 1, count: 1 };
-        assert_eq!(hotkey_action(&current, &[SimId(1)], &db, 'C', BuildTiers { builder: None, factory: Some(2) }), Some(expected));
+        assert_eq!(hotkey_action(&current, &[SimId(1)], &db, 'C', BuildTiers { builder: None, factory: Some(2) }, None), Some(expected));
 
         // The other T1 factory has no upgrade queued, so it is left out.
         assert_eq!(able(&current, &[SimId(1), SimId(3)], tank).unwrap(), [SimId(1)]);
@@ -3499,12 +3504,34 @@ mod tests {
     }
 
     #[test]
+    fn pressing_a_family_key_again_steps_through_the_family_and_round() {
+        let db = BlueprintDb::standard();
+        let current = commander_and_engineer(&db);
+        let press = |letter: char, placing: Option<&str>| hotkey_action(&current, &[SimId(11)], &db, letter, BuildTiers::default(), placing.map(|key| db.id(key)));
+        let place = |key: &str| Some(UiAction::BeginPlacement(db.id(key)));
+        assert_eq!(press('W', None), place("land_factory_t1"));
+        assert_eq!(press('W', Some("land_factory_t1")), place("air_factory"));
+        assert_eq!(press('W', Some("air_factory")), place("naval_factory"));
+        assert_eq!(press('W', Some("naval_factory")), place("land_factory_t1"), "and round to the first");
+        assert_eq!(press('Z', None), place("radar"));
+        assert_eq!(press('Z', Some("radar")), place("t1_sonar"));
+        assert_eq!(press('D', None), place("t1_point_defense"));
+        assert_eq!(press('D', Some("t1_point_defense")), place("t1_aa_turret"));
+        assert_eq!(press('D', Some("t1_aa_turret")), place("t1_torpedo_launcher"));
+        // Placing something of another family starts this one from its first.
+        assert_eq!(press('D', Some("air_factory")), place("t1_point_defense"));
+        let bar: Vec<String> = bar_items(&builder_options(&current, &[SimId(11)], &db), 1, &db).iter().map(|id| db.get(*id).key.clone()).collect();
+        let at = |key: &str| bar.iter().position(|item| item == key).unwrap();
+        assert!(at("land_factory_t1") < at("air_factory") && at("air_factory") < at("naval_factory") && at("naval_factory") < at("mass_extractor"), "a family sits together in the bar: {bar:?}");
+    }
+
+    #[test]
     fn builder_keys_begin_placing_the_same_structures_as_the_buttons() {
         let db = BlueprintDb::standard();
         let current = commander_and_engineer(&db);
-        for (letter, key) in [('Q', "land_factory_t1"), ('E', "mass_extractor"), ('G', "power_generator"), ('T', "mass_storage"), ('C', "t1_point_defense")] {
+        for (letter, key) in [('W', "land_factory_t1"), ('E', "mass_extractor"), ('S', "power_generator"), ('Z', "radar"), ('D', "t1_point_defense")] {
             for selected in [vec![SimId(10)], vec![SimId(11)], vec![SimId(10), SimId(11)]] {
-                assert_eq!(hotkey_action(&current, &selected, &db, letter, BuildTiers::default()), Some(UiAction::BeginPlacement(db.id(key))), "{letter} for {selected:?}");
+                assert_eq!(hotkey_action(&current, &selected, &db, letter, BuildTiers::default(), None), Some(UiAction::BeginPlacement(db.id(key))), "{letter} for {selected:?}");
             }
         }
     }
@@ -3596,15 +3623,15 @@ mod tests {
     fn keys_do_nothing_when_the_selection_has_no_such_option() {
         let db = BlueprintDb::standard();
         let current = commander_and_engineer(&db);
-        assert_eq!(hotkey_action(&current, &[], &db, 'E', BuildTiers::default()), None, "nothing is selected");
-        assert_eq!(hotkey_action(&current, &[SimId(12)], &db, 'E', BuildTiers::default()), None, "a bot cannot build");
-        assert_eq!(hotkey_action(&current, &[SimId(10)], &db, 'N', BuildTiers::default()), None, "nothing in that slot at T1");
-        assert_eq!(hotkey_action(&current, &[SimId(10)], &db, 'R', BuildTiers::default()), None, "a commander has no repeat");
+        assert_eq!(hotkey_action(&current, &[], &db, 'E', BuildTiers::default(), None), None, "nothing is selected");
+        assert_eq!(hotkey_action(&current, &[SimId(12)], &db, 'E', BuildTiers::default(), None), None, "a bot cannot build");
+        assert_eq!(hotkey_action(&current, &[SimId(10)], &db, 'N', BuildTiers::default(), None), None, "nothing in that slot at T1");
+        assert_eq!(hotkey_action(&current, &[SimId(10)], &db, 'R', BuildTiers::default(), None), None, "a commander has no repeat");
         let factories = mixed_factories(&db);
         let tank_level = BuildTiers { builder: None, factory: Some(2) };
         let bot = UiAction::Queue { factories: vec![SimId(1)], blueprint: db.id("t1_light_bot"), selected_count: 1, count: 1 };
-        assert_eq!(hotkey_action(&factories, &[SimId(1)], &db, 'E', tank_level), Some(bot), "a T1 factory shows T1, so no gatling bot");
-        assert_eq!(hotkey_action(&factories, &[SimId(1)], &db, 'H', BuildTiers::default()), None, "nothing in that slot of a factory's bar");
+        assert_eq!(hotkey_action(&factories, &[SimId(1)], &db, 'E', tank_level, None), Some(bot), "a T1 factory shows T1, so no gatling bot");
+        assert_eq!(hotkey_action(&factories, &[SimId(1)], &db, 'H', BuildTiers::default(), None), None, "nothing in that slot of a factory's bar");
     }
 
     #[test]
@@ -3615,17 +3642,17 @@ mod tests {
         // Each bar opens at the highest level it has; these keys are about T1.
         const T1_BARS: BuildTiers = BuildTiers { builder: Some(1), factory: Some(1) };
         let queue = |key: &str, factories: Vec<SimId>| UiAction::Queue { factories, blueprint: db.id(key), selected_count: 3, count: 1 };
-        assert_eq!(hotkey_action(&current, &selected, &db, 'Q', T1_BARS), Some(queue("t1_engineer", selected.to_vec())));
-        assert_eq!(hotkey_action(&current, &selected, &db, 'E', T1_BARS), Some(queue("t1_light_bot", selected.to_vec())));
-        assert_eq!(hotkey_action(&current, &selected, &db, 'G', T1_BARS), Some(queue("t1_light_artillery", selected.to_vec())));
-        assert_eq!(hotkey_action(&current, &selected, &db, 'T', T1_BARS), Some(queue("t1_mobile_aa", selected.to_vec())));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'Q', T1_BARS, None), Some(queue("t1_engineer", selected.to_vec())));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'E', T1_BARS, None), Some(queue("t1_light_bot", selected.to_vec())));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'G', T1_BARS, None), Some(queue("t1_light_artillery", selected.to_vec())));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'T', T1_BARS, None), Some(queue("t1_mobile_aa", selected.to_vec())));
         let t2 = BuildTiers { builder: None, factory: Some(2) };
-        assert_eq!(hotkey_action(&current, &selected, &db, 'C', t2), Some(queue("t2_heavy_tank", vec![SimId(2)])));
-        assert_eq!(hotkey_action(&current, &selected, &db, 'E', t2), Some(queue("t2_gatling_bot", vec![SimId(2)])));
-        assert_eq!(hotkey_action(&current, &selected, &db, 'U', T1_BARS), Some(queue("land_factory_t2", vec![SimId(1), SimId(3)])), "the lowest tier goes first");
+        assert_eq!(hotkey_action(&current, &selected, &db, 'C', t2, None), Some(queue("t2_heavy_tank", vec![SimId(2)])));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'E', t2, None), Some(queue("t2_gatling_bot", vec![SimId(2)])));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'U', T1_BARS, None), Some(queue("land_factory_t2", vec![SimId(1), SimId(3)])), "the lowest tier goes first");
         let to_t3 = UiAction::Queue { factories: vec![SimId(2)], blueprint: db.id("land_factory_t3"), selected_count: 1, count: 1 };
-        assert_eq!(hotkey_action(&current, &[SimId(2)], &db, 'U', T1_BARS), Some(to_t3));
-        assert_eq!(hotkey_action(&current, &selected, &db, 'K', T1_BARS), Some(UiAction::ClearQueue { factories: selected.to_vec() }));
+        assert_eq!(hotkey_action(&current, &[SimId(2)], &db, 'U', T1_BARS, None), Some(to_t3));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'K', T1_BARS, None), Some(UiAction::ClearQueue { factories: selected.to_vec() }));
     }
 
     #[test]
@@ -3633,7 +3660,7 @@ mod tests {
         let db = BlueprintDb::standard();
         let mut current = mixed_factories(&db);
         let selected = [SimId(1), SimId(2)];
-        let press = |current: &SimSnapshot| hotkey_action(current, &selected, &db, 'R', BuildTiers::default());
+        let press = |current: &SimSnapshot| hotkey_action(current, &selected, &db, 'R', BuildTiers::default(), None);
         let set = |repeat: bool| Some(UiAction::SetRepeat { factories: selected.to_vec(), repeat });
         assert_eq!(press(&current), set(true));
         current.factories[0].repeat = true;
@@ -3651,9 +3678,9 @@ mod tests {
         current.units.push(engineer);
         let selected = [SimId(1), SimId(4)];
         let queue = |key: &str| Some(UiAction::Queue { factories: vec![SimId(1)], blueprint: db.id(key), selected_count: 1, count: 1 });
-        assert_eq!(hotkey_action(&current, &selected, &db, 'E', BuildTiers::default()), queue("t1_light_bot"), "not the engineer's extractor");
-        assert_eq!(hotkey_action(&current, &selected, &db, 'Q', BuildTiers::default()), queue("t1_engineer"));
-        assert_eq!(hotkey_action(&current, &selected, &db, 'H', BuildTiers::default()), None, "the engineer's bar is not shown");
+        assert_eq!(hotkey_action(&current, &selected, &db, 'E', BuildTiers::default(), None), queue("t1_light_bot"), "not the engineer's extractor");
+        assert_eq!(hotkey_action(&current, &selected, &db, 'Q', BuildTiers::default(), None), queue("t1_engineer"));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'H', BuildTiers::default(), None), None, "the engineer's bar is not shown");
     }
 
     #[test]
@@ -3662,11 +3689,11 @@ mod tests {
         let current = commander_and_engineer(&db);
         for selected in [SimId(10), SimId(11), SimId(12)] {
             for (letter, order) in [('M', ArmedOrder::Move), ('F', ArmedOrder::AttackMove), ('J', ArmedOrder::Formation), ('Y', ArmedOrder::Assist)] {
-                assert_eq!(hotkey_action(&current, &[selected], &db, letter, BuildTiers::default()), Some(UiAction::Arm(order)), "{letter} for {selected:?}");
+                assert_eq!(hotkey_action(&current, &[selected], &db, letter, BuildTiers::default(), None), Some(UiAction::Arm(order)), "{letter} for {selected:?}");
             }
-            assert_eq!(hotkey_action(&current, &[selected], &db, 'X', BuildTiers::default()), Some(UiAction::Stop));
+            assert_eq!(hotkey_action(&current, &[selected], &db, 'X', BuildTiers::default(), None), Some(UiAction::Stop));
         }
-        assert_eq!(hotkey_action(&current, &[], &db, 'M', BuildTiers::default()), None, "nothing is selected");
+        assert_eq!(hotkey_action(&current, &[], &db, 'M', BuildTiers::default(), None), None, "nothing is selected");
     }
 
     #[test]
@@ -3697,10 +3724,10 @@ mod tests {
         let db = BlueprintDb::standard();
         let mut current = commander_and_engineer(&db);
         current.cloaks = vec![(SimId(10), false, false)];
-        assert_eq!(hotkey_action(&current, &[SimId(10)], &db, 'O', BuildTiers::default()), Some(UiAction::SetCloak { units: vec![SimId(10)], on: true }));
+        assert_eq!(hotkey_action(&current, &[SimId(10)], &db, 'O', BuildTiers::default(), None), Some(UiAction::SetCloak { units: vec![SimId(10)], on: true }));
         current.cloaks = vec![(SimId(10), true, true)];
-        assert_eq!(hotkey_action(&current, &[SimId(10)], &db, 'O', BuildTiers::default()), Some(UiAction::SetCloak { units: vec![SimId(10)], on: false }));
-        assert_eq!(hotkey_action(&current, &[SimId(12)], &db, 'O', BuildTiers::default()), None, "a bot has no cloak");
+        assert_eq!(hotkey_action(&current, &[SimId(10)], &db, 'O', BuildTiers::default(), None), Some(UiAction::SetCloak { units: vec![SimId(10)], on: false }));
+        assert_eq!(hotkey_action(&current, &[SimId(12)], &db, 'O', BuildTiers::default(), None), None, "a bot has no cloak");
     }
 
     #[test]
@@ -3722,8 +3749,8 @@ mod tests {
         let armed: Vec<SimId> = current.units.iter().filter(|unit| db.get(BlueprintId(unit.blueprint)).weapon.is_some()).map(|unit| unit.id).collect();
         let unarmed: Vec<SimId> = current.units.iter().filter(|unit| db.get(BlueprintId(unit.blueprint)).weapon.is_none()).map(|unit| unit.id).collect();
         assert!(!armed.is_empty() && !unarmed.is_empty());
-        assert_eq!(hotkey_action(&current, &armed[..1], &db, 'I', BuildTiers::default()), Some(UiAction::Arm(ArmedOrder::AttackGround)));
-        assert_eq!(hotkey_action(&current, &unarmed[..1], &db, 'I', BuildTiers::default()), None);
+        assert_eq!(hotkey_action(&current, &armed[..1], &db, 'I', BuildTiers::default(), None), Some(UiAction::Arm(ArmedOrder::AttackGround)));
+        assert_eq!(hotkey_action(&current, &unarmed[..1], &db, 'I', BuildTiers::default(), None), None);
     }
 
     #[test]
@@ -3731,7 +3758,7 @@ mod tests {
         let db = BlueprintDb::standard();
         let mut current = mixed_factories(&db);
         for letter in ['M', 'F', 'J', 'Y', 'X'] {
-            assert_eq!(hotkey_action(&current, &[SimId(1)], &db, letter, BuildTiers::default()), None, "{letter} for a factory");
+            assert_eq!(hotkey_action(&current, &[SimId(1)], &db, letter, BuildTiers::default(), None), None, "{letter} for a factory");
         }
         let mut engineer = unit(4, 0.0);
         engineer.blueprint = db.id("t1_engineer").0;
@@ -4324,7 +4351,7 @@ mod tests {
     fn shift_queues_five_units_but_only_one_upgrade() {
         let db = BlueprintDb::standard();
         let current = mixed_factories(&db);
-        let press = |letter: char, shift: bool| with_shift(hotkey_action(&current, &[SimId(1)], &db, letter, BuildTiers::default()).unwrap(), shift, &db);
+        let press = |letter: char, shift: bool| with_shift(hotkey_action(&current, &[SimId(1)], &db, letter, BuildTiers::default(), None).unwrap(), shift, &db);
         let count_of = |action: UiAction| match action {
             UiAction::Queue { count, .. } => count,
             other => panic!("expected a queue order, not {other:?}"),
@@ -4373,22 +4400,22 @@ mod tests {
         // 1 and 2 are finished factories, 3 is a factory still being built, 4 is an engineer.
         let everything = [SimId(1), SimId(2), SimId(3), SimId(4)];
         assert_eq!(pausable_units(&current, &everything, &db), [SimId(1), SimId(2), SimId(3)], "an engineer cannot be paused");
-        let press = |current: &SimSnapshot| hotkey_action(current, &everything, &db, 'O', BuildTiers::default());
+        let press = |current: &SimSnapshot| hotkey_action(current, &everything, &db, 'O', BuildTiers::default(), None);
         assert_eq!(press(&current), Some(UiAction::SetPaused { units: vec![SimId(1), SimId(2), SimId(3)], paused: true }));
         current.paused = vec![SimId(1)];
         assert_eq!(press(&current), Some(UiAction::SetPaused { units: vec![SimId(1), SimId(2), SimId(3)], paused: true }), "some still run, so pause them all");
         current.paused = vec![SimId(1), SimId(2), SimId(3)];
         assert_eq!(press(&current), Some(UiAction::SetPaused { units: vec![SimId(1), SimId(2), SimId(3)], paused: false }));
-        assert_eq!(hotkey_action(&current, &[SimId(4)], &db, 'O', BuildTiers::default()), None);
+        assert_eq!(hotkey_action(&current, &[SimId(4)], &db, 'O', BuildTiers::default(), None), None);
     }
 
     #[test]
     fn only_a_selection_with_a_commander_can_overcharge() {
         let db = BlueprintDb::standard();
         let current = commander_and_engineer(&db);
-        assert_eq!(hotkey_action(&current, &[SimId(10)], &db, 'L', BuildTiers::default()), Some(UiAction::Arm(ArmedOrder::Overcharge)));
-        assert_eq!(hotkey_action(&current, &[SimId(10), SimId(12)], &db, 'L', BuildTiers::default()), Some(UiAction::Arm(ArmedOrder::Overcharge)));
-        assert_eq!(hotkey_action(&current, &[SimId(11), SimId(12)], &db, 'L', BuildTiers::default()), None, "engineers and bots have none");
+        assert_eq!(hotkey_action(&current, &[SimId(10)], &db, 'L', BuildTiers::default(), None), Some(UiAction::Arm(ArmedOrder::Overcharge)));
+        assert_eq!(hotkey_action(&current, &[SimId(10), SimId(12)], &db, 'L', BuildTiers::default(), None), Some(UiAction::Arm(ArmedOrder::Overcharge)));
+        assert_eq!(hotkey_action(&current, &[SimId(11), SimId(12)], &db, 'L', BuildTiers::default(), None), None, "engineers and bots have none");
     }
 
     #[test]

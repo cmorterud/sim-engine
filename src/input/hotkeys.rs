@@ -1,6 +1,8 @@
-//! Keys for the options in the command panel. Unit orders have a key each. Build items take
-//! the key of their slot in the build bar, which is the same for the same kind of thing at every
-//! tech level. Mostly on the left of the keyboard, because the other hand is on the mouse.
+//! Keys for the options in the command panel. Unit orders have a key each. A builder's
+//! structures come in families that share a key, such as the factories on W: the key starts
+//! placing the first of the family, and pressing it again moves on to the next. A factory's
+//! items take the key of their slot in its bar. Both stay the same at every tech level. Mostly
+//! on the left of the keyboard, because the other hand is on the mouse; the arrow keys pan.
 
 use winit::keyboard::KeyCode;
 
@@ -20,15 +22,55 @@ pub const REPEAT: char = 'R';
 /// Away from the others, because it throws away a queue.
 pub const CLEAR_QUEUE: char = 'K';
 
-/// Letters handled on their own: panning, patrol, which also works by holding the key, and mute.
-pub const RESERVED: [char; 5] = ['W', 'A', 'S', 'D', PATROL];
+/// Letters handled on their own: patrol, which also works by holding the key.
+pub const RESERVED: [char; 1] = [PATROL];
 
 /// Shows the next tech level in the build bars.
 pub const CYCLE_TIER: char = '`';
 
-/// The keys of a build bar, by slot, in the order the bar shows them. Builders' and factories'
-/// bars use the same keys, since only one bar is shown at a time: a factory's, if one is selected.
-pub const SLOT_KEYS: [char; 20] = ['Q', 'E', 'G', 'T', 'C', 'Z', 'V', 'B', 'H', 'N', ',', '.', '/', ';', '\'', '[', ']', '\\', '-', '='];
+/// The keys of a factory's bar, by slot, in the order the bar shows them.
+pub const SLOT_KEYS: [char; 8] = ['Q', 'E', 'G', 'T', 'C', 'Z', 'V', 'B'];
+
+/// A builder's structures, in families that share a key, in the order the bar shows them. Each
+/// family lists its members in the order its key steps through them; only those of the level
+/// shown are in the bar, so a key steps through the level's land, air, and naval factories, or
+/// its radar and sonar.
+pub const BUILDER_FAMILIES: [(char, &[&str]); 8] = [
+    (
+        'W',
+        &[
+            "land_factory_t1",
+            "land_factory_t2_support",
+            "land_factory_t3_support",
+            "air_factory",
+            "air_factory_t2_support",
+            "air_factory_t3_support",
+            "naval_factory",
+            "naval_factory_t2_support",
+            "naval_factory_t3_support",
+            "quantum_gateway",
+        ],
+    ),
+    ('E', &["mass_extractor", "mass_extractor_t2", "mass_extractor_t3", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "mass_storage"]),
+    ('S', &["power_generator", "power_generator_t2", "power_generator_t3", "energy_storage"]),
+    ('D', &["t1_point_defense", "t2_point_defense", "t3_heavy_point_defense", "t1_aa_turret", "t2_flak", "t3_sam", "t1_torpedo_launcher", "t2_torpedo_launcher"]),
+    ('A', &["t2_artillery", "t3_artillery", "tactical_missile_launcher", "strategic_missile_launcher"]),
+    ('Z', &["radar", "radar_t2", "omni_sensor", "t1_sonar", "t2_sonar", "stealth_field_generator"]),
+    ('C', &["shield_generator", "t3_heavy_shield", "tactical_missile_defense", "strategic_missile_defense"]),
+    ('V', &["engineering_station", "engineering_station_t3", "air_staging", "wall"]),
+];
+
+/// A builder's structure's family, by its place in `BUILDER_FAMILIES`, and its place in the
+/// family.
+pub fn builder_family(key: &str) -> Option<(usize, usize)> {
+    BUILDER_FAMILIES.iter().enumerate().find_map(|(family, (_, members))| members.iter().position(|member| *member == key).map(|place| (family, place)))
+}
+
+/// Where an item sits in its bar: builders' bars by family and then place in it, factories' by
+/// slot. Items with the same first number are grouped, with dividers between groups.
+pub fn bar_order(key: &str) -> Option<(usize, usize)> {
+    builder_family(key).or_else(|| build_slot(key).filter(|(bar, _)| *bar == Bar::Factory).map(|(_, slot)| (0, slot)))
+}
 
 /// Which bar an item is in: a builder's, for structures, or a factory's, for units and missiles.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -37,33 +79,14 @@ pub enum Bar {
     Factory,
 }
 
-/// An item's place in its build bar. Each kind of thing has its own slot, the same at every
-/// tech level, so that the key for an extractor, a power generator, or anti-air never changes
-/// with the level shown: only one level's items are in the bar at a time.
+/// Which bar an item is in, and for a factory's items, its slot. A builder's structures are
+/// placed by family instead (`builder_family`), and their slot is the family's.
 pub fn build_slot(key: &str) -> Option<(Bar, usize)> {
-    use Bar::{Builder, Factory};
+    use Bar::Factory;
+    if let Some((family, _)) = builder_family(key) {
+        return Some((Bar::Builder, family));
+    }
     Some(match key {
-        "land_factory_t1" | "land_factory_t2_support" | "land_factory_t3_support" => (Builder, 0),
-        "mass_extractor" | "mass_extractor_t2" | "mass_extractor_t3" => (Builder, 1),
-        "power_generator" | "power_generator_t2" | "power_generator_t3" => (Builder, 2),
-        "mass_storage" | "engineering_station" | "engineering_station_t3" => (Builder, 3),
-        "t1_point_defense" | "t2_point_defense" | "t3_heavy_point_defense" => (Builder, 4),
-        "radar" | "radar_t2" | "omni_sensor" => (Builder, 5),
-        "t1_aa_turret" | "t2_flak" | "t3_sam" => (Builder, 6),
-        "air_factory" | "air_factory_t2_support" | "air_factory_t3_support" => (Builder, 7),
-        // Two kinds that are never at the same level may share a slot.
-        "hydrocarbon_plant" | "mass_fabricator" | "mass_fabricator_t3" => (Builder, 8),
-        "shield_generator" | "t3_heavy_shield" => (Builder, 9),
-        "tactical_missile_launcher" | "strategic_missile_launcher" => (Builder, 10),
-        "tactical_missile_defense" | "strategic_missile_defense" => (Builder, 11),
-        "stealth_field_generator" => (Builder, 12),
-        "air_staging" => (Builder, 13),
-        "quantum_gateway" | "wall" => (Builder, 14),
-        "energy_storage" => (Builder, 15),
-        "t2_artillery" | "t3_artillery" => (Builder, 16),
-        "naval_factory" | "naval_factory_t2_support" | "naval_factory_t3_support" => (Builder, 17),
-        "t1_sonar" | "t2_sonar" => (Builder, 18),
-        "t1_torpedo_launcher" | "t2_torpedo_launcher" => (Builder, 19),
         // Builders and scouts, then bots, artillery and bombers, anti-air and gunships, tanks,
         // support, and the rest.
         "t1_engineer" | "t2_engineer" | "t3_engineer" | "support_commander" | "t1_air_scout" | "t3_spy_plane" => (Factory, 0),
@@ -79,9 +102,12 @@ pub fn build_slot(key: &str) -> Option<(Bar, usize)> {
     })
 }
 
-/// The key for an item, from its slot.
+/// The key for an item: its family's for a builder's structure, its slot's for a factory's item.
 pub fn blueprint_hotkey(key: &str) -> Option<char> {
-    build_slot(key).map(|(_, slot)| SLOT_KEYS[slot])
+    match build_slot(key)? {
+        (Bar::Builder, family) => Some(BUILDER_FAMILIES[family].0),
+        (Bar::Factory, slot) => Some(SLOT_KEYS[slot]),
+    }
 }
 
 /// How a key is shown on a button.
@@ -93,6 +119,10 @@ pub fn key_name(letter: char) -> String {
 pub const fn letter_for(code: KeyCode) -> Option<char> {
     Some(match code {
         KeyCode::KeyQ => 'Q',
+        KeyCode::KeyW => 'W',
+        KeyCode::KeyA => 'A',
+        KeyCode::KeyS => 'S',
+        KeyCode::KeyD => 'D',
         KeyCode::KeyE => 'E',
         KeyCode::KeyG => 'G',
         KeyCode::KeyT => 'T',
@@ -150,8 +180,12 @@ mod tests {
     use super::*;
     use crate::sim::blueprints::BlueprintDb;
 
-    const ALL_KEYS: [KeyCode; 32] = [
+    const ALL_KEYS: [KeyCode; 36] = [
         KeyCode::KeyQ,
+        KeyCode::KeyW,
+        KeyCode::KeyA,
+        KeyCode::KeyS,
+        KeyCode::KeyD,
         KeyCode::KeyE,
         KeyCode::KeyG,
         KeyCode::KeyT,
@@ -206,15 +240,46 @@ mod tests {
     }
 
     #[test]
-    fn no_two_items_in_one_bar_at_one_level_share_a_slot() {
+    fn no_two_items_in_a_factorys_bar_at_one_level_share_a_slot() {
         let db = BlueprintDb::standard();
-        for unit in db.iter() {
+        for unit in db.iter().filter(|unit| unit.builds.iter().any(|option| !db.get(*option).is_structure())) {
             let mut taken: Vec<(u8, usize)> = unit.builds.iter().map(|option| (db.get(*option).tier, build_slot(&db.get(*option).key).unwrap().1)).collect();
             let count = taken.len();
             taken.sort_unstable();
             taken.dedup();
             assert_eq!(taken.len(), count, "two items in {}'s bar share a slot at one level", unit.key);
         }
+    }
+
+    #[test]
+    fn related_structures_share_a_key_as_one_family() {
+        let same = |keys: &[&str], letter: char| {
+            for key in keys {
+                assert_eq!(blueprint_hotkey(key), Some(letter), "{key}");
+            }
+        };
+        same(&["land_factory_t1", "air_factory", "naval_factory", "land_factory_t2_support", "naval_factory_t3_support"], 'W');
+        same(&["radar", "t1_sonar", "radar_t2", "t2_sonar", "omni_sensor"], 'Z');
+        same(&["t1_point_defense", "t1_aa_turret", "t2_point_defense", "t2_flak", "t3_heavy_point_defense", "t3_sam"], 'D');
+        same(&["mass_extractor", "mass_storage"], 'E');
+        same(&["power_generator", "energy_storage"], 'S');
+        // Land comes first, so the key starts on a land factory.
+        assert!(builder_family("land_factory_t1").unwrap().1 < builder_family("air_factory").unwrap().1);
+        assert!(builder_family("radar").unwrap().1 < builder_family("t1_sonar").unwrap().1);
+        assert!(builder_family("t1_point_defense").unwrap().1 < builder_family("t1_aa_turret").unwrap().1);
+    }
+
+    #[test]
+    fn each_structure_is_in_one_family_and_each_family_has_its_own_key() {
+        let mut seen: Vec<&str> = BUILDER_FAMILIES.iter().flat_map(|(_, members)| members.iter().copied()).collect();
+        let count = seen.len();
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(seen.len(), count, "a structure is in two families");
+        let mut letters: Vec<char> = BUILDER_FAMILIES.iter().map(|(letter, _)| *letter).collect();
+        letters.sort_unstable();
+        letters.dedup();
+        assert_eq!(letters.len(), BUILDER_FAMILIES.len(), "two families share a key");
     }
 
     #[test]
@@ -253,15 +318,15 @@ mod tests {
                 assert_eq!(blueprint_hotkey(kind), first, "{kind}");
             }
         }
-        // The common structures keep the keys they always had.
-        for (key, letter) in [("land_factory_t1", 'Q'), ("mass_extractor", 'E'), ("power_generator", 'G'), ("mass_storage", 'T'), ("t1_point_defense", 'C')] {
+        // A factory's common units keep the keys they always had.
+        for (key, letter) in [("t1_engineer", 'Q'), ("t1_light_bot", 'E'), ("t1_light_artillery", 'G'), ("t1_mobile_aa", 'T'), ("t1_medium_tank", 'C')] {
             assert_eq!(blueprint_hotkey(key), Some(letter), "{key}");
         }
     }
 
     #[test]
     fn slot_keys_never_take_a_key_already_in_use() {
-        for letter in &SLOT_KEYS {
+        for letter in SLOT_KEYS.iter().chain(BUILDER_FAMILIES.iter().map(|(letter, _)| letter)) {
             assert!(!RESERVED.contains(letter) && !PANEL_LETTERS.contains(letter), "{letter} is already used");
         }
         let mut keys = SLOT_KEYS.to_vec();
@@ -285,10 +350,9 @@ mod tests {
     #[test]
     fn every_key_shown_can_really_be_pressed() {
         let pressable: Vec<char> = ALL_KEYS.iter().filter_map(|code| letter_for(*code)).collect();
-        for letter in SLOT_KEYS.iter().chain(&PANEL_LETTERS) {
+        for letter in SLOT_KEYS.iter().chain(&PANEL_LETTERS).chain(BUILDER_FAMILIES.iter().map(|(letter, _)| letter)) {
             assert!(pressable.contains(letter), "{letter} is shown but cannot be pressed");
         }
-        assert_eq!(letter_for(KeyCode::KeyW), None, "panning keys are not panel keys");
-
+        assert_eq!(letter_for(KeyCode::ArrowUp), None, "panning keys are not panel keys");
     }
 }
