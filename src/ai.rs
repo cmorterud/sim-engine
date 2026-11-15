@@ -110,8 +110,8 @@ const COMMANDER_T3_SUITE_INCOME: i64 = 80;
 const STATION_INCOME: i64 = 30;
 const MOST_STATIONS: usize = 2;
 /// A strategic missile costs 12,000 mass and 1.5 million energy: only a huge economy builds one.
-const NUKE_MASS_INCOME: i64 = 120;
-const NUKE_ENERGY_INCOME: i64 = 5_000;
+const NUKE_MASS_INCOME: i64 = 100;
+const NUKE_ENERGY_INCOME: i64 = 4_000;
 /// With an air factory and this mass income a second, a light transport drops a few T1 land
 /// units by an outlying enemy extractor, far from the base's defenses, then flies home for more.
 const TRANSPORT_INCOME: i64 = 35;
