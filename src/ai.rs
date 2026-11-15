@@ -108,6 +108,17 @@ const MOST_STATIONS: usize = 2;
 /// A strategic missile costs 12,000 mass and 1.5 million energy: only a huge economy builds one.
 const NUKE_MASS_INCOME: i64 = 120;
 const NUKE_ENERGY_INCOME: i64 = 5_000;
+/// With an air factory and this mass income a second, a light transport drops a few T1 land
+/// units by an outlying enemy extractor, far from the base's defenses, then flies home for more.
+const TRANSPORT_INCOME: i64 = 35;
+/// How many it carries a drop, and the fewest worth sending.
+const DROP_SIZE: usize = 6;
+const FEWEST_DROPPED: usize = 4;
+/// How long it waits for its passengers to board, and between ordering transports.
+const BOARDING_PATIENCE_TICKS: u32 = 600;
+const TRANSPORT_RETRY_TICKS: u32 = 1_500;
+/// How far short of the target it sets them down, toward home, clear of what guards it.
+const DROP_SHORT_UNITS: i32 = 250;
 /// The commander overcharges only above this share of its health.
 const OVERCHARGE_HEALTH_PERCENT: i32 = 50;
 /// A radar blip this far above the ground or the water is an aircraft, which the army leaves alone.
@@ -166,6 +177,7 @@ struct Roster {
     tactical_missile: BlueprintId,
     tactical_defense: BlueprintId,
     engineering_stations: [BlueprintId; 2],
+    light_transport: BlueprintId,
     strategic_launcher: BlueprintId,
     strategic_missile: BlueprintId,
     strategic_defense: BlueprintId,
@@ -225,6 +237,7 @@ impl Roster {
             tactical_missile: id("tactical_missile"),
             tactical_defense: id("tactical_missile_defense"),
             engineering_stations: [id("engineering_station"), id("engineering_station_t3")],
+            light_transport: id("t1_light_transport"),
             strategic_launcher: id("strategic_missile_launcher"),
             strategic_missile: id("strategic_missile"),
             strategic_defense: id("strategic_missile_defense"),
@@ -297,6 +310,9 @@ struct Forces {
     tactical_defenses: usize,
     tactical_launchers: Vec<LauncherInfo>,
     stations: usize,
+    transports: Vec<TransportInfo>,
+    /// Idle T1 land combat units, which fit a light transport.
+    idle_light_combat: Vec<(SimId, Vec2Fp)>,
     strategic_launchers: Vec<LauncherInfo>,
     strategic_defenses: Vec<LauncherInfo>,
     /// Cells that are spoken for: planned by a builder on its way, each site's whole footprint.
@@ -332,6 +348,33 @@ struct LauncherInfo {
     stock: u32,
     /// Already firing at something.
     busy: bool,
+}
+
+#[derive(Copy, Clone)]
+struct TransportInfo {
+    id: SimId,
+    position: Vec2Fp,
+    cargo: usize,
+    /// Set down what it carries, or on its way to.
+    unloading: bool,
+    idle: bool,
+}
+
+/// A transport drop under way.
+#[derive(Clone)]
+struct Drop {
+    transport: SimId,
+    passengers: Vec<SimId>,
+    target: Vec2Fp,
+    phase: DropPhase,
+    since: u32,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum DropPhase {
+    Boarding,
+    Flying,
+    Returning,
 }
 
 #[derive(Copy, Clone)]
@@ -399,6 +442,7 @@ impl Difficulty {
                 missiles: false,
                 overcharge: false,
                 enhancements: false,
+                transports: false,
             },
             Self::Normal => Skill {
                 think_interval: THINK_INTERVAL,
@@ -417,6 +461,7 @@ impl Difficulty {
                 missiles: true,
                 overcharge: true,
                 enhancements: true,
+                transports: true,
             },
         }
     }
@@ -449,6 +494,8 @@ struct Skill {
     overcharge: bool,
     /// Whether its commander takes enhancements.
     enhancements: bool,
+    /// Whether it drops raiders by transport.
+    transports: bool,
 }
 
 pub struct AiBrain {
@@ -476,6 +523,9 @@ pub struct AiBrain {
     naval_plan: Option<NavalPlan>,
     /// Whether an enemy strategic missile launcher has been seen, which calls for a defense.
     enemy_nuke_seen: bool,
+    /// The transport drop under way, and when a transport was last ordered.
+    drop: Option<Drop>,
+    transport_ordered: Option<u32>,
 }
 
 struct NavalPlan {
@@ -511,6 +561,8 @@ impl AiBrain {
             fleet_size: FIRST_FLEET,
             naval_plan: None,
             enemy_nuke_seen: false,
+            drop: None,
+            transport_ordered: None,
         }
     }
 
@@ -527,7 +579,7 @@ impl AiBrain {
             self.roster = Some(Roster::new(world));
             self.naval_plan = Some(self.plan_naval(world));
         }
-        let forces = self.survey(world);
+        let mut forces = self.survey(world);
         let sightings = visible_enemies(world, self.team);
         if sightings.iter().any(|enemy| enemy.is_air) {
             self.enemy_air_seen = Some(world.current_tick);
@@ -545,6 +597,9 @@ impl AiBrain {
         self.command_upgrades(world, &forces, &mut commands);
         if self.skill.enhancements {
             self.command_enhancements(world, &forces, &sightings, &mut commands);
+        }
+        if self.skill.transports {
+            self.command_drops(world, &mut forces, &sightings, &mut commands);
         }
         self.command_army(world, &forces, &sightings, &mut commands);
         self.command_air(world, &forces, &sightings, &mut commands);
@@ -633,7 +688,15 @@ impl AiBrain {
                     forces.combat_units += 1;
                     if order.kind == OrderKind::Idle {
                         forces.idle_combat.push(id);
+                        if unit.tier == 1 && finished && world.ecs.get::<&crate::sim::components::Boarding>(entity).is_err() {
+                            forces.idle_light_combat.push((id, position));
+                        }
                     }
+                }
+                UnitClass::Air if blueprint == roster.light_transport => {
+                    forces.aircraft += 1;
+                    let (cargo, unloading) = world.ecs.get::<&crate::sim::components::Transport>(entity).map_or((0, false), |transport| (transport.cargo.len(), transport.unload.is_some()));
+                    forces.transports.push(TransportInfo { id, position, cargo, unloading, idle: order.kind == OrderKind::Idle && finished });
                 }
                 // Only land factories: the AI builds no missile silos, and must never queue in one.
                 UnitClass::Factory if unit.factory_kind.is_some() => {
@@ -1477,8 +1540,20 @@ impl AiBrain {
         let headquarters = forces.air_headquarters_tier;
         let air_threat = self.air_threat(world);
         let mut aircraft = forces.aircraft + forces.air_factories.iter().filter(|factory| factory.finished && !factory.queue_is_empty).count();
+        // One light transport at a time, for drops.
+        let mut transport_wanted = self.skill.transports
+            && forces.transports.is_empty()
+            && mass_income >= TRANSPORT_INCOME
+            && self.transport_ordered.is_none_or(|at| world.current_tick >= at + TRANSPORT_RETRY_TICKS);
         for factory in forces.air_factories.iter().filter(|factory| factory.finished && factory.queue_is_empty) {
             if economy.satisfaction < Res::ONE / 2 || energy_is_low {
+                continue;
+            }
+            if transport_wanted && aircraft < self.skill.max_aircraft {
+                transport_wanted = false;
+                aircraft += 1;
+                self.transport_ordered = Some(world.current_tick);
+                commands.push(SimCommand::QueueUnit { factory: factory.id, blueprint: self.roster().light_transport, count: 1 });
                 continue;
             }
             let tier = if factory.support { factory.tier.min(headquarters) } else { factory.tier };
@@ -1636,6 +1711,95 @@ impl AiBrain {
         if let Some(enhancement) = next {
             commands.push(SimCommand::Enhance { units: vec![commander], enhancement });
         }
+    }
+
+    /// Transport drops: an idle light transport at home takes on a few idle T1 land units,
+    /// sets them down short of an outlying enemy extractor, sends them at it, and flies home.
+    /// The units it takes are kept out of the army's orders while they board.
+    fn command_drops(&mut self, world: &SimWorld, forces: &mut Forces, sightings: &[Sighting], commands: &mut Vec<SimCommand>) {
+        let tick = world.current_tick;
+        let Some(transport) = forces.transports.first().copied() else {
+            self.drop = None;
+            return;
+        };
+        let Some(mut drop) = self.drop.take().filter(|drop| drop.transport == transport.id) else {
+            // A new drop, from home, once there are enough to make it worth it.
+            let leash = fp_int(COMMANDER_LEASH_UNITS * 2);
+            if !transport.idle || transport.cargo > 0 || transport.position.distance_squared(&self.home) > wide_mul(leash, leash) {
+                return;
+            }
+            let mut nearby = forces.idle_light_combat.clone();
+            nearby.sort_by_key(|(id, at)| (at.distance_squared(&transport.position), *id));
+            let passengers: Vec<SimId> = nearby.into_iter().take(DROP_SIZE).map(|(id, _)| id).collect();
+            if passengers.len() < FEWEST_DROPPED {
+                return;
+            }
+            forces.idle_combat.retain(|id| !passengers.contains(id));
+            commands.push(SimCommand::Load { units: passengers.clone(), transport: transport.id });
+            self.drop = Some(Drop { transport: transport.id, passengers, target: self.drop_target(world, sightings), phase: DropPhase::Boarding, since: tick });
+            return;
+        };
+        // Its passengers are the transport's while the drop lasts.
+        forces.idle_combat.retain(|id| !drop.passengers.contains(id));
+        match drop.phase {
+            DropPhase::Boarding => {
+                let all_aboard = transport.cargo >= drop.passengers.len();
+                let waited = tick >= drop.since + BOARDING_PATIENCE_TICKS;
+                if all_aboard || (waited && transport.cargo > 0) {
+                    let toward_home = (self.home - drop.target).normalized().scaled(fp_int(DROP_SHORT_UNITS));
+                    commands.push(SimCommand::Unload { transports: vec![transport.id], point: drop.target + toward_home });
+                    drop.phase = DropPhase::Flying;
+                    drop.since = tick;
+                } else if waited {
+                    // Nobody came: give the units back to the army.
+                    return;
+                }
+            }
+            DropPhase::Flying => {
+                if transport.cargo == 0 && !transport.unloading {
+                    commands.push(SimCommand::AttackMove { units: drop.passengers.clone(), goal: drop.target });
+                    commands.push(SimCommand::Move { units: vec![transport.id], goal: self.home });
+                    drop.phase = DropPhase::Returning;
+                    drop.since = tick;
+                }
+            }
+            DropPhase::Returning => {
+                if transport.idle {
+                    return;
+                }
+            }
+        }
+        self.drop = Some(drop);
+    }
+
+    /// Where a drop goes: the enemy extractor in sight farthest from the enemy's base, if it is
+    /// outlying, or else the outlying deposit on the enemy's side nearest home.
+    fn drop_target(&self, world: &SimWorld, sightings: &[Sighting]) -> Vec2Fp {
+        let outlying = fp_int(RAID_DISTANCE_UNITS);
+        let is_extractor = |id: SimId| {
+            world.unit_entity(id).and_then(|entity| world.ecs.get::<&Blueprinted>(entity).ok().map(|unit| world.blueprints.get(unit.0).requires_deposit)).unwrap_or(false)
+        };
+        let seen = sightings
+            .iter()
+            .filter(|enemy| enemy.is_structure && enemy.position.distance_squared(&self.enemy_home) > wide_mul(outlying, outlying) && is_extractor(enemy.id))
+            .max_by_key(|enemy| (enemy.position.distance_squared(&self.enemy_home), std::cmp::Reverse(enemy.id)));
+        if let Some(enemy) = seen {
+            return enemy.position;
+        }
+        world
+            .deposits
+            .iter()
+            .map(|&cell| cell_center(cell))
+            .filter(|center| {
+                let from_enemy = center.distance_squared(&self.enemy_home);
+                from_enemy < center.distance_squared(&self.home) && from_enemy > wide_mul(outlying, outlying)
+            })
+            .min_by_key(|center| {
+                // Ties broken the same way on both sides of a mirrored map.
+                let seen = self.plan_position(world, *center);
+                (center.distance_squared(&self.home), seen.x, seen.y)
+            })
+            .unwrap_or(self.enemy_home)
     }
 
     /// A little way from home toward the enemy, on each axis.

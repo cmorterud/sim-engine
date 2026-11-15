@@ -61,7 +61,10 @@ fn ai_commands_only_its_own_units() {
                     | SimCommand::FormationMove { units, .. }
                     | SimCommand::Attack { units, .. }
                     | SimCommand::AttackGround { units, .. }
+                    | SimCommand::Move { units, .. }
+                    | SimCommand::Load { units, .. }
                     | SimCommand::Enhance { units, .. } => units.clone(),
+                    SimCommand::Unload { transports, .. } => transports.clone(),
                     SimCommand::Overcharge { unit, .. } => vec![*unit],
                     SimCommand::QueueUnit { factory, .. } | SimCommand::SetRally { factory, .. } | SimCommand::SetRepeat { factory, .. } => vec![*factory],
                     other => panic!("unexpected command {other:?}"),
@@ -115,6 +118,9 @@ fn mirrored_order(world: &SimWorld, team: Team, command: &SimCommand) -> String 
         SimCommand::Attack { units, .. } => format!("attack x{}", units.len()),
         SimCommand::Overcharge { .. } => "overcharge".to_string(),
         SimCommand::Enhance { units, enhancement } => format!("enhance x{} {}", units.len(), enhancement.0),
+        SimCommand::Move { units, goal } => format!("move x{} to {:?}", units.len(), point(*goal)),
+        SimCommand::Load { units, .. } => format!("load x{}", units.len()),
+        SimCommand::Unload { transports, point: at } => format!("unload x{} at {:?}", transports.len(), point(*at)),
         SimCommand::AttackGround { units, point: at } => format!("attack ground x{} at {:?}", units.len(), point(*at)),
         other => panic!("unexpected command {other:?}"),
     }
@@ -244,8 +250,11 @@ fn ai_climbs_the_tech_tree_and_upgrades_its_economy() {
     let mut brain = AiBrain::new(Team::Blue, 11, world.starts);
     // 30 minutes, with nobody playing Red, whose commander is kept alive so the match goes on.
     // FAF's T3 headquarters, at 5,220 mass and 12,000 build time, comes later than ours did.
+    let (mut loaded, mut dropped) = (false, false);
     for _ in 0..18_000 {
         let commands = brain.think(&world);
+        loaded |= commands.iter().any(|command| matches!(command, SimCommand::Load { .. }));
+        dropped |= commands.iter().any(|command| matches!(command, SimCommand::Unload { .. }));
         world.advance_tick(&commands);
         let red = world.unit_entity(world.commanders[Team::Red.index()].unwrap()).unwrap();
         let mut health = world.ecs.get::<&mut sim_engine::sim::components::Health>(red).unwrap();
@@ -269,6 +278,8 @@ fn ai_climbs_the_tech_tree_and_upgrades_its_economy() {
     assert!(has("advanced_engineering") || has("t3_engineering"), "the commander took no engineering suite: {installed:?}");
     assert!(has("heavy_cannon"), "the commander took no heavier cannon: {installed:?}");
     assert!(count("engineering_station") + count("engineering_station_t3") >= 1, "no engineering station");
+    // A light transport took raiders aboard and set them down by an outlying deposit.
+    assert!(loaded && dropped, "no transport drop: loaded {loaded}, dropped {dropped}");
 }
 
 #[test]
