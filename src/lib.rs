@@ -7,6 +7,7 @@ pub mod hud;
 pub mod icons;
 pub mod input;
 pub mod map_import;
+pub mod minimap;
 pub mod math;
 pub mod render;
 pub mod sim;

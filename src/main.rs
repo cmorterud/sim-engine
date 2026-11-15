@@ -834,6 +834,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     ui::install_fonts(&egui_context);
     ui::install_style(&egui_context);
     sim_engine::hud::install_portraits(&egui_context);
+    let mut minimap = sim_engine::minimap::Minimap::default();
     let mut egui_state = egui_winit::State::new(
         egui_context.clone(),
         egui::ViewportId::ROOT,
@@ -1549,12 +1550,14 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                 let speed = session.driver.as_ref().map_or(1, SimDriver::speed);
                                 let state = ui::WatchState { map: &map_name, seed, view: watch_view, speed, paused: game_paused };
                                 ui::watch_bar(ctx, &snapshot, &state, &mut actions);
+                                minimap.show(ctx, &camera, &map.heights, f64::from(map.water_level), &snapshot, map.fog_side, &mut actions);
                                 let stopped = snapshot.tick >= sim_engine::soak::MATCH_TICK_LIMIT;
                                 ui::watch_end_window(ctx, snapshot.match_result, stopped, snapshot.tick, seed, &mut actions);
                             } else if is_match {
                                 ui::world_overlay(ctx, &camera, &snapshot, &selected, &map.blueprints, pixels_per_point);
                                 let sound_label = sound.as_ref().map(|_| sound_settings.label());
                                 ui::resource_bar(ctx, &snapshot, &map_name, sound_label.as_deref(), game_paused, &mut actions);
+                                minimap.show(ctx, &camera, &map.heights, f64::from(map.water_level), &snapshot, map.fog_side, &mut actions);
                                 ui::commander_alert(ctx, attack_alarm.alert_strength());
                                 ui::control_group_bar(ctx, &group_rows, &snapshot, PLAYER_TEAM, &map.blueprints, &selected, &mut actions);
                                 ui::quick_select_bar(ctx, &snapshot, PLAYER_TEAM, &map.blueprints, &selected, camera.focus(), &mut quick_select, &mut actions);
@@ -1630,6 +1633,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                     session.send(SimCommand::Upgrade { units });
                                 }
                                 UiAction::TogglePause => toggle_pause(&session),
+                                UiAction::CenterCamera([x, y]) => camera.look_at(f64::from(x), f64::from(y), 0.0),
                                 UiAction::SetPaused { units, paused } => {
                                     let word = if paused { "Paused" } else { "Resumed" };
                                     feedback.set_label(MarkerKind::Build, format!("{word}: {}", units.len()));

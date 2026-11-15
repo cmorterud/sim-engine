@@ -34,7 +34,7 @@ pub fn strategic_share(zoom_from_closest: f64) -> f32 {
 /// apparent size, so that large units stay solid for longer. About 4 and 8 pixels at 1080p.
 const LOD_DOT_RATIO: f32 = 0.003;
 const LOD_CUBE_RATIO: f32 = 0.006;
-const FOG_CELL_UNITS: f64 = 80.0;
+pub const FOG_CELL_UNITS: f64 = 80.0;
 
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]

@@ -164,6 +164,8 @@ pub enum UiAction {
     SetPaused { units: Vec<SimId>, paused: bool },
     /// Stop or restart the game clock.
     TogglePause,
+    /// Move the camera to look at this world point, in whole units, keeping its height.
+    CenterCamera([i32; 2]),
     /// From the quick select bar: select these, or add them to the selection.
     QuickSelect { units: Vec<SimId>, add: bool },
     /// Remove one order from these builders' queues.
@@ -1546,12 +1548,14 @@ pub fn control_group_bar(ctx: &egui::Context, groups: &[(usize, Vec<SimId>)], sn
     if groups.is_empty() {
         return;
     }
-    egui::Area::new(egui::Id::new("control groups")).anchor(Align2::LEFT_TOP, Vec2::new(8.0, CONTROL_GROUPS_TOP)).show(ctx, |ui| {
+    let top = crate::minimap::below_minimap(ctx).unwrap_or(CONTROL_GROUPS_TOP);
+    egui::Area::new(egui::Id::new("control groups")).anchor(Align2::LEFT_TOP, Vec2::new(8.0, top)).show(ctx, |ui| {
         control_group_rows(ui, groups, snapshot, db, team_color(team), selected, actions);
     });
 }
 
-/// How far down the control groups start, clear of the economy panel.
+/// How far down the control groups start, clear of the economy panel, until the minimap says
+/// where it ends.
 const CONTROL_GROUPS_TOP: f32 = 96.0;
 
 /// The text alert that goes with the "ACU under attack" sound.
@@ -1680,7 +1684,8 @@ pub fn resource_bar(ctx: &egui::Context, snapshot: &SimSnapshot, map: &str, soun
     if paused {
         paused_banner(ctx);
     }
-    hud::panel(ctx, "economy", Align2::LEFT_TOP, Vec2::new(4.0, 4.0), |ui| economy_rows(ui, &snapshot.economy, None));
+    let ((), economy) = hud::panel_rect(ctx, "economy", Align2::LEFT_TOP, Vec2::new(4.0, 4.0), |ui| economy_rows(ui, &snapshot.economy, None));
+    crate::minimap::note_economy_bottom(ctx, economy.bottom());
     hud::panel(ctx, "game controls", Align2::CENTER_TOP, Vec2::new(0.0, 4.0), |ui| {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
@@ -2214,11 +2219,12 @@ pub fn watch_bar(ctx: &egui::Context, snapshot: &SimSnapshot, state: &WatchState
         (None, None) => Vec::new(),
     };
     if !economies.is_empty() {
-        hud::panel(ctx, "economy", Align2::LEFT_TOP, Vec2::new(4.0, 4.0), |ui| {
+        let ((), panel) = hud::panel_rect(ctx, "economy", Align2::LEFT_TOP, Vec2::new(4.0, 4.0), |ui| {
             for (team, economy) in &economies {
                 economy_rows(ui, economy, Some((team_name(*team), team_text(*team))));
             }
         });
+        crate::minimap::note_economy_bottom(ctx, panel.bottom());
     }
     hud::panel(ctx, "watch controls", Align2::CENTER_TOP, Vec2::new(0.0, 4.0), |ui| {
         ui.horizontal(|ui| {

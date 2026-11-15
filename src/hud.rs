@@ -105,11 +105,13 @@ pub fn framed<R>(ui: &mut Ui, margin: Vec2, add: impl FnOnce(&mut Ui) -> R) -> R
 
 /// A framed panel floating at a corner or edge of the screen.
 pub fn panel<R>(ctx: &egui::Context, id: &str, anchor: Align2, offset: Vec2, add: impl FnOnce(&mut Ui) -> R) -> R {
-    egui::Area::new(egui::Id::new(id))
-        .anchor(anchor, offset)
-        .constrain(true)
-        .show(ctx, |ui| framed(ui, Vec2::new(11.0, 8.0), add))
-        .inner
+    panel_rect(ctx, id, anchor, offset, add).0
+}
+
+/// A framed panel, as `panel`, also returning where on the screen it is.
+pub fn panel_rect<R>(ctx: &egui::Context, id: &str, anchor: Align2, offset: Vec2, add: impl FnOnce(&mut Ui) -> R) -> (R, Rect) {
+    let shown = egui::Area::new(egui::Id::new(id)).anchor(anchor, offset).constrain(true).show(ctx, |ui| framed(ui, Vec2::new(11.0, 8.0), add));
+    (shown.inner, shown.response.rect)
 }
 
 /// The face of a square button: a gradient, lit along its rim when hovered and filled with the
