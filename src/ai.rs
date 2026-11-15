@@ -1862,8 +1862,12 @@ impl AiBrain {
         let stopped_growing = world.current_tick - self.gathered.1 >= WAVE_PATIENCE_TICKS;
         let sudden_death = world.current_tick >= SUDDEN_DEATH_TICKS.max(self.skill.commander_push_ticks);
         if sudden_death {
+            // Wherever the enemy commander is, seen or not: going for where it was last seen, or
+            // else for the enemy's start, two commanders that had each lost their base kept
+            // passing each other under the sea, one going home to rebuild and the other
+            // hunting it, while the armies marched back and forth around the passes.
             let enemy_commander = world.commanders[self.team.enemy().index()];
-            let goal = sightings.iter().find(|enemy| Some(enemy.id) == enemy_commander && !enemy.is_submerged).map_or(self.enemy_home, |enemy| enemy.position);
+            let goal = enemy_commander.and_then(|id| world.unit_position(id)).map_or(self.enemy_home, |at| at.xy());
             let mut everyone = forces.idle_combat.clone();
             if !commander_enhancing(world, forces) && world.terrain.height_at(goal) >= world.terrain.water_level() {
                 everyone.extend(forces.commander);
