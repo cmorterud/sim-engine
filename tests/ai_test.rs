@@ -59,7 +59,9 @@ fn ai_commands_only_its_own_units() {
                     | SimCommand::SetPaused { units, .. }
                     | SimCommand::QueueMove { units, .. }
                     | SimCommand::FormationMove { units, .. }
-                    | SimCommand::Attack { units, .. } => units.clone(),
+                    | SimCommand::Attack { units, .. }
+                    | SimCommand::AttackGround { units, .. }
+                    | SimCommand::Enhance { units, .. } => units.clone(),
                     SimCommand::Overcharge { unit, .. } => vec![*unit],
                     SimCommand::QueueUnit { factory, .. } | SimCommand::SetRally { factory, .. } | SimCommand::SetRepeat { factory, .. } => vec![*factory],
                     other => panic!("unexpected command {other:?}"),
@@ -112,6 +114,8 @@ fn mirrored_order(world: &SimWorld, team: Team, command: &SimCommand) -> String 
         SimCommand::SetRepeat { repeat, .. } => format!("repeat {repeat}"),
         SimCommand::Attack { units, .. } => format!("attack x{}", units.len()),
         SimCommand::Overcharge { .. } => "overcharge".to_string(),
+        SimCommand::Enhance { units, enhancement } => format!("enhance x{} {}", units.len(), enhancement.0),
+        SimCommand::AttackGround { units, point: at } => format!("attack ground x{} at {:?}", units.len(), point(*at)),
         other => panic!("unexpected command {other:?}"),
     }
 }
@@ -257,6 +261,14 @@ fn ai_climbs_the_tech_tree_and_upgrades_its_economy() {
     assert!(higher_tier >= 5 && third_tier >= 1, "the army is not keeping up with the tech: {higher_tier} of T2 and up, {third_tier} of T3");
     let income = (world.economies[0].mass_income * 10).to_num::<i64>();
     assert!(income >= 60, "mass income is only {income}/s");
+    // The commander takes its engineering suite and heavier cannon at home, and engineering
+    // stations help the factories.
+    let commander = world.unit_entity(world.commanders[Team::Blue.index()].unwrap()).unwrap();
+    let installed = world.ecs.get::<&sim_engine::sim::components::Enhancements>(commander).map_or([None; 3], |slots| slots.0);
+    let has = |key: &str| installed.contains(&Some(world.blueprints.enhancement_id(key)));
+    assert!(has("advanced_engineering") || has("t3_engineering"), "the commander took no engineering suite: {installed:?}");
+    assert!(has("heavy_cannon"), "the commander took no heavier cannon: {installed:?}");
+    assert!(count("engineering_station") + count("engineering_station_t3") >= 1, "no engineering station");
 }
 
 #[test]
