@@ -575,8 +575,8 @@ fn mobile_units(world: &SimWorld, team: Team) -> usize {
     world.snapshot().units.iter().filter(|unit| unit.team == team && !unit.is_structure).count()
 }
 
-/// The player's default opponent must be easy to beat: it keeps a small army, so that by twenty
-/// minutes a normal AI, on either side, fields half as many again.
+/// The player's default opponent must be easy to beat: it keeps a small army, so that over the
+/// first twenty minutes a normal AI, on either side, fields half as many again at its largest.
 #[test]
 #[cfg_attr(debug_assertions, ignore = "release only")]
 fn an_easy_ai_keeps_a_small_army() {
@@ -587,14 +587,18 @@ fn an_easy_ai_keeps_a_small_army() {
             let mut world = scenario::skirmish(seed).world;
             let difficulty = |team: Team| if team == easy { Difficulty::Easy } else { Difficulty::Normal };
             let mut brains = [Team::Blue, Team::Red].map(|team| AiBrain::with_difficulty(team, seed, world.starts, difficulty(team)));
+            // The largest army each side fields, sampled each minute: an army counted at one
+            // moment depends on whether a wave has just died, which is no measure of difficulty.
+            let (mut weak, mut strong) = (0, 0);
             while world.current_tick < 12_000 && world.match_result.is_none() {
                 advance_ai_vs_ai(&mut world, &mut brains);
                 if world.current_tick.is_multiple_of(600) {
                     assert!(mobile_units(&world, easy) <= EASY_MOST, "seed {seed}: easy {easy:?} has {} units at tick {}", mobile_units(&world, easy), world.current_tick);
+                    weak = weak.max(mobile_units(&world, easy));
+                    strong = strong.max(mobile_units(&world, easy.enemy()));
                 }
             }
-            let (weak, strong) = (mobile_units(&world, easy), mobile_units(&world, easy.enemy()));
-            assert!(strong * 2 >= weak * 3, "seed {seed}: normal has {strong} units to easy {easy:?}'s {weak}");
+            assert!(strong * 2 >= weak * 3, "seed {seed}: normal fielded at most {strong} units to easy {easy:?}'s {weak}");
         }
     }
 }

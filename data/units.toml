@@ -390,7 +390,7 @@ vision = 400
 radar = 2320
 upkeep = 10
 # Drives its own upgrade to a T2 Radar.
-build_power = 10
+build_power = 13
 upgrades_to = "radar_t2"
 
 # Upgraded from a T2 Radar, or built by T3 builders: its mass, energy, and build time are what the upgrade costs.
@@ -1324,7 +1324,7 @@ on_water = true
 vision = 400
 sonar = 3200
 upkeep = 20
-build_power = 10
+build_power = 13
 upgrades_to = "t2_sonar"
 
 [[unit]]
@@ -1857,7 +1857,7 @@ footprint = 1
 vision = 40
 
 # Engineering stations: a drone that helps whatever is building, being upgraded, or damaged within
-# reach, on its own. The T3 station, an upgrade of the T2, flies two.
+# reach, on its own. The T3 station, an upgrade of the T2, flies two. FAF's build rates: 20 and 30.
 [[unit]]
 id = "engineering_station"
 name = "Engineering Station"
@@ -1869,7 +1869,7 @@ build_time = 1000
 health = 1000
 footprint = 1
 vision = 280
-build_power = 25
+build_power = 20
 build_range = 300
 assists = true
 upgrades_to = "engineering_station_t3"
@@ -1885,7 +1885,7 @@ build_time = 2000
 health = 2500
 footprint = 1
 vision = 280
-build_power = 50
+build_power = 30
 build_range = 300
 assists = true
 
