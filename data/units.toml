@@ -1072,7 +1072,7 @@ on_water = true
 builds = ["t1_frigate", "t1_attack_sub"]
 upgrades_to = "naval_factory_t2"
 
-# A gun for ships and shore, and a railgun of 5 a second at aircraft.
+# A gun for ships and shore, and a twin railgun at aircraft, both muzzles at once: 10 a second.
 [[unit]]
 id = "t1_frigate"
 name = "Frigate"
@@ -1091,7 +1091,7 @@ radar = 1600
 sonar = 320
 movement = "naval"
 weapon = { range = 560, reload_ticks = 17, projectile_speed = 60, damage = 85, splash_radius = 20, turn_rate = 120 }
-extra_weapons = [{ range = 960, reload_ticks = 10, projectile_speed = 90, damage = 5, targets = "air", turn_rate = 180 }]
+extra_weapons = [{ range = 960, reload_ticks = 10, projectile_speed = 90, damage = 10, targets = "air", turn_rate = 180 }]
 
 # T2 and T3 naval factories: headquarters by upgrade, and support factories for T2 and T3
 # builders, as for land and air.
@@ -1163,7 +1163,8 @@ support = true
 on_water = true
 builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_shield_boat", "t3_battleship", "t3_battlecruiser", "t3_missile_sub", "t2_torpedo_boat"]
 
-# Two gauss cannons, a railgun at aircraft, torpedoes, and an anti-torpedo charge.
+# Two twin gauss cannons, a twin railgun at aircraft, torpedoes, and an anti-torpedo charge.
+# Each twin fires both muzzles at once (FAF's MuzzleSalvoDelay of 0).
 [[unit]]
 id = "t2_destroyer"
 name = "Destroyer"
@@ -1183,10 +1184,10 @@ sonar = 720
 # FAF's Smart Charge: it shoots down a torpedo within 600 every 10 seconds.
 torpedo_defense = { range = 600, reload_ticks = 100 }
 movement = "naval"
-weapon = { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 305, splash_radius = 20, turn_rate = 90 }
+weapon = { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 610, splash_radius = 20, turn_rate = 90 }
 extra_weapons = [
-    { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 305, splash_radius = 20, turn_rate = 90 },
-    { range = 1200, reload_ticks = 14, projectile_speed = 120, damage = 10, targets = "air", turn_rate = 180 },
+    { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 610, splash_radius = 20, turn_rate = 90 },
+    { range = 1200, reload_ticks = 14, projectile_speed = 120, damage = 20, targets = "air", turn_rate = 180 },
     { range = 900, reload_ticks = 40, projectile_speed = 30, damage = 120, targets = "naval" },
 ]
 
@@ -1373,7 +1374,7 @@ vision = 400
 sonar = 720
 weapon = { range = 1200, reload_ticks = 40, projectile_speed = 30, damage = 720, targets = "naval" }
 
-# FAF's Riptide: it hovers over land and water alike.
+# FAF's Riptide: it hovers over land and water alike. Its riot gun fires both muzzles at once.
 [[unit]]
 id = "t2_amphibious_tank"
 name = "Amphibious Tank"
@@ -1389,7 +1390,7 @@ turn_radius = 20
 radius = 11
 vision = 360
 movement = "hover"
-weapon = { range = 360, reload_ticks = 3, projectile_speed = 120, damage = "13.5", turn_rate = 180 }
+weapon = { range = 360, reload_ticks = 3, projectile_speed = 120, damage = 27, turn_rate = 180 }
 
 # A dome that moves with it, which on the water covers 660 around it: the original's sphere of
 # 1,200 sunk 1,000 below the surface.
@@ -1905,6 +1906,7 @@ vision = 640
 flight = { elevation = 200, turn_rate = 90, fuel = 600, hovers = true }
 transport = { small = 6, medium = 2, large = 1 }
 
+# Two linked railguns, each firing both muzzles at once, as one.
 [[unit]]
 id = "t2_transport"
 name = "Air Transport"
@@ -1919,7 +1921,7 @@ radius = 16
 vision = 640
 flight = { elevation = 200, turn_rate = 90, fuel = 600, hovers = true }
 transport = { small = 14, medium = 6, large = 3 }
-weapon = { range = 400, reload_ticks = 5, projectile_speed = 120, damage = 12 }
+weapon = { range = 400, reload_ticks = 5, projectile_speed = 120, damage = 24 }
 
 [[unit]]
 id = "t3_heavy_transport"
