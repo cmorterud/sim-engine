@@ -413,10 +413,14 @@ impl SimWorld {
                     missile_height: (weapon.kind == WeaponKind::TacticalMissile).then_some(weapon.cruise_height),
                     target: None,
                     turret: weapon.turn_rate.map(|rate| Turret::new(facing, rate)),
+                    spread: weapon.spread,
                     stun_ticks: weapon.stun_ticks,
                 })
                 .collect();
             self.ecs.insert_one(entity, super::components::ExtraWeapons(extras)).expect("entity was just spawned");
+        }
+        if let Some(weapon) = unit.weapon.filter(|weapon| !weapon.artillery && weapon.spread > Fp::ZERO) {
+            self.ecs.insert_one(entity, super::components::Scatter(weapon.spread)).expect("entity was just spawned");
         }
         if let Some(weapon) = unit.weapon.filter(|weapon| weapon.artillery) {
             let artillery = super::components::Artillery { min_range: weapon.min_range, spread: weapon.spread, energy_per_shot: weapon.energy_per_shot };

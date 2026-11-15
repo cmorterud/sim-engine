@@ -381,6 +381,9 @@ struct Explosion {
     stun: u32,
 }
 
+/// Mixed into the world's seed for the scatter streams, so that they do not repeat its numbers.
+const SCATTER_SEED: u64 = 0x5CA7_7E25_0FF5_E7ED;
+
 /// The highest veteran rank.
 pub const MAX_RANK: u8 = 5;
 /// Each rank adds this share of a unit's base health, as FAF's veterancy does: 10% a level.
@@ -468,6 +471,11 @@ pub struct SimWorld {
     pub spatial_grid: SpatialGrid,
     pub flow_field: FlowField,
     pub rng: SimRng,
+    /// Where scattering shots land, a stream for each team, both seeded alike: on a mirrored map,
+    /// the same shot on each side draws the same numbers, and Red's are turned about the map's
+    /// middle, so the sides stay mirror images. From the one shared stream, whichever side fired
+    /// first drew first, and the sides parted ways.
+    pub scatter_rngs: [SimRng; 2],
     pub config: SimConfig,
     pub current_tick: u32,
     pub next_sim_id: u32,
@@ -605,6 +613,7 @@ impl SimWorld {
             terrain,
             spatial_grid,
             flow_field,
+            scatter_rngs: [SimRng::new(rng.state() ^ SCATTER_SEED), SimRng::new(rng.state() ^ SCATTER_SEED)],
             rng,
             config,
             current_tick: 0,
@@ -1902,14 +1911,14 @@ impl SimWorld {
             Option<&super::components::Adjacency>,
             Option<&mut super::components::ExtraWeapons>,
             Option<&super::components::Torpedo>,
-            (Option<&super::components::TractorBeam>, Option<&super::components::StunWeapon>, &Order, Option<&Builder>),
+            (Option<&super::components::TractorBeam>, Option<&super::components::StunWeapon>, &Order, Option<&Builder>, Option<&super::components::Scatter>),
         )>();
         let mut view = query.view();
         let disabled = &self.disabled;
         let grabs = &mut self.pending_grabs;
         grabs.clear();
         for (index, &(id, entity)) in units.iter().enumerate() {
-            let (stats, combat, turret, turning, mut overcharge, overcharge_order, mut launcher, anti_air, bomb_bay, flight, artillery, adjacency, extras, torpedo, (tractor, stun_weapon, order, builder)) =
+            let (stats, combat, turret, turning, mut overcharge, overcharge_order, mut launcher, anti_air, bomb_bay, flight, artillery, adjacency, extras, torpedo, (tractor, stun_weapon, order, builder, scatter)) =
                 view.get_mut(entity).expect("unit list only holds live units");
             combat.ticks_until_ready = combat.ticks_until_ready.saturating_sub(1);
             if let Some(weapon) = overcharge.as_mut() {
@@ -2154,7 +2163,7 @@ impl SimWorld {
                 }
                 _ => combat.reload_ticks,
             };
-            let spread = artillery.map_or(Fp::ZERO, |artillery| artillery.spread);
+            let spread = artillery.map_or_else(|| scatter.map_or(Fp::ZERO, |scatter| scatter.0), |artillery| artillery.spread);
             if combat.ticks_until_ready == 0 && aimed && gun_free && loaded && charged && can_fire {
                 if let Some(target) = combat.target {
                     let entry = locate(target).expect("target was just validated or found");
@@ -2339,7 +2348,7 @@ impl SimWorld {
                         missile,
                         homing,
                         bomb: None,
-                        spread: Fp::ZERO,
+                        spread: weapon.spread,
                         underwater: weapon.torpedo,
                         stun: weapon.stun_ticks,
                     });
@@ -2427,11 +2436,14 @@ impl SimWorld {
                 }
                 continue;
             }
-            // An artillery shell lands somewhere within its spread of where it was aimed.
+            // A shell with a spread, artillery's or a scattering gun's, lands somewhere within it of
+            // where it was aimed.
             let to = if shot.spread > Fp::ZERO {
+                let stream = &mut self.scatter_rngs[shot.team.index()];
                 loop {
-                    let (x, y) = (self.rng.range_fp(-shot.spread, shot.spread), self.rng.range_fp(-shot.spread, shot.spread));
+                    let (x, y) = (stream.range_fp(-shot.spread, shot.spread), stream.range_fp(-shot.spread, shot.spread));
                     if wide_mul(x, x) + wide_mul(y, y) <= wide_mul(shot.spread, shot.spread) {
+                        let (x, y) = if shot.team == Team::Red { (-x, -y) } else { (x, y) };
                         break Vec3Fp::new(shot.to.x + x, shot.to.y + y, shot.to.z);
                     }
                 }
@@ -3228,6 +3240,9 @@ impl SimWorld {
         hasher.write(&self.current_tick.to_le_bytes());
         hasher.write(&self.next_sim_id.to_le_bytes());
         hasher.write(&self.rng.state().to_le_bytes());
+        for stream in &self.scatter_rngs {
+            hasher.write(&stream.state().to_le_bytes());
+        }
         hasher.write(&self.terrain.content_hash().to_le_bytes());
         hasher.write(&[
             u8::from(self.config.friendly_fire),

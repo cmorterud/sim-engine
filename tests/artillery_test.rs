@@ -128,6 +128,42 @@ fn artillery_shells_scatter_around_their_aim_the_same_way_every_time() {
     assert_eq!(first.iter().map(|velocity| (velocity.x.to_bits(), velocity.y.to_bits())).collect::<Vec<_>>(), again, "and the same in every replay");
 }
 
+/// The directions a unit's shells set off in, over a few volleys at a spot on the ground.
+fn shell_directions(kind: &str, team: Team, from: Vec2Fp, at: Vec2Fp, ticks: u32) -> Vec<(i32, i32)> {
+    let mut world = world(5_120);
+    let gun = world.spawn_mobile(world.blueprints.id(kind), team, from);
+    world.advance_tick(&[SimCommand::AttackGround { units: vec![gun], point: at }]);
+    let mut seen: Vec<(i32, i32)> = Vec::new();
+    for _ in 0..ticks {
+        world.advance_tick(&[]);
+        for velocity in shells(&world, gun) {
+            let key = (velocity.x.to_bits(), velocity.y.to_bits());
+            if !seen.contains(&key) {
+                seen.push(key);
+            }
+        }
+    }
+    seen
+}
+
+#[test]
+fn guns_with_firing_randomness_scatter_and_mirror_images_scatter_mirrored() {
+    // FAF's light artillery has a firing randomness of 0.5, a spread of 10 here; the light bot
+    // has none, so every shot it fires at one spot goes the same way.
+    let scattering = shell_directions("t1_light_artillery", Team::Blue, point(1_000, 2_500), point(1_500, 2_500), 600);
+    assert!(scattering.len() >= 3, "it should fire several times: {}", scattering.len());
+    assert!(scattering.windows(2).any(|pair| pair[0] != pair[1]), "its shells should go different ways: {scattering:?}");
+    let steady = shell_directions("t1_light_bot", Team::Blue, point(1_000, 2_500), point(1_200, 2_500), 100);
+    assert_eq!(steady.len(), 1, "a gun without randomness fires the same way every time: {steady:?}");
+    // The same gun on the other side, turned about the middle of the map, scatters the same way
+    // turned about, so a mirrored match stays a mirror image.
+    let mirrored = shell_directions("t1_light_artillery", Team::Red, point(4_120, 2_620), point(3_620, 2_620), 600);
+    let turned: Vec<(i32, i32)> = mirrored.iter().map(|&(x, y)| (-x, -y)).collect();
+    let close = |a: (i32, i32), b: (i32, i32)| (a.0 - b.0).abs() <= 2 && (a.1 - b.1).abs() <= 2;
+    assert_eq!(turned.len(), scattering.len());
+    assert!(turned.iter().zip(&scattering).all(|(a, b)| close(*a, *b)), "Red's {turned:?} against Blue's {scattering:?}");
+}
+
 #[test]
 fn heavy_artillery_reaches_across_the_map() {
     let mut world = world(20_480);

@@ -311,6 +311,8 @@ pub struct ExtraWeapon {
     pub missile_height: Option<Fp>,
     pub target: Option<SimId>,
     pub turret: Option<Turret>,
+    /// How far from where it aims its shots land, as `Scatter`. Fixed from the blueprint.
+    pub spread: Fp,
     /// What it hits is stunned this many ticks.
     pub stun_ticks: u32,
 }
@@ -323,6 +325,12 @@ pub struct Artillery {
     pub spread: Fp,
     pub energy_per_shot: super::blueprints::Res,
 }
+
+/// A main weapon, other than artillery's, whose shots land up to this far from where they are
+/// aimed: FAF's FiringRandomness, at 20 units to its one. Artillery keeps its spread in
+/// `Artillery`. Fixed from the blueprint, so not hashed.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Scatter(pub Fp);
 
 /// A weapon that can aim at aircraft. A weapon without it only hits what is on the ground.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
