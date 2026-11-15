@@ -20,6 +20,10 @@ const COMMANDER_LEASH_UNITS: i32 = 900;
 const DEFEND_RADIUS_UNITS: i32 = 1_400;
 /// After 35 minutes, the commander goes with full-size waves.
 const COMMANDER_PUSH_TICKS: u32 = 21_000;
+/// From here, half an hour in, any wave of at least twice the first counts as full strength, so
+/// that it goes for the base and the commander comes along: two even sides trading waves of 20
+/// to 40 against each other's defenses otherwise played to the time limit.
+const LATE_PUSH_TICKS: u32 = 30_000;
 /// Enemy deposits farther than this from the enemy's start are raided rather than its base.
 const RAID_DISTANCE_UNITS: i32 = 2_000;
 const FIRST_WAVE: usize = 10;
@@ -1866,7 +1870,8 @@ impl AiBrain {
             .or_else(|| sightings.iter().filter(reachable).find(|enemy| enemy.is_structure))
             .or_else(|| sightings.iter().find(reachable))
             .map(|enemy| enemy.position);
-        let full_strength = gathered >= self.skill.largest_wave;
+        let late = world.current_tick >= LATE_PUSH_TICKS.max(self.skill.commander_push_ticks);
+        let full_strength = gathered >= self.skill.largest_wave || (late && gathered >= self.skill.first_wave * 2);
         let goal = target.unwrap_or_else(|| self.search_point(world, full_strength));
         // Not in formation: waves at the slowest unit's pace arrived late enough that, in 200
         // AI-vs-AI matches, 6 went past the time limit, against none with each at its own speed.
