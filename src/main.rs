@@ -1479,13 +1479,13 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                         let pixels_per_point = window.scale_factor() as f32;
                         let snapshot = demo_snapshot.unwrap_or_else(|| Arc::clone(&session.current));
                         let selected = selection.selected().to_vec();
-                        let trails = if is_match { ui::build_trails(&session.previous, &snapshot, alpha, &selected) } else { Vec::new() };
+                        let mut trails = if is_match { ui::build_trails(&session.previous, &snapshot, alpha, &selected) } else { Vec::new() };
+                        ui::estimate_arrivals(&mut trails, &snapshot, &map.blueprints);
                         orders_view_strength = if shift_held {
                             1.0
                         } else {
                             (f64::from(orders_view_strength) - dt / ORDERS_FADE_SECONDS).max(0.0) as f32
                         };
-                        let mut trails = trails;
                         if is_match && orders_view_strength > 0.0 {
                             trails.extend(ui::other_units_trails(&session.previous, &snapshot, alpha, &selected, orders_view_strength));
                         }
@@ -1529,6 +1529,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                         let output = egui_context.run(raw_input, |ctx| {
                             ui::release_keyboard_focus(ctx);
                             ui::draw_map_frame(ctx, &camera, &map.heights, pixels_per_point);
+                            ui::draw_deposit_markers(ctx, &camera, &map.heights, &map.deposits, &map.vents, pixels_per_point);
                             ui::placement_grid(ctx, &camera, &grid_lines, f64::from(TERRAIN_CELL_UNITS), pixels_per_point);
                             ui::deposit_highlights(ctx, &camera, &open_deposits, snapped_deposit, pixels_per_point);
                             ui::pending_build_outlines(ctx, &camera, &pending, pixels_per_point);

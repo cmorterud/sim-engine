@@ -390,7 +390,40 @@ pub fn reset_build_tiers(ctx: &egui::Context) {
     ctx.data_mut(|data| {
         data.remove::<u8>(egui::Id::new(BUILDER_TIER_MEMORY));
         data.remove::<u8>(egui::Id::new(FACTORY_TIER_MEMORY));
+        data.remove::<CommandTab>(egui::Id::new(COMMAND_TAB_MEMORY));
     });
+}
+
+/// What the command bar's main area shows, picked with the tabs at its left.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum CommandTab {
+    /// What the selection can build.
+    Build,
+    /// What the selection is made of, by kind.
+    Selection,
+    /// A commander's enhancements.
+    Enhance,
+}
+
+const COMMAND_TAB_MEMORY: &str = "command tab";
+
+/// The tabs a selection has, in order: building if it can build, its make-up always, and
+/// enhancements if it can take any.
+pub fn command_tabs(can_build: bool, can_enhance: bool) -> Vec<CommandTab> {
+    let mut tabs = Vec::new();
+    if can_build {
+        tabs.push(CommandTab::Build);
+    }
+    tabs.push(CommandTab::Selection);
+    if can_enhance {
+        tabs.push(CommandTab::Enhance);
+    }
+    tabs
+}
+
+/// The tab shown: the one last picked if this selection has it, else its first.
+pub fn shown_tab(chosen: Option<CommandTab>, tabs: &[CommandTab]) -> CommandTab {
+    chosen.filter(|tab| tabs.contains(tab)).unwrap_or(tabs[0])
 }
 
 /// A unit's picture on a button: its portrait, with its map symbol small in the top left corner
@@ -791,31 +824,46 @@ pub fn enhancement_description(enhancement: &Enhancement, db: &BlueprintDb) -> S
     text
 }
 
-fn enhancement_rows(ui: &mut egui::Ui, snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb, actions: &mut Vec<UiAction>) {
+/// The enhancements, slot by slot, as buttons along the command bar: each with its name and
+/// cost, lit if fitted, and its details on hover.
+fn enhancement_bar(ui: &mut egui::Ui, snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb, actions: &mut Vec<UiAction>) {
     let rows = enhancement_offers(snapshot, selected, db);
-    if rows.is_empty() {
-        return;
-    }
-    egui::CollapsingHeader::new("Enhancements").id_source("enhancements").show(ui, |ui| {
-        for (slot, offers) in rows {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(format!("{}:", slot.name()));
-                for offer in offers {
-                    let enhancement = db.enhancement(offer.enhancement);
-                    let label = format!("{}\n{} mass  {} energy", enhancement.name, enhancement.mass.to_num::<i64>(), enhancement.energy.to_num::<i64>());
-                    let mut hint = enhancement_description(enhancement, db);
-                    if let Some(replaced) = offer.replaces.filter(|replaced| Some(*replaced) != enhancement.requires) {
-                        hint.push_str(&format!(" Removes {}, which is lost.", db.enhancement(replaced).name));
-                    }
-                    let button = egui::Button::new(label).selected(offer.installed);
-                    if ui.add_enabled(!offer.units.is_empty(), button).on_hover_text(hint).on_disabled_hover_text(enhancement_description(enhancement, db)).clicked() {
-                        actions.push(UiAction::Enhance { units: offer.units.clone(), enhancement: offer.enhancement });
-                    }
+    egui::ScrollArea::horizontal().id_source("enhancements").show(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            for (index, (slot, offers)) in rows.into_iter().enumerate() {
+                if index > 0 {
+                    ui.separator();
                 }
-            });
-        }
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 1.0;
+                    ui.label(egui::RichText::new(slot.name()).size(10.5).color(hud::DIM_TEXT));
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 3.0;
+                        for offer in offers {
+                            let enhancement = db.enhancement(offer.enhancement);
+                            let mut hint = enhancement_description(enhancement, db);
+                            if let Some(replaced) = offer.replaces.filter(|replaced| Some(*replaced) != enhancement.requires) {
+                                hint.push_str(&format!(" Removes {}, which is lost.", db.enhancement(replaced).name));
+                            }
+                            let enabled = !offer.units.is_empty();
+                            let button = hud::square_button(ui, Vec2::new(ENHANCEMENT_BUTTON_WIDTH, BAR_BUTTON - 14.0), offer.installed, enabled, |painter, rect| {
+                                painter.text(rect.center_top() + Vec2::new(0.0, 1.0), Align2::CENTER_TOP, &enhancement.name, FontId::proportional(10.5), hud::TEXT);
+                                let cost = format!("{}  {}", hud::compact(enhancement.mass.to_num::<i64>()), hud::compact(enhancement.energy.to_num::<i64>()));
+                                painter.text(rect.center_bottom() - Vec2::new(0.0, 1.0), Align2::CENTER_BOTTOM, cost, FontId::proportional(9.5), hud::DIM_TEXT);
+                            });
+                            if button.on_hover_text(hint).clicked() {
+                                actions.push(UiAction::Enhance { units: offer.units.clone(), enhancement: offer.enhancement });
+                            }
+                        }
+                    });
+                });
+            }
+        });
     });
 }
+
+const ENHANCEMENT_BUTTON_WIDTH: f32 = 112.0;
 
 /// What all the selected builders can build, in the order of the first one's list.
 fn builder_options(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb) -> Vec<BlueprintId> {
@@ -1788,6 +1836,9 @@ pub fn resource_bar(ctx: &egui::Context, snapshot: &SimSnapshot, db: &BlueprintD
 pub const COMMAND_BAR_HEIGHT: f32 = 108.0;
 /// The width of the order box at the command bar's left, for eight buttons a row.
 const ORDER_BOX_WIDTH: f32 = 8.0 * ORDER_BUTTON + 7.0 * 4.0 + 20.0;
+/// The size of a tab at the left of the command bar's main area: three stack in its height.
+const TAB_WIDTH: f32 = 30.0;
+const TAB_HEIGHT: f32 = 26.0;
 /// The width of the selection's details panel, above the order box.
 const INFO_WIDTH: f32 = ORDER_BOX_WIDTH - 22.0;
 
@@ -1805,7 +1856,7 @@ pub fn selection_groups(snapshot: &SimSnapshot, selected: &[SimId]) -> Vec<(u16,
 
 /// What is selected, in a panel above the order box: its symbol, name, health, what it makes and
 /// spends, and anything under way, such as an upgrade.
-fn selection_info(ui: &mut egui::Ui, snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb, menu: Option<&FactoryMenu>, actions: &mut Vec<UiAction>) {
+fn selection_info(ui: &mut egui::Ui, snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb, menu: Option<&FactoryMenu>) {
     let units: Vec<&UnitView> = selected.iter().filter_map(|id| find_unit(snapshot, *id)).collect();
     let Some(first) = units.first() else {
         return;
@@ -1935,7 +1986,6 @@ fn selection_info(ui: &mut egui::Ui, snapshot: &SimSnapshot, selected: &[SimId],
             ui.label(egui::RichText::new("Queue is empty. Right-click the ground to set a rally point.").size(11.0).color(hud::DIM_TEXT));
         }
     }
-    enhancement_rows(ui, snapshot, selected, db, actions);
 }
 
 /// The toggles after the orders: pause, cloak, upgrade, and a factory's repeat and clear.
@@ -2023,7 +2073,7 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
     let known = selected.iter().filter_map(|id| find_unit(snapshot, *id)).any(|unit| unit.blueprint != u16::MAX);
     if !selected.is_empty() {
         egui::Area::new(egui::Id::new("selection info")).anchor(Align2::LEFT_BOTTOM, Vec2::new(4.0, -(COMMAND_BAR_HEIGHT + 2.0))).show(ctx, |ui| {
-            hud::framed(ui, Vec2::new(11.0, 9.0), |ui| selection_info(ui, snapshot, selected, db, menu.as_ref(), actions));
+            hud::framed(ui, Vec2::new(11.0, 9.0), |ui| selection_info(ui, snapshot, selected, db, menu.as_ref()));
         });
     }
     egui::TopBottomPanel::bottom("commands").frame(egui::Frame::none()).show_separator_line(false).resizable(false).exact_height(COMMAND_BAR_HEIGHT).show(ctx, |ui| {
@@ -2055,21 +2105,48 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
                 ui.label(egui::RichText::new(if selected.is_empty() { "Nothing selected" } else { "Selected units out of sight" }).color(hud::DIM_TEXT));
                 return;
             }
-            // One bar: a factory's, if one is selected, else the builders', else the selection.
             let options = builder_options(snapshot, selected, db);
-            match &menu {
-                Some(menu) => factory_controls(ui, menu, db, actions),
-                None if !options.is_empty() => {
-                    if let Some(BarClick::Left(option)) = build_bar(ui, BUILDER_TIER_MEMORY, &options, db, |_| String::new(), |_| String::new()) {
-                        actions.push(UiAction::BeginPlacement(option));
+            let tabs = command_tabs(menu.is_some() || !options.is_empty(), !enhancement_offers(snapshot, selected, db).is_empty());
+            let memory = egui::Id::new(COMMAND_TAB_MEMORY);
+            let tab = shown_tab(ui.ctx().data(|data| data.get_temp::<CommandTab>(memory)), &tabs);
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                // The tabs, stacked, when there is more than one.
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    for &each in &tabs {
+                        let (glyph, hint) = match each {
+                            CommandTab::Build => (Glyph::Repair, "Build: what the selection can build"),
+                            CommandTab::Selection => (Glyph::Formation, "Selection: what is selected, by kind. Click a kind to select only those."),
+                            CommandTab::Enhance => (Glyph::Upgrade, "Enhance: the commander's enhancements"),
+                        };
+                        let button = hud::square_button(ui, Vec2::new(TAB_WIDTH, TAB_HEIGHT), each == tab, true, |painter, rect| hud::draw_glyph(painter, rect.shrink(1.0), glyph));
+                        if button.on_hover_text(hint).clicked() {
+                            ui.ctx().data_mut(|data| data.insert_temp(memory, each));
+                        }
                     }
-                }
-                None => selection_group_bar(ui, snapshot, selected, db, actions),
-            }
-            let chips = queue_chips(snapshot, selected, db);
-            if menu.is_some() || !options.is_empty() || !chips.is_empty() {
-                queue_chip_row(ui, &chips, db, actions);
-            }
+                });
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 4.0;
+                    match tab {
+                        // One bar: a factory's, if one is selected, else the builders'.
+                        CommandTab::Build => match &menu {
+                            Some(menu) => factory_controls(ui, menu, db, actions),
+                            None => {
+                                if let Some(BarClick::Left(option)) = build_bar(ui, BUILDER_TIER_MEMORY, &options, db, |_| String::new(), |_| String::new()) {
+                                    actions.push(UiAction::BeginPlacement(option));
+                                }
+                            }
+                        },
+                        CommandTab::Selection => selection_group_bar(ui, snapshot, selected, db, actions),
+                        CommandTab::Enhance => enhancement_bar(ui, snapshot, selected, db, actions),
+                    }
+                    let chips = queue_chips(snapshot, selected, db);
+                    if menu.is_some() || !options.is_empty() || !chips.is_empty() {
+                        queue_chip_row(ui, &chips, db, actions);
+                    }
+                });
+            });
         });
     });
 }
@@ -2534,6 +2611,10 @@ pub struct TrailLeg {
     pub opacity: f32,
     /// The position in the unit's plan, from 1. Zero if it is not worth numbering.
     pub number: usize,
+    /// Whose plan it is.
+    pub unit: SimId,
+    /// For the selection's moves, how many seconds until the unit gets to the leg's end.
+    pub eta: Option<f64>,
 }
 
 fn trail_marker_kind(kind: PlanStepKind) -> MarkerKind {
@@ -2587,6 +2668,8 @@ fn trails_for(previous: &SimSnapshot, current: &SimSnapshot, alpha: f64, selecte
                 kind: MarkerKind::Rally,
                 opacity: RALLY_OPACITY,
                 number: 0,
+                unit: id,
+                eta: None,
             });
         }
         let Ok(index) = current.plans.binary_search_by_key(&id, |plan| plan.id) else {
@@ -2606,6 +2689,8 @@ fn trails_for(previous: &SimSnapshot, current: &SimSnapshot, alpha: f64, selecte
                 kind: trail_marker_kind(step.kind),
                 opacity: TRAIL_OPACITY,
                 number: if steps.len() > 1 { position + 1 } else { 0 },
+                unit: id,
+                eta: None,
             });
             from = to;
         }
@@ -2613,14 +2698,62 @@ fn trails_for(previous: &SimSnapshot, current: &SimSnapshot, alpha: f64, selecte
     legs
 }
 
-/// Draws the selected units' trails: dashed lines through their pending orders, a dot at
-/// each stop, and numbers when there are several.
+/// Whether a leg is the unit walking somewhere, which gets a ribbon and an arrival time.
+const fn is_walk(kind: MarkerKind) -> bool {
+    matches!(kind, MarkerKind::Move | MarkerKind::AttackMove | MarkerKind::Patrol)
+}
+
+/// Works out when each of the selection's units reaches the end of each of its walking legs,
+/// at its top speed along straight lines: the same estimate as the original's, which ignores
+/// detours and stops along the way. Building and other work end the estimate, since how long
+/// they take is not known here.
+pub fn estimate_arrivals(legs: &mut [TrailLeg], snapshot: &SimSnapshot, db: &BlueprintDb) {
+    let mut elapsed: Option<(SimId, f64)> = None;
+    for leg in legs.iter_mut() {
+        if leg.opacity != TRAIL_OPACITY {
+            continue;
+        }
+        let speed = find_unit(snapshot, leg.unit).filter(|unit| unit.blueprint != u16::MAX).map_or(0.0, |unit| db.get(BlueprintId(unit.blueprint)).speed.to_num::<f64>() * TICKS_PER_SECOND as f64);
+        let so_far = match elapsed {
+            Some((unit, seconds)) if unit == leg.unit => Some(seconds),
+            Some(_) | None => Some(0.0),
+        };
+        let Some(so_far) = so_far.filter(|_| speed > 0.0 && is_walk(leg.kind)) else {
+            // Anything else stops the clock for the rest of this unit's legs.
+            elapsed = Some((leg.unit, f64::INFINITY));
+            continue;
+        };
+        let distance = (leg.to[0] - leg.from[0]).hypot(leg.to[1] - leg.from[1]);
+        let at = so_far + distance / speed;
+        leg.eta = at.is_finite().then_some(at);
+        elapsed = Some((leg.unit, at));
+    }
+}
+
+/// An arrival time as the original shows it: minutes and seconds.
+pub fn eta_text(seconds: f64) -> String {
+    let whole = seconds.round() as i64;
+    format!("ETA {}:{:02}", whole / 60, whole % 60)
+}
+
+/// Draws the selected units' trails: a wide, faint ribbon along their walks, dashed lines
+/// through their pending orders, a dot at each stop, numbers when there are several, and when
+/// each walk arrives. Stops that several units share show one time, the slowest's.
 pub fn order_trails(ctx: &egui::Context, camera: &Camera, legs: &[TrailLeg], pixels_per_point: f32) {
     let painter = ctx.layer_painter(egui::LayerId::background());
     let to_points = |world: [f64; 3]| {
         camera.world_to_screen(world).map(|pixels| Pos2::new(pixels[0] as f32 / pixels_per_point, pixels[1] as f32 / pixels_per_point))
     };
     let bounds = ctx.screen_rect().expand(16.0);
+    // The ribbons first, under everything else.
+    for leg in legs.iter().filter(|leg| leg.opacity == TRAIL_OPACITY && is_walk(leg.kind)) {
+        if let (Some(from), Some(to)) = (to_points(leg.from), to_points(leg.to)) {
+            if let Some((start, end)) = clip_segment(from, to, bounds) {
+                painter.line_segment([start, end], Stroke::new(RIBBON_POINTS, marker_color(leg.kind).gamma_multiply(RIBBON_OPACITY)));
+            }
+        }
+    }
+    let mut arrivals: BTreeMap<(i64, i64), (Pos2, f64)> = BTreeMap::new();
     for leg in legs {
         let color = marker_color(leg.kind).gamma_multiply(leg.opacity);
         let stroke = Stroke::new(2.0_f32, color);
@@ -2639,8 +2772,21 @@ pub fn order_trails(ctx: &egui::Context, camera: &Camera, legs: &[TrailLeg], pix
         if leg.number > 0 {
             painter.text(end + Vec2::new(6.0, -6.0), Align2::LEFT_BOTTOM, leg.number.to_string(), FontId::proportional(14.0), Color32::WHITE.gamma_multiply(leg.opacity));
         }
+        if let Some(eta) = leg.eta {
+            // Stops within a few points of each other on screen count as one.
+            let key = ((end.x / 24.0).round() as i64, (end.y / 24.0).round() as i64);
+            let slowest = arrivals.entry(key).or_insert((end, eta));
+            slowest.1 = slowest.1.max(eta);
+        }
+    }
+    for (end, eta) in arrivals.into_values() {
+        hud::outlined_text(&painter, end + Vec2::new(8.0, 4.0), Align2::LEFT_TOP, &eta_text(eta), FontId::proportional(11.0), Color32::WHITE);
     }
 }
+
+/// How wide a walk's ribbon is, in points, and how strong.
+const RIBBON_POINTS: f32 = 12.0;
+const RIBBON_OPACITY: f32 = 0.22;
 
 /// A beam between a builder and what it is working on, in world coordinates.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -2761,12 +2907,12 @@ pub fn draw_sensor_coverage(ctx: &egui::Context, camera: &Camera, heights: &crat
         camera.world_to_screen(world).map(|pixels| Pos2::new(pixels[0] as f32 / pixels_per_point, pixels[1] as f32 / pixels_per_point))
     };
     let world = |raw: i32| f64::from(raw) / 4096.0;
-    for (pick, color) in [(0usize, Color32::from_rgb(120, 230, 140)), (1, Color32::from_rgb(200, 140, 255))] {
+    for (pick, color) in [(0usize, Color32::from_rgb(96, 214, 236)), (1, Color32::from_rgb(200, 140, 255))] {
         let circles: Vec<([f64; 2], f64)> =
             ranges.iter().map(|range| ([world(range.center[0]), world(range.center[1])], world(if pick == 0 { range.radar } else { range.omni }))).filter(|circle| circle.1 > 0.0).collect();
         for [from, to] in coverage_outline(&circles) {
             if let (Some(from), Some(to)) = (to_points(from), to_points(to)) {
-                painter.line_segment([from, to], Stroke::new(1.5_f32, color.gamma_multiply(0.8 * strength)));
+                painter.line_segment([from, to], Stroke::new(1.2_f32, color.gamma_multiply(0.75 * strength)));
             }
         }
     }
@@ -3196,6 +3342,40 @@ fn team_color(team: Team) -> Color32 {
     }
 }
 
+/// The name under a side's commander.
+pub const fn commander_name(team: Team) -> &'static str {
+    match team {
+        Team::Blue => "Blue",
+        Team::Red => "Red",
+    }
+}
+
+/// Zoomed out, a mark on every mass deposit and hydrocarbon vent, which the land itself no
+/// longer shows: green for mass, amber for vents. Cells are terrain cells.
+pub fn draw_deposit_markers(ctx: &egui::Context, camera: &Camera, heights: &crate::render::camera::HeightField, deposits: &[(u32, u32)], vents: &[(u32, u32)], pixels_per_point: f32) {
+    let strength = ((camera.zoom_from_closest() - 0.35) / 0.15).clamp(0.0, 1.0) as f32;
+    if strength <= 0.0 {
+        return;
+    }
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    let bounds = ctx.screen_rect().expand(8.0);
+    let cell = f64::from(crate::sim::config::TERRAIN_CELL_UNITS);
+    for (cells, color) in [(deposits, Color32::from_rgb(170, 240, 70)), (vents, Color32::from_rgb(255, 196, 70))] {
+        for &(x, y) in cells {
+            let (wx, wy) = ((f64::from(x) + 0.5) * cell, (f64::from(y) + 0.5) * cell);
+            let Some(pixels) = camera.world_to_screen([wx, wy, heights.height_at(wx, wy)]) else {
+                continue;
+            };
+            let at = Pos2::new(pixels[0] as f32 / pixels_per_point, pixels[1] as f32 / pixels_per_point);
+            if !bounds.contains(at) {
+                continue;
+            }
+            painter.circle_filled(at, 5.5, color.gamma_multiply(0.25 * strength));
+            painter.circle(at, 3.2, color.gamma_multiply(strength), Stroke::new(1.0_f32, Color32::from_black_alpha((170.0 * strength) as u8)));
+        }
+    }
+}
+
 /// Draws a unit's icon on the map: its kind's symbol in its frame, in the team's color, or pale
 /// green when selected, with a dot beneath for each tech level.
 fn draw_icon(painter: &egui::Painter, center: Pos2, key: &str, tier: u8, color: Color32, selected: bool) {
@@ -3255,6 +3435,16 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
         let blueprint = db.get(BlueprintId(unit.blueprint));
         if show_icons {
             draw_icon(&painter, center, &blueprint.key, blueprint.tier, team_color(unit.team), is_selected);
+        }
+        // Commanders carry their side's name, underlined in its color, so they can be found.
+        if blueprint.is_commander() {
+            let name = commander_name(unit.team);
+            let below = center + Vec2::new(0.0, if show_icons { 11.0 } else { 18.0 });
+            let galley = painter.layout_no_wrap(name.to_string(), FontId::proportional(12.0), Color32::WHITE);
+            let width = galley.size().x;
+            hud::outlined_text(&painter, below, Align2::CENTER_TOP, name, FontId::proportional(12.0), Color32::WHITE);
+            let underline = below.y + galley.size().y + 1.0;
+            painter.line_segment([Pos2::new(below.x - width / 2.0, underline), Pos2::new(below.x + width / 2.0, underline)], Stroke::new(1.2_f32, team_color(unit.team)));
         }
         if snapshot.paused.binary_search(&unit.id).is_ok() {
             painter.text(center, Align2::CENTER_CENTER, "PAUSED", FontId::proportional(13.0), Color32::YELLOW);
@@ -4045,6 +4235,37 @@ mod tests {
         assert_eq!((units.as_str(), income.as_str()), ("6", "+26"));
         assert_eq!(army, db.get(db.id("acu")).mass.to_num::<i64>().to_string(), "only mobile units count towards the army");
         assert_eq!(team_figures(&current, Team::Red, &db, None)[1], "?");
+    }
+
+    #[test]
+    fn walks_get_arrival_times_that_add_up_and_stop_at_other_work() {
+        let db = BlueprintDb::standard();
+        let mut bot = unit(1, 0.0);
+        bot.blueprint = db.id("t1_light_bot").0;
+        let plan = UnitPlanView {
+            id: SimId(1),
+            steps: vec![step(PlanStepKind::Move, 100.0, 0.0), step(PlanStepKind::AttackMove, 300.0, 0.0), step(PlanStepKind::Build, 400.0, 20.0), step(PlanStepKind::Move, 500.0, 0.0)],
+        };
+        let current = snapshot(vec![bot], vec![plan]);
+        let mut legs = build_trails(&current, &current, 1.0, &[SimId(1)]);
+        estimate_arrivals(&mut legs, &current, &db);
+        let speed = db.get(db.id("t1_light_bot")).speed.to_num::<f64>() * 10.0;
+        let etas: Vec<Option<f64>> = legs.iter().map(|leg| leg.eta).collect();
+        assert!((etas[0].unwrap() - 100.0 / speed).abs() < 1e-9);
+        assert!((etas[1].unwrap() - 300.0 / speed).abs() < 1e-9, "times add up along the way");
+        assert_eq!(etas[2..], [None, None], "how long building takes is not known, so the clock stops");
+        assert_eq!(eta_text(24.4), "ETA 0:24");
+        assert_eq!(eta_text(75.0), "ETA 1:15");
+    }
+
+    #[test]
+    fn the_command_bar_offers_build_selection_and_enhance_tabs_as_they_apply() {
+        assert_eq!(command_tabs(true, true), [CommandTab::Build, CommandTab::Selection, CommandTab::Enhance]);
+        assert_eq!(command_tabs(false, false), [CommandTab::Selection]);
+        let tabs = command_tabs(true, false);
+        assert_eq!(shown_tab(None, &tabs), CommandTab::Build, "building first, when the selection can build");
+        assert_eq!(shown_tab(Some(CommandTab::Selection), &tabs), CommandTab::Selection);
+        assert_eq!(shown_tab(Some(CommandTab::Enhance), &tabs), CommandTab::Build, "a tab this selection lacks falls back to its first");
     }
 
     #[test]
