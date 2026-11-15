@@ -475,6 +475,15 @@ pub struct Veterancy {
     pub rank: u8,
 }
 
+/// The damage enemies have done to a unit, by who did it, so that the experience for destroying
+/// it is shared out as FAF does: each by its share of the damage. Units nobody has hit have none.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct VetDamage {
+    /// Each attacker and the damage it has done, in the order they first hit.
+    pub by: Vec<(SimId, Fp)>,
+    pub total: Fp,
+}
+
 /// A shield generator's dome: a sphere around the generator's base that stops enemy shells
 /// coming in from outside, while shells from inside fly out freely (GAME_SPECIFICATION.md §8.1).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

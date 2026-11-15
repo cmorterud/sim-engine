@@ -426,35 +426,64 @@ fn veterancy_of(world: &SimWorld, unit: SimId) -> Option<Veterancy> {
 }
 
 #[test]
-fn destroying_an_enemy_earns_its_mass_and_a_rank() {
+fn destroying_twice_its_own_mass_earns_a_rank() {
     let (mut world, hunter, prey) = bot_duel();
+    let mass = world.blueprints.get(world.blueprints.id("t1_light_bot")).mass;
     let base = world.ecs.get::<&Health>(world.unit_entity(hunter).unwrap()).unwrap().max;
-    // Hurt it first, so that the heal on promotion shows.
+    let kill = |world: &mut SimWorld, prey: SimId| {
+        let mut ticks = 0;
+        while world.unit_entity(prey).is_some() {
+            world.advance_tick(&[]);
+            ticks += 1;
+            assert!(ticks < 400, "the prey never died");
+        }
+    };
+    // FAF's veterancy: a T1 unit's first rank takes twice its own mass destroyed.
+    kill(&mut world, prey);
+    let veterancy = veterancy_of(&world, hunter).expect("it should have experience");
+    assert_eq!((veterancy.experience, veterancy.rank), (mass, 0), "one light bot is half a rank");
+    // Hurt it, so that the heal on promotion shows.
     world.ecs.get::<&mut Health>(world.unit_entity(hunter).unwrap()).unwrap().current = base / 2;
+    let second = world.spawn_mobile(world.blueprints.id("t1_light_bot"), Team::Red, point(1_100, 1_000));
+    world.ecs.get::<&mut Combat>(world.unit_entity(second).unwrap()).unwrap().range = Fp::ZERO;
+    kill(&mut world, second);
+    let veterancy = veterancy_of(&world, hunter).expect("it should have experience");
+    assert_eq!((veterancy.experience, veterancy.rank), (mass * 2, 1));
+    let health = *world.ecs.get::<&Health>(world.unit_entity(hunter).unwrap()).unwrap();
+    assert_eq!(health.max, base * 11 / 10, "rank 1 adds a tenth of its base health");
+    assert!(health.current >= base / 2 + base / 10 + base / 10, "promotion heals a tenth of its base health, on top of what it gained");
+    assert_eq!(world.snapshot_for(Some(Team::Blue)).veterans, [(hunter, 1)]);
+}
+
+#[test]
+fn experience_is_shared_by_the_damage_each_attacker_did() {
+    let (mut world, hunter, prey) = bot_duel();
+    let bot = world.blueprints.id("t1_light_bot");
+    let mass = world.blueprints.get(bot).mass;
+    let helper = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_100));
+    // The helper has done three quarters of the damage; the hunter will do the rest.
+    let entity = world.unit_entity(prey).unwrap();
+    let max = world.ecs.get::<&Health>(entity).unwrap().max;
+    world.ecs.get::<&mut Combat>(world.unit_entity(helper).unwrap()).unwrap().range = Fp::ZERO;
+    world.ecs.insert_one(entity, sim_engine::sim::components::VetDamage { by: vec![(helper, max * 3)], total: max * 3 }).unwrap();
+    world.ecs.get::<&mut Health>(entity).unwrap().current = Fp::ONE;
     let mut ticks = 0;
     while world.unit_entity(prey).is_some() {
         world.advance_tick(&[]);
         ticks += 1;
         assert!(ticks < 400, "the prey never died");
     }
-    // One light bot destroying another of the same cost is one times its own mass.
-    let veterancy = veterancy_of(&world, hunter).expect("it should have experience");
-    assert_eq!(veterancy.experience, world.blueprints.get(world.blueprints.id("t1_light_bot")).mass);
-    assert_eq!(veterancy.rank, 1);
-    let health = *world.ecs.get::<&Health>(world.unit_entity(hunter).unwrap()).unwrap();
-    assert_eq!(health.max, base * 6 / 5, "rank 1 adds a fifth of its base health");
-    assert!(health.current > base / 2 + base / 5, "promotion should heal it");
-    assert_eq!(world.snapshot_for(Some(Team::Blue)).veterans, [(hunter, 1)]);
+    let helper_share = veterancy_of(&world, helper).expect("the helper did most of the damage").experience;
+    let hunter_share = veterancy_of(&world, hunter).expect("the hunter finished it").experience;
+    assert!(helper_share > hunter_share * 10, "the helper did far more: {helper_share} against {hunter_share}");
+    assert!((helper_share + hunter_share - mass).abs() < Res::from_num(0.01), "the shares add up to its mass");
 }
 
 #[test]
 fn veterans_heal_over_time_and_ranks_stop_at_five() {
     let (mut world, hunter, _) = bot_duel();
     let mass = world.blueprints.get(world.blueprints.id("t1_light_bot")).mass;
-    let tank = world.blueprints.get(world.blueprints.id("t2_heavy_tank")).mass;
-    // Destroying ten heavy tanks' worth is far past rank 5.
-    let entity = world.unit_entity(hunter).unwrap();
-    let _ = entity;
+    // Destroying ten heavy tanks is far past rank 5, though each kill earns one rank at most.
     let prey: Vec<SimId> = (0..10).map(|index| world.spawn_mobile(world.blueprints.id("t2_heavy_tank"), Team::Red, point(1_050 + index * 15, 1_150))).collect();
     for target in &prey {
         let target_entity = world.unit_entity(*target).unwrap();
@@ -463,16 +492,32 @@ fn veterans_heal_over_time_and_ranks_stop_at_five() {
     }
     run_ticks(&mut world, 300);
     let veterancy = veterancy_of(&world, hunter).expect("it should have experience");
-    assert!(veterancy.experience >= tank * 5, "it should have destroyed several tanks");
     assert_eq!(veterancy.rank, 5, "rank stops at 5");
-    assert!(veterancy.experience >= mass * 5);
+    // The duel's light bot, half a rank, then a rank a tank, capped at each rank's width of
+    // twice its own mass, and nothing past rank 5.
+    assert_eq!(veterancy.experience, mass + mass * 10);
     let entity = world.unit_entity(hunter).unwrap();
     let max = world.ecs.get::<&Health>(entity).unwrap().max;
     world.ecs.get::<&mut Health>(entity).unwrap().current = max / 2;
     run_ticks(&mut world, 10);
     let healed = world.ecs.get::<&Health>(entity).unwrap().current - max / 2;
-    // Rank 5 heals 1% of maximum health a second.
-    assert!(healed >= max / 110 && healed <= max / 90, "healed {healed} of {max} in a second");
+    // FAF's regeneration for a T1 unit: 1 a second for each rank.
+    assert_eq!(healed, fp_int(5), "healed {healed} in a second");
+}
+
+#[test]
+fn ships_regenerate_and_rank_up_by_their_own_tables() {
+    let world = flat_map(false);
+    let battleship = world.blueprints.get(world.blueprints.id("t3_battleship"));
+    let commander = world.blueprints.get(world.blueprints.id("acu"));
+    // The Summit's card: 12,500 mass a level, and 9 a second of regeneration a level.
+    assert_eq!(sim_engine::sim::world::vet_threshold(battleship, 1), Res::from_num(12_500));
+    assert_eq!(sim_engine::sim::world::vet_threshold(battleship, 3), Res::from_num(37_500));
+    assert_eq!(sim_engine::sim::world::vet_regen_per_second(battleship, 1), 9);
+    // The commander has its own steps, and regenerates as T3 does.
+    assert_eq!(sim_engine::sim::world::vet_threshold(commander, 1), Res::from_num(1_000));
+    assert_eq!(sim_engine::sim::world::vet_threshold(commander, 5), Res::from_num(10_000));
+    assert_eq!(sim_engine::sim::world::vet_regen_per_second(commander, 2), 12);
 }
 
 #[test]
@@ -548,9 +593,10 @@ fn a_ground_attack_destroys_debris_and_the_mass_in_it() {
     let debris = debris_at(&mut world, "t2_heavy_tank", point(1_300, 1_000));
     let tank = spawn_gunner(&mut world, "t2_heavy_tank");
     let start = wreck(&world, debris).unwrap();
-    // Half of a heavy tank's 1,500 health, and 81% of its mass.
-    assert_eq!(start.health, fp_int(750));
-    assert_eq!(start.mass, Res::from_num(198) * 810 / 1000);
+    // FAF's wreck of a T2 unit on land: 90% of a heavy tank's 1,500 health, and 90% of its mass
+    // less a fifth for its tech level, 72% in all.
+    assert_eq!(start.health, fp_int(1_350));
+    assert_eq!(start.mass, Res::from_num(198) * 900 / 1000 * 800 / 1000);
     let mass_before = world.economies[0].mass;
     world.advance_tick(&[SimCommand::AttackGround { units: vec![tank], point: start.position }]);
 
@@ -569,12 +615,12 @@ fn a_ground_attack_destroys_debris_and_the_mass_in_it() {
         }
     }
     let hit = first_hit.expect("a shell should land on the debris");
-    assert_eq!(hit.health, fp_int(680));
-    let expected = start.mass * 680 / 750;
+    assert_eq!(hit.health, fp_int(1_280));
+    let expected = start.mass * 1_280 / 1_350;
     assert!((hit.mass - expected).abs() < Res::from_num(0.001), "{} left, not {expected}", hit.mass);
-    // Eleven shells at a reload of 12 ticks, after the first has flown.
+    // Twenty shells at a reload of 12 ticks, after the first has flown.
     let gone_at = gone_at.expect("the debris should be destroyed");
-    assert!(gone_at < 11 * 12 + 30, "it took {gone_at} ticks");
+    assert!(gone_at < 20 * 12 + 30, "it took {gone_at} ticks");
     assert_eq!(world.economies[0].mass_reclaimed, Res::ZERO);
     assert!(world.economies[0].mass <= mass_before + Res::from_num(1), "nobody got the mass");
 

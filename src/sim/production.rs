@@ -2154,6 +2154,14 @@ impl SimWorld {
             hasher.write(&[13]);
             hasher.write(&order.target.0.to_le_bytes());
         }
+        if let Ok(damage) = self.ecs.get::<&super::components::VetDamage>(entity) {
+            hasher.write(&[40]);
+            hasher.write(&damage.total.to_bits().to_le_bytes());
+            for (attacker, dealt) in &damage.by {
+                hasher.write(&attacker.0.to_le_bytes());
+                hasher.write(&dealt.to_bits().to_le_bytes());
+            }
+        }
         if let Ok(veterancy) = self.ecs.get::<&Veterancy>(entity) {
             hasher.write(&[14, veterancy.rank]);
             hasher.write(&veterancy.experience.to_bits().to_le_bytes());

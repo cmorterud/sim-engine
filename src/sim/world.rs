@@ -12,7 +12,7 @@ use super::components::{BuildTask, AntiAir, Artillery, BombBay, Falling, Flight,
     Intel, Launcher, Missile, Stunning, MissileDefense, Upgrading, Overcharged, OverchargeOrder, OverchargeWeapon, Paused, Position, Projectile, Shield, SimId, Team, Turning, Turret, UnitStats, Velocity, Veterancy,
     Wreck, WreckKind, rotate_toward, LeavingFactory, Transport,
 };
-use super::config::{SimConfig, TARGET_SEARCH_INTERVAL, TERRAIN_CELL_UNITS, WRECK_HEALTH_PERMILLE, WRECK_MASS_PERMILLE};
+use super::config::{SimConfig, TARGET_SEARCH_INTERVAL, TERRAIN_CELL_UNITS, WRECK_HEALTH_PERMILLE, WRECK_MASS_PERMILLE, WRECK_SUNK_PERMILLE, WRECK_TECH_PERMILLE};
 use super::flowfield::{nearest_passable_cell_for, FlowField, FlowSample};
 use super::formation::{plan_formation, within, Travel};
 use super::production::{Economy, WorkLink};
@@ -383,12 +383,52 @@ struct Explosion {
 
 /// The highest veteran rank.
 pub const MAX_RANK: u8 = 5;
-/// Each rank adds this share of a unit's base health, so rank 5 doubles it.
-pub(super) const RANK_HEALTH_PERMILLE: i64 = 200;
-/// Reaching a rank heals this share of the new maximum health at once.
-const PROMOTION_HEAL_PERMILLE: i64 = 250;
-/// Each rank regenerates this share of maximum health per second, in tenths of a permille.
-const REGEN_PER_RANK_PER_SECOND: i64 = 20;
+/// Each rank adds this share of a unit's base health, as FAF's veterancy does: 10% a level.
+pub(super) const RANK_HEALTH_PERMILLE: i64 = 100;
+/// Reaching a rank heals this share of the unit's base health at once: FAF's default of 10%.
+/// The commander heals more at each level, as its blueprint sets.
+const PROMOTION_HEAL_PERMILLE: i64 = 100;
+const COMMANDER_PROMOTION_HEAL_PERMILLE: [i64; 5] = [100, 200, 300, 400, 500];
+/// FAF's mass a level, as a multiple of the unit's own cost, in thousandths, by tech level: a
+/// rank n unit has destroyed n times that. The commander has its own steps instead.
+const VET_MASS_PERMILLE_BY_TIER: [i64; 3] = [2_000, 1_500, 1_250];
+const VET_MASS_PERMILLE_SUPPORT: i64 = 2_000;
+const COMMANDER_VET_MASS: [i64; 5] = [1_000, 2_250, 4_000, 6_500, 10_000];
+/// FAF's regeneration a second for each rank, by tech row: T1, T2, T3 and commanders, support
+/// commanders, experimentals. Ships, below experimental, take the row above their tier.
+const VET_REGEN_ROWS: [i64; 5] = [1, 3, 6, 9, 25];
+
+/// The mass a unit must have destroyed to reach a rank, FAF's veterancy thresholds.
+pub fn vet_threshold(unit: &super::blueprints::Blueprint, rank: u8) -> Res {
+    if rank == 0 {
+        return Res::ZERO;
+    }
+    let rank = rank.min(MAX_RANK);
+    if unit.is_commander() {
+        return Res::from_num(COMMANDER_VET_MASS[usize::from(rank) - 1]);
+    }
+    let permille = if unit.class == super::blueprints::UnitClass::SupportCommander {
+        VET_MASS_PERMILLE_SUPPORT
+    } else {
+        VET_MASS_PERMILLE_BY_TIER[usize::from(unit.tier.clamp(1, 3)) - 1]
+    };
+    unit.mass * i64::from(rank) * permille / 1_000
+}
+
+/// What a veteran of a rank regenerates a second, FAF's flat amounts.
+pub fn vet_regen_per_second(unit: &super::blueprints::Blueprint, rank: u8) -> i64 {
+    let row = if unit.is_commander() {
+        2
+    } else if unit.class == super::blueprints::UnitClass::SupportCommander {
+        3
+    } else if unit.tier >= 4 {
+        4
+    } else {
+        let naval = matches!(unit.movement, MoveClass::Naval | MoveClass::Submarine);
+        usize::from(unit.tier.clamp(1, 3)) - 1 + usize::from(naval)
+    };
+    VET_REGEN_ROWS[row] * i64::from(rank)
+}
 
 struct PendingShot {
     source: SimId,
@@ -1673,9 +1713,10 @@ impl SimWorld {
         self.unreachable = units;
     }
 
-    /// Gives a unit the mass of an enemy it destroyed, and promotes it when it has earned a
-    /// rank: one for each time its own mass cost. Units without a blueprint have no mass, so
-    /// they earn nothing, and nobody earns anything for destroying their own side.
+    /// Gives a unit its share of the mass of an enemy it helped destroy, at most one rank's worth
+    /// at a time as in FAF, and promotes it at FAF's thresholds (`vet_threshold`). Units without
+    /// a blueprint have no mass, so they earn nothing, and nobody earns anything for destroying
+    /// their own side.
     fn award_experience(&mut self, killer: SimId, victim_team: Team, mass: Res) {
         let Some((_, entity)) = self.find_unit(killer) else {
             return;
@@ -1689,8 +1730,13 @@ impl SimWorld {
             return;
         }
         let before = self.ecs.get::<&Veterancy>(entity).map_or(Veterancy { experience: Res::ZERO, rank: 0 }, |veterancy| *veterancy);
-        let experience = before.experience + mass;
-        let earned = (experience / unit.mass).to_num::<i64>().clamp(0, i64::from(MAX_RANK)) as u8;
+        if before.rank >= MAX_RANK {
+            return;
+        }
+        // No more than the width of the rank it is working toward.
+        let step = vet_threshold(unit, before.rank + 1) - vet_threshold(unit, before.rank);
+        let experience = before.experience + mass.min(step);
+        let earned = (1..=MAX_RANK).take_while(|&rank| experience >= vet_threshold(unit, rank)).last().unwrap_or(0);
         let rank = before.rank.max(earned);
         if self.ecs.get::<&Veterancy>(entity).is_err() {
             self.ecs.insert_one(entity, Veterancy { experience, rank }).expect("unit is live");
@@ -1706,22 +1752,27 @@ impl SimWorld {
             let new_max = Fp::from_bits((base * (1_000 + RANK_HEALTH_PERMILLE * i64::from(rank)) / 1_000) as i32);
             let mut health = self.ecs.get::<&mut Health>(entity).expect("units have health");
             let gained = new_max - health.max;
-            let heal = Fp::from_bits((i64::from(new_max.to_bits()) * PROMOTION_HEAL_PERMILLE / 1_000) as i32);
+            let heal_permille = if unit.is_commander() { COMMANDER_PROMOTION_HEAL_PERMILLE[usize::from(rank) - 1] } else { PROMOTION_HEAL_PERMILLE };
+            let heal = Fp::from_bits((base * heal_permille / 1_000) as i32);
             health.max = new_max;
             health.current = (health.current + gained + heal).min(new_max);
         }
     }
 
-    /// Veterans heal a little every tick, more for each rank.
+    /// Veterans heal a little every tick, more for each rank, by FAF's flat amounts.
     fn regenerate_veterans(&mut self) {
         for &(_, entity) in &self.veterans {
             let rank = self.ecs.get::<&Veterancy>(entity).map_or(0, |veterancy| veterancy.rank);
+            let Ok(blueprint) = self.ecs.get::<&Blueprinted>(entity).map(|unit| unit.0) else {
+                continue;
+            };
+            let per_second = vet_regen_per_second(self.blueprints.get(blueprint), rank);
             let mut health = self.ecs.get::<&mut Health>(entity).expect("veterans are live units");
             if health.current <= Fp::ZERO {
                 continue;
             }
-            let per_tick = i64::from(health.max.to_bits()) * REGEN_PER_RANK_PER_SECOND * i64::from(rank) / 10_000 / 10;
-            health.current = (health.current + Fp::from_bits(per_tick as i32)).min(health.max);
+            let per_tick = Fp::from_bits(((per_second << FP_FRAC_BITS) / super::blueprints::TICKS_PER_SECOND) as i32);
+            health.current = (health.current + per_tick).min(health.max);
         }
     }
 
@@ -2857,25 +2908,53 @@ impl SimWorld {
                     break;
                 }
                 for (target, damage, source) in std::mem::take(&mut self.pending_hits) {
+                    // Who dealt it, if an enemy that is still about: only enemies earn experience.
+                    let attacker = source.and_then(|source| {
+                        let (_, source_entity) = self.find_unit(source)?;
+                        let source_team = self.ecs.get::<&UnitStats>(source_entity).ok()?.team;
+                        let target_team = self.ecs.get::<&UnitStats>(target).ok()?.team;
+                        (source_team != target_team).then_some(source)
+                    });
                     let (id, position, health, blueprint, stats, construction) = self
                         .ecs
                         .query_one_mut::<(&SimId, &Position, &mut Health, Option<&Blueprinted>, &UnitStats, Option<&Construction>)>(target)
                         .expect("hit entities are live until the end of this step");
                     let was_alive = health.current > Fp::ZERO;
+                    // Each hit counts for no more than the unit's whole health, as in FAF.
+                    let counted = damage.min(health.max).max(Fp::ZERO);
                     health.current = health.current.saturating_sub(damage);
-                    if was_alive && health.current <= Fp::ZERO {
-                        let (id, x, y, blueprint, team) =
-                            (*id, position.0.x.to_bits(), position.0.y.to_bits(), blueprint.map(|b| b.0), stats.team);
-                        let built = construction.map_or(Res::ONE, |construction| construction.progress);
+                    let dies = was_alive && health.current <= Fp::ZERO;
+                    let (id, x, y, blueprint, team) = (*id, position.0.x.to_bits(), position.0.y.to_bits(), blueprint.map(|b| b.0), stats.team);
+                    let built = construction.map_or(Res::ONE, |construction| construction.progress);
+                    let finished = construction.is_none();
+                    if let Some(attacker) = attacker.filter(|_| was_alive && counted > Fp::ZERO) {
+                        if self.ecs.get::<&super::components::VetDamage>(target).is_err() {
+                            self.ecs.insert_one(target, super::components::VetDamage::default()).expect("hit entities are live until the end of this step");
+                        }
+                        let mut record = self.ecs.get::<&mut super::components::VetDamage>(target).expect("just made sure");
+                        record.total += counted;
+                        match record.by.iter_mut().find(|(id, _)| *id == attacker) {
+                            Some((_, dealt)) => *dealt += counted,
+                            None => record.by.push((attacker, counted)),
+                        }
+                    }
+                    if dies {
                         self.dead_units.push(id);
                         if let Some(blueprint) = blueprint {
-                            // The one who destroyed it earns its mass, or as much of it as had been built.
-                            if let Some(killer) = source {
-                                kills.push((killer, team, self.blueprints.get(blueprint).mass * built));
+                            // Those who destroyed it share its mass, or as much as had been built,
+                            // each by its share of the damage enemies did it.
+                            let worth = self.blueprints.get(blueprint).mass * built;
+                            if let Ok(record) = self.ecs.get::<&super::components::VetDamage>(target) {
+                                if record.total > Fp::ZERO {
+                                    let total = i64::from(record.total.to_bits());
+                                    for &(attacker, dealt) in &record.by {
+                                        kills.push((attacker, team, worth * i64::from(dealt.to_bits()) / total));
+                                    }
+                                }
                             }
                             if let Some(blast) = self.blueprints.get(blueprint).death_explosion {
                                 // A fabricator only blows up if it was running.
-                                let running = construction.is_none()
+                                let running = finished
                                     && self.ecs.get::<&Paused>(target).is_err()
                                     && self.economies[team.index()].extractor_efficiency > Res::ZERO;
                                 if !blast.only_while_running || running {
@@ -3106,12 +3185,27 @@ impl SimWorld {
                 self.economy_dirty = true;
             }
         }
-        // A unit that blew itself up leaves nothing to reclaim.
-        let wreck = self.ecs.get::<&Blueprinted>(entity).ok().filter(|_| !self.blew_itself_up(entity)).map(|blueprint| {
+        // A unit that blew itself up leaves nothing to reclaim. FAF's rules for the rest: 90% of
+        // the mass, less by tech level, less again if it sank, for as much as was built; nothing
+        // from a unit under half built, or from a structure not finished.
+        let wreck = self.ecs.get::<&Blueprinted>(entity).ok().filter(|_| !self.blew_itself_up(entity)).and_then(|blueprint| {
             let built = self.ecs.get::<&Construction>(entity).map_or(Res::ONE, |construction| construction.progress);
             let unit = self.blueprints.get(blueprint.0);
+            if built < Res::ONE / 2 || (unit.is_structure() && built < Res::ONE) {
+                return None;
+            }
+            let tech = if unit.is_commander() || unit.class == super::blueprints::UnitClass::SupportCommander {
+                WRECK_TECH_PERMILLE[0]
+            } else {
+                WRECK_TECH_PERMILLE[usize::from(unit.tier.clamp(1, 4)) - 1]
+            };
+            let sank = self.terrain.height_at(position.xy()) < self.terrain.water_level();
+            let mut mass = unit.mass * WRECK_MASS_PERMILLE / 1000 * tech / 1000;
+            if sank {
+                mass = mass * WRECK_SUNK_PERMILLE / 1000;
+            }
             let health = Fp::from_num(Res::from_num(unit.health) * WRECK_HEALTH_PERMILLE / 1000 * built).max(Fp::from_bits(1));
-            (unit.mass * WRECK_MASS_PERMILLE / 1000 * built, health)
+            Some((mass * built, health))
         });
         self.ecs.despawn(entity).expect("dead units are live until now");
         if let Some((mass, health)) = wreck.filter(|(mass, _)| *mass > Res::ZERO) {

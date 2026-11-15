@@ -68,10 +68,17 @@ pub const TREE_ENERGY: i64 = 20;
 pub const TREE_RADIUS_UNITS: i32 = 4;
 /// A rock holds this much mass for each unit of its radius.
 pub const ROCK_MASS_PER_RADIUS: i64 = 5;
-/// Wrecks keep this share of a unit's mass cost, in thousandths (GAME_SPECIFICATION.md §6.1).
-pub const WRECK_MASS_PERMILLE: i64 = 810;
-/// Debris has this share of the destroyed unit's health, in thousandths (GAME_SPECIFICATION.md §6.2).
-pub const WRECK_HEALTH_PERMILLE: i64 = 500;
+/// Wrecks keep this share of a unit's mass cost, in thousandths, before the share for its tech
+/// level and for sinking (GAME_SPECIFICATION.md §6.1): FAF's Wreckage.MassMult.
+pub const WRECK_MASS_PERMILLE: i64 = 900;
+/// FAF's further share of a wreck's mass by tech level, in thousandths: T1, T2, T3, and
+/// experimental. Commanders and support commanders keep T1's.
+pub const WRECK_TECH_PERMILLE: [i64; 4] = [900, 800, 700, 600];
+/// A wreck that sinks, from a unit that died over water, keeps this share again, in thousandths.
+pub const WRECK_SUNK_PERMILLE: i64 = 600;
+/// Debris has this share of the destroyed unit's health, in thousandths (GAME_SPECIFICATION.md
+/// §6.2): FAF's Wreckage.HealthMult.
+pub const WRECK_HEALTH_PERMILLE: i64 = 900;
 /// How often idle patrolling engineers look for work, in ticks.
 pub const PATROL_SEARCH_INTERVAL: u32 = 10;
 /// How far patrolling engineers look for work.
