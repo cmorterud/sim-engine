@@ -1217,8 +1217,8 @@ extra_weapons = [
 ]
 missile_defense = { kind = "tactical", range = 1200, reload_ticks = 10 }
 
-# Three gauss turrets of three shells of 1,000 each, four railguns at aircraft, as one, and two
-# Phalanxes, as one.
+# Three gauss turrets of three shells of 1,000 each, four twin anti-air guns as one (each fires
+# both muzzles at once, 12 a shell, every 1.7 seconds), and two Phalanxes, as one.
 [[unit]]
 id = "t3_battleship"
 name = "Battleship"
@@ -1240,7 +1240,7 @@ weapon = { range = 3000, reload_ticks = 200, projectile_speed = 60, damage = 300
 extra_weapons = [
     { range = 3000, reload_ticks = 200, projectile_speed = 60, damage = 3000, splash_radius = 40, turn_rate = 30 },
     { range = 3000, reload_ticks = 200, projectile_speed = 60, damage = 3000, splash_radius = 40, turn_rate = 30 },
-    { range = 1200, reload_ticks = 17, projectile_speed = 180, damage = 48, targets = "air", turn_rate = 180 },
+    { range = 1200, reload_ticks = 17, projectile_speed = 180, damage = 96, targets = "air", turn_rate = 180 },
 ]
 missile_defense = { kind = "tactical", range = 620, reload_ticks = 10 }
 
