@@ -535,6 +535,23 @@ fn destroying_a_structure_opens_the_ground_and_leaves_a_wreck() {
 }
 
 #[test]
+fn a_builder_walking_to_its_site_past_an_idle_friend_gets_there() {
+    // A unit that bumps into a settled friend near its goal counts as arrived, for crowds at a
+    // rally point. A builder walking to a site 200 away, outside its reach of 100 but inside
+    // that crowd distance, stopped against the friend, was given the same walk again, and
+    // stood there for good.
+    let mut world = test_world();
+    set_resources(&mut world, Team::Blue, 1_000, 1_000);
+    let engineer = world.spawn_mobile(id(&world, "t1_engineer"), Team::Blue, point(1_000, 1_000));
+    world.spawn_mobile(id(&world, "t1_light_bot"), Team::Blue, point(1_000, 988));
+    let generator = id(&world, "power_generator");
+    world.advance_tick(&[SimCommand::Build { units: vec![engineer], blueprint: generator, cell_x: 60, cell_y: 50, queued: false }]);
+    run(&mut world, 400);
+    let started = world.structures.iter().any(|&(_, entity)| world.ecs.get::<&sim_engine::sim::components::Blueprinted>(entity).is_ok_and(|unit| unit.0 == generator));
+    assert!(started, "the engineer never reached its site: it is at {:?}", world.unit_position(engineer).map(|at| (at.x.to_num::<i32>(), at.y.to_num::<i32>())));
+}
+
+#[test]
 fn engineers_reclaim_wrecks_into_mass() {
     let mut world = test_world();
     set_resources(&mut world, Team::Blue, 1_000, 1_000);

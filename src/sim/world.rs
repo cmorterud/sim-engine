@@ -1601,7 +1601,12 @@ impl SimWorld {
             // A crowd can cover a shared goal, such as a rally point, so that later units can
             // never reach it. A unit that bumps into a settled friend nearby has arrived too.
             // Units with a spot of their own have a time limit instead.
+            // Not a builder on its way to work, which arrives once its work is in reach: settled
+            // by a crowd short of that, it was given the same walk again on the next tick, and
+            // again, and stood there for the rest of the match.
+            let walking_to_work = builder.is_some_and(|builder| !builder.tasks.is_empty());
             if touches_settled_friend
+                && !walking_to_work
                 && order.slot.is_none()
                 && matches!(order.kind, OrderKind::Move | OrderKind::AttackMove)
                 && !flow.is_following(order.route)
