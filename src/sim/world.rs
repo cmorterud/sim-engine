@@ -310,6 +310,8 @@ pub struct SimSnapshot {
     pub sensor_ranges: Vec<SensorRangeView>,
     /// The viewer's units with a cloak: whether it is switched on, and whether it is hiding them.
     pub cloaks: Vec<(SimId, bool, bool)>,
+    /// Submarines in the snapshot that are on the surface, sorted.
+    pub surfaced: Vec<SimId>,
     /// The viewer's finished, unpaused intel structures that are not running for want of energy.
     pub unpowered: Vec<SimId>,
     /// How far along the viewer's upgrades in place are, in thousandths, sorted by `SimId`.
@@ -476,6 +478,9 @@ pub struct SimWorld {
     /// middle, so the sides stay mirror images. From the one shared stream, whichever side fired
     /// first drew first, and the sides parted ways.
     pub scatter_rngs: [SimRng; 2],
+    /// Submarines on the surface, by id: on the water like ships, seen and fired on as ships are,
+    /// and free to fire their deck guns. Every other submarine is submerged.
+    pub surfaced: Vec<SimId>,
     pub config: SimConfig,
     pub current_tick: u32,
     pub next_sim_id: u32,
@@ -613,6 +618,7 @@ impl SimWorld {
             terrain,
             spatial_grid,
             flow_field,
+            surfaced: Vec::new(),
             scatter_rngs: [SimRng::new(rng.state() ^ SCATTER_SEED), SimRng::new(rng.state() ^ SCATTER_SEED)],
             rng,
             config,
@@ -1069,7 +1075,8 @@ impl SimWorld {
         let (target_flies, target_dives, target_sails) = self.find_unit(target).map_or((false, false, false), |(_, entity)| {
             let flies = self.ecs.get::<&Flight>(entity).is_ok_and(|flight| flight.airborne());
             let class = self.ecs.get::<&UnitStats>(entity).map_or(MoveClass::Land, |stats| stats.move_class);
-            (flies, class == MoveClass::Submarine, class == MoveClass::Naval)
+            let up = self.surfaced.binary_search(&target).is_ok();
+            (flies, class == MoveClass::Submarine && !up, class == MoveClass::Naval || (class == MoveClass::Submarine && up))
         });
         // Only units with a weapon that can hit it: anti-air for an aircraft, a torpedo for a
         // submarine, and for anything else, a ground weapon, or a torpedo for a ship.
@@ -1355,6 +1362,7 @@ impl SimWorld {
 
     pub fn rebuild_grid(&mut self) {
         let terrain = &self.terrain;
+        let surfaced = &self.surfaced;
         let mut query = self.ecs.query::<(&Position, &UnitStats, &Order, Option<&Flight>)>();
         let view = query.view();
         self.spatial_grid.rebuild(self.units.iter().map(|&(id, entity)| {
@@ -1371,8 +1379,9 @@ impl SimWorld {
                 // A landed aircraft is on the ground.
                 is_air: flight.is_some_and(Flight::airborne),
                 // A seabed walker under the water is as submerged as a submarine.
-                is_sub: stats.move_class == MoveClass::Submarine || (stats.move_class == MoveClass::Seabed && position.0.z + stats.radius < terrain.water_level()),
-                is_naval: stats.move_class == MoveClass::Naval && !stats.is_structure,
+                is_sub: (stats.move_class == MoveClass::Submarine && surfaced.binary_search(&id).is_err())
+                    || (stats.move_class == MoveClass::Seabed && position.0.z + stats.radius < terrain.water_level()),
+                is_naval: (stats.move_class == MoveClass::Naval && !stats.is_structure) || (stats.move_class == MoveClass::Submarine && surfaced.binary_search(&id).is_ok()),
                 is_idle: order.kind == OrderKind::Idle,
             }
         }));
@@ -1396,6 +1405,7 @@ impl SimWorld {
         let max_radius = self.max_mobile_radius;
         let max_coordinate = terrain.max_coordinate_raw();
         let disabled = &self.disabled;
+        let surfaced = &self.surfaced;
         let mut unreachable = Vec::new();
         let mut chases = Vec::new();
         // Units that have driven out of their factory, with where they were sent.
@@ -1416,9 +1426,11 @@ impl SimWorld {
             // Ships keep to deep water, and float on it.
             let class = stats.move_class;
             let passable = |point: Vec2Fp| terrain.passable_for(class, point);
-            // A submarine runs just under the water.
+            // A submarine runs just under the water, or on it, surfaced, as a ship does.
+            let up = class == MoveClass::Submarine && surfaced.binary_search(&id).is_ok();
             let surface = |point: Vec2Fp| match class {
                 MoveClass::Naval | MoveClass::Hover => terrain.height_at(point).max(terrain.water_level()),
+                MoveClass::Submarine if up => terrain.water_level(),
                 MoveClass::Submarine => terrain.water_level() - stats.radius * 2,
                 _ => terrain.height_at(point),
             };
@@ -1867,7 +1879,7 @@ impl SimWorld {
             let stats = *self.ecs.get::<&UnitStats>(entity).expect("units have stats");
             let enemy = stats.team.enemy();
             let at = self.ecs.get::<&Position>(entity).expect("units have positions").0;
-            let submerged = stats.move_class == MoveClass::Submarine || at.z + stats.radius < self.terrain.water_level();
+            let submerged = (stats.move_class == MoveClass::Submarine && self.surfaced.binary_search(&id).is_err()) || (stats.move_class != MoveClass::Submarine && at.z + stats.radius < self.terrain.water_level());
             if submerged && !self.visibility.senses(Sense::Sonar, enemy, at.x.to_bits(), at.y.to_bits()) {
                 concealed[enemy.index()].push(id);
             }
@@ -2696,10 +2708,11 @@ impl SimWorld {
             let probe = probe_terrain(terrain, start, step);
 
             // Shells far above the ground cannot touch a unit, which spares most grid queries.
+            // Over the sea, the ground that counts is the surface ships ride on, not the seabed.
             let lowest = start.z.min(end.z);
             let reach = Fp::from_bits(max_mobile.max(max_structure) * 2);
             let mut best: Option<(i32, SimId, hecs::Entity, bool)> = None;
-            if lowest <= probe.highest_ground + reach {
+            if lowest <= probe.highest_ground.max(terrain.water_level()) + reach {
                 let half = (step.x.to_bits().abs() + step.y.to_bits().abs()) / 2;
                 let center_x = start.x.to_bits() + step.x.to_bits() / 2;
                 let center_y = start.y.to_bits() + step.y.to_bits() / 2;
@@ -3003,6 +3016,8 @@ impl SimWorld {
         if !self.dead_units.is_empty() {
             self.dead_units.sort_unstable();
             self.dead_units.dedup();
+            let dead = &self.dead_units;
+            self.surfaced.retain(|id| dead.binary_search(id).is_err());
             for index in 0..self.dead_units.len() {
                 let id = self.dead_units[index];
                 let (_, entity) = self.find_unit(id).expect("dead units are still listed");
@@ -3242,6 +3257,13 @@ impl SimWorld {
         hasher.write(&self.rng.state().to_le_bytes());
         for stream in &self.scatter_rngs {
             hasher.write(&stream.state().to_le_bytes());
+        }
+        // Only while any is up, so that checksums from before surfacing still hold.
+        if !self.surfaced.is_empty() {
+            hasher.write(&[7]);
+            for id in &self.surfaced {
+                hasher.write(&id.0.to_le_bytes());
+            }
         }
         hasher.write(&self.terrain.content_hash().to_le_bytes());
         hasher.write(&[
@@ -3725,6 +3747,7 @@ impl SimWorld {
             blips,
             sensor_ranges,
             cloaks,
+            surfaced: self.surfaced.clone(),
             unpowered,
             upgrades,
             enhancements,
@@ -3808,7 +3831,8 @@ impl SimWorld {
             let (x, y) = (at.x.to_bits(), at.y.to_bits());
             let shown = visibility.is_visible(viewer, x, y) && self.concealed[viewer.index()].binary_search(&id).is_err();
             // Radar does not reach under the water: a submarine shows only where sonar finds it.
-            let submerged = stats.move_class == MoveClass::Submarine || (stats.move_class == MoveClass::Seabed && at.z + stats.radius < self.terrain.water_level());
+            let submerged = (stats.move_class == MoveClass::Submarine && self.surfaced.binary_search(&id).is_err())
+                || (stats.move_class == MoveClass::Seabed && at.z + stats.radius < self.terrain.water_level());
             let sensed = if submerged { visibility.senses(Sense::Sonar, viewer, x, y) } else { on_radar(x, y) };
             if shown || !sensed {
                 continue;

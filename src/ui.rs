@@ -179,6 +179,8 @@ pub enum UiAction {
     Upgrade { units: Vec<SimId> },
     /// Switch these units' cloaks on or off.
     SetCloak { units: Vec<SimId>, on: bool },
+    /// Bring the selected submarines up, or take them down.
+    SetSurfaced { units: Vec<SimId>, surfaced: bool },
     /// Start a field enhancement on these units.
     Enhance { units: Vec<SimId>, enhancement: EnhancementId },
     /// Several at once, from one key that several options share.
@@ -1051,6 +1053,22 @@ pub fn upgradable_units(snapshot: &SimSnapshot, selected: &[SimId], db: &Bluepri
             }) && snapshot.upgrades.iter().all(|(upgrading, _)| upgrading != id)
         })
         .collect()
+}
+
+/// Brings the selected submarines up, unless they all are up already, in which case it takes
+/// them down.
+pub fn surface_action(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb) -> Option<UiAction> {
+    let subs: Vec<SimId> = selected
+        .iter()
+        .filter_map(|id| find_unit(snapshot, *id))
+        .filter(|unit| unit.blueprint != u16::MAX && db.get(BlueprintId(unit.blueprint)).movement == crate::sim::components::MoveClass::Submarine)
+        .map(|unit| unit.id)
+        .collect();
+    if subs.is_empty() {
+        return None;
+    }
+    let all_up = subs.iter().all(|id| snapshot.surfaced.binary_search(id).is_ok());
+    Some(UiAction::SetSurfaced { units: subs, surfaced: !all_up })
 }
 
 /// Cloaks the selected units that can cloak, unless they all are already, in which case it
@@ -2010,6 +2028,19 @@ fn toggle_buttons(ui: &mut egui::Ui, snapshot: &SimSnapshot, selected: &[SimId],
         let name = if *on { "Cloak" } else { "Uncloak" };
         let hint = format!("{name}\nHidden from sight and radar, except from enemies within 100 or with omni on it. Costs energy while on.");
         if glyph_button(ui, Glyph::Cloak, &key, !*on, &hint).clicked() {
+            actions.push(action);
+        }
+    }
+    if let Some(action) = surface_action(snapshot, selected, db) {
+        let UiAction::SetSurfaced { surfaced, .. } = &action else {
+            unreachable!("surface_action only returns a surfacing");
+        };
+        let (glyph, hint) = if *surfaced {
+            (Glyph::Surface, "Surface\nBring them up onto the water: deck guns fire, and they are seen and fired on like ships.")
+        } else {
+            (Glyph::Dive, "Dive\nTake them back down, where only torpedoes reach them and only sonar finds them.")
+        };
+        if glyph_button(ui, glyph, "", !*surfaced, hint).clicked() {
             actions.push(action);
         }
     }
@@ -4266,6 +4297,23 @@ mod tests {
         assert_eq!(shown_tab(None, &tabs), CommandTab::Build, "building first, when the selection can build");
         assert_eq!(shown_tab(Some(CommandTab::Selection), &tabs), CommandTab::Selection);
         assert_eq!(shown_tab(Some(CommandTab::Enhance), &tabs), CommandTab::Build, "a tab this selection lacks falls back to its first");
+    }
+
+    #[test]
+    fn the_surface_toggle_brings_subs_up_and_takes_them_down_once_all_are_up() {
+        let db = BlueprintDb::standard();
+        let mut current = commander_and_engineer(&db);
+        let mut sub = unit(20, 0.0);
+        sub.blueprint = db.id("t1_attack_sub").0;
+        let mut other = unit(21, 0.0);
+        other.blueprint = db.id("t1_attack_sub").0;
+        current.units.extend([sub, other]);
+        assert_eq!(surface_action(&current, &[SimId(10)], &db), None, "only for submarines");
+        assert_eq!(surface_action(&current, &[SimId(20), SimId(21), SimId(10)], &db), Some(UiAction::SetSurfaced { units: vec![SimId(20), SimId(21)], surfaced: true }));
+        current.surfaced = vec![SimId(20)];
+        assert_eq!(surface_action(&current, &[SimId(20), SimId(21)], &db), Some(UiAction::SetSurfaced { units: vec![SimId(20), SimId(21)], surfaced: true }), "not all up yet");
+        current.surfaced = vec![SimId(20), SimId(21)];
+        assert_eq!(surface_action(&current, &[SimId(20), SimId(21)], &db), Some(UiAction::SetSurfaced { units: vec![SimId(20), SimId(21)], surfaced: false }));
     }
 
     #[test]

@@ -705,6 +705,27 @@ impl SimWorld {
                     }
                 }
             }
+            SimCommand::SetSurfaced { units, surfaced } => {
+                for &id in units {
+                    let is_sub = self.find_unit(id).is_some_and(|(_, entity)| self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.move_class == super::components::MoveClass::Submarine));
+                    if !is_sub {
+                        continue;
+                    }
+                    match (self.surfaced.binary_search(&id), *surfaced) {
+                        (Err(at), true) => self.surfaced.insert(at, id),
+                        (Ok(at), false) => {
+                            self.surfaced.remove(at);
+                        }
+                        _ => {}
+                    }
+                    // Up onto the water, or back down below it, at once, as movement would put it.
+                    let (_, entity) = self.find_unit(id).expect("just checked");
+                    let radius = self.ecs.get::<&UnitStats>(entity).expect("units have stats").radius;
+                    let water = self.terrain.water_level();
+                    let height = if *surfaced { water + radius } else { water - radius };
+                    self.ecs.get::<&mut super::components::Position>(entity).expect("units have positions").0.z = height;
+                }
+            }
             SimCommand::Upgrade { units } => {
                 for &id in units {
                     self.start_upgrade(id);

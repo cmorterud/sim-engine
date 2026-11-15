@@ -1293,6 +1293,8 @@ vision = 640
 sonar = 1200
 movement = "submarine"
 weapon = { range = 640, reload_ticks = 40, projectile_speed = 30, damage = 150, targets = "naval" }
+# FAF's deck gun, 25 a second out to 640, which fires only on the surface.
+extra_weapons = [{ range = 640, reload_ticks = 10, projectile_speed = 60, damage = 25, turn_rate = 90 }]
 
 # Five torpedoes of 150 a run, every 10 seconds: FAF's unit database counts its 3 projectiles a
 # fire once, not three times, so 15 a run was three times too many.

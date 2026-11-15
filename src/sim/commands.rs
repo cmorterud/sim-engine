@@ -59,6 +59,9 @@ pub enum SimCommand {
     SetRepeat { factory: SimId, repeat: bool },
     /// Switch cloaks on or off, for the units that have one.
     SetCloak { units: Vec<SimId>, on: bool },
+    /// Bring submarines up onto the water, where they can fire their deck guns and be fired on
+    /// like ships, or take them back down, where only torpedoes reach them.
+    SetSurfaced { units: Vec<SimId>, surfaced: bool },
     /// Start a field enhancement on each of these that can take it (GAME_SPECIFICATION.md §2.1).
     /// One in the same slot that it does not build on is removed first.
     Enhance { units: Vec<SimId>, enhancement: EnhancementId },

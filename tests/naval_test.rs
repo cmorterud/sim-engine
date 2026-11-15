@@ -391,6 +391,69 @@ fn a_commander_on_an_attack_move_under_the_water_walks_on_past_what_it_cannot_sh
 }
 
 #[test]
+fn a_submarine_surfaces_to_use_its_deck_gun_and_can_be_shelled_there_until_it_dives() {
+    // Near the shore, with a Red light bot on the beach.
+    let mut world = lake_world();
+    let sub = spawn(&mut world, "t1_attack_sub", Team::Blue, point(1_700, 1_000));
+    let bot = spawn(&mut world, "t1_light_bot", Team::Red, point(1_250, 1_000));
+    world.ecs.get::<&mut sim_engine::sim::components::Combat>(world.unit_entity(bot).unwrap()).unwrap().range = Fp::ZERO;
+    let bot_health = world.unit_health(bot).unwrap();
+    for _ in 0..100 {
+        world.advance_tick(&[]);
+    }
+    assert!(world.unit_position(sub).unwrap().z < Fp::ZERO);
+    assert_eq!(world.unit_health(bot), Some(bot_health), "submerged, its deck gun is silent");
+
+    world.advance_tick(&[SimCommand::SetSurfaced { units: vec![sub], surfaced: true }]);
+    assert_eq!(world.surfaced, vec![sub]);
+    for _ in 0..100 {
+        world.advance_tick(&[]);
+    }
+    assert!(world.unit_position(sub).unwrap().z >= Fp::ZERO, "on the surface it rides on the water");
+    assert!(world.unit_health(bot).is_none_or(|health| health < bot_health), "surfaced, its deck gun fires at the shore");
+
+    // A Red frigate comes up. The sub's weapons and the frigate's anti-air are left out, to see
+    // the frigate's shells alone.
+    world.ecs.get::<&mut sim_engine::sim::components::Combat>(world.unit_entity(sub).unwrap()).unwrap().range = Fp::ZERO;
+    let frigate = spawn(&mut world, "t1_frigate", Team::Red, point(1_900, 1_000));
+    world.ecs.get::<&mut sim_engine::sim::components::ExtraWeapons>(world.unit_entity(frigate).unwrap()).unwrap().0.clear();
+    let full = world.unit_health(sub).unwrap();
+    for _ in 0..100 {
+        world.advance_tick(&[]);
+    }
+    assert!(world.unit_health(sub).unwrap() < full, "surfaced, the frigate's shells reach it");
+
+    world.advance_tick(&[SimCommand::SetSurfaced { units: vec![sub], surfaced: false }]);
+    for _ in 0..20 {
+        world.advance_tick(&[]);
+    }
+    let hurt = world.unit_health(sub).unwrap();
+    for _ in 0..100 {
+        world.advance_tick(&[]);
+    }
+    assert!(world.unit_position(sub).unwrap().z < Fp::ZERO, "it went back down");
+    assert_eq!(world.unit_health(sub), Some(hurt), "and shells pass over it again");
+    assert!(world.surfaced.is_empty());
+}
+
+/// The water is 40 deep here, far more than any unit is tall, so a shell skimming the surface
+/// is far above the seabed and must still be checked against the ships on it.
+#[test]
+fn shells_hit_ships_over_deep_water() {
+    let mut world = lake_world();
+    let blue = spawn(&mut world, "t1_frigate", Team::Blue, point(1_700, 1_000));
+    world.ecs.get::<&mut sim_engine::sim::components::Combat>(world.unit_entity(blue).unwrap()).unwrap().range = Fp::ZERO;
+    world.ecs.get::<&mut sim_engine::sim::components::ExtraWeapons>(world.unit_entity(blue).unwrap()).unwrap().0.clear();
+    let red = spawn(&mut world, "t1_frigate", Team::Red, point(1_900, 1_000));
+    world.ecs.get::<&mut sim_engine::sim::components::ExtraWeapons>(world.unit_entity(red).unwrap()).unwrap().0.clear();
+    let full = world.unit_health(blue).unwrap();
+    for _ in 0..100 {
+        world.advance_tick(&[]);
+    }
+    assert!(world.unit_health(blue).unwrap() < full, "the frigate's shells strike the other frigate");
+}
+
+#[test]
 fn only_torpedoes_reach_a_commander_under_the_water() {
     let mut world = lake_world();
     let commander = spawn(&mut world, "acu", Team::Blue, point(2_000, 1_000));

@@ -1645,6 +1645,11 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                     patrol_queued = false;
                                 }
                                 UiAction::Stop => stop_selection(&session, &selection, &mut feedback),
+                                UiAction::SetSurfaced { units, surfaced } => {
+                                    let order = SimCommand::SetSurfaced { units, surfaced };
+                                    feedback.show_orders(std::slice::from_ref(&order), None, &map.blueprints, "");
+                                    session.send(order);
+                                }
                                 UiAction::SetCloak { units, on } => {
                                     let word = if on { "Cloaked" } else { "Uncloaked" };
                                     feedback.set_label(MarkerKind::Support, format!("{word}: {}", units.len()));

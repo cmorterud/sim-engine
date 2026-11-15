@@ -198,6 +198,9 @@ pub enum Glyph {
     Reclaim,
     Repair,
     Sound,
+    /// Take a submarine down (`Dive`) or bring it up (`Surface`).
+    Dive,
+    Surface,
 }
 
 /// Draws a glyph inside `rect`. Each order has its own shape as well as its own color, so that
@@ -314,6 +317,19 @@ pub fn draw_glyph(painter: &egui::Painter, rect: Rect, glyph: Glyph) {
         Glyph::Repair => {
             painter.line_segment([at(-0.7, 0.7), at(0.4, -0.4)], Stroke::new(r * 0.3, yellow));
             painter.circle_stroke(at(0.5, -0.5), r * 0.35, line(yellow));
+        }
+        Glyph::Dive | Glyph::Surface => {
+            // A wave line, with an arrow going down through it or coming up.
+            let wave: Vec<Pos2> = (0..=12).map(|index| {
+                let x = -1.0 + index as f32 / 6.0;
+                at(x, 0.15 + 0.12 * (x * std::f32::consts::PI * 2.0).sin())
+            }).collect();
+            painter.add(Shape::line(wave, line(teal)));
+            let (from, to) = if glyph == Glyph::Dive { (-0.95, 0.85) } else { (0.85, -0.95) };
+            painter.line_segment([at(0.0, from), at(0.0, to)], line(blue));
+            let tip = at(0.0, to);
+            let back = if glyph == Glyph::Dive { -0.35 } else { 0.35 };
+            painter.add(Shape::line(vec![at(-0.35, to + back), tip, at(0.35, to + back)], line(blue)));
         }
         Glyph::Sound => {
             let gray = Color32::from_rgb(200, 210, 222);
