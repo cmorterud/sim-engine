@@ -511,3 +511,21 @@ fn an_attack_moving_bomber_sticks_to_each_target_until_it_is_destroyed() {
     }
     assert!(targets >= 2, "it moved on to another target once the first was destroyed: {targets}");
 }
+
+/// A fighter-bomber lets its bombs go far short of its target, from high and fast, beyond its
+/// own sight, so under fog of war it bombs what its team has on radar. Bombing only what it
+/// saw, it never let go, on an attack or an attack-move.
+#[test]
+fn a_fighter_bomber_bombs_under_fog_of_war_on_attack_and_attack_move() {
+    for attack_move in [false, true] {
+        let config = SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: true, ..SimConfig::default() };
+        let mut world = SimWorld::new(config, 1);
+        let tanks: Vec<SimId> = (0..3).map(|index| spawn(&mut world, "t2_heavy_tank", Team::Red, point(3_000 + index * 40, 3_000))).collect();
+        let janus = spawn(&mut world, "t2_fighter_bomber", Team::Blue, point(1_000, 1_000));
+        let order = if attack_move { SimCommand::AttackMove { units: vec![janus], goal: point(3_500, 3_500) } } else { SimCommand::Attack { units: vec![janus], target: tanks[0] } };
+        world.advance_tick(&[order]);
+        run(&mut world, 900);
+        let alive = tanks.iter().filter(|&&tank| world.unit_health(tank).is_some()).count();
+        assert!(alive < 3, "attack-move {attack_move}: it bombed nothing");
+    }
+}

@@ -35,7 +35,8 @@ fn ai_builds_an_economy_and_an_army() {
     assert!(count("mass_extractor") >= 4, "only {} extractors", count("mass_extractor"));
     assert!(count("power_generator") >= 2, "only {} generators", count("power_generator"));
     assert!(count("t1_engineer") >= 2, "only {} engineers", count("t1_engineer"));
-    assert!(count("t1_light_bot") + count("t1_light_artillery") + count("t2_heavy_tank") >= 3, "no army");
+    let army = ["t1_light_bot", "t1_medium_tank", "t1_light_artillery", "t1_mobile_aa", "t2_heavy_tank"].iter().map(|key| count(key)).sum::<usize>();
+    assert!(army >= 3, "no army: {army}");
     let income = (world.economies[0].mass_income * 10).to_num::<i64>();
     assert!(income >= 8, "mass income is only {income}/s");
 }
@@ -237,8 +238,9 @@ fn late_in_a_long_game_the_commander_joins_a_full_size_wave() {
 fn ai_climbs_the_tech_tree_and_upgrades_its_economy() {
     let mut world = scenario::skirmish(11).world;
     let mut brain = AiBrain::new(Team::Blue, 11, world.starts);
-    // 25 minutes, with nobody playing Red, whose commander is kept alive so the match goes on.
-    for _ in 0..15_000 {
+    // 30 minutes, with nobody playing Red, whose commander is kept alive so the match goes on.
+    // FAF's T3 headquarters, at 5,220 mass and 12,000 build time, comes later than ours did.
+    for _ in 0..18_000 {
         let commands = brain.think(&world);
         world.advance_tick(&commands);
         let red = world.unit_entity(world.commanders[Team::Red.index()].unwrap()).unwrap();

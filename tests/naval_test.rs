@@ -456,8 +456,21 @@ fn a_missile_sub_builds_nuclear_missiles_only_on_order_and_fires_cruise_missiles
     assert!(gone, "its cruise missiles fire on their own, and cost nothing");
     assert_eq!(stock(&world, sub), 0, "no nuclear missile without an order to build one");
     let nuke = world.blueprints.id("strategic_missile");
+    // FAF's missile, 12,000 mass and 1,500,000 energy over 450,000 build time, takes the sub's
+    // 1,080 build power almost seven minutes, so here it builds 20 times as fast, from deep stores.
+    {
+        let entity = world.unit_entity(sub).unwrap();
+        world.ecs.get::<&mut sim_engine::sim::components::Factory>(entity).unwrap().power = fp_int(22_500);
+        let economy = &mut world.economies[Team::Blue.index()];
+        economy.base_mass_capacity = Res::from_num(1_000_000);
+        economy.mass_capacity = economy.base_mass_capacity;
+        economy.mass = economy.mass_capacity;
+        economy.base_energy_capacity = Res::from_num(100_000_000);
+        economy.energy_capacity = economy.base_energy_capacity;
+        economy.energy = economy.energy_capacity;
+    }
     world.advance_tick(&[SimCommand::QueueUnit { factory: sub, blueprint: nuke, count: 1 }]);
-    // 4,000 build time at 20 build power is 200 seconds.
+    // 450,000 build time at 22,500 build power is 20 seconds.
     let built = (0..2_100).any(|_| {
         world.advance_tick(&[]);
         stock(&world, sub) == 1

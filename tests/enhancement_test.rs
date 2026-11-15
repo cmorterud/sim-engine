@@ -73,17 +73,17 @@ fn a_new_enhancement_in_a_full_slot_removes_the_old_one_at_once() {
     install(&mut world, acu, "advanced_engineering");
     let entity = world.unit_entity(acu).unwrap();
     assert_eq!(world.ecs.get::<&Builder>(entity).unwrap().power, fp_int(42));
-    assert_eq!(world.unit_health(acu), Some(fp_int(13_000)));
+    assert_eq!(world.unit_health(acu), Some(fp_int(14_000)));
 
     // The repair system is a left-arm enhancement too: the suite comes off when it starts.
     enhance(&mut world, acu, "nano_repair");
     assert_eq!(slots(&world, acu)[1], None, "the old one is gone");
     assert_eq!(world.ecs.get::<&Builder>(entity).unwrap().power, fp_int(10), "and what it gave");
-    assert_eq!(world.unit_health(acu), Some(fp_int(11_000)));
+    assert_eq!(world.unit_health(acu), Some(fp_int(12_000)));
     // 800 build time at 10 build power.
     run(&mut world, 805);
     assert_eq!(slots(&world, acu)[1].as_deref(), Some("nano_repair"));
-    assert_eq!(world.unit_health(acu), Some(fp_int(12_500)), "its 1,500 more health comes with it");
+    assert_eq!(world.unit_health(acu), Some(fp_int(13_500)), "its 1,500 more health comes with it");
 
     // It heals 40 a second.
     world.ecs.get::<&mut sim_engine::sim::components::Health>(entity).unwrap().current = fp_int(5_000);
@@ -109,7 +109,7 @@ fn an_enhancement_that_builds_on_another_needs_it_first() {
     run(&mut world, 2_005);
     assert_eq!(slots(&world, acu)[1].as_deref(), Some("t3_engineering"));
     assert_eq!(world.ecs.get::<&Builder>(entity).unwrap().power, fp_int(100));
-    assert_eq!(world.unit_health(acu), Some(fp_int(14_000)), "3,000 over its own, not on top of the T2 suite's");
+    assert_eq!(world.unit_health(acu), Some(fp_int(15_000)), "3,000 over its own, not on top of the T2 suite's");
 
     // The T3 suite includes the T2 one, so the T2 one cannot be taken again, which would be a step back.
     enhance(&mut world, acu, "advanced_engineering");

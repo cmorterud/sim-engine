@@ -126,7 +126,7 @@ fn an_emp_blast_stuns_what_it_reaches_for_its_time() {
     assert!(stunned(&world, beside), "the blast reaches the unit beside it");
     assert!(!stunned(&world, far), "but not one out of its reach");
     // It does almost no damage.
-    assert!(health(&world, near).unwrap() >= fp_int(190));
+    assert!(health(&world, near).unwrap() >= world.blueprints.get(world.blueprints.id("t1_light_bot")).health - fp_int(10));
 
     // Stunned, a unit can neither move nor fire, though the EMP tank is in its reach.
     let goal = point(1_100, 1_000);

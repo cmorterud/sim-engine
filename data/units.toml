@@ -14,8 +14,8 @@ tier = 1
 mass = 2000
 energy = 10000
 build_time = 1
-health = 11000
-speed = 4
+health = 12000
+speed = "3.4"
 turn_rate = 180
 radius = 16
 vision = 520
@@ -44,9 +44,9 @@ class = "engineer"
 tier = 1
 mass = 52
 energy = 260
-build_time = 130
-health = 160
-speed = 4
+build_time = 260
+health = 150
+speed = "3.8"
 # As in the original, engineers float over water, so they can build out on it.
 movement = "hover"
 turn_rate = 240
@@ -64,13 +64,13 @@ class = "bot"
 tier = 1
 mass = 30
 energy = 120
-build_time = 90
-health = 200
-speed = "5.5"
+build_time = 120
+health = 60
+speed = "8.4"
 turn_rate = 360
 radius = 7
 vision = 360
-weapon = { range = 280, reload_ticks = 10, projectile_speed = 40, damage = 18, turn_rate = 300 }
+weapon = { range = 280, reload_ticks = 3, projectile_speed = 50, damage = 7, turn_rate = 300 }
 
 [[unit]]
 id = "t1_light_artillery"
@@ -79,14 +79,14 @@ class = "artillery"
 tier = 1
 mass = 36
 energy = 180
-build_time = 180
-health = 180
-speed = "3.5"
+build_time = 200
+health = 205
+speed = "5.6"
 turn_rate = 120
 turn_radius = 30
 radius = 8
 vision = 360
-weapon = { range = 600, reload_ticks = 40, projectile_speed = 12, damage = 90, splash_radius = 20, turn_rate = 90 }
+weapon = { range = 600, reload_ticks = 83, projectile_speed = 28, damage = 100, splash_radius = 20, turn_rate = 90 }
 
 [[unit]]
 id = "t2_heavy_tank"
@@ -95,9 +95,9 @@ class = "tank"
 tier = 2
 mass = 198
 energy = 990
-build_time = 440
-health = 900
-speed = "4.5"
+build_time = 880
+health = 1500
+speed = "6.2"
 turn_rate = 90
 turn_radius = 40
 radius = 11
@@ -112,8 +112,8 @@ tier = 1
 mass = 240
 energy = 2100
 build_time = 300
-health = 3200
-footprint = 3
+health = 4000
+footprint = 4
 vision = 400
 build_power = 20
 builds = ["t1_engineer", "t1_light_bot", "t1_light_artillery", "t1_mobile_aa", "t1_land_scout", "t1_medium_tank"]
@@ -127,9 +127,9 @@ class = "factory"
 tier = 2
 mass = 1410
 energy = 11200
-build_time = 1000
-health = 6000
-footprint = 3
+build_time = 2300
+health = 8000
+footprint = 4
 vision = 400
 build_power = 40
 builds = ["t1_engineer", "t2_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_amphibious_tank", "t2_mobile_missile_launcher", "t1_land_scout", "t1_medium_tank", "t2_gatling_bot", "t2_mobile_shield", "t2_field_engineer"]
@@ -177,7 +177,7 @@ tier = 1
 mass = 200
 energy = 1500
 build_time = 250
-health = 1000
+health = 800
 footprint = 1
 vision = 300
 mass_storage = 500
@@ -190,11 +190,11 @@ class = "defense"
 tier = 1
 mass = 250
 energy = 2000
-build_time = 360
-health = 1400
+build_time = 250
+health = 1300
 footprint = 1
 vision = 480
-weapon = { range = 520, reload_ticks = 8, projectile_speed = 70, damage = 60, turn_rate = 120 }
+weapon = { range = 520, reload_ticks = 3, projectile_speed = 70, damage = 50, turn_rate = 120 }
 
 # A dome that stops enemy shells from outside, while those under it fire out freely
 # (GAME_SPECIFICATION.md §8.1). Tier 2. Upkeep is energy per second while the dome is up.
@@ -203,11 +203,11 @@ id = "shield_generator"
 name = "Shield Generator"
 class = "defense"
 tier = 2
-mass = 300
-energy = 3000
-build_time = 400
-health = 900
-footprint = 2
+mass = 600
+energy = 6000
+build_time = 1150
+health = 250
+footprint = 3
 vision = 400
 shield = { radius = 260, health = 5000, regen = 50, recharge_seconds = 30, upkeep = 30 }
 
@@ -221,13 +221,13 @@ id = "tactical_missile_launcher"
 name = "Tactical Missile Launcher"
 class = "factory"
 tier = 2
-mass = 450
-energy = 4500
-build_time = 500
-health = 1200
+mass = 800
+energy = 4000
+build_time = 800
+health = 900
 footprint = 1
 vision = 480
-build_power = 10
+build_power = 80
 builds = ["tactical_missile"]
 max_stock = 6
 weapon = { range = 5120, reload_ticks = 150, projectile_speed = 18, damage = 1500, splash_radius = 40, kind = "tactical_missile", cruise_height = 60 }
@@ -238,9 +238,9 @@ id = "tactical_missile"
 name = "Tactical Missile"
 class = "ammo"
 tier = 2
-mass = 140
-energy = 2000
-build_time = 300
+mass = 250
+energy = 3600
+build_time = 2400
 health = 1
 vision = 0
 
@@ -250,10 +250,10 @@ id = "tactical_missile_defense"
 name = "Tactical Missile Defense"
 class = "defense"
 tier = 2
-mass = 200
-energy = 2000
-build_time = 250
-health = 800
+mass = 280
+energy = 3200
+build_time = 400
+health = 1000
 footprint = 1
 vision = 400
 missile_defense = { kind = "tactical", range = 620, reload_ticks = 30 }
@@ -264,13 +264,13 @@ id = "strategic_missile_launcher"
 name = "Strategic Missile Launcher"
 class = "factory"
 tier = 3
-mass = 2000
-energy = 25000
-build_time = 1600
+mass = 16500
+energy = 412500
+build_time = 25000
 health = 4000
 footprint = 3
 vision = 560
-build_power = 20
+build_power = 1500
 builds = ["strategic_missile"]
 max_stock = 5
 # The original's two rings: 70,000 within 30 of its units and 500 within 40, at twenty of ours to one.
@@ -281,9 +281,9 @@ id = "strategic_missile"
 name = "Strategic Missile"
 class = "ammo"
 tier = 3
-mass = 2000
-energy = 40000
-build_time = 4000
+mass = 12000
+energy = 1500000
+build_time = 450000
 health = 1
 vision = 0
 
@@ -294,13 +294,13 @@ id = "strategic_missile_defense"
 name = "Strategic Missile Defense"
 class = "factory"
 tier = 3
-mass = 1000
-energy = 10000
-build_time = 1000
-health = 3000
+mass = 7500
+energy = 105000
+build_time = 5841
+health = 3800
 footprint = 2
 vision = 400
-build_power = 20
+build_power = 1080
 builds = ["anti_nuke"]
 max_stock = 7
 missile_defense = { kind = "strategic", range = 1800 }
@@ -310,9 +310,9 @@ id = "anti_nuke"
 name = "Anti-Nuke Interceptor"
 class = "ammo"
 tier = 3
-mass = 500
-energy = 6000
-build_time = 1200
+mass = 3600
+energy = 360000
+build_time = 259200
 health = 1
 vision = 0
 
@@ -323,11 +323,11 @@ id = "land_factory_t3"
 name = "Land Factory (T3)"
 class = "factory"
 tier = 3
-mass = 3200
-energy = 26000
-build_time = 2400
-health = 10000
-footprint = 3
+mass = 5220
+energy = 47400
+build_time = 12000
+health = 16000
+footprint = 4
 vision = 400
 build_power = 90
 builds = ["t1_engineer", "t2_engineer", "t3_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_amphibious_tank", "t2_mobile_missile_launcher", "t3_mobile_artillery", "t1_land_scout", "t1_medium_tank", "t2_gatling_bot", "t2_mobile_shield", "t2_field_engineer", "t3_heavy_assault_bot", "t3_armored_assault_bot"]
@@ -340,9 +340,9 @@ class = "engineer"
 tier = 2
 mass = 130
 energy = 650
-build_time = 260
+build_time = 650
 health = 400
-speed = 4
+speed = "3.8"
 # As in the original, engineers float over water, so they can build out on it.
 movement = "hover"
 turn_rate = 240
@@ -358,11 +358,11 @@ id = "t3_engineer"
 name = "Engineer (T3)"
 class = "engineer"
 tier = 3
-mass = 350
-energy = 1750
-build_time = 520
-health = 900
-speed = 4
+mass = 312
+energy = 1560
+build_time = 1560
+health = 800
+speed = "3.8"
 # As in the original, engineers float over water, so they can build out on it.
 movement = "hover"
 turn_rate = 240
@@ -381,10 +381,10 @@ id = "radar"
 name = "Radar"
 class = "economy"
 tier = 1
-mass = 60
-energy = 600
-build_time = 90
-health = 300
+mass = 80
+energy = 720
+build_time = 80
+health = 10
 footprint = 1
 vision = 400
 radar = 2320
@@ -415,11 +415,11 @@ id = "stealth_field_generator"
 name = "Stealth Field Generator"
 class = "economy"
 tier = 2
-mass = 300
-energy = 3000
-build_time = 300
-health = 600
-footprint = 1
+mass = 360
+energy = 5400
+build_time = 664
+health = 225
+footprint = 3
 vision = 400
 stealth_field = 480
 jammer = { radius = 620, decoys = 8 }
@@ -439,7 +439,7 @@ mass = 3000
 energy = 30000
 build_time = 4097
 health = 10000
-footprint = 4
+footprint = 5
 vision = 400
 build_power = 120
 builds = ["support_commander"]
@@ -454,7 +454,7 @@ mass = 2100
 energy = 25200
 build_time = 14400
 health = 16000
-speed = 5
+speed = "4.4"
 turn_rate = 180
 radius = 14
 vision = 520
@@ -484,7 +484,7 @@ energy = 5400
 build_time = 900
 health = 2000
 footprint = 1
-vision = 300
+vision = 400
 requires_deposit = true
 mass_income = 6
 upkeep = 9
@@ -502,7 +502,7 @@ energy = 31625
 build_time = 2875
 health = 7000
 footprint = 1
-vision = 300
+vision = 400
 requires_deposit = true
 mass_income = 18
 upkeep = 54
@@ -554,7 +554,7 @@ energy = 120000
 build_time = 5000
 health = 6000
 footprint = 3
-vision = 300
+vision = 400
 mass_income = 16
 upkeep = 1500
 death_explosion = { damage = 5000, radius = 200, only_while_running = true }
@@ -573,7 +573,7 @@ mass = 210
 energy = 2400
 build_time = 300
 health = 4000
-footprint = 3
+footprint = 4
 vision = 400
 build_power = 20
 builds = ["t1_air_scout", "t1_interceptor", "t1_bomber", "t1_light_transport"]
@@ -592,6 +592,7 @@ health = 35
 speed = 38
 radius = 8
 vision = 840
+sonar = 560
 radar = 1280
 flight = { elevation = 320, turn_rate = 80, fuel = 500 }
 
@@ -668,7 +669,7 @@ mass = 920
 energy = 18000
 build_time = 2300
 health = 8000
-footprint = 3
+footprint = 4
 vision = 400
 build_power = 40
 builds = ["t1_air_scout", "t1_interceptor", "t1_bomber", "t2_gunship", "t2_fighter_bomber", "t2_torpedo_bomber", "t1_light_transport", "t2_transport"]
@@ -684,7 +685,7 @@ mass = 4090
 energy = 99400
 build_time = 12000
 health = 16000
-footprint = 3
+footprint = 4
 vision = 400
 build_power = 120
 builds = ["t1_air_scout", "t1_interceptor", "t1_bomber", "t2_gunship", "t2_fighter_bomber", "t2_torpedo_bomber", "t3_spy_plane", "t3_air_superiority", "t3_strategic_bomber", "t3_heavy_gunship", "t1_light_transport", "t2_transport", "t3_heavy_transport"]
@@ -803,7 +804,7 @@ energy = 8000
 build_time = 1400
 health = 5000
 footprint = 1
-vision = 480
+vision = 560
 weapon = { range = 1200, reload_ticks = 36, projectile_speed = 90, damage = 1200, splash_radius = 30, targets = "air", turn_rate = 180 }
 
 # Two shells of 36 a volley in the original, one of 72 here, and at 90 for the reason above.
@@ -836,7 +837,7 @@ mass = 580
 energy = 4800
 build_time = 1200
 health = 4000
-footprint = 3
+footprint = 4
 vision = 400
 build_power = 40
 factory_kind = "land"
@@ -853,7 +854,7 @@ mass = 1440
 energy = 11600
 build_time = 3200
 health = 8000
-footprint = 3
+footprint = 4
 vision = 400
 build_power = 90
 factory_kind = "land"
@@ -869,7 +870,7 @@ mass = 510
 energy = 8000
 build_time = 1200
 health = 4000
-footprint = 3
+footprint = 4
 vision = 400
 build_power = 40
 factory_kind = "air"
@@ -886,7 +887,7 @@ mass = 1510
 energy = 34000
 build_time = 3200
 health = 8000
-footprint = 3
+footprint = 4
 vision = 400
 build_power = 120
 factory_kind = "air"
@@ -903,7 +904,7 @@ energy = 12000
 build_time = 2198
 health = 2500
 footprint = 3
-vision = 300
+vision = 400
 energy_income = 500
 death_explosion = { damage = 1500, radius = 100 }
 adjacency = "t2_power"
@@ -917,8 +918,8 @@ mass = 3240
 energy = 57600
 build_time = 6824
 health = 9000
-footprint = 5
-vision = 300
+footprint = 4
+vision = 400
 energy_income = 2500
 death_explosion = { damage = 5500, radius = 200 }
 
@@ -953,7 +954,7 @@ energy = 3780
 build_time = 675
 health = 2250
 footprint = 1
-vision = 480
+vision = 560
 weapon = { range = 1000, reload_ticks = 17, projectile_speed = 70, damage = 210, splash_radius = 40, turn_rate = 120 }
 
 # Aircraft land on its four pads to refuel at 50 times the rate on the ground, and are repaired
@@ -1000,7 +1001,7 @@ energy = 13585
 build_time = 1600
 health = 3600
 footprint = 1
-vision = 480
+vision = 560
 weapon = { range = 2300, reload_ticks = 200, projectile_speed = "55.6", damage = 2000, splash_radius = 60, turn_rate = 6, artillery = true, min_range = 1000, spread = 50, energy_per_shot = 1000 }
 
 [[unit]]
@@ -1012,9 +1013,9 @@ mass = 76000
 energy = 1424000
 build_time = 121400
 health = 15000
-footprint = 5
+footprint = 4
 adjacency_size = 16
-vision = 600
+vision = 560
 weapon = { range = 16500, reload_ticks = 133, projectile_speed = 150, damage = 7840, splash_radius = 120, turn_rate = 3, artillery = true, min_range = 3000, spread = "9.3", energy_per_shot = 16000 }
 
 [[unit]]
@@ -1030,7 +1031,7 @@ speed = "4.4"
 turn_rate = 75
 turn_radius = 20
 radius = 12
-vision = 400
+vision = 520
 weapon = { range = 1800, reload_ticks = 100, projectile_speed = 48, damage = 750, splash_radius = 80, turn_rate = 30, artillery = true, min_range = 500, spread = 25 }
 
 # FAF's Janus: a carpet of twenty napalm bombs of 80, burning included, as one bomb of 1,600, and
@@ -1063,7 +1064,7 @@ mass = 300
 energy = 1500
 build_time = 300
 health = 4500
-footprint = 3
+footprint = 6
 vision = 400
 build_power = 20
 factory_kind = "naval"
@@ -1103,7 +1104,7 @@ mass = 2000
 energy = 10000
 build_time = 3200
 health = 16000
-footprint = 3
+footprint = 6
 vision = 400
 build_power = 90
 factory_kind = "naval"
@@ -1120,7 +1121,7 @@ mass = 9500
 energy = 45000
 build_time = 21600
 health = 26000
-footprint = 3
+footprint = 6
 vision = 400
 build_power = 150
 factory_kind = "naval"
@@ -1136,7 +1137,7 @@ mass = 1100
 energy = 5500
 build_time = 2000
 health = 8000
-footprint = 3
+footprint = 6
 vision = 400
 build_power = 90
 factory_kind = "naval"
@@ -1154,7 +1155,7 @@ mass = 2200
 energy = 11000
 build_time = 10800
 health = 16000
-footprint = 3
+footprint = 6
 vision = 400
 build_power = 150
 factory_kind = "naval"
@@ -1385,7 +1386,7 @@ speed = "7.4"
 turn_rate = 90
 turn_radius = 20
 radius = 11
-vision = 400
+vision = 360
 movement = "hover"
 weapon = { range = 360, reload_ticks = 3, projectile_speed = 120, damage = "13.5", turn_rate = 180 }
 
@@ -1427,7 +1428,7 @@ radius = 20
 vision = 320
 sonar = 1200
 movement = "submarine"
-build_power = 20
+build_power = 1080
 builds = ["strategic_missile"]
 max_stock = 3
 weapon = { range = 8200, reload_ticks = 100, projectile_speed = 25, damage = 500, splash_radius = 800, inner_damage = 70000, inner_radius = 600, kind = "strategic_missile", cruise_height = 500 }
@@ -1448,7 +1449,7 @@ speed = "5.8"
 turn_rate = 90
 turn_radius = 20
 radius = 11
-vision = 400
+vision = 360
 weapon = { kind = "tactical_missile", automatic = true, artillery = true, min_range = 240, range = 1300, reload_ticks = 50, projectile_speed = 18, damage = 300, splash_radius = 20, cruise_height = 40 }
 
 # Field enhancements (GAME_SPECIFICATION.md §2.1), with Forged Alliance Forever's numbers for its
@@ -1719,7 +1720,7 @@ health = 650
 speed = "5.8"
 turn_rate = 80
 radius = 10
-vision = 400
+vision = 520
 # A gatling that fires 15-round bursts, about 37 damage a second, and a grenade launcher.
 weapon = { range = 680, reload_ticks = 4, projectile_speed = 56, damage = 15, turn_rate = 120 }
 extra_weapons = [{ range = 680, reload_ticks = 17, projectile_speed = 26, damage = 50, splash_radius = 40 }]
@@ -1774,7 +1775,7 @@ health = 2400
 speed = "7.6"
 turn_rate = 120
 radius = 13
-vision = 480
+vision = 440
 # A personal shield that takes the first hits.
 shield = { radius = 25, health = 700, regen = 20, recharge_seconds = 12, upkeep = 25 }
 weapon = { range = 480, reload_ticks = 3, projectile_speed = 70, damage = 45, turn_rate = 120 }
@@ -1823,8 +1824,8 @@ mass = 2000
 energy = 17600
 build_time = 2000
 health = 6500
-footprint = 2
-vision = 600
+footprint = 1
+vision = 480
 # A gatling cannon: 15-round bursts, about 250 damage a second.
 weapon = { range = 1400, reload_ticks = 7, projectile_speed = 64, damage = 175, splash_radius = 20, turn_rate = 90 }
 
@@ -1864,8 +1865,8 @@ mass = 525
 energy = 2625
 build_time = 1000
 health = 1000
-footprint = 2
-vision = 400
+footprint = 1
+vision = 280
 build_power = 25
 build_range = 300
 assists = true
@@ -1880,8 +1881,8 @@ mass = 1050
 energy = 5250
 build_time = 2000
 health = 2500
-footprint = 2
-vision = 400
+footprint = 1
+vision = 280
 build_power = 50
 build_range = 300
 assists = true
@@ -1934,4 +1935,6 @@ vision = 640
 flight = { elevation = 220, turn_rate = 80, fuel = 800, hovers = true }
 transport = { small = 28, medium = 12, large = 6 }
 shield = { radius = 85, health = 3000, regen = 30, recharge_seconds = 35, upkeep = 0 }
-weapon = { range = 440, reload_ticks = 5, projectile_speed = 120, damage = 20 }
+# Two plasma guns, and four anti-air missile racks.
+weapon = { range = 500, reload_ticks = 5, projectile_speed = 120, damage = 30 }
+extra_weapons = [{ range = 1000, reload_ticks = 1, projectile_speed = 120, damage = 27, targets = "air" }]

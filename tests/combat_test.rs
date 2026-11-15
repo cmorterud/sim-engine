@@ -233,8 +233,14 @@ fn tank_with_enemy_behind() -> (SimWorld, SimId, SimId) {
     let entity = world.unit_entity(shooter).unwrap();
     world.ecs.get::<&mut Turret>(entity).unwrap().facing = east;
     let target = world.spawn_mobile(bot, Team::Red, point(700, 1_000));
-    // The bot must not shoot back, so that only the tank's aim is measured.
+    // The bot must not shoot back, so that only the tank's aim is measured, nor die, with
+    // FAF's 60 health, before the turret has turned.
     world.ecs.get::<&mut Combat>(world.unit_entity(target).unwrap()).unwrap().range = Fp::ZERO;
+    {
+        let mut health = world.ecs.get::<&mut Health>(world.unit_entity(target).unwrap()).unwrap();
+        health.max = fp_int(100_000);
+        health.current = health.max;
+    }
     (world, shooter, target)
 }
 
@@ -319,10 +325,15 @@ fn overcharge_once(world: &mut SimWorld, commander: SimId, target: SimId) -> (f6
 
 #[test]
 fn overcharge_spends_only_what_destroys_its_target_and_at_least_its_least() {
-    // A heavy tank has 900 health, under the least a shot does, 1,250, which costs 7,500.
+    // A heavy tank has 1,500 health, so a shot spends 1,500 damage, or 9,000 energy.
     let (mut world, commander, target) = commander_facing("t2_heavy_tank", 100_000);
     let (drop, _) = overcharge_once(&mut world, commander, target);
     assert!(world.unit_entity(target).is_none(), "one shot should destroy a heavy tank");
+    assert!((8_900.0..=9_000.0).contains(&drop), "it spends what destroys it, 9,000 energy, not {drop}");
+    // A medium tank has 300 health, under the least a shot does, 1,250, which costs 7,500.
+    let (mut world, commander, target) = commander_facing("t1_medium_tank", 100_000);
+    let (drop, _) = overcharge_once(&mut world, commander, target);
+    assert!(world.unit_entity(target).is_none());
     assert!((7_400.0..=7_500.0).contains(&drop), "the least shot costs 7,500 energy, not {drop}");
     assert!(world.ecs.get::<&OverchargeOrder>(world.unit_entity(commander).unwrap()).is_err(), "the order is done");
 }
@@ -358,7 +369,8 @@ fn overcharge_waits_for_the_energy_and_then_fires() {
     world.economies[0].energy = Res::from_num(4_000);
     run_ticks(&mut world, 60);
     assert!(world.unit_entity(target).is_some(), "it needs 7,500 in store, more than a commander alone holds");
-    world.economies[0].energy = Res::from_num(8_000);
+    // 10,000 pays for the 1,500 a heavy tank takes.
+    world.economies[0].energy = Res::from_num(10_000);
     run_ticks(&mut world, 60);
     assert!(world.unit_entity(target).is_none(), "it fires once the energy is there");
 }
@@ -536,8 +548,8 @@ fn a_ground_attack_destroys_debris_and_the_mass_in_it() {
     let debris = debris_at(&mut world, "t2_heavy_tank", point(1_300, 1_000));
     let tank = spawn_gunner(&mut world, "t2_heavy_tank");
     let start = wreck(&world, debris).unwrap();
-    // Half of a heavy tank's 900 health, and 81% of its mass.
-    assert_eq!(start.health, fp_int(450));
+    // Half of a heavy tank's 1,500 health, and 81% of its mass.
+    assert_eq!(start.health, fp_int(750));
     assert_eq!(start.mass, Res::from_num(198) * 810 / 1000);
     let mass_before = world.economies[0].mass;
     world.advance_tick(&[SimCommand::AttackGround { units: vec![tank], point: start.position }]);
@@ -557,12 +569,12 @@ fn a_ground_attack_destroys_debris_and_the_mass_in_it() {
         }
     }
     let hit = first_hit.expect("a shell should land on the debris");
-    assert_eq!(hit.health, fp_int(380));
-    let expected = start.mass * 380 / 450;
+    assert_eq!(hit.health, fp_int(680));
+    let expected = start.mass * 680 / 750;
     assert!((hit.mass - expected).abs() < Res::from_num(0.001), "{} left, not {expected}", hit.mass);
-    // Seven shells at a reload of 12 ticks, after the first has flown.
+    // Eleven shells at a reload of 12 ticks, after the first has flown.
     let gone_at = gone_at.expect("the debris should be destroyed");
-    assert!(gone_at < 7 * 12 + 30, "it took {gone_at} ticks");
+    assert!(gone_at < 11 * 12 + 30, "it took {gone_at} ticks");
     assert_eq!(world.economies[0].mass_reclaimed, Res::ZERO);
     assert!(world.economies[0].mass <= mass_before + Res::from_num(1), "nobody got the mass");
 

@@ -96,6 +96,12 @@ fn a_dome_that_runs_out_collapses_and_comes_back_at_full_strength() {
     let sheltered = spawn(&mut world, "t1_light_bot", Team::Red, point(1_020, 1_080), false);
     let full = world.unit_health(sheltered).unwrap();
     world.ecs.get::<&mut Shield>(world.unit_entity(generator).unwrap()).unwrap().health = fp_int(10);
+    // FAF's generator has only 250 health; this test is about its dome, not the generator.
+    {
+        let mut health = world.ecs.get::<&mut sim_engine::sim::components::Health>(world.unit_entity(generator).unwrap()).unwrap();
+        health.max = fp_int(100_000);
+        health.current = health.max;
+    }
     let tank = spawn(&mut world, "t2_heavy_tank", Team::Blue, point(1_020, 1_480), true);
     let mut collapsed_at = None;
     for tick in 0..80 {
@@ -190,7 +196,8 @@ fn power_generators_beside_a_shield_cut_its_upkeep() {
     world.advance_tick(&[]);
     assert_eq!(upkeep(&world), 300, "30.0 energy a second alone");
     let power = world.blueprints.id("power_generator");
-    for (x, y) in [(49, 50), (52, 50), (50, 49), (50, 52), (51, 52)] {
+    // Around a shield at (50, 50), which covers 50 to 52 either way.
+    for (x, y) in [(49, 50), (53, 50), (50, 49), (50, 53), (51, 53)] {
         world.spawn_finished_structure(power, Team::Red, x, y).expect("room for it");
     }
     world.advance_tick(&[]);

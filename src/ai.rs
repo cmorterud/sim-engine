@@ -31,7 +31,7 @@ const MAX_ENGINEERS: usize = 10;
 const MAX_FACTORIES: usize = 6;
 /// Mass income, a second, at which the AI takes each step up the tech tree.
 const T2_INCOME: i64 = 8;
-const T3_INCOME: i64 = 30;
+const T3_INCOME: i64 = 50;
 /// The most mobile shields the AI keeps, since each costs as much energy to run as four T1
 /// generators make.
 const MAX_MOBILE_SHIELDS: usize = 2;
@@ -230,6 +230,8 @@ struct Forces {
     extractor_sites: Vec<ExtractorInfo>,
     /// Structures still being built that are worth helping with, and where.
     big_sites: Vec<(SimId, Vec2Fp)>,
+    /// Other structures left unfinished, which idle builders finish after the big ones.
+    small_sites: Vec<(SimId, Vec2Fp)>,
     /// Whether any engineer can build T2, or T3, structures.
     builder_tier: u8,
     air_factories: Vec<FactoryInfo>,
@@ -537,6 +539,9 @@ impl AiBrain {
             let finished = world.ecs.get::<&Construction>(entity).is_err();
             let unit = world.blueprints.get(blueprint);
             let cell = cell_of(position);
+            if !finished && unit.is_structure() && unit.mass < Res::from_num(BIG_SITE_MASS) && order.kind == OrderKind::Idle {
+                forces.small_sites.push((id, position));
+            }
             if !finished && unit.is_structure() && unit.mass >= Res::from_num(BIG_SITE_MASS) {
                 forces.big_sites.push((id, position));
             }
@@ -712,8 +717,11 @@ impl AiBrain {
                 .iter()
                 .filter(|extractor| extractor.upgrading)
                 .min_by_key(|extractor| (extractor.position.distance_squared(&position), extractor.id));
-            let site = forces.big_sites.iter().min_by_key(|(site, at)| (at.distance_squared(&position), *site));
-            if let Some(&(site, _)) = site {
+            // A big site first, then any other left unfinished: a builder taken off one, as in an
+            // energy crisis, otherwise left it half built for good.
+            let nearest = |sites: &[(SimId, Vec2Fp)]| sites.iter().min_by_key(|(site, at)| (at.distance_squared(&position), *site)).copied();
+            let site = nearest(&forces.big_sites).or_else(|| nearest(&forces.small_sites));
+            if let Some((site, _)) = site {
                 commands.push(SimCommand::Assist { units: vec![id], target: site });
             } else if let Some(wreck) = nearest_visible_wreck(world, self.team, position, self.home, self.enemy_home) {
                 commands.push(SimCommand::Reclaim { units: vec![id], target: wreck });
@@ -793,7 +801,8 @@ impl AiBrain {
         }
 
         let factories_wanted = (1 + mass_income as usize / 10).min(self.skill.max_factories);
-        if factories_total < factories_wanted && economy.mass > Res::from_num(150) {
+        // A second factory goes up even in a stall, so that an upgrade never stops all production.
+        if factories_total < factories_wanted && (economy.mass > Res::from_num(150) || factories_total < 2) {
             if let Some(cell) = self.site_near_home(world, factory, 1, planned) {
                 return Some((factory, cell));
             }
@@ -1112,7 +1121,10 @@ impl AiBrain {
             let tier = if factory.support { factory.tier.min(headquarters) } else { factory.tier };
             let upgrade = world.blueprints.get(factory.blueprint).upgrades_to;
             // One upgrade at a time: the first T1 factory to T2, that one to T3, then the rest.
-            let upgrade_wanted = upgrade.is_some_and(|into| {
+            // A factory upgrades only while another goes on making units: by FAF's costs, an
+            // upgrade to T3 takes minutes, and the only factory upgrading left the AI no army.
+            let others_producing = forces.factories.iter().any(|other| other.id != factory.id && other.finished && !other.upgrading);
+            let upgrade_wanted = others_producing && upgrade.is_some_and(|into| {
                 let into = world.blueprints.get(into);
                 let allowed = world.support_allowed(self.team, into.id) && (!into.support || headquarters >= into.tier);
                 let income = match (into.tier, factory.tier < headquarters || factory.support) {

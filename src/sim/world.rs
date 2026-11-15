@@ -1883,12 +1883,20 @@ impl SimWorld {
             // Artillery cannot hit what is closer than its least range.
             let least = artillery.map_or(0, |artillery| i64::from(artillery.min_range.to_bits()));
             let far_enough = |distance: i64| distance >= least * least;
+            // A bomber lets its bombs go far short of its target, beyond its own sight from a
+            // fast, high one such as the fighter-bomber, so it bombs what its team has on radar
+            // or omni as well as what it sees. Seeing only what was in sight, it never let go.
+            let sensed = |x: i32, y: i32| {
+                !fog
+                    || visibility.is_visible(stats.team, x, y)
+                    || (bomb_bay.is_some() && (visibility.senses(super::visibility::Sense::Radar, stats.team, x, y) || visibility.senses(super::visibility::Sense::Omni, stats.team, x, y)))
+            };
             let can_engage = |entry: &super::spatial::GridEntry| {
                 let reach = range + i64::from(entry.radius);
                 squared_distance(entry.x, entry.y) <= reach * reach
                     && far_enough(squared_distance(entry.x, entry.y))
                     && can_hit(entry)
-                    && (!fog || visibility.is_visible(stats.team, entry.x, entry.y))
+                    && sensed(entry.x, entry.y)
                     && !hidden(entry.id)
             };
             let locate = |target: SimId| units.binary_search_by_key(&target, |unit| unit.0).ok().map(|i| grid.entry(i));
@@ -1950,7 +1958,7 @@ impl SimWorld {
                         let mut consider = |other: &super::spatial::GridEntry| {
                             let distance = squared_distance(other.x, other.y);
                             let reach = radius + i64::from(other.radius);
-                            let visible = (!fog || visibility.is_visible(stats.team, other.x, other.y)) && !hidden(other.id);
+                            let visible = sensed(other.x, other.y) && !hidden(other.id);
                             if distance <= reach * reach && far_enough(distance) && visible && blocked != Some(other.id) && can_hit(other) {
                                 let candidate = (other.is_structure, distance, other.id);
                                 if best.is_none_or(|current| candidate < current) {

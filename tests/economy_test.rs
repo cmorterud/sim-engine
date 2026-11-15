@@ -179,17 +179,17 @@ fn factory_builds_its_queue_and_assist_speeds_it_up() {
     let factory = world.spawn_finished_structure(factory_blueprint, Team::Blue, 50, 50).unwrap();
     let count_bots = |world: &SimWorld| world.units.len() - 1;
     world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: bot, count: 2 }]);
-    // 90 build time at 20 power is 4.5 s, or 45 ticks.
-    run(&mut world, 40);
+    // FAF's 120 build time at 20 power is 6 s, or 60 ticks.
+    run(&mut world, 55);
     assert_eq!(count_bots(&world), 0);
     run(&mut world, 10);
-    assert_eq!(count_bots(&world), 1, "the first bot should be out by tick 50");
+    assert_eq!(count_bots(&world), 1, "the first bot should be out by tick 65");
     run(&mut world, 60);
     assert_eq!(count_bots(&world), 2);
-    run(&mut world, 60);
+    run(&mut world, 80);
     assert_eq!(count_bots(&world), 2, "the queue should be empty");
 
-    // With an assisting engineer, the same bot takes 90 / 25 = 3.6 s.
+    // With an assisting engineer, the same bot takes 120 / 25 = 4.8 s.
     let engineer_blueprint = id(&world, "t1_engineer");
     let helper = world.spawn_mobile(engineer_blueprint, Team::Blue, point(1_100, 1_100));
     let before = world.units.len();
@@ -197,8 +197,8 @@ fn factory_builds_its_queue_and_assist_speeds_it_up() {
         SimCommand::Assist { units: vec![helper], target: factory },
         SimCommand::QueueUnit { factory, blueprint: bot, count: 1 },
     ]);
-    run(&mut world, 39);
-    assert_eq!(world.units.len(), before + 1, "assist should finish the bot before 45 ticks");
+    run(&mut world, 52);
+    assert_eq!(world.units.len(), before + 1, "assist should finish the bot before 60 ticks");
 }
 
 #[test]
@@ -340,10 +340,13 @@ fn factory_repeat_loops_and_rally_sends_units() {
         SimCommand::SetRepeat { factory, repeat: true },
         SimCommand::SetRally { factory, point: point(2_000, 1_000) },
     ]);
-    run(&mut world, 200);
+    run(&mut world, 260);
     let units: Vec<SimId> = world.units.iter().map(|unit| unit.0).filter(|unit| *unit != factory).collect();
     assert!(units.len() >= 4, "repeat should keep building, got {}", units.len());
-    assert_eq!(world.unit_order(units[1]).unwrap().kind, OrderKind::Move, "new units should head to the rally point");
+    // At FAF's speed, a light bot may already have reached the rally point.
+    let at = world.unit_position(units[1]).unwrap().xy();
+    let heading = world.unit_order(units[1]).unwrap().kind == OrderKind::Move;
+    assert!(heading || at.distance_squared(&point(2_000, 1_000)) < sim_engine::math::fp::wide_mul(fp_int(200), fp_int(200)), "new units should head to the rally point");
 }
 
 #[test]
@@ -360,13 +363,13 @@ fn upgrade_halts_production_then_improves_the_factory() {
         SimCommand::QueueUnit { factory, blueprint: t2, count: 1 },
         SimCommand::QueueUnit { factory, blueprint: bot, count: 1 },
     ]);
-    // 1,000 build time at 20 power is 50 s. The bot behind it must wait.
-    run(&mut world, 400);
+    // FAF's 2,300 build time at 20 power is 115 s. The bot behind it must wait.
+    run(&mut world, 1_100);
     assert_eq!(world.units.len(), 1, "production must halt during an upgrade");
-    run(&mut world, 110);
+    run(&mut world, 60);
     let power = world.ecs.get::<&Factory>(entity(&world, factory)).unwrap().power;
     assert_eq!(power, fp_int(40));
-    assert_eq!(world.ecs.get::<&Health>(entity(&world, factory)).unwrap().max, fp_int(6_000));
+    assert_eq!(world.ecs.get::<&Health>(entity(&world, factory)).unwrap().max, fp_int(8_000));
     run(&mut world, 30);
     assert_eq!(world.units.len(), 2, "the queued bot should follow at the new build power");
     world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: tank, count: 1 }]);
@@ -384,7 +387,7 @@ fn an_upgrade_on_a_repeating_factory_happens_once_and_units_keep_looping() {
         SimCommand::QueueUnit { factory, blueprint: t2, count: 1 },
         SimCommand::QueueUnit { factory, blueprint: bot, count: 1 },
     ]);
-    run(&mut world, 700);
+    run(&mut world, 1_400);
     let queue = world.ecs.get::<&Factory>(entity(&world, factory)).unwrap().queue.clone();
     assert_eq!(queue, [bot], "only the bot should loop");
     assert_eq!(world.ecs.get::<&Factory>(entity(&world, factory)).unwrap().power, fp_int(40));
@@ -661,12 +664,13 @@ fn shells_do_not_hit_allies_on_the_way_but_strays_and_blasts_do() {
     run(&mut world, 1);
     // Gravity drops the shell below the sphere only slowly, so run until it is gone.
     run(&mut world, 5);
-    assert_eq!(health(&world, front_rank), 200, "a shell must fly clear of friendly lines");
+    let full = world.blueprints.get(bot).health.to_num::<i32>();
+    assert_eq!(health(&world, front_rank), full, "a shell must fly clear of friendly lines");
 
     // No longer safe: the same shell is a stray that hits the first ally in its path.
     shoot(&mut world, 0, Fp::ZERO);
     run(&mut world, 6);
-    assert_eq!(health(&world, front_rank), 190, "a stray should hit an ally");
+    assert_eq!(health(&world, front_rank), full - 10, "a stray should hit an ally");
 
     // A blast hurts allies around the impact regardless.
     world.spawn_projectile(
@@ -682,7 +686,7 @@ fn shells_do_not_hit_allies_on_the_way_but_strays_and_blasts_do() {
         },
     );
     run(&mut world, 10);
-    assert_eq!(health(&world, bystander), 190, "a blast should hurt allies");
+    assert_eq!(health(&world, bystander), full - 10, "a blast should hurt allies");
 }
 
 #[test]
@@ -695,8 +699,9 @@ fn fog_hides_enemies_from_targeting_and_the_players_view() {
     world.ecs.get::<&mut Combat>(entity(&world, enemy)).unwrap().range = Fp::ZERO;
 
     // Range 600 reaches the enemy, but vision 500 does not.
+    let full = world.blueprints.get(bot).health;
     run(&mut world, 30);
-    assert_eq!(world.unit_health(enemy), Some(fp_int(200)), "a unit must not fire at what its team cannot see");
+    assert_eq!(world.unit_health(enemy), Some(full), "a unit must not fire at what its team cannot see");
     let view = world.snapshot_for(Some(Team::Blue));
     assert_eq!(view.units.len(), 1, "the player must not see the enemy");
     assert!(world.snapshot_for(Some(Team::Red)).units.iter().any(|unit| unit.id == enemy), "a team sees its own units");
@@ -705,8 +710,9 @@ fn fog_hides_enemies_from_targeting_and_the_players_view() {
     let scout = world.spawn_mobile(bot, Team::Blue, point(1_200, 1_000));
     world.ecs.get::<&mut Combat>(entity(&world, scout)).unwrap().range = Fp::ZERO;
     run(&mut world, 120);
-    assert!(world.unit_health(enemy).unwrap() < fp_int(200), "the shot should land once there is sight");
-    assert!(world.snapshot_for(Some(Team::Blue)).units.iter().any(|unit| unit.id == enemy));
+    assert!(world.unit_health(enemy).is_none_or(|health| health < full), "the shot should land once there is sight");
+    // A light bot has FAF's 60 health, so the artillery may well have destroyed it by now.
+    assert!(world.unit_health(enemy).is_none() || world.snapshot_for(Some(Team::Blue)).units.iter().any(|unit| unit.id == enemy));
 }
 
 fn commander_with_neighbors() -> (SimWorld, SimId, SimId, SimId, SimId) {
@@ -725,6 +731,8 @@ fn commander_with_neighbors() -> (SimWorld, SimId, SimId, SimId, SimId) {
 fn commander_death_detonates_and_eliminates_its_team() {
     let (mut world, blue, red, nearby_enemy, blue_base) = commander_with_neighbors();
     world.ecs.get::<&mut Health>(entity(&world, blue)).unwrap().current = Fp::ONE;
+    // Blue's commander must not shoot first: a light bot has only 60 health.
+    world.ecs.get::<&mut Combat>(entity(&world, blue)).unwrap().range = Fp::ZERO;
     let shooter = world.spawn_mobile(id(&world, "t1_light_bot"), Team::Red, point(1_100, 1_100));
     run(&mut world, 30);
     assert_eq!(world.match_result, Some(MatchResult::Winner(Team::Red)));
@@ -1474,7 +1482,8 @@ fn a_unit_that_dies_hands_its_queued_routes_back() {
     for doomed in [unit, engineer] {
         world.ecs.get::<&mut Health>(entity(&world, doomed)).unwrap().current = Fp::ONE;
     }
-    world.spawn_mobile(killer, Team::Red, point(1_020, 1_050));
+    // On their way, so that the light bot, at FAF's speed, cannot outrun it.
+    world.spawn_mobile(killer, Team::Red, point(1_300, 1_050));
     run(&mut world, 150);
     assert!(world.unit_entity(unit).is_none() && world.unit_entity(engineer).is_none(), "the test needs them dead");
     assert!(world.order_queues.is_empty());

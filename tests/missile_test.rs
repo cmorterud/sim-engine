@@ -18,11 +18,12 @@ fn open_world() -> SimWorld {
     let config = SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: false, ..SimConfig::default() };
     let mut world = SimWorld::new(config, 1);
     for economy in &mut world.economies {
+        // FAF's nuclear missiles cost 12,000 mass and 1,500,000 energy apiece.
         for capacity in [&mut economy.base_mass_capacity, &mut economy.mass_capacity, &mut economy.mass] {
-            *capacity = Res::from_num(100_000);
+            *capacity = Res::from_num(1_000_000);
         }
         for capacity in [&mut economy.base_energy_capacity, &mut economy.energy_capacity, &mut economy.energy] {
-            *capacity = Res::from_num(1_000_000);
+            *capacity = Res::from_num(100_000_000);
         }
     }
     world
@@ -159,8 +160,8 @@ fn a_silo_builds_missiles_and_keeps_them() {
     let mut world = open_world();
     let silo = structure(&mut world, "strategic_missile_launcher", Team::Blue, 20, 20);
     let entity = world.unit_entity(silo).unwrap();
-    // Far more build power than it has, so that the test does not wait 200 seconds.
-    world.ecs.get::<&mut Factory>(entity).unwrap().power = fp_int(4_000);
+    // Far more build power than it has, so that the test does not wait 300 seconds a missile.
+    world.ecs.get::<&mut Factory>(entity).unwrap().power = fp_int(300_000);
     let missile = world.blueprints.id("strategic_missile");
     let units_before = world.units.len();
     world.advance_tick(&[SimCommand::QueueUnit { factory: silo, blueprint: missile, count: 2 }]);

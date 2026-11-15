@@ -145,14 +145,15 @@ fn factories_go_up_to_t3_and_make_engineers_of_their_tier() {
     let entity = world.unit_entity(factory).unwrap();
     world.ecs.get::<&mut sim_engine::sim::components::Factory>(entity).unwrap().power = fp_int(2_000);
     world.advance_tick(&[SimCommand::Upgrade { units: vec![factory] }]);
-    for _ in 0..40 {
+    // FAF's 12,000 build time at 2,000 build power is 6 seconds.
+    for _ in 0..70 {
         world.advance_tick(&[]);
     }
     assert_eq!(blueprint_key(&world, factory), "land_factory_t3");
     let engineer = world.blueprints.id("t3_engineer");
     world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: engineer, count: 1 }]);
-    // 520 build time at the T3 factory's 90 build power is under 6 seconds.
-    for _ in 0..80 {
+    // FAF's 1,560 build time at the T3 factory's 90 build power is under 18 seconds.
+    for _ in 0..180 {
         world.advance_tick(&[]);
     }
     let made = world.units.iter().any(|&(id, _)| id != factory && blueprint_key(&world, id) == "t3_engineer");
@@ -215,7 +216,8 @@ fn an_enemy_upgrade_in_sight_shows_that_it_is_happening_and_nothing_more() {
     assert!(!view.upgrading.contains(&red));
     // In sight, that it is upgrading, but not what into or how far along.
     world.advance_tick(&[SimCommand::Move { units: vec![blue], goal: point(3_700, 3_700) }]);
-    let seen = (0..1_000).any(|_| {
+    // The commander walks at FAF's 3.4 a tick, so the 3,800 there take about 1,100 ticks.
+    let seen = (0..2_000).any(|_| {
         world.advance_tick(&[]);
         world.snapshot_for(Some(Team::Blue)).upgrading.contains(&red)
     });
