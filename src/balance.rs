@@ -17,6 +17,9 @@ use crate::sim::world::SimWorld;
 const MAP_UNITS: i32 = 5_120;
 /// How far apart the two groups' centers start, beyond every direct-fire range.
 const START_GAP: i32 = 1_400;
+/// Starting layouts each measurement is averaged over: the gap and the groups' sideways offset
+/// from each other vary, since a single layout's result turns on which unit dies a tick earlier.
+const LAYOUTS: [(i32, i32); 4] = [(0, 0), (160, 37), (320, -71), (480, 113)];
 /// A duel that has not ended by now is scored where it stands: ten minutes.
 const MAX_TICKS: u32 = 6_000;
 /// Bisection steps for a break-even, over multipliers from 1/16 to 16.
@@ -35,14 +38,17 @@ pub struct Side {
 pub enum Tactics {
     /// One attack-move at the enemy, as a player who does not micro.
     AttackMove,
-    /// What a decent player does against splash and slow shells: start spread out, twice the
-    /// usual spacing; every second, close in on the enemy, each unit off to one side by turns,
-    /// so that it keeps changing direction; and pull back any unit under 30% health.
+    /// What a decent player does against massed artillery: start spread out, twice the usual
+    /// spacing; close in on the enemy without stopping to fire, firing on the way; and pull back
+    /// any unit under 30% health.
     Micro,
 }
 
-/// How far a micro unit steps to one side as it closes, in its own radii.
-const JINK_RADII: i32 = 6;
+/// How far off the straight line a micro unit weaves as it closes, as the tangent of the angle.
+/// None: weaving every second at 14 to 35 degrees slowed the approach more than it dodged
+/// shells two seconds in flight, and cost about a fifth of what charging straight gained against
+/// massed light artillery. Dodging that times itself to shells fired at the unit is for later.
+const WEAVE: f64 = 0.0;
 /// Below this share of its health, a micro unit pulls back.
 const PULL_BACK_SHARE: f64 = 0.3;
 
@@ -62,14 +68,20 @@ pub struct DuelResult {
 /// Each side's units have `health[team]` times their health, so that a break-even can be found
 /// smoothly; whole unit counts would make it jump.
 pub fn duel(db: &Arc<BlueprintDb>, blue: Side, red: Side, health: [f64; 2]) -> DuelResult {
+    duel_in(db, blue, red, health, LAYOUTS[0])
+}
+
+/// A duel in one starting layout: `(extra gap, Red's sideways offset)`.
+fn duel_in(db: &Arc<BlueprintDb>, blue: Side, red: Side, health: [f64; 2], layout: (i32, i32)) -> DuelResult {
     let config = SimConfig { map_units: MAP_UNITS, terrain: TerrainStyle::Flat, fog_of_war: false, ..SimConfig::default() };
     let mut world = SimWorld::new(config, 1);
     world.blueprints = Arc::clone(db);
     let middle = MAP_UNITS / 2;
-    let (west, east) = (middle - START_GAP / 2, middle + START_GAP / 2);
-    let blue_ids = spawn_group(&mut world, blue, Team::Blue, west, -1);
-    let red_ids = spawn_group(&mut world, red, Team::Red, east, 1);
-    let homes = [west - START_GAP / 2, east + START_GAP / 2];
+    let gap = START_GAP + layout.0;
+    let (west, east) = (middle - gap / 2, middle + gap / 2);
+    let blue_ids = spawn_group(&mut world, blue, Team::Blue, west, -1, 0);
+    let red_ids = spawn_group(&mut world, red, Team::Red, east, 1, layout.1);
+    let homes = [west - gap / 2, east + gap / 2];
     for (ids, scale) in [(&blue_ids, health[0]), (&red_ids, health[1])] {
         if scale == 1.0 {
             continue;
@@ -83,8 +95,8 @@ pub fn duel(db: &Arc<BlueprintDb>, blue: Side, red: Side, health: [f64; 2]) -> D
     }
     let goal = |x: i32| Vec2Fp::new(fp_int(x), fp_int(middle));
     world.advance_tick(&[
-        SimCommand::AttackMove { units: blue_ids.clone(), goal: goal(east + START_GAP / 2) },
-        SimCommand::AttackMove { units: red_ids.clone(), goal: goal(west - START_GAP / 2) },
+        SimCommand::AttackMove { units: blue_ids.clone(), goal: goal(east + gap / 2) },
+        SimCommand::AttackMove { units: red_ids.clone(), goal: goal(west - gap / 2) },
     ]);
     let full = |world: &SimWorld, ids: &[SimId]| ids.iter().map(|&id| worth(world, id)).sum::<f64>();
     let (blue_full, red_full) = (full(&world, &blue_ids), full(&world, &red_ids));
@@ -95,7 +107,7 @@ pub fn duel(db: &Arc<BlueprintDb>, blue: Side, red: Side, health: [f64; 2]) -> D
         if world.current_tick.is_multiple_of(10) {
             for (side, ids, enemies, home) in [(blue, &blue_ids, &red_ids, homes[0]), (red, &red_ids, &blue_ids, homes[1])] {
                 if side.tactics == Tactics::Micro {
-                    micro(&world, side, ids, enemies, home, &mut orders);
+                    micro(&world, ids, enemies, home, &mut orders);
                 }
             }
         }
@@ -115,7 +127,7 @@ pub fn duel(db: &Arc<BlueprintDb>, blue: Side, red: Side, health: [f64; 2]) -> D
 }
 
 /// This second's orders for a micro side (`Tactics::Micro`).
-fn micro(world: &SimWorld, side: Side, ids: &[SimId], enemies: &[SimId], home: i32, orders: &mut Vec<SimCommand>) {
+fn micro(world: &SimWorld, ids: &[SimId], enemies: &[SimId], home: i32, orders: &mut Vec<SimCommand>) {
     let positions: Vec<Vec2Fp> = enemies.iter().filter_map(|&id| world.unit_position(id)).map(|at| at.xy()).collect();
     if positions.is_empty() {
         return;
@@ -123,7 +135,6 @@ fn micro(world: &SimWorld, side: Side, ids: &[SimId], enemies: &[SimId], home: i
     let count = positions.len() as i32;
     let center = |pick: fn(&Vec2Fp) -> i32| positions.iter().map(pick).sum::<i32>() / count;
     let enemy = Vec2Fp::new(fp_int(center(|at| at.x.to_num())), fp_int(center(|at| at.y.to_num())));
-    let jink = world.blueprints.get(side.unit).radius.to_num::<i32>().max(4) * JINK_RADII;
     let second = (world.current_tick / 10) as i32;
     for (index, &id) in ids.iter().enumerate() {
         let Some(entity) = world.unit_entity(id) else { continue };
@@ -133,9 +144,10 @@ fn micro(world: &SimWorld, side: Side, ids: &[SimId], enemies: &[SimId], home: i
         let goal = if share < PULL_BACK_SHARE {
             Vec2Fp::new(fp_int(home), at.y)
         } else {
-            // Toward the enemy's middle, off to one side, the other side next second.
-            let side_step = if (second + index as i32) % 2 == 0 { jink } else { -jink };
-            Vec2Fp::new(enemy.x, at.y + fp_int(side_step))
+            // Toward the enemy's middle, weaving off to one side, the other side next second.
+            let ahead = (enemy.x - at.x).to_num::<f64>().abs().max(200.0);
+            let side_step = if (second + index as i32) % 2 == 0 { ahead * WEAVE } else { -ahead * WEAVE };
+            Vec2Fp::new(enemy.x, at.y + Fp::from_num(side_step))
         };
         orders.push(SimCommand::Move { units: vec![id], goal });
     }
@@ -151,12 +163,12 @@ fn worth(world: &SimWorld, id: SimId) -> f64 {
 
 /// Spawns a group in a block of up to five abreast, facing the other group, centered on `x`.
 /// `back` is the side away from the enemy, -1 for the west.
-fn spawn_group(world: &mut SimWorld, side: Side, team: Team, x: i32, back: i32) -> Vec<SimId> {
+fn spawn_group(world: &mut SimWorld, side: Side, team: Team, x: i32, back: i32, offset: i32) -> Vec<SimId> {
     let radius = world.blueprints.get(side.unit).radius.to_num::<i32>().max(4);
     let spacing = radius * if side.tactics == Tactics::Micro { 6 } else { 3 };
     let columns = side.count.clamp(1, 5) as i32;
     let rows = (side.count as i32 + columns - 1) / columns;
-    let middle = MAP_UNITS / 2;
+    let middle = MAP_UNITS / 2 + offset;
     (0..side.count as i32)
         .map(|index| {
             let (row, column) = (index / columns, index % columns);
@@ -172,9 +184,16 @@ fn spawn_group(world: &mut SimWorld, side: Side, team: Team, x: i32, back: i32) 
 /// sides alike makes a break-even's answer the same whichever unit is `a`, even where splash
 /// makes the fight stray from the square law.
 pub fn mirrored(db: &Arc<BlueprintDb>, a: Side, b: Side, h: f64) -> DuelResult {
-    let first = duel(db, a, b, [h, 1.0 / h]);
-    let second = duel(db, b, a, [1.0 / h, h]);
-    DuelResult { score: (first.score - second.score) / 2.0, seconds: (first.seconds + second.seconds) / 2.0, finished: first.finished && second.finished }
+    let (mut score, mut seconds, mut finished) = (0.0, 0.0, true);
+    for layout in LAYOUTS {
+        let first = duel_in(db, a, b, [h, 1.0 / h], layout);
+        let second = duel_in(db, b, a, [1.0 / h, h], layout);
+        score += first.score - second.score;
+        seconds += first.seconds + second.seconds;
+        finished &= first.finished && second.finished;
+    }
+    let runs = (LAYOUTS.len() * 2) as f64;
+    DuelResult { score: score / runs, seconds: seconds / runs, finished }
 }
 
 /// Where two units of equal materiel come out even.

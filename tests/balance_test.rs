@@ -48,10 +48,21 @@ fn a_break_even_is_the_same_whichever_unit_is_measured_first() {
 }
 
 #[test]
-fn a_micro_side_spreads_out_and_keeps_changing_direction() {
+fn a_micro_side_plays_differently_from_attack_moving() {
     let db = db();
     let tank = db.id("t1_medium_tank");
     let micro = Side { unit: tank, count: 6, tactics: Tactics::Micro };
     let plain = Side { unit: tank, count: 6, tactics: Tactics::AttackMove };
     assert_ne!(duel(&db, micro, plain, [1.0, 1.0]), duel(&db, plain, plain, [1.0, 1.0]), "micro changes how a duel plays out");
+}
+
+/// BALANCE.md: massed line units against massed artillery is meant to turn on micro.
+#[test]
+fn micro_is_worth_a_great_deal_against_massed_artillery() {
+    let db = db();
+    let (tank, artillery) = (db.id("t1_medium_tank"), db.id("t1_light_artillery"));
+    let plain = break_even(&db, tank, artillery, 600.0, Tactics::AttackMove);
+    let micro = break_even(&db, tank, artillery, 600.0, Tactics::Micro);
+    let gain = micro.efficiency / plain.efficiency - 1.0;
+    assert!(gain > 0.3, "spreading out and charging should be worth a lot against artillery, not {:.0}%", gain * 100.0);
 }
