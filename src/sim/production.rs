@@ -974,12 +974,11 @@ impl SimWorld {
             economy.mass_reclaimed = Res::ZERO;
             economy.energy_reclaimed = Res::ZERO;
         }
-        // Shields are paid for first, then intel, out of what is stored and coming in, and
-        // building gets the rest.
+        // Shields are paid for first, then intel, out of what is stored and coming in. Extractors
+        // and building share the rest (below).
         let upkeep = self.step_shields();
         let upkeep = self.step_intel_upkeep(upkeep);
-        let upkeep = if self.teleporting.is_empty() { upkeep } else { self.step_teleports(upkeep) };
-        let upkeep = self.pay_extractors(upkeep);
+        let mut upkeep = if self.teleporting.is_empty() { upkeep } else { self.step_teleports(upkeep) };
         let mut power_by_target: BTreeMap<(SimId, WorkKind), Fp> = BTreeMap::new();
         for index in 0..self.builders.len() {
             let (id, entity) = self.builders[index];
@@ -1020,12 +1019,13 @@ impl SimWorld {
         }
 
         // When demand exceeds supply, everything slows by the same share. A team is
-        // limited by whichever resource is scarcer, so both are spent in step.
+        // limited by whichever resource is scarcer, so both are spent in step. Extractors' energy
+        // slows by the same share as building: paid for first, as it used to be, a team whose
+        // generators had been raided spent all its energy on its extractors, had none to build
+        // generators with, and stood still for the rest of the match.
         let mut satisfaction = [Res::ONE; 2];
         for (team_index, economy) in self.economies.iter_mut().enumerate() {
             let (mass_demand, energy_demand) = demand[team_index];
-            let mass_supply = economy.mass + economy.mass_income - economy.extractor_shortfall() + economy.mass_reclaimed;
-            let energy_supply = economy.energy + economy.energy_income + economy.energy_reclaimed - upkeep[team_index];
             let share = |supply: Res, wanted: Res| {
                 if wanted <= supply || wanted == Res::ZERO {
                     Res::ONE
@@ -1033,9 +1033,15 @@ impl SimWorld {
                     (supply / wanted).clamp(Res::ZERO, Res::ONE)
                 }
             };
-            satisfaction[team_index] = share(mass_supply, mass_demand).min(share(energy_supply, energy_demand));
+            let energy_supply = (economy.energy + economy.energy_income + economy.energy_reclaimed - upkeep[team_index]).max(Res::ZERO);
+            let energy_share = share(energy_supply, economy.extractor_upkeep + energy_demand);
+            economy.extractor_efficiency = if economy.extractor_upkeep == Res::ZERO { Res::ONE } else { energy_share };
+            let extractors = economy.extractor_upkeep * economy.extractor_efficiency;
+            let mass_supply = economy.mass + economy.mass_income - economy.extractor_shortfall() + economy.mass_reclaimed;
+            satisfaction[team_index] = share(mass_supply, mass_demand).min(if energy_demand == Res::ZERO { Res::ONE } else { energy_share });
             economy.mass_demand = mass_demand;
-            economy.energy_demand = energy_demand + upkeep[team_index];
+            economy.energy_demand = energy_demand + upkeep[team_index] + economy.extractor_upkeep;
+            upkeep[team_index] += extractors;
             economy.satisfaction = satisfaction[team_index];
         }
 
@@ -1059,22 +1065,6 @@ impl SimWorld {
             economy.mass = mass.clamp(Res::ZERO, economy.mass_capacity);
             economy.energy = energy.clamp(Res::ZERO, economy.energy_capacity);
         }
-    }
-
-    /// Pays the extractors' energy, after shields, intel, and teleports, out of what is stored and
-    /// coming in. What cannot be paid slows every extractor of the team by the same share.
-    /// Returns what each team has paid, everything before included.
-    fn pay_extractors(&mut self, mut paid: [Res; 2]) -> [Res; 2] {
-        for (team, economy) in self.economies.iter_mut().enumerate() {
-            if economy.extractor_upkeep == Res::ZERO {
-                economy.extractor_efficiency = Res::ONE;
-                continue;
-            }
-            let available = (economy.energy + economy.energy_income + economy.energy_reclaimed - paid[team]).max(Res::ZERO);
-            economy.extractor_efficiency = (available / economy.extractor_upkeep).min(Res::ONE);
-            paid[team] += economy.extractor_upkeep * economy.extractor_efficiency;
-        }
-        paid
     }
 
     /// Counts down collapsed domes, and for those that are up, takes their upkeep and lets them

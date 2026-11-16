@@ -102,6 +102,35 @@ fn an_energy_stall_slows_every_extractor_alike() {
     assert!((19..=20).contains(&shown), "the bar shows what they really make, not {shown}");
 }
 
+/// Extractors wanting more energy than comes in used to be paid first, leaving building
+/// nothing: a team whose generators had been raided could never build new ones, and stood still
+/// for the rest of the match (soak, Twin Passes seed 106). Extractors and building now slow alike.
+#[test]
+fn an_energy_stall_still_lets_new_generators_be_built() {
+    let mut world = world();
+    // Twenty extractors want 4 energy a tick. One generator makes 2.
+    for index in 0..20 {
+        extractor(&mut world, 20 + index * 3, 20);
+    }
+    let generator = world.blueprints.id("power_generator");
+    world.spawn_finished_structure(generator, Team::Blue, 200, 200).unwrap();
+    let engineer = world.spawn_mobile(world.blueprints.id("t1_engineer"), Team::Blue, sim_engine::math::fp::Vec2Fp::new(fp_int(1_000), fp_int(1_000)));
+    world.advance_tick(&[SimCommand::Build { units: vec![engineer], blueprint: generator, cell_x: 52, cell_y: 52, queued: false }]);
+    let mut built = false;
+    for _ in 0..3_000 {
+        world.economies[0].energy = world.economies[0].energy.min(Res::from_num(1));
+        world.advance_tick(&[]);
+        let generators = world.units.iter().filter(|&&(id, _)| key_of(&world, id) == "power_generator" && world.unit_health(id).is_some()).count();
+        let finished = world.units.iter().filter(|&&(id, entity)| key_of(&world, id) == "power_generator" && world.ecs.get::<&sim_engine::sim::components::Construction>(entity).is_err()).count();
+        if generators >= 2 && finished >= 2 {
+            built = true;
+            break;
+        }
+    }
+    assert!(built, "the second generator should get built, slowly, in the stall");
+    assert!(world.economies[0].extractor_efficiency < Res::ONE, "the extractors still slow down");
+}
+
 #[test]
 fn a_paused_extractor_makes_and_spends_nothing() {
     let mut world = world();
