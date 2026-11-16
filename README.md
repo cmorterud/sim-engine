@@ -4,6 +4,7 @@ A deterministic, flow-economy RTS in Rust, set in a civil war between the two ha
 
 - [`SPECIFICATION.md`](SPECIFICATION.md): the engine design and its acceptance gates
 - [`GAME_SPECIFICATION.md`](GAME_SPECIFICATION.md): the game design, with the slice's scope in §18
+- [`BALANCE.md`](BALANCE.md): how the game's numbers are made, from [`data/balance_targets.toml`](data/balance_targets.toml)
 - [`data/units.toml`](data/units.toml): unit and structure stats, which are starting values for tuning
 
 ## Play

@@ -1,0 +1,88 @@
+# Balance targets (BALANCE.md), draft 1, 2026-11-15.
+#
+# These are this game's own design intent, written as numbers the balance harness can check. They
+# are not measured from any other game. Everything in data/units.toml is to be derived from them,
+# from the cost model, and from tuning runs, never seeded from another game's values.
+#
+# Scale, unchanged: 10 ticks a second, 20 map units to a terrain cell, speeds in map units a tick.
+
+[decisions]
+# The pace of the large-scale RTS this game succeeds, expressed as the targets below.
+pace = "like the inspiration"
+# Fights are decided by position and composition. Micro can win an edge in a pinch, such as against
+# a larger force, but is never needed to play well, and matters a little less than in the
+# inspiration.
+micro = "light"
+# Map scale, engine units, sight, and ranges stay as they are, so maps and the AI keep working.
+scale = "keep"
+
+# The unit everything else is measured against: the T1 Medium Tank, the plainest line unit.
+[anchor]
+unit = "t1_medium_tank"
+materiel = 60
+energy = 300
+# At a T1 land factory alone.
+build_seconds = 15
+health = 360
+# Damage a second, every shot landing. A tank kills a copy of itself in 12 seconds.
+dps = 30
+range = 400
+# Crosses a 10 km map, 10,240 units, in about three minutes.
+speed = 6.0
+vision = 480
+
+[pace]
+# Minutes, AI against AI of equal skill.
+match_minutes_median = 30
+match_minutes_range = [20, 40]
+first_t2_minute = [7, 10]
+first_t3_minute = [16, 22]
+first_experimental_minute = [28, 38]
+# Seconds for two equal-materiel armies of ten line units of a tier to fight to a finish.
+fight_seconds_t1 = [20, 40]
+fight_seconds_t2 = [25, 45]
+fight_seconds_t3 = [30, 55]
+
+[tiers]
+# Each tier's line unit costs this much more than the last tier's.
+cost_multiplier = [2.5, 3.5]
+# And is this much stronger per materiel (health times damage a second, per materiel squared,
+# square-rooted): higher tiers win by concentration, not by making lower tiers pointless.
+efficiency_multiplier = [1.2, 1.5]
+
+[micro]
+# Light micro. A line weapon's shell reaches its full range within this many seconds, so that
+# dodging by walking sideways is a small edge.
+line_flight_seconds_max = 0.8
+# The share of a line weapon's shots at its full range that a target walking sideways at full
+# speed avoids: by the target's weight class.
+dodge_share_heavy_max = 0.05
+dodge_share_line_max = 0.15
+dodge_share_light_max = 0.35
+# Within a tier, line units' ranges differ by no more than this share, so that kiting belongs to
+# the roles built for it (skirmishers and artillery), not to every matchup.
+line_range_spread_max = 0.10
+# A skirmisher outranges what it counters by at least this share, and moves at least this share
+# of its speed.
+skirmisher_range_edge_min = 0.20
+skirmisher_speed_share_min = 0.90
+# The extra effective strength scripted micro (focus fire, pulling damaged units back) gives a
+# force over plain attack-moving: worth it in a pinch, never decisive on its own.
+micro_gain = [0.10, 0.25]
+
+[counters]
+# In an equal-materiel fight, the share of its army a designed winner keeps.
+winner_survivors = [0.40, 0.70]
+# A matchup meant to be even ends within this margin of surviving shares.
+even_margin = 0.15
+# One that depends on micro, within this.
+micro_margin = 0.25
+
+[strategy]
+# AI strategy variants (T2 rush, T1 spam, air-heavy, naval-heavy) each win within their timing
+# windows and lose outside them, and none wins more than this share over all.
+win_rate_max = 0.55
+# Mirror matches stay fair: Blue's share of wins, by the soak's binomial test.
+mirror_p_min = 0.05
+# After 15 minutes, T1 units are still at least this share of units built: they stay useful.
+t1_share_after_15_min = 0.15
