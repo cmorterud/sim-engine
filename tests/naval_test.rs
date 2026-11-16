@@ -184,7 +184,7 @@ fn a_cruiser_shoots_down_missiles_fired_at_it() {
         world.advance_tick(&[]);
         intercepted += world.snapshot_for(Some(Team::Blue)).interceptions.len();
     }
-    assert!(intercepted > 0, "the Phalanx should stop some of the missiles");
+    assert!(intercepted > 0, "the close-in gun should stop some of the missiles");
     let _ = red;
 }
 

@@ -49,7 +49,7 @@ impl Slot {
 }
 
 /// A personal teleporter (GAME_SPECIFICATION.md §2.1): its charge costs energy and time that
-/// grow with the distance, as in Forged Alliance Forever.
+/// grow with the distance, as in FAF.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct TeleporterDef {
     /// Energy for a jump of no distance.
@@ -146,7 +146,7 @@ pub enum WeaponKind {
 }
 
 /// What a structure gives the finished structures of its team that touch it (GAME_SPECIFICATION.md
-/// §3.2), as in Forged Alliance Forever's `AdjacencyBuffs.lua`.
+/// §3.2), as in FAF's `AdjacencyBuffs.lua`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum AdjacencyGiver {
     T1Power,
@@ -431,7 +431,7 @@ pub struct Blueprint {
     pub factory_kind: Option<FactoryKind>,
     /// A support factory: cheaper, and it needs a headquarters of its kind and tier.
     pub support: bool,
-    /// An field workshop: a structure whose build power helps whatever friendly
+    /// A field workshop: a structure whose build power helps whatever friendly
     /// construction, production, or repair is within its build range, by itself.
     pub assists: bool,
     pub adjacency_giver: Option<AdjacencyGiver>,

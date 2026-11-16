@@ -44,7 +44,7 @@ pub struct Economy {
     pub extractor_income: Res,
     pub extractor_upkeep: Res,
     /// The share of that energy paid this tick, from 0 to 1. Extractors make that share of
-    /// their mass, so an energy stall slows them all alike, as in the original.
+    /// their mass, so an energy stall slows them all alike.
     pub extractor_efficiency: Res,
     /// Everything reclaimed so far, for the economy panel. Nothing in the simulation reads it,
     /// so it is left out of the state hash.
@@ -1201,7 +1201,7 @@ impl SimWorld {
                 }
             }
             TaskStep::MoveTo(goal) => {
-                // An field workshop cannot go to work out of its reach, so it lets it go.
+                // A field workshop cannot go to work out of its reach, so it lets it go.
                 if self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.is_structure) {
                     self.ecs.get::<&mut Builder>(entity).expect("builder list only holds builders").tasks.remove(0);
                     return;
@@ -1465,7 +1465,7 @@ impl SimWorld {
     }
 
     /// Whether a team's builders can capture this unit: an enemy's, finished, and not a
-    /// commander or field rig, which cannot be captured, as in the original.
+    /// commander or field rig, which cannot be captured.
     fn capturable(&self, entity: hecs::Entity, team: Team) -> bool {
         let theirs = self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team != team);
         let finished = self.ecs.get::<&Construction>(entity).is_err();

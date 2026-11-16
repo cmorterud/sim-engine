@@ -18,6 +18,21 @@ env:
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
+  # Other games' names appear only in PROVENANCE.md (GAME_SPECIFICATION.md §20). This fails on any
+  # entry of the deny-list anywhere else, matched as whole words in any case.
+  provenance:
+    name: Provenance names
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: No other games' names outside PROVENANCE.md
+        run: |
+          if git grep -n -i -w -E -f .github/denylist.txt -- . ':!PROVENANCE.md' ':!.github/denylist.txt'; then
+            echo "::error::Names on .github/denylist.txt belong only in PROVENANCE.md"
+            exit 1
+          fi
+
   # Compiling takes nearly all of the time, and each profile compiles everything separately,
   # so each job builds for itself and keeps its own cache instead of sharing artifacts.
   build-and-test:

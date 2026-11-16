@@ -144,7 +144,7 @@ pub enum Shape {
     HeavyPointDefense,
     /// A wall section: a block with crenellations along the top.
     Wall,
-    /// An field workshop: a pad with a tower, and a drone hovering over it.
+    /// A field workshop: a pad with a tower, and a drone hovering over it.
     FieldWorkshop,
     /// An air transport, pointing along +Y: a long body with a cargo bay under it and a fan
     /// in a ring at each side.

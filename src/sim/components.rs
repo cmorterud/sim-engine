@@ -357,7 +357,7 @@ pub struct Homing {
     pub underwater: bool,
 }
 
-/// A falling bomb. Bombs fall at the original's gravity, which is stronger than that of shells.
+/// A falling bomb. Bombs fall at FAF's gravity, which is stronger than that of shells.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Falling;
 
@@ -595,7 +595,7 @@ pub struct Intel {
 }
 
 /// How far along an enemy capture of this unit is. Gone if nobody works on it for a tick, so a
-/// capture that stops starts over, as in the original.
+/// capture that stops starts over.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct BeingCaptured {
     /// From 0 to 1.

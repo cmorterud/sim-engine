@@ -66,7 +66,7 @@ pub enum MatchResult {
     Draw,
 }
 
-/// An Discharge shell that landed, where, and on whose dome if it struck one.
+/// A Discharge shell that landed, where, and on whose dome if it struck one.
 #[derive(Copy, Clone, Debug)]
 struct DischargeImpact {
     def: super::blueprints::DischargeDef,
@@ -2087,7 +2087,7 @@ impl SimWorld {
                 }
             }
 
-            // An Discharge order takes over the gun, until it fires or its target is gone.
+            // A Discharge order takes over the gun, until it fires or its target is gone.
             let discharge_target = discharge_order.map(|order| order.target);
             if let Some(target) = discharge_target {
                 if locate(target).is_none() {

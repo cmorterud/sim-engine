@@ -1,5 +1,5 @@
 //! Capture (GAME_SPECIFICATION.md §5.3): builders take over enemy units and structures, in half
-//! the target's build time at their build power, for its energy cost, as in the original.
+//! the target's build time at their build power, for its energy cost.
 
 use sim_engine::math::fp::{fp_int, Fp, Vec2Fp};
 use sim_engine::sim::blueprints::Res;

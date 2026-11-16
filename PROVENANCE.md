@@ -1,44 +1,101 @@
 # Provenance
 
-This is a non-commercial, open-source game, under the GNU General Public License version 3 (`LICENSE`), inspired by *Supreme Commander: Forged Alliance*. It is
-its own game: its own engine, written from scratch, and, before any public release, its own names
-and look (GAME_SPECIFICATION.md §20). This file records what was taken from elsewhere, so that it
-stays deliberate and easy to replace.
+sim-engine is a free, open-source game under the GNU General Public License version 3
+(`LICENSE`). It is a spiritual successor to *Supreme Commander: Forged Alliance*, and is not
+affiliated with or endorsed by its makers or by Forged Alliance Forever (FAF). It is its own game:
+its own engine, written from scratch, and its own setting, names, and look (GAME_SPECIFICATION.md
+§1.1, §14, §20). This file records what came from elsewhere and what was replaced, so that it stays
+deliberate, honest, and easy to check. It is the only file that names other games: a CI check
+fails on the names in `.github/denylist.txt` anywhere else.
 
 ## What the game never contains
 
-* No code from *Forged Alliance*, Forged Alliance Forever (FAF), or any other game. Everything here
-  is written for this project.
-* No art, models, textures, sounds, maps, scripts, or blueprint files from either. Maps from other
-  games are only ever loaded from a player's own files, and never shipped or committed.
+* No code from *Forged Alliance*, FAF, or any other game. Everything here is written for this
+  project.
+* No art, models, textures, sounds, maps, scripts, or blueprint files from either, and nothing that
+  downloads or reads them (see Maps from other games).
+
+## Remediation, 2026-11-15
+
+The game was first built with *Forged Alliance*'s names and four factions as working references,
+and with starting numbers from FAF. On 2026-11-15, in commits `e805813`, `4a2571b`, `a03ab6e`, and
+the documentation change that followed them:
+
+* The four factions, their lore, and their named experimentals and units were removed from
+  GAME_SPECIFICATION.md. In their place is one original faction, the Frontier Garrison Corps, in an
+  original setting, with a second faction and experimentals to be designed later from the game's
+  own roles, not from another game's units.
+* Every display name, blueprint id, and code identifier taken from *Forged Alliance* was replaced
+  (see Names, below), and the map importer and map downloader were removed.
+* Starting numbers are next: they are to be re-derived from this project's own cost model,
+  targets, and tuning runs, after which "Starting numbers" below gives way to a dated note. Until
+  then, comments in the unit data and code still say "FAF's" next to the values that came from
+  FAF, so that the record stays accurate, and no new value is taken from FAF.
 
 ## Starting numbers
 
-To save a great deal of early playtesting, unit and enhancement numbers start from FAF's published
-balance, taken from its unit blueprint files in <https://github.com/FAForever/fa>. They are a
-starting point, not something kept in step with FAF: they change freely with this game's own
-testing. `data/units.toml` notes where a value came from, and how it was scaled, next to the value.
-The original's map unit is 20 of ours, one terrain cell: its 10 km map, 512 across, is our 10 km
-skirmish map, 10,240 across. Every range and radius uses that scale: sight, intel, shields,
-weapon ranges and blasts, missile defense, and build ranges, the slice's own units included.
-Movement speeds, projectile speeds, and unit sizes keep the slice's values for now.
+To save early playtesting, unit and enhancement numbers started from FAF's published balance,
+taken from its unit blueprint files in <https://github.com/FAForever/fa>. They change freely with
+this game's own testing and are not kept in step with FAF. `data/units.toml` notes where a value
+came from, and how it was scaled, next to the value. FAF's map unit is 20 of ours, one terrain
+cell, and every range and radius uses that scale; speeds are doubled, for ticks.
 
 Taken so far:
 
 * Missiles and their defenses (§8): stock limits, the nuclear blast's two rings, and the tactical
   missile's build time, scaled to our launcher's cost.
-* The commander's field enhancements (§2.1), and the support commander, its gateway, and its
-  enhancements (§2.2), from FAF's UEF units, with the support commander's teleporter and Rapid
+* The commander's field enhancements (§2.1), and the field rig, the rig yard, and the field rig's
+  enhancements (§2.2), from FAF's UEF units, with the field rig's Orbital Redeploy and Rapid
   Fabricator from its Aeon one.
 * How one enhancement's effects replace another's of the same kind, as FAF's commander scripts do.
-* Mass extractor tiers, mass fabricators, and the hydrocarbon power plant (§3), from FAF's UEF units.
-* The T1 air factory, aircraft, and anti-air (§10), from FAF's UEF units, with generic names. How
-  far a bomb is let go short of its target is worked out here from its fall.
-* The rest of the UEF's non-experimental units and structures: the Land Scout, Medium Tank, Gatling
-  Bot, Mobile Shield Generator, Field Engineer, Heavy and Armored Assault Bots, Torpedo Boat, Heavy
-  Point Defense, Heavy Shield Generator, Wall Section, and Engineering Stations, from FAF's UEF
-  units, with generic names. The stations' drones are folded into the station's own build power.
-* The three air transports and their room by size class, from FAF's UEF units, with generic names.
+* Materiel extractor tiers, materiel fabricators, and the geothermal plant (§3), from FAF's UEF
+  units.
+* The air factories, aircraft, and anti-air (§10), from FAF's UEF units. How far a bomb is let go
+  short of its target is worked out here from its fall.
+* The rest of the UEF's non-experimental units and structures: the Land Scout, Medium Tank,
+  Grenadier Walker, Mobile Shield Generator, Combat Engineer, Heavy and Siege Walkers, Torpedo Boat,
+  Heavy Point Defense, Heavy Shield Generator, Wall Section, and Field Workshops. The workshops'
+  drones are folded into the workshop's own build power.
+* The three air transports and their room by size class, from FAF's UEF units.
+* Veterancy, wreckage, turn rates, firing randomness, and missile speeds (§6, §11, §18.4), from
+  FAF's rules and blueprints.
+
+## Names
+
+Replaced on 2026-11-15, in display names, ids, code, tests, and documentation:
+
+| Was (from *Forged Alliance*) | Now |
+| --- | --- |
+| Armored Command Unit (ACU) | Command Rig |
+| Overcharge | Discharge |
+| Support Commander (sACU) | Field Rig |
+| Quantum Gateway | Rig Yard |
+| Quantum teleportation, Personal Teleporter | Orbital Redeploy |
+| Hydrocarbon Power Plant | Geothermal Plant |
+| Omni Sensor, omni | Deep Scan Array, deep scan |
+| Engineering Station | Field Workshop |
+| Air Staging Facility | Airfield |
+| Anti-Nuke Interceptor | Strategic Interceptor |
+| Amphibious Tank | Assault Hovercraft |
+| Gatling Bot | Grenadier Walker |
+| Shield Boat | Escort Corvette |
+| Light, Heavy, and Armored Assault Bots | Light, Heavy, and Siege Walkers |
+| Field Engineer | Combat Engineer |
+| Mass | Materiel, in everything players read |
+| Right arm, left arm, back | Weapons, fabrication, and systems bays |
+| T2 and T3 Engineering Suites | T2 and T3 Fabrication Packs |
+| Nano-Repair System | Damage Control, moved to the systems bay |
+| Resource Allocation System | Onboard Reactor |
+| Personal Stealth, Personal Cloak | Signature Suppression, Thermal Camouflage |
+| Personal Shield, Shield Generator Field | Field Shield, Area Shield |
+| Heavy Plasma Refractor, Energy Accelerator | Long Barrel, Capacitor Bank |
+| Enhanced Sensor System | Sensor Mast, moved to the systems bay |
+| Smart Charge, Phalanx | anti-torpedo charge, close-in gun |
+| UEF, Cybran Nation, Aeon Illuminate, Seraphim, and their experimentals | Frontier Garrison Corps (Charter and Accord); others later |
+
+Kept as ordinary words of the genre or of the military: Rapid Fabricator, Radar Jammer, Tactical
+and Strategic Missile Launcher and Defense, Mobile Shield Generator, and the tank, artillery, ship,
+and aircraft classes.
 
 ## Fonts
 
@@ -56,24 +113,13 @@ game depends on nothing of the original's.
 ## Bundled maps
 
 `highland` and `twin_passes` (`src/sim/maps.rs`) are this game's own, generated by its own code
-from fixed seeds. Their ideas come from community maps for the original, Hilly Plateau's rolling
-plateau and rock fields and Dual Gap's two crossings, but nothing of those maps' data is used.
+from fixed seeds. Their ideas come from community maps for *Forged Alliance*, Hilly Plateau's
+rolling plateau and rock fields and Dual Gap's two crossings, but nothing of those maps' data is
+used.
 
 ## Formulas
 
-* Teleport cost and charge time (`src/sim/enhancements.rs`): a flat cost plus half the distance to
-  the power 2.1, and a delay plus a hundred-thousandth of it, each capped. The formula comes from
-  FAF's `lua/shared/teleport.lua`, Copyright (c) 2022 clyf, under the MIT license. No code was
-  copied: the formula is worked out here in whole numbers.
-
-## Names to replace before release
-
-Ids in code and data are neutral (`acu`, `support_commander`, `quantum_gateway`). Display names
-that come from *Forged Alliance* and must change before any public release:
-
-* Units and structures: Armored Command Unit, Support Commander, Quantum Gateway.
-* Enhancements: Resource Allocation System, Nano-Repair System, Heavy Plasma Refractor, Energy
-  Accelerator, Rapid Fabricator, Enhanced Sensor System, Shield Generator Field.
-* The faction names and iconic units in GAME_SPECIFICATION.md §2 and §14.
-
-New content uses neutral names from the start.
+* Orbital Redeploy's cost and charge time (`src/sim/enhancements.rs`): a flat cost plus half the
+  distance to the power 2.1, and a delay plus a hundred-thousandth of it, each capped. The formula
+  comes from FAF's `lua/shared/teleport.lua`, Copyright (c) 2022 clyf, under the MIT license. No
+  code was copied: the formula is worked out here in whole numbers.

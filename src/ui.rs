@@ -2735,7 +2735,7 @@ const fn is_walk(kind: MarkerKind) -> bool {
 }
 
 /// Works out when each of the selection's units reaches the end of each of its walking legs,
-/// at its top speed along straight lines: the same estimate as the original's, which ignores
+/// at its top speed along straight lines: the usual estimate, which ignores
 /// detours and stops along the way. Building and other work end the estimate, since how long
 /// they take is not known here.
 pub fn estimate_arrivals(legs: &mut [TrailLeg], snapshot: &SimSnapshot, db: &BlueprintDb) {
@@ -2761,7 +2761,7 @@ pub fn estimate_arrivals(legs: &mut [TrailLeg], snapshot: &SimSnapshot, db: &Blu
     }
 }
 
-/// An arrival time as the original shows it: minutes and seconds.
+/// An arrival time in minutes and seconds.
 pub fn eta_text(seconds: f64) -> String {
     let whole = seconds.round() as i64;
     format!("ETA {}:{:02}", whole / 60, whole % 60)

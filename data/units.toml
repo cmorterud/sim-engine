@@ -19,7 +19,7 @@ speed = "3.4"
 turn_rate = 90
 radius = 16
 vision = 520
-# As in the original, it walks the seabed too.
+# It walks the seabed too.
 movement = "seabed"
 build_power = 10
 build_range = 200
@@ -47,7 +47,7 @@ energy = 260
 build_time = 260
 health = 150
 speed = "3.8"
-# As in the original, engineers float over water, so they can build out on it.
+# Engineers float over water, so they can build out on it.
 movement = "hover"
 turn_rate = 180
 turn_radius = 10
@@ -213,7 +213,7 @@ shield = { radius = 260, health = 5000, regen = 50, recharge_seconds = 30, upkee
 
 # Missiles (GAME_SPECIFICATION.md §8). The launchers and defenses are tier 2 and 3: T2 and T3
 # engineers build them, and so does the commander once it has the engineering upgrade. A launcher
-# builds its missiles, keeps up to its stock, and fires them only on order, as in the original.
+# builds its missiles, keeps up to its stock, and fires them only on order.
 adjacency_size = 12
 
 [[unit]]
@@ -273,7 +273,7 @@ vision = 560
 build_power = 1500
 builds = ["strategic_missile"]
 max_stock = 5
-# The original's two rings: 70,000 within 30 of its units and 500 within 40, at twenty of ours to one.
+# FAF's two rings: 70,000 within 30 of its units and 500 within 40, at twenty of ours to one.
 weapon = { range = 20000, reload_ticks = 100, projectile_speed = 25, damage = 500, splash_radius = 800, inner_damage = 70000, inner_radius = 600, kind = "strategic_missile", cruise_height = 500 }
 
 [[unit]]
@@ -343,7 +343,7 @@ energy = 650
 build_time = 650
 health = 400
 speed = "3.8"
-# As in the original, engineers float over water, so they can build out on it.
+# Engineers float over water, so they can build out on it.
 movement = "hover"
 turn_rate = 150
 turn_radius = 10
@@ -363,7 +363,7 @@ energy = 1560
 build_time = 1560
 health = 800
 speed = "3.8"
-# As in the original, engineers float over water, so they can build out on it.
+# Engineers float over water, so they can build out on it.
 movement = "hover"
 turn_rate = 120
 turn_radius = 10
@@ -425,8 +425,7 @@ stealth_field = 480
 jammer = { radius = 620, decoys = 8 }
 upkeep = 25
 
-# Field rigs (GAME_SPECIFICATION.md §2.2), with Forged Alliance Forever's numbers for its
-# UEF ones, and its Rig Yard. A field rig is a T3 engineer with heavy armor, a gun,
+# Field rigs (GAME_SPECIFICATION.md §2.2), with FAF's numbers for them and the Rig Yard. A field rig is a T3 engineer with heavy armor, a gun,
 # and income of its own, and its death does not end the match.
 adjacency_size = 12
 
@@ -471,7 +470,7 @@ energy_storage = 500
 death_explosion = { damage = 1000, radius = 200 }
 deep_scan = 320
 
-# Mass extractor upgrades, with FAF's UEF numbers. Each is reached only by upgrading the one
+# Mass extractor upgrades, with FAF's numbers. Each is reached only by upgrading the one
 # below in place, which keeps making mass at its old rate meanwhile: its cost and build time here
 # are the upgrade's, built at the lower tier's own build power.
 [[unit]]
@@ -507,8 +506,8 @@ requires_deposit = true
 mass_income = 18
 upkeep = 54
 
-# Mass fabrication and geothermal power (GAME_SPECIFICATION.md §3.3-3.4), with FAF's UEF numbers.
-# The original's fabricators are T2 and T3, and its plant makes 5 generators' worth of energy.
+# Mass fabrication and geothermal power (GAME_SPECIFICATION.md §3.3-3.4), with FAF's numbers.
+# FAF's fabricators are T2 and T3, and its plant makes 5 generators' worth of energy.
 adjacency = "t3_extractor"
 
 [[unit]]
@@ -559,7 +558,7 @@ mass_income = 16
 upkeep = 1500
 death_explosion = { damage = 5000, radius = 200, only_while_running = true }
 
-# Aircraft (GAME_SPECIFICATION.md §10), with Forged Alliance Forever's numbers for its T1 aircraft.
+# Aircraft (GAME_SPECIFICATION.md §10), with FAF's numbers for its T1 aircraft.
 # An aircraft's speed is its top air speed. `flight` sets how high it flies, how fast it turns,
 # how far past its target it flies before turning for another pass, and its seconds of fuel.
 adjacency = "t3_fabricator"
@@ -629,7 +628,7 @@ radar = 880
 flight = { elevation = 280, turn_rate = 90, break_off = 640, fuel = 400 }
 weapon = { kind = "bomb", range = 800, reload_ticks = 50, projectile_speed = 20, damage = 350, splash_radius = 60 }
 
-# Two shots a volley in the original, one shot of twice the damage here.
+# Two shots a volley in FAF, one shot of twice the damage here.
 [[unit]]
 id = "t1_aa_turret"
 name = "Anti-Air Turret"
@@ -724,7 +723,7 @@ radar = 1920
 deep_scan = 560
 flight = { elevation = 440, turn_rate = 80, fuel = 1500 }
 
-# Two beams of 250 a second in the original, one shot of 500 here.
+# Two beams of 250 a second in FAF, one shot of 500 here.
 [[unit]]
 id = "t3_air_superiority"
 name = "Air Superiority Fighter"
@@ -778,7 +777,7 @@ weapon = { range = 500, reload_ticks = 4, projectile_speed = 70, damage = 100, s
 extra_weapons = [{ range = 880, reload_ticks = 13, projectile_speed = 90, damage = 16, targets = "air" }]
 
 # Flak bursts on an aircraft and hits every enemy aircraft around it. Its shells fly at 90, not
-# the original's 70, so that they can catch the fastest aircraft, which steer here instead of
+# FAF's 70, so that they can catch the fastest aircraft, which steer here instead of
 # being led.
 [[unit]]
 id = "t2_flak"
@@ -793,7 +792,7 @@ footprint = 1
 vision = 480
 weapon = { range = 1000, reload_ticks = 8, projectile_speed = 90, damage = 125, splash_radius = 70, targets = "air", turn_rate = 180, spread = 40 }
 
-# A volley of six missiles of 200 in the original, one of 1,200 here.
+# A volley of six missiles of 200 in FAF, one of 1,200 here.
 [[unit]]
 id = "t3_sam"
 name = "SAM Launcher"
@@ -807,7 +806,7 @@ footprint = 1
 vision = 560
 weapon = { range = 1200, reload_ticks = 36, projectile_speed = 90, damage = 1200, splash_radius = 30, targets = "air", turn_rate = 180 }
 
-# Two shells of 36 a volley in the original, one of 72 here, and at 90 for the reason above.
+# Two shells of 36 a volley in FAF, one of 72 here, and at 90 for the reason above.
 [[unit]]
 id = "t2_mobile_flak"
 name = "Mobile Flak"
@@ -824,7 +823,7 @@ radius = 10
 vision = 400
 weapon = { range = 800, reload_ticks = 5, projectile_speed = 90, damage = 72, splash_radius = 80, targets = "air", turn_rate = 180, spread = 50 }
 
-# Support factories (GAME_SPECIFICATION.md §15), as in Forged Alliance Forever: T2 and T3 builders
+# Support factories (GAME_SPECIFICATION.md §15), as in FAF: T2 and T3 builders
 # build them for less than an upgrade costs, but only while the team has a headquarters, a factory
 # upgraded to that tier, of the same kind. Without one, they build nothing above T1, and a T2
 # support factory cannot upgrade to T3 without a T3 headquarters.
@@ -943,7 +942,7 @@ upkeep = 150
 build_power = 20
 upgrades_to = "deep_scan_array"
 
-# Three shells of 70 a volley in the original, one of 210 here.
+# Three shells of 70 a volley in FAF, one of 210 here.
 [[unit]]
 id = "t2_point_defense"
 name = "Point Defense (T2)"
@@ -987,7 +986,7 @@ vision = 300
 energy_storage = 10000
 adjacency = "energy_storage"
 
-# Artillery (GAME_SPECIFICATION.md §7), with FAF's UEF numbers. Artillery cannot hit what is closer
+# Artillery (GAME_SPECIFICATION.md §7), with FAF's numbers. Artillery cannot hit what is closer
 # than its min_range, its shells land up to its spread from where they are aimed, and an
 # installation's shot costs energy_per_shot, paid when it fires. Generators beside an installation
 # cut what a shot costs and the time between shots.
@@ -1053,7 +1052,7 @@ flight = { elevation = 360, turn_rate = 100, break_off = 400, fuel = 500 }
 weapon = { kind = "bomb", range = 1200, reload_ticks = 100, projectile_speed = 30, damage = 1600, splash_radius = 60 }
 extra_weapons = [{ range = 600, reload_ticks = 10, projectile_speed = 180, damage = 150, targets = "air" }]
 
-# Naval units (GAME_SPECIFICATION.md §10), with FAF's UEF numbers. The naval factory goes on water
+# Naval units (GAME_SPECIFICATION.md §10), with FAF's numbers. The naval factory goes on water
 # deep enough for ships, and its ships sail only there.
 [[unit]]
 id = "naval_factory"
@@ -1181,7 +1180,7 @@ radius = 20
 vision = 640
 radar = 800
 sonar = 720
-# FAF's Smart Charge: it shoots down a torpedo within 600 every 10 seconds.
+# An anti-torpedo charge, FAF's numbers: it shoots down a torpedo within 600 every 10 seconds.
 torpedo_defense = { range = 600, reload_ticks = 100 }
 movement = "naval"
 weapon = { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 610, splash_radius = 20, turn_rate = 90, spread = 7 }
@@ -1192,7 +1191,7 @@ extra_weapons = [
 ]
 
 # Cruise missiles it fires on its own, a gauss cannon, SAMs (four of 250 a volley, as one), and
-# a Phalanx that shoots down tactical missiles.
+# a close-in gun that shoots down tactical missiles.
 [[unit]]
 id = "t2_cruiser"
 name = "Cruiser"
@@ -1220,7 +1219,7 @@ extra_weapons = [
 missile_defense = { kind = "tactical", range = 1200, reload_ticks = 10 }
 
 # Three gauss turrets of three shells of 1,000 each, four twin anti-air guns as one (each fires
-# both muzzles at once, 12 a shell, every 1.7 seconds), and two Phalanxes, as one.
+# both muzzles at once, 12 a shell, every 1.7 seconds), and two close-in guns, as one.
 [[unit]]
 id = "t3_battleship"
 name = "Battleship"
@@ -1246,7 +1245,7 @@ extra_weapons = [
 ]
 missile_defense = { kind = "tactical", range = 620, reload_ticks = 10 }
 
-# Two dual plasma cannons, torpedoes, a Phalanx, and an anti-torpedo charge.
+# Two dual plasma cannons, torpedoes, a close-in gun, and an anti-torpedo charge.
 [[unit]]
 id = "t3_battlecruiser"
 name = "Battlecruiser"
@@ -1274,7 +1273,7 @@ missile_defense = { kind = "tactical", range = 620, reload_ticks = 20 }
 
 # Under the sea (GAME_SPECIFICATION.md §10). A submarine sails submerged, where only torpedoes
 # reach it and only sonar finds it. Torpedoes steer to ships and submarines, and hit nothing
-# else; they run at 30, faster than the original's launch speed, as they steer here rather than
+# else; they run at 30, faster than FAF's launch speed, as they steer here rather than
 # speed up, and slower ones could never catch a ship.
 [[unit]]
 id = "t1_attack_sub"
@@ -1378,7 +1377,7 @@ vision = 400
 sonar = 720
 weapon = { range = 1200, reload_ticks = 40, projectile_speed = 30, damage = 720, targets = "naval" }
 
-# FAF's hovercraft: it hovers over land and water alike. Its riot gun fires both muzzles at once.
+# FAF's numbers for its hover tank: it hovers over land and water alike. Its riot gun fires both muzzles at once.
 [[unit]]
 id = "t2_assault_hovercraft"
 name = "Assault Hovercraft"
@@ -1396,7 +1395,7 @@ vision = 360
 movement = "hover"
 weapon = { range = 360, reload_ticks = 3, projectile_speed = 120, damage = 27, turn_rate = 180 }
 
-# A dome that moves with it, which on the water covers 660 around it: the original's sphere of
+# A dome that moves with it, which on the water covers 660 around it: FAF's sphere of
 # 1,200 sunk 1,000 below the surface.
 [[unit]]
 id = "t2_escort_corvette"
@@ -1415,7 +1414,7 @@ vision = 640
 movement = "naval"
 shield = { radius = 660, health = 5500, regen = 80, recharge_seconds = 30, upkeep = 100 }
 
-# FAF's Ace. It builds nuclear missiles as a strategic missile launcher does, on order or one after
+# FAF's numbers. It builds nuclear missiles as a strategic missile launcher does, on order or one after
 # another, up to three, and fires one only on order. Its cruise missiles it fires on its own at
 # whatever is in range, and needs none built. It fires both from under the water.
 [[unit]]
@@ -1440,7 +1439,7 @@ max_stock = 3
 weapon = { range = 8200, reload_ticks = 100, projectile_speed = 25, damage = 500, splash_radius = 800, inner_damage = 70000, inner_radius = 600, kind = "strategic_missile", cruise_height = 500 }
 extra_weapons = [{ kind = "tactical_missile", automatic = true, range = 5120, reload_ticks = 100, projectile_speed = 32, damage = 2000, splash_radius = 60, cruise_height = 60 }]
 
-# FAF's Flapjack: it fires cruise missiles on its own at what is in range, as artillery does,
+# FAF's numbers: it fires cruise missiles on its own at what is in range, as artillery does,
 # and cannot hit what is closer than 240. Two of 300 a volley, as one every 5 seconds.
 [[unit]]
 id = "t2_mobile_missile_launcher"
@@ -1458,8 +1457,8 @@ radius = 11
 vision = 360
 weapon = { kind = "tactical_missile", automatic = true, artillery = true, min_range = 240, range = 1300, reload_ticks = 50, projectile_speed = 40, damage = 300, splash_radius = 20, cruise_height = 40 }
 
-# Field enhancements (GAME_SPECIFICATION.md §2.1), with Forged Alliance Forever's numbers for its
-# commander. A commander has three slots, and one enhancement in each: a new one replaces what is
+# Field enhancements (GAME_SPECIFICATION.md §2.1), with FAF's numbers for its
+# commander. A commander has three bays, and one enhancement in each: a new one replaces what is
 # there, unless it builds on it. Its effects are totals over the commander's own, not steps.
 [[enhancement]]
 id = "heavy_cannon"
@@ -1469,7 +1468,7 @@ slot = "weapons"
 mass = 800
 energy = 24000
 build_time = 800
-# The original's 30 range for 22, and double the damage.
+# FAF's 30 range for 22, and double the damage.
 weapon_range = 600
 weapon_damage = 140
 
@@ -1576,9 +1575,8 @@ build_time = 2800
 mass_income = 14
 energy_income = 2500
 
-# The field rig's enhancements, in §2.1's slots: weapons in the weapons bay, building and
-# sensors in the left, and utility on the back. Its teleporter and fabricator are FAF's Aeon ones,
-# since its UEF one has neither, and its engineering drone needs aircraft (§10).
+# The field rig's enhancements, in §2.1's bays: weapons, fabrication, and systems. Its redeploy
+# and fabricator take FAF's numbers for another faction's, and its engineering drone needs aircraft.
 [[enhancement]]
 id = "long_barrel"
 name = "Long Barrel"
@@ -1587,7 +1585,7 @@ slot = "weapons"
 mass = 800
 energy = 30000
 build_time = 3360
-# The original's 35 range for 25, and a blast of 2.
+# FAF's 35 range for 25, and a blast of 2.
 weapon_range = 700
 weapon_splash = 40
 
@@ -1620,7 +1618,7 @@ slot = "systems"
 mass = 600
 energy = 20000
 build_time = 3000
-# The original's 45 sight and 80 deep scan.
+# FAF's 45 sight and 80 omni.
 vision = 900
 deep_scan = 1600
 
@@ -1677,7 +1675,7 @@ build_time = 8400
 mass_income = 10
 energy_income = 1000
 
-# The rest of the UEF's land, naval, and defensive line, from FAF's blueprints with the usual
+# The rest of the land, naval, and defensive line, from FAF's blueprints with the usual
 # conversion: distances x20, speeds x2 per tick, build times and health as they are, and salvo
 # weapons as one shot at a time with the same damage a second.
 
