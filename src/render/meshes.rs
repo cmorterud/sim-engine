@@ -1016,9 +1016,11 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Glow);
             mesh.block([-0.06, 0.0, 0.32], [0.06, 0.012, 0.36]);
         }
+        // A tracer: a glowing slug along x, the way it flies, brightest at its nose.
         Shape::Shell => {
-            mesh.frustum([0.0, 0.0], [0.0, 0.5], [0.5, 0.0], 4);
-            mesh.frustum([0.0, 0.0], [0.0, -0.5], [0.5, 0.0], 4);
+            mesh.paint(Material::Glow);
+            mesh.beam([-0.5, 0.0, 0.0], [0.3, 0.0, 0.0], 0.32, 0.32);
+            mesh.beam([0.3, 0.0, 0.0], [0.5, 0.0, 0.0], 0.5, 0.5);
         }
         Shape::Missile => {
             mesh.beam([0.0, -0.5, 0.0], [0.0, 0.3, 0.0], 0.12, 0.12);

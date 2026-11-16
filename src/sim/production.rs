@@ -563,6 +563,24 @@ impl SimWorld {
                     }
                 }
                 self.push_task(&builders, task);
+                // The other mobile builders in the selection, which cannot build it, drop what they
+                // were doing and help the first that can: told to build something new, a selection
+                // builds that, and nothing else goes on being built.
+                if !*queued {
+                    if let Some(&lead) = builders.first() {
+                        let helpers: Vec<SimId> = units
+                            .iter()
+                            .copied()
+                            .filter(|id| !builders.contains(id) && !after_suite.contains(id))
+                            .filter(|id| {
+                                self.find_unit(*id).is_some_and(|(_, entity)| {
+                                    self.ecs.get::<&Builder>(entity).is_ok() && self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| !stats.is_structure)
+                                })
+                            })
+                            .collect();
+                        self.replace_tasks(&helpers, BuildTask::Assist { target: lead });
+                    }
+                }
             }
             SimCommand::MoveBuild { units, task, cell_x, cell_y } => {
                 let BuildTask::Build { blueprint, .. } = *task else {

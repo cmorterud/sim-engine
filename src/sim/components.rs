@@ -85,8 +85,42 @@ pub struct Combat {
     pub blocked: Option<(SimId, u32)>,
     /// Set by a ground attack: fire at this spot, and at nothing else, until given another order.
     pub ground_target: Option<Vec2Fp>,
+    /// The ground stops the shot at the ordered target or spot from here, so the unit walks
+    /// closer instead of firing into it.
+    pub line_blocked: bool,
+    /// While the ground hides what it was ordered to shoot: where the unit last was when it
+    /// had moved on, and that tick. One that stays put a while fires into the ground anyway,
+    /// until it moves again or has a clear shot.
+    pub closing: Option<([i32; 2], u32)>,
     /// False while a structure is under construction.
     pub enabled: bool,
+}
+
+/// How long a unit walking closer to an ordered target, for a clear shot, may go without getting
+/// closer before it fires anyway.
+pub const CLOSING_PATIENCE_TICKS: u32 = 20;
+/// In `Combat::closing`, for a unit with no way to walk closer.
+pub const NO_CLOSER: u32 = u32::MAX;
+
+impl Combat {
+    /// Notes where the unit is, as raw `Fp` bits, while the ground hides what it was ordered to
+    /// shoot, and returns whether it is still on its way to a clear shot: it has moved a unit
+    /// within the last `CLOSING_PATIENCE_TICKS`, and has not found it can get no closer.
+    pub fn still_closing(&mut self, at: [i32; 2], tick: u32) -> bool {
+        let one = 1i64 << crate::math::fp::FP_FRAC_BITS;
+        let moved = |from: [i32; 2]| {
+            let (dx, dy) = (i64::from(at[0] - from[0]), i64::from(at[1] - from[1]));
+            dx * dx + dy * dy > one * one
+        };
+        match self.closing {
+            Some((_, NO_CLOSER)) => false,
+            Some((from, since)) if !moved(from) => tick < since + CLOSING_PATIENCE_TICKS,
+            _ => {
+                self.closing = Some((at, tick));
+                true
+            }
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug)]

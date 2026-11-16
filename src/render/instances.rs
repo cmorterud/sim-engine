@@ -18,7 +18,14 @@ const WORK_PULSES: f64 = 0.8;
 const WORK_DIP: f64 = 0.25;
 
 pub(super) const RAW_TO_WORLD: f64 = 1.0 / 4096.0;
-const PROJECTILE_SIZE: f32 = 0.6;
+/// A shell's tracer, in map units: as thick as this, and more for a shell with a blast, up to
+/// `TRACER_MAX_WIDTH`, and `TRACER_LENGTH_SHARE` times as long, so that a shell can be followed
+/// in flight close up. A medium tank is 18 across.
+const TRACER_WIDTH: f32 = 1.2;
+const TRACER_MAX_WIDTH: f32 = 3.0;
+const TRACER_LENGTH_SHARE: f32 = 4.0;
+/// A shell far off shows as a dot this many pixels across, as a glint.
+const TRACER_ICON_PX: f32 = 1.5;
 
 /// On-screen half-size of a unit's tactical dot, in pixels.
 const UNIT_ICON_PX: f32 = 2.5;
@@ -580,8 +587,31 @@ pub fn build_unit_instances(
     });
 }
 
-pub fn build_projectile_instances(previous: &[ProjectileView], current: &[ProjectileView], alpha: f64, eye: [f64; 3], out: &mut InstanceBatches) {
-    merge_by_id(previous, current, |projectile| projectile.id, |before, projectile| {
+/// The way a projectile flies, from one tick's position to the next, as a unit vector. One just
+/// fired, with no position before, points north.
+fn flight(from: [i32; 3], to: [i32; 3]) -> [f32; 3] {
+    let delta = [f64::from(to[0] - from[0]), f64::from(to[1] - from[1]), f64::from(to[2] - from[2])];
+    let length = (delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2]).sqrt();
+    if length > 0.0 { delta.map(|axis| (axis / length) as f32) } else { [0.0, 1.0, 0.0] }
+}
+
+/// A shell's tracer, `length` along `direction` and `width` across. The shell's mesh lies along x.
+fn tracer_instance(center: [f64; 3], direction: [f32; 3], length: f32, width: f32, color: [f32; 3], icon_px: f32, eye: [f64; 3]) -> UnitInstanceRaw {
+    let along = glam::Vec3::from(direction);
+    // Across: level, unless it flies straight up or down.
+    let across = along.cross(glam::Vec3::Z).try_normalize().unwrap_or(glam::Vec3::X);
+    let up = across.cross(along);
+    let mut tracer = instance(center, [1.0; 3], NORTH, color, icon_px, eye);
+    tracer.model_matrix[0] = [along.x * length, along.y * length, along.z * length, 0.0];
+    tracer.model_matrix[1] = [across.x * width, across.y * width, across.z * width, 0.0];
+    tracer.model_matrix[2] = [up.x * width, up.y * width, up.z * width, 0.0];
+    tracer
+}
+
+/// Draws the projectiles in flight, and those that struck since the last tick (`landed`) on the
+/// way from where they were to where they struck, so that a shell is seen to reach its target.
+pub fn build_projectile_instances(previous: &[ProjectileView], current: &[ProjectileView], landed: &[ProjectileView], alpha: f64, eye: [f64; 3], out: &mut InstanceBatches) {
+    let mut draw = |before: Option<&ProjectileView>, projectile: &ProjectileView| {
         let now = [projectile.x, projectile.y, projectile.z];
         let from = before.map_or(now, |before| [before.x, before.y, before.z]);
         let center = interpolate(from, now, alpha);
@@ -592,10 +622,21 @@ pub fn build_projectile_instances(previous: &[ProjectileView], current: &[Projec
             if length > 0.0 { [(dx / length) as f32, (dy / length) as f32] } else { NORTH }
         };
         match projectile.kind {
-            ProjectileKind::Shell => out.push(Shape::Shell, instance(center, [PROJECTILE_SIZE; 3], NORTH, SHELL, PROJECTILE_ICON_PX, eye)),
-            ProjectileKind::Discharge => out.push(Shape::Shell, instance(center, [DISCHARGE_SIZE; 3], NORTH, DISCHARGE_SHELL, UNIT_ICON_PX, eye)),
+            ProjectileKind::Shell => {
+                let splash = (f64::from(projectile.splash) * RAW_TO_WORLD) as f32;
+                let width = (TRACER_WIDTH + splash * 0.08).min(TRACER_MAX_WIDTH);
+                out.push(Shape::Shell, tracer_instance(center, flight(from, now), width * TRACER_LENGTH_SHARE, width, SHELL, TRACER_ICON_PX, eye));
+            }
+            ProjectileKind::Discharge => out.push(Shape::Shell, tracer_instance(center, flight(from, now), DISCHARGE_SIZE * 3.0, DISCHARGE_SIZE, DISCHARGE_SHELL, UNIT_ICON_PX, eye)),
             ProjectileKind::TacticalMissile => out.push(Shape::Missile, instance(center, [3.0, 9.0, 3.0], heading, MISSILE, UNIT_ICON_PX, eye)),
             ProjectileKind::StrategicMissile => out.push(Shape::Missile, instance(center, [7.0, 20.0, 7.0], heading, NUKE, UNIT_ICON_PX * 1.6, eye)),
+        }
+    };
+    merge_by_id(previous, current, |projectile| projectile.id, &mut draw);
+    // One that struck is drawn only on its way there, from where the last tick showed it.
+    merge_by_id(previous, landed, |projectile| projectile.id, |before, projectile| {
+        if before.is_some() && alpha < 1.0 {
+            draw(before, projectile);
         }
     });
 }

@@ -53,7 +53,10 @@ fn only_t3_builders_can_build_a_gateway() {
     let (t2, t3) = (spawn(&mut world, "t2_engineer", Team::Blue, point(1_000, 1_000)), spawn(&mut world, "t3_engineer", Team::Blue, point(1_000, 1_040)));
     let commander = spawn(&mut world, "command_rig", Team::Blue, point(1_000, 1_080));
     world.advance_tick(&[SimCommand::Build { units: vec![t2, t3, commander], blueprint: gateway, cell_x: 60, cell_y: 50, queued: false }]);
-    let has_task = |world: &SimWorld, id: SimId| !world.ecs.get::<&Builder>(world.unit_entity(id).unwrap()).unwrap().tasks.is_empty();
+    // Building it, as opposed to helping one that can (builder_orders_test.rs).
+    let has_task = |world: &SimWorld, id: SimId| {
+        world.ecs.get::<&Builder>(world.unit_entity(id).unwrap()).unwrap().tasks.first().is_some_and(|task| matches!(task, sim_engine::sim::components::BuildTask::Build { .. }))
+    };
     assert!(!has_task(&world, t2) && has_task(&world, t3) && !has_task(&world, commander));
     install(&mut world, commander, "t2_fabrication");
     install(&mut world, commander, "t3_fabrication");

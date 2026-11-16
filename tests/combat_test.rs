@@ -148,8 +148,11 @@ fn units_acquire_the_nearest_enemy_and_kill_it() {
 /// A shooter with an enemy in range on the far side of a wall too high for its shells.
 fn enemy_behind_a_wall() -> (SimWorld, SimId, SimId) {
     let mut world = flat_world(false);
-    // One terrain cell thick, with the target just in range on the far side.
-    world.add_box_obstacle(RectFp::new(point(120, 60), point(140, 140)));
+    // One terrain cell thick, raised twice, well above any arc the shooter's slow shells fly,
+    // with the target just in range on the far side.
+    let wall = RectFp::new(point(120, 60), point(140, 140));
+    world.add_box_obstacle(wall);
+    world.add_box_obstacle(wall);
     world.prepare_map();
     let shooter = world.spawn_unit(standard_unit(Team::Blue, point(112, 100)));
     let target = passive_unit(&mut world, Team::Red, point(141, 100));
@@ -880,4 +883,62 @@ fn a_target_that_outruns_an_attack_move_is_chased_by_route_until_it_is_caught() 
     assert!(world.unit_health(bot).is_none(), "and caught it once it stopped");
     let here = world.unit_position(tank).unwrap().xy();
     assert!((here.x - goal.x).abs() < fp_int(200) && (here.y - goal.y).abs() < fp_int(200), "then went on to its goal, and is at {here:?}");
+}
+
+/// A shell that hits is reported where it struck, on the target, for drawing it that far: its
+/// last position, which is all the renderer had, is a tick's flight short.
+#[test]
+fn a_shell_is_reported_where_it_struck() {
+    let config = SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: false, ..SimConfig::default() };
+    let mut world = SimWorld::new(config, 1);
+    let (tank, target_kind) = (world.blueprints.id("t1_medium_tank"), world.blueprints.id("t2_heavy_tank"));
+    let shooter = world.spawn_mobile(tank, Team::Blue, point(1_000, 1_000));
+    let target = world.spawn_mobile(target_kind, Team::Red, point(1_340, 1_000));
+    world.ecs.get::<&mut Combat>(world.unit_entity(target).unwrap()).unwrap().range = Fp::ZERO;
+    world.advance_tick(&[SimCommand::Attack { units: vec![shooter], target }]);
+    let at = world.unit_position(target).unwrap();
+    let radius = world.blueprints.get(target_kind).radius;
+    let mut struck = Vec::new();
+    for _ in 0..60 {
+        world.advance_tick(&[]);
+        struck.extend(world.snapshot().landed.into_iter().filter(|shell| shell.source == shooter));
+    }
+    assert!(!struck.is_empty(), "the tank should have fired and hit");
+    for shell in struck {
+        let (dx, dy) = (Fp::from_bits(shell.x) - at.x, Fp::from_bits(shell.y) - at.y);
+        assert!(dx * dx + dy * dy <= radius * radius * 2, "struck {dx}, {dy} from the target's middle, beyond its {radius} radius");
+    }
+}
+
+/// A tank told to attack a target behind a ridge used to shell the ridge, every shell landing
+/// short. It walks on until the shot is clear, and then hits.
+#[test]
+fn a_tank_told_to_attack_past_a_ridge_closes_in_instead_of_shelling_it() {
+    use sim_engine::sim::terrain::{Terrain, HEIGHT_FRAC_BITS};
+    // Flat, with a ridge 30 high and 80 across at x 1,140 to 1,220.
+    let cells = 256usize;
+    let height = |x: usize| if (57..=61).contains(&x) { 30 } else { 0 };
+    let heights: Vec<i16> = (0..(cells + 1) * (cells + 1)).map(|index| (height(index % (cells + 1)) << HEIGHT_FRAC_BITS) as i16).collect();
+    let terrain = Terrain::from_heights(5_120, heights, &vec![false; cells * cells], Fp::from_num(-1_000));
+    let config = SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: false, ..SimConfig::default() };
+    let mut world = SimWorld::with_terrain(config, 1, terrain);
+    world.prepare_map();
+    let (tank, target_kind) = (world.blueprints.id("t1_medium_tank"), world.blueprints.id("t2_heavy_tank"));
+    let shooter = world.spawn_mobile(tank, Team::Blue, point(1_000, 1_000));
+    let target = world.spawn_mobile(target_kind, Team::Red, point(1_330, 1_000));
+    let entity = world.unit_entity(target).unwrap();
+    world.ecs.get::<&mut Combat>(entity).unwrap().range = Fp::ZERO;
+    {
+        let mut health = world.ecs.get::<&mut Health>(entity).unwrap();
+        health.max = fp_int(100_000);
+        health.current = health.max;
+    }
+    world.advance_tick(&[SimCommand::Attack { units: vec![shooter], target }]);
+    let mut short = 0;
+    for _ in 0..300 {
+        world.advance_tick(&[]);
+        short += world.snapshot().landed.iter().filter(|shell| shell.source == shooter && Fp::from_bits(shell.x) < fp_int(1_250)).count();
+    }
+    assert_eq!(short, 0, "no shells into the ridge");
+    assert!(world.unit_health(target).unwrap() < fp_int(100_000), "it should have closed in and hit");
 }

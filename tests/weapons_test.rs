@@ -1,0 +1,304 @@
+//! Every armed unit and structure can hurt what its weapons are for (GAME_SPECIFICATION.md §7):
+//! ground weapons a target at their full range, from where they stand; bombers a target pass
+//! after pass, without a pass that drops nothing, and a moving one too; anti-air weapons an
+//! aircraft flying over; torpedoes ships and submarines. Checked against the real unit data, so
+//! that a new unit, or a change to one, is covered.
+//!
+//! Missile launchers that fire only the missiles they are told to build, and nuclear missiles,
+//! are left to their own tests (missile_test.rs).
+
+use sim_engine::math::fp::{fp_int, Fp, Vec2Fp};
+use sim_engine::sim::blueprints::{Blueprint, BlueprintId, Res, Targets, WeaponDef, WeaponKind};
+use sim_engine::sim::commands::SimCommand;
+use sim_engine::sim::components::{Combat, Health, MoveClass, Projectile, SimId, Team};
+use sim_engine::sim::config::{SimConfig, TerrainStyle};
+use sim_engine::sim::terrain::{Terrain, HEIGHT_FRAC_BITS};
+use sim_engine::sim::world::SimWorld;
+
+/// Dummies take this much before they would die, more than any test does to them.
+const DUMMY_HEALTH: i32 = 400_000;
+/// The lake, deep water, on every map: x and y from 1,000 to these.
+const LAKE_X_END: i32 = 5_000;
+const LAKE_Y_END: i32 = 9_000;
+/// Where land units and structures stand, and where ships sail, on the usual map.
+const LAND: (i32, i32) = (5_600, 5_000);
+const SHORE: (i32, i32) = (4_880, 5_000);
+const OPEN_WATER: (i32, i32) = (2_000, 5_000);
+/// Most weapons fit on a 10 km map. Longer ones, from where they stand, need 20 km.
+const MAP: i32 = 10_240;
+const BIG_MAP: i32 = 20_480;
+
+fn point(x: i32, y: i32) -> Vec2Fp {
+    Vec2Fp::new(fp_int(x), fp_int(y))
+}
+
+/// Flat land 20 up, with a lake 40 deep, and plenty of materiel and energy for both teams.
+fn world(map: i32) -> SimWorld {
+    let cells = (map / 20) as usize;
+    let samples = cells + 1;
+    let height = |x: usize, y: usize| {
+        let (wx, wy) = (x as i32 * 20, y as i32 * 20);
+        if (1_000..=LAKE_X_END).contains(&wx) && (1_000..=LAKE_Y_END).contains(&wy) { -40 } else { 20 }
+    };
+    let heights: Vec<i16> = (0..samples * samples).map(|index| (height(index % samples, index / samples) << HEIGHT_FRAC_BITS) as i16).collect();
+    let blocked: Vec<bool> = (0..cells * cells)
+        .map(|cell| {
+            let (x, y) = (cell % cells, cell / cells);
+            [(x, y), (x + 1, y), (x, y + 1), (x + 1, y + 1)].iter().any(|&(cx, cy)| height(cx, cy) < 0)
+        })
+        .collect();
+    let terrain = Terrain::from_heights(map, heights, &blocked, Fp::ZERO);
+    let config = SimConfig { map_units: map, terrain: TerrainStyle::Flat, fog_of_war: false, ..SimConfig::default() };
+    let mut world = SimWorld::with_terrain(config, 1, terrain);
+    world.prepare_map();
+    for economy in &mut world.economies {
+        for value in [&mut economy.base_mass_capacity, &mut economy.mass_capacity, &mut economy.base_energy_capacity, &mut economy.energy_capacity] {
+            *value = Res::from_num(10_000_000);
+        }
+        economy.mass = Res::from_num(5_000_000);
+        economy.energy = Res::from_num(5_000_000);
+    }
+    world
+}
+
+/// Places a unit, or a finished structure centred on the point.
+fn place(world: &mut SimWorld, key: &str, team: Team, at: (i32, i32)) -> SimId {
+    let blueprint = world.blueprints.id(key);
+    let def = world.blueprints.get(blueprint);
+    if def.is_structure() {
+        let half = u32::from(def.footprint) / 2;
+        let (cell_x, cell_y) = (at.0 as u32 / 20 - half, at.1 as u32 / 20 - half);
+        world.spawn_finished_structure(blueprint, team, cell_x, cell_y).unwrap_or_else(|| panic!("no room for {key} at {at:?}"))
+    } else {
+        world.spawn_mobile(blueprint, team, point(at.0, at.1))
+    }
+}
+
+/// A Red target that never shoots back and takes a great deal to destroy.
+fn dummy(world: &mut SimWorld, key: &str, at: (i32, i32)) -> SimId {
+    let id = place(world, key, Team::Red, at);
+    let entity = world.unit_entity(id).unwrap();
+    world.ecs.get::<&mut Combat>(entity).unwrap().enabled = false;
+    let mut health = world.ecs.get::<&mut Health>(entity).unwrap();
+    health.max = fp_int(DUMMY_HEALTH);
+    health.current = health.max;
+    id
+}
+
+fn damage(world: &SimWorld, id: SimId) -> i32 {
+    DUMMY_HEALTH - world.unit_health(id).map_or(0, |health| health.to_num::<i32>())
+}
+
+/// What a weapon can be pointed at, and whether this test covers it.
+fn covered(weapon: &WeaponDef) -> bool {
+    match weapon.kind {
+        WeaponKind::Shell | WeaponKind::Bomb => true,
+        WeaponKind::TacticalMissile => weapon.automatic,
+        WeaponKind::StrategicMissile | WeaponKind::Tractor => false,
+    }
+}
+
+fn weapons(def: &Blueprint) -> Vec<WeaponDef> {
+    def.weapon.iter().chain(&def.extra_weapons).copied().filter(covered).collect()
+}
+
+fn hits(weapon: &WeaponDef, targets: Targets) -> bool {
+    weapon.targets == targets || (weapon.targets == Targets::Both && targets != Targets::Naval)
+}
+
+fn sails(def: &Blueprint) -> bool {
+    matches!(def.movement, MoveClass::Naval | MoveClass::Submarine) || def.on_water
+}
+
+/// Runs until the target has taken damage, or `ticks` have passed. Returns the ticks it took.
+fn until_hurt(world: &mut SimWorld, target: SimId, ticks: u32) -> Option<u32> {
+    (0..ticks).find(|_| {
+        world.advance_tick(&[]);
+        damage(world, target) > 0
+    })
+}
+
+/// The units the test checks, by what they are armed to hit.
+fn armed_with(targets: Targets, bombs: bool) -> Vec<(String, Blueprint)> {
+    let world = world(MAP);
+    world
+        .blueprints
+        .iter()
+        .filter(|def| weapons(def).iter().any(|weapon| hits(weapon, targets) && (weapon.kind == WeaponKind::Bomb) == bombs))
+        .map(|def| (def.key.clone(), def.clone()))
+        .collect()
+}
+
+/// Every weapon that hits the ground hits a target at its full range from where the unit stands,
+/// without closing in: land units and structures a land unit, ships both a land unit across the
+/// shore and a ship. Aircraft, which fly to what they attack, are only checked for hitting it.
+#[test]
+fn every_ground_weapon_hits_a_target_at_its_full_range() {
+    let mut failures = Vec::new();
+    for (key, def) in armed_with(Targets::Ground, false) {
+        let reach = weapons(&def).iter().filter(|weapon| hits(weapon, Targets::Ground) && weapon.kind != WeaponKind::Bomb).map(|weapon| weapon.range.to_num::<i32>()).max().unwrap();
+        let mut cases = Vec::new();
+        if def.is_air() {
+            cases.push(("t1_engineer", LAND, (LAND.0 + 1_500, LAND.1)));
+        } else if sails(&def) {
+            cases.push(("t1_engineer", SHORE, (SHORE.0 + reach, SHORE.1)));
+            cases.push(("t1_frigate", OPEN_WATER, (OPEN_WATER.0, OPEN_WATER.1 + reach.min(LAKE_Y_END - OPEN_WATER.1 - 200))));
+        } else {
+            cases.push(("t1_engineer", LAND, (LAND.0 + reach, LAND.1)));
+        }
+        for (target_key, from, to) in cases {
+            let big = to.0 > MAP - 200;
+            // Beyond the lake, at the map's west edge, facing east.
+            let (from, to) = if big { ((600, 10_000), (600 + reach, 10_000)) } else { (from, to) };
+            let mut world = world(if big { BIG_MAP } else { MAP });
+            let shooter = place(&mut world, &key, Team::Blue, from);
+            let target = dummy(&mut world, target_key, to);
+            // Submarines surface to use a deck gun.
+            if def.movement == MoveClass::Submarine {
+                world.advance_tick(&[SimCommand::SetSurfaced { units: vec![shooter], surfaced: true }]);
+            }
+            if !def.is_structure() {
+                world.advance_tick(&[SimCommand::Attack { units: vec![shooter], target }]);
+            }
+            let start = world.unit_position(shooter).unwrap().xy();
+            let hurt = until_hurt(&mut world, target, 1_500);
+            let Some(end) = world.unit_position(shooter) else {
+                failures.push(format!("{key} was destroyed attacking a {target_key}"));
+                continue;
+            };
+            let moved = (end.xy() - start).length_squared().to_num::<f64>().sqrt();
+            if hurt.is_none() {
+                failures.push(format!("{key} did no damage to a {target_key} {} away", reach));
+            } else if !def.is_air() && moved > 30.0 {
+                failures.push(format!("{key} moved {moved:.0} to hit a {target_key} at its full range of {reach}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// A bomber attacking a target makes pass after pass over it, and lets a bomb go on every pass
+/// once it has reloaded, each of them landing on the target: a still one, and one driving across
+/// its path, which bombs have to be aimed ahead of.
+#[test]
+fn every_bomber_bombs_on_every_pass_and_hits() {
+    let mut failures = Vec::new();
+    for (key, def) in armed_with(Targets::Ground, true) {
+        let bomb = weapons(&def).into_iter().find(|weapon| weapon.kind == WeaponKind::Bomb).unwrap();
+        for moving in [false, true] {
+            let mut world = world(MAP);
+            let shooter = place(&mut world, &key, Team::Blue, LAND);
+            let at = (LAND.0 + 2_000, LAND.1);
+            let target = dummy(&mut world, "t1_medium_tank", at);
+            if moving {
+                world.advance_tick(&[SimCommand::Patrol { units: vec![target], points: vec![point(at.0, 1_000), point(at.0, 9_000)], queued: false }]);
+            }
+            world.advance_tick(&[SimCommand::Attack { units: vec![shooter], target }]);
+            let throw = sim_engine::sim::air::bomb_throw(def.flight.unwrap().elevation, def.speed).to_num::<f64>();
+            let (mut bombs, mut seen) = (0u32, std::collections::BTreeSet::new());
+            let (mut passes, mut bombs_at_last_pass, mut skipped) = (0u32, 0u32, 0u32);
+            let mut last_distance = f64::MAX;
+            let mut closing = false;
+            for _ in 0..3_000 {
+                world.advance_tick(&[]);
+                for &(id, entity) in &world.projectiles {
+                    if world.ecs.get::<&Projectile>(entity).is_ok_and(|projectile| projectile.source == shooter) && seen.insert(id) {
+                        bombs += 1;
+                    }
+                }
+                // A pass is the closest it comes to the target, within a bomb's throw.
+                let here = world.unit_position(shooter).unwrap().xy();
+                let there = world.unit_position(target).unwrap().xy();
+                let distance = (here - there).length_squared().to_num::<f64>().sqrt();
+                if closing && distance > last_distance && last_distance < throw {
+                    passes += 1;
+                    // Every pass after the first two, by which it is flying and reloaded, drops.
+                    if passes > 2 && bombs == bombs_at_last_pass {
+                        skipped += 1;
+                    }
+                    bombs_at_last_pass = bombs;
+                }
+                closing = distance < last_distance;
+                last_distance = distance;
+            }
+            let landed = damage(&world, target) as f64 / bomb.damage.to_num::<f64>();
+            let what = if moving { "a moving target" } else { "a target standing still" };
+            if passes < 4 || bombs < 3 {
+                failures.push(format!("{key} made {passes} passes and dropped {bombs} bombs on {what}"));
+            }
+            if skipped > 0 {
+                failures.push(format!("{key} dropped nothing on {skipped} of {passes} passes over {what}"));
+            }
+            // A bomb that lands within its blast of the target does all its damage.
+            if landed < f64::from(bombs) * 0.75 {
+                failures.push(format!("{key} landed {landed:.1} of {bombs} bombs on {what}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// Every anti-air weapon hits an aircraft flying back and forth over it, or that it is sent
+/// after if it flies itself.
+#[test]
+fn every_anti_air_weapon_hits_an_aircraft_flying_over() {
+    let mut failures = Vec::new();
+    for (key, def) in armed_with(Targets::Air, false) {
+        let from = if sails(&def) { OPEN_WATER } else { LAND };
+        let mut world = world(MAP);
+        let shooter = place(&mut world, &key, Team::Blue, from);
+        let target = dummy(&mut world, "t1_air_scout", (from.0, from.1 - 1_500));
+        world.advance_tick(&[SimCommand::Patrol { units: vec![target], points: vec![point(from.0, from.1 - 1_500), point(from.0, from.1 + 1_500)], queued: false }]);
+        if !def.is_structure() {
+            world.advance_tick(&[SimCommand::Attack { units: vec![shooter], target }]);
+        }
+        if until_hurt(&mut world, target, 1_500).is_none() {
+            failures.push(format!("{key} did no damage to an aircraft flying over"));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// Every torpedo weapon hits a ship at its full range, and a submarine under the water.
+#[test]
+fn every_torpedo_hits_ships_and_submarines() {
+    let mut failures = Vec::new();
+    for (key, def) in armed_with(Targets::Naval, false) {
+        let reach = weapons(&def).iter().filter(|weapon| hits(weapon, Targets::Naval)).map(|weapon| weapon.range.to_num::<i32>()).max().unwrap();
+        for target_key in ["t1_frigate", "t1_attack_sub"] {
+            let mut world = world(MAP);
+            // Aircraft fly out over the lake to it; the rest are on the water already.
+            let from = if def.is_air() { LAND } else { OPEN_WATER };
+            let shooter = place(&mut world, &key, Team::Blue, from);
+            let to = if def.is_air() { (OPEN_WATER.0 + 400, OPEN_WATER.1) } else { (OPEN_WATER.0, OPEN_WATER.1 + reach) };
+            let target = dummy(&mut world, target_key, to);
+            if !def.is_structure() {
+                world.advance_tick(&[SimCommand::Attack { units: vec![shooter], target }]);
+            }
+            if until_hurt(&mut world, target, 1_500).is_none() {
+                failures.push(format!("{key} did no damage to a {target_key} {reach} away"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// The test covers what it should: a unit of each kind, so that a mistake in the filters above
+/// cannot quietly test nothing.
+#[test]
+fn the_weapon_tests_cover_each_kind_of_unit() {
+    let keys = |targets, bombs| armed_with(targets, bombs).into_iter().map(|(key, _)| key).collect::<Vec<_>>();
+    let ground = keys(Targets::Ground, false);
+    for key in ["t1_medium_tank", "t1_light_artillery", "t2_artillery", "t3_artillery", "t1_point_defense", "t1_frigate", "t3_battleship", "t2_gunship", "command_rig", "t2_mobile_missile_launcher"] {
+        assert!(ground.contains(&key.to_string()), "{key} should be checked against ground targets");
+    }
+    assert!(keys(Targets::Ground, true).contains(&"t2_fighter_bomber".to_string()));
+    for key in ["t1_mobile_aa", "t1_aa_turret", "t1_interceptor", "t2_fighter_bomber", "t2_destroyer"] {
+        assert!(keys(Targets::Air, false).contains(&key.to_string()), "{key} should be checked against aircraft");
+    }
+    for key in ["t1_attack_sub", "t2_torpedo_bomber", "t1_torpedo_launcher"] {
+        assert!(keys(Targets::Naval, false).contains(&key.to_string()), "{key} should be checked against ships");
+    }
+    let _ = BlueprintId(0);
+}
+

@@ -65,8 +65,10 @@ fn each_tier_of_builder_builds_only_up_to_its_tier() {
             world.advance_tick(&[SimCommand::Stop { units: vec![unit] }]);
         }
         order_build(&mut world, vec![t1, t2, t3, commander], key, cell_x);
+        // The rest help one that can (builder_orders_test.rs).
         for unit in [t1, t2, t3, commander] {
-            assert_eq!(!tasks(&world, unit).is_empty(), able.contains(&unit), "{key} for {}", blueprint_key(&world, unit));
+            let builds = tasks(&world, unit).first().is_some_and(|task| matches!(task, BuildTask::Build { .. }));
+            assert_eq!(builds, able.contains(&unit), "{key} for {}", blueprint_key(&world, unit));
         }
     }
 }

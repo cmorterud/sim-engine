@@ -24,9 +24,39 @@ pub struct Selection {
     last_click: Option<(SimId, f64)>,
     /// Whether the player has picked units since this was last checked, for the sound.
     picked: bool,
+    /// Which blueprints, by index, can attack. Empty treats every unit as armed.
+    armed: Vec<bool>,
+}
+
+/// Of a group picked together, the units that can fight, if there are any: a box over an army
+/// and its engineers means the army. Otherwise mobile units, if any, over structures: a box over
+/// a base and an army means the army. The commander can fight.
+pub fn prefer_fighters(found: Vec<SimId>, units: &[UnitView], armed: &[bool]) -> Vec<SimId> {
+    let unit = |id: &SimId| units.binary_search_by_key(id, |unit| unit.id).ok().map(|index| &units[index]);
+    let is_mobile = |id: &SimId| unit(id).is_some_and(|unit| !unit.is_structure);
+    let is_fighter = |id: &SimId| is_mobile(id) && unit(id).is_some_and(|unit| armed.is_empty() || armed.get(usize::from(unit.blueprint)).copied().unwrap_or(false));
+    if found.iter().any(is_fighter) {
+        found.into_iter().filter(is_fighter).collect()
+    } else if found.iter().any(is_mobile) {
+        found.into_iter().filter(is_mobile).collect()
+    } else {
+        found
+    }
 }
 
 impl Selection {
+    /// Tells the selection which blueprints, by index, can attack.
+    pub fn set_armed(&mut self, armed: Vec<bool>) {
+        self.armed = armed;
+    }
+
+    /// Selects every unit of the team, those that can fight if there are any (`prefer_fighters`).
+    pub fn select_all(&mut self, units: &[UnitView], team: Team) {
+        let all = units.iter().filter(|unit| unit.team == team).map(|unit| unit.id).collect();
+        let found = prefer_fighters(all, units, &self.armed);
+        self.select(found);
+    }
+
     pub fn selected(&self) -> &[SimId] {
         &self.selected
     }
@@ -104,18 +134,7 @@ impl Selection {
         }
         let previous = if adding { std::mem::take(&mut self.selected) } else { Vec::new() };
         let found = match dragged {
-            Some((min, max)) => {
-                // A box over a base and an army means the army.
-                let found = units_in_box(units, camera, team, min, max);
-                let is_mobile = |id: &SimId| {
-                    units.binary_search_by_key(id, |unit| unit.id).is_ok_and(|index| !units[index].is_structure)
-                };
-                if found.iter().any(is_mobile) {
-                    found.into_iter().filter(is_mobile).collect()
-                } else {
-                    found
-                }
-            }
+            Some((min, max)) => prefer_fighters(units_in_box(units, camera, team, min, max), units, &self.armed),
             None => nearest_unit(units, camera, team, start).into_iter().collect::<Vec<_>>(),
         };
         self.picked |= !found.is_empty();
@@ -137,10 +156,11 @@ impl Selection {
         let same_type = units.iter().filter(|unit| unit.team == team && unit.blueprint == blueprint).filter(|unit| {
             screen_position(unit, camera).is_some_and(|p| p[0] >= 0.0 && p[0] <= viewport[0] && p[1] >= 0.0 && p[1] <= viewport[1])
         });
+        let found = prefer_fighters(same_type.map(|unit| unit.id).collect(), units, &self.armed);
         if !adding {
             self.selected.clear();
         }
-        self.selected.extend(same_type.map(|unit| unit.id));
+        self.selected.extend(found);
         self.picked = true;
         self.selected.sort_unstable();
         self.selected.dedup();
@@ -408,6 +428,48 @@ mod tests {
         let min = [center[0] - 20.0, center[1] - 20.0];
         let max = [center[0] + 20.0, center[1] + 20.0];
         assert_eq!(units_in_box(&units, &camera, Team::Blue, min, max), [SimId(1)]);
+    }
+
+    /// Blue units at the middle of the screen: an armed tank (blueprint 0), an unarmed engineer
+    /// (1), and an armed turret (0, a structure).
+    fn army_and_engineer() -> (Vec<UnitView>, Vec<bool>) {
+        let mut units = vec![unit(1, Team::Blue, 40_000.0, 40_000.0), unit(2, Team::Blue, 40_002.0, 40_000.0), unit(3, Team::Blue, 40_004.0, 40_000.0)];
+        units[0].blueprint = 0;
+        units[1].blueprint = 1;
+        units[2].blueprint = 0;
+        units[2].is_structure = true;
+        (units, vec![true, false])
+    }
+
+    #[test]
+    fn a_box_over_fighters_and_engineers_selects_only_the_fighters() {
+        let camera = camera();
+        let (units, armed) = army_and_engineer();
+        let mut selection = Selection::default();
+        selection.set_armed(armed.clone());
+        let center = camera.world_to_screen([40_002.0, 40_000.0, 1.0]).unwrap();
+        selection.move_cursor([center[0] - 40.0, center[1] - 40.0]);
+        selection.begin_drag();
+        selection.move_cursor([center[0] + 40.0, center[1] + 40.0]);
+        selection.end_drag(&units, &camera, Team::Blue);
+        assert_eq!(selection.selected(), [SimId(1)], "the tank, not the engineer or the turret");
+        // Without a fighter, the engineer; without units, the structures.
+        assert_eq!(prefer_fighters(vec![SimId(2), SimId(3)], &units, &armed), [SimId(2)]);
+        assert_eq!(prefer_fighters(vec![SimId(3)], &units, &armed), [SimId(3)]);
+    }
+
+    #[test]
+    fn select_all_selects_the_army_or_everything_without_one() {
+        let (mut units, armed) = army_and_engineer();
+        units.push(unit(4, Team::Red, 0.0, 0.0));
+        units[3].blueprint = 0;
+        let mut selection = Selection::default();
+        selection.set_armed(armed);
+        selection.select_all(&units, Team::Blue);
+        assert_eq!(selection.selected(), [SimId(1)], "only Blue's fighting units");
+        units.remove(0);
+        selection.select_all(&units, Team::Blue);
+        assert_eq!(selection.selected(), [SimId(2)], "with no fighters, the units that do not fight");
     }
 
     #[test]

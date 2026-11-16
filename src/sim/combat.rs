@@ -177,6 +177,23 @@ pub fn shot_is_clear(terrain: &Terrain, from: Vec3Fp, to: Vec3Fp, horizontal_spe
     true
 }
 
+/// Whether a shell fired from `from` at a spot on the ground lands within `reach` of it, across
+/// the ground, rather than on a rise in between or on the near side of a slope.
+pub fn shot_lands_near(terrain: &Terrain, from: Vec3Fp, to: Vec3Fp, horizontal_speed: Fp, reach: Fp) -> bool {
+    let solution = firing_solution(from, to, horizontal_speed);
+    let (mut position, mut velocity) = (from, solution.velocity);
+    for _ in 0..solution.flight_ticks {
+        if let Some(along) = probe_terrain(terrain, position, velocity).hit {
+            let part = |value: Fp| Fp::from_bits(((i64::from(value.to_bits()) * i64::from(along)) >> FP_FRAC_BITS) as i32);
+            let landing = Vec2Fp::new(position.x + part(velocity.x), position.y + part(velocity.y));
+            return (landing - to.xy()).length_squared() <= reach * reach;
+        }
+        position = position + velocity;
+        velocity.z -= GRAVITY;
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

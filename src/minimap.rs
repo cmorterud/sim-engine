@@ -42,11 +42,12 @@ pub fn land_colors(heights: &HeightField, water_level: f64, side: usize) -> Vec<
     });
     let span = (highest - water_level.max(lowest)).max(1.0);
     let mut colors = Vec::with_capacity(side * side);
+    // North, the way the camera looks, is up, as on the screen: the top row is the far edge.
     for row in 0..side {
         for column in 0..side {
-            let (x, y) = ((column as f64 + 0.5) * step, (row as f64 + 0.5) * step);
+            let (x, y) = ((column as f64 + 0.5) * step, size - (row as f64 + 0.5) * step);
             let height = at(x, y);
-            let (east, south) = (at(x + step, y) - at(x - step, y), at(x, y + step) - at(x, y - step));
+            let (east, south) = (at(x + step, y) - at(x - step, y), at(x, y - step) - at(x, y + step));
             let slope = (east.hypot(south) / (2.0 * step)) as f32;
             // Light from the top left: slopes facing it are lighter.
             let light = (1.0 - ((east + south) / (2.0 * step)) as f32 * 1.6).clamp(0.55, 1.35);
@@ -68,13 +69,14 @@ pub fn land_colors(heights: &HeightField, water_level: f64, side: usize) -> Vec<
 
 /// Where a world point falls on the minimap.
 fn to_minimap(rect: Rect, map_size: f64, point: [f64; 2]) -> Pos2 {
-    rect.min + Vec2::new((point[0] / map_size) as f32 * rect.width(), (point[1] / map_size) as f32 * rect.height())
+    // North up, as the camera looks: the map's far edge, +y, is the minimap's top.
+    Pos2::new(rect.left() + (point[0] / map_size) as f32 * rect.width(), rect.bottom() - (point[1] / map_size) as f32 * rect.height())
 }
 
 /// The world point under a spot on the minimap, kept on the map.
 pub fn from_minimap(rect: Rect, map_size: f64, spot: Pos2) -> [f64; 2] {
     let share = |offset: f32, length: f32| f64::from((offset / length).clamp(0.0, 1.0)) * map_size;
-    [share(spot.x - rect.left(), rect.width()), share(spot.y - rect.top(), rect.height())]
+    [share(spot.x - rect.left(), rect.width()), share(rect.bottom() - spot.y, rect.height())]
 }
 
 /// The ground at the corners of the screen: bottom left, bottom right, top right, top left. A
@@ -139,7 +141,8 @@ impl Minimap {
                 if let Some((fog, side)) = fog {
                     // The fog grid can reach past the map's edge.
                     let reach = (map_size / (side as f64 * FOG_CELL_UNITS)) as f32;
-                    painter.image(fog, rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(reach, reach)), Color32::WHITE);
+                    // Its first row is the map's near edge, at the bottom.
+                    painter.image(fog, rect, Rect::from_min_max(Pos2::new(0.0, reach), Pos2::new(reach, 0.0)), Color32::WHITE);
                 }
                 let raw = |value: i32| f64::from(value) / 4096.0;
                 // Every dot in one mesh: a battle has thousands, and shapes one by one cost
@@ -234,10 +237,10 @@ mod tests {
         let size = 5_120.0;
         let point = [1_280.0, 3_840.0];
         let spot = to_minimap(rect, size, point);
-        assert_eq!(spot, Pos2::new(60.0, 170.0));
+        assert_eq!(spot, Pos2::new(60.0, 70.0), "north, the far edge, is up");
         let back = from_minimap(rect, size, spot);
         assert!((back[0] - point[0]).abs() < 1e-6 && (back[1] - point[1]).abs() < 1e-6);
-        assert_eq!(from_minimap(rect, size, Pos2::new(-50.0, 500.0)), [0.0, size], "a drag past the edge stops at it");
+        assert_eq!(from_minimap(rect, size, Pos2::new(-50.0, 500.0)), [0.0, 0.0], "a drag past the edge stops at it");
     }
 
     /// Clicks the middle of the minimap through real egui input, and returns what came out.

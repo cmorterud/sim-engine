@@ -18,7 +18,7 @@ micro = "light"
 scale = "keep"
 # Every shell aims where its target will be when it arrives, artillery's too, so that steady
 # movement never dodges and only a change of direction does. Artillery's long flight makes that
-# worth far more against it. Bombs drop where the target is; shots at aircraft home. Cruise
+# worth far more against it. Bombs lead as well; shots at aircraft home. Cruise
 # missiles neither lead nor follow, so that their long range is no help against what keeps moving.
 leading_shots = "every shell"
 # Bigger armies for the same income than the inspiration, at the same pace, since the engine can

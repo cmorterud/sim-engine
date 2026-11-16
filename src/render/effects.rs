@@ -194,11 +194,19 @@ impl Effects {
             return;
         }
         self.seen_tick = Some(current.tick);
-        // A shell gone from the latest snapshot has hit, or run out, where it last was.
-        merge_by_id(&current.projectiles, &previous.projectiles, |projectile| projectile.id, |still_there, projectile| {
+        // A shell gone from the latest snapshot has hit, or run out: where the simulation says it
+        // struck, if the snapshot says, or else where it last was. It is drawn flying on to that
+        // point (build_projectile_instances), so it bursts as the snapshot after it would be due.
+        let arrival = (f64::from(current.tick) / crate::sim::blueprints::TICKS_PER_SECOND as f64).max(time);
+        merge_by_id(&current.projectiles, &previous.projectiles, |projectile| projectile.id, |still_there, last_seen| {
             if still_there.is_some() {
                 return;
             }
+            let struck = current.landed.binary_search_by_key(&last_seen.id, |landed| landed.id).ok().map(|index| &current.landed[index]);
+            let (projectile, time) = match struck {
+                Some(struck) => (struck, arrival),
+                None => (last_seen, time),
+            };
             let least: f32 = match projectile.kind {
                 ProjectileKind::Shell => 2.5,
                 ProjectileKind::Discharge => 8.0,
@@ -394,6 +402,33 @@ mod tests {
         let mut out = InstanceBatches::default();
         effects.build(time, [0.0; 3], &mut out);
         out.shape(shape).len()
+    }
+
+    /// A shell's last position is a tick's flight short of what it hits: its burst used to be
+    /// drawn there, so that every shell looked to land short. It bursts where the simulation says
+    /// it struck, as the shell, drawn flying on, gets there.
+    #[test]
+    fn a_shell_bursts_where_it_struck_when_it_gets_there() {
+        let mut before = snapshot(1);
+        before.projectiles = vec![shell(5, ProjectileKind::Shell)];
+        let mut after = snapshot(2);
+        let mut struck = shell(5, ProjectileKind::Shell);
+        struck.x += 4096 * 55;
+        after.landed = vec![struck];
+        let mut effects = Effects::new();
+        // At tick 1's time, the shell is still on its way to tick 2.
+        effects.note_events(&before, &after, 0.1, &|_, _| 0.0, None);
+        assert_eq!(count(&mut effects, 0.15, Shape::Fireball), 0, "not before it gets there");
+        let mut out = InstanceBatches::default();
+        effects.build(0.21, [0.0; 3], &mut out);
+        let fireballs = out.shape(Shape::Fireball);
+        assert_eq!(fireballs.len(), 1);
+        assert_eq!(fireballs[0].model_matrix[3][0], 155.0, "where it struck, not 55 short");
+        let mut drawn = InstanceBatches::default();
+        crate::render::instances::build_projectile_instances(&before.projectiles, &after.projectiles, &after.landed, 0.5, [0.0; 3], &mut drawn);
+        let shells = drawn.shape(Shape::Shell);
+        assert_eq!(shells.len(), 1, "drawn on its way to where it struck");
+        assert!((shells[0].model_matrix[3][0] - 127.5).abs() < 0.01, "halfway there");
     }
 
     #[test]

@@ -55,6 +55,8 @@ pub struct GridEntry {
     pub is_naval: bool,
     /// Has no order this tick. Moving units settle when they bump into one near their goal.
     pub is_idle: bool,
+    /// How far it moved across the ground last tick, as raw `Fp` bits, for aiming ahead of it.
+    pub velocity: [i32; 2],
     cell_x: u16,
 }
 
@@ -73,6 +75,7 @@ pub struct GridUnit {
     pub is_sub: bool,
     pub is_naval: bool,
     pub is_idle: bool,
+    pub velocity: [i32; 2],
 }
 
 /// One list's occupied cells: entries sorted by `(row, column, SimId)`,
@@ -137,6 +140,7 @@ impl SpatialGrid {
                 is_sub: unit.is_sub,
                 is_naval: unit.is_naval,
                 is_idle: unit.is_idle,
+                velocity: unit.velocity,
                 cell_x,
             });
             let row = self.cell(unit.y) as usize;
@@ -274,6 +278,7 @@ mod tests {
             is_sub: false,
             is_naval: false,
             is_idle: false,
+            velocity: [0, 0],
         }
     }
 

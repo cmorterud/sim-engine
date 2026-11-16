@@ -30,6 +30,8 @@ const FORMATION_SPACING_RADII: i32 = 5;
 const SLOT_EXTRA_TICKS: i64 = 40;
 /// How long a formation waits for members that have fallen behind, before going on without them.
 const FORMATION_PATIENCE_TICKS: u32 = 100;
+/// A ground attack's shell must come down this close to its spot, or the unit walks closer.
+const GROUND_SHOT_REACH_UNITS: i32 = 8;
 /// How long a unit passes over a target that the ground stops its shots at.
 pub(super) const BLOCKED_TARGET_TICKS: u32 = 50;
 /// How far beyond its range a unit on an attack-move walks straight at a target it is chasing,
@@ -290,6 +292,8 @@ pub struct SimSnapshot {
     pub tick: u32,
     pub units: Vec<UnitView>,
     pub projectiles: Vec<ProjectileView>,
+    /// Projectiles gone since the last tick, at the point where they struck, or ran out.
+    pub landed: Vec<ProjectileView>,
     pub wrecks: Vec<WreckView>,
     /// The shields of generators the viewer can see.
     pub shields: Vec<ShieldView>,
@@ -596,6 +600,21 @@ pub struct SimWorld {
     pending_wreck_blasts: Vec<Explosion>,
     dead_units: Vec<SimId>,
     dead_projectiles: Vec<SimId>,
+    /// Projectiles that struck something, or ran out, this tick, where they did: for drawing
+    /// them all the way to what they hit. Not part of the game state.
+    landed: Vec<ProjectileView>,
+}
+
+/// How a projectile looks to the renderer, at its position.
+fn projectile_view(id: SimId, position: &Position, projectile: &Projectile, discharged: Option<&Discharged>, missile: Option<&Missile>) -> ProjectileView {
+    let (x, y, z) = (position.0.x.to_bits(), position.0.y.to_bits(), position.0.z.to_bits());
+    let kind = match (discharged, missile) {
+        (Some(_), _) => ProjectileKind::Discharge,
+        (None, Some(missile)) if missile.strategic => ProjectileKind::StrategicMissile,
+        (None, Some(_)) => ProjectileKind::TacticalMissile,
+        (None, None) => ProjectileKind::Shell,
+    };
+    ProjectileView { id, team: projectile.source_team, x, y, z, kind, source: projectile.source, splash: projectile.splash_radius.to_bits() }
 }
 
 impl SimWorld {
@@ -689,6 +708,7 @@ impl SimWorld {
             pending_discharges: Vec::new(),
             dead_units: Vec::new(),
             dead_projectiles: Vec::new(),
+            landed: Vec::new(),
         }
     }
 
@@ -756,6 +776,8 @@ impl SimWorld {
                 projectile_splash: spawn.projectile_splash,
                 target: None,
                 forced_target: None,
+                line_blocked: false,
+                closing: None,
                 chasing: false,
                 blocked: None,
                 ground_target: None,
@@ -1365,10 +1387,10 @@ impl SimWorld {
     pub fn rebuild_grid(&mut self) {
         let terrain = &self.terrain;
         let surfaced = &self.surfaced;
-        let mut query = self.ecs.query::<(&Position, &UnitStats, &Order, Option<&Flight>)>();
+        let mut query = self.ecs.query::<(&Position, &UnitStats, &Order, Option<&Flight>, Option<&Velocity>)>();
         let view = query.view();
         self.spatial_grid.rebuild(self.units.iter().map(|&(id, entity)| {
-            let (position, stats, order, flight) = view.get(entity).expect("unit list only holds live units");
+            let (position, stats, order, flight, velocity) = view.get(entity).expect("unit list only holds live units");
             GridUnit {
                 id,
                 entity,
@@ -1385,6 +1407,7 @@ impl SimWorld {
                     || (stats.move_class == MoveClass::Seabed && position.0.z + stats.radius < terrain.water_level()),
                 is_naval: (stats.move_class == MoveClass::Naval && !stats.is_structure) || (stats.move_class == MoveClass::Submarine && surfaced.binary_search(&id).is_ok()),
                 is_idle: order.kind == OrderKind::Idle,
+                velocity: velocity.map_or([0, 0], |velocity| [velocity.0.x.to_bits(), velocity.0.y.to_bits()]),
             }
         }));
     }
@@ -1412,10 +1435,10 @@ impl SimWorld {
         let mut chases = Vec::new();
         // Units that have driven out of their factory, with where they were sent.
         let mut left_factory = Vec::new();
-        let mut query = self.ecs.query_mut::<(&mut Position, &mut Velocity, &UnitStats, &mut Order, &Combat, Option<&mut Turning>, Option<&Builder>, Option<&LeavingFactory>)>();
+        let mut query = self.ecs.query_mut::<(&mut Position, &mut Velocity, &UnitStats, &mut Order, &Combat, Option<&mut Turning>, Option<&Builder>, Option<&LeavingFactory>, Option<&super::components::ExtraWeapons>)>();
         let mut view = query.view();
         for (index, &(id, entity)) in units.iter().enumerate() {
-            let (position, velocity, stats, order, combat, turning, builder, leaving) = view.get_mut(entity).expect("unit list only holds live units");
+            let (position, velocity, stats, order, combat, turning, builder, leaving, extras) = view.get_mut(entity).expect("unit list only holds live units");
             if stats.is_structure || stats.move_class == MoveClass::Air {
                 continue;
             }
@@ -1493,6 +1516,22 @@ impl SimWorld {
                     }
                     open.then_some(point)
                 });
+            // An ordered target or spot that the ground hides from the gun is walked straight at,
+            // until the shot is clear.
+            let chasing_toward = chasing_toward.or_else(|| {
+                if !combat.line_blocked {
+                    return None;
+                }
+                let point = combat.ground_target.or_else(|| {
+                    let entry = grid.entry(units.binary_search_by_key(&combat.forced_target?, |unit| unit.0).ok()?);
+                    Some(Vec2Fp::new(Fp::from_bits(entry.x), Fp::from_bits(entry.y)))
+                })?;
+                if within(here, point, stats.radius) {
+                    return None;
+                }
+                let direction = (point - here).normalized();
+                passable(here + direction.scaled(stats.radius + stats.max_speed)).then_some(point)
+            });
 
             // Steering from the unit's order.
             let mut desired = Vec2Fp::ZERO;
@@ -1512,8 +1551,11 @@ impl SimWorld {
                     direction.scaled(speed)
                 };
                 // A ground attack stops as soon as its spot is in range.
-                let shelling_ground = combat.ground_target.is_some_and(|spot| within(here, spot, combat.range));
-                let may_walk = (order.kind == OrderKind::Move || combat.target.is_none()) && !shelling_ground;
+                let shelling_ground = combat.ground_target.is_some_and(|spot| within(here, spot, combat.range)) && !combat.line_blocked;
+                // So does an attack, once any weapon is firing at what it was told to attack: a
+                // submarine's deck gun at something on land its torpedoes cannot reach.
+                let extra_engaged = combat.forced_target.is_some() && extras.is_some_and(|extras| extras.0.iter().any(|weapon| weapon.target == combat.forced_target));
+                let may_walk = (order.kind == OrderKind::Move || (combat.target.is_none() && !extra_engaged) || combat.line_blocked) && !shelling_ground;
                 if let Some(slot) = order.slot {
                     // Close enough to the group's goal to leave the route and walk to its own spot.
                     if arrived {
@@ -1720,6 +1762,13 @@ impl SimWorld {
             let Ok(mut combat) = self.ecs.get::<&mut Combat>(entity) else {
                 return true;
             };
+            // One walking closer to what it was ordered to shoot, for a clear shot, that can get
+            // no closer, keeps its target and fires from where it is.
+            if combat.line_blocked {
+                let here = combat.closing.map_or([0, 0], |(at, _)| at);
+                (combat.line_blocked, combat.closing) = (false, Some((here, super::components::NO_CLOSER)));
+                return false;
+            }
             let Some(target) = combat.forced_target.filter(|_| combat.chasing) else {
                 return true;
             };
@@ -1952,6 +2001,9 @@ impl SimWorld {
                 let (dx, dy) = (i64::from(x - me.x), i64::from(y - me.y));
                 dx * dx + dy * dy
             };
+            // Guns sit on top of a unit, not in its middle, which lets a ship fire over a bank and
+            // a tank over a low rise.
+            let muzzle = me.z.saturating_add(me.radius);
             // Range reaches the edge of a target, so that large structures can be hit from their range.
             // A cloaked enemy it cannot see is no target, even in plain sight.
             let hidden = |id: SimId| concealed[stats.team.index()].binary_search(&id).is_ok();
@@ -2008,11 +2060,19 @@ impl SimWorld {
 
             // A ground attack takes over the gun, so the unit looks for nothing else.
             let ground = combat.ground_target;
+            if ground.is_none() && combat.forced_target.is_none() {
+                (combat.line_blocked, combat.closing) = (false, None);
+            }
             if ground.is_some() {
                 combat.target = None;
             } else if let Some(forced) = combat.forced_target {
                 match locate(forced) {
-                    Some(entry) => combat.target = can_engage(entry).then_some(forced),
+                    Some(entry) => {
+                        combat.target = can_engage(entry).then_some(forced);
+                        if combat.target.is_none() {
+                            (combat.line_blocked, combat.closing) = (false, None);
+                        }
+                    }
                     None => {
                         (combat.forced_target, combat.chasing) = (None, false);
                         combat.target = None;
@@ -2131,7 +2191,7 @@ impl SimWorld {
                         shots.push(PendingShot {
                             source: id,
                             team: stats.team,
-                            from: raw(me.x, me.y, me.z),
+                            from: raw(me.x, me.y, muzzle),
                             to: raw(entry.x, entry.y, entry.z),
                             speed: combat.projectile_speed,
                             damage: weapon.def.max_damage,
@@ -2162,9 +2222,10 @@ impl SimWorld {
             let at_height = flight.is_none_or(|flight| flight.altitude >= flight.elevation);
             let raw = |x: i32, y: i32, z: i32| Vec3Fp::new(Fp::from_bits(x), Fp::from_bits(y), Fp::from_bits(z));
             // A bomber lets go only when its bomb would land on the target.
-            let bomb_on = |to: Vec3Fp, radius: i32| {
-                let reach = (combat.projectile_splash + Fp::from_bits(radius)) / 2;
-                at_height && turning.is_some_and(|turning| bomb_lands_on(raw(me.x, me.y, me.z), turning.facing, speed, to, reach))
+            let splash = combat.projectile_splash;
+            let bomb_on = |to: Vec3Fp, radius: i32, velocity: [i32; 2]| {
+                let reach = (splash + Fp::from_bits(radius)) / 2;
+                at_height && turning.is_some_and(|turning| bomb_lands_on(raw(me.x, me.y, muzzle), turning.facing, speed, to, velocity, reach))
             };
             // Artillery waits for the energy a shot needs, and reloads faster beside generators.
             let weapon_energy = artillery.map_or(Res::ZERO, |artillery| {
@@ -2182,16 +2243,27 @@ impl SimWorld {
             if combat.ticks_until_ready == 0 && aimed && gun_free && loaded && charged && can_fire {
                 if let Some(target) = combat.target {
                     let entry = locate(target).expect("target was just validated or found");
-                    let (from, to) = (raw(me.x, me.y, me.z), raw(entry.x, entry.y, entry.z));
+                    let (from, to) = (raw(me.x, me.y, muzzle), raw(entry.x, entry.y, entry.z));
                     let homing = (entry.is_air || torpedo).then_some(target);
-                    if bomb.is_some() && !bomb_on(Vec3Fp::new(to.x, to.y, terrain.height_at(to.xy())), entry.radius) {
+                    // Missiles, bombs and shots at aircraft are never blocked by the ground.
+                    let direct = missile.is_none() && homing.is_none() && bomb.is_none() && tractor.is_none();
+                    let clear = !direct || shot_is_clear(terrain, from, to, combat.projectile_speed);
+                    // A target the player ordered is walked closer to until the shot is clear, rather
+                    // than shelling the ground in the way. Artillery lobs over most of it, and fires.
+                    if combat.forced_target == Some(target) {
+                        combat.line_blocked = !clear && artillery.is_none() && combat.still_closing([me.x, me.y], tick);
+                        if clear {
+                            combat.closing = None;
+                        }
+                    }
+                    if bomb.is_some() && !bomb_on(Vec3Fp::new(to.x, to.y, terrain.height_at(to.xy())), entry.radius, entry.velocity) {
                         // Not over it yet.
-                    // A target picked by the unit itself is passed over for a while if the ground
-                    // would stop the shot. One the player ordered is fired at regardless.
-                    // Missiles, bombs and shots at aircraft are never blocked.
-                    } else if combat.forced_target.is_none() && missile.is_none() && homing.is_none() && bomb.is_none() && tractor.is_none() && !shot_is_clear(terrain, from, to, combat.projectile_speed) {
+                    } else if !clear && combat.forced_target.is_none() {
+                        // A target picked by the unit itself is passed over for a while.
                         combat.blocked = Some((target, tick + BLOCKED_TARGET_TICKS));
                         combat.target = None;
+                    } else if combat.line_blocked {
+                        // Walking closer: no shot yet.
                     } else if tractor.is_some() {
                         // It takes hold, once the cleanup has checked the unit can be lifted.
                         grabs.push((id, target));
@@ -2232,15 +2304,29 @@ impl SimWorld {
             if let Some(spot) = ground.filter(|_| hits_ground && tractor.is_none()) {
                 let spot_point = Vec3Fp::new(spot.x, spot.y, terrain.height_at(spot));
                 let distance = squared_distance(spot.x.to_bits(), spot.y.to_bits());
-                let in_reach = if bomb.is_some() { bomb_on(spot_point, 0) } else { distance <= range * range && far_enough(distance) };
+                let in_reach = if bomb.is_some() { bomb_on(spot_point, 0, [0, 0]) } else { distance <= range * range && far_enough(distance) };
                 let charged = economies[stats.team.index()].energy >= weapon_energy;
-                if combat.ticks_until_ready == 0 && aimed && loaded && in_reach && charged && can_fire {
-                    let from = Vec3Fp::new(Fp::from_bits(me.x), Fp::from_bits(me.y), Fp::from_bits(me.z));
+                if !in_reach {
+                    (combat.line_blocked, combat.closing) = (false, None);
+                }
+                let from = Vec3Fp::new(Fp::from_bits(me.x), Fp::from_bits(me.y), Fp::from_bits(muzzle));
+                let to = Vec3Fp::new(spot.x, spot.y, terrain.height_at(spot) - GROUND_AIM_DEPTH);
+                // A shell that would come down on a rise in between, or short on a slope, is not
+                // fired: the unit walks closer. Bombs, missiles and artillery go over.
+                if combat.ticks_until_ready == 0 && aimed && loaded && in_reach && bomb.is_none() && missile.is_none() && artillery.is_none() {
+                    let reach = combat.projectile_splash.max(fp_int(GROUND_SHOT_REACH_UNITS));
+                    let lands = super::combat::shot_lands_near(terrain, from, to, combat.projectile_speed, reach);
+                    combat.line_blocked = !lands && combat.still_closing([me.x, me.y], tick);
+                    if lands {
+                        combat.closing = None;
+                    }
+                }
+                if combat.ticks_until_ready == 0 && aimed && loaded && in_reach && charged && can_fire && !combat.line_blocked {
                     shots.push(PendingShot {
                         source: id,
                         team: stats.team,
                         from,
-                        to: Vec3Fp::new(spot.x, spot.y, terrain.height_at(spot) - GROUND_AIM_DEPTH),
+                        to,
                         speed: combat.projectile_speed,
                         damage: combat.projectile_damage,
                         splash: combat.projectile_splash,
@@ -2341,7 +2427,7 @@ impl SimWorld {
                     if weapon.ticks_until_ready > 0 || !aimed || (me.is_sub && !weapon.torpedo && weapon.missile_height.is_none()) {
                         continue;
                     }
-                    let from = raw(me.x, me.y, me.z);
+                    let from = raw(me.x, me.y, muzzle);
                     let (to, homing) = match (spot, target) {
                         (Some(spot), _) => (Vec3Fp::new(spot.x, spot.y, terrain.height_at(spot) - GROUND_AIM_DEPTH), None),
                         (None, Some(entry)) => (raw(entry.x, entry.y, entry.z), (entry.is_air || weapon.torpedo).then_some(entry.id)),
@@ -2629,6 +2715,7 @@ impl SimWorld {
     }
 
     pub fn step_projectiles(&mut self) {
+        self.landed.clear();
         self.pending_shield_hits.clear();
         self.dead_projectiles.clear();
         let mut shot_down = if self.missile_defenses.is_empty() { Vec::new() } else { self.intercept_missiles() };
@@ -2768,7 +2855,13 @@ impl SimWorld {
                 let part = |value: Fp| ((i64::from(value.to_bits()) * i64::from(along)) >> FP_FRAC_BITS) as i32;
                 (start.x.to_bits() + part(step.x), start.y.to_bits() + part(step.y))
             };
+            // Where along this step it struck, in full, for the blast and for drawing.
+            let impact_at = |along: i32| {
+                let part = |value: Fp| Fp::from_bits(((i64::from(value.to_bits()) * i64::from(along)) >> FP_FRAC_BITS) as i32);
+                Vec3Fp::new(start.x + part(step.x), start.y + part(step.y), start.z + part(step.z))
+            };
             if let Some((along, struck)) = dome_hit.filter(|(along, _)| first(*along)) {
+                position.0 = impact_at(along);
                 if let Some(discharged) = discharged {
                     discharges.push(DischargeImpact { def: discharged.def, source: projectile.source, team: projectile.source_team, point: point_at(along), dome: Some(domes[struck].id) });
                     dead.push(id);
@@ -2791,18 +2884,20 @@ impl SimWorld {
                 continue;
             }
 
-            // Splash shells detonate where they stop, and damage everything nearby.
+            // Splash shells detonate where they strike, and damage everything nearby.
             let splash = projectile.splash_radius > Fp::ZERO;
-            let blast = Explosion { x: end.x.to_bits(), y: end.y.to_bits(), radius: projectile.splash_radius, damage: projectile.damage, source: Some(projectile.source), stun };
+            let blast_at = |at: Vec3Fp| Explosion { x: at.x.to_bits(), y: at.y.to_bits(), radius: projectile.splash_radius, damage: projectile.damage, source: Some(projectile.source), stun };
             // A nuclear blast also has an inner ring, that does far more.
-            let core = missile.filter(|missile| missile.inner_radius > Fp::ZERO).map(|missile| Explosion { radius: missile.inner_radius, damage: missile.inner_damage, stun: 0, ..blast });
+            let core_at = |at: Vec3Fp| missile.filter(|missile| missile.inner_radius > Fp::ZERO).map(|missile| Explosion { radius: missile.inner_radius, damage: missile.inner_damage, stun: 0, ..blast_at(at) });
 
             match (best, probe.hit) {
                 (Some((along, _, target, is_structure)), terrain_hit) if terrain_hit.is_none_or(|ground| along <= ground) => {
+                    let impact = impact_at(along);
+                    position.0 = impact;
                     if let Some(discharged) = discharged {
                         discharges.push(DischargeImpact { def: discharged.def, source: projectile.source, team: projectile.source_team, point: point_at(along), dome: None });
                     } else if splash {
-                        explosions.extend([Some(blast), core].into_iter().flatten());
+                        explosions.extend([Some(blast_at(impact)), core_at(impact)].into_iter().flatten());
                     } else {
                         let _ = is_structure;
                         hits.push((target, projectile.damage, Some(projectile.source)));
@@ -2813,15 +2908,15 @@ impl SimWorld {
                     dead.push(id);
                 }
                 (_, Some(ground)) => {
+                    let impact = impact_at(ground);
+                    position.0 = impact;
                     if let Some(discharged) = discharged {
                         discharges.push(DischargeImpact { def: discharged.def, source: projectile.source, team: projectile.source_team, point: point_at(ground), dome: None });
                     } else if splash {
-                        explosions.extend([Some(blast), core].into_iter().flatten());
+                        explosions.extend([Some(blast_at(impact)), core_at(impact)].into_iter().flatten());
                     } else {
                         // A shell that comes down on bare ground hits any debris lying there.
-                        let along = |value: Fp| ((i64::from(value.to_bits()) * i64::from(ground)) >> FP_FRAC_BITS) as i32;
-                        let (x, y) = (start.x.to_bits() + along(step.x), start.y.to_bits() + along(step.y));
-                        wreck_blasts.push(Explosion { x, y, radius: Fp::ZERO, ..blast });
+                        wreck_blasts.push(Explosion { radius: Fp::ZERO, ..blast_at(impact) });
                     }
                     dead.push(id);
                 }
@@ -3082,9 +3177,13 @@ impl SimWorld {
             let ecs = &mut self.ecs;
             // Both lists are sorted by SimId, so one forward pass finds every match.
             let mut next_dead = 0;
+            let landed = &mut self.landed;
             self.projectiles.retain(|&(id, entity)| {
                 if dead.get(next_dead) == Some(&id) {
                     next_dead += 1;
+                    if let Ok((position, projectile, discharged, missile)) = ecs.query_one_mut::<(&Position, &Projectile, Option<&Discharged>, Option<&Missile>)>(entity) {
+                        landed.push(projectile_view(id, position, projectile, discharged, missile));
+                    }
                     ecs.despawn(entity).expect("dead projectiles are live until now");
                     false
                 } else {
@@ -3411,7 +3510,12 @@ impl SimWorld {
             write_fp(hasher, spot.x);
             write_fp(hasher, spot.y);
         }
-        hasher.write(&[u8::from(combat.enabled), order.kind as u8]);
+        hasher.write(&[u8::from(combat.enabled), order.kind as u8, u8::from(combat.line_blocked)]);
+        if let Some((closest, since)) = combat.closing {
+            hasher.write(&closest[0].to_le_bytes());
+            hasher.write(&closest[1].to_le_bytes());
+            hasher.write(&since.to_le_bytes());
+        }
         hasher.write(&order.route.to_le_bytes());
         if let Some(slot) = order.slot {
             write_fp(hasher, slot.x);
@@ -3543,16 +3647,11 @@ impl SimWorld {
             .iter()
             .filter_map(|&(id, entity)| {
                 let (position, projectile, discharged, missile) = projectile_view.get(entity).expect("projectile list only holds live projectiles");
-                let (x, y, z) = (position.0.x.to_bits(), position.0.y.to_bits(), position.0.z.to_bits());
-                let kind = match (discharged, missile) {
-                    (Some(_), _) => ProjectileKind::Discharge,
-                    (None, Some(missile)) if missile.strategic => ProjectileKind::StrategicMissile,
-                    (None, Some(_)) => ProjectileKind::TacticalMissile,
-                    (None, None) => ProjectileKind::Shell,
-                };
-                seen(projectile.source_team, x, y).then_some(ProjectileView { id, team: projectile.source_team, x, y, z, kind, source: projectile.source, splash: projectile.splash_radius.to_bits() })
+                let view = self::projectile_view(id, position, projectile, discharged, missile);
+                seen(projectile.source_team, view.x, view.y).then_some(view)
             })
             .collect();
+        let landed = self.landed.iter().filter(|view| seen(view.team, view.x, view.y)).copied().collect();
         let wrecks = self
             .wrecks
             .iter()
@@ -3757,6 +3856,7 @@ impl SimWorld {
             tick: self.current_tick,
             units,
             projectiles,
+            landed,
             wrecks,
             shields,
             interceptions,

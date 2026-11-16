@@ -1281,8 +1281,10 @@ pub struct QueueChip {
     pub count: u32,
     /// How far along it is, in thousandths, if started.
     pub progress: Option<u16>,
-    /// What right-clicking it does.
+    /// What right-clicking it does: remove one.
     pub remove: UiAction,
+    /// What left-clicking it does, if anything: queue one more.
+    pub add: Option<UiAction>,
 }
 
 /// What a queue entry's button shows: the item's icon, or the order's glyph.
@@ -1340,18 +1342,34 @@ pub fn queue_chips(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb)
                 _ => None,
             };
             let built = progress.map_or(String::new(), |permille| format!(" {}%", permille / 10));
-            QueueChip { label: format!("{}. {}{built}", position + 1, task_name(&task, db)), icon: task_icon(&task), count: 1, progress, remove: UiAction::CancelTask { units, task } }
+            QueueChip { label: format!("{}. {}{built}", position + 1, task_name(&task, db)), icon: task_icon(&task), count: 1, progress, remove: UiAction::CancelTask { units, task }, add: None }
         })
         .collect();
 
     if let Some(menu) = factory_menu(snapshot, selected, db) {
         for (index, &(item, count)) in menu.queue.iter().enumerate() {
-            let holding = |id: &&SimId| snapshot.factories.iter().any(|factory| factory.id == **id && factory.queue.contains(&item.0));
-            let factories: Vec<SimId> = menu.factories.iter().filter(holding).copied().collect();
+            // The selected factories with this item queued, with how many of it, and how long
+            // their queues are.
+            let holding: Vec<(SimId, usize, usize)> = menu
+                .factories
+                .iter()
+                .filter_map(|&id| {
+                    let factory = snapshot.factories.iter().find(|factory| factory.id == id)?;
+                    let held = factory.queue.iter().filter(|&&queued| queued == item.0).count();
+                    (held > 0).then_some((id, held, factory.queue.len()))
+                })
+                .collect();
             let name = &db.get(item).name;
             let label = if count > 1 { format!("{name} x{count}") } else { name.clone() };
             let progress = if index == 0 { menu.progress_permille } else { None };
-            chips.push(QueueChip { label, icon: ChipIcon::Item(item), count, progress, remove: UiAction::RemoveQueued { factories, blueprint: item } });
+            // One at a time: removed from the factory with the most of it, the last on a tie, and
+            // added to the one of them with the shortest queue, the first on a tie. Not another
+            // upgrade, which a factory takes only once.
+            let most = holding.iter().max_by_key(|&&(_, held, _)| held).map(|&(id, ..)| id);
+            let shortest = holding.iter().min_by_key(|&&(_, _, length)| length).map(|&(id, ..)| id);
+            let remove = UiAction::RemoveQueued { factories: most.into_iter().collect(), blueprint: item };
+            let add = shortest.filter(|_| !db.get(item).is_factory()).map(|id| UiAction::Queue { factories: vec![id], blueprint: item, selected_count: 1, count: 1 });
+            chips.push(QueueChip { label, icon: ChipIcon::Item(item), count, progress, remove, add });
         }
     }
     chips
@@ -1386,8 +1404,12 @@ fn queue_chip_row(ui: &mut egui::Ui, chips: &[QueueChip], db: &BlueprintDb, acti
                             hud::meter(painter, bar, f32::from(progress) / 1000.0, BUILDING);
                         }
                     });
-                    if button.on_hover_text(format!("{}\nRight-click to remove", chip.label)).secondary_clicked() {
+                    let hint = if chip.add.is_some() { "Left-click to queue one more, right-click to remove one" } else { "Right-click to remove" };
+                    let button = button.on_hover_text(format!("{}\n{hint}", chip.label));
+                    if button.secondary_clicked() {
                         actions.push(chip.remove.clone());
+                    } else if button.clicked() {
+                        actions.extend(chip.add.clone());
                     }
                 }
             });
@@ -4209,9 +4231,12 @@ mod tests {
         let chips = queue_chips(&current, &[SimId(1), SimId(2)], &db);
         assert_eq!(chips.len(), 2);
         assert_eq!(chips[0].label, "Light Walker x3");
-        assert_eq!(chips[0].remove, UiAction::RemoveQueued { factories: vec![SimId(1), SimId(2)], blueprint: bot });
+        // One at a time: off the factory with the most, onto the one with the shorter queue.
+        assert_eq!(chips[0].remove, UiAction::RemoveQueued { factories: vec![SimId(1)], blueprint: bot });
+        assert_eq!(chips[0].add, Some(UiAction::Queue { factories: vec![SimId(1)], blueprint: bot, selected_count: 1, count: 1 }));
         assert_eq!(chips[1].label, "Heavy Tank");
         assert_eq!(chips[1].remove, UiAction::RemoveQueued { factories: vec![SimId(2)], blueprint: tank });
+        assert_eq!(chips[1].add, Some(UiAction::Queue { factories: vec![SimId(2)], blueprint: tank, selected_count: 1, count: 1 }));
     }
 
     /// Runs real egui input through the queue row, and returns what came out.
@@ -4219,7 +4244,7 @@ mod tests {
         let ctx = egui::Context::default();
         install_fonts(&ctx);
         let db = BlueprintDb::standard();
-        let chips = [QueueChip { label: "1. Materiel Extractor".to_string(), icon: ChipIcon::Item(db.id("mass_extractor")), count: 1, progress: None, remove: UiAction::Restart }];
+        let chips = [QueueChip { label: "1. Materiel Extractor".to_string(), icon: ChipIcon::Item(db.id("mass_extractor")), count: 1, progress: None, remove: UiAction::Restart, add: Some(UiAction::TogglePause) }];
         // On the first chip, which starts the row.
         let at = egui::pos2(24.0, 24.0);
         let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
@@ -4364,11 +4389,11 @@ mod tests {
     }
 
     #[test]
-    fn right_clicking_a_queue_item_removes_it_and_left_clicking_does_not() {
+    fn right_clicking_a_queue_item_removes_one_and_left_clicking_adds_one() {
         let (actions, over_panel) = click_first_chip(egui::PointerButton::Secondary);
-        assert_eq!(actions, [UiAction::Restart], "a right-click should remove the order");
+        assert_eq!(actions, [UiAction::Restart], "a right-click should remove one");
         assert!(over_panel, "the interface must claim the click, or it would also order units to move");
-        assert!(click_first_chip(egui::PointerButton::Primary).0.is_empty());
+        assert_eq!(click_first_chip(egui::PointerButton::Primary).0, [UiAction::TogglePause], "a left-click should queue one more");
     }
 
     /// Whether a button's popup shows once the pointer has rested on it for `rest` seconds.

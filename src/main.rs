@@ -105,7 +105,8 @@ Usage: sim-engine [options]
   --fog <on|off>       Fog of war, for every team and the AI too (default on)
 
 Controls:
-  Left-drag or click   Select your units
+  Left-drag or click   Select your units. A box over fighting units and engineers or
+                       structures selects only the fighting units, commander included
   Double-click         Select all your units of that type on screen
   Shift + click        Add a unit to the selection, or remove it
   Shift (hold)         Show every unit's pending orders
@@ -149,6 +150,7 @@ Controls:
   Space                Jump to your commander
   Right-click a transport  With land units selected, board it
   Ctrl + U             Unload the selected transports where you click next
+  Ctrl + A             Select all your units that fight, or all your units if none do
   Ctrl + P             Pause or resume the game. Orders given while paused wait for
                        it to resume. Command works too, and so does the Pause button
   Scroll               Zoom, towards the cursor
@@ -796,10 +798,12 @@ fn place_structures(
         feedback.show_rejected(Some(position_of(last)), "Can't build there");
         return false;
     }
-    // Only the first can replace existing orders, or each would cancel the one before it.
+    // Only the first can replace existing orders, or each would cancel the one before it. The
+    // whole selection goes, so that builders that cannot build it help those that can.
+    let units = selection.selected().to_vec();
     for (index, &(cell_x, cell_y)) in valid.iter().enumerate() {
         feedback.add_marker(MarkerKind::Build, position_of((cell_x, cell_y)), None);
-        session.send(SimCommand::Build { units: builders.clone(), blueprint, cell_x, cell_y, queued: queued || index > 0 });
+        session.send(SimCommand::Build { units: units.clone(), blueprint, cell_x, cell_y, queued: queued || index > 0 });
     }
     let blocked = cells.len() - valid.len();
     let mut label = match valid.len() {
@@ -889,6 +893,8 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     );
 
     let mut selection = Selection::default();
+    // Units that fight: armed, and not builders, apart from the commander.
+    selection.set_armed(map.blueprints.iter().map(|blueprint| (blueprint.weapon.is_some() || !blueprint.extra_weapons.is_empty()) && (blueprint.build_power == Fp::ZERO || blueprint.is_commander())).collect());
     let mut placing: Option<BlueprintId> = None;
     let mut armed: Option<ArmedOrder> = None;
     // Where a Shift-drag row of structures began, while the button is held.
@@ -1241,6 +1247,15 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                     patrol_queued = false;
                                     }
                                 }
+                            }
+                            // Ctrl+A selects the whole army: every unit that fights, or every unit if none does.
+                            PhysicalKey::Code(KeyCode::KeyA) if pressed && !event.repeat && command_held && is_match && !watching => {
+                                selection.select_all(&session.current.units, PLAYER_TEAM);
+                                armed = None;
+                                placing = None;
+                                line_start = None;
+                                patrol_points.clear();
+                                patrol_queued = false;
                             }
                             // Ctrl+C arms a capture.
                             PhysicalKey::Code(KeyCode::KeyC) if pressed && !event.repeat && command_held && is_match => {
@@ -1762,7 +1777,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                         instances::build_unit_instances(&previous.units, &current.units, alpha, eye, selection.selected(), &looks, &current.work_links, &mut motion, &mut scene_instances);
                         let drawn_units_and_shells = {
                             let units = scene_instances.total();
-                            instances::build_projectile_instances(&previous.projectiles, &current.projectiles, alpha, eye, &mut scene_instances);
+                            instances::build_projectile_instances(&previous.projectiles, &current.projectiles, &current.landed, alpha, eye, &mut scene_instances);
                             units + current.projectiles.len()
                         };
                         // Explosions, missile trails, and wakes, made from the snapshots alone.

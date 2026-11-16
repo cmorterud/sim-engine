@@ -14,6 +14,9 @@ use crate::math::fp::{fp_int, wide_mul, Fp, Vec2Fp, Vec3Fp};
 /// what shells use here.
 pub const BOMB_GRAVITY: Fp = Fp::from_bits(GRAVITY_RAW * 10);
 
+/// Ticks of straight flight a bomber leaves itself, after turning round, to settle on the line
+/// to its target before it must let go.
+const BOMB_RUN_UP_TICKS: i32 = 10;
 /// This close to the end of a move, in ticks of flight, an aircraft has arrived.
 const ARRIVE_TICKS: i32 = 3;
 /// Ticks to slow to a stop and come down, or to take off again.
@@ -24,14 +27,33 @@ pub fn flying_height(terrain: &Terrain, at: Vec2Fp, elevation: Fp) -> Fp {
     terrain.height_at(at).max(terrain.water_level()) + elevation
 }
 
-/// Whether a bomb dropped now would land on a target, given where the aircraft is and how it is
-/// flying. The bomb keeps the aircraft's speed as it falls, so it is let go short of the target.
-pub fn bomb_lands_on(from: Vec3Fp, facing: Vec2Fp, speed: Fp, target: Vec3Fp, reach: Fp) -> bool {
-    let fall = i64::from((from.z - target.z).to_bits().max(0));
+/// How many ticks a bomb takes to fall this far.
+pub fn bomb_fall_ticks(fall: Fp) -> i64 {
     // After n ticks a bomb has fallen g * n * (n - 1) / 2.
-    let ticks = ((2 * fall / i64::from(BOMB_GRAVITY.to_bits())) as u64).isqrt() as i64 + 1;
+    let fall = i64::from(fall.to_bits().max(0));
+    ((2 * fall / i64::from(BOMB_GRAVITY.to_bits())) as u64).isqrt() as i64 + 1
+}
+
+/// Where a target moving at `velocity` a tick will be once a bomb has fallen `fall` onto it.
+pub fn bomb_lead(target: Vec2Fp, velocity: [i32; 2], fall: Fp) -> Vec2Fp {
+    let ticks = bomb_fall_ticks(fall);
+    let ahead = |at: Fp, step: i32| Fp::from_bits((i64::from(at.to_bits()) + i64::from(step) * ticks).clamp(0, i64::from(i32::MAX)) as i32);
+    Vec2Fp::new(ahead(target.x, velocity[0]), ahead(target.y, velocity[1]))
+}
+
+/// How far ahead of the aircraft a bomb dropped from `fall` up lands.
+pub fn bomb_throw(fall: Fp, speed: Fp) -> Fp {
+    Fp::from_bits((i64::from(speed.to_bits()) * bomb_fall_ticks(fall)).min(i64::from(i32::MAX)) as i32)
+}
+
+/// Whether a bomb dropped now would land on a target moving at `velocity` a tick, given where the
+/// aircraft is and how it is flying. The bomb keeps the aircraft's speed as it falls, so it is let
+/// go short of the target; it lands where the target will be by then, so a moving one is led.
+pub fn bomb_lands_on(from: Vec3Fp, facing: Vec2Fp, speed: Fp, target: Vec3Fp, velocity: [i32; 2], reach: Fp) -> bool {
+    let ticks = bomb_fall_ticks(from.z - target.z);
     let drop = i64::from(speed.to_bits()) * ticks;
-    let offset = (target - from).xy();
+    let ahead = bomb_lead(target.xy(), velocity, from.z - target.z);
+    let offset = ahead - from.xy();
     let along = (i64::from(facing.x.to_bits()) * i64::from(offset.x.to_bits()) + i64::from(facing.y.to_bits()) * i64::from(offset.y.to_bits())) >> 12;
     let across = (i64::from(facing.x.to_bits()) * i64::from(offset.y.to_bits()) - i64::from(facing.y.to_bits()) * i64::from(offset.x.to_bits())) >> 12;
     let short = drop - along;
@@ -158,10 +180,11 @@ impl SimWorld {
             &mut Flight,
             &mut super::components::Health,
             Option<&super::components::Patrol>,
+            Option<&super::components::BombBay>,
         )>();
         let mut view = query.view();
         for &(_, entity) in &self.aircraft {
-            let (position, velocity, stats, order, combat, turning, flight, health, patrol) = view.get_mut(entity).expect("aircraft are live units");
+            let (position, velocity, stats, order, combat, turning, flight, health, patrol, bomb_bay) = view.get_mut(entity).expect("aircraft are live units");
             let here = position.0.xy();
             let radius = turn_radius(stats.max_speed, turning.max_turn);
             let patrolling = patrol.is_some();
@@ -204,7 +227,11 @@ impl SimWorld {
 
             // A target to make passes over, a facility to land on, the end of its move, or nowhere.
             let chasing = if order.kind == OrderKind::Move { None } else { combat.target.or(combat.forced_target) };
-            let target = chasing.and_then(locate).map(|entry| Vec2Fp::new(Fp::from_bits(entry.x), Fp::from_bits(entry.y)));
+            // A bomber heads for where the target will be when its bomb lands.
+            let target = chasing.and_then(locate).map(|entry| {
+                let at = Vec2Fp::new(Fp::from_bits(entry.x), Fp::from_bits(entry.y));
+                if bomb_bay.is_some() { bomb_lead(at, entry.velocity, flight.elevation) } else { at }
+            });
             let ground_target = combat.ground_target.filter(|_| order.kind == OrderKind::Attack);
             let mut heading_for = if staging.is_some() { None } else { target.or(ground_target) };
             let attacking = heading_for.is_some();
@@ -274,6 +301,15 @@ impl SimWorld {
             }
             let speed = flight.speed;
 
+            // A bomber lets go well short of its target, its bomb's throw ahead, so it flies on
+            // far enough past to turn round and line up for that again: twice round its turn,
+            // then the throw, then a run-up to settle on the line.
+            let break_off = if bomb_bay.is_some() {
+                let throw = bomb_throw(flight.elevation, stats.max_speed);
+                flight.break_off.max(throw + radius.saturating_mul(fp_int(2)) + stats.max_speed.saturating_mul(fp_int(BOMB_RUN_UP_TICKS)))
+            } else {
+                flight.break_off
+            };
             let facing = turning.facing;
             turning.facing = match heading_for {
                 Some(point) => {
@@ -282,11 +318,11 @@ impl SimWorld {
                     if !attacking || flight.hovers {
                         flight.breaking_off = false;
                     } else if flight.breaking_off {
-                        flight.breaking_off = distance_squared < wide_mul(flight.break_off, flight.break_off);
+                        flight.breaking_off = distance_squared < wide_mul(break_off, break_off);
                     } else {
                         // Once over the target and past it, fly on for a run-up to the next pass.
                         let behind = facing.x * offset.x + facing.y * offset.y <= Fp::ZERO;
-                        let half = flight.break_off / 2;
+                        let half = break_off / 2;
                         flight.breaking_off = behind && distance_squared < wide_mul(half, half);
                     }
                     // A gunship can turn on the spot, so nothing is out of its reach.
@@ -397,11 +433,16 @@ mod tests {
         let target = Vec3Fp::new(fp_int(1_000), fp_int(0), fp_int(0));
         let at = |x: i32| Vec3Fp::new(fp_int(x), fp_int(0), fp_int(280));
         // From 280 up, a bomb falls for 24 ticks, so at 20 a tick it lands 480 on.
-        assert!(bomb_lands_on(at(520), east, fp_int(20), target, fp_int(30)));
-        assert!(!bomb_lands_on(at(900), east, fp_int(20), target, fp_int(30)), "too late");
-        assert!(!bomb_lands_on(at(200), east, fp_int(20), target, fp_int(30)), "too early");
+        let still = [0, 0];
+        assert!(bomb_lands_on(at(520), east, fp_int(20), target, still, fp_int(30)));
+        assert!(!bomb_lands_on(at(900), east, fp_int(20), target, still, fp_int(30)), "too late");
+        assert!(!bomb_lands_on(at(200), east, fp_int(20), target, still, fp_int(30)), "too early");
+        // A target driving away at 5 a tick is 120 further on when the bomb lands: let go later.
+        let away = [fp_int(5).to_bits(), 0];
+        assert!(bomb_lands_on(at(640), east, fp_int(20), target, away, fp_int(30)), "led");
+        assert!(!bomb_lands_on(at(520), east, fp_int(20), target, away, fp_int(30)), "where it is now is too soon");
         let west = Vec2Fp::new(-Fp::ONE, Fp::ZERO);
-        assert!(!bomb_lands_on(at(520), west, fp_int(20), target, fp_int(30)), "flying away");
+        assert!(!bomb_lands_on(at(520), west, fp_int(20), target, still, fp_int(30)), "flying away");
     }
 
     #[test]
