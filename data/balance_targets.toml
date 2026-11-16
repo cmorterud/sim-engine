@@ -119,9 +119,11 @@ micro_gain = [0.10, 0.25]
 # Formations keep units 2.5 radii apart, center to center (FORMATION_SPACING_RADII).
 # Line weapons splash no wider than their target's radius, so it is incidental.
 line_splash_over_target_radius_max = 1.0
-# Splash roles (artillery, grenadiers, the commander's Discharge) reach about twice the spacing,
-# so that a clump takes several times what a spread formation does.
-splash_role_over_spacing = [1.6, 2.4]
+# Splash roles (artillery, grenadiers, the commander's Discharge) reach, splash plus the target's
+# radius, about one spacing, so that a shell on a clump hits a unit and its four neighbours, five
+# times what it does to a spread formation. Twice the spacing, as first written, hit a three by
+# three block of small units with every shell.
+splash_reach_over_spacing = [1.0, 1.2]
 
 [counters]
 # In an equal-materiel fight, the share of its army a designed winner keeps.

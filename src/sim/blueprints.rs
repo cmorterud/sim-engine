@@ -785,7 +785,7 @@ struct RawFile {
     enhancement: Vec<RawEnhancement>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct BlueprintDb {
     blueprints: Vec<Blueprint>,
     enhancements: Vec<Enhancement>,
@@ -1190,6 +1190,15 @@ impl BlueprintDb {
 
     pub fn iter(&self) -> impl Iterator<Item = &Blueprint> {
         self.blueprints.iter()
+    }
+
+    /// A copy with one unit changed, for the balance harness (BALANCE.md), which tries values in
+    /// memory. It keeps the original's content hash, so worlds built on it do not stand for any
+    /// committed data.
+    pub fn with_unit(&self, id: BlueprintId, change: impl FnOnce(&mut Blueprint)) -> Self {
+        let mut copy = self.clone();
+        change(&mut copy.blueprints[usize::from(id.0)]);
+        copy
     }
 
     pub const fn content_hash(&self) -> u64 {

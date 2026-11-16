@@ -295,3 +295,230 @@ pub fn report(db: &Arc<BlueprintDb>) {
         println!("  {:<34} micro gain {:+.0}%", "", (micro.efficiency / plain.efficiency - 1.0) * 100.0);
     }
 }
+
+/// The balance targets (BALANCE.md, step 1).
+const TARGETS: &str = include_str!("../data/balance_targets.toml");
+
+/// The anchor's numbers, from the targets.
+#[derive(Copy, Clone, Debug)]
+pub struct Anchor {
+    pub materiel: f64,
+    pub energy: f64,
+    pub build_seconds: f64,
+    pub health: f64,
+    pub dps: f64,
+    pub range: f64,
+    pub speed: f64,
+    pub vision: f64,
+    pub radius: f64,
+    pub projectile_speed: f64,
+}
+
+impl Anchor {
+    pub fn from_targets() -> Self {
+        let table: toml::Table = TARGETS.parse().expect("data/balance_targets.toml is valid");
+        let anchor = table["anchor"].as_table().expect("the targets have an anchor");
+        let number = |key: &str| anchor[key].as_float().or_else(|| anchor[key].as_integer().map(|value| value as f64)).unwrap_or_else(|| panic!("anchor.{key} is a number"));
+        Self {
+            materiel: number("materiel"),
+            energy: number("energy"),
+            build_seconds: number("build_seconds"),
+            health: number("health"),
+            dps: number("dps"),
+            range: number("range"),
+            speed: number("speed"),
+            vision: number("vision"),
+            radius: number("radius"),
+            projectile_speed: number("projectile_speed"),
+        }
+    }
+
+    pub fn time_to_kill(&self) -> f64 {
+        self.health / self.dps
+    }
+
+    /// Strength per materiel, √(health × damage a second) / cost, by Lanchester's square law.
+    pub fn efficiency(&self) -> f64 {
+        (self.health * self.dps).sqrt() / self.materiel
+    }
+}
+
+/// A role's shape, as multiples of the anchor's (BALANCE.md, step 2). With a cost and a strength
+/// multiplier, it gives every number a unit needs: strength is the anchor's per materiel, times
+/// the multiplier, times the cost, split into health and damage by the role's time to kill.
+#[derive(Clone, Debug)]
+pub struct Role {
+    pub unit: &'static str,
+    pub role: &'static str,
+    pub cost: f64,
+    pub time_to_kill: f64,
+    pub range: f64,
+    pub speed: f64,
+    pub sight_over_range: f64,
+    /// Seconds for a shell to reach full range.
+    pub flight_seconds: f64,
+    pub reload_seconds: f64,
+    pub splash: f64,
+    pub radius: f64,
+    /// Artillery's least range, as a share of its range.
+    pub min_range: Option<f64>,
+    pub spread: f64,
+    /// The mirrored duel score against the anchor, both attack-moving, that the strength
+    /// multiplier is solved for: the counter matrix's cell. `None` keeps `strength`.
+    pub score_against_anchor: Option<f64>,
+    pub strength: f64,
+}
+
+/// T1 land, first pass. Costs set how many a materiel buys; strengths are solved by duels.
+pub fn t1_land_roles() -> Vec<Role> {
+    let base = Role {
+        unit: "t1_medium_tank",
+        role: "line",
+        cost: 40.0,
+        time_to_kill: 1.0,
+        range: 1.0,
+        speed: 1.0,
+        sight_over_range: 1.1,
+        flight_seconds: 0.55,
+        reload_seconds: 1.0,
+        splash: 0.0,
+        radius: 9.0,
+        min_range: None,
+        spread: 0.0,
+        score_against_anchor: None,
+        strength: 1.0,
+    };
+    vec![
+        base.clone(),
+        // Fast and fragile, for engineers and extractors; line units beat it, keeping about half.
+        Role { unit: "t1_light_walker", role: "raider", cost: 24.0, time_to_kill: 0.5, range: 0.6, speed: 1.8, sight_over_range: 1.6, flight_seconds: 0.5, reload_seconds: 0.5, radius: 7.0, score_against_anchor: Some(-0.55), ..base.clone() },
+        // Outranges everything at T1 and punishes clumps; it beats line units that attack-move
+        // into it, keeping about half, and loses to micro and to raiders.
+        Role {
+            unit: "t1_light_artillery",
+            role: "artillery",
+            cost: 48.0,
+            time_to_kill: 1.15,
+            range: 1.7,
+            speed: 0.8,
+            sight_over_range: 0.65,
+            flight_seconds: 2.1,
+            reload_seconds: 5.0,
+            splash: 16.0,
+            min_range: Some(0.5),
+            spread: 20.0,
+            score_against_anchor: Some(0.5),
+            ..base.clone()
+        },
+        // Sight, not a fighter: cheap, fast, and sees far.
+        Role { unit: "t1_land_scout", role: "scout", cost: 12.0, time_to_kill: 0.4, range: 0.6, speed: 2.0, sight_over_range: 3.3, flight_seconds: 0.4, reload_seconds: 1.0, radius: 6.0, strength: 0.5, ..base },
+    ]
+}
+
+/// Equal materiel for every T1 cost above: 12 anchors, 20 raiders, 10 artillery, 40 scouts.
+const PRICING_MATERIEL: f64 = 480.0;
+
+/// The unit data with a role's numbers at this strength.
+pub fn apply(db: &BlueprintDb, anchor: &Anchor, role: &Role, strength: f64) -> BlueprintDb {
+    let id = db.id(role.unit);
+    let factory_power = db.get(db.id("land_factory_t1")).build_power.to_num::<f64>();
+    let seconds_per_materiel = anchor.build_seconds / anchor.materiel;
+    let total = anchor.efficiency() * strength * role.cost;
+    let time_to_kill = anchor.time_to_kill() * role.time_to_kill;
+    let (health, dps) = (total * time_to_kill.sqrt(), total / time_to_kill.sqrt());
+    let range = anchor.range * role.range;
+    db.with_unit(id, |unit| {
+        unit.mass = crate::sim::blueprints::Res::from_num(role.cost);
+        unit.energy = crate::sim::blueprints::Res::from_num(role.cost * anchor.energy / anchor.materiel);
+        unit.build_time = crate::sim::blueprints::Res::from_num((role.cost * seconds_per_materiel * factory_power).round());
+        unit.health = Fp::from_num(health.round());
+        unit.speed = Fp::from_num((anchor.speed * role.speed * 10.0).round() / 10.0);
+        unit.radius = Fp::from_num(role.radius);
+        unit.vision = Fp::from_num((range * role.sight_over_range / 5.0).round() * 5.0);
+        if let Some(weapon) = unit.weapon.as_mut() {
+            weapon.reload_ticks = (role.reload_seconds * 10.0).round() as u32;
+            weapon.damage = Fp::from_num((dps * role.reload_seconds * 10.0).round() / 10.0);
+            weapon.range = Fp::from_num(range.round());
+            weapon.projectile_speed = Fp::from_num((range / (role.flight_seconds * 10.0)).round());
+            weapon.splash_radius = Fp::from_num(role.splash);
+            weapon.artillery = role.min_range.is_some();
+            weapon.min_range = Fp::from_num((range * role.min_range.unwrap_or(0.0)).round());
+            weapon.spread = Fp::from_num(role.spread);
+        }
+    })
+}
+
+/// Solves a role's strength multiplier for its score against the anchor: the duel score rises
+/// with strength, so bisection over multipliers from 1/8 to 8 finds it.
+pub fn price(db: &BlueprintDb, anchor: &Anchor, role: &Role) -> f64 {
+    let Some(target) = role.score_against_anchor else { return role.strength };
+    let (mut low, mut high) = (-3.0f64, 3.0f64);
+    let anchor_id = db.id("t1_medium_tank");
+    let count = |cost: f64| (PRICING_MATERIEL / cost).round() as u32;
+    for _ in 0..10 {
+        let middle = (low + high) / 2.0;
+        let trial = Arc::new(apply(db, anchor, role, middle.exp2()));
+        let unit = Side { unit: trial.id(role.unit), count: count(role.cost), tactics: Tactics::AttackMove };
+        let tanks = Side { unit: anchor_id, count: count(anchor.materiel), tactics: Tactics::AttackMove };
+        if mirrored(&trial, unit, tanks, 1.0).score > target {
+            high = middle;
+        } else {
+            low = middle;
+        }
+    }
+    ((low + high) / 2.0).exp2()
+}
+
+/// The `--balance-derive` report: T1 land's first-pass numbers from the targets, with the duels
+/// that priced them and the counter-matrix cells they should meet.
+pub fn derive_report() {
+    let anchor = Anchor::from_targets();
+    let roles = t1_land_roles();
+    let mut db = apply(&BlueprintDb::standard(), &anchor, &roles[0], 1.0);
+    let mut strengths = Vec::new();
+    for role in &roles {
+        let strength = price(&db, &anchor, role);
+        db = apply(&db, &anchor, role, strength);
+        strengths.push(strength);
+    }
+    let db = Arc::new(db);
+    println!("T1 land, first pass from data/balance_targets.toml (anchor efficiency {:.3} a materiel):", anchor.efficiency());
+    for (role, strength) in roles.iter().zip(&strengths) {
+        let unit = db.get(db.id(role.unit));
+        let weapon = unit.weapon.expect("T1 land units have a weapon");
+        println!("  {:<10} strength {:.2}  {}", role.role, strength, describe(unit));
+        println!(
+            "             mass = {}, energy = {}, build_time = {}, health = {}, speed = \"{}\", radius = {}, vision = {}",
+            unit.mass, unit.energy, unit.build_time, unit.health, unit.speed, unit.radius, unit.vision
+        );
+        println!(
+            "             weapon = {{ range = {}, reload_ticks = {}, projectile_speed = {}, damage = {}, splash_radius = {}, spread = {}{} }}",
+            weapon.range,
+            weapon.reload_ticks,
+            weapon.projectile_speed,
+            weapon.damage,
+            weapon.splash_radius,
+            weapon.spread,
+            if weapon.artillery { format!(", artillery = true, min_range = {}", weapon.min_range) } else { String::new() },
+        );
+    }
+    let side = |key: &str, tactics| {
+        let role = roles.iter().find(|role| role.unit == key).expect("a T1 land role");
+        Side { unit: db.id(key), count: (PRICING_MATERIEL / role.cost).round() as u32, tactics }
+    };
+    println!();
+    println!("Counter-matrix cells, equal materiel ({PRICING_MATERIEL}), mirrored, score for the first:");
+    let anchor_side = side("t1_medium_tank", Tactics::AttackMove);
+    let line_vs = |enemy: &str| mirrored(&db, anchor_side, side(enemy, Tactics::AttackMove), 1.0);
+    println!("  line against raider:                {:+.2} (line keeps 0.4-0.7)", line_vs("t1_light_walker").score);
+    println!("  line against artillery, attack-move: {:+.2} (artillery keeps 0.4-0.7)", line_vs("t1_light_artillery").score);
+    let micro = mirrored(&db, side("t1_medium_tank", Tactics::Micro), side("t1_light_artillery", Tactics::AttackMove), 1.0);
+    println!("  line against artillery, with micro:  {:+.2} (line should win)", micro.score);
+    let raider = mirrored(&db, side("t1_light_walker", Tactics::AttackMove), side("t1_light_artillery", Tactics::AttackMove), 1.0);
+    println!("  raider against artillery:           {:+.2} (raider should win)", raider.score);
+    let plain = break_even(&db, db.id("t1_medium_tank"), db.id("t1_light_artillery"), PRICING_MATERIEL, Tactics::AttackMove);
+    let with_micro = break_even(&db, db.id("t1_medium_tank"), db.id("t1_light_artillery"), PRICING_MATERIEL, Tactics::Micro);
+    println!("  micro gain, line against artillery:  {:+.0}% (targets: 50-100%)", (with_micro.efficiency / plain.efficiency - 1.0) * 100.0);
+    let ten = mirrored(&db, Side { count: 10, ..anchor_side }, Side { count: 10, ..anchor_side }, 1.0);
+    println!("  ten anchors against ten:            {:.1} s (targets: 25-45 s)", ten.seconds);
+}
