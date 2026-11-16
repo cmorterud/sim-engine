@@ -48,10 +48,10 @@ the bold weight of the font egui ships with, under the Ubuntu Font Licence 1.0
 
 ## Maps from other games
 
-`src/map_import.rs` reads maps made for *Forged Alliance*, from the unzipped folder a player gives:
-the heightmap, water, and props from the `.scmap`, and the deposits and starts from the
-`_save.lua`. The reader was written for this project from the files' layout. No map is shipped or
-committed, and the tests build small map files of their own in code.
+None. Until 2026-11-15, `src/map_import.rs` read maps made for *Forged Alliance* from a folder the
+player gave, and `src/bin/map-download.rs` fetched two community maps from FAF's content server
+into the player's cache. Neither shipped or committed any map, and both were removed so that the
+game depends on nothing of the original's.
 
 ## Bundled maps
 

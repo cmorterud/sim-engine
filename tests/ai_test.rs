@@ -429,7 +429,7 @@ fn the_commander_never_discharges_the_enemy_commander() {
 fn the_army_is_never_sent_at_an_enemy_commander_under_the_water() {
     // Tanks cannot hit what is on the seabed. Two commanders that followed their waves there
     // once stalked each other until the match ran out of time.
-    let map = scenario::MapSource::Imported(std::sync::Arc::new(sim_engine::sim::maps::twin_passes()));
+    let map = scenario::MapSource::Map(std::sync::Arc::new(sim_engine::sim::maps::twin_passes()));
     let mut world = map.scenario(3).world;
     let mut brain = AiBrain::new(Team::Blue, 3, world.starts);
     let home = world.starts[0];
@@ -480,7 +480,7 @@ fn the_army_is_never_sent_at_an_enemy_commander_under_the_water() {
 #[test]
 #[cfg_attr(debug_assertions, ignore = "release only")]
 fn on_a_map_with_a_sea_the_ai_builds_a_navy_and_none_on_a_dry_one() {
-    let map = scenario::MapSource::Imported(std::sync::Arc::new(sim_engine::sim::maps::twin_passes()));
+    let map = scenario::MapSource::Map(std::sync::Arc::new(sim_engine::sim::maps::twin_passes()));
     let mut world = map.scenario(3).world;
     let mut brain = AiBrain::new(Team::Blue, 3, world.starts);
     // 20 minutes, with nobody playing Red.

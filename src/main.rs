@@ -93,11 +93,9 @@ Usage: sim-engine [options]
                        shared machines such as CI runners
   --seed <number>      Scenario seed
   --sound-check        Play each sound in turn, and exit
-  --map <name>         Play on a map that comes with the game: highland or twin_passes
-  --map <folder>       Or on a Forged Alliance map from your own files (the unzipped folder
-                       with its .scmap and _save.lua), for any of the modes above
+  --map <name>         Play on a map that comes with the game: highland or twin_passes,
+                       for any of the modes above
   --ai <easy|normal>   How hard the AI opponent plays (default easy)
-  --starts <a>,<b>     With --map, which armies' starts Blue and Red take (default 1,2)
   --watch              Watch the AI-vs-AI match the soak plays for --map and --seed,
                        seeing everything. V switches to Blue's or Red's sight, - and =
                        change the speed, and Space pauses
@@ -170,7 +168,6 @@ struct Options {
     seed: Option<u64>,
     sound_check: bool,
     map: Option<PathBuf>,
-    starts: Option<(usize, usize)>,
     /// How hard the AI opponent plays: easy unless asked otherwise.
     difficulty: Option<Difficulty>,
     /// Watch the soak's AI-vs-AI match for the map and seed instead of playing.
@@ -231,11 +228,6 @@ fn parse_options() -> Result<Option<Options>, String> {
             "--ai" => options.difficulty = Some(Difficulty::from_name(&value("--ai")?).ok_or("--ai needs easy or normal")?),
             "--watch" => options.watch = true,
             "--view" => options.view = parse_view(&value("--view")?).ok_or("--view needs all, blue, or red")?,
-            "--starts" => {
-                let text = value("--starts")?;
-                let pair = text.split_once(',').and_then(|(a, b)| Some((a.trim().parse().ok()?, b.trim().parse().ok()?)));
-                options.starts = Some(pair.ok_or("--starts needs two army numbers, like 1,2")?);
-            }
             "--help" | "-h" => return Err(USAGE.to_string()),
             other => return Err(format!("unknown option {other}\n\n{USAGE}")),
         }
@@ -268,18 +260,12 @@ fn main() {
             let map = bundled.expect("just checked");
             let trees = map.scenery.iter().filter(|(kind, _)| *kind == sim_engine::sim::components::WreckKind::Tree).count();
             println!("map {}: {} km, {} materiel deposits, {} trees and {} rocks", map.name, map.map_units / 1024, map.deposits.len(), trees, map.scenery.len() - trees);
-            MapSource::Imported(Arc::new(map))
+            MapSource::Map(Arc::new(map))
         }
-        Some(path) => match sim_engine::map_import::import(path, options.starts.unwrap_or((1, 2))) {
-            Ok(imported) => {
-                println!("map {}: {}", imported.map.name, imported.notes.join("; "));
-                MapSource::Imported(Arc::new(imported.map))
-            }
-            Err(message) => {
-                println!("cannot load the map: {message}");
-                std::process::exit(1);
-            }
-        },
+        Some(name) => {
+            println!("unknown map {}: the maps are highland and twin_passes", name.display());
+            std::process::exit(1);
+        }
     };
     if options.sound_check {
         sound_check();
@@ -807,7 +793,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     let mut watch_view = options.view;
     let map_name = match &map_source {
         MapSource::Skirmish => "Skirmish".to_string(),
-        MapSource::Imported(map) => display_name(&map.name),
+        MapSource::Map(map) => display_name(&map.name),
     };
     let scenario = make_scenario(seed, battle, &map_source);
     // A watcher seeing through one team's eyes starts at its base, as its player would.

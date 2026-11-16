@@ -90,7 +90,7 @@ fn a_geothermal_plant_goes_only_over_a_vent_and_nothing_else_does() {
 
 #[test]
 fn the_ai_builds_on_vents_near_its_base() {
-    let source = MapSource::Imported(Arc::new(sim_engine::sim::maps::highland()));
+    let source = MapSource::Map(Arc::new(sim_engine::sim::maps::highland()));
     let mut built = [false; 2];
     play_match_on(&source, 3, 4_000, |world| {
         for &(_, entity) in &world.units {

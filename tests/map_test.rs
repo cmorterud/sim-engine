@@ -1,5 +1,5 @@
-//! Matches on maps loaded from files (GAME_SPECIFICATION.md §20). The importer's own tests build
-//! small map files in code; these play on the map data it produces.
+//! Matches on map data (GAME_SPECIFICATION.md §20): a small map built here in code, played and
+//! replayed.
 
 use std::sync::Arc;
 
@@ -59,25 +59,10 @@ fn a_map_becomes_a_world_with_its_terrain_starts_deposits_and_scenery() {
 
 #[test]
 fn the_same_map_and_seed_play_the_same_match() {
-    let source = MapSource::Imported(Arc::new(test_map()));
+    let source = MapSource::Map(Arc::new(test_map()));
     let first = play_match_on(&source, 5, 3_000, |_| {});
     let again = play_match_on(&source, 5, 3_000, |_| {});
     assert_eq!(first.checksums, again.checksums);
     assert_eq!(replay_match_on(&source, 5, &first.log), first.checksums, "and a replay of its orders matches");
     assert!(first.units_built_peak > 10, "both sides built something: {}", first.units_built_peak);
-}
-
-/// Plays on a real map from the player's own files, if one is named by `SIM_TEST_MAP`. Maps
-/// from other games are never committed, so this is skipped otherwise.
-#[test]
-fn a_real_map_loads_and_plays_when_one_is_given() {
-    let Ok(path) = std::env::var("SIM_TEST_MAP") else {
-        eprintln!("skipped: set SIM_TEST_MAP to an unzipped map folder to run it");
-        return;
-    };
-    let imported = sim_engine::map_import::import(std::path::Path::new(&path), (1, 2)).expect("the map loads");
-    let source = MapSource::Imported(Arc::new(imported.map));
-    let record = play_match_on(&source, 1, 6_000, |_| {});
-    assert_eq!(replay_match_on(&source, 1, &record.log), record.checksums);
-    assert!(record.units_built_peak > 20, "both sides built: {}", record.units_built_peak);
 }

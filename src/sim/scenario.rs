@@ -239,8 +239,8 @@ pub fn skirmish(seed: u64) -> Scenario {
     Scenario { world, opening_commands: Vec::new() }
 }
 
-/// A map loaded from a file, already turned into whole numbers, so that every instance builds
-/// the same world from it. The simulation never reads files: the importer does, outside it.
+/// A map's data, in whole numbers, so that every instance builds the same world from it. The
+/// bundled maps (`maps.rs`) generate theirs in code.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MapData {
     pub name: String,
@@ -280,18 +280,18 @@ pub fn from_map(map: &MapData, seed: u64) -> Scenario {
     Scenario { world, opening_commands: Vec::new() }
 }
 
-/// Where a match is played: the generated skirmish map, or one from a file.
+/// Where a match is played: the generated skirmish map, or one that comes with the game.
 #[derive(Clone, Debug)]
 pub enum MapSource {
     Skirmish,
-    Imported(std::sync::Arc<MapData>),
+    Map(std::sync::Arc<MapData>),
 }
 
 impl MapSource {
     pub fn scenario(&self, seed: u64) -> Scenario {
         match self {
             Self::Skirmish => skirmish(seed),
-            Self::Imported(map) => from_map(map, seed),
+            Self::Map(map) => from_map(map, seed),
         }
     }
 }
