@@ -270,7 +270,7 @@ fn convert(name: &str, scmap: &Scmap, markers: &[Marker], starts: (usize, usize)
             deposits_blocked += usize::from(blocked[y * size + x]);
         }
     }
-    notes.push(format!("{} mass deposits", deposits.len()));
+    notes.push(format!("{} materiel deposits", deposits.len()));
     if deposits_blocked > 0 {
         notes.push(format!("{deposits_blocked} of them on ground too steep to build on"));
     }
@@ -286,7 +286,7 @@ fn convert(name: &str, scmap: &Scmap, markers: &[Marker], starts: (usize, usize)
         }
     }
     if !vents.is_empty() {
-        notes.push(format!("{} hydrocarbon vents", vents.len()));
+        notes.push(format!("{} geothermal vents", vents.len()));
     }
     if vents_blocked > 0 {
         notes.push(format!("{vents_blocked} of them on ground too steep to build on"));
@@ -453,7 +453,7 @@ mod tests {
         assert_eq!(map.starts, [Vec2Fp::new(Fp::from_num(170), Fp::from_num(1_130)), Vec2Fp::new(Fp::from_num(1_110), Fp::from_num(150))]);
         assert_eq!(map.scenery, [(WreckKind::Tree, Vec2Fp::new(Fp::from_num(70), Fp::from_num(90))), (WreckKind::Rock, Vec2Fp::new(Fp::from_num(205), Fp::from_num(40)))]);
         assert_eq!(map.vents, [(20, 20)]);
-        assert!(imported.notes.iter().any(|note| note.contains("1 hydrocarbon vents")));
+        assert!(imported.notes.iter().any(|note| note.contains("1 geothermal vents")));
         assert!(convert("test", &scmap, &parse_markers(SAVE), (1, 3)).is_err(), "there is no army 3");
     }
 

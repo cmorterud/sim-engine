@@ -359,7 +359,7 @@ fn cancelling_unreachable_orders_replays_identically() {
 
 /// Bots, tanks, and artillery in a block: fast, medium, and slow.
 fn mixed_group(world: &mut SimWorld) -> Vec<sim_engine::sim::components::SimId> {
-    let kinds = ["t1_light_bot", "t2_heavy_tank", "t1_light_artillery"];
+    let kinds = ["t1_light_walker", "t2_heavy_tank", "t1_light_artillery"];
     (0..12)
         .map(|index| {
             let blueprint = world.blueprints.id(kinds[index % 3]);
@@ -579,7 +579,7 @@ fn mirror_image_moves_stay_mirror_images() {
     let mirror = |p: Vec2Fp| Vec2Fp::new(fp_int(map) - p.x, fp_int(map) - p.y);
     let mut pairs = Vec::new();
     let mut commands = Vec::new();
-    for (index, key) in ["t1_light_bot", "t2_heavy_tank", "t1_engineer"].into_iter().enumerate() {
+    for (index, key) in ["t1_light_walker", "t2_heavy_tank", "t1_engineer"].into_iter().enumerate() {
         let blueprint = world.blueprints.id(key);
         let start = point(1_007 + 211 * index as i32, 1_013);
         let goal = point(1_903 + 211 * index as i32, 1_597 + 97 * index as i32);

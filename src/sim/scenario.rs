@@ -230,7 +230,7 @@ pub fn skirmish(seed: u64) -> Scenario {
     }
     scatter_scenery(&mut world, start_cell);
 
-    let commander = world.blueprints.id("acu");
+    let commander = world.blueprints.id("command_rig");
     world.starts = [skirmish_start(Team::Blue), skirmish_start(Team::Red)];
     world.spawn_mobile(commander, Team::Blue, skirmish_start(Team::Blue));
     world.spawn_mobile(commander, Team::Red, skirmish_start(Team::Red));
@@ -252,7 +252,7 @@ pub struct MapData {
     /// Below this, land is under water. Far below the map if it has none.
     pub water_level: Fp,
     pub deposits: Vec<(u32, u32)>,
-    /// Hydrocarbon vents, by cell.
+    /// Geothermal vents, by cell.
     pub vents: Vec<(u32, u32)>,
     /// Blue's start, then Red's.
     pub starts: [Vec2Fp; 2],
@@ -271,7 +271,7 @@ pub fn from_map(map: &MapData, seed: u64) -> Scenario {
         let radius = world.rng.range_fp(fp_int(5), fp_int(10));
         world.spawn_scenery(kind, position, radius);
     }
-    let commander = world.blueprints.id("acu");
+    let commander = world.blueprints.id("command_rig");
     world.starts = map.starts;
     world.spawn_mobile(commander, Team::Blue, map.starts[0]);
     world.spawn_mobile(commander, Team::Red, map.starts[1]);

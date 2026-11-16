@@ -13,7 +13,7 @@ use sim_engine::audio::{self, AttackAlarm, SoundEngine, SoundSettings};
 use sim_engine::input::feedback::{MarkerKind, OrderFeedback};
 use sim_engine::input::hotkeys;
 use sim_engine::input::orders::{
-    assist_orders, attack_ground_orders, capture_orders, deposit_position, formation_commands, free_deposits, site_position, line_cells, mobile_units, move_orders, overcharge_orders, pending_builds, queued_commands, PendingBuild, placement_cell, placement_is_valid, placement_target, right_click_orders, PlacementMap, RightClick,
+    assist_orders, attack_ground_orders, capture_orders, deposit_position, formation_commands, free_deposits, site_position, line_cells, mobile_units, move_orders, discharge_orders, pending_builds, queued_commands, PendingBuild, placement_cell, placement_is_valid, placement_target, right_click_orders, PlacementMap, RightClick,
 };
 use sim_engine::input::selection::{group_center, ControlGroups, Selection};
 use sim_engine::math::fp::{Fp, Vec2Fp};
@@ -124,11 +124,11 @@ Controls:
                        Add Alt to attack-move. Command works too
   J, then left-click   Formation move. Hold Alt when clicking to attack-move
   I, then left-click   Attack ground: keep firing at a spot, even out of sight.
-                       Shells that land on debris destroy it, and its mass
+                       Shells that land on debris destroy it, and its materiel
   P, then left-clicks  Add patrol points, then right-click or press P to start
   P + right-click      Hold P and add patrol points, then release P
   X                    Stop
-  L, then left-click   Overcharge an enemy with the commander
+  L, then left-click   Discharge an enemy with the commander
   O                    Pause or resume the selected factories and construction sites,
                        or switch a cloak on and off
   Ctrl + C, then click Capture an enemy unit or structure with the selected builders.
@@ -140,7 +140,7 @@ Controls:
                        Command works too
   1 to 0               Select that group, and press again quickly to jump the camera to it
   W E S D A Z C V     With builders: place a structure. Related ones share a key, and
-                       pressing it again moves on to the next: W factories, E mass,
+                       pressing it again moves on to the next: W factories, E materiel,
                        S energy, D defenses and anti-air, A artillery and missiles,
                        Z radar and sonar, C shields and missile defense, V support
   N                    Mute or unmute
@@ -267,7 +267,7 @@ fn main() {
         Some(_) if bundled.is_some() => {
             let map = bundled.expect("just checked");
             let trees = map.scenery.iter().filter(|(kind, _)| *kind == sim_engine::sim::components::WreckKind::Tree).count();
-            println!("map {}: {} km, {} mass deposits, {} trees and {} rocks", map.name, map.map_units / 1024, map.deposits.len(), trees, map.scenery.len() - trees);
+            println!("map {}: {} km, {} materiel deposits, {} trees and {} rocks", map.name, map.map_units / 1024, map.deposits.len(), trees, map.scenery.len() - trees);
             MapSource::Imported(Arc::new(map))
         }
         Some(path) => match sim_engine::map_import::import(path, options.starts.unwrap_or((1, 2))) {
@@ -618,7 +618,7 @@ fn sound_check() {
     println!("selecting a unit");
     engine.play_select();
     wait(1);
-    println!("ACU under attack");
+    println!("Commander under attack");
     engine.play_alarm();
     wait(2);
     println!("{} frames played", engine.frames_played());
@@ -1005,15 +1005,15 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                         patrol_queued |= shift_held;
                                         add_patrol_point(&selection, &camera, &map, &mut feedback, &mut patrol_points, "right-click or press P to start");
                                     }
-                                    ArmedOrder::Overcharge => {
-                                        if issue_planned_orders(&session, &selection, &camera, &map, &mut feedback, false, false, false, "Click an enemy to Overcharge", overcharge_orders) {
+                                    ArmedOrder::Discharge => {
+                                        if issue_planned_orders(&session, &selection, &camera, &map, &mut feedback, false, false, false, "Click an enemy to Discharge", discharge_orders) {
                                             if !shift_held {
                                                 armed = None;
                                             }
                                             // It waits for the energy, so say so.
-                                            let needed = map.blueprints.iter().find_map(|unit| unit.overcharge).map_or(0, |overcharge| overcharge.energy_required.to_num::<i64>());
+                                            let needed = map.blueprints.iter().find_map(|unit| unit.discharge).map_or(0, |discharge| discharge.energy_required.to_num::<i64>());
                                             if session.current.economy.energy < needed {
-                                                feedback.show_rejected(None, &format!("Overcharge is waiting for {needed} energy in store"));
+                                                feedback.show_rejected(None, &format!("Discharge is waiting for {needed} energy in store"));
                                             }
                                         }
                                     }
@@ -1426,13 +1426,13 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                     let radius = map.blueprints.get(map.blueprints.id("shield_generator")).shield.map_or(0, |shield| shield.radius.to_bits());
                                     let ground = z - snapshot.units[index].radius;
                                     snapshot.shields.push(ShieldView { id: commander, team: PLAYER_TEAM, center: [x, y, ground], radius, health_permille: 660, up: true, recharging: 0 });
-                                    // Two overlapping radars and an omni sensor, for the coverage outline far out, and
+                                    // Two overlapping radars and a deep scan array, for the coverage outline far out, and
                                     // a few blips beyond them.
                                     let unit = |value: i32| value << 12;
                                     snapshot.sensor_ranges = vec![
-                                        SensorRangeView { center: [x, y], radar: unit(1_600), omni: unit(400) },
-                                        SensorRangeView { center: [x + unit(1_800), y + unit(600)], radar: unit(1_600), omni: 0 },
-                                        SensorRangeView { center: [x + unit(900), y - unit(900)], radar: unit(2_400), omni: unit(800) },
+                                        SensorRangeView { center: [x, y], radar: unit(1_600), deep_scan: unit(400) },
+                                        SensorRangeView { center: [x + unit(1_800), y + unit(600)], radar: unit(1_600), deep_scan: 0 },
+                                        SensorRangeView { center: [x + unit(900), y - unit(900)], radar: unit(2_400), deep_scan: unit(800) },
                                     ];
                                     snapshot.blips = (0..6).map(|index| [x + unit(2_600 + 120 * index), y + unit(300 * (index % 3)), ground]).collect();
                                 }
@@ -1510,7 +1510,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                             })
                             .unwrap_or_default();
                         // While placing an extractor, mark the deposits it can go on.
-                        // A hydrocarbon plant marks the free vents the same way.
+                        // A geothermal plant marks the free vents the same way.
                         let extractor = placing.filter(|blueprint| {
                             let unit = map.blueprints.get(*blueprint);
                             unit.requires_deposit || unit.requires_vent

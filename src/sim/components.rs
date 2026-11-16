@@ -264,9 +264,9 @@ pub struct Flight {
     /// Ticks of flight left, and on a full tank. With none left, it flies low and slow.
     pub fuel: u32,
     pub max_fuel: u32,
-    /// How many of an air staging facility's slots it takes: one for T1, two for T2, four for T3.
+    /// How many of an airfield's slots it takes: one for T1, two for T2, four for T3.
     pub size: u8,
-    /// The air staging facility it is on its way to, or on, to refuel and be repaired.
+    /// The airfield it is on its way to, or on, to refuel and be repaired.
     pub refit: Option<SimId>,
     /// On the pad, and which of the four pads.
     pub docked: bool,
@@ -455,23 +455,23 @@ impl Turning {
     }
 }
 
-/// The commander's Overcharge weapon, ready to fire again after its own reload.
+/// The commander's Discharge weapon, ready to fire again after its own reload.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct OverchargeWeapon {
-    pub def: super::blueprints::OverchargeDef,
+pub struct DischargeWeapon {
+    pub def: super::blueprints::DischargeDef,
     pub ticks_until_ready: u32,
 }
 
-/// An order to Overcharge one enemy, as soon as it is in range and there is the energy.
+/// An order to Discharge one enemy, as soon as it is in range and there is the energy.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct OverchargeOrder {
+pub struct DischargeOrder {
     pub target: SimId,
 }
 
-/// Marks an Overcharge shell, whose damage and cost are worked out where it lands.
+/// Marks a Discharge shell, whose damage and cost are worked out where it lands.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct Overcharged {
-    pub def: super::blueprints::OverchargeDef,
+pub struct Discharged {
+    pub def: super::blueprints::DischargeDef,
 }
 
 /// Experience from destroying enemies, and the rank it has earned, from 1 to 5. Units with
@@ -582,7 +582,7 @@ pub struct Upgrading {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Intel {
     /// Built, not paused, and paid for this tick, so that its sensors, field, and jamming work.
-    /// Always for a unit with no upkeep, such as the commander's built-in omni sensor.
+    /// Always for a unit with no upkeep, such as the commander's built-in deep scan array.
     pub running: bool,
     /// The player has switched its cloak on.
     pub cloak_on: bool,

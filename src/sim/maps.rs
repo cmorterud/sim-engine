@@ -180,7 +180,7 @@ impl Layout<'_> {
         true
     }
 
-    /// A hydrocarbon vent and its turned partner, if a plant would fit on open, level ground
+    /// A geothermal vent and its turned partner, if a plant would fit on open, level ground
     /// over both, away from deposits and other vents.
     fn vent(&mut self, cell: (i32, i32)) -> bool {
         let partner = self.turned(cell);

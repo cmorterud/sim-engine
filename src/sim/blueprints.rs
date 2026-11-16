@@ -24,16 +24,16 @@ pub struct EnhancementId(pub u16);
 /// Where an enhancement fits. A unit has one of each, so a new one replaces what is there.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Slot {
-    /// Offensive upgrades.
-    RightArm,
-    /// Construction upgrades.
-    LeftArm,
-    /// Strategic utility.
-    Back,
+    /// Weapon upgrades.
+    Weapons,
+    /// Building upgrades.
+    Fabrication,
+    /// Protection, sensors, repair, and the rest.
+    Systems,
 }
 
 impl Slot {
-    pub const ALL: [Self; 3] = [Self::RightArm, Self::LeftArm, Self::Back];
+    pub const ALL: [Self; 3] = [Self::Weapons, Self::Fabrication, Self::Systems];
 
     pub const fn index(self) -> usize {
         self as usize
@@ -41,9 +41,9 @@ impl Slot {
 
     pub const fn name(self) -> &'static str {
         match self {
-            Self::RightArm => "Right arm",
-            Self::LeftArm => "Left arm",
-            Self::Back => "Back",
+            Self::Weapons => "Weapons",
+            Self::Fabrication => "Fabrication",
+            Self::Systems => "Systems",
         }
     }
 }
@@ -77,9 +77,9 @@ pub struct EnhancementEffects {
     pub weapon_damage: Option<Fp>,
     pub weapon_reload_ticks: Option<u32>,
     pub weapon_splash: Option<Fp>,
-    /// New sight and omni ranges, if they change.
+    /// New sight and deep scan ranges, if they change.
     pub vision: Option<Fp>,
-    pub omni: Option<Fp>,
+    pub deep_scan: Option<Fp>,
     /// Decoy blips on enemy radar, and the energy per tick they cost.
     pub jammer: Option<JammerDef>,
     pub jammer_upkeep: Option<Res>,
@@ -113,8 +113,8 @@ pub struct Enhancement {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum UnitClass {
     Commander,
-    /// Built at a Quantum Gateway (GAME_SPECIFICATION.md §2.2). Its death does not end the match.
-    SupportCommander,
+    /// Built at a Rig Yard (GAME_SPECIFICATION.md §2.2). Its death does not end the match.
+    FieldRig,
     /// Aircraft (GAME_SPECIFICATION.md §10).
     Air,
     Engineer,
@@ -152,7 +152,7 @@ pub enum AdjacencyGiver {
     T1Power,
     T2Power,
     T3Power,
-    Hydrocarbon,
+    Geothermal,
     T1Extractor,
     T2Extractor,
     T3Extractor,
@@ -188,13 +188,13 @@ impl AdjacencyGiver {
         const NONE: [i32; 5] = [0; 5];
         let (weapon_energy, rate_of_fire) = match self {
             Self::T1Power => ([2_500, 1_250, 830, 625, 500], [4_000, 1_250, 830, 625, 500]),
-            Self::T2Power | Self::Hydrocarbon => ([5_000; 5], [6_250, 6_250, 6_250, 6_250, 2_500]),
+            Self::T2Power | Self::Geothermal => ([5_000; 5], [6_250, 6_250, 6_250, 6_250, 2_500]),
             Self::T3Power => ([7_500; 5], [10_000, 10_000, 10_000, 10_000, 4_000]),
             _ => (NONE, NONE),
         };
         let (energy_active, upkeep, mass_active, mass_output, energy_output) = match self {
             Self::T1Power => ([6_250, 3_125, 2_080, 1_563, 250], [6_250, 3_125, 2_080, 1_563, 1_250], NONE, NONE, NONE),
-            Self::T2Power | Self::Hydrocarbon => ([12_500; 5], [12_500; 5], NONE, NONE, NONE),
+            Self::T2Power | Self::Geothermal => ([12_500; 5], [12_500; 5], NONE, NONE, NONE),
             Self::T3Power => ([18_750, 18_750, 18_750, 15_620, 5_000], [18_750; 5], NONE, NONE, NONE),
             Self::T1Extractor => (NONE, NONE, [10_000, 5_000, 3_330, 7_500, 7_500], NONE, NONE),
             Self::T2Extractor => (NONE, NONE, [15_000, 7_500, 5_000, 10_000, 10_000], NONE, NONE),
@@ -245,14 +245,14 @@ pub struct FlightDef {
 /// An aircraft that carries land units (GAME_SPECIFICATION.md §10).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct TransportDef {
-    /// Room by size of what it carries: T1 land units, T2, and T3 and support commanders.
+    /// Room by size of what it carries: T1 land units, T2, and T3 and field rigs.
     /// Mixed loads share the room: each small unit takes a `small`th of it, and so on.
     pub slots: [u32; 3],
 }
 
 /// A pad where aircraft land to refuel and be repaired (GAME_SPECIFICATION.md §10).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct AirStagingDef {
+pub struct AirfieldDef {
     /// Room for this many T1 aircraft. A T2 aircraft takes two, and a T3 one four.
     pub slots: u8,
     /// Health given back to each aircraft on it, per tick.
@@ -321,14 +321,14 @@ pub struct TorpedoDefenseDef {
     pub reload_ticks: u32,
 }
 
-/// The commander's Overcharge: a shot paid for from stored energy, that destroys almost any
+/// The commander's Discharge: a shot paid for from stored energy, that destroys almost any
 /// mobile unit but does little to structures.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-/// The commander's Overcharge, by FAF's rule (GAME_SPECIFICATION.md §2.1): it fires only with
+/// The commander's Discharge, by FAF's rule (GAME_SPECIFICATION.md §2.1): it fires only with
 /// `energy_required` in store, and when the shell lands, it spends what it needs to destroy
 /// the toughest enemy where it lands, within `min_damage` and `max_damage` and what a share
 /// of the store can pay for, at `energy_per_damage` a point.
-pub struct OverchargeDef {
+pub struct DischargeDef {
     pub energy_required: Res,
     /// The most of the store one shot may spend, in thousandths.
     pub energy_share_permille: u32,
@@ -404,7 +404,7 @@ pub struct Blueprint {
     /// For aircraft.
     pub flight: Option<FlightDef>,
     pub requires_deposit: bool,
-    /// Built over a hydrocarbon vent, which must be under the middle of its footprint.
+    /// Built over a geothermal vent, which must be under the middle of its footprint.
     pub requires_vent: bool,
     /// A structure built on deep water, such as a naval factory, instead of on land.
     pub on_water: bool,
@@ -419,19 +419,19 @@ pub struct Blueprint {
     pub energy_storage: Res,
     pub death_explosion: Option<ExplosionDef>,
     pub death_storm: Option<StormDef>,
-    pub overcharge: Option<OverchargeDef>,
+    pub discharge: Option<DischargeDef>,
     pub shield: Option<ShieldDef>,
     pub missile_defense: Option<MissileDefenseDef>,
     /// Anti-torpedo charges: they shoot down enemy torpedoes within range, one each reload.
     pub torpedo_defense: Option<TorpedoDefenseDef>,
-    pub air_staging: Option<AirStagingDef>,
+    pub airfield: Option<AirfieldDef>,
     /// An air transport, which carries land units (GAME_SPECIFICATION.md §10).
     pub transport: Option<TransportDef>,
     /// For factories.
     pub factory_kind: Option<FactoryKind>,
     /// A support factory: cheaper, and it needs a headquarters of its kind and tier.
     pub support: bool,
-    /// An engineering station: a structure whose build power helps whatever friendly
+    /// An field workshop: a structure whose build power helps whatever friendly
     /// construction, production, or repair is within its build range, by itself.
     pub assists: bool,
     pub adjacency_giver: Option<AdjacencyGiver>,
@@ -441,7 +441,7 @@ pub struct Blueprint {
     pub radar: Fp,
     /// Reveals submerged submarines within it (GAME_SPECIFICATION.md §10). Zero for none.
     pub sonar: Fp,
-    pub omni: Fp,
+    pub deep_scan: Fp,
     /// Friendly units within this range of it make no radar blip. Zero for none.
     pub stealth_field: Fp,
     pub jammer: Option<JammerDef>,
@@ -456,7 +456,7 @@ pub struct Blueprint {
 impl Blueprint {
     /// Whether it does anything for intel: sensors, stealth, jamming, or cloaking.
     pub fn has_intel(&self) -> bool {
-        self.radar > Fp::ZERO || self.omni > Fp::ZERO || self.sonar > Fp::ZERO || self.stealth_field > Fp::ZERO || self.jammer.is_some() || self.cloak_upkeep.is_some()
+        self.radar > Fp::ZERO || self.deep_scan > Fp::ZERO || self.sonar > Fp::ZERO || self.stealth_field > Fp::ZERO || self.jammer.is_some() || self.cloak_upkeep.is_some()
     }
 
     pub const fn is_structure(&self) -> bool {
@@ -586,7 +586,7 @@ struct RawTransport {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RawAirStaging {
+struct RawAirfield {
     slots: u8,
     /// Health a second, for each aircraft.
     repair: Number,
@@ -612,7 +612,7 @@ struct RawTorpedoDefense {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RawOvercharge {
+struct RawDischarge {
     energy_required: Number,
     energy_share_permille: u32,
     energy_per_damage: u32,
@@ -702,12 +702,12 @@ struct RawUnit {
     mass_storage: Option<Number>,
     energy_storage: Option<Number>,
     death_explosion: Option<RawExplosion>,
-    overcharge: Option<RawOvercharge>,
+    discharge: Option<RawDischarge>,
     shield: Option<RawShield>,
     missile_defense: Option<RawMissileDefense>,
     torpedo_defense: Option<RawTorpedoDefense>,
     death_storm: Option<RawStorm>,
-    air_staging: Option<RawAirStaging>,
+    airfield: Option<RawAirfield>,
     transport: Option<RawTransport>,
     /// "land" or "air".
     factory_kind: Option<String>,
@@ -722,7 +722,7 @@ struct RawUnit {
     adjacency_size: Option<u8>,
     radar: Option<Number>,
     sonar: Option<Number>,
-    omni: Option<Number>,
+    deep_scan: Option<Number>,
     stealth_field: Option<Number>,
     jammer: Option<RawJammer>,
     cloak: Option<RawCloak>,
@@ -746,7 +746,7 @@ struct RawEnhancement {
     id: String,
     name: String,
     units: Vec<String>,
-    /// "right_arm", "left_arm", or "back".
+    /// "weapons", "fabrication", or "systems".
     slot: String,
     requires: Option<String>,
     mass: Number,
@@ -762,7 +762,7 @@ struct RawEnhancement {
     weapon_reload_ticks: Option<u32>,
     weapon_splash: Option<Number>,
     vision: Option<Number>,
-    omni: Option<Number>,
+    deep_scan: Option<Number>,
     jammer: Option<RawJammer>,
     /// Energy per second while jamming.
     jammer_upkeep: Option<Number>,
@@ -810,9 +810,9 @@ fn parse_enhancements(raw: &[RawEnhancement], lookup: impl Fn(&str) -> Result<Bl
         let whole = |value: &Option<Number>| value.as_ref().map(Number::fp).transpose().map_err(context);
         let per_tick = |value: &Option<Number>| value.as_ref().map(|number| number.res().map(|per_second| per_second / TICKS_PER_SECOND)).transpose().map_err(context);
         let slot = match enhancement.slot.as_str() {
-            "right_arm" => Slot::RightArm,
-            "left_arm" => Slot::LeftArm,
-            "back" => Slot::Back,
+            "weapons" => Slot::Weapons,
+            "fabrication" => Slot::Fabrication,
+            "systems" => Slot::Systems,
             other => return Err(context(format!("unknown slot {other:?}"))),
         };
         let requires = match &enhancement.requires {
@@ -844,7 +844,7 @@ fn parse_enhancements(raw: &[RawEnhancement], lookup: impl Fn(&str) -> Result<Bl
             weapon_reload_ticks: enhancement.weapon_reload_ticks,
             weapon_splash: whole(&enhancement.weapon_splash)?,
             vision: whole(&enhancement.vision)?,
-            omni: whole(&enhancement.omni)?,
+            deep_scan: whole(&enhancement.deep_scan)?,
             jammer: match &enhancement.jammer {
                 None => None,
                 Some(jammer) => Some(JammerDef { radius: jammer.radius.fp().map_err(context)?, decoys: jammer.decoys }),
@@ -965,19 +965,19 @@ impl BlueprintDb {
                     only_while_running: explosion.only_while_running,
                 }),
             };
-            let overcharge = match &unit.overcharge {
+            let discharge = match &unit.discharge {
                 None => None,
-                Some(overcharge) => Some(OverchargeDef {
-                    energy_required: overcharge.energy_required.res().map_err(context)?,
-                    energy_share_permille: overcharge.energy_share_permille.min(1000),
-                    energy_per_damage: overcharge.energy_per_damage.max(1),
-                    min_damage: overcharge.min_damage.fp().map_err(context)?,
-                    max_damage: overcharge.max_damage.fp().map_err(context)?,
-                    commander_damage: overcharge.commander_damage.fp().map_err(context)?,
-                    structure_damage: overcharge.structure_damage.fp().map_err(context)?,
-                    splash_radius: overcharge.splash_radius.fp().map_err(context)?,
-                    search_radius: overcharge.search_radius.fp().map_err(context)?,
-                    reload_ticks: overcharge.reload_ticks,
+                Some(discharge) => Some(DischargeDef {
+                    energy_required: discharge.energy_required.res().map_err(context)?,
+                    energy_share_permille: discharge.energy_share_permille.min(1000),
+                    energy_per_damage: discharge.energy_per_damage.max(1),
+                    min_damage: discharge.min_damage.fp().map_err(context)?,
+                    max_damage: discharge.max_damage.fp().map_err(context)?,
+                    commander_damage: discharge.commander_damage.fp().map_err(context)?,
+                    structure_damage: discharge.structure_damage.fp().map_err(context)?,
+                    splash_radius: discharge.splash_radius.fp().map_err(context)?,
+                    search_radius: discharge.search_radius.fp().map_err(context)?,
+                    reload_ticks: discharge.reload_ticks,
                 }),
             };
             let shield = unit.shield.as_ref().map(parse_shield).transpose().map_err(context)?;
@@ -993,16 +993,16 @@ impl BlueprintDb {
                     reload_ticks: defense.reload_ticks.unwrap_or(0),
                 }),
             };
-            let air_staging = match &unit.air_staging {
+            let airfield = match &unit.airfield {
                 None => None,
-                Some(staging) => Some(AirStagingDef {
+                Some(staging) => Some(AirfieldDef {
                     slots: staging.slots,
                     repair_per_tick: staging.repair.fp().map_err(context)? / TICKS_PER_SECOND as i32,
                     energy_per_tick: staging.repair_energy.res().map_err(context)? / TICKS_PER_SECOND,
                 }),
             };
-            if air_staging.is_some() && footprint == 0 {
-                return Err(context("only structures can be air staging".into()));
+            if airfield.is_some() && footprint == 0 {
+                return Err(context("only structures can be airfield".into()));
             }
             let jammer = match &unit.jammer {
                 None => None,
@@ -1019,7 +1019,7 @@ impl BlueprintDb {
                 name: unit.name.clone(),
                 class: match unit.class.as_str() {
                     "commander" => UnitClass::Commander,
-                    "support_commander" => UnitClass::SupportCommander,
+                    "field_rig" => UnitClass::FieldRig,
                     "air" => UnitClass::Air,
                     "engineer" => UnitClass::Engineer,
                     "bot" => UnitClass::Bot,
@@ -1074,7 +1074,7 @@ impl BlueprintDb {
                 mass_storage: total(&unit.mass_storage)?,
                 energy_storage: total(&unit.energy_storage)?,
                 death_explosion,
-                overcharge,
+                discharge,
                 shield,
                 missile_defense,
                 death_storm: match &unit.death_storm {
@@ -1090,7 +1090,7 @@ impl BlueprintDb {
                     None => None,
                     Some(defense) => Some(TorpedoDefenseDef { range: defense.range.fp().map_err(context)?, reload_ticks: defense.reload_ticks }),
                 },
-                air_staging,
+                airfield,
                 transport: unit.transport.as_ref().map(|transport| TransportDef { slots: [transport.small.max(1), transport.medium.max(1), transport.large.max(1)] }),
                 factory_kind: match unit.factory_kind.as_deref() {
                     None => None,
@@ -1106,7 +1106,7 @@ impl BlueprintDb {
                     Some("t1_power") => Some(AdjacencyGiver::T1Power),
                     Some("t2_power") => Some(AdjacencyGiver::T2Power),
                     Some("t3_power") => Some(AdjacencyGiver::T3Power),
-                    Some("hydrocarbon") => Some(AdjacencyGiver::Hydrocarbon),
+                    Some("geothermal") => Some(AdjacencyGiver::Geothermal),
                     Some("t1_extractor") => Some(AdjacencyGiver::T1Extractor),
                     Some("t2_extractor") => Some(AdjacencyGiver::T2Extractor),
                     Some("t3_extractor") => Some(AdjacencyGiver::T3Extractor),
@@ -1124,7 +1124,7 @@ impl BlueprintDb {
                 },
                 radar: whole(&unit.radar)?,
                 sonar: whole(&unit.sonar)?,
-                omni: whole(&unit.omni)?,
+                deep_scan: whole(&unit.deep_scan)?,
                 stealth_field: whole(&unit.stealth_field)?,
                 jammer,
                 cloak_upkeep,
@@ -1220,9 +1220,9 @@ mod tests {
     fn standard_data_has_the_vertical_slice_roster() {
         let db = BlueprintDb::standard();
         for key in [
-            "acu",
+            "command_rig",
             "t1_engineer",
-            "t1_light_bot",
+            "t1_light_walker",
             "t1_light_artillery",
             "t2_heavy_tank",
             "land_factory_t1",
@@ -1238,9 +1238,9 @@ mod tests {
             "strategic_missile_launcher",
             "strategic_missile",
             "strategic_missile_defense",
-            "anti_nuke",
+            "strategic_interceptor",
             "radar",
-            "omni_sensor",
+            "deep_scan_array",
             "stealth_field_generator",
         ] {
             assert!(db.find(key).is_some(), "{key} is missing");

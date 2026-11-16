@@ -1,4 +1,4 @@
-//! Intel (GAME_SPECIFICATION.md §9): radar blips, stealth fields, jamming, omni, and cloaking.
+//! Intel (GAME_SPECIFICATION.md §9): radar blips, stealth fields, jamming, deep scan, and cloaking.
 
 use sim_engine::math::fp::{fp_int, Fp, Vec2Fp};
 use sim_engine::sim::blueprints::Res;
@@ -41,9 +41,9 @@ fn passive(world: &mut SimWorld, key: &str, team: Team, at: Vec2Fp) -> SimId {
 
 /// A commander with the cloaking enhancement on its back.
 fn cloaking_commander(world: &mut SimWorld, at: Vec2Fp) -> SimId {
-    let acu = world.blueprints.id("acu");
-    let commander = world.spawn_mobile(acu, Team::Blue, at);
-    world.install_enhancement(commander, world.blueprints.enhancement_id("personal_cloak"));
+    let rig = world.blueprints.id("command_rig");
+    let commander = world.spawn_mobile(rig, Team::Blue, at);
+    world.install_enhancement(commander, world.blueprints.enhancement_id("thermal_camouflage"));
     commander
 }
 
@@ -66,7 +66,7 @@ fn radar_shows_an_enemy_out_of_sight_as_a_blip() {
     let mut world = foggy_world();
     let radar = structure(&mut world, "radar", Team::Blue, 50, 50);
     // 1,000 away: beyond the radar's own 300 of sight, within its 1,600 of radar.
-    let enemy = passive(&mut world, "t1_light_bot", Team::Red, point(2_020, 1_010));
+    let enemy = passive(&mut world, "t1_light_walker", Team::Red, point(2_020, 1_010));
     run(&mut world, 10);
     assert!(!shown(&world, Team::Blue, enemy), "it is out of sight");
     assert_eq!(blips(&world, Team::Blue).len(), 1, "but on radar");
@@ -76,7 +76,7 @@ fn radar_shows_an_enemy_out_of_sight_as_a_blip() {
     assert!(world.snapshot_for(Some(Team::Red)).sensor_ranges.is_empty(), "only the viewer's own sensors");
 
     // In sight it is a unit, not a blip.
-    let scout = passive(&mut world, "t1_light_bot", Team::Blue, point(1_900, 1_010));
+    let scout = passive(&mut world, "t1_light_walker", Team::Blue, point(1_900, 1_010));
     run(&mut world, 10);
     assert!(shown(&world, Team::Blue, enemy));
     assert!(blips(&world, Team::Blue).is_empty());
@@ -87,7 +87,7 @@ fn radar_shows_an_enemy_out_of_sight_as_a_blip() {
 fn a_radar_without_energy_or_paused_shows_nothing() {
     let mut world = foggy_world();
     let radar = structure(&mut world, "radar", Team::Blue, 50, 50);
-    passive(&mut world, "t1_light_bot", Team::Red, point(2_020, 1_010));
+    passive(&mut world, "t1_light_walker", Team::Red, point(2_020, 1_010));
     world.economies[0].energy = Res::ZERO;
     run(&mut world, 10);
     assert!(blips(&world, Team::Blue).is_empty(), "with no energy it is off");
@@ -104,12 +104,12 @@ fn a_radar_without_energy_or_paused_shows_nothing() {
 }
 
 #[test]
-fn a_stealth_field_hides_blips_until_omni_strips_it() {
+fn a_stealth_field_hides_blips_until_deep_scan_strips_it() {
     let mut world = foggy_world();
     structure(&mut world, "radar", Team::Blue, 50, 50);
     // A Red stealth field and jammer far from everything, with a Red unit inside the field.
     let field = structure(&mut world, "stealth_field_generator", Team::Red, 100, 50);
-    passive(&mut world, "t1_light_bot", Team::Red, point(2_100, 1_010));
+    passive(&mut world, "t1_light_walker", Team::Red, point(2_100, 1_010));
     run(&mut world, 10);
     // The field itself and the bot are hidden. Only decoys show: never more than eight.
     let decoys = blips(&world, Team::Blue);
@@ -117,17 +117,17 @@ fn a_stealth_field_hides_blips_until_omni_strips_it() {
     let near = |blip: &[i32; 3], x: i32, y: i32| (blip[0] - fp_int(x).to_bits()).abs() < fp_int(20).to_bits() && (blip[1] - fp_int(y).to_bits()).abs() < fp_int(20).to_bits();
     assert!(!decoys.iter().any(|blip| near(blip, 2_100, 1_010)), "the bot in the field makes no blip");
 
-    // A Blue omni sensor 600 away: its 800 of omni covers the field, beyond its 400 of sight.
-    let omni = structure(&mut world, "radar", Team::Blue, 70, 50);
-    let entity = world.unit_entity(omni).unwrap();
-    world.ecs.get::<&mut Blueprinted>(entity).unwrap().0 = world.blueprints.id("omni_sensor");
+    // A Blue deep scan array 600 away: its 800 of deep scan covers the field, beyond its 400 of sight.
+    let deep_scan = structure(&mut world, "radar", Team::Blue, 70, 50);
+    let entity = world.unit_entity(deep_scan).unwrap();
+    world.ecs.get::<&mut Blueprinted>(entity).unwrap().0 = world.blueprints.id("deep_scan_array");
     run(&mut world, 10);
     let now = blips(&world, Team::Blue);
-    assert!(now.iter().any(|blip| near(blip, 2_100, 1_010)), "omni strips the bot's stealth: {now:?}");
+    assert!(now.iter().any(|blip| near(blip, 2_100, 1_010)), "deep scan strips the bot's stealth: {now:?}");
     assert!(now.iter().any(|blip| near(blip, 2_020, 1_020)), "and the generator's: {now:?}");
-    // Decoys within omni are gone: any left are beyond its reach, at 1,410 + 800.
+    // Decoys within deep scan are gone: any left are beyond its reach, at 1,410 + 800.
     for blip in now.iter().filter(|blip| !near(blip, 2_100, 1_010) && !near(blip, 2_020, 1_020)) {
-        assert!(blip[0] > fp_int(2_210).to_bits(), "a decoy within omni: {blip:?}");
+        assert!(blip[0] > fp_int(2_210).to_bits(), "a decoy within deep scan: {blip:?}");
     }
     let _ = field;
 }
@@ -152,7 +152,7 @@ fn a_cloaked_commander_cannot_be_seen_or_shot_until_an_enemy_comes_close() {
     let commander = cloaking_commander(&mut world, point(1_000, 1_000));
     world.ecs.get::<&mut Combat>(world.unit_entity(commander).unwrap()).unwrap().range = Fp::ZERO;
     // A Red bot 300 away: within its sight and its 340 of range.
-    let bot = world.blueprints.id("t1_light_bot");
+    let bot = world.blueprints.id("t1_light_walker");
     let bot = world.spawn_mobile(bot, Team::Red, point(1_300, 1_000));
     world.advance_tick(&[SimCommand::SetCloak { units: vec![commander], on: true }]);
     let full = world.unit_health(commander).unwrap();
@@ -186,20 +186,20 @@ fn a_cloak_drops_when_it_cannot_be_paid_for() {
 }
 
 #[test]
-fn an_enemy_commanders_omni_finds_a_cloaked_one() {
+fn an_enemy_commanders_deep_scan_finds_a_cloaked_one() {
     let mut world = foggy_world();
-    let acu = world.blueprints.id("acu");
+    let rig = world.blueprints.id("command_rig");
     let blue = cloaking_commander(&mut world, point(1_000, 1_000));
-    // 300 away: inside the Red commander's 400 of omni, but well beyond 100.
-    let red = world.spawn_mobile(acu, Team::Red, point(1_300, 1_000));
+    // 300 away: inside the Red commander's 400 of deep scan, but well beyond 100.
+    let red = world.spawn_mobile(rig, Team::Red, point(1_300, 1_000));
     world.ecs.get::<&mut Combat>(world.unit_entity(red).unwrap()).unwrap().range = Fp::ZERO;
     world.advance_tick(&[SimCommand::SetCloak { units: vec![blue], on: true }]);
     run(&mut world, 10);
-    assert!(shown(&world, Team::Red, blue), "omni sees through a cloak");
+    assert!(shown(&world, Team::Red, blue), "deep scan sees through a cloak");
 }
 
 #[test]
-fn a_radar_upgrades_in_place_to_a_t2_radar_and_then_an_omni_sensor() {
+fn a_radar_upgrades_in_place_to_a_t2_radar_and_then_an_deep_scan_array() {
     let mut world = foggy_world();
     let radar = structure(&mut world, "radar", Team::Blue, 50, 50);
     let key = |world: &SimWorld| world.blueprints.get(world.ecs.get::<&Blueprinted>(world.unit_entity(radar).unwrap()).unwrap().0).key.clone();
@@ -210,8 +210,8 @@ fn a_radar_upgrades_in_place_to_a_t2_radar_and_then_an_omni_sensor() {
     world.advance_tick(&[SimCommand::Upgrade { units: vec![radar] }]);
     // 2,400 at the T2 radar's 20 is 120 seconds.
     run(&mut world, 1_220);
-    assert_eq!(key(&world), "omni_sensor");
+    assert_eq!(key(&world), "deep_scan_array");
     run(&mut world, 10);
     let sensors = world.snapshot_for(Some(Team::Blue)).sensor_ranges;
-    assert_eq!((sensors[0].radar, sensors[0].omni), (fp_int(12_000).to_bits(), fp_int(4_000).to_bits()));
+    assert_eq!((sensors[0].radar, sensors[0].deep_scan), (fp_int(12_000).to_bits(), fp_int(4_000).to_bits()));
 }

@@ -11,7 +11,7 @@ use cpal::{FromSample, SampleFormat, SizedSample};
 use crate::sim::components::SimId;
 use crate::sim::world::{SimSnapshot, UnitView};
 
-/// How long "ACU under attack" stays silent after playing, however often the ACU is hit.
+/// How long "commander under attack" stays silent after playing, however often the commander is hit.
 pub const ALARM_COOLDOWN_SECONDS: f64 = 30.0;
 /// How long the text alert stays on screen.
 const ALERT_SECONDS: f64 = 4.0;
@@ -309,7 +309,7 @@ pub fn sound_levels(snapshot: &SimSnapshot, zoom_fraction: f64, on_screen: impl 
     SoundLevels { build: crowd_level(builders) * distance, factory: crowd_level(factories) * distance }
 }
 
-/// Decides when "ACU under attack" plays.
+/// Decides when "commander under attack" plays.
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub struct AttackAlarm {
     commander: Option<(SimId, u16)>,
@@ -584,34 +584,34 @@ mod tests {
     #[test]
     fn the_alarm_plays_on_damage_then_waits_thirty_seconds() {
         let mut alarm = AttackAlarm::default();
-        let acu = |health| Some((SimId(1), health));
-        assert!(!alarm.update(acu(1000), 0.1), "the first sighting is not damage");
-        assert!(!alarm.update(acu(1000), 0.1), "no damage");
-        assert!(alarm.update(acu(990), 0.1), "first hit");
+        let rig = |health| Some((SimId(1), health));
+        assert!(!alarm.update(rig(1000), 0.1), "the first sighting is not damage");
+        assert!(!alarm.update(rig(1000), 0.1), "no damage");
+        assert!(alarm.update(rig(990), 0.1), "first hit");
         assert!(alarm.alert_strength() > 0.9, "the text alert should show");
 
         // Constant damage for just under 30 seconds stays quiet.
         let mut health = 990;
         for _ in 0..299 {
             health -= 1;
-            assert!(!alarm.update(acu(health), 0.1));
+            assert!(!alarm.update(rig(health), 0.1));
         }
         assert_eq!(alarm.alert_strength(), 0.0, "the text alert should have gone by now");
         health -= 1;
-        assert!(!alarm.update(acu(health), 0.05), "only just short");
+        assert!(!alarm.update(rig(health), 0.05), "only just short");
         health -= 1;
-        assert!(alarm.update(acu(health), 0.1), "30 seconds later, it plays again");
+        assert!(alarm.update(rig(health), 0.1), "30 seconds later, it plays again");
     }
 
     #[test]
     fn damage_during_the_cooldown_does_not_count_afterwards() {
         let mut alarm = AttackAlarm::default();
-        let acu = |health| Some((SimId(1), health));
-        alarm.update(acu(1000), 0.1);
-        assert!(alarm.update(acu(900), 0.1));
-        assert!(!alarm.update(acu(800), 1.0));
+        let rig = |health| Some((SimId(1), health));
+        alarm.update(rig(1000), 0.1);
+        assert!(alarm.update(rig(900), 0.1));
+        assert!(!alarm.update(rig(800), 1.0));
         for _ in 0..40 {
-            assert!(!alarm.update(acu(800), 1.0), "no new damage, so nothing to report");
+            assert!(!alarm.update(rig(800), 1.0), "no new damage, so nothing to report");
         }
     }
 

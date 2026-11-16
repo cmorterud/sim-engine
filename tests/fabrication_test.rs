@@ -1,4 +1,4 @@
-//! Mass fabricators and hydrocarbon power plants (GAME_SPECIFICATION.md §3.3-3.4, FAF's numbers).
+//! Mass fabricators and geothermal plants (GAME_SPECIFICATION.md §3.3-3.4, FAF's numbers).
 
 use std::sync::Arc;
 
@@ -45,13 +45,13 @@ fn fabricators_turn_energy_into_mass() {
     structure(&mut world, "mass_fabricator", 50, 50).unwrap();
     world.advance_tick(&[]);
     let (mass, energy) = one_tick(&mut world);
-    assert!(near(mass, Res::from_num(1) / 10) && near(energy, -Res::from_num(10)), "1 mass a second for 100 energy: {mass}, {energy}");
+    assert!(near(mass, Res::from_num(1) / 10) && near(energy, -Res::from_num(10)), "1 materiel a second for 100 energy: {mass}, {energy}");
 
     let mut world = self::world();
     structure(&mut world, "mass_fabricator_t3", 50, 50).unwrap();
     world.advance_tick(&[]);
     let (mass, energy) = one_tick(&mut world);
-    assert!(near(mass, Res::from_num(16) / 10) && near(energy, -Res::from_num(150)), "16 mass a second for 1,500 energy: {mass}, {energy}");
+    assert!(near(mass, Res::from_num(16) / 10) && near(energy, -Res::from_num(150)), "16 materiel a second for 1,500 energy: {mass}, {energy}");
 }
 
 #[test]
@@ -60,7 +60,7 @@ fn a_fabricator_blows_up_only_if_it_was_running() {
         let mut world = world();
         let fabricator = structure(&mut world, "mass_fabricator_t3", 50, 50).unwrap();
         // A light bot beside it, which a 5,000-damage blast within 200 would destroy.
-        let bot = world.spawn_mobile(world.blueprints.id("t1_light_bot"), Team::Blue, Vec2Fp::new(fp_int(1_090), fp_int(1_030)));
+        let bot = world.spawn_mobile(world.blueprints.id("t1_light_walker"), Team::Blue, Vec2Fp::new(fp_int(1_090), fp_int(1_030)));
         world.ecs.get::<&mut Combat>(world.unit_entity(bot).unwrap()).unwrap().range = Fp::ZERO;
         world.advance_tick(&[SimCommand::SetPaused { units: vec![fabricator], paused }]);
         world.advance_tick(&[]);
@@ -75,13 +75,13 @@ fn a_fabricator_blows_up_only_if_it_was_running() {
 }
 
 #[test]
-fn a_hydrocarbon_plant_goes_only_over_a_vent_and_nothing_else_does() {
+fn a_geothermal_plant_goes_only_over_a_vent_and_nothing_else_does() {
     let mut world = world();
     world.vents.push((60, 60));
-    assert!(structure(&mut world, "hydrocarbon_plant", 40, 40).is_none(), "no vent there");
-    assert!(structure(&mut world, "hydrocarbon_plant", 60, 60).is_none(), "the vent must be under its middle, not its corner");
+    assert!(structure(&mut world, "geothermal_plant", 40, 40).is_none(), "no vent there");
+    assert!(structure(&mut world, "geothermal_plant", 60, 60).is_none(), "the vent must be under its middle, not its corner");
     assert!(structure(&mut world, "power_generator", 60, 60).is_none(), "vents are saved for plants");
-    let plant = structure(&mut world, "hydrocarbon_plant", 59, 59).expect("over the vent");
+    let plant = structure(&mut world, "geothermal_plant", 59, 59).expect("over the vent");
     world.advance_tick(&[]);
     let (_, energy) = one_tick(&mut world);
     assert!(near(energy, Res::from_num(10)), "100 energy a second: {energy}");
@@ -97,7 +97,7 @@ fn the_ai_builds_on_vents_near_its_base() {
             let Ok(blueprint) = world.ecs.get::<&Blueprinted>(entity) else {
                 continue;
             };
-            if world.blueprints.get(blueprint.0).key == "hydrocarbon_plant" {
+            if world.blueprints.get(blueprint.0).key == "geothermal_plant" {
                 let team = world.ecs.get::<&sim_engine::sim::components::UnitStats>(entity).unwrap().team;
                 built[team.index()] = true;
             }

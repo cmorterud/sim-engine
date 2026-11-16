@@ -101,11 +101,11 @@ pub fn right_click_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
     }
 
     let friend = nearest_unit(click.units, click.camera, click.team, click.cursor).filter(|id| !click.selected.contains(id));
-    // Aircraft sent to a finished air staging facility land on it to refuel and be repaired.
+    // Aircraft sent to a finished airfield land on it to refuel and be repaired.
     if let Some(target) = friend {
         let index = click.units.binary_search_by_key(&target, |unit| unit.id).expect("found in this list");
         let unit = &click.units[index];
-        let staging = unit.blueprint != u16::MAX && unit.built_permille == 1000 && click.blueprints.get(BlueprintId(unit.blueprint)).air_staging.is_some();
+        let staging = unit.blueprint != u16::MAX && unit.built_permille == 1000 && click.blueprints.get(BlueprintId(unit.blueprint)).airfield.is_some();
         let aircraft: Vec<SimId> = parts
             .mobile
             .iter()
@@ -227,8 +227,8 @@ pub fn formation_commands(commands: Vec<SimCommand>) -> Vec<SimCommand> {
         .collect()
 }
 
-/// Overcharge the enemy under the cursor with each selected unit that has it.
-pub fn overcharge_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
+/// Discharge the enemy under the cursor with each selected unit that has it.
+pub fn discharge_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
     let Some(target) = nearest_unit(click.units, click.camera, click.team.enemy(), click.cursor) else {
         return Vec::new();
     };
@@ -236,17 +236,17 @@ pub fn overcharge_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
         .selected
         .iter()
         .filter_map(|id| click.units.binary_search_by_key(id, |unit| unit.id).ok().map(|index| &click.units[index]))
-        .filter(|unit| unit.blueprint != u16::MAX && click.blueprints.get(BlueprintId(unit.blueprint)).overcharge.is_some())
-        .map(|unit| SimCommand::Overcharge { unit: unit.id, target })
+        .filter(|unit| unit.blueprint != u16::MAX && click.blueprints.get(BlueprintId(unit.blueprint)).discharge.is_some())
+        .map(|unit| SimCommand::Discharge { unit: unit.id, target })
         .collect()
 }
 
 /// Whether a unit the player can see could be captured: finished, and not a commander, a
-/// support commander, or an aircraft.
+/// field rig, or an aircraft.
 fn capturable(unit: &UnitView, blueprints: &BlueprintDb) -> bool {
     unit.blueprint != u16::MAX && unit.built_permille == 1000 && {
         let class = blueprints.get(BlueprintId(unit.blueprint)).class;
-        !matches!(class, UnitClass::Commander | UnitClass::SupportCommander | UnitClass::Air)
+        !matches!(class, UnitClass::Commander | UnitClass::FieldRig | UnitClass::Air)
     }
 }
 
@@ -357,7 +357,7 @@ pub fn deposit_position(cell: (u32, u32), heights: &HeightField) -> [f64; 3] {
 }
 
 /// The deposits a new extractor could go on right now.
-/// For a hydrocarbon plant, the corner cells of the free vents it could go over instead.
+/// For a geothermal plant, the corner cells of the free vents it could go over instead.
 pub fn free_deposits(map: &PlacementMap<'_>, blueprint: BlueprintId, units: &[UnitView], pending: &[PendingBuild]) -> Vec<(u32, u32)> {
     let unit = map.blueprints.get(blueprint);
     let sites: Vec<(u32, u32)> = if unit.requires_vent {
@@ -459,7 +459,7 @@ pub struct PlacementMap<'a> {
     /// Sorted (y, x) cells of walls, known from the start.
     pub blocked_cells: &'a [(u32, u32)],
     pub deposits: &'a [(u32, u32)],
-    /// Hydrocarbon vents, by cell.
+    /// Geothermal vents, by cell.
     pub vents: &'a [(u32, u32)],
     /// Sorted (y, x) cells of water deep enough for ships, where naval structures go.
     pub water_cells: &'a [(u32, u32)],
@@ -566,18 +566,18 @@ mod tests {
     }
 
     #[test]
-    fn overcharge_goes_from_the_commander_to_the_enemy_under_the_cursor() {
+    fn discharge_goes_from_the_commander_to_the_enemy_under_the_cursor() {
         let db = db();
         let units = [
-            view(1, Team::Blue, db.id("acu"), &db, 2_000.0, 1_950.0),
-            view(2, Team::Blue, db.id("t1_light_bot"), &db, 2_040.0, 1_950.0),
+            view(1, Team::Blue, db.id("command_rig"), &db, 2_000.0, 1_950.0),
+            view(2, Team::Blue, db.id("t1_light_walker"), &db, 2_040.0, 1_950.0),
             view(3, Team::Red, db.id("t2_heavy_tank"), &db, 2_000.0, 2_050.0),
         ];
         let camera = camera();
-        let orders = overcharge_orders(&click_for(&[SimId(1), SimId(2)], &units, &db, &camera, [2_000.0, 2_050.0]));
-        assert_eq!(orders, [SimCommand::Overcharge { unit: SimId(1), target: SimId(3) }], "only the commander has Overcharge");
-        assert!(overcharge_orders(&click_for(&[SimId(2)], &units, &db, &camera, [2_000.0, 2_050.0])).is_empty());
-        assert!(overcharge_orders(&click_for(&[SimId(1)], &units, &db, &camera, [2_000.0, 1_950.0])).is_empty(), "a friend is not a target");
+        let orders = discharge_orders(&click_for(&[SimId(1), SimId(2)], &units, &db, &camera, [2_000.0, 2_050.0]));
+        assert_eq!(orders, [SimCommand::Discharge { unit: SimId(1), target: SimId(3) }], "only the commander has Discharge");
+        assert!(discharge_orders(&click_for(&[SimId(2)], &units, &db, &camera, [2_000.0, 2_050.0])).is_empty());
+        assert!(discharge_orders(&click_for(&[SimId(1)], &units, &db, &camera, [2_000.0, 1_950.0])).is_empty(), "a friend is not a target");
     }
 
     #[test]
@@ -588,7 +588,7 @@ mod tests {
             view(1, Team::Blue, db.id("t1_light_artillery"), &db, 2_000.0, 1_950.0),
             view(2, Team::Blue, db.id("t1_engineer"), &db, 2_040.0, 1_950.0),
             view(3, Team::Blue, db.id("t1_point_defense"), &db, 1_960.0, 1_950.0),
-            view(4, Team::Red, db.id("t1_light_bot"), &db, 2_300.0, 2_300.0),
+            view(4, Team::Red, db.id("t1_light_walker"), &db, 2_300.0, 2_300.0),
         ];
         let raw = |value: f64| (value * 4096.0) as i32;
         let wreck = |id: u32, x: f64, kind: WreckKind| WreckView { id: SimId(id), x: raw(x), y: raw(2_050.0), z: raw(8.0), radius: raw(8.0), mass: 10, energy: 0, kind };
@@ -611,7 +611,7 @@ mod tests {
     #[test]
     fn shift_turns_orders_into_their_queued_forms() {
         let db = db();
-        let units = [view(1, Team::Blue, db.id("t1_light_bot"), &db, 2_000.0, 1_950.0), view(2, Team::Red, db.id("t1_light_bot"), &db, 2_100.0, 2_050.0)];
+        let units = [view(1, Team::Blue, db.id("t1_light_walker"), &db, 2_000.0, 1_950.0), view(2, Team::Red, db.id("t1_light_walker"), &db, 2_100.0, 2_050.0)];
         let goal = Vec2Fp::new(Fp::from_num(10.0), Fp::from_num(20.0));
         let ids = || vec![SimId(1)];
         let raw = |value: f64| Fp::from_bits((value * 4096.0) as i32);
@@ -679,9 +679,9 @@ mod tests {
     fn an_armed_move_goes_to_the_ground_even_on_top_of_a_unit_and_leaves_structures_out() {
         let db = db();
         let units = [
-            view(1, Team::Blue, db.id("t1_light_bot"), &db, 2_000.0, 1_950.0),
+            view(1, Team::Blue, db.id("t1_light_walker"), &db, 2_000.0, 1_950.0),
             view(2, Team::Blue, db.id("land_factory_t1"), &db, 1_900.0, 1_950.0),
-            view(3, Team::Red, db.id("t1_light_bot"), &db, 2_000.0, 2_050.0),
+            view(3, Team::Red, db.id("t1_light_walker"), &db, 2_000.0, 2_050.0),
         ];
         let camera = camera();
         let goal = Vec2Fp::new(Fp::from_num(2_000.0), Fp::from_num(2_050.0));
@@ -694,7 +694,7 @@ mod tests {
     fn assisting_a_combat_unit_means_following_it() {
         let db = db();
         let units = [
-            view(1, Team::Blue, db.id("t1_light_bot"), &db, 2_000.0, 1_900.0),
+            view(1, Team::Blue, db.id("t1_light_walker"), &db, 2_000.0, 1_900.0),
             view(2, Team::Blue, db.id("t1_engineer"), &db, 2_040.0, 1_900.0),
             view(3, Team::Blue, db.id("t2_heavy_tank"), &db, 2_000.0, 2_050.0),
         ];
@@ -707,9 +707,9 @@ mod tests {
     fn assisting_a_builder_lends_build_power_and_guards_it_with_the_rest() {
         let db = db();
         let units = [
-            view(1, Team::Blue, db.id("t1_light_bot"), &db, 2_000.0, 1_900.0),
+            view(1, Team::Blue, db.id("t1_light_walker"), &db, 2_000.0, 1_900.0),
             view(2, Team::Blue, db.id("t1_engineer"), &db, 2_040.0, 1_900.0),
-            view(3, Team::Blue, db.id("acu"), &db, 2_000.0, 2_050.0),
+            view(3, Team::Blue, db.id("command_rig"), &db, 2_000.0, 2_050.0),
         ];
         let camera = camera();
         let orders = assist_orders(&click_for(&[SimId(1), SimId(2)], &units, &db, &camera, [2_000.0, 2_050.0]));
@@ -719,7 +719,7 @@ mod tests {
     #[test]
     fn assisting_needs_a_friendly_unit_and_a_unit_cannot_assist_itself() {
         let db = db();
-        let units = [view(1, Team::Blue, db.id("t1_light_bot"), &db, 2_000.0, 1_950.0), view(2, Team::Red, db.id("t2_heavy_tank"), &db, 2_000.0, 2_050.0)];
+        let units = [view(1, Team::Blue, db.id("t1_light_walker"), &db, 2_000.0, 1_950.0), view(2, Team::Red, db.id("t2_heavy_tank"), &db, 2_000.0, 2_050.0)];
         let camera = camera();
         assert!(assist_orders(&click_for(&[SimId(1)], &units, &db, &camera, [2_000.0, 2_050.0])).is_empty(), "the enemy is not a friend");
         assert!(assist_orders(&click_for(&[SimId(1)], &units, &db, &camera, [2_000.0, 1_950.0])).is_empty(), "it is the only one selected");
@@ -729,7 +729,7 @@ mod tests {
     fn right_clicking_a_transport_with_land_units_selected_boards_them() {
         let db = db();
         let units = [
-            view(1, Team::Blue, db.id("t1_light_bot"), &db, 2_000.0, 1_950.0),
+            view(1, Team::Blue, db.id("t1_light_walker"), &db, 2_000.0, 1_950.0),
             view(2, Team::Blue, db.id("t2_heavy_tank"), &db, 2_030.0, 1_950.0),
             view(3, Team::Blue, db.id("t1_interceptor"), &db, 2_060.0, 1_950.0),
             view(4, Team::Blue, db.id("t1_light_transport"), &db, 2_000.0, 2_050.0),
@@ -743,8 +743,8 @@ mod tests {
     fn attack_move_stays_an_attack_move_on_top_of_a_unit() {
         let db = db();
         let units = [
-            view(1, Team::Blue, db.id("t1_light_bot"), &db, 2_000.0, 1_950.0),
-            view(2, Team::Red, db.id("t1_light_bot"), &db, 2_000.0, 2_050.0),
+            view(1, Team::Blue, db.id("t1_light_walker"), &db, 2_000.0, 1_950.0),
+            view(2, Team::Red, db.id("t1_light_walker"), &db, 2_000.0, 2_050.0),
         ];
         let camera = camera();
         let world = [2_000.0, 2_050.0];
@@ -788,9 +788,9 @@ mod tests {
     fn right_clicking_an_enemy_attacks_it_with_armed_units_and_captures_it_with_engineers() {
         let db = db();
         let units = [
-            view(1, Team::Blue, db.id("t1_light_bot"), &db, 2_000.0, 1_950.0),
+            view(1, Team::Blue, db.id("t1_light_walker"), &db, 2_000.0, 1_950.0),
             view(2, Team::Blue, db.id("t1_engineer"), &db, 2_010.0, 1_950.0),
-            view(3, Team::Red, db.id("t1_light_bot"), &db, 2_000.0, 2_050.0),
+            view(3, Team::Red, db.id("t1_light_walker"), &db, 2_000.0, 2_050.0),
         ];
         let orders = click_at(&[SimId(1), SimId(2)], &units, &[], &db, &camera(), [2_000.0, 2_050.0]);
         assert_eq!(orders, [SimCommand::Attack { units: vec![SimId(1)], target: SimId(3) }, SimCommand::Capture { units: vec![SimId(2)], target: SimId(3) }]);
@@ -836,7 +836,7 @@ mod tests {
     fn right_clicking_ground_moves_units_and_sets_factory_rally_points() {
         let db = db();
         let units = [
-            view(1, Team::Blue, db.id("t1_light_bot"), &db, 2_000.0, 1_950.0),
+            view(1, Team::Blue, db.id("t1_light_walker"), &db, 2_000.0, 1_950.0),
             view(2, Team::Blue, db.id("land_factory_t1"), &db, 1_900.0, 1_900.0),
         ];
         let orders = click_at(&[SimId(1), SimId(2)], &units, &[], &db, &camera(), [2_050.0, 2_080.0]);
@@ -868,9 +868,9 @@ mod tests {
         let db = db();
         let units = [
             view(1, Team::Blue, db.id("t1_engineer"), &db, 1_000.0, 1_000.0),
-            view(2, Team::Blue, db.id("acu"), &db, 1_050.0, 1_000.0),
+            view(2, Team::Blue, db.id("command_rig"), &db, 1_050.0, 1_000.0),
             view(3, Team::Red, db.id("power_generator"), &db, 2_000.0, 2_000.0),
-            view(4, Team::Red, db.id("acu"), &db, 3_000.0, 3_000.0),
+            view(4, Team::Red, db.id("command_rig"), &db, 3_000.0, 3_000.0),
         ];
         let at = |selected: &[SimId], cursor: [f64; 2]| click_at(selected, &units, &[], &db, &camera(), cursor);
         assert_eq!(at(&[SimId(1)], [2_000.0, 2_000.0]), [SimCommand::Capture { units: vec![SimId(1)], target: SimId(3) }]);
@@ -886,7 +886,7 @@ mod tests {
     fn hidden_enemies_cannot_be_targeted() {
         let db = db();
         // The enemy is simply absent from the snapshot, so the click becomes a move.
-        let units = [view(1, Team::Blue, db.id("t1_light_bot"), &db, 2_000.0, 1_950.0)];
+        let units = [view(1, Team::Blue, db.id("t1_light_walker"), &db, 2_000.0, 1_950.0)];
         let orders = click_at(&[SimId(1)], &units, &[], &db, &camera(), [2_000.0, 2_050.0]);
         assert!(matches!(orders[0], SimCommand::Move { .. }));
     }

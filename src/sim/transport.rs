@@ -19,14 +19,14 @@ const UNLOAD_REACH_UNITS: i32 = 80;
 const UNLOAD_SPREAD_CELLS: i32 = 12;
 
 /// Which of a transport's sizes a unit takes: T1 land units are small, T2 medium, and T3 and
-/// support commanders large. Aircraft, ships, structures, and commanders cannot be carried.
+/// field rigs large. Aircraft, ships, structures, and commanders cannot be carried.
 pub fn transport_size(unit: &Blueprint) -> Option<usize> {
     let carriable = !unit.is_structure() && !unit.is_air() && unit.class != UnitClass::Commander && unit.class != UnitClass::Ammo && unit.speed > Fp::ZERO;
     let afloat = matches!(unit.movement, MoveClass::Naval | MoveClass::Submarine);
     if !carriable || afloat {
         return None;
     }
-    Some(if unit.class == UnitClass::SupportCommander { 2 } else { usize::from(unit.tier.clamp(1, 3)) - 1 })
+    Some(if unit.class == UnitClass::FieldRig { 2 } else { usize::from(unit.tier.clamp(1, 3)) - 1 })
 }
 
 /// Whether a load of `counts` units of each size, and one more of `size`, fits: each small unit

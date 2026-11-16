@@ -65,7 +65,7 @@ fn an_extractor_upgrades_to_t2_and_then_t3_while_it_keeps_working() {
     });
     assert!(took.is_some_and(|ticks| (890..=905).contains(&ticks)), "{took:?}");
     world.advance_tick(&[]);
-    assert_eq!(one_tick(&mut world), (Res::from_num(6) / 10, -Res::from_num(9) / 10), "6 mass a second, for 9 energy");
+    assert_eq!(one_tick(&mut world), (Res::from_num(6) / 10, -Res::from_num(9) / 10), "6 materiel a second, for 9 energy");
     assert_eq!(world.unit_health(mex), Some(fp_int(2_000)), "full health kept at the same share");
 
     // And on to T3: 2,875 build time at the T2's 15 build power, about 192 seconds.
@@ -76,7 +76,7 @@ fn an_extractor_upgrades_to_t2_and_then_t3_while_it_keeps_working() {
     });
     assert!(took.is_some_and(|ticks| (1_900..=1_930).contains(&ticks)), "{took:?}");
     world.advance_tick(&[]);
-    assert_eq!(one_tick(&mut world), (Res::from_num(18) / 10, -Res::from_num(54) / 10), "18 mass a second, for 54 energy");
+    assert_eq!(one_tick(&mut world), (Res::from_num(18) / 10, -Res::from_num(54) / 10), "18 materiel a second, for 54 energy");
     world.advance_tick(&[SimCommand::Upgrade { units: vec![mex] }]);
     assert_eq!(key_of(&world, mex), "mass_extractor_t3", "T3 is the last tier");
 }
@@ -97,7 +97,7 @@ fn an_energy_stall_slows_every_extractor_alike() {
     // A tenth of a second's energy is not exact in fixed point, so these are a hair off.
     let near = |value: Res, wanted: Res| (value - wanted).abs() < Res::from_num(0.0001);
     assert!(near(world.economies[0].extractor_efficiency, Res::from_num(1) / 2), "{}", world.economies[0].extractor_efficiency);
-    assert!(near(mass, Res::from_num(2)), "half of their 4 mass a tick, not {mass}");
+    assert!(near(mass, Res::from_num(2)), "half of their 4 materiel a tick, not {mass}");
     let shown = world.snapshot_for(Some(Team::Blue)).economy.mass_income;
     assert!((19..=20).contains(&shown), "the bar shows what they really make, not {shown}");
 }

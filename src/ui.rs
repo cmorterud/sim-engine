@@ -75,7 +75,7 @@ pub enum ArmedOrder {
     AttackGround,
     Patrol,
     Assist,
-    Overcharge,
+    Discharge,
     /// Not on a letter: Ctrl+T, and only for units with a teleporter.
     Teleport,
     /// Not on a letter: Ctrl+C, for builders.
@@ -85,7 +85,7 @@ pub enum ArmedOrder {
 }
 
 impl ArmedOrder {
-    const ALL: [Self; 7] = [Self::Move, Self::AttackMove, Self::Formation, Self::AttackGround, Self::Patrol, Self::Assist, Self::Overcharge];
+    const ALL: [Self; 7] = [Self::Move, Self::AttackMove, Self::Formation, Self::AttackGround, Self::Patrol, Self::Assist, Self::Discharge];
 
     const fn letter(self) -> char {
         match self {
@@ -95,7 +95,7 @@ impl ArmedOrder {
             Self::AttackGround => hotkeys::ATTACK_GROUND,
             Self::Patrol => hotkeys::PATROL,
             Self::Assist => hotkeys::ASSIST,
-            Self::Overcharge => hotkeys::OVERCHARGE,
+            Self::Discharge => hotkeys::DISCHARGE,
             Self::Teleport => 'T',
             Self::Capture => 'C',
             Self::Unload => 'U',
@@ -110,7 +110,7 @@ impl ArmedOrder {
             Self::AttackGround => "Attack ground",
             Self::Patrol => "Patrol",
             Self::Assist => "Assist",
-            Self::Overcharge => "Overcharge",
+            Self::Discharge => "Discharge",
             Self::Teleport => "Teleport",
             Self::Capture => "Capture",
             Self::Unload => "Unload",
@@ -125,7 +125,7 @@ impl ArmedOrder {
             Self::AttackGround => "Keep firing at a spot, even out of sight, until given another order. Shells that land on debris destroy it, so the enemy cannot reclaim it.",
             Self::Patrol => "Repeat a route. Combat units fight along it, and engineers also reclaim and repair.",
             Self::Assist => "Stay with a friendly unit and protect it. Builders also help it build.",
-            Self::Overcharge => "Needs 7,500 energy in store. Spends what destroys the toughest enemy where it lands, 6 energy a point of damage, up to 90% of the store and 15,000 damage. Does 400 to commanders and 800 to structures.",
+            Self::Discharge => "Needs 7,500 energy in store. Spends what destroys the toughest enemy where it lands, 6 energy a point of damage, up to 90% of the store and 15,000 damage. Does 400 to commanders and 800 to structures.",
             Self::Teleport => "Charge up, standing still, and jump to a spot you can see or have on radar. Costs a great deal of energy, more the farther it goes, and aborts if the energy runs out. Lands on enemy units destroy them.",
             Self::Capture => "Take over an enemy unit or structure, in half its build time at your builders' build power, for its energy cost. Stopping starts it over. Commanders cannot be captured.",
             Self::Unload => "Fly there and set down everything on board around the spot. To load, select land units and right-click the transport.",
@@ -141,7 +141,7 @@ impl ArmedOrder {
             Self::AttackGround => "Attack ground: left-click a spot or some debris. Right-click or Esc to cancel.",
             Self::Patrol => "Patrol: left-click each point, then right-click or press P to start. Esc to cancel.",
             Self::Assist => "Assist: left-click a friendly unit. Right-click or Esc to cancel.",
-            Self::Overcharge => "Overcharge: left-click an enemy. Right-click or Esc to cancel.",
+            Self::Discharge => "Discharge: left-click an enemy. Right-click or Esc to cancel.",
             Self::Teleport => "Teleport: left-click open ground you can see or have on radar. Right-click or Esc to cancel.",
             Self::Capture => "Capture: left-click an enemy unit or structure. Right-click or Esc to cancel.",
             Self::Unload => "Unload: left-click where to set the cargo down. Right-click or Esc to cancel.",
@@ -267,7 +267,7 @@ pub fn item_details(db: &BlueprintDb, blueprint: BlueprintId) -> String {
     let kind = if unit.is_structure() { format!("T{} structure, {} by {}", unit.tier, unit.footprint, unit.footprint) } else { format!("T{} unit", unit.tier) };
     let mut lines = vec![
         format!("{} ({kind})", unit.name),
-        format!("Costs {} mass and {} energy, build time {}", unit.mass.to_num::<i64>(), unit.energy.to_num::<i64>(), unit.build_time.to_num::<i64>()),
+        format!("Costs {} materiel and {} energy, build time {}", unit.mass.to_num::<i64>(), unit.energy.to_num::<i64>(), unit.build_time.to_num::<i64>()),
         format!("Health {}", whole(unit.health)),
     ];
     if let Some(weapon) = unit.weapon {
@@ -288,7 +288,7 @@ pub fn item_details(db: &BlueprintDb, blueprint: BlueprintId) -> String {
     }
     let mut makes = Vec::new();
     if unit.mass_income > Res::ZERO {
-        makes.push(format!("{:.1} mass", per_second(unit.mass_income)));
+        makes.push(format!("{:.1} materiel", per_second(unit.mass_income)));
     }
     if unit.energy_income > Res::ZERO {
         makes.push(format!("{:.0} energy", per_second(unit.energy_income)));
@@ -300,7 +300,7 @@ pub fn item_details(db: &BlueprintDb, blueprint: BlueprintId) -> String {
         lines.push(format!("Uses {:.0} energy a second while running", per_second(unit.upkeep)));
     }
     if unit.mass_storage > Res::ZERO || unit.energy_storage > Res::ZERO {
-        lines.push(format!("Stores {} mass and {} energy", unit.mass_storage.to_num::<i64>(), unit.energy_storage.to_num::<i64>()));
+        lines.push(format!("Stores {} materiel and {} energy", unit.mass_storage.to_num::<i64>(), unit.energy_storage.to_num::<i64>()));
     }
     if let Some(shield) = unit.shield {
         lines.push(format!("Shield: {} health, radius {}", whole(shield.health), whole(shield.radius)));
@@ -309,8 +309,8 @@ pub fn item_details(db: &BlueprintDb, blueprint: BlueprintId) -> String {
     if unit.radar > Fp::ZERO {
         sensors.push(format!("radar {}", whole(unit.radar)));
     }
-    if unit.omni > Fp::ZERO {
-        sensors.push(format!("omni {}", whole(unit.omni)));
+    if unit.deep_scan > Fp::ZERO {
+        sensors.push(format!("deep scan {}", whole(unit.deep_scan)));
     }
     if unit.stealth_field > Fp::ZERO {
         sensors.push(format!("stealth field {}", whole(unit.stealth_field)));
@@ -320,10 +320,10 @@ pub fn item_details(db: &BlueprintDb, blueprint: BlueprintId) -> String {
         lines.push(format!("Build power {}", whole(unit.build_power)));
     }
     if unit.requires_deposit {
-        lines.push("Built on a mass deposit".to_string());
+        lines.push("Built on a materiel deposit".to_string());
     }
     if unit.requires_vent {
-        lines.push("Built over a hydrocarbon vent".to_string());
+        lines.push("Built over a geothermal vent".to_string());
     }
     lines.join("\n")
 }
@@ -543,12 +543,12 @@ pub fn has_mobile_builders(snapshot: &SimSnapshot, selected: &[SimId], db: &Blue
     })
 }
 
-/// Whether anything selected has Overcharge.
-pub fn has_overcharge(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb) -> bool {
+/// Whether anything selected has Discharge.
+pub fn has_discharge(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb) -> bool {
     selected
         .iter()
         .filter_map(|id| find_unit(snapshot, *id))
-        .any(|unit| unit.blueprint != u16::MAX && db.get(BlueprintId(unit.blueprint)).overcharge.is_some())
+        .any(|unit| unit.blueprint != u16::MAX && db.get(BlueprintId(unit.blueprint)).discharge.is_some())
 }
 
 /// A shield generator's dome, in words: how strong it is, or how long until it is back.
@@ -611,7 +611,7 @@ pub fn has_weapons(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb)
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Copy, Clone)]
 struct OrderOffers {
-    overcharge: bool,
+    discharge: bool,
     weapons: bool,
     teleport: bool,
     capture: bool,
@@ -642,7 +642,7 @@ const fn order_glyph(order: ArmedOrder) -> Glyph {
         ArmedOrder::AttackGround => Glyph::AttackGround,
         ArmedOrder::Patrol => Glyph::Patrol,
         ArmedOrder::Assist => Glyph::Assist,
-        ArmedOrder::Overcharge => Glyph::Overcharge,
+        ArmedOrder::Discharge => Glyph::Discharge,
         ArmedOrder::Teleport => Glyph::Teleport,
         ArmedOrder::Capture => Glyph::Capture,
         ArmedOrder::Unload => Glyph::Unload,
@@ -651,9 +651,9 @@ const fn order_glyph(order: ArmedOrder) -> Glyph {
 
 /// The unit orders, as glyph buttons: the armed one lit.
 fn unit_order_buttons(ui: &mut egui::Ui, armed: Option<ArmedOrder>, offers: &OrderOffers, actions: &mut Vec<UiAction>) {
-    let OrderOffers { overcharge, weapons, teleport, capture, unload } = *offers;
+    let OrderOffers { discharge, weapons, teleport, capture, unload } = *offers;
     let offered = |order: &ArmedOrder| match order {
-        ArmedOrder::Overcharge => overcharge,
+        ArmedOrder::Discharge => discharge,
         ArmedOrder::AttackGround => weapons,
         _ => true,
     };
@@ -681,7 +681,7 @@ fn unit_order_buttons(ui: &mut egui::Ui, armed: Option<ArmedOrder>, offers: &Ord
 }
 
 /// Whether the viewer can sense a spot, and so teleport there: it is in sight, or within the
-/// radar or omni of one of its sensors.
+/// radar or deep scan of one of its sensors.
 pub fn senses_spot(snapshot: &SimSnapshot, point: [f64; 2]) -> bool {
     let Some(fog) = &snapshot.fog else {
         return true;
@@ -693,7 +693,7 @@ pub fn senses_spot(snapshot: &SimSnapshot, point: [f64; 2]) -> bool {
     }
     snapshot.sensor_ranges.iter().any(|sensor| {
         let (dx, dy) = (point[0] - f64::from(sensor.center[0]) / 4096.0, point[1] - f64::from(sensor.center[1]) / 4096.0);
-        let reach = f64::from(sensor.radar.max(sensor.omni)) / 4096.0;
+        let reach = f64::from(sensor.radar.max(sensor.deep_scan)) / 4096.0;
         dx * dx + dy * dy <= reach * reach
     })
 }
@@ -707,7 +707,7 @@ pub fn installed_enhancements(snapshot: &SimSnapshot, id: SimId) -> [Option<Enha
         .map_or([None; 3], |(_, slots)| slots.map(|slot| (slot != u16::MAX).then_some(EnhancementId(slot))))
 }
 
-/// The tier of structures a builder can build: its own, or its engineering suite's. A suite
+/// The tier of structures a builder can build: its own, or its fabrication pack's. A suite
 /// still being fitted counts, as what it unlocks can be queued behind it.
 fn unit_build_tier(snapshot: &SimSnapshot, unit: &UnitView, db: &BlueprintDb) -> u8 {
     let under_way = snapshot.enhancing.iter().filter(|(id, _, _)| *id == unit.id).map(|&(_, enhancement, _)| EnhancementId(enhancement));
@@ -816,7 +816,7 @@ pub fn enhancement_description(enhancement: &Enhancement, db: &BlueprintDb) -> S
         parts.push("teleporting, with Ctrl+T".to_string());
     }
     if effects.mass_income > crate::sim::blueprints::Res::ZERO || effects.energy_income > crate::sim::blueprints::Res::ZERO {
-        parts.push(format!("{} mass and {} energy a second", per_second(effects.mass_income.to_num::<i64>()), per_second(effects.energy_income.to_num::<i64>())));
+        parts.push(format!("{} materiel and {} energy a second", per_second(effects.mass_income.to_num::<i64>()), per_second(effects.energy_income.to_num::<i64>())));
     }
     let mut text = format!("{}: {}.", enhancement.name, parts.join(", "));
     if let Some(needed) = enhancement.requires {
@@ -966,7 +966,7 @@ pub fn hotkey_action(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintD
             hotkeys::FORMATION => return Some(UiAction::Arm(ArmedOrder::Formation)),
             hotkeys::ATTACK_GROUND if has_weapons(snapshot, selected, db) => return Some(UiAction::Arm(ArmedOrder::AttackGround)),
             hotkeys::ASSIST => return Some(UiAction::Arm(ArmedOrder::Assist)),
-            hotkeys::OVERCHARGE if has_overcharge(snapshot, selected, db) => return Some(UiAction::Arm(ArmedOrder::Overcharge)),
+            hotkeys::DISCHARGE if has_discharge(snapshot, selected, db) => return Some(UiAction::Arm(ArmedOrder::Discharge)),
             hotkeys::STOP => return Some(UiAction::Stop),
             _ => {}
         }
@@ -1124,7 +1124,7 @@ pub fn selection_rates(snapshot: &SimSnapshot, selected: &[SimId], db: &Blueprin
     }
     let mut output = Vec::new();
     if total.mass_income > 0 {
-        output.push(format!("+{} mass/s", per_second(total.mass_income)));
+        output.push(format!("+{} materiel/s", per_second(total.mass_income)));
     }
     if total.energy_income > 0 {
         output.push(format!("+{} energy/s", per_second(total.energy_income)));
@@ -1132,7 +1132,7 @@ pub fn selection_rates(snapshot: &SimSnapshot, selected: &[SimId], db: &Blueprin
     let spending = match (factories, total.mass_use + total.energy_use) {
         (0, _) => String::new(),
         (_, 0) => "Using nothing".to_string(),
-        _ => format!("Using {} mass/s, {} energy/s", per_second(total.mass_use), per_second(total.energy_use)),
+        _ => format!("Using {} materiel/s, {} energy/s", per_second(total.mass_use), per_second(total.energy_use)),
     };
     SelectionRates { output: output.join(", "), spending }
 }
@@ -1525,7 +1525,7 @@ fn quick_rows(
     let key_of = |id: SimId| find_unit(snapshot, id).filter(|unit| unit.blueprint != u16::MAX).map_or_else(String::new, |unit| db.get(BlueprintId(unit.blueprint)).key.clone());
     if let Some(commander) = groups.commander {
         let health = find_unit(snapshot, commander).map(|unit| unit.health_permille);
-        if quick_square(ui, &key_of(commander), None, selected.contains(&commander), health).on_hover_text("ACU: click to select. The view stays where it is.").clicked() {
+        if quick_square(ui, &key_of(commander), None, selected.contains(&commander), health).on_hover_text("Commander: click to select. The view stays where it is.").clicked() {
             actions.push(UiAction::QuickSelect { units: vec![commander], add: shift });
         }
     }
@@ -1607,7 +1607,7 @@ fn one_line_label(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>) {
 pub fn control_group_label(group: usize, members: &[SimId], snapshot: &SimSnapshot, db: &BlueprintDb) -> String {
     let short_name = |unit: &UnitView| {
         let blueprint = db.get(BlueprintId(unit.blueprint));
-        if blueprint.is_commander() { "ACU".to_string() } else { blueprint.name.clone() }
+        if blueprint.is_commander() { "Commander".to_string() } else { blueprint.name.clone() }
     };
     let mut names = members.iter().filter_map(|id| find_unit(snapshot, *id)).filter(|unit| unit.blueprint != u16::MAX).map(short_name);
     let first = names.next();
@@ -1660,7 +1660,7 @@ pub fn control_group_bar(ctx: &egui::Context, groups: &[(usize, Vec<SimId>)], sn
 /// where it ends.
 const CONTROL_GROUPS_TOP: f32 = 96.0;
 
-/// The text alert that goes with the "ACU under attack" sound.
+/// The text alert that goes with the "commander under attack" sound.
 pub fn commander_alert(ctx: &egui::Context, strength: f32) {
     if strength <= 0.0 {
         return;
@@ -1669,7 +1669,7 @@ pub fn commander_alert(ctx: &egui::Context, strength: f32) {
         .anchor(Align2::CENTER_TOP, Vec2::new(0.0, 150.0))
         .interactable(false)
         .show(ctx, |ui| {
-            let text = egui::RichText::new("ACU under attack").size(22.0).strong().color(STALLED.gamma_multiply(strength));
+            let text = egui::RichText::new("Commander under attack").size(22.0).strong().color(STALLED.gamma_multiply(strength));
             egui::Frame::popup(ui.style()).multiply_with_opacity(strength).show(ui, |ui| {
                 one_line_label(ui, text);
             });
@@ -1724,7 +1724,7 @@ fn economy_row(ui: &mut egui::Ui, energy: bool, stored: i64, capacity: i64, inco
     painter.text(Pos2::new(rect.right() - 54.0, rect.bottom() - 1.0), Align2::RIGHT_BOTTOM, hud::compact(total), small.clone(), hud::DIM_TEXT);
     painter.text(Pos2::new(rect.right(), rect.top() + 1.0), Align2::RIGHT_TOP, format!("+{income}"), small.clone(), hud::GAIN);
     painter.text(Pos2::new(rect.right(), rect.bottom() - 1.0), Align2::RIGHT_BOTTOM, format!("-{demand}"), small, hud::LOSS);
-    let name = if energy { "Energy" } else { "Mass" };
+    let name = if energy { "Energy" } else { "Materiel" };
     response.on_hover_text(format!(
         "{name}: {stored} stored of {capacity}.\nNet {} a second: {income} coming in, {demand} going out.\nReclaim: {rate} a second now, {total} in all.",
         hud::signed(income - demand)
@@ -1764,10 +1764,10 @@ fn score_row(ui: &mut egui::Ui, color: Color32, name: &str, figures: [String; 3]
 fn score_columns(ui: &mut egui::Ui) {
     let (rect, response) = ui.allocate_exact_size(Vec2::new(SCORE_WIDTH, 14.0), egui::Sense::hover());
     let painter = ui.painter();
-    for (heading, column) in ["Units", "Mass/s", "Army"].iter().zip(SCORE_COLUMNS) {
+    for (heading, column) in ["Units", "Materiel/s", "Army"].iter().zip(SCORE_COLUMNS) {
         painter.text(Pos2::new(rect.left() + column, rect.center().y), Align2::RIGHT_CENTER, heading, FontId::proportional(10.5), hud::DIM_TEXT);
     }
-    response.on_hover_text("Units: how many it has that you can see. Mass/s: its mass income. Army: the mass its mobile units cost. A team out of sight shows only what you can see of it.");
+    response.on_hover_text("Units: how many it has that you can see. Materiel/s: its materiel income. Army: the materiel its mobile units cost. A team out of sight shows only what you can see of it.");
 }
 
 /// Where each figure of a score row ends, from the row's left.
@@ -2026,7 +2026,7 @@ fn toggle_buttons(ui: &mut egui::Ui, snapshot: &SimSnapshot, selected: &[SimId],
         // O pauses first, when there is something to pause.
         let key = if pause.is_none() { hotkeys::PAUSE.to_string() } else { String::new() };
         let name = if *on { "Cloak" } else { "Uncloak" };
-        let hint = format!("{name}\nHidden from sight and radar, except from enemies within 100 or with omni on it. Costs energy while on.");
+        let hint = format!("{name}\nHidden from sight and radar, except from enemies within 100 or with deep scan on it. Costs energy while on.");
         if glyph_button(ui, Glyph::Cloak, &key, !*on, &hint).clicked() {
             actions.push(action);
         }
@@ -2057,7 +2057,7 @@ fn toggle_buttons(ui: &mut egui::Ui, snapshot: &SimSnapshot, selected: &[SimId],
         if let Some(first) = upgradable.first().and_then(|id| find_unit(snapshot, *id)) {
             let into = db.get(db.get(BlueprintId(first.blueprint)).upgrades_to.expect("only upgradable units are listed"));
             let hint = format!(
-                "[{key}] Upgrade: {}\n{} mass  {} energy\nA commander stands still while it upgrades, and a new order cancels it.",
+                "[{key}] Upgrade: {}\n{} materiel  {} energy\nA commander stands still while it upgrades, and a new order cancels it.",
                 into.name,
                 into.mass.to_num::<i64>(),
                 into.energy.to_num::<i64>()
@@ -2119,7 +2119,7 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
                 ui.spacing_mut().item_spacing = Vec2::splat(4.0);
                 if has_mobile_units(snapshot, selected) {
                     let offers = OrderOffers {
-                        overcharge: has_overcharge(snapshot, selected, db),
+                        discharge: has_discharge(snapshot, selected, db),
                         weapons: has_weapons(snapshot, selected, db),
                         teleport: !teleporters(snapshot, selected, db).is_empty(),
                         capture: has_mobile_builders(snapshot, selected, db),
@@ -2925,7 +2925,7 @@ pub fn coverage_outline(circles: &[([f64; 2], f64)]) -> Vec<[[f64; 2]; 2]> {
     pieces
 }
 
-/// When zoomed out, outlines what the viewer's radar covers, and within that, its omni.
+/// When zoomed out, outlines what the viewer's radar covers, and within that, its deep scan.
 pub fn draw_sensor_coverage(ctx: &egui::Context, camera: &Camera, heights: &crate::render::camera::HeightField, ranges: &[crate::sim::world::SensorRangeView], pixels_per_point: f32) {
     // Fades in from about halfway out, so that it never clutters play up close.
     let strength = ((camera.zoom_from_closest() - 0.45) / 0.15).clamp(0.0, 1.0) as f32;
@@ -2940,7 +2940,7 @@ pub fn draw_sensor_coverage(ctx: &egui::Context, camera: &Camera, heights: &crat
     let world = |raw: i32| f64::from(raw) / 4096.0;
     for (pick, color) in [(0usize, Color32::from_rgb(96, 214, 236)), (1, Color32::from_rgb(200, 140, 255))] {
         let circles: Vec<([f64; 2], f64)> =
-            ranges.iter().map(|range| ([world(range.center[0]), world(range.center[1])], world(if pick == 0 { range.radar } else { range.omni }))).filter(|circle| circle.1 > 0.0).collect();
+            ranges.iter().map(|range| ([world(range.center[0]), world(range.center[1])], world(if pick == 0 { range.radar } else { range.deep_scan }))).filter(|circle| circle.1 > 0.0).collect();
         for [from, to] in coverage_outline(&circles) {
             if let (Some(from), Some(to)) = (to_points(from), to_points(to)) {
                 painter.line_segment([from, to], Stroke::new(1.2_f32, color.gamma_multiply(0.75 * strength)));
@@ -2983,7 +2983,7 @@ pub fn placement_ranges(unit: &crate::sim::blueprints::Blueprint) -> Vec<(&'stat
     }
     ranges.push(("Radar", world(unit.radar), Color32::from_rgb(120, 230, 140)));
     ranges.push(("Sonar", world(unit.sonar), Color32::from_rgb(90, 200, 255)));
-    ranges.push(("Omni", world(unit.omni), Color32::from_rgb(200, 140, 255)));
+    ranges.push(("Deep scan", world(unit.deep_scan), Color32::from_rgb(200, 140, 255)));
     ranges.push(("Stealth field", world(unit.stealth_field), Color32::from_rgb(190, 190, 200)));
     ranges.retain(|range| range.1 > 0.0);
     // One ring for ranges that coincide, under the first name.
@@ -3004,7 +3004,7 @@ const MOST_RANGES_SHOWN: usize = 60;
 type Circle = ([f64; 2], f64);
 
 /// Rings for the ranges of what is selected, mobile units and structures alike: weapons,
-/// anti-air, torpedoes, shields, missile defense, radar, sonar, omni, and stealth. Rings of the
+/// anti-air, torpedoes, shields, missile defense, radar, sonar, deep scan, and stealth. Rings of the
 /// same kind merge into one outline around the group, so a selected army shows where it reaches
 /// rather than a tangle of circles. Each kind is labelled once, up close.
 pub fn draw_selection_ranges(ctx: &egui::Context, camera: &Camera, heights: &crate::render::camera::HeightField, snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb, pixels_per_point: f32) {
@@ -3381,7 +3381,7 @@ pub const fn commander_name(team: Team) -> &'static str {
     }
 }
 
-/// Zoomed out, a mark on every mass deposit and hydrocarbon vent, which the land itself no
+/// Zoomed out, a mark on every mass deposit and geothermal vent, which the land itself no
 /// longer shows: green for mass, amber for vents. Cells are terrain cells.
 pub fn draw_deposit_markers(ctx: &egui::Context, camera: &Camera, heights: &crate::render::camera::HeightField, deposits: &[(u32, u32)], vents: &[(u32, u32)], pixels_per_point: f32) {
     let strength = ((camera.zoom_from_closest() - 0.35) / 0.15).clamp(0.0, 1.0) as f32;
@@ -3602,7 +3602,7 @@ mod tests {
             view.is_structure = true;
             view
         };
-        let mut current = snapshot(vec![structure(1, "land_factory_t1"), structure(2, "air_factory"), structure(3, "quantum_gateway"), structure(4, "tactical_missile_launcher")], vec![]);
+        let mut current = snapshot(vec![structure(1, "land_factory_t1"), structure(2, "air_factory"), structure(3, "rig_yard"), structure(4, "tactical_missile_launcher")], vec![]);
         current.factories = (1..=4).map(|id| factory_view(id, vec![], false, 0)).collect();
         let queue = |factory: u32, key: &str, selected_count: usize| UiAction::Queue { factories: vec![SimId(factory)], blueprint: db.id(key), selected_count, count: 1 };
         let both = hotkey_action(&current, &[SimId(1), SimId(2)], &db, 'Q', BuildTiers::default(), None).expect("the first slot");
@@ -3610,7 +3610,7 @@ mod tests {
         let UiAction::Batch(shifted) = with_shift(both, true, &db) else { panic!("still a batch") };
         assert!(shifted.iter().all(|action| matches!(action, UiAction::Queue { count: SHIFT_QUEUE_COUNT, .. })));
         // A gateway's and a silo's only items are in their first slot too.
-        assert_eq!(hotkey_action(&current, &[SimId(3)], &db, 'Q', BuildTiers::default(), None), Some(queue(3, "support_commander", 1)));
+        assert_eq!(hotkey_action(&current, &[SimId(3)], &db, 'Q', BuildTiers::default(), None), Some(queue(3, "field_rig", 1)));
         assert_eq!(hotkey_action(&current, &[SimId(4)], &db, 'Q', BuildTiers::default(), None), Some(queue(4, "tactical_missile", 1)));
     }
 
@@ -3618,7 +3618,7 @@ mod tests {
     fn a_build_key_picks_from_the_level_the_bar_shows() {
         let db = BlueprintDb::standard();
         let mut current = commander_and_engineer(&db);
-        current.enhancements = vec![(SimId(10), [u16::MAX, db.enhancement_id("t3_engineering").0, u16::MAX])];
+        current.enhancements = vec![(SimId(10), [u16::MAX, db.enhancement_id("t3_fabrication").0, u16::MAX])];
         let press = |letter: char, builder: Option<u8>| hotkey_action(&current, &[SimId(10)], &db, letter, BuildTiers { builder, factory: None }, None);
         let place = |key: &str| Some(UiAction::BeginPlacement(db.id(key)));
         assert_eq!(press('E', None), place("mass_extractor_t3"), "the highest level at first");
@@ -3628,11 +3628,11 @@ mod tests {
         assert_eq!(press('E', Some(3)), place("mass_extractor_t3"));
         assert_eq!(press('S', Some(3)), place("power_generator_t3"));
         assert_eq!(press('Z', Some(2)), place("radar_t2"));
-        assert_eq!(press('Z', Some(3)), place("omni_sensor"));
+        assert_eq!(press('Z', Some(3)), place("deep_scan_array"));
         assert_eq!(press('D', Some(2)), place("t2_point_defense"));
         assert_eq!(press('D', Some(3)), place("t3_heavy_point_defense"));
-        assert_eq!(press('W', Some(3)), place("quantum_gateway"), "a support factory needs a headquarters, and there is none");
-        assert_eq!(press('V', Some(2)), place("engineering_station"));
+        assert_eq!(press('W', Some(3)), place("rig_yard"), "a support factory needs a headquarters, and there is none");
+        assert_eq!(press('V', Some(2)), place("field_workshop"));
         assert_eq!(press('V', Some(1)), place("wall"));
         assert_eq!(press('Q', Some(1)), None, "Q is a factory's key");
         // A bot can build nothing, so N mutes instead.
@@ -3643,7 +3643,7 @@ mod tests {
     fn support_factories_are_offered_once_there_is_a_headquarters_of_their_kind() {
         let db = BlueprintDb::standard();
         let mut current = commander_and_engineer(&db);
-        current.enhancements = vec![(SimId(10), [u16::MAX, db.enhancement_id("t3_engineering").0, u16::MAX])];
+        current.enhancements = vec![(SimId(10), [u16::MAX, db.enhancement_id("t3_fabrication").0, u16::MAX])];
         let offered = |current: &SimSnapshot, key: &str| builder_options(current, &[SimId(10)], &db).contains(&db.id(key));
         assert!(!offered(&current, "land_factory_t2_support"));
         let mut headquarters = unit(20, 0.0);
@@ -3660,7 +3660,7 @@ mod tests {
     #[test]
     fn the_tier_key_steps_through_the_levels_a_bar_has() {
         let db = BlueprintDb::standard();
-        let options: Vec<BlueprintId> = ["power_generator", "shield_generator", "quantum_gateway"].iter().map(|key| db.id(key)).collect();
+        let options: Vec<BlueprintId> = ["power_generator", "shield_generator", "rig_yard"].iter().map(|key| db.id(key)).collect();
         assert_eq!(next_tier(None, &options, &db), Some(1), "from the highest, shown first, round to the lowest");
         assert_eq!(next_tier(Some(1), &options, &db), Some(2));
         assert_eq!(next_tier(Some(2), &options, &db), Some(3));
@@ -3683,7 +3683,7 @@ mod tests {
         assert_eq!(menu.factories, [SimId(1), SimId(2), SimId(3)], "unfinished factories take orders too");
         assert_eq!(menu.unfinished, 1);
         let able = |key: &str| menu.options.iter().find(|(option, _)| *option == db.id(key)).map(|(_, able)| able.clone());
-        assert_eq!(able("t1_light_bot").unwrap(), [SimId(1), SimId(2), SimId(3)]);
+        assert_eq!(able("t1_light_walker").unwrap(), [SimId(1), SimId(2), SimId(3)]);
         assert_eq!(able("t2_heavy_tank").unwrap(), [SimId(2)], "only T2 factories can build tanks");
         assert_eq!(menu.upgrade, Some((db.id("land_factory_t2"), vec![SimId(1), SimId(3)])), "only T1 factories can upgrade");
     }
@@ -3703,7 +3703,7 @@ mod tests {
     #[test]
     fn the_queue_is_combined_and_an_upgrade_under_way_is_not_offered_again() {
         let db = BlueprintDb::standard();
-        let (bot, upgrade) = (db.id("t1_light_bot"), db.id("land_factory_t2"));
+        let (bot, upgrade) = (db.id("t1_light_walker"), db.id("land_factory_t2"));
         let mut current = mixed_factories(&db);
         current.factories[0] = factory_view(1, vec![upgrade.0, bot.0], false, 200);
         current.factories[1] = factory_view(2, vec![bot.0, bot.0], false, 400);
@@ -3716,7 +3716,7 @@ mod tests {
     #[test]
     fn a_factory_under_construction_has_a_menu_and_shows_its_queue() {
         let db = BlueprintDb::standard();
-        let bot = db.id("t1_light_bot");
+        let bot = db.id("t1_light_walker");
         let mut current = mixed_factories(&db);
         current.factories[2] = factory_view(3, vec![bot.0], false, 0);
         let menu = factory_menu(&current, &[SimId(3)], &db).unwrap();
@@ -3729,7 +3729,7 @@ mod tests {
     #[test]
     fn an_unfinished_factory_does_not_drag_down_the_progress_bar() {
         let db = BlueprintDb::standard();
-        let bot = db.id("t1_light_bot");
+        let bot = db.id("t1_light_walker");
         let mut current = mixed_factories(&db);
         current.factories[0] = factory_view(1, vec![bot.0], false, 600);
         current.factories[2] = factory_view(3, vec![bot.0], false, 0);
@@ -3741,7 +3741,7 @@ mod tests {
     #[test]
     fn a_factory_with_an_upgrade_queued_offers_what_the_upgrade_will_build() {
         let db = BlueprintDb::standard();
-        let (upgrade, tank, bot) = (db.id("land_factory_t2"), db.id("t2_heavy_tank"), db.id("t1_light_bot"));
+        let (upgrade, tank, bot) = (db.id("land_factory_t2"), db.id("t2_heavy_tank"), db.id("t1_light_walker"));
         let mut current = mixed_factories(&db);
         let able = |current: &SimSnapshot, selected: &[SimId], option| {
             factory_menu(current, selected, &db).unwrap().options.iter().find(|(existing, _)| *existing == option).map(|(_, able)| able.clone())
@@ -3825,11 +3825,11 @@ mod tests {
 
     fn commander_and_engineer(db: &BlueprintDb) -> SimSnapshot {
         let mut commander = unit(10, 0.0);
-        commander.blueprint = db.id("acu").0;
+        commander.blueprint = db.id("command_rig").0;
         let mut engineer = unit(11, 0.0);
         engineer.blueprint = db.id("t1_engineer").0;
         let mut bot = unit(12, 0.0);
-        bot.blueprint = db.id("t1_light_bot").0;
+        bot.blueprint = db.id("t1_light_walker").0;
         snapshot(vec![commander, engineer, bot], vec![])
     }
 
@@ -3872,16 +3872,16 @@ mod tests {
         let mut current = commander_and_engineer(&db);
         let (shield, nuke) = (db.id("shield_generator"), db.id("strategic_missile_launcher"));
         assert!(!builder_options(&current, &[SimId(10)], &db).contains(&shield), "T1 only at first");
-        current.enhancements = vec![(SimId(10), [u16::MAX, db.enhancement_id("advanced_engineering").0, u16::MAX])];
+        current.enhancements = vec![(SimId(10), [u16::MAX, db.enhancement_id("t2_fabrication").0, u16::MAX])];
         let options = builder_options(&current, &[SimId(10)], &db);
         assert!(options.contains(&shield) && !options.contains(&nuke), "T2 with the T2 suite");
-        current.enhancements = vec![(SimId(10), [u16::MAX, db.enhancement_id("t3_engineering").0, u16::MAX])];
+        current.enhancements = vec![(SimId(10), [u16::MAX, db.enhancement_id("t3_fabrication").0, u16::MAX])];
         assert!(builder_options(&current, &[SimId(10)], &db).contains(&nuke), "T3 with the T3 suite");
         // With an engineer selected too, only what both can build.
         assert!(!builder_options(&current, &[SimId(10), SimId(11)], &db).contains(&shield));
         // A suite still being fitted already offers what it unlocks, to queue behind it.
         current.enhancements = Vec::new();
-        current.enhancing = vec![(SimId(10), db.enhancement_id("advanced_engineering").0, 300)];
+        current.enhancing = vec![(SimId(10), db.enhancement_id("t2_fabrication").0, 300)];
         let options = builder_options(&current, &[SimId(10)], &db);
         assert!(options.contains(&shield) && !options.contains(&nuke), "T2 while the T2 suite is fitted");
     }
@@ -3890,7 +3890,7 @@ mod tests {
     fn only_the_viewers_own_upgrades_show_how_far_along_they_are() {
         let db = BlueprintDb::standard();
         let mut current = commander_and_engineer(&db);
-        current.enhancing = vec![(SimId(10), db.enhancement_id("advanced_engineering").0, 400)];
+        current.enhancing = vec![(SimId(10), db.enhancement_id("t2_fabrication").0, 400)];
         current.upgrading = vec![SimId(10), SimId(12)];
         assert_eq!(upgrade_progress(&current, SimId(10), &db), Some(0.4));
         // Listed as upgrading, but with nothing more known, as for an enemy.
@@ -3907,21 +3907,21 @@ mod tests {
         let offer = |rows: &[(Slot, Vec<EnhancementOffer>)], key: &str| {
             rows.iter().flat_map(|(_, offers)| offers).find(|offer| offer.enhancement == db.enhancement_id(key)).cloned().expect("listed")
         };
-        assert_eq!(offer(&rows, "advanced_engineering").units, [SimId(10)]);
-        assert!(offer(&rows, "t3_engineering").units.is_empty(), "it needs the T2 suite first");
+        assert_eq!(offer(&rows, "t2_fabrication").units, [SimId(10)]);
+        assert!(offer(&rows, "t3_fabrication").units.is_empty(), "it needs the T2 suite first");
 
-        current.enhancements = vec![(SimId(10), [u16::MAX, db.enhancement_id("advanced_engineering").0, u16::MAX])];
+        current.enhancements = vec![(SimId(10), [u16::MAX, db.enhancement_id("t2_fabrication").0, u16::MAX])];
         let rows = enhancement_offers(&current, &[SimId(10)], &db);
-        let installed = offer(&rows, "advanced_engineering");
+        let installed = offer(&rows, "t2_fabrication");
         assert!(installed.installed && installed.units.is_empty());
-        assert_eq!(offer(&rows, "t3_engineering").units, [SimId(10)]);
-        assert_eq!(offer(&rows, "nano_repair").replaces, Some(db.enhancement_id("advanced_engineering")), "it would take the suite's place");
-        assert!(enhancement_description(db.enhancement(db.enhancement_id("t3_engineering")), &db).contains("Builds on T2 Engineering Suite"));
+        assert_eq!(offer(&rows, "t3_fabrication").units, [SimId(10)]);
+        assert_eq!(offer(&rows, "damage_control").replaces, None, "it goes in the systems bay, beside the pack");
+        assert!(enhancement_description(db.enhancement(db.enhancement_id("t3_fabrication")), &db).contains("Builds on T2 Fabrication Pack"));
 
         // With the T3 suite, the T2 one is part of it: shown as there, and not offered again.
-        current.enhancements = vec![(SimId(10), [u16::MAX, db.enhancement_id("t3_engineering").0, db.enhancement_id("personal_cloak").0])];
+        current.enhancements = vec![(SimId(10), [u16::MAX, db.enhancement_id("t3_fabrication").0, db.enhancement_id("thermal_camouflage").0])];
         let rows = enhancement_offers(&current, &[SimId(10)], &db);
-        for (key, included) in [("t3_engineering", true), ("advanced_engineering", true), ("nano_repair", false), ("personal_cloak", true), ("personal_stealth", true)] {
+        for (key, included) in [("t3_fabrication", true), ("t2_fabrication", true), ("damage_control", false), ("thermal_camouflage", true), ("signature_suppression", true)] {
             let offer = offer(&rows, key);
             assert_eq!((offer.installed, offer.units.is_empty()), (included, included), "{key}");
         }
@@ -3944,7 +3944,7 @@ mod tests {
         current.fog = Some(std::sync::Arc::new(vec![255, 90, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
         assert!(senses_spot(&current, [40.0, 40.0]));
         assert!(!senses_spot(&current, [120.0, 40.0]), "explored is not in sight");
-        current.sensor_ranges = vec![crate::sim::world::SensorRangeView { center: [200 * 4096, 200 * 4096], radar: 100 * 4096, omni: 0 }];
+        current.sensor_ranges = vec![crate::sim::world::SensorRangeView { center: [200 * 4096, 200 * 4096], radar: 100 * 4096, deep_scan: 0 }];
         assert!(senses_spot(&current, [250.0, 250.0]), "on radar");
         assert!(!senses_spot(&current, [300.0, 300.0]));
     }
@@ -3959,8 +3959,8 @@ mod tests {
         assert_eq!(hotkey_action(&current, &[SimId(10)], &db, 'R', BuildTiers::default(), None), None, "a commander has no repeat");
         let factories = mixed_factories(&db);
         let tank_level = BuildTiers { builder: None, factory: Some(2) };
-        let bot = UiAction::Queue { factories: vec![SimId(1)], blueprint: db.id("t1_light_bot"), selected_count: 1, count: 1 };
-        assert_eq!(hotkey_action(&factories, &[SimId(1)], &db, 'E', tank_level, None), Some(bot), "a T1 factory shows T1, so no gatling bot");
+        let bot = UiAction::Queue { factories: vec![SimId(1)], blueprint: db.id("t1_light_walker"), selected_count: 1, count: 1 };
+        assert_eq!(hotkey_action(&factories, &[SimId(1)], &db, 'E', tank_level, None), Some(bot), "a T1 factory shows T1, so no grenadier walker");
         assert_eq!(hotkey_action(&factories, &[SimId(1)], &db, 'H', BuildTiers::default(), None), None, "nothing in that slot of a factory's bar");
     }
 
@@ -3973,12 +3973,12 @@ mod tests {
         const T1_BARS: BuildTiers = BuildTiers { builder: Some(1), factory: Some(1) };
         let queue = |key: &str, factories: Vec<SimId>| UiAction::Queue { factories, blueprint: db.id(key), selected_count: 3, count: 1 };
         assert_eq!(hotkey_action(&current, &selected, &db, 'Q', T1_BARS, None), Some(queue("t1_engineer", selected.to_vec())));
-        assert_eq!(hotkey_action(&current, &selected, &db, 'E', T1_BARS, None), Some(queue("t1_light_bot", selected.to_vec())));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'E', T1_BARS, None), Some(queue("t1_light_walker", selected.to_vec())));
         assert_eq!(hotkey_action(&current, &selected, &db, 'G', T1_BARS, None), Some(queue("t1_light_artillery", selected.to_vec())));
         assert_eq!(hotkey_action(&current, &selected, &db, 'T', T1_BARS, None), Some(queue("t1_mobile_aa", selected.to_vec())));
         let t2 = BuildTiers { builder: None, factory: Some(2) };
         assert_eq!(hotkey_action(&current, &selected, &db, 'C', t2, None), Some(queue("t2_heavy_tank", vec![SimId(2)])));
-        assert_eq!(hotkey_action(&current, &selected, &db, 'E', t2, None), Some(queue("t2_gatling_bot", vec![SimId(2)])));
+        assert_eq!(hotkey_action(&current, &selected, &db, 'E', t2, None), Some(queue("t2_grenadier_walker", vec![SimId(2)])));
         assert_eq!(hotkey_action(&current, &selected, &db, 'U', T1_BARS, None), Some(queue("land_factory_t2", vec![SimId(1), SimId(3)])), "the lowest tier goes first");
         let to_t3 = UiAction::Queue { factories: vec![SimId(2)], blueprint: db.id("land_factory_t3"), selected_count: 1, count: 1 };
         assert_eq!(hotkey_action(&current, &[SimId(2)], &db, 'U', T1_BARS, None), Some(to_t3));
@@ -4008,7 +4008,7 @@ mod tests {
         current.units.push(engineer);
         let selected = [SimId(1), SimId(4)];
         let queue = |key: &str| Some(UiAction::Queue { factories: vec![SimId(1)], blueprint: db.id(key), selected_count: 1, count: 1 });
-        assert_eq!(hotkey_action(&current, &selected, &db, 'E', BuildTiers::default(), None), queue("t1_light_bot"), "not the engineer's extractor");
+        assert_eq!(hotkey_action(&current, &selected, &db, 'E', BuildTiers::default(), None), queue("t1_light_walker"), "not the engineer's extractor");
         assert_eq!(hotkey_action(&current, &selected, &db, 'Q', BuildTiers::default(), None), queue("t1_engineer"));
         assert_eq!(hotkey_action(&current, &selected, &db, 'H', BuildTiers::default(), None), None, "the engineer's bar is not shown");
     }
@@ -4107,21 +4107,21 @@ mod tests {
     #[test]
     fn every_button_label_shows_its_key_and_name_and_nothing_else() {
         let db = BlueprintDb::standard();
-        assert_eq!(item_label(&db, db.id("mass_extractor")), "[E] Mass Extractor");
-        assert_eq!(item_label(&db, db.id("t1_light_bot")), "[E] Light Assault Bot");
+        assert_eq!(item_label(&db, db.id("mass_extractor")), "[E] Materiel Extractor");
+        assert_eq!(item_label(&db, db.id("t1_light_walker")), "[E] Light Walker");
     }
 
     #[test]
     fn hovering_an_item_shows_its_cost_and_what_it_does() {
         let db = BlueprintDb::standard();
         let generator = item_details(&db, db.id("power_generator"));
-        assert!(generator.contains("Costs 75 mass and 750 energy"), "{generator}");
+        assert!(generator.contains("Costs 75 materiel and 750 energy"), "{generator}");
         assert!(generator.contains("Makes 20 energy a second"), "{generator}");
         let interceptor = item_details(&db, db.id("t1_interceptor"));
         assert!(interceptor.contains("at aircraft only"), "{interceptor}");
         assert!(interceptor.contains("Speed 300 a second, flies at 280"), "{interceptor}");
         let extractor = item_details(&db, db.id("mass_extractor"));
-        assert!(extractor.contains("Built on a mass deposit"), "{extractor}");
+        assert!(extractor.contains("Built on a materiel deposit"), "{extractor}");
     }
 
     #[test]
@@ -4173,7 +4173,7 @@ mod tests {
         current.build_queues = vec![BuildQueueView { id: SimId(10), tasks: tasks.clone() }];
         let chips = queue_chips(&current, &[SimId(10)], &db);
         let labels: Vec<&str> = chips.iter().map(|chip| chip.label.as_str()).collect();
-        assert_eq!(labels, ["1. Power Generator 45%", "2. Mass Extractor", "3. Reclaim"]);
+        assert_eq!(labels, ["1. Power Generator 45%", "2. Materiel Extractor", "3. Reclaim"]);
         assert_eq!(chips[1].remove, UiAction::CancelTask { units: vec![SimId(10)], task: tasks[1] });
         assert!(queue_chips(&current, &[SimId(11)], &db).is_empty(), "the engineer has no orders");
     }
@@ -4202,13 +4202,13 @@ mod tests {
     #[test]
     fn a_factorys_items_are_grouped_and_only_reach_factories_holding_them() {
         let db = BlueprintDb::standard();
-        let (bot, tank) = (db.id("t1_light_bot"), db.id("t2_heavy_tank"));
+        let (bot, tank) = (db.id("t1_light_walker"), db.id("t2_heavy_tank"));
         let mut current = mixed_factories(&db);
         current.factories[0] = factory_view(1, vec![bot.0, bot.0], false, 100);
         current.factories[1] = factory_view(2, vec![tank.0, bot.0], false, 100);
         let chips = queue_chips(&current, &[SimId(1), SimId(2)], &db);
         assert_eq!(chips.len(), 2);
-        assert_eq!(chips[0].label, "Light Assault Bot x3");
+        assert_eq!(chips[0].label, "Light Walker x3");
         assert_eq!(chips[0].remove, UiAction::RemoveQueued { factories: vec![SimId(1), SimId(2)], blueprint: bot });
         assert_eq!(chips[1].label, "Heavy Tank");
         assert_eq!(chips[1].remove, UiAction::RemoveQueued { factories: vec![SimId(2)], blueprint: tank });
@@ -4219,7 +4219,7 @@ mod tests {
         let ctx = egui::Context::default();
         install_fonts(&ctx);
         let db = BlueprintDb::standard();
-        let chips = [QueueChip { label: "1. Mass Extractor".to_string(), icon: ChipIcon::Item(db.id("mass_extractor")), count: 1, progress: None, remove: UiAction::Restart }];
+        let chips = [QueueChip { label: "1. Materiel Extractor".to_string(), icon: ChipIcon::Item(db.id("mass_extractor")), count: 1, progress: None, remove: UiAction::Restart }];
         // On the first chip, which starts the row.
         let at = egui::pos2(24.0, 24.0);
         let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
@@ -4252,7 +4252,7 @@ mod tests {
         assert_eq!(selection_net(&current, &[SimId(10), SimId(11)]), Some((-141, 170)));
         assert_eq!(selection_net(&current, &[SimId(12)]), None, "the bot reports no rates");
         let power = |key: &str| db.get(db.id(key)).build_power.to_num::<i64>();
-        assert_eq!(selection_build_power(&current, &[SimId(10), SimId(11), SimId(12)], &db), power("acu") + power("t1_engineer"));
+        assert_eq!(selection_build_power(&current, &[SimId(10), SimId(11), SimId(12)], &db), power("command_rig") + power("t1_engineer"));
         assert_eq!(signed_tenths(-141), "-14.1");
         assert_eq!(signed_tenths(25), "+2.5");
         assert_eq!(signed_tenths(0), "+0.0");
@@ -4264,7 +4264,7 @@ mod tests {
         let current = base_with_factories(&db);
         let [units, income, army] = team_figures(&current, Team::Blue, &db, Some(26));
         assert_eq!((units.as_str(), income.as_str()), ("6", "+26"));
-        assert_eq!(army, db.get(db.id("acu")).mass.to_num::<i64>().to_string(), "only mobile units count towards the army");
+        assert_eq!(army, db.get(db.id("command_rig")).mass.to_num::<i64>().to_string(), "only mobile units count towards the army");
         assert_eq!(team_figures(&current, Team::Red, &db, None)[1], "?");
     }
 
@@ -4272,7 +4272,7 @@ mod tests {
     fn walks_get_arrival_times_that_add_up_and_stop_at_other_work() {
         let db = BlueprintDb::standard();
         let mut bot = unit(1, 0.0);
-        bot.blueprint = db.id("t1_light_bot").0;
+        bot.blueprint = db.id("t1_light_walker").0;
         let plan = UnitPlanView {
             id: SimId(1),
             steps: vec![step(PlanStepKind::Move, 100.0, 0.0), step(PlanStepKind::AttackMove, 300.0, 0.0), step(PlanStepKind::Build, 400.0, 20.0), step(PlanStepKind::Move, 500.0, 0.0)],
@@ -4280,7 +4280,7 @@ mod tests {
         let current = snapshot(vec![bot], vec![plan]);
         let mut legs = build_trails(&current, &current, 1.0, &[SimId(1)]);
         estimate_arrivals(&mut legs, &current, &db);
-        let speed = db.get(db.id("t1_light_bot")).speed.to_num::<f64>() * 10.0;
+        let speed = db.get(db.id("t1_light_walker")).speed.to_num::<f64>() * 10.0;
         let etas: Vec<Option<f64>> = legs.iter().map(|leg| leg.eta).collect();
         assert!((etas[0].unwrap() - 100.0 / speed).abs() < 1e-9);
         assert!((etas[1].unwrap() - 300.0 / speed).abs() < 1e-9, "times add up along the way");
@@ -4328,11 +4328,11 @@ mod tests {
         let db = BlueprintDb::standard();
         let mut current = commander_and_engineer(&db);
         let mut second_bot = unit(13, 0.0);
-        second_bot.blueprint = db.id("t1_light_bot").0;
+        second_bot.blueprint = db.id("t1_light_walker").0;
         current.units.push(second_bot);
         let groups = selection_groups(&current, &[SimId(12), SimId(10), SimId(13), SimId(99)]);
-        let bot = db.id("t1_light_bot").0;
-        assert_eq!(groups, [(bot, vec![SimId(12), SimId(13)]), (db.id("acu").0, vec![SimId(10)])], "unknown units are left out");
+        let bot = db.id("t1_light_walker").0;
+        assert_eq!(groups, [(bot, vec![SimId(12), SimId(13)]), (db.id("command_rig").0, vec![SimId(10)])], "unknown units are left out");
     }
 
     #[test]
@@ -4350,7 +4350,7 @@ mod tests {
     fn clicking_an_order_button_arms_it_and_the_armed_order_stays_lit() {
         let ctx = egui::Context::default();
         install_fonts(&ctx);
-        let offers = OrderOffers { overcharge: false, weapons: true, teleport: false, capture: false, unload: false };
+        let offers = OrderOffers { discharge: false, weapons: true, teleport: false, capture: false, unload: false };
         let at = egui::pos2(8.0 + ORDER_BUTTON / 2.0, 8.0 + ORDER_BUTTON / 2.0);
         let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
         let mut actions = Vec::new();
@@ -4417,7 +4417,7 @@ mod tests {
         assert!(names("t2_heavy_tank").contains(&"Weapon"));
         assert!(names("radar").contains(&"Radar"));
         assert!(names("stealth_field_generator").contains(&"Stealth field"));
-        assert!(names("acu").contains(&"Omni"));
+        assert!(names("command_rig").contains(&"Deep scan"));
     }
 
     #[test]
@@ -4438,21 +4438,21 @@ mod tests {
             let mut view = unit(id, x);
             view.x = raw(x);
             view.blueprint = db.id(key).0;
-            view.is_structure = key != "acu";
+            view.is_structure = key != "command_rig";
             view.built_permille = built;
             view.team = team;
             view
         };
         snapshot(
             vec![
-                make(1, "acu", 0.0, 1000, Team::Blue),
+                make(1, "command_rig", 0.0, 1000, Team::Blue),
                 make(2, "land_factory_t1", 100.0, 1000, Team::Blue),
                 make(3, "land_factory_t1", 900.0, 400, Team::Blue),
                 make(4, "land_factory_t2", 500.0, 1000, Team::Blue),
                 make(5, "land_factory_t2", 700.0, 1000, Team::Blue),
                 make(6, "power_generator", 50.0, 1000, Team::Blue),
                 make(7, "land_factory_t1", 300.0, 1000, Team::Red),
-                make(8, "acu", 300.0, 1000, Team::Red),
+                make(8, "command_rig", 300.0, 1000, Team::Red),
             ],
             vec![],
         )
@@ -4541,7 +4541,7 @@ mod tests {
             actions
         }
 
-        /// Row 0 is the ACU, row 1 the factory kind, and rows 2 and 3 its tiers: two big squares,
+        /// Row 0 is the commander, row 1 the factory kind, and rows 2 and 3 its tiers: two big squares,
         /// then two short buttons, each 4 points apart, inside the panel's 8 point margin.
         fn click(&mut self, row: usize, modifiers: egui::Modifiers) -> Vec<UiAction> {
             let middles = [32.0, 84.0, 124.0, 152.0];
@@ -4687,10 +4687,10 @@ mod tests {
         current.rates = vec![rates(1, 0, 0, 36, 180), rates(2, 0, 0, 0, 0), rates(4, 0, 200, 0, 0), rates(5, 25, 0, 0, 0)];
 
         let of = |selected: &[SimId]| selection_rates(&current, selected, &db);
-        assert_eq!(of(&[SimId(5)]), SelectionRates { output: "+2.5 mass/s".to_string(), spending: String::new() });
+        assert_eq!(of(&[SimId(5)]), SelectionRates { output: "+2.5 materiel/s".to_string(), spending: String::new() });
         assert_eq!(of(&[SimId(4)]), SelectionRates { output: "+20.0 energy/s".to_string(), spending: String::new() });
-        assert_eq!(of(&[SimId(4), SimId(5)]).output, "+2.5 mass/s, +20.0 energy/s", "several add up");
-        assert_eq!(of(&[SimId(1)]), SelectionRates { output: String::new(), spending: "Using 3.6 mass/s, 18.0 energy/s".to_string() });
+        assert_eq!(of(&[SimId(4), SimId(5)]).output, "+2.5 materiel/s, +20.0 energy/s", "several add up");
+        assert_eq!(of(&[SimId(1)]), SelectionRates { output: String::new(), spending: "Using 3.6 materiel/s, 18.0 energy/s".to_string() });
         assert_eq!(of(&[SimId(2)]).spending, "Using nothing");
         assert_eq!(of(&[SimId(99)]), SelectionRates::default());
     }
@@ -4702,7 +4702,7 @@ mod tests {
         assert_eq!(control_group_label(1, &[SimId(11)], &current, &db), "1: Engineer");
         assert_eq!(control_group_label(2, &[SimId(11), SimId(11)], &current, &db), "2: Engineer x2");
         assert_eq!(control_group_label(0, &[SimId(10), SimId(12)], &current, &db), "0: 2 units");
-        assert_eq!(control_group_label(3, &[SimId(10)], &current, &db), "3: ACU");
+        assert_eq!(control_group_label(3, &[SimId(10)], &current, &db), "3: Commander");
     }
 
     #[test]
@@ -4815,11 +4815,11 @@ mod tests {
     }
 
     #[test]
-    fn only_a_selection_with_a_commander_can_overcharge() {
+    fn only_a_selection_with_a_commander_can_discharge() {
         let db = BlueprintDb::standard();
         let current = commander_and_engineer(&db);
-        assert_eq!(hotkey_action(&current, &[SimId(10)], &db, 'L', BuildTiers::default(), None), Some(UiAction::Arm(ArmedOrder::Overcharge)));
-        assert_eq!(hotkey_action(&current, &[SimId(10), SimId(12)], &db, 'L', BuildTiers::default(), None), Some(UiAction::Arm(ArmedOrder::Overcharge)));
+        assert_eq!(hotkey_action(&current, &[SimId(10)], &db, 'L', BuildTiers::default(), None), Some(UiAction::Arm(ArmedOrder::Discharge)));
+        assert_eq!(hotkey_action(&current, &[SimId(10), SimId(12)], &db, 'L', BuildTiers::default(), None), Some(UiAction::Arm(ArmedOrder::Discharge)));
         assert_eq!(hotkey_action(&current, &[SimId(11), SimId(12)], &db, 'L', BuildTiers::default(), None), None, "engineers and bots have none");
     }
 

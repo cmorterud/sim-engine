@@ -57,7 +57,7 @@ fn a_new_bot_starts_in_the_bay_drives_out_the_end_facing_its_rally_and_goes_on()
     let center = position(&world, factory);
     // North-west: the west end faces it more than the east, and the ends come before the sides.
     let rally = point(500, 900);
-    world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: id(&world, "t1_light_bot"), count: 1 }, SimCommand::SetRally { factory, point: rally }]);
+    world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: id(&world, "t1_light_walker"), count: 1 }, SimCommand::SetRally { factory, point: rally }]);
     let bot = first_built(&mut world, factory);
     assert_eq!(position(&world, bot), center, "it is built in the bay");
     let out = leaving(&world, bot).expect("it drives out first");
@@ -80,7 +80,7 @@ fn a_new_bot_starts_in_the_bay_drives_out_the_end_facing_its_rally_and_goes_on()
 fn an_order_given_on_the_way_out_takes_over_from_the_rally() {
     let mut world = test_world();
     let factory = world.spawn_finished_structure(id(&world, "land_factory_t1"), Team::Blue, 50, 50).unwrap();
-    world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: id(&world, "t1_light_bot"), count: 1 }, SimCommand::SetRally { factory, point: point(500, 900) }]);
+    world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: id(&world, "t1_light_walker"), count: 1 }, SimCommand::SetRally { factory, point: point(500, 900) }]);
     let bot = first_built(&mut world, factory);
     let elsewhere = point(4_000, 1_000);
     world.advance_tick(&[SimCommand::Move { units: vec![bot], goal: elsewhere }]);
@@ -112,7 +112,7 @@ fn a_new_aircraft_lifts_off_its_pad_and_flies_to_the_rally() {
 fn anyone_who_sees_a_factory_sees_what_it_is_building_and_how_far_along() {
     let mut world = test_world();
     let factory = world.spawn_finished_structure(id(&world, "land_factory_t1"), Team::Blue, 50, 50).unwrap();
-    let bot = id(&world, "t1_light_bot");
+    let bot = id(&world, "t1_light_walker");
     world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: bot, count: 1 }]);
     let assembling = |world: &SimWorld| world.snapshot_for(Some(Team::Red)).units.iter().find(|unit| unit.id == factory).and_then(|unit| unit.assembling);
     let early = assembling(&world).expect("the bot shows in the bay");

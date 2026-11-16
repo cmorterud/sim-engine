@@ -184,7 +184,7 @@ pub enum Glyph {
     AttackGround,
     Patrol,
     Assist,
-    Overcharge,
+    Discharge,
     Stop,
     Capture,
     Teleport,
@@ -255,7 +255,7 @@ pub fn draw_glyph(painter: &egui::Painter, rect: Rect, glyph: Glyph) {
             painter.line_segment([at(0.0, -0.45), at(0.0, 0.35)], line(blue));
             painter.line_segment([at(-0.4, -0.05), at(0.4, -0.05)], line(blue));
         }
-        Glyph::Overcharge => {
+        Glyph::Discharge => {
             painter.add(Shape::convex_polygon(vec![at(0.2, -1.0), at(-0.55, 0.15), at(0.0, 0.15), at(-0.2, 1.0)], yellow, Stroke::NONE));
             painter.add(Shape::convex_polygon(vec![at(0.2, -1.0), at(0.55, -0.15), at(0.0, -0.15)], yellow, Stroke::NONE));
             painter.add(Shape::convex_polygon(vec![at(0.0, -0.15), at(0.55, -0.15), at(-0.2, 1.0)], yellow, Stroke::NONE));

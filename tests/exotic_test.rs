@@ -119,14 +119,14 @@ fn run_until(world: &mut SimWorld, limit: u32, mut done: impl FnMut(&SimWorld) -
 fn an_emp_blast_stuns_what_it_reaches_for_its_time() {
     let mut world = world();
     let emp = unit(&mut world, "test_emp_tank", Team::Blue, 1_000, 1_000);
-    let near = unit(&mut world, "t1_light_bot", Team::Red, 1_350, 1_000);
-    let beside = unit(&mut world, "t1_light_bot", Team::Red, 1_350, 1_030);
-    let far = unit(&mut world, "t1_light_bot", Team::Red, 1_350, 1_200);
+    let near = unit(&mut world, "t1_light_walker", Team::Red, 1_350, 1_000);
+    let beside = unit(&mut world, "t1_light_walker", Team::Red, 1_350, 1_030);
+    let far = unit(&mut world, "t1_light_walker", Team::Red, 1_350, 1_200);
     let hit = run_until(&mut world, 100, |world| stunned(world, near)).expect("the EMP fires and stuns");
     assert!(stunned(&world, beside), "the blast reaches the unit beside it");
     assert!(!stunned(&world, far), "but not one out of its reach");
     // It does almost no damage.
-    assert!(health(&world, near).unwrap() >= world.blueprints.get(world.blueprints.id("t1_light_bot")).health - fp_int(10));
+    assert!(health(&world, near).unwrap() >= world.blueprints.get(world.blueprints.id("t1_light_walker")).health - fp_int(10));
 
     // Stunned, a unit can neither move nor fire, though the EMP tank is in its reach.
     let goal = point(1_100, 1_000);
@@ -151,7 +151,7 @@ fn an_emp_blast_stuns_what_it_reaches_for_its_time() {
 fn a_new_stun_lengthens_one_already_running_and_never_shortens_it() {
     let mut world = world();
     unit(&mut world, "test_emp_tank", Team::Blue, 1_000, 1_000);
-    let target = unit(&mut world, "t1_light_bot", Team::Red, 1_350, 1_000);
+    let target = unit(&mut world, "t1_light_walker", Team::Red, 1_350, 1_000);
     run_until(&mut world, 100, |world| stunned(world, target)).expect("stunned");
     // A second, quicker EMP tank, stunning again partway through.
     unit(&mut world, "test_emp_tank", Team::Blue, 1_000, 1_100);
@@ -215,8 +215,8 @@ fn aircraft_are_not_stunned() {
 fn a_tractor_beam_lifts_a_unit_draws_it_in_and_crushes_it() {
     let mut world = world();
     let walker = unit(&mut world, "test_tractor", Team::Blue, 1_000, 1_000);
-    let bot = unit(&mut world, "t1_light_bot", Team::Red, 1_180, 1_000);
-    let other = unit(&mut world, "t1_light_bot", Team::Red, 1_000, 1_180);
+    let bot = unit(&mut world, "t1_light_walker", Team::Red, 1_180, 1_000);
+    let other = unit(&mut world, "t1_light_walker", Team::Red, 1_000, 1_180);
     let grabbed = run_until(&mut world, 50, |world| !world.snapshot().tractor_beams.is_empty()).expect("it takes hold");
     // It holds one unit at a time: the other is left alone while the first is held.
     assert_eq!(world.snapshot().tractor_beams.len(), 1);
@@ -242,10 +242,10 @@ fn a_tractor_beam_lifts_a_unit_draws_it_in_and_crushes_it() {
 fn a_tractor_beam_cannot_lift_a_commander_or_a_structure() {
     let mut world = world();
     unit(&mut world, "test_tractor", Team::Blue, 1_000, 1_000);
-    let acu = unit(&mut world, "acu", Team::Red, 1_150, 1_000);
+    let rig = unit(&mut world, "command_rig", Team::Red, 1_150, 1_000);
     world.spawn_finished_structure(world.blueprints.id("mass_storage"), Team::Red, 50, 57).unwrap();
     // Keep the commander from shooting back.
-    world.ecs.get::<&mut sim_engine::sim::components::Combat>(world.unit_entity(acu).unwrap()).unwrap().range = Fp::ZERO;
+    world.ecs.get::<&mut sim_engine::sim::components::Combat>(world.unit_entity(rig).unwrap()).unwrap().range = Fp::ZERO;
     for _ in 0..100 {
         world.advance_tick(&[]);
         assert!(world.snapshot().tractor_beams.is_empty(), "nothing here can be lifted");
@@ -257,7 +257,7 @@ fn a_tractor_beam_cannot_lift_a_commander_or_a_structure() {
 fn a_held_unit_is_let_go_when_its_holder_dies() {
     let mut world = world();
     let walker = unit(&mut world, "test_tractor", Team::Blue, 1_000, 1_000);
-    let bot = unit(&mut world, "t1_light_bot", Team::Red, 1_180, 1_000);
+    let bot = unit(&mut world, "t1_light_walker", Team::Red, 1_180, 1_000);
     run_until(&mut world, 50, |world| !world.snapshot().tractor_beams.is_empty()).expect("it takes hold");
     // A point defense out of the beam's reach finishes off the walker.
     world.spawn_finished_structure(world.blueprints.id("t1_point_defense"), Team::Red, 50, 65).unwrap();
@@ -310,7 +310,7 @@ fn exotic_weapons_are_deterministic() {
         unit(&mut world, "test_tractor", Team::Blue, 1_000, 1_100);
         let walker = unit(&mut world, "test_storm_walker", Team::Red, 1_400, 1_000);
         for index in 0..6 {
-            unit(&mut world, "t1_light_bot", Team::Red, 1_200 + index * 20, 1_050);
+            unit(&mut world, "t1_light_walker", Team::Red, 1_200 + index * 20, 1_050);
         }
         world.advance_tick(&[SimCommand::SelfDestruct { units: vec![walker] }]);
         let mut checksums = Vec::new();

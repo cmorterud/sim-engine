@@ -7,7 +7,7 @@ use std::hash::Hasher;
 use super::blueprints::{BlueprintId, Res, Targets, UnitClass, WeaponKind, ADJACENCY_SCALE, TICKS_PER_SECOND};
 use super::commands::SimCommand;
 use super::components::{
-    Adjacency, AntiAir, BeingCaptured, BombBay, Flight, Blueprinted, BuildTask, Builder, Intel, Launcher, Upgrading, MissileDefense, OverchargeOrder, OverchargeWeapon, Paused, Shield, Turning, Turret, Veterancy, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, OrderQueue, Patrol,
+    Adjacency, AntiAir, BeingCaptured, BombBay, Flight, Blueprinted, BuildTask, Builder, Intel, Launcher, Upgrading, MissileDefense, DischargeOrder, DischargeWeapon, Paused, Shield, Turning, Turret, Veterancy, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, OrderQueue, Patrol,
     Position, SimId, Team, UnitStats, Wreck, WreckKind,
 };
 use super::config::{
@@ -245,7 +245,7 @@ impl SimWorld {
                 if !open {
                     return false;
                 }
-                // Deposits are saved for extractors, and vents for hydrocarbon plants.
+                // Deposits are saved for extractors, and vents for geothermal plants.
                 if !unit.requires_deposit && self.deposits.contains(&(x, y)) {
                     return false;
                 }
@@ -357,8 +357,8 @@ impl SimWorld {
             let radius = fp_int(unit.turn_radius as i32);
             self.ecs.insert_one(entity, Turning::new(facing, rate, radius)).expect("entity was just spawned");
         }
-        if let Some(overcharge) = unit.overcharge {
-            let weapon = OverchargeWeapon { def: overcharge, ticks_until_ready: 0 };
+        if let Some(discharge) = unit.discharge {
+            let weapon = DischargeWeapon { def: discharge, ticks_until_ready: 0 };
             self.ecs.insert_one(entity, weapon).expect("entity was just spawned");
         }
         if let Some(flight) = unit.flight {
@@ -477,8 +477,8 @@ impl SimWorld {
             self.ecs.insert_one(entity, shield).expect("entity was just spawned");
             self.shields.push((id, entity));
         }
-        if unit.air_staging.is_some() {
-            self.air_stagings.push((id, entity));
+        if unit.airfield.is_some() {
+            self.airfields.push((id, entity));
         }
         if unit.transport.is_some() {
             self.ecs.insert_one(entity, super::components::Transport::default()).expect("entity was just spawned");
@@ -536,7 +536,7 @@ impl SimWorld {
             }
             SimCommand::Build { units, blueprint, cell_x, cell_y, queued } => {
                 let builders = self.units_that_can_build(units, *blueprint);
-                // A commander being fitted with an engineering suite can already queue what the
+                // A commander being fitted with an fabrication pack can already queue what the
                 // suite unlocks. That waits behind the suite, so it is queued whatever the order
                 // says, and never cancels the suite.
                 let after_suite: Vec<SimId> = units
@@ -752,7 +752,7 @@ impl SimWorld {
             | SimCommand::QueueMove { .. }
             | SimCommand::FormationMove { .. }
             | SimCommand::AttackGround { .. }
-            | SimCommand::Overcharge { .. }
+            | SimCommand::Discharge { .. }
             | SimCommand::MoveOrder { .. }
             | SimCommand::Follow { .. }
             | SimCommand::Stop { .. }
@@ -1201,7 +1201,7 @@ impl SimWorld {
                 }
             }
             TaskStep::MoveTo(goal) => {
-                // An engineering station cannot go to work out of its reach, so it lets it go.
+                // An field workshop cannot go to work out of its reach, so it lets it go.
                 if self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.is_structure) {
                     self.ecs.get::<&mut Builder>(entity).expect("builder list only holds builders").tasks.remove(0);
                     return;
@@ -1465,14 +1465,14 @@ impl SimWorld {
     }
 
     /// Whether a team's builders can capture this unit: an enemy's, finished, and not a
-    /// commander or support commander, which cannot be captured, as in the original.
+    /// commander or field rig, which cannot be captured, as in the original.
     fn capturable(&self, entity: hecs::Entity, team: Team) -> bool {
         let theirs = self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team != team);
         let finished = self.ecs.get::<&Construction>(entity).is_err();
         // Nor can an aircraft in flight be reached.
         let commander = self.ecs.get::<&Blueprinted>(entity).is_ok_and(|unit| {
             let class = self.blueprints.get(unit.0).class;
-            matches!(class, UnitClass::Commander | UnitClass::SupportCommander | UnitClass::Air)
+            matches!(class, UnitClass::Commander | UnitClass::FieldRig | UnitClass::Air)
         });
         theirs && finished && !commander
     }
@@ -1626,7 +1626,7 @@ impl SimWorld {
         for (entity, bonus) in adjacency_updates {
             *self.ecs.get::<&mut Adjacency>(entity).expect("structures have adjacency") = bonus;
         }
-        // Commanders and support commanders make and store resources of their own.
+        // Commanders and field rigs make and store resources of their own.
         for &(_, entity) in &self.builders {
             let Ok(blueprint) = self.ecs.get::<&Blueprinted>(entity).map(|unit| unit.0) else {
                 continue;
@@ -1789,7 +1789,7 @@ impl SimWorld {
         }
     }
 
-    /// What an engineering station helps with: the nearest friendly construction site, factory
+    /// What a field workshop helps with: the nearest friendly construction site, factory
     /// at work, or upgrade within its reach, or failing that, the nearest damaged friend. Ties go
     /// to the lowest id.
     fn find_station_work(&self, entity: hecs::Entity) -> Option<BuildTask> {
@@ -2171,11 +2171,11 @@ impl SimWorld {
         if self.ecs.get::<&Paused>(entity).is_ok() {
             hasher.write(&[11]);
         }
-        if let Ok(weapon) = self.ecs.get::<&OverchargeWeapon>(entity) {
+        if let Ok(weapon) = self.ecs.get::<&DischargeWeapon>(entity) {
             hasher.write(&[12]);
             hasher.write(&weapon.ticks_until_ready.to_le_bytes());
         }
-        if let Ok(order) = self.ecs.get::<&OverchargeOrder>(entity) {
+        if let Ok(order) = self.ecs.get::<&DischargeOrder>(entity) {
             hasher.write(&[13]);
             hasher.write(&order.target.0.to_le_bytes());
         }

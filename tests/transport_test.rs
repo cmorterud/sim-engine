@@ -46,7 +46,7 @@ fn run(world: &mut SimWorld, ticks: u32) {
 fn units_board_a_transport_that_comes_to_them_and_leave_the_map() {
     let mut world = test_world();
     let transport = spawn(&mut world, "t1_light_transport", 1_500, 1_500);
-    let bots: Vec<SimId> = (0..3).map(|index| spawn(&mut world, "t1_light_bot", 2_000 + index * 30, 2_000)).collect();
+    let bots: Vec<SimId> = (0..3).map(|index| spawn(&mut world, "t1_light_walker", 2_000 + index * 30, 2_000)).collect();
     world.advance_tick(&[SimCommand::Load { units: bots.clone(), transport }]);
     run(&mut world, 300);
     let mut on_board = cargo(&world, transport);
@@ -63,18 +63,18 @@ fn a_transport_takes_only_what_fits() {
     let world = test_world();
     let light = world.blueprints.get(id(&world, "t1_light_transport")).transport.unwrap();
     let size = |key: &str| transport_size(world.blueprints.get(id(&world, key))).unwrap();
-    let (bot, tank, assault) = (size("t1_light_bot"), size("t2_heavy_tank"), size("t3_heavy_assault_bot"));
+    let (bot, tank, assault) = (size("t1_light_walker"), size("t2_heavy_tank"), size("t3_heavy_walker"));
     assert!(fits(light, [5, 0, 0], bot) && !fits(light, [6, 0, 0], bot), "six small");
     assert!(fits(light, [0, 1, 0], tank) && !fits(light, [0, 2, 0], tank), "two medium");
     assert!(fits(light, [0, 0, 0], assault) && !fits(light, [0, 0, 1], assault), "one large");
     assert!(fits(light, [2, 1, 0], bot) && !fits(light, [3, 1, 0], bot), "a medium takes the room of three small");
-    assert_eq!(transport_size(world.blueprints.get(id(&world, "acu"))), None, "commanders walk");
+    assert_eq!(transport_size(world.blueprints.get(id(&world, "command_rig"))), None, "commanders walk");
     assert_eq!(transport_size(world.blueprints.get(id(&world, "t1_interceptor"))), None);
     assert_eq!(transport_size(world.blueprints.get(id(&world, "t1_frigate"))), None);
 
     let mut world = test_world();
     let transport = spawn(&mut world, "t1_light_transport", 1_500, 1_500);
-    let bots: Vec<SimId> = (0..8).map(|index| spawn(&mut world, "t1_light_bot", 2_000 + (index % 4) * 30, 2_000 + (index / 4) * 30)).collect();
+    let bots: Vec<SimId> = (0..8).map(|index| spawn(&mut world, "t1_light_walker", 2_000 + (index % 4) * 30, 2_000 + (index / 4) * 30)).collect();
     world.advance_tick(&[SimCommand::Load { units: bots.clone(), transport }]);
     run(&mut world, 400);
     assert_eq!(cargo(&world, transport).len(), 6, "six get in");
@@ -89,7 +89,7 @@ fn a_transport_takes_only_what_fits() {
 fn a_transport_sets_its_cargo_down_where_it_is_sent_and_it_can_be_ordered_again() {
     let mut world = test_world();
     let transport = spawn(&mut world, "t1_light_transport", 1_500, 1_500);
-    let bots: Vec<SimId> = (0..4).map(|index| spawn(&mut world, "t1_light_bot", 1_600 + index * 30, 1_600)).collect();
+    let bots: Vec<SimId> = (0..4).map(|index| spawn(&mut world, "t1_light_walker", 1_600 + index * 30, 1_600)).collect();
     world.advance_tick(&[SimCommand::Load { units: bots.clone(), transport }]);
     run(&mut world, 300);
     assert_eq!(cargo(&world, transport).len(), 4);
@@ -111,7 +111,7 @@ fn a_transport_sets_its_cargo_down_where_it_is_sent_and_it_can_be_ordered_again(
 fn what_a_transport_carries_goes_down_with_it() {
     let mut world = test_world();
     let transport = spawn(&mut world, "t1_light_transport", 1_500, 1_500);
-    let bots: Vec<SimId> = (0..2).map(|index| spawn(&mut world, "t1_light_bot", 1_600 + index * 30, 1_600)).collect();
+    let bots: Vec<SimId> = (0..2).map(|index| spawn(&mut world, "t1_light_walker", 1_600 + index * 30, 1_600)).collect();
     world.advance_tick(&[SimCommand::Load { units: bots.clone(), transport }]);
     run(&mut world, 300);
     assert_eq!(cargo(&world, transport).len(), 2);
@@ -130,7 +130,7 @@ fn a_transported_match_replays_exactly() {
     let play = || {
         let mut world = test_world();
         let transport = spawn(&mut world, "t2_transport", 1_500, 1_500);
-        let units: Vec<SimId> = ["t1_light_bot", "t2_heavy_tank", "t1_engineer"].iter().enumerate().map(|(index, key)| spawn(&mut world, key, 1_600 + index as i32 * 40, 1_600)).collect();
+        let units: Vec<SimId> = ["t1_light_walker", "t2_heavy_tank", "t1_engineer"].iter().enumerate().map(|(index, key)| spawn(&mut world, key, 1_600 + index as i32 * 40, 1_600)).collect();
         world.advance_tick(&[SimCommand::Load { units, transport }]);
         run(&mut world, 250);
         let mid = world.compute_checksum();

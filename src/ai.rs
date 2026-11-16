@@ -70,7 +70,7 @@ const AIR_THREAT_TICKS: u32 = 3_000;
 /// Anti-air structures it keeps: this many, plus one for every 20 mass a second, up to the most.
 const BASE_ANTI_AIR: usize = 2;
 const MOST_ANTI_AIR: usize = 6;
-/// Aircraft it needs before it builds an air staging facility.
+/// Aircraft it needs before it builds an airfield.
 const STAGING_AIRCRAFT: usize = 6;
 /// On a map with water, mass income for its first naval factory, without a T2 land
 /// headquarters, and its second; its naval factories upgrade to T2 and T3 at these.
@@ -86,7 +86,7 @@ const LARGEST_FLEET: usize = 12;
 /// A structure being built that costs at least this much mass is worth sending idle builders to.
 const BIG_SITE_MASS: i32 = 500;
 const T3_ENGINEERS: usize = 2;
-/// How far from home the AI goes to build on a hydrocarbon vent.
+/// How far from home the AI goes to build on a geothermal vent.
 const VENT_REACH_UNITS: i32 = 2_500;
 const MAX_POINT_DEFENSES: usize = 4;
 /// How long before trying a deposit again, in case a hidden enemy holds it.
@@ -102,9 +102,9 @@ const MOST_SHIELDS: usize = 4;
 const TMD_INCOME: i64 = 20;
 const MOST_TMDS: usize = 3;
 const TACTICAL_LAUNCHER_INCOME: i64 = 25;
-/// Energy income a second at which an AI that overcharges puts up an energy storage.
-const OVERCHARGE_STORAGE_INCOME: i64 = 300;
-/// The commander takes its T2 engineering suite at this mass income a second, its heavier
+/// Energy income a second at which an AI that discharges puts up an energy storage.
+const DISCHARGE_STORAGE_INCOME: i64 = 300;
+/// The commander takes its T2 fabrication pack at this mass income a second, its heavier
 /// cannon at the next, and its T3 suite at the last, each only while it is safe at home: it
 /// stands still while an enhancement is fitted. Earlier, the suite's 21,000 energy held back
 /// the climb to T3 and the navy.
@@ -128,8 +128,8 @@ const BOARDING_PATIENCE_TICKS: u32 = 600;
 const TRANSPORT_RETRY_TICKS: u32 = 1_500;
 /// How far short of the target it sets them down, toward home, clear of what guards it.
 const DROP_SHORT_UNITS: i32 = 250;
-/// The commander overcharges only above this share of its health.
-const OVERCHARGE_HEALTH_PERCENT: i32 = 50;
+/// The commander discharges only above this share of its health.
+const DISCHARGE_HEALTH_PERCENT: i32 = 50;
 /// A radar blip this far above the ground or the water is an aircraft, which the army leaves alone.
 const BLIP_GROUND_HEIGHT: i32 = 30;
 
@@ -150,7 +150,7 @@ struct Roster {
     generators: [BlueprintId; 3],
     storage: BlueprintId,
     point_defense: BlueprintId,
-    hydrocarbon: BlueprintId,
+    geothermal: BlueprintId,
     air_factory: BlueprintId,
     air_support_factories: [BlueprintId; 2],
     interceptor: BlueprintId,
@@ -162,35 +162,35 @@ struct Roster {
     mobile_anti_air: [BlueprintId; 2],
     /// Anti-air structures by tier.
     anti_air: [BlueprintId; 3],
-    air_staging: BlueprintId,
+    airfield: BlueprintId,
     naval_factory: BlueprintId,
     naval_support_factories: [BlueprintId; 2],
     frigate: BlueprintId,
     submarine: BlueprintId,
     destroyer: BlueprintId,
     cruiser: BlueprintId,
-    shield_boat: BlueprintId,
+    escort_corvette: BlueprintId,
     battleship: BlueprintId,
     battlecruiser: BlueprintId,
     energy_storage: BlueprintId,
     torpedo_boat: BlueprintId,
     medium_tank: BlueprintId,
-    gatling_bot: BlueprintId,
+    grenadier_walker: BlueprintId,
     mobile_shield: BlueprintId,
-    heavy_assault_bot: BlueprintId,
-    armored_assault_bot: BlueprintId,
+    heavy_walker: BlueprintId,
+    siege_walker: BlueprintId,
     /// Radars by tier: the radar and the T2 radar.
     radars: [BlueprintId; 2],
     shield: BlueprintId,
     tactical_launcher: BlueprintId,
     tactical_missile: BlueprintId,
     tactical_defense: BlueprintId,
-    engineering_stations: [BlueprintId; 2],
+    field_workshops: [BlueprintId; 2],
     light_transport: BlueprintId,
     strategic_launcher: BlueprintId,
     strategic_missile: BlueprintId,
     strategic_defense: BlueprintId,
-    anti_nuke: BlueprintId,
+    strategic_interceptor: BlueprintId,
     /// The commander's enhancements, in the order it takes them.
     t2_suite: crate::sim::blueprints::EnhancementId,
     heavy_cannon: crate::sim::blueprints::EnhancementId,
@@ -202,10 +202,10 @@ impl Roster {
         let id = |key: &str| world.blueprints.id(key);
         Self {
             engineers: [id("t1_engineer"), id("t2_engineer"), id("t3_engineer")],
-            bot: id("t1_light_bot"),
+            bot: id("t1_light_walker"),
             artillery: id("t1_light_artillery"),
             tank: id("t2_heavy_tank"),
-            amphibious: id("t2_amphibious_tank"),
+            amphibious: id("t2_assault_hovercraft"),
             missile_launcher: id("t2_mobile_missile_launcher"),
             heavy_artillery: id("t3_mobile_artillery"),
             factory_t1: id("land_factory_t1"),
@@ -214,7 +214,7 @@ impl Roster {
             generators: [id("power_generator"), id("power_generator_t2"), id("power_generator_t3")],
             storage: id("mass_storage"),
             point_defense: id("t1_point_defense"),
-            hydrocarbon: id("hydrocarbon_plant"),
+            geothermal: id("geothermal_plant"),
             air_factory: id("air_factory"),
             air_support_factories: [id("air_factory_t2_support"), id("air_factory_t3_support")],
             interceptor: id("t1_interceptor"),
@@ -223,37 +223,37 @@ impl Roster {
             fighter_bomber: id("t2_fighter_bomber"),
             mobile_anti_air: [id("t1_mobile_aa"), id("t2_mobile_flak")],
             anti_air: [id("t1_aa_turret"), id("t2_flak"), id("t3_sam")],
-            air_staging: id("air_staging"),
+            airfield: id("airfield"),
             naval_factory: id("naval_factory"),
             naval_support_factories: [id("naval_factory_t2_support"), id("naval_factory_t3_support")],
             frigate: id("t1_frigate"),
             submarine: id("t1_attack_sub"),
             destroyer: id("t2_destroyer"),
             cruiser: id("t2_cruiser"),
-            shield_boat: id("t2_shield_boat"),
+            escort_corvette: id("t2_escort_corvette"),
             battleship: id("t3_battleship"),
             battlecruiser: id("t3_battlecruiser"),
             torpedo_boat: id("t2_torpedo_boat"),
             energy_storage: id("energy_storage"),
             medium_tank: id("t1_medium_tank"),
-            gatling_bot: id("t2_gatling_bot"),
+            grenadier_walker: id("t2_grenadier_walker"),
             mobile_shield: id("t2_mobile_shield"),
-            heavy_assault_bot: id("t3_heavy_assault_bot"),
-            armored_assault_bot: id("t3_armored_assault_bot"),
+            heavy_walker: id("t3_heavy_walker"),
+            siege_walker: id("t3_siege_walker"),
             radars: [id("radar"), id("radar_t2")],
             shield: id("shield_generator"),
             tactical_launcher: id("tactical_missile_launcher"),
             tactical_missile: id("tactical_missile"),
             tactical_defense: id("tactical_missile_defense"),
-            engineering_stations: [id("engineering_station"), id("engineering_station_t3")],
+            field_workshops: [id("field_workshop"), id("field_workshop_t3")],
             light_transport: id("t1_light_transport"),
             strategic_launcher: id("strategic_missile_launcher"),
             strategic_missile: id("strategic_missile"),
             strategic_defense: id("strategic_missile_defense"),
-            anti_nuke: id("anti_nuke"),
-            t2_suite: world.blueprints.enhancement_id("advanced_engineering"),
+            strategic_interceptor: id("strategic_interceptor"),
+            t2_suite: world.blueprints.enhancement_id("t2_fabrication"),
             heavy_cannon: world.blueprints.enhancement_id("heavy_cannon"),
-            t3_suite: world.blueprints.enhancement_id("t3_engineering"),
+            t3_suite: world.blueprints.enhancement_id("t3_fabrication"),
         }
     }
 
@@ -295,7 +295,7 @@ struct Forces {
     idle_strike: Vec<SimId>,
     aircraft: usize,
     anti_air_structures: usize,
-    air_stagings: usize,
+    airfields: usize,
     naval_factories: Vec<FactoryInfo>,
     naval_headquarters_tier: u8,
     /// Builders at work on anything but a generator.
@@ -415,7 +415,7 @@ struct Sighting {
 pub enum Difficulty {
     /// A small economy and a small army, slow to react and to climb the tech tree, waiting
     /// twelve minutes before it attacks and then in small waves, and without missiles,
-    /// overcharge, or its commander in the fight.
+    /// discharge, or its commander in the fight.
     Easy,
     /// Everything it knows.
     Normal,
@@ -449,7 +449,7 @@ impl Difficulty {
                 first_attack_tick: 7_200,
                 commander_push_ticks: u32::MAX,
                 missiles: false,
-                overcharge: false,
+                discharge: false,
                 enhancements: false,
                 transports: false,
             },
@@ -468,7 +468,7 @@ impl Difficulty {
                 first_attack_tick: 0,
                 commander_push_ticks: COMMANDER_PUSH_TICKS,
                 missiles: true,
-                overcharge: true,
+                discharge: true,
                 enhancements: true,
                 transports: true,
             },
@@ -500,7 +500,7 @@ struct Skill {
     /// When its commander starts joining full-size waves.
     commander_push_ticks: u32,
     missiles: bool,
-    overcharge: bool,
+    discharge: bool,
     /// Whether its commander takes enhancements.
     enhancements: bool,
     /// Whether it drops raiders by transport.
@@ -616,8 +616,8 @@ impl AiBrain {
         if self.skill.missiles {
             self.command_missiles(world, &forces, &sightings, &mut commands);
         }
-        if self.skill.overcharge {
-            self.command_overcharge(world, &forces, &sightings, &mut commands);
+        if self.skill.discharge {
+            self.command_discharge(world, &forces, &sightings, &mut commands);
         }
         commands
     }
@@ -737,7 +737,7 @@ impl AiBrain {
                         }
                     }
                 }
-                // Of the silos, only the tactical missile launcher. No support commanders yet.
+                // Of the silos, only the tactical missile launcher. No field rigs yet.
                 UnitClass::Factory if blueprint == roster.tactical_launcher => {
                     let factory = world.ecs.get::<&Factory>(entity).expect("launchers have factory parts");
                     forces.tactical_launchers.push(LauncherInfo {
@@ -765,7 +765,7 @@ impl AiBrain {
                         forces.strategic_defenses.push(info);
                     }
                 }
-                UnitClass::Factory | UnitClass::Ammo | UnitClass::SupportCommander => {}
+                UnitClass::Factory | UnitClass::Ammo | UnitClass::FieldRig => {}
                 UnitClass::Economy | UnitClass::Defense => {
                     if unit.requires_deposit {
                         forces.extractors.push(cell);
@@ -782,8 +782,8 @@ impl AiBrain {
                         forces.generators_building += usize::from(!finished);
                     } else if roster.anti_air.contains(&blueprint) {
                         forces.anti_air_structures += 1;
-                    } else if blueprint == roster.air_staging {
-                        forces.air_stagings += 1;
+                    } else if blueprint == roster.airfield {
+                        forces.airfields += 1;
                     } else if blueprint == roster.storage {
                         forces.storages += 1;
                     } else if blueprint == roster.energy_storage {
@@ -799,7 +799,7 @@ impl AiBrain {
                         forces.shields += 1;
                     } else if blueprint == roster.tactical_defense {
                         forces.tactical_defenses += 1;
-                    } else if roster.engineering_stations.contains(&blueprint) {
+                    } else if roster.field_workshops.contains(&blueprint) {
                         forces.stations += 1;
                     }
                 }
@@ -928,7 +928,7 @@ impl AiBrain {
         // A free vent near home is the cheapest energy there is.
         if energy_is_low || energy_lags {
             if let Some(cell) = self.vent_site(world, planned) {
-                return Some((roster.hydrocarbon, cell));
+                return Some((roster.geothermal, cell));
             }
         }
         if energy_is_low {
@@ -1002,9 +1002,9 @@ impl AiBrain {
                 }
             }
         }
-        if forces.aircraft >= STAGING_AIRCRAFT && forces.air_stagings + count_planned(roster.air_staging) == 0 && world.can_build(builder, roster.air_staging) {
-            if let Some(cell) = self.site_near_home(world, roster.air_staging, 1, planned) {
-                return Some((roster.air_staging, cell));
+        if forces.aircraft >= STAGING_AIRCRAFT && forces.airfields + count_planned(roster.airfield) == 0 && world.can_build(builder, roster.airfield) {
+            if let Some(cell) = self.site_near_home(world, roster.airfield, 1, planned) {
+                return Some((roster.airfield, cell));
             }
         }
 
@@ -1036,9 +1036,9 @@ impl AiBrain {
             }
             // Engineering stations beside the factories, which help with whatever is near.
             let stations_wanted = if mass_income >= STATION_INCOME { (1 + (mass_income - STATION_INCOME) as usize / 40).min(MOST_STATIONS) } else { 0 };
-            if forces.stations + count_planned(roster.engineering_stations[0]) < stations_wanted && world.can_build(builder, roster.engineering_stations[0]) {
+            if forces.stations + count_planned(roster.field_workshops[0]) < stations_wanted && world.can_build(builder, roster.field_workshops[0]) {
                 if let Some(cell) = self.station_site(world, forces, planned) {
-                    return Some((roster.engineering_stations[0], cell));
+                    return Some((roster.field_workshops[0], cell));
                 }
             }
             // A strategic missile defense once the enemy has been seen with a launcher.
@@ -1062,10 +1062,10 @@ impl AiBrain {
             }
         }
 
-        // Overcharge needs 7,500 energy in store, more than a commander holds by itself, so an AI
-        // that overcharges puts up one energy storage once its income can fill it.
-        if self.skill.overcharge
-            && energy_income >= OVERCHARGE_STORAGE_INCOME
+        // Discharge needs 7,500 energy in store, more than a commander holds by itself, so an AI
+        // that discharges puts up one energy storage once its income can fill it.
+        if self.skill.discharge
+            && energy_income >= DISCHARGE_STORAGE_INCOME
             && forces.energy_storages + count_planned(roster.energy_storage) == 0
             && world.can_build(builder, roster.energy_storage)
         {
@@ -1089,10 +1089,10 @@ impl AiBrain {
         None
     }
 
-    /// The corner cell for a hydrocarbon plant over the free vent nearest home, if one is
+    /// The corner cell for a geothermal plant over the free vent nearest home, if one is
     /// within reach of the base.
     fn vent_site(&self, world: &SimWorld, planned: &[(u32, u32)]) -> Option<(u32, u32)> {
-        let plant = self.roster().hydrocarbon;
+        let plant = self.roster().geothermal;
         let half = u32::from(world.blueprints.get(plant).footprint) / 2;
         let reach = wide_mul(fp_int(VENT_REACH_UNITS), fp_int(VENT_REACH_UNITS));
         world
@@ -1346,8 +1346,8 @@ impl AiBrain {
                         _ => roster.bot,
                     },
                     // A mobile shield goes with every six units, to cover the rest, up to two.
-                    2 => [roster.tank, roster.gatling_bot, roster.tank, roster.amphibious, roster.mobile_shield, roster.missile_launcher][turn as usize],
-                    _ => [roster.heavy_assault_bot, roster.heavy_artillery, roster.armored_assault_bot, roster.tank, roster.mobile_shield, roster.heavy_assault_bot][turn as usize],
+                    2 => [roster.tank, roster.grenadier_walker, roster.tank, roster.amphibious, roster.mobile_shield, roster.missile_launcher][turn as usize],
+                    _ => [roster.heavy_walker, roster.heavy_artillery, roster.siege_walker, roster.tank, roster.mobile_shield, roster.heavy_walker][turn as usize],
                 }
                 }
             };
@@ -1356,7 +1356,7 @@ impl AiBrain {
                     mobile_shields += 1;
                     item
                 } else if tier >= 3 {
-                    self.roster().heavy_assault_bot
+                    self.roster().heavy_walker
                 } else {
                     self.roster().tank
                 }
@@ -1456,8 +1456,8 @@ impl AiBrain {
                     let turn = (self.unit_counter % 6) as usize;
                     match tier {
                         1 => [roster.frigate, roster.frigate, roster.submarine][turn % 3],
-                        2 => [roster.destroyer, roster.torpedo_boat, roster.cruiser, roster.destroyer, roster.frigate, roster.shield_boat][turn],
-                        _ => [roster.battleship, roster.destroyer, roster.battlecruiser, roster.cruiser, roster.torpedo_boat, roster.shield_boat][turn],
+                        2 => [roster.destroyer, roster.torpedo_boat, roster.cruiser, roster.destroyer, roster.frigate, roster.escort_corvette][turn],
+                        _ => [roster.battleship, roster.destroyer, roster.battlecruiser, roster.cruiser, roster.torpedo_boat, roster.escort_corvette][turn],
                     }
                 }
             };
@@ -1659,7 +1659,7 @@ impl AiBrain {
     /// Beside the first finished land factory, so that a station reaches what it builds, or
     /// near home if there is none.
     fn station_site(&self, world: &SimWorld, forces: &Forces, planned: &[(u32, u32)]) -> Option<(u32, u32)> {
-        let station = self.roster().engineering_stations[0];
+        let station = self.roster().field_workshops[0];
         match forces.factories.iter().find(|factory| factory.finished) {
             Some(factory) => {
                 // The search runs on the plan, which Red sees turned around: a factory's cell
@@ -1676,7 +1676,7 @@ impl AiBrain {
     }
 
     /// The commander's enhancements, one at a time, while it is idle at home and no enemy is near: the
-    /// T2 engineering suite, then the heavy cannon, then the T3 suite, each once the income can
+    /// T2 fabrication pack, then the heavy cannon, then the T3 suite, each once the income can
     /// carry it without a stall.
     fn command_enhancements(&self, world: &SimWorld, forces: &Forces, sightings: &[Sighting], commands: &mut Vec<SimCommand>) {
         let Some(commander) = forces.commander else {
@@ -1918,7 +1918,7 @@ impl AiBrain {
         let roster = self.roster();
         // Defenses keep interceptors coming, and fire them on their own.
         for defense in forces.strategic_defenses.iter().filter(|defense| defense.finished && defense.queue_is_empty) {
-            commands.push(SimCommand::QueueUnit { factory: defense.id, blueprint: roster.anti_nuke, count: 1 });
+            commands.push(SimCommand::QueueUnit { factory: defense.id, blueprint: roster.strategic_interceptor, count: 1 });
             commands.push(SimCommand::SetRepeat { factory: defense.id, repeat: true });
         }
         // A launcher keeps building missiles, and fires each at the costliest enemy structure in
@@ -1964,10 +1964,10 @@ impl AiBrain {
         }
     }
 
-    /// The commander overcharges the costliest enemy unit in its gun's range, other than the
+    /// The commander discharges the costliest enemy unit in its gun's range, other than the
     /// enemy commander, which takes little from it, when the energy the shot needs is in store
     /// and it is above half health. The shot spends what it takes to destroy its target.
-    fn command_overcharge(&self, world: &SimWorld, forces: &Forces, sightings: &[Sighting], commands: &mut Vec<SimCommand>) {
+    fn command_discharge(&self, world: &SimWorld, forces: &Forces, sightings: &[Sighting], commands: &mut Vec<SimCommand>) {
         let Some(commander) = forces.commander else {
             return;
         };
@@ -1975,10 +1975,10 @@ impl AiBrain {
             return;
         };
         // An enemy this close is worth dropping an enhancement for: the commander is the match.
-        if world.ecs.get::<&crate::sim::components::OverchargeOrder>(entity).is_ok() {
+        if world.ecs.get::<&crate::sim::components::DischargeOrder>(entity).is_ok() {
             return;
         }
-        let Ok(weapon) = world.ecs.get::<&crate::sim::components::OverchargeWeapon>(entity).map(|weapon| *weapon) else {
+        let Ok(weapon) = world.ecs.get::<&crate::sim::components::DischargeWeapon>(entity).map(|weapon| *weapon) else {
             return;
         };
         let economy = &world.economies[self.team.index()];
@@ -1986,7 +1986,7 @@ impl AiBrain {
             return;
         }
         let health = *world.ecs.get::<&crate::sim::components::Health>(entity).expect("units have health");
-        if wide_mul(health.current, fp_int(100)) < wide_mul(health.max, fp_int(OVERCHARGE_HEALTH_PERCENT)) {
+        if wide_mul(health.current, fp_int(100)) < wide_mul(health.max, fp_int(DISCHARGE_HEALTH_PERCENT)) {
             return;
         }
         let at = world.ecs.get::<&Position>(entity).expect("units have positions").0.xy();
@@ -2003,7 +2003,7 @@ impl AiBrain {
             .filter(|enemy| !enemy.is_structure && !enemy.is_air && Some(enemy.id) != enemy_commander && enemy.position.distance_squared(&at) <= wide_mul(reach, reach))
             .max_by_key(|enemy| (worth(enemy.id), std::cmp::Reverse(enemy.position.distance_squared(&at)), std::cmp::Reverse(enemy.id)));
         if let Some(enemy) = target {
-            commands.push(SimCommand::Overcharge { unit: commander, target: enemy.id });
+            commands.push(SimCommand::Discharge { unit: commander, target: enemy.id });
         }
     }
 

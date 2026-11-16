@@ -153,7 +153,7 @@ fn guns_with_firing_randomness_scatter_and_mirror_images_scatter_mirrored() {
     let scattering = shell_directions("t1_light_artillery", Team::Blue, point(1_000, 2_500), point(1_500, 2_500), 600);
     assert!(scattering.len() >= 3, "it should fire several times: {}", scattering.len());
     assert!(scattering.windows(2).any(|pair| pair[0] != pair[1]), "its shells should go different ways: {scattering:?}");
-    let steady = shell_directions("t1_light_bot", Team::Blue, point(1_000, 2_500), point(1_200, 2_500), 100);
+    let steady = shell_directions("t1_light_walker", Team::Blue, point(1_000, 2_500), point(1_200, 2_500), 100);
     assert_eq!(steady.len(), 1, "a gun without randomness fires the same way every time: {steady:?}");
     // The same gun on the other side, turned about the middle of the map, scatters the same way
     // turned about, so a mirrored match stays a mirror image.

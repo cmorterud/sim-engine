@@ -201,7 +201,7 @@ impl Effects {
             }
             let least: f32 = match projectile.kind {
                 ProjectileKind::Shell => 2.5,
-                ProjectileKind::Overcharge => 8.0,
+                ProjectileKind::Discharge => 8.0,
                 ProjectileKind::TacticalMissile => 14.0,
                 ProjectileKind::StrategicMissile => 220.0,
             };

@@ -88,7 +88,7 @@ fn builders_working_together_capture_faster_and_stopping_starts_over() {
 fn a_captured_unit_changes_sides_with_nothing_to_do_and_its_old_enemies_stop_shooting_it() {
     let mut world = world();
     let factory = world.spawn_finished_structure(world.blueprints.id("land_factory_t1"), Team::Red, 60, 50).unwrap();
-    let bot = world.blueprints.id("t1_light_bot");
+    let bot = world.blueprints.id("t1_light_walker");
     world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: bot, count: 5 }]);
     // A Blue tank shooting the factory, and the engineer that takes it.
     let tank = world.spawn_mobile(world.blueprints.id("t2_heavy_tank"), Team::Blue, point(1_400, 1_030));
@@ -112,7 +112,7 @@ fn a_captured_unit_changes_sides_with_nothing_to_do_and_its_old_enemies_stop_sho
 #[test]
 fn commanders_and_unfinished_structures_cannot_be_captured() {
     let mut world = world();
-    let commander = world.spawn_mobile(world.blueprints.id("acu"), Team::Red, point(1_200, 1_000));
+    let commander = world.spawn_mobile(world.blueprints.id("command_rig"), Team::Red, point(1_200, 1_000));
     world.ecs.get::<&mut Combat>(world.unit_entity(commander).unwrap()).unwrap().range = Fp::ZERO;
     let engineer = engineer(&mut world, point(1_100, 1_000));
     world.advance_tick(&[SimCommand::Capture { units: vec![engineer], target: commander }]);

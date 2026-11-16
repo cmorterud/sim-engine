@@ -35,10 +35,10 @@ fn ai_builds_an_economy_and_an_army() {
     assert!(count("mass_extractor") >= 4, "only {} extractors", count("mass_extractor"));
     assert!(count("power_generator") >= 2, "only {} generators", count("power_generator"));
     assert!(count("t1_engineer") >= 2, "only {} engineers", count("t1_engineer"));
-    let army = ["t1_light_bot", "t1_medium_tank", "t1_light_artillery", "t1_mobile_aa", "t2_heavy_tank"].iter().map(|key| count(key)).sum::<usize>();
+    let army = ["t1_light_walker", "t1_medium_tank", "t1_light_artillery", "t1_mobile_aa", "t2_heavy_tank"].iter().map(|key| count(key)).sum::<usize>();
     assert!(army >= 3, "no army: {army}");
     let income = (world.economies[0].mass_income * 10).to_num::<i64>();
-    assert!(income >= 8, "mass income is only {income}/s");
+    assert!(income >= 8, "materiel income is only {income}/s");
 }
 
 #[test]
@@ -65,7 +65,7 @@ fn ai_commands_only_its_own_units() {
                     | SimCommand::Load { units, .. }
                     | SimCommand::Enhance { units, .. } => units.clone(),
                     SimCommand::Unload { transports, .. } => transports.clone(),
-                    SimCommand::Overcharge { unit, .. } => vec![*unit],
+                    SimCommand::Discharge { unit, .. } => vec![*unit],
                     SimCommand::QueueUnit { factory, .. } | SimCommand::SetRally { factory, .. } | SimCommand::SetRepeat { factory, .. } => vec![*factory],
                     other => panic!("unexpected command {other:?}"),
                 };
@@ -116,7 +116,7 @@ fn mirrored_order(world: &SimWorld, team: Team, command: &SimCommand) -> String 
         SimCommand::QueueMove { units, goal, attack } => format!("queue-move x{} to {:?} {attack}", units.len(), point(*goal)),
         SimCommand::SetRepeat { repeat, .. } => format!("repeat {repeat}"),
         SimCommand::Attack { units, .. } => format!("attack x{}", units.len()),
-        SimCommand::Overcharge { .. } => "overcharge".to_string(),
+        SimCommand::Discharge { .. } => "discharge".to_string(),
         SimCommand::Enhance { units, enhancement } => format!("enhance x{} {}", units.len(), enhancement.0),
         SimCommand::Move { units, goal } => format!("move x{} to {:?}", units.len(), point(*goal)),
         SimCommand::Load { units, .. } => format!("load x{}", units.len()),
@@ -265,19 +265,19 @@ fn ai_climbs_the_tech_tree_and_upgrades_its_economy() {
     assert!(count("t2_engineer") >= 1 && count("t3_engineer") >= 1, "no higher-tier engineers");
     assert!(count("mass_extractor_t2") + count("mass_extractor_t3") >= 6, "only {} upgraded extractors", count("mass_extractor_t2") + count("mass_extractor_t3"));
     assert!(count("power_generator_t2") + count("power_generator_t3") >= 1, "no higher-tier generators");
-    let higher_tier = ["t2_heavy_tank", "t2_gatling_bot", "t2_amphibious_tank", "t3_heavy_assault_bot", "t3_armored_assault_bot", "t3_mobile_artillery"].iter().map(|key| count(key)).sum::<usize>();
-    let third_tier = ["t3_heavy_assault_bot", "t3_armored_assault_bot", "t3_mobile_artillery"].iter().map(|key| count(key)).sum::<usize>();
+    let higher_tier = ["t2_heavy_tank", "t2_grenadier_walker", "t2_assault_hovercraft", "t3_heavy_walker", "t3_siege_walker", "t3_mobile_artillery"].iter().map(|key| count(key)).sum::<usize>();
+    let third_tier = ["t3_heavy_walker", "t3_siege_walker", "t3_mobile_artillery"].iter().map(|key| count(key)).sum::<usize>();
     assert!(higher_tier >= 5 && third_tier >= 1, "the army is not keeping up with the tech: {higher_tier} of T2 and up, {third_tier} of T3");
     let income = (world.economies[0].mass_income * 10).to_num::<i64>();
-    assert!(income >= 60, "mass income is only {income}/s");
-    // The commander takes its engineering suite and heavier cannon at home, and engineering
+    assert!(income >= 60, "materiel income is only {income}/s");
+    // The commander takes its fabrication pack and heavier cannon at home, and engineering
     // stations help the factories.
     let commander = world.unit_entity(world.commanders[Team::Blue.index()].unwrap()).unwrap();
     let installed = world.ecs.get::<&sim_engine::sim::components::Enhancements>(commander).map_or([None; 3], |slots| slots.0);
     let has = |key: &str| installed.contains(&Some(world.blueprints.enhancement_id(key)));
-    assert!(has("advanced_engineering") || has("t3_engineering"), "the commander took no engineering suite: {installed:?}");
+    assert!(has("t2_fabrication") || has("t3_fabrication"), "the commander took no fabrication pack: {installed:?}");
     assert!(has("heavy_cannon"), "the commander took no heavier cannon: {installed:?}");
-    assert!(count("engineering_station") + count("engineering_station_t3") >= 1, "no engineering station");
+    assert!(count("field_workshop") + count("field_workshop_t3") >= 1, "no field workshop");
     // A light transport took raiders aboard and set them down by an outlying deposit.
     assert!(loaded && dropped, "no transport drop: loaded {loaded}, dropped {dropped}");
 }
@@ -321,7 +321,7 @@ fn ai_takes_to_the_air_and_answers_enemy_aircraft_with_anti_air() {
 
 #[test]
 #[cfg_attr(debug_assertions, ignore = "release only")]
-fn ai_puts_up_radar_shields_and_missiles_and_overcharges_what_comes_close() {
+fn ai_puts_up_radar_shields_and_missiles_and_discharges_what_comes_close() {
     let mut world = scenario::skirmish(11).world;
     let mut brain = AiBrain::new(Team::Blue, 11, world.starts);
     let keep_red_alive = |world: &mut SimWorld| {
@@ -342,7 +342,7 @@ fn ai_puts_up_radar_shields_and_missiles_and_overcharges_what_comes_close() {
     assert_eq!(count(&world, "tactical_missile_launcher"), 1, "not one tactical missile launcher");
 
     // A Red generator in sight of Blue's base draws a missile, and a Red tank by the commander
-    // an Overcharge.
+    // a Discharge.
     let home = scenario::skirmish_start(Team::Blue);
     let home_cell = (home.x.to_num::<i32>() / 20, home.y.to_num::<i32>() / 20);
     let generator = world.blueprints.id("power_generator");
@@ -350,7 +350,7 @@ fn ai_puts_up_radar_shields_and_missiles_and_overcharges_what_comes_close() {
         .find_map(|step| world.spawn_finished_structure(generator, Team::Red, (home_cell.0 + 25 + step % 8) as u32, (home_cell.1 + 25 + step / 8) as u32))
         .expect("room for a Red generator");
     // Kept standing, like Red's commander, so that the base's other guns do not end it first,
-    // and tough enough that no single shot, such as an armored assault bot's, ends it either.
+    // and tough enough that no single shot, such as a siege walker's, ends it either.
     {
         let entity = world.unit_entity(target).unwrap();
         let mut health = world.ecs.get::<&mut sim_engine::sim::components::Health>(entity).unwrap();
@@ -366,28 +366,28 @@ fn ai_puts_up_radar_shields_and_missiles_and_overcharges_what_comes_close() {
     let commander = world.commanders[Team::Blue.index()].unwrap();
     let at = world.unit_position(commander).unwrap().xy();
     let tank = world.spawn_mobile(world.blueprints.id("t2_heavy_tank"), Team::Red, Vec2Fp::new(at.x + fp_int(300), at.y));
-    let (mut fired_at, mut overcharged) = (false, false);
+    let (mut fired_at, mut discharged) = (false, false);
     let launcher = world.units.iter().find(|(_, entity)| {
         world.ecs.get::<&Blueprinted>(*entity).is_ok_and(|unit| unit.0 == world.blueprints.id("tactical_missile_launcher"))
     }).map(|&(id, _)| id).unwrap();
     for _ in 0..600 {
         let commands = brain.think(&world);
-        overcharged |= commands.iter().any(|command| matches!(command, SimCommand::Overcharge { target, .. } if *target == tank));
+        discharged |= commands.iter().any(|command| matches!(command, SimCommand::Discharge { target, .. } if *target == tank));
         fired_at |= commands.iter().any(|command| matches!(command, SimCommand::Attack { units, target: aimed } if units == &vec![launcher] && *aimed == target));
         world.advance_tick(&commands);
         keep_red_alive(&mut world);
         keep_standing(&mut world);
-        // Overcharge needs the energy stored, and whether a big build happens to be emptying
+        // Discharge needs the energy stored, and whether a big build happens to be emptying
         // the store just now is down to timing that has nothing to do with what is tested here.
         let economy = &mut world.economies[Team::Blue.index()];
         economy.energy = economy.energy_capacity;
     }
     assert!(fired_at, "the missile launcher never fired at the Red generator");
-    assert!(overcharged, "the commander never overcharged the Red tank");
+    assert!(discharged, "the commander never discharged the Red tank");
 }
 
 #[test]
-fn the_commander_never_overcharges_the_enemy_commander() {
+fn the_commander_never_discharges_the_enemy_commander() {
     // A commander takes only 400 from it, so the shot is better spent on anything else.
     let mut world = scenario::skirmish(5).world;
     let mut brain = AiBrain::new(Team::Blue, 5, world.starts);
@@ -403,12 +403,12 @@ fn the_commander_never_overcharges_the_enemy_commander() {
         economy.energy = economy.energy_capacity;
         let commands = brain.think(&world);
         for command in &commands {
-            if let SimCommand::Overcharge { target, .. } = command {
-                assert_ne!(*target, red, "overcharged the enemy commander at tick {tick}");
+            if let SimCommand::Discharge { target, .. } = command {
+                assert_ne!(*target, red, "discharged the enemy commander at tick {tick}");
             }
         }
         // With Red's commander gone home, a Red tank beside it is fair game, which shows the
-        // commander was free to overcharge all along.
+        // commander was free to discharge all along.
         if tick == 150 {
             let red_entity = world.unit_entity(red).unwrap();
             let start = scenario::skirmish_start(Team::Red);
@@ -416,13 +416,13 @@ fn the_commander_never_overcharges_the_enemy_commander() {
             let tank = world.blueprints.id("t2_heavy_tank");
             world.spawn_mobile(tank, Team::Red, Vec2Fp::new(at.x - fp_int(300), at.y));
         }
-        offered_something_else |= tick > 150 && commands.iter().any(|command| matches!(command, SimCommand::Overcharge { .. }));
+        offered_something_else |= tick > 150 && commands.iter().any(|command| matches!(command, SimCommand::Discharge { .. }));
         world.advance_tick(&commands);
         let health = |id| world.unit_entity(id).map(|entity| { let mut h = world.ecs.get::<&mut sim_engine::sim::components::Health>(entity).unwrap(); h.current = h.max; });
         health(red);
         health(blue);
     }
-    assert!(offered_something_else, "the commander never overcharged the tank either");
+    assert!(offered_something_else, "the commander never discharged the tank either");
 }
 
 #[test]
@@ -493,7 +493,7 @@ fn on_a_map_with_a_sea_the_ai_builds_a_navy_and_none_on_a_dry_one() {
     }
     let count = |world: &SimWorld, keys: &[&str]| keys.iter().map(|key| count_owned(world, Team::Blue, key)).sum::<usize>();
     let yards = ["naval_factory", "naval_factory_t2", "naval_factory_t3", "naval_factory_t2_support", "naval_factory_t3_support"];
-    let ships = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_shield_boat", "t3_battleship", "t3_battlecruiser"];
+    let ships = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_escort_corvette", "t3_battleship", "t3_battlecruiser"];
     assert!(count(&world, &yards) >= 1, "no naval factory on the sea's shore");
     assert!(count(&world, &ships) >= 2, "only {} ships", count(&world, &ships));
 
@@ -527,7 +527,7 @@ fn after_losing_every_generator_the_ai_pauses_its_extractors_and_rebuilds_its_po
     }
     // Finished ones: a site still being built cannot self-destruct, and makes nothing.
     let generators = |world: &SimWorld| {
-        let kinds: Vec<_> = ["power_generator", "power_generator_t2", "power_generator_t3", "hydrocarbon_plant"].iter().map(|key| world.blueprints.id(key)).collect();
+        let kinds: Vec<_> = ["power_generator", "power_generator_t2", "power_generator_t3", "geothermal_plant"].iter().map(|key| world.blueprints.id(key)).collect();
         world
             .units
             .iter()
@@ -540,7 +540,7 @@ fn after_losing_every_generator_the_ai_pauses_its_extractors_and_rebuilds_its_po
     };
     assert!(generators(&world) >= 4);
     // Raiders take out every generator at once, and the energy in store with them.
-    let wanted: Vec<_> = ["power_generator", "power_generator_t2", "power_generator_t3", "hydrocarbon_plant"].iter().map(|key| world.blueprints.id(key)).collect();
+    let wanted: Vec<_> = ["power_generator", "power_generator_t2", "power_generator_t3", "geothermal_plant"].iter().map(|key| world.blueprints.id(key)).collect();
     let doomed: Vec<_> = world
         .units
         .iter()

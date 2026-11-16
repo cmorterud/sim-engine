@@ -10,8 +10,8 @@ pub enum SimCommand {
     /// Move towards a unit, re-routing as it travels.
     Follow { units: Vec<SimId>, target: SimId },
     Stop { units: Vec<SimId> },
-    /// Fire the commander's Overcharge at one enemy, closing in first if need be.
-    Overcharge { unit: SimId, target: SimId },
+    /// Fire the commander's Discharge at one enemy, closing in first if need be.
+    Discharge { unit: SimId, target: SimId },
     /// Close on one enemy and fire only at it.
     Attack { units: Vec<SimId>, target: SimId },
     /// Fire at a spot on the ground, walking into range first, until given another order.
@@ -77,7 +77,7 @@ pub enum SimCommand {
     /// Pause or resume factories and construction sites. Anything else is left alone.
     SetPaused { units: Vec<SimId>, paused: bool },
     SetRally { factory: SimId, point: Vec2Fp },
-    /// Send aircraft to land on one of their team's air staging facilities, to refuel and be
+    /// Send aircraft to land on one of their team's airfields, to refuel and be
     /// repaired (GAME_SPECIFICATION.md §10).
     Refit { units: Vec<SimId>, staging: SimId },
 }

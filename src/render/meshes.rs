@@ -47,15 +47,15 @@ pub enum Shape {
     /// A wide, low block with a hatch on top.
     NukeSilo,
     /// A drum with a ring of launch tubes.
-    AntiNukeSilo,
+    StrategicInterceptorSilo,
     /// A mast with a tilted dish.
     Radar,
     /// A cone wrapped in rings.
     StealthGenerator,
     /// A slab with four pillars around a glowing core, under a ring.
-    Gateway,
+    RigYard,
     /// A wide, low drum with three stacks.
-    HydrocarbonPlant,
+    GeothermalPlant,
     /// A block wrapped in rings.
     Fabricator,
     /// A fighter: a slim body with swept delta wings and a tail fin, pointing along +Y.
@@ -65,7 +65,7 @@ pub enum Shape {
     /// A turret with two barrels raised to the sky, which swivels to aim.
     AntiAirGun,
     /// A low deck with four round landing pads and a control tower.
-    AirStaging,
+    Airfield,
     /// A gunship: a thick body under a rotor disc, with a tail boom, pointing along +Y.
     Gunship,
     /// A wide flying wing, pointing along +Y.
@@ -93,7 +93,7 @@ pub enum Shape {
     /// A longer submarine with a row of glowing missile hatches.
     MissileSubmarine,
     /// A hull with a tall emitter mast.
-    ShieldBoat,
+    EscortCorvette,
     /// The land factory at tier 2: a side hall with two stacks.
     FactoryT2,
     /// The land factory at tier 3: a stepped roof under a gantry, with three stacks.
@@ -131,21 +131,21 @@ pub enum Shape {
     /// A light four-wheeled car with a radar mast and a small gun.
     LandScout,
     /// A bot's upper body with a gatling arm and a grenade launcher on its shoulder.
-    GatlingBot,
+    GrenadierWalker,
     /// A shield emitter on a tracked hull: a mast with a glowing ring and an orb.
     ShieldEmitter,
     /// A broad armored bot's upper body, with a cannon in each arm and shield emitters.
-    HeavyAssaultBot,
+    HeavyWalker,
     /// A bulky bot's upper body, with one heavy cannon over its shoulder.
-    ArmoredAssaultBot,
+    SiegeWalker,
     /// A low, fast boat with torpedo tubes along its sides.
     TorpedoBoat,
     /// A gatling turret for the heavy point defense.
     HeavyPointDefense,
     /// A wall section: a block with crenellations along the top.
     Wall,
-    /// An engineering station: a pad with a tower, and a drone hovering over it.
-    EngineeringStation,
+    /// An field workshop: a pad with a tower, and a drone hovering over it.
+    FieldWorkshop,
     /// An air transport, pointing along +Y: a long body with a cargo bay under it and a fan
     /// in a ring at each side.
     Transport,
@@ -185,16 +185,16 @@ impl Shape {
         Self::MissileLauncher,
         Self::MissileDefense,
         Self::NukeSilo,
-        Self::AntiNukeSilo,
+        Self::StrategicInterceptorSilo,
         Self::Radar,
         Self::StealthGenerator,
-        Self::Gateway,
-        Self::HydrocarbonPlant,
+        Self::RigYard,
+        Self::GeothermalPlant,
         Self::Fabricator,
         Self::Aircraft,
         Self::Bomber,
         Self::AntiAirGun,
-        Self::AirStaging,
+        Self::Airfield,
         Self::Gunship,
         Self::StrategicBomber,
         Self::FlakGun,
@@ -208,7 +208,7 @@ impl Shape {
         Self::Battlecruiser,
         Self::Submarine,
         Self::MissileSubmarine,
-        Self::ShieldBoat,
+        Self::EscortCorvette,
         Self::FactoryT2,
         Self::FactoryT3,
         Self::AirFactory,
@@ -228,14 +228,14 @@ impl Shape {
         Self::AirSuperiority,
         Self::HeavyGunship,
         Self::LandScout,
-        Self::GatlingBot,
+        Self::GrenadierWalker,
         Self::ShieldEmitter,
-        Self::HeavyAssaultBot,
-        Self::ArmoredAssaultBot,
+        Self::HeavyWalker,
+        Self::SiegeWalker,
         Self::TorpedoBoat,
         Self::HeavyPointDefense,
         Self::Wall,
-        Self::EngineeringStation,
+        Self::FieldWorkshop,
         Self::Transport,
         Self::Dome,
         Self::SelectionRing,
@@ -274,7 +274,7 @@ impl Shape {
 
     /// Whether the shape is a hull that leaves a wake behind it on the water.
     pub const fn leaves_wake(self) -> bool {
-        matches!(self, Self::Frigate | Self::Destroyer | Self::Cruiser | Self::Battleship | Self::Battlecruiser | Self::Submarine | Self::MissileSubmarine | Self::ShieldBoat | Self::TorpedoBoat)
+        matches!(self, Self::Frigate | Self::Destroyer | Self::Cruiser | Self::Battleship | Self::Battlecruiser | Self::Submarine | Self::MissileSubmarine | Self::EscortCorvette | Self::TorpedoBoat)
     }
 
     /// Whether the shape is a pair of legs, which swing as the unit walks.
@@ -680,7 +680,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Glow);
             mesh.moving(motion::PULSE, [0.0, 0.38, 0.25], |mesh| mesh.frustum([0.0, 0.38], [0.18, 0.3], [0.03, 0.07], 6));
         }
-        // A narrow two-legged walker, with a gun in its right arm and its left arm raised.
+        // A narrow two-legged walker, with a gun in its weapons bay and its fabrication bay raised.
         Shape::Bot => {
             mesh.bevel([-0.22, -0.18, -0.02], [0.22, 0.18, 0.36], 0.05);
             mesh.paint(Material::Hull);
@@ -867,7 +867,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 );
             });
         }
-        Shape::GatlingBot => {
+        Shape::GrenadierWalker => {
             mesh.bevel([-0.22, -0.18, -0.02], [0.22, 0.18, 0.34], 0.05);
             mesh.paint(Material::Hull);
             mesh.bevel([0.22, -0.12, 0.08], [0.38, 0.2, 0.3], 0.04);
@@ -900,7 +900,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Hull);
             mesh.frustum([0.0, -0.02], [0.3, 0.38], [0.12, 0.05], 8);
         }
-        Shape::HeavyAssaultBot => {
+        Shape::HeavyWalker => {
             mesh.prism(&[[-0.3, -0.18], [0.3, -0.18], [0.34, 0.04], [0.22, 0.22], [-0.22, 0.22], [-0.34, 0.04]], [-0.06, 0.3], [0.8, 1.0]);
             mesh.paint(Material::Hull);
             for x in [-0.4_f32, 0.4] {
@@ -922,7 +922,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Glow);
             mesh.block([-0.08, 0.14, 0.35], [0.08, 0.155, 0.4]);
         }
-        Shape::ArmoredAssaultBot => {
+        Shape::SiegeWalker => {
             mesh.bevel([-0.3, -0.26, -0.04], [0.3, 0.2, 0.3], 0.06);
             mesh.paint(Material::Hull);
             mesh.bevel([-0.27, 0.2, -0.02], [0.27, 0.27, 0.24], 0.03);
@@ -977,7 +977,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Hull);
             mesh.fin(0.0, [-0.48, -0.36], 0.1, [-0.46, -0.4], 0.26, 0.015);
         }
-        Shape::EngineeringStation => {
+        Shape::FieldWorkshop => {
             mesh.paint(Material::Hull);
             mesh.bevel([-0.5, -0.5, -0.5], [0.5, 0.5, -0.38], 0.03);
             mesh.paint(Material::Trim);
@@ -1070,7 +1070,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Metal);
             mesh.frustum([0.3, 0.3], [0.1, 0.5], [0.12, 0.08], 6);
         }
-        Shape::AntiNukeSilo => {
+        Shape::StrategicInterceptorSilo => {
             mesh.paint(Material::Hull);
             mesh.frustum([0.0, 0.0], [-0.5, 0.15], [0.5, 0.48], 10);
             for (x, y) in [(-0.22_f32, -0.22_f32), (0.22, -0.22), (-0.22, 0.22), (0.22, 0.22)] {
@@ -1100,7 +1100,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.frustum([0.0, 0.0], [z, z + 0.06], [radius, radius], 12);
             }
         }
-        Shape::HydrocarbonPlant => {
+        Shape::GeothermalPlant => {
             mesh.frustum([0.0, 0.0], [-0.5, -0.15], [0.48, 0.44], 12);
             for (x, y) in [(-0.22_f32, -0.15_f32), (0.22, -0.15), (0.0, 0.25)] {
                 mesh.paint(Material::Metal);
@@ -1480,7 +1480,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 }
             }
         }
-        Shape::ShieldBoat => {
+        Shape::EscortCorvette => {
             mesh.hull(0.11, 0.2, 0.08);
             mesh.paint(Material::Trim);
             mesh.block([-0.08, -0.44, -0.2], [0.08, -0.22, -0.18]);
@@ -1883,7 +1883,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Glow);
             mesh.frustum([-0.42, 0.42], [0.2, 0.28], [0.075, 0.07], 6);
         }
-        Shape::AirStaging => {
+        Shape::Airfield => {
             mesh.paint(Material::Hull);
             mesh.block([-0.5, -0.5, -0.5], [0.5, 0.5, -0.3]);
             mesh.paint(Material::Trim);
@@ -1903,7 +1903,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.flash([x, 0.38, 0.44], 0.05);
             }
         }
-        Shape::Gateway => {
+        Shape::RigYard => {
             mesh.paint(Material::Hull);
             mesh.block([-0.5, -0.5, -0.5], [0.5, 0.5, -0.35]);
             mesh.paint(Material::Metal);

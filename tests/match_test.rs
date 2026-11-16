@@ -36,8 +36,8 @@ fn run_until(driver: &SimDriver, limit: u32, mut done: impl FnMut(&SimSnapshot) 
 }
 
 fn own_commander(snapshot: &SimSnapshot, db: &BlueprintDb) -> SimId {
-    let acu = db.id("acu").0;
-    snapshot.units.iter().find(|unit| unit.team == Team::Blue && unit.blueprint == acu).expect("commander is alive").id
+    let rig = db.id("command_rig").0;
+    snapshot.units.iter().find(|unit| unit.team == Team::Blue && unit.blueprint == rig).expect("commander is alive").id
 }
 
 #[test]
@@ -61,7 +61,7 @@ fn a_player_can_build_an_economy_and_army_through_commands() {
     let commander = own_commander(&first, &db);
 
     // Choose a factory, and place it next to the commander at a ground point.
-    let (factory_blueprint, extractor, bot) = (db.id("land_factory_t1"), db.id("mass_extractor"), db.id("t1_light_bot"));
+    let (factory_blueprint, extractor, bot) = (db.id("land_factory_t1"), db.id("mass_extractor"), db.id("t1_light_walker"));
     let start = skirmish_start(Team::Blue);
     let ground = [start.x.to_num::<f64>() + 150.0, start.y.to_num::<f64>()];
     let (cell_x, cell_y) = placement_cell(ground, db.get(factory_blueprint).footprint);
@@ -123,7 +123,7 @@ fn the_players_view_never_shows_enemies_outside_of_sight() {
     let driver = start_session();
     let snapshot = run_until(&driver, 2_000, |snapshot| snapshot.tick >= 2_000);
     // At 200 s, Red's base is far outside of Blue's sight, and no fighting has reached Blue yet.
-    let enemy_acu = db.id("acu").0;
-    assert!(!snapshot.units.iter().any(|unit| unit.team == Team::Red && unit.blueprint == enemy_acu), "Red's commander should be hidden");
+    let enemy_rig = db.id("command_rig").0;
+    assert!(!snapshot.units.iter().any(|unit| unit.team == Team::Red && unit.blueprint == enemy_rig), "Red's commander should be hidden");
     driver.finish();
 }

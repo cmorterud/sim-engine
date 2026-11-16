@@ -279,9 +279,9 @@ fn aircraft_burn_fuel_in_the_air_and_fly_low_and_slow_without_it() {
 }
 
 #[test]
-fn an_air_staging_facility_refuels_and_repairs_aircraft_for_energy() {
+fn an_airfield_facility_refuels_and_repairs_aircraft_for_energy() {
     let mut world = world();
-    let staging = world.spawn_finished_structure(world.blueprints.id("air_staging"), Team::Blue, 100, 100).unwrap();
+    let staging = world.spawn_finished_structure(world.blueprints.id("airfield"), Team::Blue, 100, 100).unwrap();
     let interceptor = spawn(&mut world, "t1_interceptor", Team::Blue, point(1_000, 1_000));
     set_fuel(&mut world, interceptor, 100);
     world.ecs.get::<&mut sim_engine::sim::components::Health>(world.unit_entity(interceptor).unwrap()).unwrap().current = fp_int(95);
@@ -315,7 +315,7 @@ fn an_air_staging_facility_refuels_and_repairs_aircraft_for_energy() {
 #[test]
 fn a_facility_holds_four_aircraft_at_once_and_the_rest_wait_overhead() {
     let mut world = world();
-    let staging = world.spawn_finished_structure(world.blueprints.id("air_staging"), Team::Blue, 100, 100).unwrap();
+    let staging = world.spawn_finished_structure(world.blueprints.id("airfield"), Team::Blue, 100, 100).unwrap();
     // All five arrive at once.
     let scouts: Vec<SimId> = (0..5).map(|index| spawn(&mut world, "t1_air_scout", Team::Blue, point(2_020 + index * 5, 2_030))).collect();
     for &scout in &scouts {
@@ -340,7 +340,7 @@ fn a_facility_holds_four_aircraft_at_once_and_the_rest_wait_overhead() {
 #[test]
 fn patrolling_aircraft_stay_up_refuel_when_low_and_go_back_to_their_patrol() {
     let mut world = world();
-    world.spawn_finished_structure(world.blueprints.id("air_staging"), Team::Blue, 100, 100).unwrap();
+    world.spawn_finished_structure(world.blueprints.id("airfield"), Team::Blue, 100, 100).unwrap();
     let interceptor = spawn(&mut world, "t1_interceptor", Team::Blue, point(1_000, 1_000));
     world.advance_tick(&[SimCommand::Patrol { units: vec![interceptor], points: vec![point(1_000, 1_000), point(4_000, 1_000)], queued: false }]);
     for _ in 0..300 {
@@ -473,10 +473,10 @@ fn a_fighter_bomber_carpets_the_ground_and_fights_aircraft() {
     let mut world = world();
     let key = world.blueprints.id("power_generator");
     let generators: Vec<SimId> = [(150, 125), (152, 125)].iter().map(|&(x, y)| world.spawn_finished_structure(key, Team::Red, x, y).unwrap()).collect();
-    let janus = spawn(&mut world, "t2_fighter_bomber", Team::Blue, point(1_000, 1_000));
+    let fighter_bomber = spawn(&mut world, "t2_fighter_bomber", Team::Blue, point(1_000, 1_000));
     let interceptor = spawn(&mut world, "t1_interceptor", Team::Red, point(1_200, 1_000));
-    world.advance_tick(&[SimCommand::Follow { units: vec![interceptor], target: janus }]);
-    world.advance_tick(&[SimCommand::Attack { units: vec![janus], target: generators[0] }]);
+    world.advance_tick(&[SimCommand::Follow { units: vec![interceptor], target: fighter_bomber }]);
+    world.advance_tick(&[SimCommand::Attack { units: vec![fighter_bomber], target: generators[0] }]);
     run(&mut world, 700);
     assert!(world.unit_health(interceptor).is_none(), "150 a second against 295");
     assert!(generators.iter().all(|&id| world.unit_health(id).is_none()), "1,600 within 60 takes both");
@@ -521,8 +521,8 @@ fn a_fighter_bomber_bombs_under_fog_of_war_on_attack_and_attack_move() {
         let config = SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: true, ..SimConfig::default() };
         let mut world = SimWorld::new(config, 1);
         let tanks: Vec<SimId> = (0..3).map(|index| spawn(&mut world, "t2_heavy_tank", Team::Red, point(3_000 + index * 40, 3_000))).collect();
-        let janus = spawn(&mut world, "t2_fighter_bomber", Team::Blue, point(1_000, 1_000));
-        let order = if attack_move { SimCommand::AttackMove { units: vec![janus], goal: point(3_500, 3_500) } } else { SimCommand::Attack { units: vec![janus], target: tanks[0] } };
+        let fighter_bomber = spawn(&mut world, "t2_fighter_bomber", Team::Blue, point(1_000, 1_000));
+        let order = if attack_move { SimCommand::AttackMove { units: vec![fighter_bomber], goal: point(3_500, 3_500) } } else { SimCommand::Attack { units: vec![fighter_bomber], target: tanks[0] } };
         world.advance_tick(&[order]);
         run(&mut world, 900);
         let alive = tanks.iter().filter(|&&tank| world.unit_health(tank).is_some()).count();

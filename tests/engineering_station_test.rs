@@ -49,7 +49,7 @@ fn a_station_speeds_up_a_factory_in_its_reach_and_not_one_beyond() {
 
     let mut helped = test_world();
     let factory = helped.spawn_finished_structure(id(&helped, "land_factory_t1"), Team::Blue, 50, 50).unwrap();
-    helped.spawn_finished_structure(id(&helped, "engineering_station"), Team::Blue, 55, 50).unwrap();
+    helped.spawn_finished_structure(id(&helped, "field_workshop"), Team::Blue, 55, 50).unwrap();
     let blueprint = tank(&helped);
     let with_station = ticks_to_build(&mut helped, factory, blueprint);
     // 20 build power and 25 more: a little under half the time.
@@ -57,7 +57,7 @@ fn a_station_speeds_up_a_factory_in_its_reach_and_not_one_beyond() {
 
     let mut far = test_world();
     let factory = far.spawn_finished_structure(id(&far, "land_factory_t1"), Team::Blue, 50, 50).unwrap();
-    far.spawn_finished_structure(id(&far, "engineering_station"), Team::Blue, 100, 50).unwrap();
+    far.spawn_finished_structure(id(&far, "field_workshop"), Team::Blue, 100, 50).unwrap();
     let blueprint = tank(&far);
     assert_eq!(ticks_to_build(&mut far, factory, blueprint), by_itself, "1,000 units off is out of reach");
 }
@@ -65,7 +65,7 @@ fn a_station_speeds_up_a_factory_in_its_reach_and_not_one_beyond() {
 #[test]
 fn a_station_repairs_a_damaged_friend_in_reach() {
     let mut world = test_world();
-    world.spawn_finished_structure(id(&world, "engineering_station"), Team::Blue, 50, 50).unwrap();
+    world.spawn_finished_structure(id(&world, "field_workshop"), Team::Blue, 50, 50).unwrap();
     let defense = world.spawn_finished_structure(id(&world, "t1_point_defense"), Team::Blue, 54, 50).unwrap();
     let entity = world.unit_entity(defense).unwrap();
     let max = world.ecs.get::<&Health>(entity).unwrap().max;
@@ -81,7 +81,7 @@ fn a_station_repairs_a_damaged_friend_in_reach() {
 fn a_station_leaves_a_factory_with_nothing_to_make_for_other_work() {
     let mut world = test_world();
     let factory = world.spawn_finished_structure(id(&world, "land_factory_t1"), Team::Blue, 50, 50).unwrap();
-    world.spawn_finished_structure(id(&world, "engineering_station"), Team::Blue, 55, 50).unwrap();
+    world.spawn_finished_structure(id(&world, "field_workshop"), Team::Blue, 55, 50).unwrap();
     let scout = id(&world, "t1_land_scout");
     ticks_to_build(&mut world, factory, scout);
     assert!(world.ecs.get::<&Factory>(world.unit_entity(factory).unwrap()).unwrap().queue.is_empty());
@@ -98,7 +98,7 @@ fn a_station_leaves_a_factory_with_nothing_to_make_for_other_work() {
 #[test]
 fn the_t3_station_is_an_upgrade_with_more_build_power() {
     let db_world = test_world();
-    let (t2, t3) = (db_world.blueprints.get(id(&db_world, "engineering_station")), db_world.blueprints.get(id(&db_world, "engineering_station_t3")));
+    let (t2, t3) = (db_world.blueprints.get(id(&db_world, "field_workshop")), db_world.blueprints.get(id(&db_world, "field_workshop_t3")));
     assert_eq!(t2.upgrades_to, Some(t3.id));
     // FAF's build rates: 20 for the T2 station, 30 for the T3.
     assert_eq!((t2.build_power.to_num::<i64>(), t3.build_power.to_num::<i64>()), (20, 30));

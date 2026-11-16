@@ -30,8 +30,8 @@ const BLUE: [f32; 3] = [0.20, 0.50, 1.00];
 const RED: [f32; 3] = [1.00, 0.27, 0.22];
 const SELECTED: [f32; 3] = [0.25, 1.00, 0.35];
 const SHELL: [f32; 3] = [1.00, 0.85, 0.35];
-const OVERCHARGE_SHELL: [f32; 3] = [0.75, 0.95, 1.00];
-const OVERCHARGE_SIZE: f32 = 2.4;
+const DISCHARGE_SHELL: [f32; 3] = [0.75, 0.95, 1.00];
+const DISCHARGE_SIZE: f32 = 2.4;
 const MISSILE: [f32; 3] = [0.92, 0.92, 0.88];
 const NUKE: [f32; 3] = [1.00, 0.95, 0.30];
 const OBSTACLE: [f32; 3] = [0.42, 0.40, 0.38];
@@ -269,36 +269,36 @@ pub struct UnitLook {
 pub fn unit_look(key: &str) -> UnitLook {
     let look = |shape, tint, height_share| UnitLook { shape, tint, height_share, base: None, size: 0.0 };
     match key {
-        "acu" => UnitLook { base: Some(Shape::CommanderLegs), ..look(Shape::Commander, Some([1.00, 1.00, 1.00]), 1.0) },
-        "support_commander" => UnitLook { base: Some(Shape::CommanderLegs), ..look(Shape::Commander, Some([0.70, 0.75, 0.85]), 1.0) },
-        "quantum_gateway" => look(Shape::Gateway, Some([0.55, 0.60, 1.00]), 0.6),
-        "hydrocarbon_plant" => look(Shape::HydrocarbonPlant, Some([0.85, 0.60, 0.25]), 0.7),
+        "command_rig" => UnitLook { base: Some(Shape::CommanderLegs), ..look(Shape::Commander, Some([1.00, 1.00, 1.00]), 1.0) },
+        "field_rig" => UnitLook { base: Some(Shape::CommanderLegs), ..look(Shape::Commander, Some([0.70, 0.75, 0.85]), 1.0) },
+        "rig_yard" => look(Shape::RigYard, Some([0.55, 0.60, 1.00]), 0.6),
+        "geothermal_plant" => look(Shape::GeothermalPlant, Some([0.85, 0.60, 0.25]), 0.7),
         "mass_fabricator" => look(Shape::Fabricator, Some([0.40, 0.95, 0.85]), 1.0),
         "mass_fabricator_t3" => look(Shape::Fabricator, Some([0.70, 0.45, 1.00]), 0.8),
         "t2_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([0.95, 0.65, 0.25]), 1.0) },
         "t3_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([0.95, 0.50, 0.20]), 1.0) },
         "land_factory_t3" => look(Shape::FactoryT3, Some([0.10, 0.10, 0.20]), 0.85),
         "t1_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([0.95, 0.80, 0.30]), 1.0) },
-        "t1_light_bot" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::Bot, None, 1.0) },
+        "t1_light_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::Bot, None, 1.0) },
         "t1_land_scout" => look(Shape::LandScout, Some([0.75, 0.95, 1.00]), 1.0),
         "t1_medium_tank" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::Tank, Some([0.80, 0.85, 0.70]), 1.0) },
-        "t2_gatling_bot" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::GatlingBot, None, 1.0) },
+        "t2_grenadier_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::GrenadierWalker, None, 1.0) },
         "t2_mobile_shield" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::ShieldEmitter, Some([0.55, 0.85, 1.00]), 1.0) },
-        "t2_field_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([0.95, 0.40, 0.25]), 1.0) },
-        "t3_heavy_assault_bot" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::HeavyAssaultBot, None, 1.0) },
-        "t3_armored_assault_bot" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::ArmoredAssaultBot, Some([0.70, 0.70, 0.75]), 1.0) },
+        "t2_combat_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([0.95, 0.40, 0.25]), 1.0) },
+        "t3_heavy_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::HeavyWalker, None, 1.0) },
+        "t3_siege_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::SiegeWalker, Some([0.70, 0.70, 0.75]), 1.0) },
         "t2_torpedo_boat" => look(Shape::TorpedoBoat, Some([0.40, 0.90, 0.80]), 0.5),
         "t3_heavy_point_defense" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::HeavyPointDefense, Some([0.95, 0.35, 0.30]), 1.0) },
         "t3_heavy_shield" => look(Shape::ShieldGenerator, Some([0.45, 0.70, 1.00]), 0.9),
         "wall" => look(Shape::Wall, Some([0.70, 0.70, 0.70]), 0.9),
-        "engineering_station" => look(Shape::EngineeringStation, Some([0.95, 0.75, 0.30]), 0.8),
+        "field_workshop" => look(Shape::FieldWorkshop, Some([0.95, 0.75, 0.30]), 0.8),
         "t1_light_transport" => look(Shape::Transport, Some([0.85, 0.80, 0.60]), 1.0),
         "t2_transport" => look(Shape::Transport, Some([0.70, 0.75, 0.80]), 1.0),
         "t3_heavy_transport" => look(Shape::Transport, Some([0.55, 0.60, 0.75]), 1.0),
-        "engineering_station_t3" => look(Shape::EngineeringStation, Some([0.95, 0.55, 0.20]), 0.95),
+        "field_workshop_t3" => look(Shape::FieldWorkshop, Some([0.95, 0.55, 0.20]), 0.95),
         "t1_light_artillery" => UnitLook { base: Some(Shape::ArtilleryHull), ..look(Shape::Artillery, None, 1.0) },
         "t2_heavy_tank" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::Tank, None, 1.0) },
-        "t2_amphibious_tank" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::Tank, Some([0.45, 0.65, 0.75]), 1.0) },
+        "t2_assault_hovercraft" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::Tank, Some([0.45, 0.65, 0.75]), 1.0) },
         "land_factory_t1" => look(Shape::Factory, Some([0.35, 0.35, 0.45]), 0.55),
         "land_factory_t2" => look(Shape::FactoryT2, Some([0.20, 0.20, 0.30]), 0.7),
         "mass_extractor" => look(Shape::Extractor, Some([0.10, 0.95, 0.75]), 0.8),
@@ -311,19 +311,19 @@ pub fn unit_look(key: &str) -> UnitLook {
         "t3_artillery" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::ArtilleryGun, Some([0.50, 0.30, 0.20]), 0.6) },
         "t3_mobile_artillery" => UnitLook { base: Some(Shape::ArtilleryHull), ..look(Shape::Artillery, Some([0.55, 0.45, 0.35]), 1.0) },
         "radar" => look(Shape::Radar, Some([0.40, 0.90, 0.55]), 1.3),
-        "omni_sensor" => look(Shape::Radar, Some([0.75, 0.55, 1.00]), 1.6),
+        "deep_scan_array" => look(Shape::Radar, Some([0.75, 0.55, 1.00]), 1.6),
         "stealth_field_generator" => look(Shape::StealthGenerator, Some([0.30, 0.30, 0.35]), 1.2),
         "shield_generator" => look(Shape::ShieldGenerator, Some([0.55, 0.85, 1.00]), 1.0),
         "tactical_missile_launcher" => look(Shape::MissileLauncher, Some([0.85, 0.85, 0.80]), 0.9),
         "tactical_missile_defense" => look(Shape::MissileDefense, Some([1.00, 0.55, 0.45]), 1.2),
         "strategic_missile_launcher" => look(Shape::NukeSilo, Some([1.00, 0.90, 0.30]), 0.5),
-        "strategic_missile_defense" => look(Shape::AntiNukeSilo, Some([0.95, 0.95, 0.95]), 0.7),
+        "strategic_missile_defense" => look(Shape::StrategicInterceptorSilo, Some([0.95, 0.95, 0.95]), 0.7),
         "air_factory" => look(Shape::AirFactory, Some([0.45, 0.60, 0.80]), 0.5),
-        "air_staging" => look(Shape::AirStaging, Some([0.70, 0.80, 0.90]), 0.5),
+        "airfield" => look(Shape::Airfield, Some([0.70, 0.80, 0.90]), 0.5),
         "naval_factory" => look(Shape::NavalFactory, Some([0.35, 0.45, 0.55]), 0.5),
         "t1_frigate" => look(Shape::Frigate, None, 0.5),
         "t1_attack_sub" => look(Shape::Submarine, Some([0.10, 0.20, 0.30]), 0.3),
-        "t2_shield_boat" => look(Shape::ShieldBoat, Some([0.55, 0.85, 1.00]), 0.5),
+        "t2_escort_corvette" => look(Shape::EscortCorvette, Some([0.55, 0.85, 1.00]), 0.5),
         "t3_missile_sub" => look(Shape::MissileSubmarine, Some([0.05, 0.10, 0.20]), 0.35),
         "t2_mobile_missile_launcher" => UnitLook { base: Some(Shape::ArtilleryHull), ..look(Shape::MissileLauncher, Some([0.80, 0.80, 0.70]), 1.0) },
         "t2_torpedo_bomber" => look(Shape::Bomber, Some([0.40, 0.55, 0.70]), 0.55),
@@ -593,7 +593,7 @@ pub fn build_projectile_instances(previous: &[ProjectileView], current: &[Projec
         };
         match projectile.kind {
             ProjectileKind::Shell => out.push(Shape::Shell, instance(center, [PROJECTILE_SIZE; 3], NORTH, SHELL, PROJECTILE_ICON_PX, eye)),
-            ProjectileKind::Overcharge => out.push(Shape::Shell, instance(center, [OVERCHARGE_SIZE; 3], NORTH, OVERCHARGE_SHELL, UNIT_ICON_PX, eye)),
+            ProjectileKind::Discharge => out.push(Shape::Shell, instance(center, [DISCHARGE_SIZE; 3], NORTH, DISCHARGE_SHELL, UNIT_ICON_PX, eye)),
             ProjectileKind::TacticalMissile => out.push(Shape::Missile, instance(center, [3.0, 9.0, 3.0], heading, MISSILE, UNIT_ICON_PX, eye)),
             ProjectileKind::StrategicMissile => out.push(Shape::Missile, instance(center, [7.0, 20.0, 7.0], heading, NUKE, UNIT_ICON_PX * 1.6, eye)),
         }
@@ -647,7 +647,7 @@ pub fn deposit_instance(center: [f64; 3], width: f64, eye: [f64; 3]) -> UnitInst
     instance(center, [width as f32, width as f32, 1.0], NORTH, DEPOSIT, UNIT_ICON_PX, eye)
 }
 
-/// A hydrocarbon vent: a dark, wide patch on the ground.
+/// A geothermal vent: a dark, wide patch on the ground.
 pub fn vent_instance(center: [f64; 3], width: f64, eye: [f64; 3]) -> UnitInstanceRaw {
     instance(center, [width as f32, width as f32, 1.0], NORTH, VENT, UNIT_ICON_PX, eye)
 }
@@ -750,7 +750,7 @@ mod tests {
         for unit in drawn() {
             assert_ne!(unit_look(&unit.key).shape, Shape::Cube, "{} has no shape of its own", unit.key);
         }
-        // Higher tiers of the factory and the engineer, the radar's omni upgrade, and the support
+        // Higher tiers of the factory and the engineer, the radar's deep scan upgrade, and the support
         // commander share the shape they come from, the air factory is a factory, the scout a small
         // fighter, and the anti-air turret has the mobile anti-air's guns. Everything else is unique.
         let shared = [
@@ -758,8 +758,8 @@ mod tests {
             "land_factory_t3",
             "t2_engineer",
             "t3_engineer",
-            "omni_sensor",
-            "support_commander",
+            "deep_scan_array",
+            "field_rig",
             "mass_extractor_t2",
             "mass_extractor_t3",
             "mass_fabricator_t3",
@@ -782,8 +782,8 @@ mod tests {
             "t2_fighter_bomber",
             "t2_destroyer",
             "t1_attack_sub",
-            "t2_amphibious_tank",
-            "t2_shield_boat",
+            "t2_assault_hovercraft",
+            "t2_escort_corvette",
             "t3_missile_sub",
             "t2_mobile_missile_launcher",
             "t2_torpedo_bomber",
@@ -803,9 +803,9 @@ mod tests {
             "t3_air_superiority",
             "t2_flak",
             "t1_medium_tank",
-            "t2_field_engineer",
+            "t2_combat_engineer",
             "t3_heavy_shield",
-            "engineering_station_t3",
+            "field_workshop_t3",
             "t2_transport",
             "t3_heavy_transport",
         ];
@@ -867,7 +867,7 @@ mod tests {
         let mut motion = Motion::new();
         let phase = |motion: &mut Motion, x: i32| {
             let mut bot = unit(1, x);
-            bot.blueprint = db.id("t1_light_bot").0;
+            bot.blueprint = db.id("t1_light_walker").0;
             let mut out = InstanceBatches::default();
             build_unit_instances(&[bot], &[bot], 1.0, [0.0; 3], &[], &looks, &[], motion, &mut out);
             out.shape(Shape::BotLegs)[0].hull[3]
@@ -933,7 +933,7 @@ mod tests {
         factory.blueprint = db.id("land_factory_t1").0;
         factory.is_structure = true;
         factory.radius = 30 << 12;
-        let bot = db.id("t1_light_bot").0;
+        let bot = db.id("t1_light_walker").0;
         let draw = |factory: UnitView| {
             let mut out = InstanceBatches::default();
             build_unit_instances(&[], &[factory], 0.0, [0.0; 3], &[], &looks, &[], &mut Motion::new(), &mut out);
@@ -1037,30 +1037,30 @@ mod tests {
     fn a_working_builder_turns_to_face_its_work_and_keeps_facing_it() {
         let db = BlueprintDb::standard();
         let looks = unit_looks(&db);
-        let mut acu = unit(1, 0);
-        acu.blueprint = db.id("acu").0;
+        let mut rig = unit(1, 0);
+        rig.blueprint = db.id("command_rig").0;
         // Directly north-west of the unit, whichever way it was facing.
         let work = [WorkLinkView { builder: SimId(1), target: [-40_960, 40_960, 0], reclaim: false }];
         let mut motion = Motion::new();
         let mut draw = |before: UnitView, links: &[WorkLinkView]| {
             let mut out = InstanceBatches::default();
-            build_unit_instances(&[before], &[acu], 1.0, [0.0; 3], &[], &looks, links, &mut motion, &mut out);
+            build_unit_instances(&[before], &[rig], 1.0, [0.0; 3], &[], &looks, links, &mut motion, &mut out);
             facing(&out.shape(Shape::Commander)[0])
         };
-        let start = draw(acu, &[]);
+        let start = draw(rig, &[]);
         assert!(start[0] > 0.0, "Blue starts out facing the middle of the map: {start:?}");
         let mut now = start;
         for _ in 0..60 {
-            now = draw(acu, &work);
+            now = draw(rig, &work);
         }
         assert!((now[0] + FRAC_1_SQRT_2).abs() < 1e-2 && (now[1] - FRAC_1_SQRT_2).abs() < 1e-2, "should face its work: {now:?}");
 
         // Being nudged while working must not turn it away.
-        let mut nudged = acu;
+        let mut nudged = rig;
         nudged.x = -4096 * 4;
         let settled = draw(nudged, &work);
         assert!((settled[0] + FRAC_1_SQRT_2).abs() < 1e-2);
-        assert_eq!(draw(acu, &[]), settled, "it keeps facing the same way when the work is done");
+        assert_eq!(draw(rig, &[]), settled, "it keeps facing the same way when the work is done");
     }
 
     /// Blue starts out facing north-east, and its first factory can be exactly behind it.
@@ -1093,16 +1093,16 @@ mod tests {
     fn a_commanders_legs_face_the_way_it_walks_while_its_body_faces_its_work() {
         let db = BlueprintDb::standard();
         let looks = unit_looks(&db);
-        let mut acu = unit(1, 0);
-        acu.blueprint = db.id("acu").0;
+        let mut rig = unit(1, 0);
+        rig.blueprint = db.id("command_rig").0;
         // Walking east, and building something to the north.
-        acu.facing = [4096, 0];
+        rig.facing = [4096, 0];
         let work = [WorkLinkView { builder: SimId(1), target: [0, 40_960, 0], reclaim: false }];
         let mut motion = Motion::new();
         let mut out = InstanceBatches::default();
         for _ in 0..60 {
             out.clear();
-            build_unit_instances(&[acu], &[acu], 1.0, [0.0; 3], &[], &looks, &work, &mut motion, &mut out);
+            build_unit_instances(&[rig], &[rig], 1.0, [0.0; 3], &[], &looks, &work, &mut motion, &mut out);
         }
         let legs = facing(&out.shape(Shape::CommanderLegs)[0]);
         let body = facing(&out.shape(Shape::Commander)[0]);
@@ -1112,7 +1112,7 @@ mod tests {
         // With the work done, the body settles back over its legs.
         for _ in 0..60 {
             out.clear();
-            build_unit_instances(&[acu], &[acu], 1.0, [0.0; 3], &[], &looks, &[], &mut motion, &mut out);
+            build_unit_instances(&[rig], &[rig], 1.0, [0.0; 3], &[], &looks, &[], &mut motion, &mut out);
         }
         let body = facing(&out.shape(Shape::Commander)[0]);
         assert!((body[0] - 1.0).abs() < 1e-2, "the body should face the way the legs do: {body:?}");

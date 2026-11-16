@@ -5,7 +5,7 @@ use sim_engine::math::rect::RectFp;
 use sim_engine::sim::blueprints::Res;
 use sim_engine::sim::commands::SimCommand;
 use sim_engine::sim::combat::firing_solution;
-use sim_engine::sim::components::{Combat, Health, OverchargeOrder, Position, Projectile, SimId, Team, Turning, Turret, Veterancy};
+use sim_engine::sim::components::{Combat, Health, DischargeOrder, Position, Projectile, SimId, Team, Turning, Turret, Veterancy};
 use sim_engine::sim::config::{SimConfig, TerrainStyle};
 use sim_engine::sim::scenario::{self, standard_unit};
 use sim_engine::sim::world::SimWorld;
@@ -227,7 +227,7 @@ fn battle_on_a_maximum_size_map_runs_to_casualties() {
 fn tank_with_enemy_behind() -> (SimWorld, SimId, SimId) {
     let config = SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: false, ..SimConfig::default() };
     let mut world = SimWorld::new(config, 1);
-    let (tank, bot) = (world.blueprints.id("t2_heavy_tank"), world.blueprints.id("t1_light_bot"));
+    let (tank, bot) = (world.blueprints.id("t2_heavy_tank"), world.blueprints.id("t1_light_walker"));
     let shooter = world.spawn_mobile(tank, Team::Blue, point(1_000, 1_000));
     let east = Vec2Fp::new(Fp::ONE, Fp::ZERO);
     let entity = world.unit_entity(shooter).unwrap();
@@ -288,9 +288,9 @@ fn run_ticks(world: &mut SimWorld, ticks: u32) {
 fn commander_facing(enemy: &str, energy: i64) -> (SimWorld, SimId, SimId) {
     let config = SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: false, ..SimConfig::default() };
     let mut world = SimWorld::new(config, 1);
-    let (acu, enemy_blueprint) = (world.blueprints.id("acu"), world.blueprints.id(enemy));
-    let commander = world.spawn_mobile(acu, Team::Blue, point(1_000, 1_000));
-    // Its normal gun is out of the picture, so that only Overcharge does damage.
+    let (rig, enemy_blueprint) = (world.blueprints.id("command_rig"), world.blueprints.id(enemy));
+    let commander = world.spawn_mobile(rig, Team::Blue, point(1_000, 1_000));
+    // Its normal gun is out of the picture, so that only Discharge does damage.
     world.ecs.get::<&mut Combat>(world.unit_entity(commander).unwrap()).unwrap().projectile_damage = Fp::ZERO;
     let target = if world.blueprints.get(enemy_blueprint).is_structure() {
         world.spawn_finished_structure(enemy_blueprint, Team::Red, 60, 50).unwrap()
@@ -305,11 +305,11 @@ fn commander_facing(enemy: &str, energy: i64) -> (SimWorld, SimId, SimId) {
     (world, commander, target)
 }
 
-/// Fires one Overcharge at the target, and returns the most energy that left the store in one
+/// Fires one Discharge at the target, and returns the most energy that left the store in one
 /// tick, which is the tick it landed, and the damage the target took.
-fn overcharge_once(world: &mut SimWorld, commander: SimId, target: SimId) -> (f64, Fp) {
+fn discharge_once(world: &mut SimWorld, commander: SimId, target: SimId) -> (f64, Fp) {
     let full = world.ecs.get::<&Health>(world.unit_entity(target).unwrap()).unwrap().current;
-    world.advance_tick(&[SimCommand::Overcharge { unit: commander, target }]);
+    world.advance_tick(&[SimCommand::Discharge { unit: commander, target }]);
     let mut biggest_drop = 0.0_f64;
     for _ in 0..120 {
         let before = world.economies[0].energy.to_num::<f64>();
@@ -324,48 +324,48 @@ fn overcharge_once(world: &mut SimWorld, commander: SimId, target: SimId) -> (f6
 }
 
 #[test]
-fn overcharge_spends_only_what_destroys_its_target_and_at_least_its_least() {
+fn discharge_spends_only_what_destroys_its_target_and_at_least_its_least() {
     // A heavy tank has 1,500 health, so a shot spends 1,500 damage, or 9,000 energy.
     let (mut world, commander, target) = commander_facing("t2_heavy_tank", 100_000);
-    let (drop, _) = overcharge_once(&mut world, commander, target);
+    let (drop, _) = discharge_once(&mut world, commander, target);
     assert!(world.unit_entity(target).is_none(), "one shot should destroy a heavy tank");
     assert!((8_900.0..=9_000.0).contains(&drop), "it spends what destroys it, 9,000 energy, not {drop}");
     // A medium tank has 300 health, under the least a shot does, 1,250, which costs 7,500.
     let (mut world, commander, target) = commander_facing("t1_medium_tank", 100_000);
-    let (drop, _) = overcharge_once(&mut world, commander, target);
+    let (drop, _) = discharge_once(&mut world, commander, target);
     assert!(world.unit_entity(target).is_none());
     assert!((7_400.0..=7_500.0).contains(&drop), "the least shot costs 7,500 energy, not {drop}");
-    assert!(world.ecs.get::<&OverchargeOrder>(world.unit_entity(commander).unwrap()).is_err(), "the order is done");
+    assert!(world.ecs.get::<&DischargeOrder>(world.unit_entity(commander).unwrap()).is_err(), "the order is done");
 }
 
 #[test]
-fn overcharge_does_what_the_store_can_pay_for_against_something_tough() {
+fn discharge_does_what_the_store_can_pay_for_against_something_tough() {
     // 7,200 health: with 9,000 in store, 90% of it pays for 1,350 damage, all of which it spends.
-    let (mut world, commander, target) = commander_facing("t3_armored_assault_bot", 9_000);
-    let (drop, dealt) = overcharge_once(&mut world, commander, target);
+    let (mut world, commander, target) = commander_facing("t3_siege_walker", 9_000);
+    let (drop, dealt) = discharge_once(&mut world, commander, target);
     assert!((dealt.to_num::<f64>() - 1_350.0).abs() < 2.0, "it does 1,350, not {dealt}");
     assert!((drop - 8_100.0).abs() < 20.0, "and spends 8,100, not {drop}");
     // With plenty in store, it spends what destroys it: 7,200 damage, for 43,200.
-    let (mut world, commander, target) = commander_facing("t3_armored_assault_bot", 100_000);
-    let (drop, _) = overcharge_once(&mut world, commander, target);
+    let (mut world, commander, target) = commander_facing("t3_siege_walker", 100_000);
+    let (drop, _) = discharge_once(&mut world, commander, target);
     assert!(world.unit_entity(target).is_none(), "destroyed");
     assert!((drop - 43_200.0).abs() < 50.0, "for 43,200 energy, not {drop}");
 }
 
 #[test]
-fn overcharge_does_little_to_a_commander() {
-    let (mut world, commander, target) = commander_facing("acu", 100_000);
-    let (_, dealt) = overcharge_once(&mut world, commander, target);
+fn discharge_does_little_to_a_commander() {
+    let (mut world, commander, target) = commander_facing("command_rig", 100_000);
+    let (_, dealt) = discharge_once(&mut world, commander, target);
     assert_eq!(dealt, fp_int(400), "a commander takes 400");
 }
 
 #[test]
-fn overcharge_waits_for_the_energy_and_then_fires() {
+fn discharge_waits_for_the_energy_and_then_fires() {
     let (mut world, commander, target) = commander_facing("t2_heavy_tank", 1_000);
-    world.advance_tick(&[SimCommand::Overcharge { unit: commander, target }]);
+    world.advance_tick(&[SimCommand::Discharge { unit: commander, target }]);
     run_ticks(&mut world, 60);
     assert!(world.unit_entity(target).is_some(), "it cannot fire without the energy");
-    assert!(world.ecs.get::<&OverchargeOrder>(world.unit_entity(commander).unwrap()).is_ok(), "it keeps waiting");
+    assert!(world.ecs.get::<&DischargeOrder>(world.unit_entity(commander).unwrap()).is_ok(), "it keeps waiting");
     world.economies[0].energy = Res::from_num(4_000);
     run_ticks(&mut world, 60);
     assert!(world.unit_entity(target).is_some(), "it needs 7,500 in store, more than a commander alone holds");
@@ -376,10 +376,10 @@ fn overcharge_waits_for_the_energy_and_then_fires() {
 }
 
 #[test]
-fn overcharge_does_little_to_a_structure() {
+fn discharge_does_little_to_a_structure() {
     let (mut world, commander, target) = commander_facing("t1_point_defense", 9_000);
     let full = world.ecs.get::<&Health>(world.unit_entity(target).unwrap()).unwrap().current;
-    world.advance_tick(&[SimCommand::Overcharge { unit: commander, target }]);
+    world.advance_tick(&[SimCommand::Discharge { unit: commander, target }]);
     let mut lost = Fp::ZERO;
     for _ in 0..120 {
         world.advance_tick(&[]);
@@ -392,29 +392,29 @@ fn overcharge_does_little_to_a_structure() {
 }
 
 #[test]
-fn overcharge_is_refused_at_a_friend_and_ends_when_the_target_dies() {
+fn discharge_is_refused_at_a_friend_and_ends_when_the_target_dies() {
     let (mut world, commander, target) = commander_facing("t2_heavy_tank", 9_000);
-    let bot = world.blueprints.id("t1_light_bot");
+    let bot = world.blueprints.id("t1_light_walker");
     let friend = world.spawn_mobile(bot, Team::Blue, point(1_100, 1_000));
-    world.advance_tick(&[SimCommand::Overcharge { unit: commander, target: friend }]);
-    assert!(world.ecs.get::<&OverchargeOrder>(world.unit_entity(commander).unwrap()).is_err(), "a friend is not a target");
+    world.advance_tick(&[SimCommand::Discharge { unit: commander, target: friend }]);
+    assert!(world.ecs.get::<&DischargeOrder>(world.unit_entity(commander).unwrap()).is_err(), "a friend is not a target");
 
     world.economies[0].energy = Res::ZERO;
-    world.advance_tick(&[SimCommand::Overcharge { unit: commander, target }]);
+    world.advance_tick(&[SimCommand::Discharge { unit: commander, target }]);
     world.ecs.get::<&mut Health>(world.unit_entity(target).unwrap()).unwrap().current = Fp::ZERO;
     world.ecs.get::<&mut Health>(world.unit_entity(target).unwrap()).unwrap().current = Fp::ONE;
-    let enemy_killer = world.spawn_mobile(world.blueprints.id("acu"), Team::Blue, point(1_250, 1_000));
+    let enemy_killer = world.spawn_mobile(world.blueprints.id("command_rig"), Team::Blue, point(1_250, 1_000));
     let _ = enemy_killer;
     run_ticks(&mut world, 80);
     assert!(world.unit_entity(target).is_none(), "the test needs the target dead");
-    assert!(world.ecs.get::<&OverchargeOrder>(world.unit_entity(commander).unwrap()).is_err(), "there is nothing left to Overcharge");
+    assert!(world.ecs.get::<&DischargeOrder>(world.unit_entity(commander).unwrap()).is_err(), "there is nothing left to Discharge");
 }
 
 /// A Blue bot and a weakened Red bot right beside it, from the real data.
 fn bot_duel() -> (SimWorld, SimId, SimId) {
     let config = SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: false, ..SimConfig::default() };
     let mut world = SimWorld::new(config, 1);
-    let bot = world.blueprints.id("t1_light_bot");
+    let bot = world.blueprints.id("t1_light_walker");
     let hunter = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
     let prey = world.spawn_mobile(bot, Team::Red, point(1_100, 1_000));
     world.ecs.get::<&mut Combat>(world.unit_entity(prey).unwrap()).unwrap().range = Fp::ZERO;
@@ -428,7 +428,7 @@ fn veterancy_of(world: &SimWorld, unit: SimId) -> Option<Veterancy> {
 #[test]
 fn destroying_twice_its_own_mass_earns_a_rank() {
     let (mut world, hunter, prey) = bot_duel();
-    let mass = world.blueprints.get(world.blueprints.id("t1_light_bot")).mass;
+    let mass = world.blueprints.get(world.blueprints.id("t1_light_walker")).mass;
     let base = world.ecs.get::<&Health>(world.unit_entity(hunter).unwrap()).unwrap().max;
     let kill = |world: &mut SimWorld, prey: SimId| {
         let mut ticks = 0;
@@ -444,7 +444,7 @@ fn destroying_twice_its_own_mass_earns_a_rank() {
     assert_eq!((veterancy.experience, veterancy.rank), (mass, 0), "one light bot is half a rank");
     // Hurt it, so that the heal on promotion shows.
     world.ecs.get::<&mut Health>(world.unit_entity(hunter).unwrap()).unwrap().current = base / 2;
-    let second = world.spawn_mobile(world.blueprints.id("t1_light_bot"), Team::Red, point(1_100, 1_000));
+    let second = world.spawn_mobile(world.blueprints.id("t1_light_walker"), Team::Red, point(1_100, 1_000));
     world.ecs.get::<&mut Combat>(world.unit_entity(second).unwrap()).unwrap().range = Fp::ZERO;
     kill(&mut world, second);
     let veterancy = veterancy_of(&world, hunter).expect("it should have experience");
@@ -458,7 +458,7 @@ fn destroying_twice_its_own_mass_earns_a_rank() {
 #[test]
 fn experience_is_shared_by_the_damage_each_attacker_did() {
     let (mut world, hunter, prey) = bot_duel();
-    let bot = world.blueprints.id("t1_light_bot");
+    let bot = world.blueprints.id("t1_light_walker");
     let mass = world.blueprints.get(bot).mass;
     let helper = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_100));
     // The helper has done three quarters of the damage; the hunter will do the rest.
@@ -476,13 +476,13 @@ fn experience_is_shared_by_the_damage_each_attacker_did() {
     let helper_share = veterancy_of(&world, helper).expect("the helper did most of the damage").experience;
     let hunter_share = veterancy_of(&world, hunter).expect("the hunter finished it").experience;
     assert!(helper_share > hunter_share * 10, "the helper did far more: {helper_share} against {hunter_share}");
-    assert!((helper_share + hunter_share - mass).abs() < Res::from_num(0.01), "the shares add up to its mass");
+    assert!((helper_share + hunter_share - mass).abs() < Res::from_num(0.01), "the shares add up to its materiel");
 }
 
 #[test]
 fn veterans_heal_over_time_and_ranks_stop_at_five() {
     let (mut world, hunter, _) = bot_duel();
-    let mass = world.blueprints.get(world.blueprints.id("t1_light_bot")).mass;
+    let mass = world.blueprints.get(world.blueprints.id("t1_light_walker")).mass;
     // Destroying ten heavy tanks is far past rank 5, though each kill earns one rank at most.
     let prey: Vec<SimId> = (0..10).map(|index| world.spawn_mobile(world.blueprints.id("t2_heavy_tank"), Team::Red, point(1_050 + index * 15, 1_150))).collect();
     for target in &prey {
@@ -509,7 +509,7 @@ fn veterans_heal_over_time_and_ranks_stop_at_five() {
 fn ships_regenerate_and_rank_up_by_their_own_tables() {
     let world = flat_map(false);
     let battleship = world.blueprints.get(world.blueprints.id("t3_battleship"));
-    let commander = world.blueprints.get(world.blueprints.id("acu"));
+    let commander = world.blueprints.get(world.blueprints.id("command_rig"));
     // The Summit's card: 12,500 mass a level, and 9 a second of regeneration a level.
     assert_eq!(sim_engine::sim::world::vet_threshold(battleship, 1), Res::from_num(12_500));
     assert_eq!(sim_engine::sim::world::vet_threshold(battleship, 3), Res::from_num(37_500));
@@ -525,7 +525,7 @@ fn nothing_is_earned_for_destroying_your_own_side() {
     let config = SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: false, friendly_fire: true, ..SimConfig::default() };
     let mut world = SimWorld::new(config, 1);
     let artillery = world.blueprints.id("t1_light_artillery");
-    let bot = world.blueprints.id("t1_light_bot");
+    let bot = world.blueprints.id("t1_light_walker");
     let gunner = world.spawn_mobile(artillery, Team::Blue, point(1_000, 1_000));
     let enemy = world.spawn_mobile(bot, Team::Red, point(1_400, 1_000));
     world.ecs.get::<&mut Combat>(world.unit_entity(enemy).unwrap()).unwrap().range = Fp::ZERO;
@@ -622,7 +622,7 @@ fn a_ground_attack_destroys_debris_and_the_mass_in_it() {
     let gone_at = gone_at.expect("the debris should be destroyed");
     assert!(gone_at < 20 * 12 + 30, "it took {gone_at} ticks");
     assert_eq!(world.economies[0].mass_reclaimed, Res::ZERO);
-    assert!(world.economies[0].mass <= mass_before + Res::from_num(1), "nobody got the mass");
+    assert!(world.economies[0].mass <= mass_before + Res::from_num(1), "nobody got the materiel");
 
     // It keeps firing at the spot until given another order.
     let fired = |world: &mut SimWorld, ticks: u32| {
@@ -645,8 +645,8 @@ fn artillery_blasts_all_the_debris_it_lands_among_but_not_trees_or_rocks() {
     use sim_engine::sim::components::WreckKind;
     let mut world = flat_map(false);
     let spot = point(1_400, 1_000);
-    let near = [debris_at(&mut world, "t1_light_bot", spot), debris_at(&mut world, "t1_light_bot", point(1_425, 1_010))];
-    let far = debris_at(&mut world, "t1_light_bot", point(1_500, 1_000));
+    let near = [debris_at(&mut world, "t1_light_walker", spot), debris_at(&mut world, "t1_light_walker", point(1_425, 1_010))];
+    let far = debris_at(&mut world, "t1_light_walker", point(1_500, 1_000));
     let far_mass = wreck(&world, far).unwrap().mass;
     let tree = world.spawn_scenery(WreckKind::Tree, point(1_405, 995), Fp::ZERO);
     let rock = world.spawn_scenery(WreckKind::Rock, point(1_395, 1_008), fp_int(8));
@@ -668,7 +668,7 @@ fn artillery_blasts_all_the_debris_it_lands_among_but_not_trees_or_rocks() {
 #[test]
 fn a_ground_attack_walks_into_range_and_fires_into_the_fog_at_nothing_else() {
     let mut world = flat_map(true);
-    let bot = spawn_gunner(&mut world, "t1_light_bot");
+    let bot = spawn_gunner(&mut world, "t1_light_walker");
     // An enemy right behind, which it would otherwise turn and shoot.
     let enemy = passive_unit(&mut world, Team::Red, point(900, 1_000));
     let enemy_health = world.unit_health(enemy).unwrap();
@@ -699,7 +699,7 @@ fn ground_attack_shells_land_on_the_smallest_debris_at_any_range() {
     for (gunner, distances) in [("t2_heavy_tank", [60, 250, 455]), ("t1_light_artillery", [100, 350, 595])] {
         for distance in distances {
             let mut world = flat_map(false);
-            let debris = debris_at(&mut world, "t1_light_bot", point(1_000 + distance, 1_000));
+            let debris = debris_at(&mut world, "t1_light_walker", point(1_000 + distance, 1_000));
             let unit = spawn_gunner(&mut world, gunner);
             let spot = wreck(&world, debris).unwrap().position;
             world.advance_tick(&[SimCommand::AttackGround { units: vec![unit], point: spot }]);
@@ -720,7 +720,7 @@ fn ground_attack_shells_land_on_the_smallest_debris_at_any_range() {
 /// soon walks out of range.
 fn bot_meets_a_fleeing_engineer() -> (SimWorld, SimId, SimId) {
     let mut world = SimWorld::new(SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: true, ..SimConfig::default() }, 1);
-    let bot = world.spawn_mobile(world.blueprints.id("t1_light_bot"), Team::Blue, point(1_000, 2_500));
+    let bot = world.spawn_mobile(world.blueprints.id("t1_light_walker"), Team::Blue, point(1_000, 2_500));
     let engineer = world.spawn_mobile(world.blueprints.id("t1_engineer"), Team::Red, point(1_200, 2_500));
     world.advance_tick(&[SimCommand::AttackMove { units: vec![bot], goal: point(4_000, 2_500) }, SimCommand::Move { units: vec![engineer], goal: point(1_200, 5_000) }]);
     (world, bot, engineer)
@@ -783,7 +783,7 @@ fn a_new_order_calls_off_a_chase() {
 #[test]
 fn a_patrol_goes_on_after_a_chase() {
     let mut world = SimWorld::new(SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: true, ..SimConfig::default() }, 1);
-    let bot = world.spawn_mobile(world.blueprints.id("t1_light_bot"), Team::Blue, point(1_000, 2_500));
+    let bot = world.spawn_mobile(world.blueprints.id("t1_light_walker"), Team::Blue, point(1_000, 2_500));
     let engineer = world.spawn_mobile(world.blueprints.id("t1_engineer"), Team::Red, point(1_200, 2_500));
     let points = vec![point(1_000, 2_500), point(3_000, 2_500)];
     world.advance_tick(&[SimCommand::Patrol { units: vec![bot], points, queued: false }, SimCommand::Move { units: vec![engineer], goal: point(1_200, 5_000) }]);
@@ -812,7 +812,7 @@ fn a_target_that_outruns_an_attack_move_is_chased_by_route_until_it_is_caught() 
     let tank = world.spawn_mobile(world.blueprints.id("t2_heavy_tank"), Team::Blue, point(1_000, 1_000));
     let entity = world.unit_entity(tank).unwrap();
     // Twice as fast as the tank, so it gets well away before it stops.
-    let bot = world.spawn_mobile(world.blueprints.id("t1_light_bot"), Team::Red, point(1_300, 1_000));
+    let bot = world.spawn_mobile(world.blueprints.id("t1_light_walker"), Team::Red, point(1_300, 1_000));
     let bot_entity = world.unit_entity(bot).unwrap();
     world.ecs.get::<&mut sim_engine::sim::components::UnitStats>(bot_entity).unwrap().max_speed = fp_int(9);
     world.ecs.get::<&mut Combat>(bot_entity).unwrap().range = Fp::ZERO;

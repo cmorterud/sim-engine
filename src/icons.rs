@@ -20,11 +20,11 @@ pub enum Frame {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Icon {
     Commander,
-    SupportCommander,
+    FieldRig,
     Engineer,
-    LightBot,
+    LightWalker,
     Tank,
-    AmphibiousTank,
+    AssaultHovercraft,
     Artillery,
     MobileMissile,
     MobileAntiAir,
@@ -41,15 +41,15 @@ pub enum Icon {
     Battlecruiser,
     Submarine,
     MissileSubmarine,
-    ShieldBoat,
+    EscortCorvette,
     LandFactory,
     AirFactory,
     NavalFactory,
-    Gateway,
-    AirStaging,
+    RigYard,
+    Airfield,
     Extractor,
     Generator,
-    Hydrocarbon,
+    Geothermal,
     MassStorage,
     EnergyStorage,
     Fabricator,
@@ -67,13 +67,13 @@ pub enum Icon {
     Stealth,
     TacticalMissile,
     StrategicMissile,
-    AntiNuke,
+    StrategicInterceptor,
     LandScout,
     MobileShield,
-    FieldEngineer,
+    CombatEngineer,
     TorpedoBoat,
     Wall,
-    EngineeringStation,
+    FieldWorkshop,
     Transport,
     /// Anything without an icon of its own, such as the stress test's plain cubes.
     Unknown,
@@ -94,11 +94,11 @@ pub enum BarGroup {
 impl Icon {
     pub const ALL: [Self; 57] = [
         Self::Commander,
-        Self::SupportCommander,
+        Self::FieldRig,
         Self::Engineer,
-        Self::LightBot,
+        Self::LightWalker,
         Self::Tank,
-        Self::AmphibiousTank,
+        Self::AssaultHovercraft,
         Self::Artillery,
         Self::MobileMissile,
         Self::MobileAntiAir,
@@ -115,15 +115,15 @@ impl Icon {
         Self::Battlecruiser,
         Self::Submarine,
         Self::MissileSubmarine,
-        Self::ShieldBoat,
+        Self::EscortCorvette,
         Self::LandFactory,
         Self::AirFactory,
         Self::NavalFactory,
-        Self::Gateway,
-        Self::AirStaging,
+        Self::RigYard,
+        Self::Airfield,
         Self::Extractor,
         Self::Generator,
-        Self::Hydrocarbon,
+        Self::Geothermal,
         Self::MassStorage,
         Self::EnergyStorage,
         Self::Fabricator,
@@ -141,13 +141,13 @@ impl Icon {
         Self::Stealth,
         Self::TacticalMissile,
         Self::StrategicMissile,
-        Self::AntiNuke,
+        Self::StrategicInterceptor,
         Self::LandScout,
         Self::MobileShield,
-        Self::FieldEngineer,
+        Self::CombatEngineer,
         Self::TorpedoBoat,
         Self::Wall,
-        Self::EngineeringStation,
+        Self::FieldWorkshop,
         Self::Transport,
         Self::Unknown,
     ];
@@ -155,20 +155,20 @@ impl Icon {
     /// The icon for a blueprint, by its key. Tiers of the same kind share one.
     pub fn for_key(key: &str) -> Self {
         match key {
-            "acu" => Self::Commander,
-            "support_commander" => Self::SupportCommander,
+            "command_rig" => Self::Commander,
+            "field_rig" => Self::FieldRig,
             "t1_engineer" | "t2_engineer" | "t3_engineer" => Self::Engineer,
             // Bots and tanks of each tier share a symbol.
-            "t1_light_bot" | "t2_gatling_bot" | "t3_heavy_assault_bot" => Self::LightBot,
-            "t1_medium_tank" | "t2_heavy_tank" | "t3_armored_assault_bot" => Self::Tank,
+            "t1_light_walker" | "t2_grenadier_walker" | "t3_heavy_walker" => Self::LightWalker,
+            "t1_medium_tank" | "t2_heavy_tank" | "t3_siege_walker" => Self::Tank,
             "t1_land_scout" => Self::LandScout,
             "t2_mobile_shield" => Self::MobileShield,
-            "t2_field_engineer" => Self::FieldEngineer,
+            "t2_combat_engineer" => Self::CombatEngineer,
             "t2_torpedo_boat" => Self::TorpedoBoat,
             "wall" => Self::Wall,
-            "engineering_station" | "engineering_station_t3" => Self::EngineeringStation,
+            "field_workshop" | "field_workshop_t3" => Self::FieldWorkshop,
             "t1_light_transport" | "t2_transport" | "t3_heavy_transport" => Self::Transport,
-            "t2_amphibious_tank" => Self::AmphibiousTank,
+            "t2_assault_hovercraft" => Self::AssaultHovercraft,
             "t1_light_artillery" | "t3_mobile_artillery" => Self::Artillery,
             "t2_mobile_missile_launcher" => Self::MobileMissile,
             "t1_mobile_aa" | "t2_mobile_flak" => Self::MobileAntiAir,
@@ -185,15 +185,15 @@ impl Icon {
             "t3_battlecruiser" => Self::Battlecruiser,
             "t1_attack_sub" => Self::Submarine,
             "t3_missile_sub" => Self::MissileSubmarine,
-            "t2_shield_boat" => Self::ShieldBoat,
+            "t2_escort_corvette" => Self::EscortCorvette,
             key if key.starts_with("land_factory") => Self::LandFactory,
             key if key.starts_with("air_factory") => Self::AirFactory,
             key if key.starts_with("naval_factory") => Self::NavalFactory,
-            "quantum_gateway" => Self::Gateway,
-            "air_staging" => Self::AirStaging,
+            "rig_yard" => Self::RigYard,
+            "airfield" => Self::Airfield,
             key if key.starts_with("mass_extractor") => Self::Extractor,
             key if key.starts_with("power_generator") => Self::Generator,
-            "hydrocarbon_plant" => Self::Hydrocarbon,
+            "geothermal_plant" => Self::Geothermal,
             "mass_storage" => Self::MassStorage,
             "energy_storage" => Self::EnergyStorage,
             key if key.starts_with("mass_fabricator") => Self::Fabricator,
@@ -206,30 +206,30 @@ impl Icon {
             "tactical_missile_defense" => Self::TacticalDefense,
             "strategic_missile_launcher" => Self::StrategicLauncher,
             "strategic_missile_defense" => Self::StrategicDefense,
-            "radar" | "radar_t2" | "omni_sensor" => Self::Radar,
+            "radar" | "radar_t2" | "deep_scan_array" => Self::Radar,
             "t1_sonar" | "t2_sonar" => Self::Sonar,
             "stealth_field_generator" => Self::Stealth,
             "tactical_missile" => Self::TacticalMissile,
             "strategic_missile" => Self::StrategicMissile,
-            "anti_nuke" => Self::AntiNuke,
+            "strategic_interceptor" => Self::StrategicInterceptor,
             _ => Self::Unknown,
         }
     }
 
     pub const fn frame(self) -> Frame {
         match self {
-            Self::Commander | Self::SupportCommander => Frame::Commander,
-            Self::Engineer | Self::LightBot | Self::Tank | Self::AmphibiousTank | Self::Artillery | Self::MobileMissile | Self::MobileAntiAir | Self::LandScout | Self::MobileShield | Self::FieldEngineer | Self::Unknown => Frame::Land,
+            Self::Commander | Self::FieldRig => Frame::Commander,
+            Self::Engineer | Self::LightWalker | Self::Tank | Self::AssaultHovercraft | Self::Artillery | Self::MobileMissile | Self::MobileAntiAir | Self::LandScout | Self::MobileShield | Self::CombatEngineer | Self::Unknown => Frame::Land,
             Self::Scout | Self::Fighter | Self::Bomber | Self::FighterBomber | Self::TorpedoBomber | Self::Gunship | Self::Transport => Frame::Air,
-            Self::Frigate | Self::Destroyer | Self::Cruiser | Self::Battleship | Self::Battlecruiser | Self::Submarine | Self::MissileSubmarine | Self::ShieldBoat | Self::TorpedoBoat => Frame::Naval,
+            Self::Frigate | Self::Destroyer | Self::Cruiser | Self::Battleship | Self::Battlecruiser | Self::Submarine | Self::MissileSubmarine | Self::EscortCorvette | Self::TorpedoBoat => Frame::Naval,
             _ => Frame::Structure,
         }
     }
 
     pub const fn group(self) -> BarGroup {
         match self {
-            Self::LandFactory | Self::AirFactory | Self::NavalFactory | Self::Gateway | Self::AirStaging | Self::EngineeringStation => BarGroup::Factories,
-            Self::Extractor | Self::Generator | Self::Hydrocarbon | Self::MassStorage | Self::EnergyStorage | Self::Fabricator => BarGroup::Resources,
+            Self::LandFactory | Self::AirFactory | Self::NavalFactory | Self::RigYard | Self::Airfield | Self::FieldWorkshop => BarGroup::Factories,
+            Self::Extractor | Self::Generator | Self::Geothermal | Self::MassStorage | Self::EnergyStorage | Self::Fabricator => BarGroup::Resources,
             Self::PointDefense | Self::AntiAirTurret | Self::TorpedoLauncher | Self::ShieldGenerator | Self::TacticalDefense | Self::StrategicDefense | Self::Wall => BarGroup::Defenses,
             Self::Radar | Self::Sonar | Self::Stealth => BarGroup::Intel,
             Self::ArtilleryInstallation | Self::TacticalLauncher | Self::StrategicLauncher => BarGroup::Strategic,
@@ -279,14 +279,14 @@ impl Role {
 impl Icon {
     pub const fn role(self) -> Role {
         match self {
-            Self::Commander | Self::SupportCommander | Self::Engineer | Self::FieldEngineer | Self::EngineeringStation | Self::Transport | Self::LandFactory | Self::AirFactory | Self::NavalFactory | Self::Gateway | Self::AirStaging | Self::Unknown => Role::Build,
+            Self::Commander | Self::FieldRig | Self::Engineer | Self::CombatEngineer | Self::FieldWorkshop | Self::Transport | Self::LandFactory | Self::AirFactory | Self::NavalFactory | Self::RigYard | Self::Airfield | Self::Unknown => Role::Build,
             Self::Extractor | Self::MassStorage | Self::Fabricator => Role::Mass,
-            Self::Generator | Self::Hydrocarbon | Self::EnergyStorage => Role::Energy,
-            Self::LightBot | Self::Tank | Self::AmphibiousTank | Self::Gunship | Self::Frigate | Self::Destroyer | Self::Cruiser | Self::Battleship | Self::Battlecruiser | Self::PointDefense => Role::DirectFire,
+            Self::Generator | Self::Geothermal | Self::EnergyStorage => Role::Energy,
+            Self::LightWalker | Self::Tank | Self::AssaultHovercraft | Self::Gunship | Self::Frigate | Self::Destroyer | Self::Cruiser | Self::Battleship | Self::Battlecruiser | Self::PointDefense => Role::DirectFire,
             Self::MobileAntiAir | Self::Fighter | Self::AntiAirTurret => Role::AntiAir,
             Self::Artillery | Self::MobileMissile | Self::Bomber | Self::FighterBomber | Self::MissileSubmarine | Self::ArtilleryInstallation | Self::TacticalLauncher | Self::StrategicLauncher | Self::TacticalMissile | Self::StrategicMissile => Role::Indirect,
             Self::TorpedoBomber | Self::Submarine | Self::TorpedoLauncher | Self::TorpedoBoat => Role::Underwater,
-            Self::ShieldBoat | Self::ShieldGenerator | Self::TacticalDefense | Self::StrategicDefense | Self::AntiNuke | Self::MobileShield | Self::Wall => Role::Protection,
+            Self::EscortCorvette | Self::ShieldGenerator | Self::TacticalDefense | Self::StrategicDefense | Self::StrategicInterceptor | Self::MobileShield | Self::Wall => Role::Protection,
             Self::Scout | Self::Radar | Self::Sonar | Self::Stealth | Self::LandScout => Role::Intel,
         }
     }
@@ -378,7 +378,7 @@ fn symbol(out: &mut Vec<Shape>, center: Pos2, size: f32, icon: Icon, stroke: Str
             out.push(ring(0.0, 0.0, 0.8));
             out.push(dot(0.0, 0.0, 0.3));
         }
-        Icon::SupportCommander => {
+        Icon::FieldRig => {
             out.push(ring(0.0, 0.0, 0.8));
             out.push(line(&[(-0.4, 0.0), (0.4, 0.0)]));
         }
@@ -387,12 +387,12 @@ fn symbol(out: &mut Vec<Shape>, center: Pos2, size: f32, icon: Icon, stroke: Str
             out.push(line(&[(-0.5, -0.7), (-0.5, 0.7)]));
             out.push(line(&[(0.5, -0.7), (0.5, 0.7)]));
         }
-        Icon::LightBot => {
+        Icon::LightWalker => {
             out.push(line(&[(-0.9, -0.8), (0.9, 0.8)]));
             out.push(line(&[(-0.9, 0.8), (0.9, -0.8)]));
         }
         Icon::Tank => out.push(line(&[(-0.9, -0.5), (0.9, -0.5), (0.9, 0.5), (-0.9, 0.5), (-0.9, -0.5)])),
-        Icon::AmphibiousTank => {
+        Icon::AssaultHovercraft => {
             out.push(line(&[(-0.9, -0.7), (0.9, -0.7), (0.9, 0.1), (-0.9, 0.1), (-0.9, -0.7)]));
             out.push(line(&[(-0.9, 0.6), (-0.45, 0.35), (0.0, 0.6), (0.45, 0.35), (0.9, 0.6)]));
         }
@@ -466,7 +466,7 @@ fn symbol(out: &mut Vec<Shape>, center: Pos2, size: f32, icon: Icon, stroke: Str
             out.push(line(&[(0.0, 0.0), (0.0, -0.85)]));
             out.push(line(&[(-0.35, -0.5), (0.0, -0.85), (0.35, -0.5)]));
         }
-        Icon::ShieldBoat => {
+        Icon::EscortCorvette => {
             out.push(line(&hull));
             out.push(arc(0.0, 0.25, 0.75, 180.0, 360.0));
         }
@@ -484,13 +484,13 @@ fn symbol(out: &mut Vec<Shape>, center: Pos2, size: f32, icon: Icon, stroke: Str
             out.push(solid(&[(-0.85, -0.6), (0.85, -0.6), (0.85, 0.15), (-0.85, 0.15)]));
             out.push(line(&[(-0.9, 0.65), (-0.45, 0.4), (0.0, 0.65), (0.45, 0.4), (0.9, 0.65)]));
         }
-        Icon::Gateway => {
+        Icon::RigYard => {
             out.push(line(&[(-0.7, 0.8), (-0.7, -0.2)]));
             out.push(line(&[(0.7, 0.8), (0.7, -0.2)]));
             out.push(arc(0.0, -0.2, 0.7, 180.0, 360.0));
             out.push(dot(0.0, 0.3, 0.2));
         }
-        Icon::AirStaging => {
+        Icon::Airfield => {
             out.push(line(&[(-0.55, -0.75), (-0.55, 0.75)]));
             out.push(line(&[(0.55, -0.75), (0.55, 0.75)]));
             out.push(line(&[(-0.55, 0.0), (0.55, 0.0)]));
@@ -500,7 +500,7 @@ fn symbol(out: &mut Vec<Shape>, center: Pos2, size: f32, icon: Icon, stroke: Str
             out.push(dot(0.0, 0.0, 0.22));
         }
         Icon::Generator => out.push(line(&[(0.25, -0.9), (-0.45, 0.1), (0.15, 0.1), (-0.25, 0.9)])),
-        Icon::Hydrocarbon => {
+        Icon::Geothermal => {
             out.push(line(&[(0.0, -0.9), (0.55, 0.15), (0.35, 0.65), (0.0, 0.85), (-0.35, 0.65), (-0.55, 0.15), (0.0, -0.9)]));
             out.push(dot(0.0, 0.35, 0.18));
         }
@@ -583,7 +583,7 @@ fn symbol(out: &mut Vec<Shape>, center: Pos2, size: f32, icon: Icon, stroke: Str
             out.push(solid(&[(0.0, -0.9), (0.4, -0.3), (0.4, 0.7), (-0.4, 0.7), (-0.4, -0.3)]));
             out.push(line(&[(-0.75, 0.85), (0.75, 0.85)]));
         }
-        Icon::AntiNuke => {
+        Icon::StrategicInterceptor => {
             out.push(line(&[(0.0, 0.85), (0.0, -0.85)]));
             out.push(line(&[(-0.5, -0.35), (0.0, -0.85), (0.5, -0.35)]));
             out.push(ring(0.0, 0.2, 0.5));
@@ -598,7 +598,7 @@ fn symbol(out: &mut Vec<Shape>, center: Pos2, size: f32, icon: Icon, stroke: Str
             out.push(arc(0.0, 0.45, 0.85, 180.0, 360.0));
             out.push(line(&[(-0.55, 0.45), (0.55, 0.45), (0.55, 0.8), (-0.55, 0.8), (-0.55, 0.45)]));
         }
-        Icon::FieldEngineer => {
+        Icon::CombatEngineer => {
             // The engineer's mark with a gun's sight across it.
             out.push(line(&[(-1.0, 0.0), (1.0, 0.0)]));
             out.push(line(&[(-0.5, -0.7), (-0.5, 0.7)]));
@@ -618,7 +618,7 @@ fn symbol(out: &mut Vec<Shape>, center: Pos2, size: f32, icon: Icon, stroke: Str
             out.push(line(&[(-0.45, 0.0), (-0.45, 0.6)]));
             out.push(line(&[(0.45, 0.0), (0.45, 0.6)]));
         }
-        Icon::EngineeringStation => {
+        Icon::FieldWorkshop => {
             // A tower with a drone circling it.
             out.push(line(&[(-0.5, 0.85), (0.5, 0.85)]));
             out.push(line(&[(0.0, 0.85), (0.0, -0.1)]));
@@ -686,7 +686,7 @@ mod tests {
     #[test]
     fn a_build_bar_symbol_fills_most_of_its_button() {
         let rect = Rect::from_min_size(Pos2::ZERO, Vec2::splat(46.0));
-        let bounds = bar_shapes(rect, Icon::LightBot).iter().fold(Rect::NOTHING, |bounds, shape| bounds.union(shape.visual_bounding_rect()));
+        let bounds = bar_shapes(rect, Icon::LightWalker).iter().fold(Rect::NOTHING, |bounds, shape| bounds.union(shape.visual_bounding_rect()));
         assert!(bounds.width() > 23.0 && bounds.height() > 23.0, "the symbol is only {bounds:?}");
         assert!(rect.contains_rect(bounds), "the symbol spills out of its button: {bounds:?}");
     }

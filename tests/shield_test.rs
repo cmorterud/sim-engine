@@ -59,7 +59,7 @@ fn run(world: &mut SimWorld, ticks: u32) {
 #[test]
 fn a_dome_stops_enemy_shells_from_outside_and_takes_their_damage() {
     let (mut world, generator) = shielded_world();
-    let sheltered = spawn(&mut world, "t1_light_bot", Team::Red, point(1_020, 1_080), false);
+    let sheltered = spawn(&mut world, "t1_light_walker", Team::Red, point(1_020, 1_080), false);
     let full = world.unit_health(sheltered).unwrap();
     // 400 from its target, and well outside the 180-unit dome.
     spawn(&mut world, "t2_heavy_tank", Team::Blue, point(1_020, 1_480), true);
@@ -79,9 +79,9 @@ fn shells_from_inside_fly_out_and_friendly_shells_fly_in() {
     let (mut world, generator) = shielded_world();
     // A Red tank under its own dome, and a Blue unit outside it.
     spawn(&mut world, "t2_heavy_tank", Team::Red, point(1_020, 1_060), true);
-    let outside = spawn(&mut world, "t1_light_bot", Team::Blue, point(1_020, 1_420), false);
+    let outside = spawn(&mut world, "t1_light_walker", Team::Blue, point(1_020, 1_420), false);
     // A Blue unit that has walked in under the Red dome, and a Red tank outside shelling it.
-    let intruder = spawn(&mut world, "t1_light_bot", Team::Blue, point(900, 1_020), false);
+    let intruder = spawn(&mut world, "t1_light_walker", Team::Blue, point(900, 1_020), false);
     spawn(&mut world, "t2_heavy_tank", Team::Red, point(500, 1_020), true);
     let (outside_full, intruder_full) = (world.unit_health(outside).unwrap(), world.unit_health(intruder).unwrap());
     run(&mut world, 80);
@@ -93,7 +93,7 @@ fn shells_from_inside_fly_out_and_friendly_shells_fly_in() {
 #[test]
 fn a_dome_that_runs_out_collapses_and_comes_back_at_full_strength() {
     let (mut world, generator) = shielded_world();
-    let sheltered = spawn(&mut world, "t1_light_bot", Team::Red, point(1_020, 1_080), false);
+    let sheltered = spawn(&mut world, "t1_light_walker", Team::Red, point(1_020, 1_080), false);
     let full = world.unit_health(sheltered).unwrap();
     world.ecs.get::<&mut Shield>(world.unit_entity(generator).unwrap()).unwrap().health = fp_int(10);
     // FAF's generator has only 250 health; this test is about its dome, not the generator.
@@ -131,7 +131,7 @@ fn drop_on_overlap(splash: i32) -> (Fp, Fp) {
     let (mut world, first) = shielded_world();
     let blueprint = world.blueprints.id("shield_generator");
     let second = world.spawn_finished_structure(blueprint, Team::Red, 58, 50).expect("room for it");
-    let source = spawn(&mut world, "t1_light_bot", Team::Blue, point(3_000, 3_000), false);
+    let source = spawn(&mut world, "t1_light_walker", Team::Blue, point(3_000, 3_000), false);
     world.spawn_projectile(
         Vec3Fp::new(fp_int(1_100), fp_int(1_020), fp_int(600)),
         Projectile {

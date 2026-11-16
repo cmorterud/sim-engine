@@ -1,7 +1,7 @@
 //! Aircraft (GAME_SPECIFICATION.md §10). An aircraft flies at its own height over land and
 //! water, straight at where it is going, with no pathfinding and nothing to bump into. In flight
 //! it never stops, so it turns in arcs and makes passes over its target. With nothing to do it
-//! lands. It burns fuel as it flies, and refuels and is repaired on an air staging facility.
+//! lands. It burns fuel as it flies, and refuels and is repaired on an airfield.
 
 use super::components::{rotate_toward, Combat, Flight, Order, OrderKind, Position, SimId, Turning, UnitStats, Velocity};
 use super::config::GRAVITY_RAW;
@@ -59,13 +59,13 @@ fn inside_turn(facing: Vec2Fp, offset: Vec2Fp, radius: Fp) -> bool {
 /// Below this share of a full tank, a patrolling aircraft goes to refuel.
 const REFUEL_SHARE_PERCENT: u32 = 20;
 /// Ticks of fuel gained each tick on the ground, the original's recharge rate of 5, and on an
-/// air staging facility's pad, 50 times that.
+/// airfield's pad, 50 times that.
 const LANDED_REFUEL_PER_TICK: u32 = 5;
 const DOCKED_REFUEL_PER_TICK: u32 = LANDED_REFUEL_PER_TICK * 50;
-/// How far from its middle an air staging facility's four pads are, in units.
+/// How far from its middle an airfield's four pads are, in units.
 const PAD_OFFSET_UNITS: i32 = 20;
 
-/// An air staging facility, as the aircraft see it this tick.
+/// An airfield, as the aircraft see it this tick.
 struct Staging {
     id: SimId,
     team: super::components::Team,
@@ -85,13 +85,13 @@ impl Staging {
 }
 
 impl SimWorld {
-    /// Sends aircraft to land on an air staging facility of their team, and stay until they are
+    /// Sends aircraft to land on an airfield of their team, and stay until they are
     /// refuelled and repaired. It ends whatever else they were doing, patrols included.
     pub(super) fn command_refit(&mut self, units: &[SimId], staging: SimId) {
         let Some((_, staging_entity)) = self.find_unit(staging) else {
             return;
         };
-        if self.air_stagings.binary_search_by_key(&staging, |unit| unit.0).is_err() || self.ecs.get::<&super::components::Construction>(staging_entity).is_ok() {
+        if self.airfields.binary_search_by_key(&staging, |unit| unit.0).is_err() || self.ecs.get::<&super::components::Construction>(staging_entity).is_ok() {
             return;
         }
         let team = self.ecs.get::<&UnitStats>(staging_entity).expect("units have stats").team;
@@ -108,14 +108,14 @@ impl SimWorld {
         }
     }
 
-    /// The finished air staging facilities, with how many of their slots are taken.
+    /// The finished airfields, with how many of their slots are taken.
     fn stagings(&self) -> Vec<Staging> {
         let mut stagings: Vec<Staging> = self
-            .air_stagings
+            .airfields
             .iter()
             .filter(|&&(_, entity)| self.ecs.get::<&super::components::Construction>(entity).is_err())
             .filter_map(|&(id, entity)| {
-                let def = self.blueprints.get(self.ecs.get::<&super::components::Blueprinted>(entity).ok()?.0).air_staging?;
+                let def = self.blueprints.get(self.ecs.get::<&super::components::Blueprinted>(entity).ok()?.0).airfield?;
                 let team = self.ecs.get::<&UnitStats>(entity).ok()?.team;
                 let center = self.ecs.get::<&Position>(entity).ok()?.0.xy();
                 Some(Staging { id, team, center, slots: def.slots, used: 0, repair: def.repair_per_tick, energy: def.energy_per_tick })
@@ -138,7 +138,7 @@ impl SimWorld {
         if self.aircraft.is_empty() {
             return;
         }
-        let mut stagings = if self.air_stagings.is_empty() { Vec::new() } else { self.stagings() };
+        let mut stagings = if self.airfields.is_empty() { Vec::new() } else { self.stagings() };
         let units = &self.units;
         let grid = &self.spatial_grid;
         let terrain = &self.terrain;
@@ -166,7 +166,7 @@ impl SimWorld {
             let radius = turn_radius(stats.max_speed, turning.max_turn);
             let patrolling = patrol.is_some();
 
-            // On patrol and low on fuel, it goes to the nearest air staging facility of its team.
+            // On patrol and low on fuel, it goes to the nearest airfield of its team.
             if patrolling && flight.refit.is_none() && flight.fuel * 100 < flight.max_fuel * REFUEL_SHARE_PERCENT {
                 let nearest = stagings.iter().filter(|spot| spot.team == stats.team).min_by_key(|spot| (here.distance_squared(&spot.center), spot.id));
                 if let Some(spot) = nearest {

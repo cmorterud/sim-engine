@@ -9,7 +9,7 @@ use super::combat::{entry_hit, firing_solution, missile_velocity, probe_terrain,
 use super::commands::SimCommand;
 use super::components::{BuildTask, AntiAir, Artillery, BombBay, Falling, Flight, Homing,
     Blueprinted, Builder, Combat, Construction, Factory, Footprint, Health, MoveClass, Order, OrderKind, OrderQueue, Patrol,
-    Intel, Launcher, Missile, Stunning, MissileDefense, Upgrading, Overcharged, OverchargeOrder, OverchargeWeapon, Paused, Position, Projectile, Shield, SimId, Team, Turning, Turret, UnitStats, Velocity, Veterancy,
+    Intel, Launcher, Missile, Stunning, MissileDefense, Upgrading, Discharged, DischargeOrder, DischargeWeapon, Paused, Position, Projectile, Shield, SimId, Team, Turning, Turret, UnitStats, Velocity, Veterancy,
     Wreck, WreckKind, rotate_toward, LeavingFactory, Transport,
 };
 use super::config::{SimConfig, TARGET_SEARCH_INTERVAL, TERRAIN_CELL_UNITS, WRECK_HEALTH_PERMILLE, WRECK_MASS_PERMILLE, WRECK_SUNK_PERMILLE, WRECK_TECH_PERMILLE};
@@ -66,10 +66,10 @@ pub enum MatchResult {
     Draw,
 }
 
-/// An Overcharge shell that landed, where, and on whose dome if it struck one.
+/// An Discharge shell that landed, where, and on whose dome if it struck one.
 #[derive(Copy, Clone, Debug)]
-struct OverchargeImpact {
-    def: super::blueprints::OverchargeDef,
+struct DischargeImpact {
+    def: super::blueprints::DischargeDef,
     source: SimId,
     team: Team,
     point: (i32, i32),
@@ -240,7 +240,7 @@ pub struct ProjectileView {
 pub enum ProjectileKind {
     Shell,
     /// Drawn larger and brighter.
-    Overcharge,
+    Discharge,
     TacticalMissile,
     StrategicMissile,
 }
@@ -267,10 +267,10 @@ pub struct SensorRangeView {
     pub center: [i32; 2],
     /// Zero for none.
     pub radar: i32,
-    pub omni: i32,
+    pub deep_scan: i32,
 }
 
-/// How close, in units, an enemy must come to see a cloaked unit without omni.
+/// How close, in units, an enemy must come to see a cloaked unit without deep scan.
 pub const CLOAK_REVEAL_UNITS: i32 = 100;
 /// How often decoy blips move, in ticks.
 const DECOY_SHUFFLE_TICKS: u32 = 50;
@@ -412,7 +412,7 @@ pub fn vet_threshold(unit: &super::blueprints::Blueprint, rank: u8) -> Res {
     if unit.is_commander() {
         return Res::from_num(COMMANDER_VET_MASS[usize::from(rank) - 1]);
     }
-    let permille = if unit.class == super::blueprints::UnitClass::SupportCommander {
+    let permille = if unit.class == super::blueprints::UnitClass::FieldRig {
         VET_MASS_PERMILLE_SUPPORT
     } else {
         VET_MASS_PERMILLE_BY_TIER[usize::from(unit.tier.clamp(1, 3)) - 1]
@@ -424,7 +424,7 @@ pub fn vet_threshold(unit: &super::blueprints::Blueprint, rank: u8) -> Res {
 pub fn vet_regen_per_second(unit: &super::blueprints::Blueprint, rank: u8) -> i64 {
     let row = if unit.is_commander() {
         2
-    } else if unit.class == super::blueprints::UnitClass::SupportCommander {
+    } else if unit.class == super::blueprints::UnitClass::FieldRig {
         3
     } else if unit.tier >= 4 {
         4
@@ -443,8 +443,8 @@ struct PendingShot {
     speed: Fp,
     damage: Fp,
     splash: Fp,
-    /// For an Overcharge shell, its rule, worked out where it lands.
-    overcharge: Option<super::blueprints::OverchargeDef>,
+    /// For a Discharge shell, its rule, worked out where it lands.
+    discharge: Option<super::blueprints::DischargeDef>,
     missile: Option<MissileShot>,
     /// A shot at an aircraft, that steers itself to it.
     homing: Option<SimId>,
@@ -496,7 +496,7 @@ pub struct SimWorld {
     pub visibility: Visibility,
     pub economies: [Economy; 2],
     pub deposits: Vec<(u32, u32)>,
-    /// Hydrocarbon vents, by cell (GAME_SPECIFICATION.md §3.4). A plant is built with one at the
+    /// Geothermal vents, by cell (GAME_SPECIFICATION.md §3.4). A plant is built with one at the
     /// middle of its footprint.
     pub vents: Vec<(u32, u32)>,
     /// The structure on each occupied terrain cell, by cell index.
@@ -528,7 +528,7 @@ pub struct SimWorld {
     pub self_destructing: Vec<(SimId, hecs::Entity)>,
     /// Units an enemy is capturing, sorted by `SimId`, and those worked on this tick.
     pub being_captured: Vec<(SimId, hecs::Entity)>,
-    /// Aircraft, and air staging facilities, sorted by `SimId`.
+    /// Aircraft, and airfields, sorted by `SimId`.
     pub aircraft: Vec<(SimId, hecs::Entity)>,
     /// Units with anti-torpedo charges, sorted by `SimId`.
     pub torpedo_defenses: Vec<(SimId, hecs::Entity)>,
@@ -544,7 +544,7 @@ pub struct SimWorld {
     pub boarding: Vec<(SimId, hecs::Entity)>,
     /// Units inside transports, off the map and out of `units`, sorted by `SimId`.
     pub carried: Vec<(SimId, hecs::Entity)>,
-    pub air_stagings: Vec<(SimId, hecs::Entity)>,
+    pub airfields: Vec<(SimId, hecs::Entity)>,
     /// Units that are stunned or held in a tractor beam, and units with tractor beams, sorted by
     /// `SimId`. Worked out from what is hashed, so they are not hashed themselves.
     pub disabled: Vec<(SimId, hecs::Entity)>,
@@ -588,8 +588,8 @@ pub struct SimWorld {
     pending_explosions: Vec<Explosion>,
     /// Shells that came down on a shield this tick, and what they do to it.
     pending_shield_hits: Vec<(SimId, Fp)>,
-    /// Overcharge shells that landed this tick, to be worked out once the shells have all moved.
-    pending_overcharges: Vec<OverchargeImpact>,
+    /// Discharge shells that landed this tick, to be worked out once the shells have all moved.
+    pending_discharges: Vec<DischargeImpact>,
     /// Blasts and shells that land on the ground this tick, which also hit debris.
     pending_wreck_blasts: Vec<Explosion>,
     dead_units: Vec<SimId>,
@@ -659,7 +659,7 @@ impl SimWorld {
             boarding: Vec::new(),
             carried: Vec::new(),
             torpedo_defenses: Vec::new(),
-            air_stagings: Vec::new(),
+            airfields: Vec::new(),
             disabled: Vec::new(),
             tractors: Vec::new(),
             storms: Vec::new(),
@@ -684,7 +684,7 @@ impl SimWorld {
             pending_explosions: Vec::new(),
             pending_wreck_blasts: Vec::new(),
             pending_shield_hits: Vec::new(),
-            pending_overcharges: Vec::new(),
+            pending_discharges: Vec::new(),
             dead_units: Vec::new(),
             dead_projectiles: Vec::new(),
         }
@@ -818,7 +818,7 @@ impl SimWorld {
         self.step_visibility();
         self.step_combat();
         self.step_projectiles();
-        self.resolve_overcharges();
+        self.resolve_discharges();
         self.step_production();
         self.step_cleanup();
         self.current_tick += 1;
@@ -850,7 +850,7 @@ impl SimWorld {
                 }
                 SimCommand::Attack { units, target } => self.command_attack(units, *target),
                 SimCommand::AttackGround { units, point } => self.command_attack_ground(units, *point),
-                SimCommand::Overcharge { unit, target } => self.command_overcharge(*unit, *target),
+                SimCommand::Discharge { unit, target } => self.command_discharge(*unit, *target),
                 SimCommand::QueueMove { units, goal, attack } => self.queue_move(units, *goal, *attack, false),
                 SimCommand::FormationMove { units, goal, attack, queued: true } => self.queue_move(units, *goal, *attack, true),
                 SimCommand::FormationMove { units, goal, attack, queued: false } => {
@@ -1031,7 +1031,7 @@ impl SimWorld {
                 combat.forced_target = None;
                 combat.ground_target = None;
             }
-            let _ = self.ecs.remove_one::<OverchargeOrder>(entity);
+            let _ = self.ecs.remove_one::<DischargeOrder>(entity);
             // And an aircraft's trip to refuel.
             if let Ok(mut flight) = self.ecs.get::<&mut Flight>(entity) {
                 (flight.refit, flight.docked) = (None, false);
@@ -1050,7 +1050,7 @@ impl SimWorld {
         }
     }
 
-    fn command_overcharge(&mut self, unit: SimId, target: SimId) {
+    fn command_discharge(&mut self, unit: SimId, target: SimId) {
         let Some((_, entity)) = self.find_unit(unit) else {
             return;
         };
@@ -1059,11 +1059,11 @@ impl SimWorld {
         };
         let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team;
         let is_enemy = self.ecs.get::<&UnitStats>(target_entity).is_ok_and(|stats| stats.team != team);
-        if self.ecs.get::<&OverchargeWeapon>(entity).is_err() || !is_enemy {
+        if self.ecs.get::<&DischargeWeapon>(entity).is_err() || !is_enemy {
             return;
         }
         self.clear_unit_plans(&[unit]);
-        self.ecs.insert_one(entity, OverchargeOrder { target }).expect("unit is live");
+        self.ecs.insert_one(entity, DischargeOrder { target }).expect("unit is live");
         let position = self.unit_position(target).expect("just found").xy();
         self.assign_route(&[unit], OrderKind::Move, position, Some(target));
     }
@@ -1827,8 +1827,8 @@ impl SimWorld {
         }
     }
 
-    /// Radar and omni sensors take their turns with sight, and cloaks are worked out every tick.
-    /// A cloaked unit is hidden from a team unless that team has omni on it, or a unit of its
+    /// Radar and deep scan arrays take their turns with sight, and cloaks are worked out every tick.
+    /// A cloaked unit is hidden from a team unless that team has deep scan on it, or a unit of its
     /// own within `CLOAK_REVEAL_UNITS`.
     fn step_sensors(&mut self, tick: u32) {
         for index in 0..self.intel.len() {
@@ -1841,11 +1841,11 @@ impl SimWorld {
             if !running || self.is_disabled(id) {
                 continue;
             }
-            let (radar, omni) = self.sensor_ranges(entity);
+            let (radar, deep_scan) = self.sensor_ranges(entity);
             let sonar = self.ecs.get::<&Blueprinted>(entity).map_or(Fp::ZERO, |unit| self.blueprints.get(unit.0).sonar);
             let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team;
             let at = self.ecs.get::<&Position>(entity).expect("units have positions").0;
-            for (sense, range) in [(Sense::Radar, radar), (Sense::Omni, omni), (Sense::Sonar, sonar)] {
+            for (sense, range) in [(Sense::Radar, radar), (Sense::DeepScan, deep_scan), (Sense::Sonar, sonar)] {
                 if range > Fp::ZERO {
                     self.visibility.stamp(sense, team, at.x.to_bits(), at.y.to_bits(), range);
                 }
@@ -1860,7 +1860,7 @@ impl SimWorld {
             let enemy = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team.enemy();
             let at = self.ecs.get::<&Position>(entity).expect("units have positions").0;
             let (x, y) = (at.x.to_bits(), at.y.to_bits());
-            let mut revealed = self.visibility.senses(Sense::Omni, enemy, x, y);
+            let mut revealed = self.visibility.senses(Sense::DeepScan, enemy, x, y);
             if !revealed {
                 let mut near = |other: &super::spatial::GridEntry| {
                     let (dx, dy) = (i64::from(other.x - x), i64::from(other.y - y));
@@ -1906,15 +1906,15 @@ impl SimWorld {
         let (max_mobile, max_structure) = (self.max_mobile_radius, self.max_structure_radius);
         shots.clear();
         let mut finished_attacks: Vec<SimId> = Vec::new();
-        let mut finished_overcharges: Vec<SimId> = Vec::new();
+        let mut finished_discharges: Vec<SimId> = Vec::new();
         let mut fired_nukes: Vec<SimId> = Vec::new();
         let mut query = self.ecs.query_mut::<(
             &UnitStats,
             &mut Combat,
             Option<&mut Turret>,
             Option<&Turning>,
-            Option<&mut OverchargeWeapon>,
-            Option<&OverchargeOrder>,
+            Option<&mut DischargeWeapon>,
+            Option<&DischargeOrder>,
             Option<&mut Launcher>,
             Option<&AntiAir>,
             Option<&BombBay>,
@@ -1930,10 +1930,10 @@ impl SimWorld {
         let grabs = &mut self.pending_grabs;
         grabs.clear();
         for (index, &(id, entity)) in units.iter().enumerate() {
-            let (stats, combat, turret, turning, mut overcharge, overcharge_order, mut launcher, anti_air, bomb_bay, flight, artillery, adjacency, extras, torpedo, (tractor, stun_weapon, order, builder, scatter)) =
+            let (stats, combat, turret, turning, mut discharge, discharge_order, mut launcher, anti_air, bomb_bay, flight, artillery, adjacency, extras, torpedo, (tractor, stun_weapon, order, builder, scatter)) =
                 view.get_mut(entity).expect("unit list only holds live units");
             combat.ticks_until_ready = combat.ticks_until_ready.saturating_sub(1);
-            if let Some(weapon) = overcharge.as_mut() {
+            if let Some(weapon) = discharge.as_mut() {
                 weapon.ticks_until_ready = weapon.ticks_until_ready.saturating_sub(1);
             }
             if !combat.enabled || combat.range == Fp::ZERO {
@@ -1978,11 +1978,11 @@ impl SimWorld {
             let far_enough = |distance: i64| distance >= least * least;
             // A bomber lets its bombs go far short of its target, beyond its own sight from a
             // fast, high one such as the fighter-bomber, so it bombs what its team has on radar
-            // or omni as well as what it sees. Seeing only what was in sight, it never let go.
+            // or deep scan as well as what it sees. Seeing only what was in sight, it never let go.
             let sensed = |x: i32, y: i32| {
                 !fog
                     || visibility.is_visible(stats.team, x, y)
-                    || (bomb_bay.is_some() && (visibility.senses(super::visibility::Sense::Radar, stats.team, x, y) || visibility.senses(super::visibility::Sense::Omni, stats.team, x, y)))
+                    || (bomb_bay.is_some() && (visibility.senses(super::visibility::Sense::Radar, stats.team, x, y) || visibility.senses(super::visibility::Sense::DeepScan, stats.team, x, y)))
             };
             let can_engage = |entry: &super::spatial::GridEntry| {
                 let reach = range + i64::from(entry.radius);
@@ -2087,14 +2087,14 @@ impl SimWorld {
                 }
             }
 
-            // An Overcharge order takes over the gun, until it fires or its target is gone.
-            let overcharge_target = overcharge_order.map(|order| order.target);
-            if let Some(target) = overcharge_target {
+            // An Discharge order takes over the gun, until it fires or its target is gone.
+            let discharge_target = discharge_order.map(|order| order.target);
+            if let Some(target) = discharge_target {
                 if locate(target).is_none() {
-                    finished_overcharges.push(id);
+                    finished_discharges.push(id);
                 }
             }
-            let aim_at = overcharge_target.filter(|target| locate(*target).is_some()).or(combat.target);
+            let aim_at = discharge_target.filter(|target| locate(*target).is_some()).or(combat.target);
             let aim_point = match ground {
                 Some(spot) => Some((spot.x.to_bits(), spot.y.to_bits())),
                 None => aim_at.and_then(locate).map(|entry| (entry.x, entry.y)),
@@ -2119,8 +2119,8 @@ impl SimWorld {
                     }
                 }
             };
-            // Overcharge fires in range, once aimed and reloaded, if the team has the energy stored.
-            if let (Some(target), Some(weapon), true) = (overcharge_target, overcharge.as_mut(), can_fire) {
+            // Discharge fires in range, once aimed and reloaded, if the team has the energy stored.
+            if let (Some(target), Some(weapon), true) = (discharge_target, discharge.as_mut(), can_fire) {
                 let economy = &mut economies[stats.team.index()];
                 if let Some(entry) = locate(target).filter(|entry| can_engage(entry)) {
                     // By FAF's rule, nothing is spent until the shell lands.
@@ -2134,7 +2134,7 @@ impl SimWorld {
                             speed: combat.projectile_speed,
                             damage: weapon.def.max_damage,
                             splash: Fp::ZERO,
-                            overcharge: Some(weapon.def),
+                            discharge: Some(weapon.def),
                             missile: None,
                             homing: None,
                             bomb: None,
@@ -2143,12 +2143,12 @@ impl SimWorld {
                             stun: 0,
                         });
                         weapon.ticks_until_ready = weapon.def.reload_ticks;
-                        finished_overcharges.push(id);
+                        finished_discharges.push(id);
                     }
                 }
             }
-            // While aiming an Overcharge elsewhere, the gun does not fire at anything else.
-            let gun_free = overcharge_target.is_none_or(|target| combat.target == Some(target));
+            // While aiming a Discharge elsewhere, the gun does not fire at anything else.
+            let gun_free = discharge_target.is_none_or(|target| combat.target == Some(target));
             // A bomber's velocity, which its bombs keep as they fall.
             let speed = flight.map_or(stats.max_speed, |flight| flight.speed);
             let bomb = bomb_bay.and(turning).map(|turning| {
@@ -2202,7 +2202,7 @@ impl SimWorld {
                             speed: combat.projectile_speed,
                             damage: combat.projectile_damage,
                             splash: combat.projectile_splash,
-                            overcharge: None,
+                            discharge: None,
                             missile,
                             homing,
                             bomb,
@@ -2238,7 +2238,7 @@ impl SimWorld {
                         speed: combat.projectile_speed,
                         damage: combat.projectile_damage,
                         splash: combat.projectile_splash,
-                        overcharge: None,
+                        discharge: None,
                         missile,
                         homing: None,
                         bomb,
@@ -2356,7 +2356,7 @@ impl SimWorld {
                         speed: weapon.projectile_speed,
                         damage: weapon.damage,
                         splash: weapon.splash,
-                        overcharge: None,
+                        discharge: None,
                         missile,
                         homing,
                         bomb: None,
@@ -2380,9 +2380,9 @@ impl SimWorld {
             drop(combat);
             self.set_order(id, Order::IDLE);
         }
-        for id in finished_overcharges {
+        for id in finished_discharges {
             let (_, entity) = self.find_unit(id).expect("it just fired");
-            let _ = self.ecs.remove_one::<OverchargeOrder>(entity);
+            let _ = self.ecs.remove_one::<DischargeOrder>(entity);
             self.set_order(id, Order::IDLE);
         }
         let friendly_fire = self.config.friendly_fire;
@@ -2476,9 +2476,9 @@ impl SimWorld {
                     allied_safe_ticks: if friendly_fire { solution.flight_ticks } else { 0 },
                 },
             );
-            if let Some(def) = shot.overcharge {
+            if let Some(def) = shot.discharge {
                 let entity = self.projectiles.last().filter(|last| last.0 == projectile).expect("just spawned").1;
-                self.ecs.insert_one(entity, Overcharged { def }).expect("just spawned");
+                self.ecs.insert_one(entity, Discharged { def }).expect("just spawned");
             }
             if shot.stun > 0 {
                 let entity = self.projectiles.last().filter(|last| last.0 == projectile).expect("just spawned").1;
@@ -2620,7 +2620,7 @@ impl SimWorld {
         }
         let domes = if self.shields.is_empty() { Vec::new() } else { self.standing_domes() };
         let shield_hits = &mut self.pending_shield_hits;
-        let overcharges = &mut self.pending_overcharges;
+        let discharges = &mut self.pending_discharges;
         let terrain = &self.terrain;
         let grid = &self.spatial_grid;
         let hits = &mut self.pending_hits;
@@ -2633,14 +2633,14 @@ impl SimWorld {
         self.pending_stuns.clear();
         let units = &self.units;
         let stuns = &mut self.pending_stuns;
-        let mut query = self.ecs.query_mut::<(&mut Position, &mut Projectile, Option<&Overcharged>, Option<&Missile>, Option<&Homing>, Option<&Falling>, Option<&Stunning>)>();
+        let mut query = self.ecs.query_mut::<(&mut Position, &mut Projectile, Option<&Discharged>, Option<&Missile>, Option<&Homing>, Option<&Falling>, Option<&Stunning>)>();
         let mut view = query.view();
         for &(id, entity) in &self.projectiles {
             if shot_down.binary_search(&id).is_ok() {
                 dead.push(id);
                 continue;
             }
-            let (position, projectile, overcharged, missile, homing, falling, stunning) = view.get_mut(entity).expect("projectile list only holds live projectiles");
+            let (position, projectile, discharged, missile, homing, falling, stunning) = view.get_mut(entity).expect("projectile list only holds live projectiles");
             let stun = stunning.map_or(0, |stunning| stunning.0);
             let start = position.0;
             // A shot at an aircraft flies to it and hits only it. With the aircraft gone, it is spent.
@@ -2750,8 +2750,8 @@ impl SimWorld {
                 (start.x.to_bits() + part(step.x), start.y.to_bits() + part(step.y))
             };
             if let Some((along, struck)) = dome_hit.filter(|(along, _)| first(*along)) {
-                if let Some(overcharged) = overcharged {
-                    overcharges.push(OverchargeImpact { def: overcharged.def, source: projectile.source, team: projectile.source_team, point: point_at(along), dome: Some(domes[struck].id) });
+                if let Some(discharged) = discharged {
+                    discharges.push(DischargeImpact { def: discharged.def, source: projectile.source, team: projectile.source_team, point: point_at(along), dome: Some(domes[struck].id) });
                     dead.push(id);
                     continue;
                 }
@@ -2780,8 +2780,8 @@ impl SimWorld {
 
             match (best, probe.hit) {
                 (Some((along, _, target, is_structure)), terrain_hit) if terrain_hit.is_none_or(|ground| along <= ground) => {
-                    if let Some(overcharged) = overcharged {
-                        overcharges.push(OverchargeImpact { def: overcharged.def, source: projectile.source, team: projectile.source_team, point: point_at(along), dome: None });
+                    if let Some(discharged) = discharged {
+                        discharges.push(DischargeImpact { def: discharged.def, source: projectile.source, team: projectile.source_team, point: point_at(along), dome: None });
                     } else if splash {
                         explosions.extend([Some(blast), core].into_iter().flatten());
                     } else {
@@ -2794,8 +2794,8 @@ impl SimWorld {
                     dead.push(id);
                 }
                 (_, Some(ground)) => {
-                    if let Some(overcharged) = overcharged {
-                        overcharges.push(OverchargeImpact { def: overcharged.def, source: projectile.source, team: projectile.source_team, point: point_at(ground), dome: None });
+                    if let Some(discharged) = discharged {
+                        discharges.push(DischargeImpact { def: discharged.def, source: projectile.source, team: projectile.source_team, point: point_at(ground), dome: None });
                     } else if splash {
                         explosions.extend([Some(blast), core].into_iter().flatten());
                     } else {
@@ -2816,18 +2816,18 @@ impl SimWorld {
 
     }
 
-    /// Works out the Overcharge shells that landed this tick, by FAF's rule: each may spend a
+    /// Works out the Discharge shells that landed this tick, by FAF's rule: each may spend a
     /// share of the energy in store, split between the team's shells in flight, at so much a
     /// point of damage, up to its most; of that, it spends only what destroys the toughest enemy
     /// unit where it lands, and never less than its least. Against a lone commander, a structure,
     /// or a structure's dome, it does the least, and against a mobile unit's dome, what brings
     /// the dome down. The energy goes when it lands. Its blast hurts only enemies, commanders and
     /// structures at most their own amounts.
-    fn resolve_overcharges(&mut self) {
-        if self.pending_overcharges.is_empty() {
+    fn resolve_discharges(&mut self) {
+        if self.pending_discharges.is_empty() {
             return;
         }
-        for impact in std::mem::take(&mut self.pending_overcharges) {
+        for impact in std::mem::take(&mut self.pending_discharges) {
             let def = impact.def;
             let team = impact.team;
             let in_flight = 1 + self
@@ -2835,7 +2835,7 @@ impl SimWorld {
                 .iter()
                 .filter(|&&(id, entity)| {
                     self.dead_projectiles.binary_search(&id).is_err()
-                        && self.ecs.get::<&Overcharged>(entity).is_ok()
+                        && self.ecs.get::<&Discharged>(entity).is_ok()
                         && self.ecs.get::<&Projectile>(entity).is_ok_and(|projectile| projectile.source_team == team)
                 })
                 .count() as i64;
@@ -3053,7 +3053,7 @@ impl SimWorld {
             self.seabed_walkers.retain(alive);
             self.transports.retain(alive);
             self.boarding.retain(alive);
-            self.air_stagings.retain(alive);
+            self.airfields.retain(alive);
             self.disabled.retain(alive);
             self.tractors.retain(alive);
             self.dead_units.clear();
@@ -3210,7 +3210,7 @@ impl SimWorld {
             self.clear_footprint(footprint);
             self.economy_dirty = true;
         }
-        // A commander or support commander takes its income and storage with it.
+        // A commander or field rig takes its income and storage with it.
         if let Ok(blueprint) = self.ecs.get::<&Blueprinted>(entity) {
             let unit = self.blueprints.get(blueprint.0);
             if unit.mass_income > Res::ZERO || unit.energy_income > Res::ZERO || unit.mass_storage > Res::ZERO || unit.energy_storage > Res::ZERO {
@@ -3226,7 +3226,7 @@ impl SimWorld {
             if built < Res::ONE / 2 || (unit.is_structure() && built < Res::ONE) {
                 return None;
             }
-            let tech = if unit.is_commander() || unit.class == super::blueprints::UnitClass::SupportCommander {
+            let tech = if unit.is_commander() || unit.class == super::blueprints::UnitClass::FieldRig {
                 WRECK_TECH_PERMILLE[0]
             } else {
                 WRECK_TECH_PERMILLE[usize::from(unit.tier.clamp(1, 4)) - 1]
@@ -3406,12 +3406,12 @@ impl SimWorld {
     fn hash_projectile(&self, entity: hecs::Entity, hasher: &mut impl Hasher) {
         let mut query = self
             .ecs
-            .query_one::<(&Position, &Projectile, Option<&Overcharged>)>(entity)
+            .query_one::<(&Position, &Projectile, Option<&Discharged>)>(entity)
             .expect("projectile list only holds live projectiles");
-        let (position, projectile, overcharged) = query.get().expect("projectiles have every component");
-        if let Some(overcharged) = overcharged {
+        let (position, projectile, discharged) = query.get().expect("projectiles have every component");
+        if let Some(discharged) = discharged {
             hasher.write(&[1]);
-            write_fp(hasher, overcharged.def.structure_damage);
+            write_fp(hasher, discharged.def.structure_damage);
         }
 
         write_vec3(hasher, position.0);
@@ -3517,16 +3517,16 @@ impl SimWorld {
                 })
             })
             .collect();
-        let mut projectile_query = self.ecs.query::<(&Position, &Projectile, Option<&Overcharged>, Option<&Missile>)>();
+        let mut projectile_query = self.ecs.query::<(&Position, &Projectile, Option<&Discharged>, Option<&Missile>)>();
         let projectile_view = projectile_query.view();
         let projectiles = self
             .projectiles
             .iter()
             .filter_map(|&(id, entity)| {
-                let (position, projectile, overcharged, missile) = projectile_view.get(entity).expect("projectile list only holds live projectiles");
+                let (position, projectile, discharged, missile) = projectile_view.get(entity).expect("projectile list only holds live projectiles");
                 let (x, y, z) = (position.0.x.to_bits(), position.0.y.to_bits(), position.0.z.to_bits());
-                let kind = match (overcharged, missile) {
-                    (Some(_), _) => ProjectileKind::Overcharge,
+                let kind = match (discharged, missile) {
+                    (Some(_), _) => ProjectileKind::Discharge,
                     (None, Some(missile)) if missile.strategic => ProjectileKind::StrategicMissile,
                     (None, Some(_)) => ProjectileKind::TacticalMissile,
                     (None, None) => ProjectileKind::Shell,
@@ -3664,9 +3664,9 @@ impl SimWorld {
             own_intel(viewer)
                 .filter(|&&(id, entity)| self.ecs.get::<&Intel>(entity).is_ok_and(|intel| intel.running) && self.ecs.get::<&Construction>(entity).is_err() && !self.is_disabled(id))
                 .filter_map(|&(_, entity)| {
-                    let (radar, omni) = self.sensor_ranges(entity);
+                    let (radar, deep_scan) = self.sensor_ranges(entity);
                     let at = self.ecs.get::<&Position>(entity).ok()?.0;
-                    (radar > Fp::ZERO || omni > Fp::ZERO).then(|| SensorRangeView { center: [at.x.to_bits(), at.y.to_bits()], radar: radar.to_bits(), omni: omni.to_bits() })
+                    (radar > Fp::ZERO || deep_scan > Fp::ZERO).then(|| SensorRangeView { center: [at.x.to_bits(), at.y.to_bits()], radar: radar.to_bits(), deep_scan: deep_scan.to_bits() })
                 })
                 .collect()
         });
@@ -3785,17 +3785,17 @@ impl SimWorld {
 }
 
 impl SimWorld {
-    /// What the viewer's radar shows that it cannot see: enemies on its radar or omni, except
-    /// those hidden by a stealth field or a cloak where it has no omni, and decoys from enemy
-    /// jammers, except where its omni or its sight shows there is nothing there. Each is its
+    /// What the viewer's radar shows that it cannot see: enemies on its radar or deep scan, except
+    /// those hidden by a stealth field or a cloak where it has no deep scan, and decoys from enemy
+    /// jammers, except where its deep scan or its sight shows there is nothing there. Each is its
     /// position's raw bits. The AI reads these too, so it can be fooled by decoys as a player can.
     pub fn blips_for(&self, viewer: Team) -> Vec<[i32; 3]> {
         let visibility = &self.visibility;
-        if !visibility.has_any(Sense::Radar, viewer) && !visibility.has_any(Sense::Omni, viewer) && !visibility.has_any(Sense::Sonar, viewer) {
+        if !visibility.has_any(Sense::Radar, viewer) && !visibility.has_any(Sense::DeepScan, viewer) && !visibility.has_any(Sense::Sonar, viewer) {
             return Vec::new();
         }
         let enemy = viewer.enemy();
-        let on_radar = |x: i32, y: i32| visibility.senses(Sense::Radar, viewer, x, y) || visibility.senses(Sense::Omni, viewer, x, y);
+        let on_radar = |x: i32, y: i32| visibility.senses(Sense::Radar, viewer, x, y) || visibility.senses(Sense::DeepScan, viewer, x, y);
         // The enemy's working stealth fields and jammers.
         let mut fields: Vec<(i32, i32, i64)> = Vec::new();
         let mut jammers: Vec<(SimId, i32, i32, i32, u32)> = Vec::new();
@@ -3837,7 +3837,7 @@ impl SimWorld {
             if shown || !sensed {
                 continue;
             }
-            if !visibility.senses(Sense::Omni, viewer, x, y) {
+            if !visibility.senses(Sense::DeepScan, viewer, x, y) {
                 let stealthed = fields.iter().any(|&(fx, fy, radius)| {
                     let (dx, dy) = (i64::from(x - fx), i64::from(y - fy));
                     dx * dx + dy * dy <= radius * radius
@@ -3855,7 +3855,7 @@ impl SimWorld {
                 let spot = decoy_spot(id, period, decoy, radius);
                 let (x, y) = (jx + (spot.0 << FP_FRAC_BITS), jy + (spot.1 << FP_FRAC_BITS));
                 let point = Vec2Fp::new(Fp::from_bits(x), Fp::from_bits(y));
-                if !self.terrain.in_bounds(point) || !on_radar(x, y) || visibility.senses(Sense::Omni, viewer, x, y) || visibility.is_visible(viewer, x, y) {
+                if !self.terrain.in_bounds(point) || !on_radar(x, y) || visibility.senses(Sense::DeepScan, viewer, x, y) || visibility.is_visible(viewer, x, y) {
                     continue;
                 }
                 blips.push([x, y, (self.terrain.height_at(point) + fp_int(8)).to_bits()]);

@@ -67,11 +67,11 @@ fn income_flows_into_storage_up_to_capacity() {
     run(&mut world, 100);
     let economy = world.economies[0];
     // 2 mass/s for 10 s, minus the single tick where income is first calculated.
-    assert!((19.0..=20.5).contains(&economy.mass.to_num::<f64>()), "mass was {}", economy.mass);
+    assert!((19.0..=20.5).contains(&economy.mass.to_num::<f64>()), "materiel was {}", economy.mass);
     // 20 energy/s has nowhere to go, because no structure stores energy.
     assert_eq!(economy.energy, Res::ZERO);
     run(&mut world, 3_000);
-    assert_eq!(world.economies[0].mass, Res::from_num(500), "mass must stop at capacity");
+    assert_eq!(world.economies[0].mass, Res::from_num(500), "materiel must stop at capacity");
 }
 
 #[test]
@@ -113,7 +113,7 @@ fn construction_takes_build_time_divided_by_build_power() {
     let health = *world.ecs.get::<&Health>(entity(&world, site)).unwrap();
     assert!(health.current >= health.max * 99 / 100, "a finished site should have nearly full health, not {}", health.current);
     let spent = 10_000.0 - world.economies[0].mass.to_num::<f64>();
-    assert!((74.0..=76.0).contains(&spent), "spent {spent} mass, but the cost is 75");
+    assert!((74.0..=76.0).contains(&spent), "spent {spent} materiel, but the cost is 75");
 }
 
 #[test]
@@ -141,7 +141,7 @@ fn energy_stall_stops_work_even_with_mass_available() {
     let (_, site) = engineer_at_site(&mut world);
     run(&mut world, 100);
     assert_eq!(progress(&world, site), 0.0);
-    assert_eq!(world.economies[0].mass, Res::from_num(10_000), "no mass should be spent during an energy stall");
+    assert_eq!(world.economies[0].mass, Res::from_num(10_000), "no materiel should be spent during an energy stall");
 }
 
 #[test]
@@ -175,7 +175,7 @@ fn factory_builds_its_queue_and_assist_speeds_it_up() {
     let mut world = test_world();
     set_resources(&mut world, Team::Blue, 10_000, 100_000);
     let factory_blueprint = id(&world, "land_factory_t1");
-    let bot = id(&world, "t1_light_bot");
+    let bot = id(&world, "t1_light_walker");
     let factory = world.spawn_finished_structure(factory_blueprint, Team::Blue, 50, 50).unwrap();
     let count_bots = |world: &SimWorld| world.units.len() - 1;
     world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: bot, count: 2 }]);
@@ -272,7 +272,7 @@ fn a_factory_under_construction_holds_its_orders_until_it_is_built() {
     let mut world = test_world();
     set_resources(&mut world, Team::Blue, 100_000, 1_000_000);
     let engineer_blueprint = id(&world, "t1_engineer");
-    let (factory_blueprint, bot) = (id(&world, "land_factory_t1"), id(&world, "t1_light_bot"));
+    let (factory_blueprint, bot) = (id(&world, "land_factory_t1"), id(&world, "t1_light_walker"));
     let engineer = world.spawn_mobile(engineer_blueprint, Team::Blue, point(1_000, 1_000));
     let helper = world.spawn_mobile(engineer_blueprint, Team::Blue, point(1_000, 1_020));
     let (cell_x, cell_y) = (1_100 / CELL as u32, 1_000 / CELL as u32);
@@ -333,7 +333,7 @@ fn factory_repeat_loops_and_rally_sends_units() {
     let mut world = test_world();
     set_resources(&mut world, Team::Blue, 10_000, 100_000);
     let factory_blueprint = id(&world, "land_factory_t1");
-    let bot = id(&world, "t1_light_bot");
+    let bot = id(&world, "t1_light_walker");
     let factory = world.spawn_finished_structure(factory_blueprint, Team::Blue, 50, 50).unwrap();
     world.advance_tick(&[
         SimCommand::QueueUnit { factory, blueprint: bot, count: 1 },
@@ -353,7 +353,7 @@ fn factory_repeat_loops_and_rally_sends_units() {
 fn upgrade_halts_production_then_improves_the_factory() {
     let mut world = test_world();
     set_resources(&mut world, Team::Blue, 10_000, 100_000);
-    let (t1, t2, bot, tank) = (id(&world, "land_factory_t1"), id(&world, "land_factory_t2"), id(&world, "t1_light_bot"), id(&world, "t2_heavy_tank"));
+    let (t1, t2, bot, tank) = (id(&world, "land_factory_t1"), id(&world, "land_factory_t2"), id(&world, "t1_light_walker"), id(&world, "t2_heavy_tank"));
     let factory = world.spawn_finished_structure(t1, Team::Blue, 50, 50).unwrap();
     // A T1 factory cannot build tanks, so this order is refused.
     world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: tank, count: 1 }]);
@@ -380,7 +380,7 @@ fn upgrade_halts_production_then_improves_the_factory() {
 fn an_upgrade_on_a_repeating_factory_happens_once_and_units_keep_looping() {
     let mut world = test_world();
     set_resources(&mut world, Team::Blue, 100_000, 1_000_000);
-    let (t1, t2, bot) = (id(&world, "land_factory_t1"), id(&world, "land_factory_t2"), id(&world, "t1_light_bot"));
+    let (t1, t2, bot) = (id(&world, "land_factory_t1"), id(&world, "land_factory_t2"), id(&world, "t1_light_walker"));
     let factory = world.spawn_finished_structure(t1, Team::Blue, 50, 50).unwrap();
     world.advance_tick(&[
         SimCommand::SetRepeat { factory, repeat: true },
@@ -410,7 +410,7 @@ fn asking_for_an_upgrade_twice_only_queues_it_once() {
 fn several_factories_can_take_the_same_orders() {
     let mut world = test_world();
     set_resources(&mut world, Team::Blue, 100_000, 1_000_000);
-    let (t1, t2, bot, tank) = (id(&world, "land_factory_t1"), id(&world, "land_factory_t2"), id(&world, "t1_light_bot"), id(&world, "t2_heavy_tank"));
+    let (t1, t2, bot, tank) = (id(&world, "land_factory_t1"), id(&world, "land_factory_t2"), id(&world, "t1_light_walker"), id(&world, "t2_heavy_tank"));
     let first = world.spawn_finished_structure(t1, Team::Blue, 50, 50).unwrap();
     let second = world.spawn_finished_structure(t1, Team::Blue, 60, 50).unwrap();
     let third = world.spawn_finished_structure(t2, Team::Blue, 70, 50).unwrap();
@@ -448,7 +448,7 @@ fn extractor_output_grows_with_each_touching_storage() {
 fn factory_demand(neighbors: &[&str]) -> (f64, f64) {
     let mut world = test_world();
     set_resources(&mut world, Team::Blue, 100_000, 100_000);
-    let (t1, bot) = (id(&world, "land_factory_t1"), id(&world, "t1_light_bot"));
+    let (t1, bot) = (id(&world, "land_factory_t1"), id(&world, "t1_light_walker"));
     let factory = world.spawn_finished_structure(t1, Team::Blue, 50, 50).unwrap();
     for (index, key) in neighbors.iter().enumerate() {
         if *key == "mass_extractor" {
@@ -467,7 +467,7 @@ fn neighbors_cut_a_factorys_costs_as_in_faf() {
     let (base_mass, base_energy) = factory_demand(&[]);
     // A T1 generator takes 1.563% off a factory's energy, and nothing off its mass.
     let (mass, energy) = factory_demand(&["power_generator", "power_generator"]);
-    assert!((mass - base_mass).abs() < 1e-5, "mass should not change: {mass} against {base_mass}");
+    assert!((mass - base_mass).abs() < 1e-5, "materiel should not change: {mass} against {base_mass}");
     assert!((energy / base_energy - 0.968_74).abs() < 0.000_2, "two T1 generators: {}", energy / base_energy);
     // A T1 extractor takes 7.5% off its mass.
     let (mass, _) = factory_demand(&["mass_extractor"]);
@@ -501,7 +501,7 @@ fn energy_storage_holds_energy_and_adds_to_the_generators_it_touches() {
 #[test]
 fn structures_block_movement_and_units_walk_out_from_under_them() {
     let mut world = test_world();
-    let (bot, factory) = (id(&world, "t1_light_bot"), id(&world, "land_factory_t1"));
+    let (bot, factory) = (id(&world, "t1_light_walker"), id(&world, "land_factory_t1"));
     let unit = world.spawn_mobile(bot, Team::Blue, point(1_030, 1_030));
     world.spawn_finished_structure(factory, Team::Blue, 50, 50).unwrap();
     assert!(!world.terrain.is_passable(world.unit_position(unit).unwrap().xy()), "the setup should place the unit inside the factory");
@@ -524,14 +524,14 @@ fn destroying_a_structure_opens_the_ground_and_leaves_a_wreck() {
     let structure = world.spawn_finished_structure(generator, Team::Blue, 50, 50).unwrap();
     assert!(!world.terrain.cell_is_open(50, 50));
     world.ecs.get::<&mut Health>(entity(&world, structure)).unwrap().current = Fp::ONE;
-    let enemy = id(&world, "t1_light_bot");
+    let enemy = id(&world, "t1_light_walker");
     world.spawn_mobile(enemy, Team::Red, point(1_010, 1_100));
     run(&mut world, 60);
     assert!(world.unit_position(structure).is_none(), "the structure should have been destroyed");
     assert!(world.terrain.cell_is_open(50, 50), "the ground should be open again");
     assert_eq!(world.wrecks.len(), 1);
     let wreck = *world.ecs.get::<&sim_engine::sim::components::Wreck>(world.wrecks[0].1).unwrap();
-    assert_eq!(wreck.mass.to_num::<i64>(), 60, "81% of a 75-mass generator");
+    assert_eq!(wreck.mass.to_num::<i64>(), 60, "81% of a 75-materiel generator");
 }
 
 #[test]
@@ -543,7 +543,7 @@ fn a_builder_walking_to_its_site_past_an_idle_friend_gets_there() {
     let mut world = test_world();
     set_resources(&mut world, Team::Blue, 1_000, 1_000);
     let engineer = world.spawn_mobile(id(&world, "t1_engineer"), Team::Blue, point(1_000, 1_000));
-    world.spawn_mobile(id(&world, "t1_light_bot"), Team::Blue, point(1_000, 988));
+    world.spawn_mobile(id(&world, "t1_light_walker"), Team::Blue, point(1_000, 988));
     let generator = id(&world, "power_generator");
     world.advance_tick(&[SimCommand::Build { units: vec![engineer], blueprint: generator, cell_x: 60, cell_y: 50, queued: false }]);
     run(&mut world, 400);
@@ -556,7 +556,7 @@ fn engineers_reclaim_wrecks_into_mass() {
     let mut world = test_world();
     set_resources(&mut world, Team::Blue, 1_000, 1_000);
     world.economies[0].mass = Res::ZERO;
-    let (engineer_blueprint, bot) = (id(&world, "t1_engineer"), id(&world, "t1_light_bot"));
+    let (engineer_blueprint, bot) = (id(&world, "t1_engineer"), id(&world, "t1_light_walker"));
     let doomed = world.spawn_mobile(bot, Team::Red, point(1_000, 1_000));
     let engineer = world.spawn_mobile(engineer_blueprint, Team::Blue, point(1_400, 1_000));
     world.ecs.get::<&mut Health>(entity(&world, doomed)).unwrap().current = Fp::ONE;
@@ -579,7 +579,7 @@ fn engineers_reclaim_wrecks_into_mass() {
     assert!(saw_reclaim_link, "reclaiming should show as work");
     assert!(world.wrecks.is_empty(), "the wreck should be gone");
     let mass = world.economies[0].mass.to_num::<f64>();
-    assert!((24.2..=24.4).contains(&mass), "reclaimed {mass} mass");
+    assert!((24.2..=24.4).contains(&mass), "reclaimed {mass} materiel");
     // The economy panel shows reclaim coming in while it lasts, and the total once it is done.
     let economy = world.snapshot_for(Some(Team::Blue)).economy;
     assert!(most_reclaim_rate > 0, "reclaim showed no rate");
@@ -591,7 +591,7 @@ fn engineers_reclaim_wrecks_into_mass() {
 #[test]
 fn patrolling_engineers_reclaim_on_their_own_then_carry_on() {
     let mut world = test_world();
-    let (engineer_blueprint, bot) = (id(&world, "t1_engineer"), id(&world, "t1_light_bot"));
+    let (engineer_blueprint, bot) = (id(&world, "t1_engineer"), id(&world, "t1_light_walker"));
     let doomed = world.spawn_mobile(bot, Team::Red, point(1_000, 1_000));
     world.ecs.get::<&mut Health>(entity(&world, doomed)).unwrap().current = Fp::ONE;
     let attacker = world.spawn_mobile(bot, Team::Blue, point(1_100, 1_000));
@@ -616,7 +616,7 @@ fn patrolling_engineers_reclaim_on_their_own_then_carry_on() {
 #[test]
 fn patrolling_combat_units_loop_through_their_points() {
     let mut world = test_world();
-    let bot = id(&world, "t1_light_bot");
+    let bot = id(&world, "t1_light_walker");
     let unit = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
     world.advance_tick(&[SimCommand::Patrol { units: vec![unit], points: vec![point(1_100, 1_000), point(1_000, 1_000)], queued: false }]);
     let mut visited_far = false;
@@ -633,7 +633,7 @@ fn patrolling_combat_units_loop_through_their_points() {
 #[test]
 fn attack_order_closes_range_and_ignores_nearer_enemies() {
     let mut world = test_world();
-    let bot = id(&world, "t1_light_bot");
+    let bot = id(&world, "t1_light_walker");
     let attacker = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
     let near = world.spawn_mobile(bot, Team::Red, point(1_100, 1_000));
     let far = world.spawn_mobile(bot, Team::Red, point(2_000, 1_000));
@@ -659,7 +659,7 @@ fn shells_do_not_hit_allies_on_the_way_but_strays_and_blasts_do() {
         SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, friendly_fire: true, ..SimConfig::default() },
         1,
     );
-    let bot = id(&world, "t1_light_bot");
+    let bot = id(&world, "t1_light_walker");
     let shooter = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
     let front_rank = world.spawn_mobile(bot, Team::Blue, point(1_100, 1_000));
     let target = world.spawn_mobile(bot, Team::Red, point(1_200, 1_000));
@@ -718,7 +718,7 @@ fn shells_do_not_hit_allies_on_the_way_but_strays_and_blasts_do() {
 fn fog_hides_enemies_from_targeting_and_the_players_view() {
     let config = SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: true, ..SimConfig::default() };
     let mut world = SimWorld::new(config, 1);
-    let (artillery, bot) = (id(&world, "t1_light_artillery"), id(&world, "t1_light_bot"));
+    let (artillery, bot) = (id(&world, "t1_light_artillery"), id(&world, "t1_light_walker"));
     world.spawn_mobile(artillery, Team::Blue, point(1_000, 1_000));
     let enemy = world.spawn_mobile(bot, Team::Red, point(1_560, 1_000));
     world.ecs.get::<&mut Combat>(entity(&world, enemy)).unwrap().range = Fp::ZERO;
@@ -743,9 +743,9 @@ fn fog_hides_enemies_from_targeting_and_the_players_view() {
 fn commander_with_neighbors() -> (SimWorld, SimId, SimId, SimId, SimId) {
     let config = SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, ..SimConfig::default() };
     let mut world = SimWorld::new(config, 1);
-    let (acu, bot, generator) = (id(&world, "acu"), id(&world, "t1_light_bot"), id(&world, "power_generator"));
-    let blue = world.spawn_mobile(acu, Team::Blue, point(1_000, 1_000));
-    let red = world.spawn_mobile(acu, Team::Red, point(4_000, 4_000));
+    let (rig, bot, generator) = (id(&world, "command_rig"), id(&world, "t1_light_walker"), id(&world, "power_generator"));
+    let blue = world.spawn_mobile(rig, Team::Blue, point(1_000, 1_000));
+    let red = world.spawn_mobile(rig, Team::Red, point(4_000, 4_000));
     let nearby_enemy = world.spawn_mobile(bot, Team::Red, point(1_150, 1_000));
     let blue_base = world.spawn_finished_structure(generator, Team::Blue, 150, 150).unwrap();
     world.ecs.get::<&mut Combat>(entity(&world, nearby_enemy)).unwrap().range = Fp::ZERO;
@@ -758,7 +758,7 @@ fn commander_death_detonates_and_eliminates_its_team() {
     world.ecs.get::<&mut Health>(entity(&world, blue)).unwrap().current = Fp::ONE;
     // Blue's commander must not shoot first: a light bot has only 60 health.
     world.ecs.get::<&mut Combat>(entity(&world, blue)).unwrap().range = Fp::ZERO;
-    let shooter = world.spawn_mobile(id(&world, "t1_light_bot"), Team::Red, point(1_100, 1_100));
+    let shooter = world.spawn_mobile(id(&world, "t1_light_walker"), Team::Red, point(1_100, 1_100));
     run(&mut world, 30);
     assert_eq!(world.match_result, Some(MatchResult::Winner(Team::Red)));
     assert!(world.unit_position(blue).is_none());
@@ -812,7 +812,7 @@ fn queued_builds_appear_in_order_and_leave_the_plan_when_finished() {
 fn plans_show_moves_attacks_patrols_and_support() {
     let mut world = test_world();
     set_resources(&mut world, Team::Blue, 10_000, 100_000);
-    let (bot, engineer_blueprint, generator) = (id(&world, "t1_light_bot"), id(&world, "t1_engineer"), id(&world, "power_generator"));
+    let (bot, engineer_blueprint, generator) = (id(&world, "t1_light_walker"), id(&world, "t1_engineer"), id(&world, "power_generator"));
     let walker = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
     let attacker = world.spawn_mobile(bot, Team::Blue, point(1_100, 1_000));
     let fighter = world.spawn_mobile(bot, Team::Blue, point(1_200, 1_000));
@@ -842,7 +842,7 @@ fn plans_show_moves_attacks_patrols_and_support() {
 fn plans_never_show_the_other_team_or_a_hidden_target() {
     let config = SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: true, ..SimConfig::default() };
     let mut world = SimWorld::new(config, 1);
-    let bot = id(&world, "t1_light_bot");
+    let bot = id(&world, "t1_light_walker");
     let attacker = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
     let enemy = world.spawn_mobile(bot, Team::Red, point(4_000, 4_000));
     world.ecs.get::<&mut Combat>(entity(&world, enemy)).unwrap().range = Fp::ZERO;
@@ -882,9 +882,9 @@ fn reading_plans_does_not_change_the_checksum() {
 #[test]
 fn commanders_killed_together_is_a_draw() {
     let mut world = test_world();
-    let acu = id(&world, "acu");
-    let blue = world.spawn_mobile(acu, Team::Blue, point(1_000, 1_000));
-    let red = world.spawn_mobile(acu, Team::Red, point(1_200, 1_000));
+    let rig = id(&world, "command_rig");
+    let blue = world.spawn_mobile(rig, Team::Blue, point(1_000, 1_000));
+    let red = world.spawn_mobile(rig, Team::Red, point(1_200, 1_000));
     world.ecs.get::<&mut Health>(entity(&world, blue)).unwrap().current = Fp::ONE;
     // When one reactor goes, its blast reaches the other, which detonates in the same tick.
     for _ in 0..30 {
@@ -923,7 +923,7 @@ fn production_state_changes_the_checksum() {
     set_resources(&mut world, Team::Blue, 1_000, 10_000);
     let (engineer, site) = engineer_at_site(&mut world);
     let t1 = id(&world, "land_factory_t1");
-    let bot = id(&world, "t1_light_bot");
+    let bot = id(&world, "t1_light_walker");
     let factory = world.spawn_finished_structure(t1, Team::Blue, 150, 150).unwrap();
     world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: bot, count: 2 }]);
     run(&mut world, 3);
@@ -935,7 +935,7 @@ fn production_state_changes_the_checksum() {
         assert_eq!(world.compute_checksum(), baseline, "undoing {name} did not restore the checksum");
     };
     let tiny = Res::from_bits(1);
-    check(&mut world, "stored mass", &|w| w.economies[0].mass += tiny, &|w| w.economies[0].mass -= tiny);
+    check(&mut world, "stored materiel", &|w| w.economies[0].mass += tiny, &|w| w.economies[0].mass -= tiny);
     check(&mut world, "stored energy", &|w| w.economies[1].energy += tiny, &|w| w.economies[1].energy -= tiny);
     let site_entity = entity(&world, site);
     check(
@@ -1005,7 +1005,7 @@ fn an_engineer_at_any_rally_point_goes_on_to_its_queued_builds() {
 #[test]
 fn a_unit_sent_onto_a_structure_finishes_its_order_beside_it() {
     let mut world = test_world();
-    let (factory_blueprint, bot) = (id(&world, "land_factory_t1"), id(&world, "t1_light_bot"));
+    let (factory_blueprint, bot) = (id(&world, "land_factory_t1"), id(&world, "t1_light_walker"));
     let factory = world.spawn_finished_structure(factory_blueprint, Team::Blue, 50, 50).unwrap();
     let inside = world.unit_position(factory).unwrap().xy();
     let unit = world.spawn_mobile(bot, Team::Blue, point(1_400, 1_000));
@@ -1128,7 +1128,7 @@ fn removing_an_order_only_affects_the_builders_named() {
 fn removing_a_factory_item_takes_the_last_one_and_keeps_work_under_way() {
     let mut world = test_world();
     set_resources(&mut world, Team::Blue, 100_000, 1_000_000);
-    let (factory_blueprint, bot, artillery) = (id(&world, "land_factory_t1"), id(&world, "t1_light_bot"), id(&world, "t1_light_artillery"));
+    let (factory_blueprint, bot, artillery) = (id(&world, "land_factory_t1"), id(&world, "t1_light_walker"), id(&world, "t1_light_artillery"));
     let factory = world.spawn_finished_structure(factory_blueprint, Team::Blue, 50, 50).unwrap();
     world.advance_tick(&[
         SimCommand::QueueUnit { factory, blueprint: bot, count: 1 },
@@ -1162,7 +1162,7 @@ fn removing_a_factory_item_takes_the_last_one_and_keeps_work_under_way() {
 /// A T1 factory with an upgrade queued, and everything needed for it.
 fn factory_upgrading(world: &mut SimWorld) -> (SimId, BlueprintId, BlueprintId, BlueprintId) {
     set_resources(world, Team::Blue, 100_000, 1_000_000);
-    let (t1, t2, tank, bot) = (id(world, "land_factory_t1"), id(world, "land_factory_t2"), id(world, "t2_heavy_tank"), id(world, "t1_light_bot"));
+    let (t1, t2, tank, bot) = (id(world, "land_factory_t1"), id(world, "land_factory_t2"), id(world, "t2_heavy_tank"), id(world, "t1_light_walker"));
     let factory = world.spawn_finished_structure(t1, Team::Blue, 50, 50).unwrap();
     world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: t2, count: 1 }]);
     (factory, t2, tank, bot)
@@ -1203,7 +1203,7 @@ fn units_queued_during_an_upgrade_wait_for_it_and_then_get_built() {
 fn a_factory_without_an_upgrade_queued_still_refuses_higher_units() {
     let mut world = test_world();
     set_resources(&mut world, Team::Blue, 100_000, 1_000_000);
-    let (t1, tank, bot) = (id(&world, "land_factory_t1"), id(&world, "t2_heavy_tank"), id(&world, "t1_light_bot"));
+    let (t1, tank, bot) = (id(&world, "land_factory_t1"), id(&world, "t2_heavy_tank"), id(&world, "t1_light_walker"));
     let factory = world.spawn_finished_structure(t1, Team::Blue, 50, 50).unwrap();
     world.advance_tick(&[
         SimCommand::QueueUnit { factory, blueprint: bot, count: 1 },
@@ -1244,7 +1244,7 @@ fn removing_a_waiting_unit_leaves_the_upgrade_alone() {
 fn a_repeating_factory_keeps_a_waiting_unit_behind_the_upgrade() {
     let mut world = test_world();
     set_resources(&mut world, Team::Blue, 100_000, 1_000_000);
-    let (t1, t2, tank, bot) = (id(&world, "land_factory_t1"), id(&world, "land_factory_t2"), id(&world, "t2_heavy_tank"), id(&world, "t1_light_bot"));
+    let (t1, t2, tank, bot) = (id(&world, "land_factory_t1"), id(&world, "land_factory_t2"), id(&world, "t2_heavy_tank"), id(&world, "t1_light_walker"));
     let factory = world.spawn_finished_structure(t1, Team::Blue, 50, 50).unwrap();
     world.advance_tick(&[
         SimCommand::SetRepeat { factory, repeat: true },
@@ -1271,8 +1271,8 @@ fn distance_between(world: &SimWorld, first: SimId, second: SimId) -> f64 {
 #[test]
 fn a_follower_waits_beside_its_unit_without_pushing_it() {
     let mut world = test_world();
-    let (acu, bot) = (id(&world, "acu"), id(&world, "t1_light_bot"));
-    let ward = world.spawn_mobile(acu, Team::Blue, point(1_000, 1_000));
+    let (rig, bot) = (id(&world, "command_rig"), id(&world, "t1_light_walker"));
+    let ward = world.spawn_mobile(rig, Team::Blue, point(1_000, 1_000));
     let guard = world.spawn_mobile(bot, Team::Blue, point(1_300, 1_000));
     let start = world.unit_position(ward).unwrap();
     world.advance_tick(&[SimCommand::Follow { units: vec![guard], target: ward }]);
@@ -1291,7 +1291,7 @@ fn a_follower_waits_beside_its_unit_without_pushing_it() {
 #[test]
 fn a_follower_fires_at_enemies_in_range_without_leaving_its_unit() {
     let mut world = test_world();
-    let (engineer, bot) = (id(&world, "t1_engineer"), id(&world, "t1_light_bot"));
+    let (engineer, bot) = (id(&world, "t1_engineer"), id(&world, "t1_light_walker"));
     let ward = world.spawn_mobile(engineer, Team::Blue, point(1_000, 1_000));
     let guard = world.spawn_mobile(bot, Team::Blue, point(1_030, 1_000));
     world.advance_tick(&[SimCommand::Follow { units: vec![guard], target: ward }]);
@@ -1314,9 +1314,9 @@ fn a_follower_fires_at_enemies_in_range_without_leaving_its_unit() {
 #[test]
 fn a_follower_stands_down_when_its_unit_dies() {
     let mut world = test_world();
-    let (engineer, bot, acu) = (id(&world, "t1_engineer"), id(&world, "t1_light_bot"), id(&world, "acu"));
+    let (engineer, bot, rig) = (id(&world, "t1_engineer"), id(&world, "t1_light_walker"), id(&world, "command_rig"));
     let ward = world.spawn_mobile(engineer, Team::Blue, point(1_000, 1_000));
-    let guard = world.spawn_mobile(acu, Team::Blue, point(1_200, 1_000));
+    let guard = world.spawn_mobile(rig, Team::Blue, point(1_200, 1_000));
     world.advance_tick(&[SimCommand::Follow { units: vec![guard], target: ward }]);
     world.ecs.get::<&mut Health>(entity(&world, ward)).unwrap().current = Fp::ONE;
     world.spawn_mobile(bot, Team::Red, point(1_000, 1_040));
@@ -1347,7 +1347,7 @@ fn run_until_near(world: &mut SimWorld, unit: SimId, place: Vec2Fp, within: f64)
 #[test]
 fn a_unit_works_through_queued_moves_in_order_then_stops() {
     let mut world = test_world();
-    let bot = id(&world, "t1_light_bot");
+    let bot = id(&world, "t1_light_walker");
     let unit = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
     let (first, second, third) = (point(1_300, 1_000), point(1_300, 1_300), point(1_000, 1_300));
     world.advance_tick(&[
@@ -1370,7 +1370,7 @@ fn a_unit_works_through_queued_moves_in_order_then_stops() {
 #[test]
 fn a_queued_move_starts_straight_away_for_an_idle_unit() {
     let mut world = test_world();
-    let bot = id(&world, "t1_light_bot");
+    let bot = id(&world, "t1_light_walker");
     let unit = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
     world.advance_tick(&[SimCommand::QueueMove { units: vec![unit], goal: point(1_300, 1_000), attack: true }]);
     assert_eq!(order_kind(&world, unit), OrderKind::AttackMove);
@@ -1380,7 +1380,7 @@ fn a_queued_move_starts_straight_away_for_an_idle_unit() {
 #[test]
 fn a_group_shares_a_route_for_each_stop_and_forms_up_at_each_one() {
     let mut world = test_world();
-    let bot = id(&world, "t1_light_bot");
+    let bot = id(&world, "t1_light_walker");
     let units: Vec<SimId> = (0..16).map(|index| world.spawn_mobile(bot, Team::Blue, point(1_000 + index % 4 * 30, 1_000 + index / 4 * 30))).collect();
     let (first, second) = (point(1_600, 1_000), point(1_600, 1_600));
     world.advance_tick(&[
@@ -1473,7 +1473,7 @@ fn an_engineer_can_mix_moves_and_builds_in_any_order() {
 #[test]
 fn a_new_order_or_stop_drops_the_queue_and_hands_its_routes_back() {
     let mut world = test_world();
-    let (bot, engineer_blueprint) = (id(&world, "t1_light_bot"), id(&world, "t1_engineer"));
+    let (bot, engineer_blueprint) = (id(&world, "t1_light_walker"), id(&world, "t1_engineer"));
     let unit = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
     let engineer = world.spawn_mobile(engineer_blueprint, Team::Blue, point(1_000, 1_100));
     let both = vec![unit, engineer];
@@ -1497,13 +1497,13 @@ fn a_new_order_or_stop_drops_the_queue_and_hands_its_routes_back() {
 #[test]
 fn a_unit_that_dies_hands_its_queued_routes_back() {
     let mut world = test_world();
-    let (bot, engineer_blueprint) = (id(&world, "t1_light_bot"), id(&world, "t1_engineer"));
+    let (bot, engineer_blueprint) = (id(&world, "t1_light_walker"), id(&world, "t1_engineer"));
     let unit = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
     let engineer = world.spawn_mobile(engineer_blueprint, Team::Blue, point(1_000, 1_100));
     let queue = |goal: Vec2Fp| SimCommand::QueueMove { units: vec![unit, engineer], goal, attack: false };
     world.advance_tick(&[queue(point(4_000, 1_000)), queue(point(4_000, 2_000))]);
     assert_eq!(world.flow_field.route_count(), 2);
-    let killer = id(&world, "acu");
+    let killer = id(&world, "command_rig");
     for doomed in [unit, engineer] {
         world.ecs.get::<&mut Health>(entity(&world, doomed)).unwrap().current = Fp::ONE;
     }
@@ -1518,7 +1518,7 @@ fn a_unit_that_dies_hands_its_queued_routes_back() {
 #[test]
 fn a_queued_move_can_be_removed_from_the_panel_whether_waiting_or_under_way() {
     let mut world = test_world();
-    let (bot, engineer_blueprint) = (id(&world, "t1_light_bot"), id(&world, "t1_engineer"));
+    let (bot, engineer_blueprint) = (id(&world, "t1_light_walker"), id(&world, "t1_engineer"));
     let unit = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
     let engineer = world.spawn_mobile(engineer_blueprint, Team::Blue, point(1_000, 1_100));
     let both = vec![unit, engineer];
@@ -1550,7 +1550,7 @@ fn a_queued_move_can_be_removed_from_the_panel_whether_waiting_or_under_way() {
 #[test]
 fn queueing_an_order_ends_a_patrol_and_only_builders_take_queued_tasks() {
     let mut world = test_world();
-    let (bot, engineer_blueprint) = (id(&world, "t1_light_bot"), id(&world, "t1_engineer"));
+    let (bot, engineer_blueprint) = (id(&world, "t1_light_walker"), id(&world, "t1_engineer"));
     let unit = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
     let engineer = world.spawn_mobile(engineer_blueprint, Team::Blue, point(1_000, 1_100));
     world.advance_tick(&[SimCommand::Patrol { units: vec![unit], points: vec![point(1_200, 1_000), point(1_000, 1_000)], queued: false }]);
@@ -1569,7 +1569,7 @@ fn queueing_an_order_ends_a_patrol_and_only_builders_take_queued_tasks() {
 #[test]
 fn structures_in_a_queued_group_are_left_out() {
     let mut world = test_world();
-    let (bot, factory_blueprint) = (id(&world, "t1_light_bot"), id(&world, "land_factory_t1"));
+    let (bot, factory_blueprint) = (id(&world, "t1_light_walker"), id(&world, "land_factory_t1"));
     let unit = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
     let factory = world.spawn_finished_structure(factory_blueprint, Team::Blue, 80, 80).unwrap();
     world.advance_tick(&[SimCommand::QueueMove { units: vec![unit, factory], goal: point(1_300, 1_000), attack: false }]);
@@ -1586,7 +1586,7 @@ fn stops_of(world: &SimWorld, unit: SimId) -> Vec<BuildTask> {
 #[test]
 fn a_move_under_way_can_be_dragged_somewhere_else() {
     let mut world = test_world();
-    let bot = id(&world, "t1_light_bot");
+    let bot = id(&world, "t1_light_walker");
     let unit = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
     world.advance_tick(&[SimCommand::Move { units: vec![unit], goal: point(1_500, 1_000) }]);
     run(&mut world, 5);
@@ -1604,7 +1604,7 @@ fn a_move_under_way_can_be_dragged_somewhere_else() {
 #[test]
 fn a_queued_move_can_be_dragged_and_keeps_its_place_in_line() {
     let mut world = test_world();
-    let (bot, engineer_blueprint) = (id(&world, "t1_light_bot"), id(&world, "t1_engineer"));
+    let (bot, engineer_blueprint) = (id(&world, "t1_light_walker"), id(&world, "t1_engineer"));
     let unit = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
     let engineer = world.spawn_mobile(engineer_blueprint, Team::Blue, point(1_000, 1_100));
     let both = vec![unit, engineer];
@@ -1661,7 +1661,7 @@ fn a_build_that_has_not_started_can_be_dragged_and_one_that_has_cannot() {
 #[test]
 fn moving_an_order_that_is_already_finished_does_nothing() {
     let mut world = test_world();
-    let bot = id(&world, "t1_light_bot");
+    let bot = id(&world, "t1_light_walker");
     let unit = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
     world.advance_tick(&[SimCommand::Move { units: vec![unit], goal: point(1_100, 1_000) }]);
     let task = stops_of(&world, unit)[0];
@@ -1675,7 +1675,7 @@ fn moving_an_order_that_is_already_finished_does_nothing() {
 #[test]
 fn patrols_and_attacks_and_follow_orders_have_no_handles() {
     let mut world = test_world();
-    let bot = id(&world, "t1_light_bot");
+    let bot = id(&world, "t1_light_walker");
     let patroller = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
     let attacker = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_100));
     let follower = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_200));
@@ -1695,7 +1695,7 @@ fn patrols_and_attacks_and_follow_orders_have_no_handles() {
 #[test]
 fn rates_show_real_output_and_what_a_factory_really_spends() {
     let mut world = test_world();
-    let (extractor, generator, factory_blueprint, bot) = (id(&world, "mass_extractor"), id(&world, "power_generator"), id(&world, "land_factory_t1"), id(&world, "t1_light_bot"));
+    let (extractor, generator, factory_blueprint, bot) = (id(&world, "mass_extractor"), id(&world, "power_generator"), id(&world, "land_factory_t1"), id(&world, "t1_light_walker"));
     world.deposits.push((10, 10));
     let mine = world.spawn_finished_structure(extractor, Team::Blue, 10, 10).unwrap();
     let power = world.spawn_finished_structure(generator, Team::Blue, 30, 30).unwrap();
@@ -1703,7 +1703,7 @@ fn rates_show_real_output_and_what_a_factory_really_spends() {
     set_resources(&mut world, Team::Blue, 100_000, 1_000_000);
     run(&mut world, 2);
     let rates_of = |world: &SimWorld, unit: SimId| *world.snapshot_for(Some(Team::Blue)).rates.iter().find(|rates| rates.id == unit).expect("should be listed");
-    assert_eq!(rates_of(&world, mine).mass_income, 20, "2 mass per second, in tenths");
+    assert_eq!(rates_of(&world, mine).mass_income, 20, "2 materiel per second, in tenths");
     assert_eq!(rates_of(&world, power).energy_income, 200, "20 energy per second, in tenths");
     assert_eq!(rates_of(&world, factory).mass_use, 0, "an idle factory spends nothing");
 
@@ -1717,7 +1717,7 @@ fn rates_show_real_output_and_what_a_factory_really_spends() {
     run(&mut world, 3);
     let stalled = rates_of(&world, factory);
     assert!(stalled.mass_use < full.mass_use, "{stalled:?} against {full:?}");
-    assert!(stalled.mass_use <= 21, "it cannot spend more than the 2 mass per second coming in: {stalled:?}");
+    assert!(stalled.mass_use <= 21, "it cannot spend more than the 2 materiel per second coming in: {stalled:?}");
     assert!(world.snapshot_for(Some(Team::Red)).rates.iter().all(|rates| rates.id != factory), "the enemy must not see this");
 }
 
@@ -1798,7 +1798,7 @@ fn a_build_that_cannot_be_reached_is_dropped_and_the_next_one_built() {
 fn a_paused_factory_spends_nothing_and_keeps_its_queue_until_resumed() {
     let mut world = test_world();
     set_resources(&mut world, Team::Blue, 100_000, 1_000_000);
-    let (factory_blueprint, bot) = (id(&world, "land_factory_t1"), id(&world, "t1_light_bot"));
+    let (factory_blueprint, bot) = (id(&world, "land_factory_t1"), id(&world, "t1_light_walker"));
     let factory = world.spawn_finished_structure(factory_blueprint, Team::Blue, 50, 50).unwrap();
     world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: bot, count: 3 }]);
     run(&mut world, 5);
@@ -1867,7 +1867,7 @@ fn a_tree_gives_quick_energy_and_a_little_mass() {
     run(&mut world, 10);
     assert_eq!(scenery_kind(&world, tree), None, "the tree should be gone");
     let (mass, energy) = (world.economies[0].mass.to_num::<f64>(), world.economies[0].energy.to_num::<f64>());
-    assert!((0.99..=1.01).contains(&mass), "reclaimed {mass} mass");
+    assert!((0.99..=1.01).contains(&mass), "reclaimed {mass} materiel");
     assert!((19.9..=20.1).contains(&energy), "reclaimed {energy} energy");
 }
 
@@ -1886,7 +1886,7 @@ fn a_rock_gives_mass_by_its_size_and_no_energy() {
     run(&mut world, 20);
     assert_eq!(scenery_kind(&world, rock), None, "gone after 5");
     let mass = world.economies[0].mass.to_num::<f64>();
-    assert!((39.9..=40.1).contains(&mass), "reclaimed {mass} mass");
+    assert!((39.9..=40.1).contains(&mass), "reclaimed {mass} materiel");
     assert_eq!(world.economies[0].energy, Res::ZERO);
 }
 

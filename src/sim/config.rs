@@ -72,7 +72,7 @@ pub const ROCK_MASS_PER_RADIUS: i64 = 5;
 /// level and for sinking (GAME_SPECIFICATION.md §6.1): FAF's Wreckage.MassMult.
 pub const WRECK_MASS_PERMILLE: i64 = 900;
 /// FAF's further share of a wreck's mass by tech level, in thousandths: T1, T2, T3, and
-/// experimental. Commanders and support commanders keep T1's.
+/// experimental. Commanders and field rigs keep T1's.
 pub const WRECK_TECH_PERMILLE: [i64; 4] = [900, 800, 700, 600];
 /// A wreck that sinks, from a unit that died over water, keeps this share again, in thousandths.
 pub const WRECK_SUNK_PERMILLE: i64 = 600;

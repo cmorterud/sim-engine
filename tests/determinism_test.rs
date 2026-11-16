@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use sim_engine::math::fp::{Fp, Vec2Fp};
-use sim_engine::sim::components::{Combat, Health, Order, OrderKind, OrderQueue, OverchargeOrder, Paused, Position, SimId, Turning, Turret, Velocity, Veterancy};
+use sim_engine::sim::components::{Combat, Health, Order, OrderKind, OrderQueue, DischargeOrder, Paused, Position, SimId, Turning, Turret, Velocity, Veterancy};
 use sim_engine::sim::blueprints::Res;
 use sim_engine::sim::config::{SimConfig, TerrainStyle};
 use sim_engine::sim::scenario::{self, Scenario};
@@ -106,14 +106,14 @@ fn every_wreck_and_reclaim_field_changes_the_checksum() {
     let wide_bit = sim_engine::sim::blueprints::Res::from_bits(1);
     type Edit = Box<dyn Fn(&mut SimWorld, bool)>;
     let edits: Vec<(&str, Edit)> = vec![
-        ("wreck mass", Box::new(move |w, undo| w.ecs.get::<&mut Wreck>(entity).unwrap().mass += if undo { -wide_bit } else { wide_bit })),
+        ("wreck materiel", Box::new(move |w, undo| w.ecs.get::<&mut Wreck>(entity).unwrap().mass += if undo { -wide_bit } else { wide_bit })),
         ("wreck energy", Box::new(move |w, undo| w.ecs.get::<&mut Wreck>(entity).unwrap().energy += if undo { -wide_bit } else { wide_bit })),
         ("wreck x", Box::new(move |w, undo| w.ecs.get::<&mut Wreck>(entity).unwrap().position.x += if undo { -one_bit } else { one_bit })),
         ("wreck y", Box::new(move |w, undo| w.ecs.get::<&mut Wreck>(entity).unwrap().position.y += if undo { -one_bit } else { one_bit })),
         ("wreck radius", Box::new(move |w, undo| w.ecs.get::<&mut Wreck>(entity).unwrap().radius += if undo { -one_bit } else { one_bit })),
         ("wreck kind", Box::new(move |w, undo| w.ecs.get::<&mut Wreck>(entity).unwrap().kind = if undo { WreckKind::Rock } else { WreckKind::Tree })),
         ("wreck health", Box::new(move |w, undo| w.ecs.get::<&mut Wreck>(entity).unwrap().health += if undo { -one_bit } else { one_bit })),
-        ("mass reclaimed", Box::new(move |w, undo| w.economies[0].mass_reclaimed += if undo { -wide_bit } else { wide_bit })),
+        ("materiel reclaimed", Box::new(move |w, undo| w.economies[0].mass_reclaimed += if undo { -wide_bit } else { wide_bit })),
         ("energy reclaimed", Box::new(move |w, undo| w.economies[0].energy_reclaimed += if undo { -wide_bit } else { wide_bit })),
     ];
     for (name, edit) in edits {
@@ -126,7 +126,7 @@ fn every_wreck_and_reclaim_field_changes_the_checksum() {
 
 /// A shield is hashed only on a generator, so it has a test of its own.
 #[test]
-fn every_shield_field_changes_the_checksum() {
+fn every_area_shield_changes_the_checksum() {
     use sim_engine::sim::components::{Shield, Team};
     let (_, mut world) = run(scenario::battle(SEED, 20, small_config()), 10, 10);
     let blueprint = world.blueprints.id("shield_generator");
@@ -158,8 +158,8 @@ fn every_intel_field_changes_the_checksum() {
     use sim_engine::sim::components::{Intel, Team};
     let (_, mut world) = run(scenario::battle(SEED, 20, small_config()), 10, 10);
     let at = world.unit_position(world.units[0].0).unwrap().xy();
-    let acu = world.blueprints.id("acu");
-    let commander = world.spawn_mobile(acu, Team::Blue, at);
+    let rig = world.blueprints.id("command_rig");
+    let commander = world.spawn_mobile(rig, Team::Blue, at);
     let entity = world.unit_entity(commander).unwrap();
     let before_sensors = world.compute_checksum();
     world.advance_tick(&[]);
@@ -180,16 +180,16 @@ fn every_intel_field_changes_the_checksum() {
         edit(&mut world.ecs.get::<&mut Intel>(entity).unwrap());
         assert_eq!(world.compute_checksum(), baseline, "undoing {name} did not restore the checksum");
     }
-    // The commander's omni coverage counts too: moving it changes what it covers.
+    // The commander's deep scan coverage counts too: moving it changes what it covers.
     let shifted = {
         let mut moved = run(scenario::battle(SEED, 20, small_config()), 10, 10).1;
-        let commander = moved.spawn_mobile(acu, Team::Blue, at + Vec2Fp::new(Fp::from_num(600), Fp::ZERO));
+        let commander = moved.spawn_mobile(rig, Team::Blue, at + Vec2Fp::new(Fp::from_num(600), Fp::ZERO));
         moved.ecs.get::<&mut sim_engine::sim::components::Position>(moved.unit_entity(commander).unwrap()).unwrap().0 = world.ecs.get::<&sim_engine::sim::components::Position>(entity).unwrap().0;
         moved.advance_tick(&[]);
         moved.advance_tick(&[]);
         moved.compute_checksum()
     };
-    assert_ne!(shifted, baseline, "where the omni was last tick is part of the state");
+    assert_ne!(shifted, baseline, "where the deep scan was last tick is part of the state");
 }
 
 /// An upgrade in place is hashed only while it is under way.
@@ -226,15 +226,15 @@ fn every_enhancement_field_changes_the_checksum() {
     use sim_engine::sim::components::{Enhancements, Enhancing, SelfDestructing, Team, Teleporting};
     let (_, mut world) = run(scenario::battle(SEED, 20, small_config()), 10, 10);
     let at = world.unit_position(world.units[0].0).unwrap().xy();
-    let acu = world.blueprints.id("acu");
-    let (installed, building, jumping) = (world.spawn_mobile(acu, Team::Blue, at), world.spawn_mobile(acu, Team::Blue, at), world.spawn_mobile(acu, Team::Blue, at));
+    let rig = world.blueprints.id("command_rig");
+    let (installed, building, jumping) = (world.spawn_mobile(rig, Team::Blue, at), world.spawn_mobile(rig, Team::Blue, at), world.spawn_mobile(rig, Team::Blue, at));
     world.install_enhancement(installed, world.blueprints.enhancement_id("heavy_cannon"));
     world.install_enhancement(jumping, world.blueprints.enhancement_id("teleporter"));
     for economy in &mut world.economies {
         economy.energy_capacity = Res::from_num(1_000_000);
         economy.energy = Res::from_num(1_000_000);
     }
-    let enhancement = world.blueprints.enhancement_id("advanced_engineering");
+    let enhancement = world.blueprints.enhancement_id("t2_fabrication");
     world.advance_tick(&[
         SimCommand::Enhance { units: vec![building], enhancement },
         SimCommand::Teleport { units: vec![jumping], point: at + Vec2Fp::new(Fp::from_num(200), Fp::ZERO) },
@@ -400,11 +400,11 @@ fn every_hashed_field_changes_the_checksum() {
         },
     );
     assert_changes(
-        "an overcharge order",
+        "a discharge order",
         &mut world,
-        &|w| w.ecs.insert_one(entity, OverchargeOrder { target: SimId(0) }).unwrap(),
+        &|w| w.ecs.insert_one(entity, DischargeOrder { target: SimId(0) }).unwrap(),
         &|w| {
-            w.ecs.remove_one::<OverchargeOrder>(entity).unwrap();
+            w.ecs.remove_one::<DischargeOrder>(entity).unwrap();
         },
     );
     assert_changes(

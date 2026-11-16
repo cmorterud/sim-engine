@@ -72,7 +72,7 @@ impl SimWorld {
             total.weapon_reload_ticks = effects.weapon_reload_ticks.or(total.weapon_reload_ticks);
             total.weapon_splash = effects.weapon_splash.or(total.weapon_splash);
             total.vision = total.vision.max(effects.vision);
-            total.omni = total.omni.max(effects.omni);
+            total.deep_scan = total.deep_scan.max(effects.deep_scan);
             total.jammer = effects.jammer.or(total.jammer);
             total.jammer_upkeep = effects.jammer_upkeep.or(total.jammer_upkeep);
             total.shield = effects.shield.or(total.shield);
@@ -85,7 +85,7 @@ impl SimWorld {
         total
     }
 
-    /// The highest tier of structure a builder can build: its own, or its engineering suite's.
+    /// The highest tier of structure a builder can build: its own, or its fabrication pack's.
     pub fn build_tier(&self, entity: hecs::Entity) -> u8 {
         let own = self.ecs.get::<&super::components::Blueprinted>(entity).map_or(0, |unit| self.blueprints.get(unit.0).tier);
         own.max(self.enhancement_effects(entity).build_tier)
@@ -96,13 +96,13 @@ impl SimWorld {
         self.on_build_list(entity, blueprint) && self.blueprints.get(blueprint).tier <= self.build_tier(entity)
     }
 
-    /// The tier it will build once the engineering suite it is being fitted with is done.
+    /// The tier it will build once the fabrication pack it is being fitted with is done.
     pub fn build_tier_ahead(&self, entity: hecs::Entity) -> u8 {
         let pending = self.ecs.get::<&Enhancing>(entity).map_or(0, |under_way| self.blueprints.enhancement(under_way.enhancement).effects.build_tier);
         self.build_tier(entity).max(pending)
     }
 
-    /// Whether a builder could build this once its engineering suite under way is done, but not
+    /// Whether a builder could build this once its fabrication pack under way is done, but not
     /// yet. Such a build waits behind the suite, and goes if the suite is cancelled.
     pub fn can_build_after_suite(&self, entity: hecs::Entity, blueprint: BlueprintId) -> bool {
         self.on_build_list(entity, blueprint) && !self.can_build(entity, blueprint) && self.blueprints.get(blueprint).tier <= self.build_tier_ahead(entity)
@@ -249,7 +249,7 @@ impl SimWorld {
                 }
             }
         }
-        let needs_intel = effects.cloak_upkeep.is_some() || effects.stealth_upkeep.is_some() || effects.jammer.is_some() || effects.omni.is_some();
+        let needs_intel = effects.cloak_upkeep.is_some() || effects.stealth_upkeep.is_some() || effects.jammer.is_some() || effects.deep_scan.is_some();
         if needs_intel && self.ecs.get::<&Intel>(entity).is_err() {
             let intel = Intel { running: true, cloak_on: false, cloaked: false, stealthed: false, jamming: false };
             self.ecs.insert_one(entity, intel).expect("unit is live");
@@ -272,11 +272,11 @@ impl SimWorld {
         self.economy_dirty = true;
     }
 
-    /// A unit's radar and omni ranges: its blueprint's, or an enhancement's omni.
+    /// A unit's radar and deep scan ranges: its blueprint's, or an enhancement's deep scan.
     pub(super) fn sensor_ranges(&self, entity: hecs::Entity) -> (Fp, Fp) {
         let unit = self.blueprints.get(self.ecs.get::<&super::components::Blueprinted>(entity).expect("sensor units have blueprints").0);
-        let omni = if self.enhanced.is_empty() { None } else { self.enhancement_effects(entity).omni };
-        (unit.radar, omni.unwrap_or(unit.omni))
+        let deep_scan = if self.enhanced.is_empty() { None } else { self.enhancement_effects(entity).deep_scan };
+        (unit.radar, deep_scan.unwrap_or(unit.deep_scan))
     }
 
     /// What a unit pays to stay cloaked: from its blueprint, or else from an enhancement.
@@ -301,7 +301,7 @@ impl SimWorld {
     }
 
     /// Starts each unit with a teleporter charging toward a spot its team can sense: in sight,
-    /// or on radar or omni. It must be open ground.
+    /// or on radar or deep scan. It must be open ground.
     pub(super) fn command_teleport(&mut self, units: &[SimId], point: Vec2Fp) {
         if !self.terrain.in_bounds(point) || !self.terrain.is_passable(point) {
             return;
@@ -321,7 +321,7 @@ impl SimWorld {
             let senses = !self.config.fog_of_war
                 || self.visibility.is_visible(team, x, y)
                 || self.visibility.senses(Sense::Radar, team, x, y)
-                || self.visibility.senses(Sense::Omni, team, x, y);
+                || self.visibility.senses(Sense::DeepScan, team, x, y);
             if !senses {
                 continue;
             }

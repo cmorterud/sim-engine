@@ -7,8 +7,8 @@
 version = 1
 
 [[unit]]
-id = "acu"
-name = "Armored Command Unit"
+id = "command_rig"
+name = "Command Rig"
 class = "commander"
 tier = 1
 mass = 2000
@@ -23,19 +23,19 @@ vision = 520
 movement = "seabed"
 build_power = 10
 build_range = 200
-# Its engineering suites (the enhancements below) unlock the T2 and T3 structures on its list.
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "radar", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "stealth_field_generator", "strategic_missile_launcher", "strategic_missile_defense", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "naval_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "omni_sensor", "land_factory_t3_support", "air_factory_t3_support", "t2_artillery", "t3_artillery", "naval_factory_t2_support", "naval_factory_t3_support", "t1_sonar", "t1_torpedo_launcher", "t2_sonar", "t2_torpedo_launcher", "wall", "t3_heavy_point_defense", "t3_heavy_shield", "engineering_station"]
+# Its fabrication packs (the enhancements below) unlock the T2 and T3 structures on its list.
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "radar", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "stealth_field_generator", "strategic_missile_launcher", "strategic_missile_defense", "rig_yard", "geothermal_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "naval_factory", "t1_aa_turret", "airfield", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "deep_scan_array", "land_factory_t3_support", "air_factory_t3_support", "t2_artillery", "t3_artillery", "naval_factory_t2_support", "naval_factory_t3_support", "t1_sonar", "t1_torpedo_launcher", "t2_sonar", "t2_torpedo_launcher", "wall", "t3_heavy_point_defense", "t3_heavy_shield", "field_workshop"]
 weapon = { range = 440, reload_ticks = 7, projectile_speed = 50, damage = 70, turn_rate = 180 }
-# FAF's Overcharge: 7,500 in store to fire; on landing, up to 90% of the store at 6 energy a point,
+# FAF's Discharge: 7,500 in store to fire; on landing, up to 90% of the store at 6 energy a point,
 # from 1,250 to 15,000 damage, as much as the toughest enemy there takes; 400 to commanders, 800
 # to structures, a blast of 50, and a look 54 round for the toughest.
-overcharge = { energy_required = 7500, energy_share_permille = 900, energy_per_damage = 6, min_damage = 1250, max_damage = 15000, commander_damage = 400, structure_damage = 800, splash_radius = 50, search_radius = 54, reload_ticks = 33 }
+discharge = { energy_required = 7500, energy_share_permille = 900, energy_per_damage = 6, min_damage = 1250, max_damage = 15000, commander_damage = 400, structure_damage = 800, splash_radius = 50, search_radius = 54, reload_ticks = 33 }
 mass_income = 1
 energy_income = 20
 mass_storage = 650
 energy_storage = 4000
 death_explosion = { damage = 15000, radius = 300 }
-omni = 480
+deep_scan = 480
 
 [[unit]]
 id = "t1_engineer"
@@ -55,11 +55,11 @@ radius = 8
 vision = 360
 build_power = 5
 build_range = 100
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "radar", "hydrocarbon_plant", "air_factory", "naval_factory", "t1_aa_turret", "t1_sonar", "t1_torpedo_launcher", "wall"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "radar", "geothermal_plant", "air_factory", "naval_factory", "t1_aa_turret", "t1_sonar", "t1_torpedo_launcher", "wall"]
 
 [[unit]]
-id = "t1_light_bot"
-name = "Light Assault Bot"
+id = "t1_light_walker"
+name = "Light Walker"
 class = "bot"
 tier = 1
 mass = 30
@@ -116,7 +116,7 @@ health = 4000
 footprint = 4
 vision = 400
 build_power = 20
-builds = ["t1_engineer", "t1_light_bot", "t1_light_artillery", "t1_mobile_aa", "t1_land_scout", "t1_medium_tank"]
+builds = ["t1_engineer", "t1_light_walker", "t1_light_artillery", "t1_mobile_aa", "t1_land_scout", "t1_medium_tank"]
 upgrades_to = "land_factory_t2"
 factory_kind = "land"
 
@@ -132,13 +132,13 @@ health = 8000
 footprint = 4
 vision = 400
 build_power = 40
-builds = ["t1_engineer", "t2_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_amphibious_tank", "t2_mobile_missile_launcher", "t1_land_scout", "t1_medium_tank", "t2_gatling_bot", "t2_mobile_shield", "t2_field_engineer"]
+builds = ["t1_engineer", "t2_engineer", "t1_light_walker", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_assault_hovercraft", "t2_mobile_missile_launcher", "t1_land_scout", "t1_medium_tank", "t2_grenadier_walker", "t2_mobile_shield", "t2_combat_engineer"]
 upgrades_to = "land_factory_t3"
 factory_kind = "land"
 
 [[unit]]
 id = "mass_extractor"
-name = "Mass Extractor"
+name = "Materiel Extractor"
 class = "economy"
 tier = 1
 mass = 36
@@ -171,7 +171,7 @@ adjacency = "t1_power"
 
 [[unit]]
 id = "mass_storage"
-name = "Mass Storage"
+name = "Materiel Storage"
 class = "economy"
 tier = 1
 mass = 200
@@ -301,13 +301,13 @@ health = 3800
 footprint = 2
 vision = 400
 build_power = 1080
-builds = ["anti_nuke"]
+builds = ["strategic_interceptor"]
 max_stock = 7
 missile_defense = { kind = "strategic", range = 1800 }
 
 [[unit]]
-id = "anti_nuke"
-name = "Anti-Nuke Interceptor"
+id = "strategic_interceptor"
+name = "Strategic Interceptor"
 class = "ammo"
 tier = 3
 mass = 3600
@@ -317,7 +317,7 @@ health = 1
 vision = 0
 
 # Tech tiers (GAME_SPECIFICATION.md §15). The T2 factory upgrades in its queue to the T3 one, and
-# each makes engineers of its tier. The commander's tiers are engineering suites, below.
+# each makes engineers of its tier. The commander's tiers are fabrication packs, below.
 [[unit]]
 id = "land_factory_t3"
 name = "Land Factory (T3)"
@@ -330,7 +330,7 @@ health = 16000
 footprint = 4
 vision = 400
 build_power = 90
-builds = ["t1_engineer", "t2_engineer", "t3_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_amphibious_tank", "t2_mobile_missile_launcher", "t3_mobile_artillery", "t1_land_scout", "t1_medium_tank", "t2_gatling_bot", "t2_mobile_shield", "t2_field_engineer", "t3_heavy_assault_bot", "t3_armored_assault_bot"]
+builds = ["t1_engineer", "t2_engineer", "t3_engineer", "t1_light_walker", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_assault_hovercraft", "t2_mobile_missile_launcher", "t3_mobile_artillery", "t1_land_scout", "t1_medium_tank", "t2_grenadier_walker", "t2_mobile_shield", "t2_combat_engineer", "t3_heavy_walker", "t3_siege_walker"]
 factory_kind = "land"
 
 [[unit]]
@@ -351,7 +351,7 @@ radius = 9
 vision = 400
 build_power = 12
 build_range = 120
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "radar", "stealth_field_generator", "hydrocarbon_plant", "mass_fabricator", "air_factory", "naval_factory", "t1_aa_turret", "air_staging", "t2_flak", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "t2_artillery", "naval_factory_t2_support", "t1_sonar", "t1_torpedo_launcher", "t2_sonar", "t2_torpedo_launcher", "wall", "engineering_station"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "radar", "stealth_field_generator", "geothermal_plant", "mass_fabricator", "air_factory", "naval_factory", "t1_aa_turret", "airfield", "t2_flak", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "t2_artillery", "naval_factory_t2_support", "t1_sonar", "t1_torpedo_launcher", "t2_sonar", "t2_torpedo_launcher", "wall", "field_workshop"]
 
 [[unit]]
 id = "t3_engineer"
@@ -371,11 +371,11 @@ radius = 10
 vision = 520
 build_power = 30
 build_range = 140
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "naval_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "omni_sensor", "land_factory_t3_support", "air_factory_t3_support", "t2_artillery", "t3_artillery", "naval_factory_t2_support", "naval_factory_t3_support", "t1_sonar", "t1_torpedo_launcher", "t2_sonar", "t2_torpedo_launcher", "wall", "t3_heavy_point_defense", "t3_heavy_shield", "engineering_station"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "rig_yard", "geothermal_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "naval_factory", "t1_aa_turret", "airfield", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "deep_scan_array", "land_factory_t3_support", "air_factory_t3_support", "t2_artillery", "t3_artillery", "naval_factory_t2_support", "naval_factory_t3_support", "t1_sonar", "t1_torpedo_launcher", "t2_sonar", "t2_torpedo_launcher", "wall", "t3_heavy_point_defense", "t3_heavy_shield", "field_workshop"]
 
 # Intel (GAME_SPECIFICATION.md §9). Ranges are in units, and upkeep is energy per second
 # while running: a team that cannot pay switches its sensors off until it can. The commander
-# has a short-range omni sensor built in, and can cloak.
+# has a short-range deep scan array built in, and can cloak.
 [[unit]]
 id = "radar"
 name = "Radar"
@@ -395,8 +395,8 @@ upgrades_to = "radar_t2"
 
 # Upgraded from a T2 Radar, or built by T3 builders: its mass, energy, and build time are what the upgrade costs.
 [[unit]]
-id = "omni_sensor"
-name = "Omni Sensor"
+id = "deep_scan_array"
+name = "Deep Scan Array"
 class = "economy"
 tier = 3
 mass = 2400
@@ -406,7 +406,7 @@ health = 100
 footprint = 1
 vision = 600
 radar = 12000
-omni = 4000
+deep_scan = 4000
 upkeep = 2000
 
 # Hides friendly units in its field from enemy radar, and puts decoy blips on it.
@@ -425,14 +425,14 @@ stealth_field = 480
 jammer = { radius = 620, decoys = 8 }
 upkeep = 25
 
-# Support commanders (GAME_SPECIFICATION.md §2.2), with Forged Alliance Forever's numbers for its
-# UEF ones, and its Quantum Gateway. A support commander is a T3 engineer with heavy armor, a gun,
+# Field rigs (GAME_SPECIFICATION.md §2.2), with Forged Alliance Forever's numbers for its
+# UEF ones, and its Rig Yard. A field rig is a T3 engineer with heavy armor, a gun,
 # and income of its own, and its death does not end the match.
 adjacency_size = 12
 
 [[unit]]
-id = "quantum_gateway"
-name = "Quantum Gateway"
+id = "rig_yard"
+name = "Rig Yard"
 class = "factory"
 tier = 3
 mass = 3000
@@ -442,13 +442,13 @@ health = 10000
 footprint = 5
 vision = 400
 build_power = 120
-builds = ["support_commander"]
+builds = ["field_rig"]
 adjacency_size = 20
 
 [[unit]]
-id = "support_commander"
-name = "Support Commander"
-class = "support_commander"
+id = "field_rig"
+name = "Field Rig"
+class = "field_rig"
 tier = 3
 mass = 2100
 energy = 25200
@@ -461,7 +461,7 @@ vision = 520
 movement = "seabed"
 build_power = 56
 build_range = 200
-builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "quantum_gateway", "hydrocarbon_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "naval_factory", "t1_aa_turret", "air_staging", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "omni_sensor", "land_factory_t3_support", "air_factory_t3_support", "t2_artillery", "t3_artillery", "naval_factory_t2_support", "naval_factory_t3_support", "t1_sonar", "t1_torpedo_launcher", "t2_sonar", "t2_torpedo_launcher", "wall", "t3_heavy_point_defense", "t3_heavy_shield", "engineering_station"]
+builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "rig_yard", "geothermal_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "naval_factory", "t1_aa_turret", "airfield", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "deep_scan_array", "land_factory_t3_support", "air_factory_t3_support", "t2_artillery", "t3_artillery", "naval_factory_t2_support", "naval_factory_t3_support", "t1_sonar", "t1_torpedo_launcher", "t2_sonar", "t2_torpedo_launcher", "wall", "t3_heavy_point_defense", "t3_heavy_shield", "field_workshop"]
 # Three times the commander's fire: 300 a second for its 100, and a little farther.
 weapon = { range = 500, reload_ticks = 10, projectile_speed = 50, damage = 300, turn_rate = 180 }
 mass_income = 1
@@ -469,14 +469,14 @@ energy_income = 20
 mass_storage = 275
 energy_storage = 500
 death_explosion = { damage = 1000, radius = 200 }
-omni = 320
+deep_scan = 320
 
 # Mass extractor upgrades, with FAF's UEF numbers. Each is reached only by upgrading the one
 # below in place, which keeps making mass at its old rate meanwhile: its cost and build time here
 # are the upgrade's, built at the lower tier's own build power.
 [[unit]]
 id = "mass_extractor_t2"
-name = "Mass Extractor (T2)"
+name = "Materiel Extractor (T2)"
 class = "economy"
 tier = 2
 mass = 900
@@ -494,7 +494,7 @@ adjacency = "t2_extractor"
 
 [[unit]]
 id = "mass_extractor_t3"
-name = "Mass Extractor (T3)"
+name = "Materiel Extractor (T3)"
 class = "economy"
 tier = 3
 mass = 4600
@@ -507,13 +507,13 @@ requires_deposit = true
 mass_income = 18
 upkeep = 54
 
-# Mass fabrication and hydrocarbon power (GAME_SPECIFICATION.md §3.3-3.4), with FAF's UEF numbers.
+# Mass fabrication and geothermal power (GAME_SPECIFICATION.md §3.3-3.4), with FAF's UEF numbers.
 # The original's fabricators are T2 and T3, and its plant makes 5 generators' worth of energy.
 adjacency = "t3_extractor"
 
 [[unit]]
-id = "hydrocarbon_plant"
-name = "Hydrocarbon Power Plant"
+id = "geothermal_plant"
+name = "Geothermal Plant"
 class = "economy"
 tier = 1
 mass = 160
@@ -526,11 +526,11 @@ requires_vent = true
 energy_income = 100
 
 # Turns 100 energy a second into 1 mass, and blows up if destroyed while running.
-adjacency = "hydrocarbon"
+adjacency = "geothermal"
 
 [[unit]]
 id = "mass_fabricator"
-name = "Mass Fabricator"
+name = "Materiel Fabricator"
 class = "economy"
 tier = 2
 mass = 200
@@ -546,7 +546,7 @@ adjacency = "t1_fabricator"
 
 [[unit]]
 id = "mass_fabricator_t3"
-name = "Mass Fabricator (T3)"
+name = "Materiel Fabricator (T3)"
 class = "economy"
 tier = 3
 mass = 4000
@@ -721,7 +721,7 @@ speed = 54
 radius = 10
 vision = 1280
 radar = 1920
-omni = 560
+deep_scan = 560
 flight = { elevation = 440, turn_rate = 80, fuel = 1500 }
 
 # Two beams of 250 a second in the original, one shot of 500 here.
@@ -842,7 +842,7 @@ vision = 400
 build_power = 40
 factory_kind = "land"
 support = true
-builds = ["t1_engineer", "t2_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_amphibious_tank", "t2_mobile_missile_launcher", "t1_land_scout", "t1_medium_tank", "t2_gatling_bot", "t2_mobile_shield", "t2_field_engineer"]
+builds = ["t1_engineer", "t2_engineer", "t1_light_walker", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_assault_hovercraft", "t2_mobile_missile_launcher", "t1_land_scout", "t1_medium_tank", "t2_grenadier_walker", "t2_mobile_shield", "t2_combat_engineer"]
 upgrades_to = "land_factory_t3_support"
 
 [[unit]]
@@ -859,7 +859,7 @@ vision = 400
 build_power = 90
 factory_kind = "land"
 support = true
-builds = ["t1_engineer", "t2_engineer", "t3_engineer", "t1_light_bot", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_amphibious_tank", "t2_mobile_missile_launcher", "t3_mobile_artillery", "t1_land_scout", "t1_medium_tank", "t2_gatling_bot", "t2_mobile_shield", "t2_field_engineer", "t3_heavy_assault_bot", "t3_armored_assault_bot"]
+builds = ["t1_engineer", "t2_engineer", "t3_engineer", "t1_light_walker", "t1_light_artillery", "t2_heavy_tank", "t1_mobile_aa", "t2_mobile_flak", "t2_assault_hovercraft", "t2_mobile_missile_launcher", "t3_mobile_artillery", "t1_land_scout", "t1_medium_tank", "t2_grenadier_walker", "t2_mobile_shield", "t2_combat_engineer", "t3_heavy_walker", "t3_siege_walker"]
 
 [[unit]]
 id = "air_factory_t2_support"
@@ -923,7 +923,7 @@ vision = 400
 energy_income = 2500
 death_explosion = { damage = 5500, radius = 200 }
 
-# Upgraded from a Radar, or built by T2 builders, and upgrades to an Omni Sensor.
+# Upgraded from a Radar, or built by T2 builders, and upgrades to a Deep Scan Array.
 adjacency = "t3_power"
 adjacency_size = 16
 
@@ -941,7 +941,7 @@ vision = 480
 radar = 4000
 upkeep = 150
 build_power = 20
-upgrades_to = "omni_sensor"
+upgrades_to = "deep_scan_array"
 
 # Three shells of 70 a volley in the original, one of 210 here.
 [[unit]]
@@ -960,8 +960,8 @@ weapon = { range = 1000, reload_ticks = 17, projectile_speed = 70, damage = 210,
 # Aircraft land on its four pads to refuel at 50 times the rate on the ground, and are repaired
 # for energy. A T2 aircraft takes two pads, and a T3 one all four.
 [[unit]]
-id = "air_staging"
-name = "Air Staging Facility"
+id = "airfield"
+name = "Airfield"
 class = "economy"
 tier = 2
 mass = 175
@@ -970,7 +970,7 @@ build_time = 350
 health = 500
 footprint = 3
 vision = 400
-air_staging = { slots = 4, repair = 500, repair_energy = 30 }
+airfield = { slots = 4, repair = 500, repair_energy = 30 }
 
 # Holds 10,000 energy, and adds to the output of the generators it touches.
 [[unit]]
@@ -1034,7 +1034,7 @@ radius = 12
 vision = 520
 weapon = { range = 1800, reload_ticks = 100, projectile_speed = 48, damage = 750, splash_radius = 80, turn_rate = 30, artillery = true, min_range = 500, spread = 25 }
 
-# FAF's Janus: a carpet of twenty napalm bombs of 80, burning included, as one bomb of 1,600, and
+# FAF's fighter-bomber: a carpet of twenty napalm bombs of 80, burning included, as one bomb of 1,600, and
 # two railguns of 75 a second at aircraft, as one.
 [[unit]]
 id = "t2_fighter_bomber"
@@ -1109,7 +1109,7 @@ vision = 400
 build_power = 90
 factory_kind = "naval"
 on_water = true
-builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_shield_boat", "t2_torpedo_boat"]
+builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_escort_corvette", "t2_torpedo_boat"]
 upgrades_to = "naval_factory_t3"
 
 [[unit]]
@@ -1126,7 +1126,7 @@ vision = 400
 build_power = 150
 factory_kind = "naval"
 on_water = true
-builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_shield_boat", "t3_battleship", "t3_battlecruiser", "t3_missile_sub", "t2_torpedo_boat"]
+builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_escort_corvette", "t3_battleship", "t3_battlecruiser", "t3_missile_sub", "t2_torpedo_boat"]
 
 [[unit]]
 id = "naval_factory_t2_support"
@@ -1143,7 +1143,7 @@ build_power = 90
 factory_kind = "naval"
 support = true
 on_water = true
-builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_shield_boat", "t2_torpedo_boat"]
+builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_escort_corvette", "t2_torpedo_boat"]
 upgrades_to = "naval_factory_t3_support"
 
 [[unit]]
@@ -1161,7 +1161,7 @@ build_power = 150
 factory_kind = "naval"
 support = true
 on_water = true
-builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_shield_boat", "t3_battleship", "t3_battlecruiser", "t3_missile_sub", "t2_torpedo_boat"]
+builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_escort_corvette", "t3_battleship", "t3_battlecruiser", "t3_missile_sub", "t2_torpedo_boat"]
 
 # Two twin gauss cannons, a twin railgun at aircraft, torpedoes, and an anti-torpedo charge.
 # Each twin fires both muzzles at once (FAF's MuzzleSalvoDelay of 0).
@@ -1378,10 +1378,10 @@ vision = 400
 sonar = 720
 weapon = { range = 1200, reload_ticks = 40, projectile_speed = 30, damage = 720, targets = "naval" }
 
-# FAF's Riptide: it hovers over land and water alike. Its riot gun fires both muzzles at once.
+# FAF's hovercraft: it hovers over land and water alike. Its riot gun fires both muzzles at once.
 [[unit]]
-id = "t2_amphibious_tank"
-name = "Amphibious Tank"
+id = "t2_assault_hovercraft"
+name = "Assault Hovercraft"
 class = "tank"
 tier = 2
 mass = 320
@@ -1399,8 +1399,8 @@ weapon = { range = 360, reload_ticks = 3, projectile_speed = 120, damage = 27, t
 # A dome that moves with it, which on the water covers 660 around it: the original's sphere of
 # 1,200 sunk 1,000 below the surface.
 [[unit]]
-id = "t2_shield_boat"
-name = "Shield Boat"
+id = "t2_escort_corvette"
+name = "Escort Corvette"
 class = "defense"
 tier = 2
 mass = 900
@@ -1464,8 +1464,8 @@ weapon = { kind = "tactical_missile", automatic = true, artillery = true, min_ra
 [[enhancement]]
 id = "heavy_cannon"
 name = "Heavy Cannon"
-units = ["acu"]
-slot = "right_arm"
+units = ["command_rig"]
+slot = "weapons"
 mass = 800
 energy = 24000
 build_time = 800
@@ -1474,10 +1474,10 @@ weapon_range = 600
 weapon_damage = 140
 
 [[enhancement]]
-id = "advanced_engineering"
-name = "T2 Engineering Suite"
-units = ["acu"]
-slot = "left_arm"
+id = "t2_fabrication"
+name = "T2 Fabrication Pack"
+units = ["command_rig"]
+slot = "fabrication"
 mass = 800
 energy = 21000
 build_time = 1000
@@ -1487,11 +1487,11 @@ health = 2000
 regen = 10
 
 [[enhancement]]
-id = "t3_engineering"
-name = "T3 Engineering Suite"
-units = ["acu"]
-slot = "left_arm"
-requires = "advanced_engineering"
+id = "t3_fabrication"
+name = "T3 Fabrication Pack"
+units = ["command_rig"]
+slot = "fabrication"
+requires = "t2_fabrication"
 mass = 2400
 energy = 50000
 build_time = 8400
@@ -1501,10 +1501,10 @@ health = 3000
 regen = 20
 
 [[enhancement]]
-id = "nano_repair"
-name = "Nano-Repair System"
-units = ["acu"]
-slot = "left_arm"
+id = "damage_control"
+name = "Damage Control"
+units = ["command_rig"]
+slot = "systems"
 mass = 800
 energy = 24000
 build_time = 800
@@ -1512,30 +1512,30 @@ health = 1500
 regen = 40
 
 [[enhancement]]
-id = "personal_shield"
-name = "Personal Shield"
-units = ["acu"]
-slot = "back"
+id = "field_shield"
+name = "Field Shield"
+units = ["command_rig"]
+slot = "systems"
 mass = 2300
 energy = 112500
 build_time = 2100
 shield = { radius = 30, health = 19000, regen = 30, recharge_seconds = 140, upkeep = 250 }
 
 [[enhancement]]
-id = "shield_field"
-name = "Shield Generator Field"
-units = ["acu"]
-slot = "back"
+id = "area_shield"
+name = "Area Shield"
+units = ["command_rig"]
+slot = "systems"
 mass = 1400
 energy = 40000
 build_time = 1400
 shield = { radius = 200, health = 5000, regen = 60, recharge_seconds = 45, upkeep = 200 }
 
 [[enhancement]]
-id = "personal_stealth"
-name = "Personal Stealth"
-units = ["acu"]
-slot = "back"
+id = "signature_suppression"
+name = "Signature Suppression"
+units = ["command_rig"]
+slot = "systems"
 mass = 650
 energy = 14000
 build_time = 800
@@ -1543,11 +1543,11 @@ health = 2000
 stealth_upkeep = 50
 
 [[enhancement]]
-id = "personal_cloak"
-name = "Personal Cloak"
-units = ["acu"]
-slot = "back"
-requires = "personal_stealth"
+id = "thermal_camouflage"
+name = "Thermal Camouflage"
+units = ["command_rig"]
+slot = "systems"
+requires = "signature_suppression"
 mass = 6000
 energy = 750000
 build_time = 4200
@@ -1557,33 +1557,33 @@ cloak = { upkeep = 3000 }
 
 [[enhancement]]
 id = "teleporter"
-name = "Personal Teleporter"
-units = ["acu"]
-slot = "back"
+name = "Orbital Redeploy"
+units = ["command_rig"]
+slot = "systems"
 mass = 15000
 energy = 1500000
 build_time = 4200
 teleporter = { flat_energy = 100000, max_energy = 2500000, min_seconds = 20, max_seconds = 50 }
 
 [[enhancement]]
-id = "resource_allocation"
-name = "Resource Allocation System"
-units = ["acu"]
-slot = "back"
+id = "onboard_reactor"
+name = "Onboard Reactor"
+units = ["command_rig"]
+slot = "systems"
 mass = 5000
 energy = 175000
 build_time = 2800
 mass_income = 14
 energy_income = 2500
 
-# The support commander's enhancements, in §2.1's slots: weapons in the right arm, building and
+# The field rig's enhancements, in §2.1's slots: weapons in the weapons bay, building and
 # sensors in the left, and utility on the back. Its teleporter and fabricator are FAF's Aeon ones,
 # since its UEF one has neither, and its engineering drone needs aircraft (§10).
 [[enhancement]]
-id = "heavy_plasma_refractor"
-name = "Heavy Plasma Refractor"
-units = ["support_commander"]
-slot = "right_arm"
+id = "long_barrel"
+name = "Long Barrel"
+units = ["field_rig"]
+slot = "weapons"
 mass = 800
 energy = 30000
 build_time = 3360
@@ -1592,10 +1592,10 @@ weapon_range = 700
 weapon_splash = 40
 
 [[enhancement]]
-id = "energy_accelerator"
-name = "Energy Accelerator"
-units = ["support_commander"]
-slot = "right_arm"
+id = "capacitor_bank"
+name = "Capacitor Bank"
+units = ["field_rig"]
+slot = "weapons"
 mass = 1000
 energy = 44700
 build_time = 5040
@@ -1605,40 +1605,40 @@ weapon_reload_ticks = 5
 [[enhancement]]
 id = "rapid_fabricator"
 name = "Rapid Fabricator"
-units = ["support_commander"]
-slot = "left_arm"
+units = ["field_rig"]
+slot = "fabrication"
 mass = 800
 energy = 50500
 build_time = 4200
 build_power = 98
 
 [[enhancement]]
-id = "sensor_system"
-name = "Enhanced Sensor System"
-units = ["support_commander"]
-slot = "left_arm"
+id = "sensor_mast"
+name = "Sensor Mast"
+units = ["field_rig"]
+slot = "systems"
 mass = 600
 energy = 20000
 build_time = 3000
-# The original's 45 sight and 80 omni.
+# The original's 45 sight and 80 deep scan.
 vision = 900
-omni = 1600
+deep_scan = 1600
 
 [[enhancement]]
 id = "support_shield"
-name = "Personal Shield"
-units = ["support_commander"]
-slot = "back"
+name = "Field Shield"
+units = ["field_rig"]
+slot = "systems"
 mass = 2000
 energy = 100200
 build_time = 7200
 shield = { radius = 30, health = 26000, regen = 50, recharge_seconds = 170, upkeep = 500 }
 
 [[enhancement]]
-id = "support_shield_field"
-name = "Shield Generator Field"
-units = ["support_commander"]
-slot = "back"
+id = "support_area_shield"
+name = "Area Shield"
+units = ["field_rig"]
+slot = "systems"
 requires = "support_shield"
 mass = 3500
 energy = 360800
@@ -1648,8 +1648,8 @@ shield = { radius = 200, health = 52000, regen = 150, recharge_seconds = 215, up
 [[enhancement]]
 id = "radar_jammer"
 name = "Radar Jammer"
-units = ["support_commander"]
-slot = "back"
+units = ["field_rig"]
+slot = "systems"
 mass = 300
 energy = 8000
 build_time = 2500
@@ -1658,19 +1658,19 @@ jammer_upkeep = 100
 
 [[enhancement]]
 id = "support_teleporter"
-name = "Personal Teleporter"
-units = ["support_commander"]
-slot = "back"
+name = "Orbital Redeploy"
+units = ["field_rig"]
+slot = "systems"
 mass = 15000
 energy = 1500000
 build_time = 21000
 teleporter = { flat_energy = 100000, max_energy = 2500000, min_seconds = 20, max_seconds = 50 }
 
 [[enhancement]]
-id = "support_resource_allocation"
-name = "Resource Allocation System"
-units = ["support_commander"]
-slot = "back"
+id = "support_onboard_reactor"
+name = "Onboard Reactor"
+units = ["field_rig"]
+slot = "systems"
 mass = 4500
 energy = 90000
 build_time = 8400
@@ -1715,8 +1715,8 @@ vision = 400
 weapon = { range = 360, reload_ticks = 10, projectile_speed = 50, damage = 24, turn_rate = 90 }
 
 [[unit]]
-id = "t2_gatling_bot"
-name = "Gatling Bot"
+id = "t2_grenadier_walker"
+name = "Grenadier Walker"
 class = "bot"
 tier = 2
 mass = 200
@@ -1748,8 +1748,8 @@ vision = 400
 shield = { radius = 170, health = 3000, regen = 55, recharge_seconds = 24, upkeep = 80 }
 
 [[unit]]
-id = "t2_field_engineer"
-name = "Field Engineer"
+id = "t2_combat_engineer"
+name = "Combat Engineer"
 class = "engineer"
 tier = 2
 mass = 225
@@ -1770,8 +1770,8 @@ weapon = { range = 360, reload_ticks = 5, projectile_speed = 120, damage = 15, t
 builds = ["land_factory_t1", "air_factory", "naval_factory", "t1_point_defense", "t2_point_defense", "t1_aa_turret", "t2_flak", "shield_generator", "tactical_missile_defense", "t1_torpedo_launcher", "t2_torpedo_launcher", "t2_artillery", "tactical_missile_launcher", "radar", "radar_t2", "t1_sonar", "t2_sonar", "stealth_field_generator", "wall"]
 
 [[unit]]
-id = "t3_heavy_assault_bot"
-name = "Heavy Assault Bot"
+id = "t3_heavy_walker"
+name = "Heavy Walker"
 class = "bot"
 tier = 3
 mass = 480
@@ -1787,8 +1787,8 @@ shield = { radius = 25, health = 700, regen = 20, recharge_seconds = 12, upkeep 
 weapon = { range = 480, reload_ticks = 3, projectile_speed = 70, damage = 45, turn_rate = 120 }
 
 [[unit]]
-id = "t3_armored_assault_bot"
-name = "Armored Assault Bot"
+id = "t3_siege_walker"
+name = "Siege Walker"
 class = "bot"
 tier = 3
 mass = 1280
@@ -1863,8 +1863,8 @@ vision = 40
 # Engineering stations: a drone that helps whatever is building, being upgraded, or damaged within
 # reach, on its own. The T3 station, an upgrade of the T2, flies two. FAF's build rates: 20 and 30.
 [[unit]]
-id = "engineering_station"
-name = "Engineering Station"
+id = "field_workshop"
+name = "Field Workshop"
 class = "economy"
 tier = 2
 mass = 525
@@ -1876,11 +1876,11 @@ vision = 280
 build_power = 20
 build_range = 300
 assists = true
-upgrades_to = "engineering_station_t3"
+upgrades_to = "field_workshop_t3"
 
 [[unit]]
-id = "engineering_station_t3"
-name = "Engineering Station (T3)"
+id = "field_workshop_t3"
+name = "Field Workshop (T3)"
 class = "economy"
 tier = 3
 mass = 1050

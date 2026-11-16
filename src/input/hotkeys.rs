@@ -16,7 +16,7 @@ pub const FORMATION: char = 'J';
 pub const ATTACK_GROUND: char = 'I';
 pub const STOP: char = 'X';
 pub const PAUSE: char = 'O';
-pub const OVERCHARGE: char = 'L';
+pub const DISCHARGE: char = 'L';
 pub const UPGRADE: char = 'U';
 pub const REPEAT: char = 'R';
 /// Away from the others, because it throws away a queue.
@@ -48,16 +48,16 @@ pub const BUILDER_FAMILIES: [(char, &[&str]); 8] = [
             "naval_factory",
             "naval_factory_t2_support",
             "naval_factory_t3_support",
-            "quantum_gateway",
+            "rig_yard",
         ],
     ),
     ('E', &["mass_extractor", "mass_extractor_t2", "mass_extractor_t3", "mass_fabricator", "mass_fabricator_t3", "mass_storage"]),
-    ('S', &["power_generator", "power_generator_t2", "power_generator_t3", "hydrocarbon_plant", "energy_storage"]),
+    ('S', &["power_generator", "power_generator_t2", "power_generator_t3", "geothermal_plant", "energy_storage"]),
     ('D', &["t1_point_defense", "t2_point_defense", "t3_heavy_point_defense", "t1_aa_turret", "t2_flak", "t3_sam", "t1_torpedo_launcher", "t2_torpedo_launcher"]),
     ('A', &["t2_artillery", "t3_artillery", "tactical_missile_launcher", "strategic_missile_launcher"]),
-    ('Z', &["radar", "radar_t2", "omni_sensor", "t1_sonar", "t2_sonar", "stealth_field_generator"]),
+    ('Z', &["radar", "radar_t2", "deep_scan_array", "t1_sonar", "t2_sonar", "stealth_field_generator"]),
     ('C', &["shield_generator", "t3_heavy_shield", "tactical_missile_defense", "strategic_missile_defense"]),
-    ('V', &["engineering_station", "engineering_station_t3", "air_staging", "wall"]),
+    ('V', &["field_workshop", "field_workshop_t3", "airfield", "wall"]),
 ];
 
 /// A builder's structure's family, by its place in `BUILDER_FAMILIES`, and its place in the
@@ -89,15 +89,15 @@ pub fn build_slot(key: &str) -> Option<(Bar, usize)> {
     Some(match key {
         // Builders and scouts, then bots, artillery and bombers, anti-air and gunships, tanks,
         // support, and the rest.
-        "t1_engineer" | "t2_engineer" | "t3_engineer" | "support_commander" | "t1_air_scout" | "t3_spy_plane" => (Factory, 0),
-        "tactical_missile" | "strategic_missile" | "anti_nuke" => (Factory, 0),
-        "t1_light_bot" | "t2_gatling_bot" | "t3_heavy_assault_bot" | "t1_interceptor" | "t2_torpedo_bomber" | "t3_air_superiority" | "t1_frigate" | "t2_destroyer" | "t3_battleship" => (Factory, 1),
+        "t1_engineer" | "t2_engineer" | "t3_engineer" | "field_rig" | "t1_air_scout" | "t3_spy_plane" => (Factory, 0),
+        "tactical_missile" | "strategic_missile" | "strategic_interceptor" => (Factory, 0),
+        "t1_light_walker" | "t2_grenadier_walker" | "t3_heavy_walker" | "t1_interceptor" | "t2_torpedo_bomber" | "t3_air_superiority" | "t1_frigate" | "t2_destroyer" | "t3_battleship" => (Factory, 1),
         "t1_light_artillery" | "t2_mobile_missile_launcher" | "t3_mobile_artillery" | "t1_bomber" | "t2_fighter_bomber" | "t3_strategic_bomber" | "t2_cruiser" | "t3_battlecruiser" => (Factory, 2),
-        "t1_mobile_aa" | "t2_mobile_flak" | "t2_gunship" | "t3_heavy_gunship" | "t1_attack_sub" | "t2_shield_boat" | "t3_missile_sub" => (Factory, 3),
-        "t1_medium_tank" | "t2_heavy_tank" | "t3_armored_assault_bot" | "t2_torpedo_boat" => (Factory, 4),
+        "t1_mobile_aa" | "t2_mobile_flak" | "t2_gunship" | "t3_heavy_gunship" | "t1_attack_sub" | "t2_escort_corvette" | "t3_missile_sub" => (Factory, 3),
+        "t1_medium_tank" | "t2_heavy_tank" | "t3_siege_walker" | "t2_torpedo_boat" => (Factory, 4),
         "t1_land_scout" | "t2_mobile_shield" | "t1_light_transport" | "t2_transport" | "t3_heavy_transport" => (Factory, 5),
-        "t2_amphibious_tank" => (Factory, 6),
-        "t2_field_engineer" => (Factory, 7),
+        "t2_assault_hovercraft" => (Factory, 6),
+        "t2_combat_engineer" => (Factory, 7),
         _ => return None,
     })
 }
@@ -150,7 +150,7 @@ pub const fn letter_for(code: KeyCode) -> Option<char> {
         KeyCode::KeyI => ATTACK_GROUND,
         KeyCode::KeyX => STOP,
         KeyCode::KeyO => PAUSE,
-        KeyCode::KeyL => OVERCHARGE,
+        KeyCode::KeyL => DISCHARGE,
         KeyCode::KeyU => UPGRADE,
         KeyCode::KeyR => REPEAT,
         KeyCode::KeyK => CLEAR_QUEUE,
@@ -219,7 +219,7 @@ mod tests {
         KeyCode::KeyK,
     ];
 
-    const PANEL_LETTERS: [char; 12] = [MOVE, ATTACK_MOVE, FORMATION, ATTACK_GROUND, ASSIST, STOP, PAUSE, OVERCHARGE, UPGRADE, REPEAT, CLEAR_QUEUE, CYCLE_TIER];
+    const PANEL_LETTERS: [char; 12] = [MOVE, ATTACK_MOVE, FORMATION, ATTACK_GROUND, ASSIST, STOP, PAUSE, DISCHARGE, UPGRADE, REPEAT, CLEAR_QUEUE, CYCLE_TIER];
 
     /// Everything that can appear in a build menu, from the real data.
     fn buildable(db: &BlueprintDb) -> Vec<String> {
@@ -259,10 +259,10 @@ mod tests {
             }
         };
         same(&["land_factory_t1", "air_factory", "naval_factory", "land_factory_t2_support", "naval_factory_t3_support"], 'W');
-        same(&["radar", "t1_sonar", "radar_t2", "t2_sonar", "omni_sensor"], 'Z');
+        same(&["radar", "t1_sonar", "radar_t2", "t2_sonar", "deep_scan_array"], 'Z');
         same(&["t1_point_defense", "t1_aa_turret", "t2_point_defense", "t2_flak", "t3_heavy_point_defense", "t3_sam"], 'D');
         same(&["mass_extractor", "mass_storage"], 'E');
-        same(&["power_generator", "hydrocarbon_plant", "energy_storage"], 'S');
+        same(&["power_generator", "geothermal_plant", "energy_storage"], 'S');
         // Land comes first, so the key starts on a land factory.
         assert!(builder_family("land_factory_t1").unwrap().1 < builder_family("air_factory").unwrap().1);
         assert!(builder_family("radar").unwrap().1 < builder_family("t1_sonar").unwrap().1);
@@ -288,10 +288,10 @@ mod tests {
             &["t1_aa_turret", "t2_flak", "t3_sam"][..],
             &["mass_extractor", "mass_extractor_t2", "mass_extractor_t3"],
             &["power_generator", "power_generator_t2", "power_generator_t3"],
-            &["radar", "radar_t2", "omni_sensor"],
+            &["radar", "radar_t2", "deep_scan_array"],
             &["t1_point_defense", "t2_point_defense", "t3_heavy_point_defense"],
             &["shield_generator", "t3_heavy_shield"],
-            &["t1_medium_tank", "t2_heavy_tank", "t3_armored_assault_bot"],
+            &["t1_medium_tank", "t2_heavy_tank", "t3_siege_walker"],
             &["t1_land_scout", "t2_mobile_shield"],
             &["t2_artillery", "t3_artillery"],
             &["t1_light_artillery", "t3_mobile_artillery"],
@@ -306,7 +306,7 @@ mod tests {
             &["tactical_missile_launcher", "strategic_missile_launcher"],
             &["tactical_missile_defense", "strategic_missile_defense"],
             &["t1_engineer", "t2_engineer", "t3_engineer"],
-            &["t1_light_bot", "t2_gatling_bot", "t3_heavy_assault_bot"],
+            &["t1_light_walker", "t2_grenadier_walker", "t3_heavy_walker"],
             &["t1_mobile_aa", "t2_mobile_flak"],
             &["t1_air_scout", "t3_spy_plane"],
             &["t1_interceptor", "t3_air_superiority"],
@@ -319,7 +319,7 @@ mod tests {
             }
         }
         // A factory's common units keep the keys they always had.
-        for (key, letter) in [("t1_engineer", 'Q'), ("t1_light_bot", 'E'), ("t1_light_artillery", 'G'), ("t1_mobile_aa", 'T'), ("t1_medium_tank", 'C')] {
+        for (key, letter) in [("t1_engineer", 'Q'), ("t1_light_walker", 'E'), ("t1_light_artillery", 'G'), ("t1_mobile_aa", 'T'), ("t1_medium_tank", 'C')] {
             assert_eq!(blueprint_hotkey(key), Some(letter), "{key}");
         }
     }
