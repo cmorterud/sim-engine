@@ -456,6 +456,8 @@ struct PendingShot {
     underwater: bool,
     /// What it hits is stunned this many ticks.
     stun: u32,
+    /// A direct-fire shell aims where this unit will be when it arrives (§7.1, Leading Shots).
+    lead: Option<hecs::Entity>,
 }
 
 /// What a launcher gives the missile it fires.
@@ -2141,6 +2143,7 @@ impl SimWorld {
                             spread: Fp::ZERO,
                             underwater: false,
                             stun: 0,
+                            lead: Some(entry.entity),
                         });
                         weapon.ticks_until_ready = weapon.def.reload_ticks;
                         finished_discharges.push(id);
@@ -2209,6 +2212,8 @@ impl SimWorld {
                             spread,
                             underwater: torpedo,
                             stun,
+                            // Artillery, bombs, missiles, and homing shots do not lead.
+                            lead: (artillery.is_none() && missile.is_none() && homing.is_none() && bomb.is_none()).then_some(entry.entity),
                         });
                         economies[stats.team.index()].energy -= weapon_energy;
                         combat.ticks_until_ready = reload;
@@ -2245,6 +2250,7 @@ impl SimWorld {
                         spread,
                         underwater: false,
                         stun,
+                        lead: None,
                     });
                     economies[stats.team.index()].energy -= weapon_energy;
                     combat.ticks_until_ready = reload;
@@ -2363,6 +2369,10 @@ impl SimWorld {
                         spread: weapon.spread,
                         underwater: weapon.torpedo,
                         stun: weapon.stun_ticks,
+                        lead: match (spot, target) {
+                            (None, Some(entry)) if missile.is_none() && homing.is_none() => Some(entry.entity),
+                            _ => None,
+                        },
                     });
                     weapon.ticks_until_ready = weapon.reload_ticks;
                 }
@@ -2448,6 +2458,14 @@ impl SimWorld {
                 }
                 continue;
             }
+            // A direct-fire shell aims where its target will be when it arrives.
+            let aim = match shot.lead.and_then(|target| self.ecs.get::<&Velocity>(target).ok().map(|velocity| velocity.0)) {
+                Some(velocity) => {
+                    let terrain = &self.terrain;
+                    super::combat::lead_point(shot.from, shot.to, velocity, shot.speed, |at| terrain.height_at(at).max(terrain.water_level()))
+                }
+                None => shot.to,
+            };
             // A shell with a spread, artillery's or a scattering gun's, lands somewhere within it of
             // where it was aimed.
             let to = if shot.spread > Fp::ZERO {
@@ -2456,11 +2474,11 @@ impl SimWorld {
                     let (x, y) = (stream.range_fp(-shot.spread, shot.spread), stream.range_fp(-shot.spread, shot.spread));
                     if wide_mul(x, x) + wide_mul(y, y) <= wide_mul(shot.spread, shot.spread) {
                         let (x, y) = if shot.team == Team::Red { (-x, -y) } else { (x, y) };
-                        break Vec3Fp::new(shot.to.x + x, shot.to.y + y, shot.to.z);
+                        break Vec3Fp::new(aim.x + x, aim.y + y, aim.z);
                     }
                 }
             } else {
-                shot.to
+                aim
             };
             let solution = firing_solution(shot.from, to, shot.speed);
             let projectile = self.spawn_projectile(

@@ -36,6 +36,24 @@ pub fn firing_solution(from: Vec3Fp, to: Vec3Fp, horizontal_speed: Fp) -> Firing
     }
 }
 
+/// Where to aim a shell so that it meets a target moving at `velocity` a tick (GAME_SPECIFICATION.md
+/// §7.1, Leading Shots): where the target will be once the shell has flown there, refined twice,
+/// since a farther point takes longer to reach. Only the ground position leads; the height keeps
+/// the target's height over the surface beneath it, given by `surface`.
+pub fn lead_point(from: Vec3Fp, to: Vec3Fp, velocity: Vec3Fp, horizontal_speed: Fp, surface: impl Fn(Vec2Fp) -> Fp) -> Vec3Fp {
+    if velocity.x == Fp::ZERO && velocity.y == Fp::ZERO {
+        return to;
+    }
+    let ahead = |value: Fp, ticks: u32| Fp::from_bits((i64::from(value.to_bits()) * i64::from(ticks)).clamp(i64::from(i32::MIN / 2), i64::from(i32::MAX / 2)) as i32);
+    let mut aim = to;
+    for _ in 0..2 {
+        let ticks = firing_solution(from, aim, horizontal_speed).flight_ticks;
+        aim = Vec3Fp::new(to.x + ahead(velocity.x, ticks), to.y + ahead(velocity.y, ticks), to.z);
+    }
+    let height = to.z - surface(to.xy());
+    Vec3Fp::new(aim.x, aim.y, surface(aim.xy()) + height)
+}
+
 /// A segment's closest approach to a sphere around `(x, y, z)`. Returns how far along
 /// the segment that happens, as raw `Fp` from 0 to 1, if it is within `radius`.
 pub fn segment_hit(start: Vec3Fp, step: Vec3Fp, x: i32, y: i32, z: i32, radius: i32) -> Option<i32> {
@@ -203,6 +221,21 @@ mod tests {
         let solution = firing_solution(v(5, 5, 5), v(5, 5, 5), fp_int(2));
         assert_eq!(solution.flight_ticks, 1);
         assert_eq!(solution.velocity, Vec3Fp::ZERO);
+    }
+
+    #[test]
+    fn a_shell_leads_a_moving_target_by_its_flight_time() {
+        let flat = |_: Vec2Fp| Fp::ZERO;
+        let (from, to) = (v(0, 0, 0), v(300, 0, 0));
+        assert_eq!(lead_point(from, to, Vec3Fp::ZERO, fp_int(60), flat), to, "a target standing still is aimed at");
+        // Moving sideways at 6 a tick: 300 at 60 is 5 ticks, and the aim point's own distance
+        // still rounds up to 6 ticks, so it aims 36 ahead.
+        let aim = lead_point(from, to, v(0, 6, 0), fp_int(60), flat);
+        assert_eq!((aim.x, aim.z), (to.x, to.z));
+        assert_eq!(aim.y, fp_int(36));
+        // The height follows the ground under the aim point.
+        let slope = |at: Vec2Fp| at.y / 2;
+        assert_eq!(lead_point(from, v(300, 0, 5), v(0, 6, 0), fp_int(60), slope).z, fp_int(23));
     }
 
     #[test]

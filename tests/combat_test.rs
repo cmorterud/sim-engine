@@ -263,6 +263,41 @@ fn a_turret_must_swivel_round_before_it_can_fire() {
     assert!(facing.x < Fp::from_num(-0.99), "it should be aiming back at the bot, not {facing:?}");
 }
 
+/// A tank driving across a gun's line of fire at full speed used to walk out from under every
+/// shell, which aimed where it was. Shells now aim where it will be (§7.1, Leading Shots).
+#[test]
+fn shells_lead_a_target_driving_across_the_line_of_fire() {
+    let config = SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: false, ..SimConfig::default() };
+    let mut world = SimWorld::new(config, 1);
+    let (tank, target_kind) = (world.blueprints.id("t2_heavy_tank"), world.blueprints.id("t1_medium_tank"));
+    let shooter = world.spawn_mobile(tank, Team::Blue, point(1_500, 1_000));
+    let target = world.spawn_mobile(target_kind, Team::Red, point(1_000, 1_350));
+    let entity = world.unit_entity(target).unwrap();
+    world.ecs.get::<&mut Combat>(entity).unwrap().range = Fp::ZERO;
+    {
+        let mut health = world.ecs.get::<&mut Health>(entity).unwrap();
+        health.max = fp_int(100_000);
+        health.current = health.max;
+    }
+    // Across the tank's front, 350 away at its nearest, at full speed.
+    world.advance_tick(&[SimCommand::Move { units: vec![target], goal: point(2_200, 1_350) }]);
+    let damage = world.ecs.get::<&Combat>(world.unit_entity(shooter).unwrap()).unwrap().projectile_damage;
+    let mut shots = 0;
+    let mut seen = std::collections::BTreeSet::new();
+    for _ in 0..120 {
+        world.advance_tick(&[]);
+        for &(id, entity) in &world.projectiles {
+            if world.ecs.get::<&Projectile>(entity).is_ok_and(|projectile| projectile.source == shooter) && seen.insert(id) {
+                shots += 1;
+            }
+        }
+    }
+    run_ticks(&mut world, 20);
+    let hits = (fp_int(100_000) - world.unit_health(target).unwrap()) / damage;
+    assert!(shots >= 4, "it should have fired several times, not {shots}");
+    assert!(hits * 4 >= Fp::from_num(shots * 3), "most shells should hit a target moving steadily: {hits} of {shots}");
+}
+
 #[test]
 fn a_turret_without_a_target_turns_back_to_the_front() {
     let (mut world, shooter, target) = tank_with_enemy_behind();
@@ -722,8 +757,17 @@ fn bot_meets_a_fleeing_engineer() -> (SimWorld, SimId, SimId) {
     let mut world = SimWorld::new(SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: true, ..SimConfig::default() }, 1);
     let bot = world.spawn_mobile(world.blueprints.id("t1_light_walker"), Team::Blue, point(1_000, 2_500));
     let engineer = world.spawn_mobile(world.blueprints.id("t1_engineer"), Team::Red, point(1_200, 2_500));
+    sturdy(&mut world, engineer);
     world.advance_tick(&[SimCommand::AttackMove { units: vec![bot], goal: point(4_000, 2_500) }, SimCommand::Move { units: vec![engineer], goal: point(1_200, 5_000) }]);
     (world, bot, engineer)
+}
+
+/// Shells lead their targets, so an engineer walking straight away is hit as it goes: enough health
+/// that it lives to walk out of range, which is what these tests are about.
+fn sturdy(world: &mut SimWorld, id: SimId) {
+    let mut health = world.ecs.get::<&mut Health>(world.unit_entity(id).unwrap()).unwrap();
+    health.max = fp_int(1_500);
+    health.current = health.max;
 }
 
 #[test]
@@ -785,6 +829,7 @@ fn a_patrol_goes_on_after_a_chase() {
     let mut world = SimWorld::new(SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: true, ..SimConfig::default() }, 1);
     let bot = world.spawn_mobile(world.blueprints.id("t1_light_walker"), Team::Blue, point(1_000, 2_500));
     let engineer = world.spawn_mobile(world.blueprints.id("t1_engineer"), Team::Red, point(1_200, 2_500));
+    sturdy(&mut world, engineer);
     let points = vec![point(1_000, 2_500), point(3_000, 2_500)];
     world.advance_tick(&[SimCommand::Patrol { units: vec![bot], points, queued: false }, SimCommand::Move { units: vec![engineer], goal: point(1_200, 5_000) }]);
     let entity = world.unit_entity(bot).unwrap();

@@ -176,6 +176,7 @@ Destroyed units, downed aircraft, shattered base buildings, rocks, and trees lea
 * **True Trajectory:** Shells, plasma charges, missiles, and rockets travel with real muzzle velocity and gravitational drop.
 * **Elevation & Masking:** Cliffs, hills, and base walls physically block low-trajectory fire. Artillery placed on ridges gains increased line-of-sight and clearance.
 * **Physical Dodging:** Agile units (light walkers, interceptors) can change heading to evade incoming slow-moving artillery shells or unguided rockets.
+* **Leading Shots:** Direct-fire weapons aim where their target will be when the shell arrives, from its velocity and the shell's flight time, refined twice. A unit moving steadily, across the line of fire or straight away, is hit; only a change of direction after the shot dodges it, a small edge for deliberate micro (BALANCE.md). Artillery, bombs, missiles, and shots that home do not lead, so artillery stays weak against what moves. Before this, shells aimed where the target was, so a tank driving across a gun's front at full speed walked out from under every shell, and one walking straight away was rarely hit.
 * **Friendly Fire:** Stray rounds, premature detonations, and artillery spread inflict full damage on friendly units and shields.
 * **Beam Weapons:** Continuous raycast energy vectors (e.g., microwave lasers) apply damage instantly along line-of-sight without projectile flight delays.
 
