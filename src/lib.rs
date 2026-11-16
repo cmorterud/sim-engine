@@ -2,6 +2,7 @@
 
 pub mod ai;
 pub mod audio;
+pub mod balance;
 pub mod driver;
 pub mod hud;
 pub mod icons;

@@ -89,6 +89,7 @@ Usage: sim-engine [options]
   --capture <dir>      With --autotest, save screenshots at several zoom levels
   --soak <matches>     Play and replay AI-vs-AI matches, and report on the exit criteria
   --threads <n>        Threads for --soak (default 6)
+  --balance            Measure the unit data with the balance harness's duels (BALANCE.md)
   --no-tick-gate       With --soak, report tick times without failing on them, for
                        shared machines such as CI runners
   --seed <number>      Scenario seed
@@ -163,6 +164,8 @@ struct Options {
     fast_forward: u32,
     capture_dir: Option<PathBuf>,
     soak: Option<u64>,
+    /// Print the balance harness's measurements of today's unit data (BALANCE.md).
+    balance: bool,
     threads: Option<usize>,
     no_tick_gate: bool,
     seed: Option<u64>,
@@ -220,6 +223,7 @@ fn parse_options() -> Result<Option<Options>, String> {
             "--fast-forward" => options.fast_forward = number("--fast-forward", value("--fast-forward")?)? as u32,
             "--capture" => options.capture_dir = Some(PathBuf::from(value("--capture")?)),
             "--soak" => options.soak = Some(number("--soak", value("--soak")?)?),
+            "--balance" => options.balance = true,
             "--threads" => options.threads = Some(number("--threads", value("--threads")?)? as usize),
             "--no-tick-gate" => options.no_tick_gate = true,
             "--seed" => options.seed = Some(number("--seed", value("--seed")?)?),
@@ -269,6 +273,10 @@ fn main() {
     };
     if options.sound_check {
         sound_check();
+        return;
+    }
+    if options.balance {
+        sim_engine::balance::report(&std::sync::Arc::new(sim_engine::sim::blueprints::BlueprintDb::standard()));
         return;
     }
     if let Some(matches) = options.soak {
