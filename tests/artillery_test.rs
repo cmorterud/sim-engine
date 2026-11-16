@@ -1,10 +1,10 @@
 //! Artillery (GAME_SPECIFICATION.md §7): it cannot hit what is too close, its shells scatter, an
 //! installation's shot costs energy, and generators beside one cut that cost and its reload.
 
-use sim_engine::math::fp::{fp_int, Vec2Fp, Vec3Fp};
+use sim_engine::math::fp::{fp_int, Fp, Vec2Fp, Vec3Fp};
 use sim_engine::sim::blueprints::Res;
 use sim_engine::sim::commands::SimCommand;
-use sim_engine::sim::components::{Projectile, SimId, Team};
+use sim_engine::sim::components::{Artillery, Combat, Health, Projectile, SimId, Team};
 use sim_engine::sim::config::{SimConfig, TerrainStyle};
 use sim_engine::sim::world::SimWorld;
 
@@ -40,6 +40,68 @@ fn first_shot(world: &mut SimWorld, source: SimId, limit: u32) -> Option<u32> {
         world.advance_tick(&[]);
         !shells(world, source).is_empty()
     })
+}
+
+/// A tank driving steadily across a weapon's front, with health enough to take everything, that
+/// does not shoot back.
+fn passing_tank(world: &mut SimWorld, from: Vec2Fp, to: Vec2Fp) -> SimId {
+    let tank = world.spawn_mobile(world.blueprints.id("t1_medium_tank"), Team::Red, from);
+    let entity = world.unit_entity(tank).unwrap();
+    world.ecs.get::<&mut Combat>(entity).unwrap().range = Fp::ZERO;
+    {
+        let mut health = world.ecs.get::<&mut Health>(entity).unwrap();
+        health.max = fp_int(100_000);
+        health.current = health.max;
+    }
+    world.advance_tick(&[SimCommand::Move { units: vec![tank], goal: to }]);
+    tank
+}
+
+/// Runs, and returns how many shots `source` fired.
+fn count_shots(world: &mut SimWorld, source: SimId, ticks: u32) -> usize {
+    let mut fired = std::collections::BTreeSet::new();
+    for _ in 0..ticks {
+        world.advance_tick(&[]);
+        for &(id, shell) in &world.projectiles {
+            if world.ecs.get::<&Projectile>(shell).is_ok_and(|shell| shell.source == source) {
+                fired.insert(id);
+            }
+        }
+    }
+    fired.len()
+}
+
+/// Artillery leads its target as every shell does (GAME_SPECIFICATION.md §7.1, Leading Shots): a
+/// tank driving steadily past is hit, where before the shells fell where it had been.
+#[test]
+fn artillery_leads_a_target_moving_steadily() {
+    let mut world = world(5_120);
+    let artillery = world.spawn_mobile(world.blueprints.id("t3_mobile_artillery"), Team::Blue, point(1_000, 1_000));
+    // No scatter, so that only the aim is measured.
+    world.ecs.get::<&mut Artillery>(world.unit_entity(artillery).unwrap()).unwrap().spread = Fp::ZERO;
+    let tank = passing_tank(&mut world, point(200, 2_100), point(3_000, 2_100));
+    let fired = count_shots(&mut world, artillery, 300);
+    for _ in 0..60 {
+        world.advance_tick(&[]);
+    }
+    let hits = ((fp_int(100_000) - world.unit_health(tank).unwrap()) / fp_int(750)).to_num::<usize>();
+    assert!(fired >= 2, "it should have fired a few times, not {fired}");
+    assert!(hits * 2 >= fired, "most shells should land on a tank driving steadily: {hits} of {fired}");
+}
+
+/// Cruise missiles do not lead, and do not follow a target that moves: they fly to where it was
+/// when they were launched, so that their long range is no help against what keeps moving.
+#[test]
+fn cruise_missiles_land_where_a_moving_target_was() {
+    let mut world = world(5_120);
+    let launcher = world.spawn_mobile(world.blueprints.id("t2_mobile_missile_launcher"), Team::Blue, point(1_000, 1_000));
+    let tank = passing_tank(&mut world, point(300, 2_000), point(3_000, 2_000));
+    let fired = count_shots(&mut world, launcher, 200);
+    for _ in 0..80 {
+        world.advance_tick(&[]);
+    }
+    assert!(fired >= 2, "it should have fired at the tank, not {fired} times");
+    assert_eq!(world.unit_health(tank), Some(fp_int(100_000)), "every missile lands behind a tank that keeps driving");
 }
 
 #[test]

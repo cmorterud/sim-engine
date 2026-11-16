@@ -16,9 +16,11 @@ pace = "like the inspiration, fights a little longer"
 micro = "light"
 # Map scale, engine units, sight, and ranges stay as they are, so maps and the AI keep working.
 scale = "keep"
-# Direct-fire weapons aim where their target will be when the shell arrives. Artillery and bombs
-# do not, so they stay weak against moving targets; missiles and anti-air already home.
-leading_shots = "direct fire only"
+# Every shell aims where its target will be when it arrives, artillery's too, so that steady
+# movement never dodges and only a change of direction does. Artillery's long flight makes that
+# worth far more against it. Bombs drop where the target is; shots at aircraft home. Cruise
+# missiles neither lead nor follow, so that their long range is no help against what keeps moving.
+leading_shots = "every shell"
 # Bigger armies for the same income than the inspiration, at the same pace, since the engine can
 # carry them: units are cheaper for their income, and tech costs scale with income, so that tech
 # timings stay where [pace] puts them. Tuned with the other global knobs (BALANCE.md, step 5).
@@ -95,7 +97,7 @@ efficiency_multiplier = [1.0, 1.15]
 [micro]
 # A line weapon's shell reaches full range within this many seconds.
 line_flight_seconds_max = 0.6
-# Artillery shells take at least this long, so that they miss what moves.
+# Artillery shells take at least this long, so that a unit changing direction dodges them.
 artillery_flight_seconds_min = 2.0
 # With leading shots, the share of a line weapon's shots at full range that a target avoids by
 # changing direction every second at full speed: by the target's weight class.
@@ -128,6 +130,13 @@ winner_survivors = [0.40, 0.70]
 even_margin = 0.15
 # One that depends on micro, within this.
 micro_margin = 0.25
+# Matchups meant to turn on micro, where it may be worth far more than [micro] micro_gain: massed
+# line units against massed artillery lose attack-moving, and win spread out and charging.
+micro_cells = [["line", "artillery"], ["assault", "artillery"]]
+micro_cell_gain = [0.5, 1.0]
+# Artillery always has counters that need no micro: raiders and fast units that close in, other
+# artillery, mobile shields, and bombers.
+artillery_counters_without_micro = ["raider", "artillery", "mobile_shield", "bomber"]
 
 [strategy]
 # AI strategy variants (T2 rush, T1 spam, air-heavy, naval-heavy) each win within their timing

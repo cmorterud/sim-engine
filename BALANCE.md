@@ -15,8 +15,11 @@ Made on 2026-11-15, with the inspiration's ratios as a reference for feel (PROVE
 * **Micro:** position and composition decide fights. Micro can win an edge in a pinch, such as
   against a larger force, but is never needed to play well. Range is worth a touch less than in
   the inspiration (closing time 0.35 of the time to kill), so kiting belongs to skirmishers and
-  artillery. Shells are fast, and direct-fire weapons lead their targets, so dodging takes
-  deliberate changes of direction. Scripted micro is worth 10–25% effective strength.
+  artillery. Shells are fast, and every shell leads its target, so dodging takes deliberate
+  changes of direction. Scripted micro is worth 10–25% effective strength, except where a
+  matchup is meant to turn on it: massed line units against massed artillery lose attack-moving
+  and win spread out and charging, while raiders, artillery, mobile shields, and bombers beat
+  artillery with no micro at all.
 * **Sight** is about the inspiration's: scouts see far, line units a little past their guns,
   heavy units and artillery less than their range.
 * **Tiers** are about as efficient per materiel as each other, so lower tiers stay useful, and

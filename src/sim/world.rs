@@ -456,7 +456,7 @@ struct PendingShot {
     underwater: bool,
     /// What it hits is stunned this many ticks.
     stun: u32,
-    /// A direct-fire shell aims where this unit will be when it arrives (§7.1, Leading Shots).
+    /// A shell aims where this unit will be when it arrives (§7.1, Leading Shots).
     lead: Option<hecs::Entity>,
 }
 
@@ -2212,8 +2212,9 @@ impl SimWorld {
                             spread,
                             underwater: torpedo,
                             stun,
-                            // Artillery, bombs, missiles, and homing shots do not lead.
-                            lead: (artillery.is_none() && missile.is_none() && homing.is_none() && bomb.is_none()).then_some(entry.entity),
+                            // Every shell leads, artillery's too. Bombs, shots that home, and cruise missiles, which fly to
+                            // where the target was at launch, do not.
+                            lead: (missile.is_none() && homing.is_none() && bomb.is_none()).then_some(entry.entity),
                         });
                         economies[stats.team.index()].energy -= weapon_energy;
                         combat.ticks_until_ready = reload;
@@ -2458,7 +2459,7 @@ impl SimWorld {
                 }
                 continue;
             }
-            // A direct-fire shell aims where its target will be when it arrives.
+            // A shell aims where its target will be when it arrives.
             let aim = match shot.lead.and_then(|target| self.ecs.get::<&Velocity>(target).ok().map(|velocity| velocity.0)) {
                 Some(velocity) => {
                     let terrain = &self.terrain;
