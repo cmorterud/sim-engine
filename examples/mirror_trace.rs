@@ -4,16 +4,23 @@
 //! and what is near, all with Red's turned about the center to compare with Blue's. Take the
 //! tick, blueprint, and position from `mirror_probe`.
 //!
-//! `cargo run --release --example mirror_trace -- <seed> <tick> <blueprint> <x> <y>`
+//! `cargo run --release --example mirror_trace -- <seed> <tick> <blueprint> <x> <y> [map] [ticks]`,
+//! where the map is a bundled one, such as `twin_passes`, or `skirmish`, and `ticks` is how many
+//! ticks before `tick` to show (4).
 use sim_engine::ai::AiBrain;
 use sim_engine::sim::components::{Blueprinted, Combat, Order, Position, Team, UnitStats, Velocity};
-use sim_engine::sim::scenario::{skirmish, SKIRMISH_MAP_UNITS};
+use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::Arc;
+
+use sim_engine::sim::scenario::{MapSource, SKIRMISH_MAP_UNITS};
 use sim_engine::sim::world::SimWorld;
 
-const MAP: f64 = SKIRMISH_MAP_UNITS as f64;
+/// The map's size, set once in `main`, for turning Red's about the center.
+static MAP_UNITS: AtomicI32 = AtomicI32::new(SKIRMISH_MAP_UNITS);
 
 fn flip(team: Team, x: f64, y: f64) -> (f64, f64) {
-    if team == Team::Red { (MAP - x, MAP - y) } else { (x, y) }
+    let map = f64::from(MAP_UNITS.load(Ordering::Relaxed));
+    if team == Team::Red { (map - x, map - y) } else { (x, y) }
 }
 
 fn find(world: &SimWorld, team: Team, blueprint: u16, x: f64, y: f64) -> Option<hecs::Entity> {
@@ -87,13 +94,19 @@ fn main() {
     let at: u32 = args[1].parse().unwrap();
     let blueprint: u16 = args[2].parse().unwrap();
     let (x, y): (f64, f64) = (args[3].parse().unwrap(), args[4].parse().unwrap());
-    let mut world = skirmish(seed).world;
+    let source = match args.get(5).map(String::as_str) {
+        None | Some("skirmish") => MapSource::Skirmish,
+        Some(name) => MapSource::Map(Arc::new(sim_engine::sim::maps::bundled(name).expect("a bundled map"))),
+    };
+    let window: u32 = args.get(6).and_then(|text| text.parse().ok()).unwrap_or(4);
+    let mut world = source.scenario(seed).world;
+    MAP_UNITS.store(world.terrain.map_units(), Ordering::Relaxed);
     let mut brains = [AiBrain::new(Team::Blue, seed, world.starts), AiBrain::new(Team::Red, seed, world.starts)];
     while world.current_tick < at {
         let mut commands = brains[0].think(&world);
         commands.extend(brains[1].think(&world));
         world.advance_tick(&commands);
-        if world.current_tick + 4 >= at {
+        if world.current_tick + window >= at {
             println!("tick {}", world.current_tick);
             for team in [Team::Blue, Team::Red] {
                 if let Some(e) = find(&world, team, blueprint, x, y) {

@@ -107,6 +107,37 @@ fn a_transport_sets_its_cargo_down_where_it_is_sent_and_it_can_be_ordered_again(
     assert!(world.unit_position(bots[0]).unwrap().x > fp_int(4_300), "and they take orders again");
 }
 
+/// Two transports that are mirror images, unloading at mirror-image spots, set their cargo down as
+/// mirror images: the search for open cells goes the same way round for each side. It went the
+/// same way across the map for both, so a drop on Twin Passes put Red's units two cells off
+/// Blue's, turned about the center.
+#[test]
+fn mirror_image_drops_set_down_mirror_image_cargo() {
+    let mut world = test_world();
+    let map = 5_120;
+    let mut loads = Vec::new();
+    for (team, flip) in [(Team::Blue, false), (Team::Red, true)] {
+        let at = |x: i32, y: i32| if flip { point(map - x, map - y) } else { point(x, y) };
+        let transport = world.spawn_mobile(id(&world, "t1_light_transport"), team, at(1_500, 1_500));
+        let bots: Vec<SimId> = (0..4).map(|index| world.spawn_mobile(id(&world, "t1_light_walker"), team, at(1_600 + index * 30, 1_600))).collect();
+        loads.push((transport, bots, at(2_210, 2_330)));
+    }
+    world.advance_tick(&loads.iter().map(|(transport, bots, _)| SimCommand::Load { units: bots.clone(), transport: *transport }).collect::<Vec<_>>());
+    run(&mut world, 300);
+    world.advance_tick(&loads.iter().map(|(transport, _, drop)| SimCommand::Unload { transports: vec![*transport], point: *drop }).collect::<Vec<_>>());
+    run(&mut world, 400);
+    let landed = |bots: &[SimId], flip: bool| {
+        let mut spots: Vec<(i32, i32)> = bots
+            .iter()
+            .map(|bot| world.unit_position(*bot).expect("set down").xy())
+            .map(|at| if flip { (map - at.x.to_num::<i32>(), map - at.y.to_num::<i32>()) } else { (at.x.to_num::<i32>(), at.y.to_num::<i32>()) })
+            .collect();
+        spots.sort();
+        spots
+    };
+    assert_eq!(landed(&loads[0].1, false), landed(&loads[1].1, true), "Red's cargo, turned about the center, lands where Blue's does");
+}
+
 #[test]
 fn what_a_transport_carries_goes_down_with_it() {
     let mut world = test_world();

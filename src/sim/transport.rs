@@ -223,9 +223,11 @@ impl SimWorld {
                 transport.unload = None;
                 std::mem::take(&mut transport.cargo)
             };
+            // Red searches the other way round, so mirror-image drops stay mirror images.
+            let mirror = self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team == super::components::Team::Red);
             let mut taken: Vec<(usize, usize)> = Vec::new();
             for carried in cargo {
-                self.unstow(carried, point, &mut taken);
+                self.unstow(carried, point, mirror, &mut taken);
             }
         }
     }
@@ -280,8 +282,9 @@ impl SimWorld {
     }
 
     /// Puts a carried unit back on the map, on the nearest cell to `point` that it can stand on
-    /// and that nothing set down with it has taken.
-    fn unstow(&mut self, id: SimId, point: Vec2Fp, taken: &mut Vec<(usize, usize)>) {
+    /// and that nothing set down with it has taken. Cells equally near are tried in a fixed order,
+    /// turned about the center for `mirror`, Red's, so that both sides break the ties alike.
+    fn unstow(&mut self, id: SimId, point: Vec2Fp, mirror: bool, taken: &mut Vec<(usize, usize)>) {
         let Ok(index) = self.carried.binary_search_by_key(&id, |unit| unit.0) else {
             return;
         };
@@ -298,7 +301,8 @@ impl SimWorld {
                     if dx.abs() != ring && dy.abs() != ring {
                         continue;
                     }
-                    let (x, y) = (center_x as i32 + dx, center_y as i32 + dy);
+                    let turn = if mirror { -1 } else { 1 };
+                    let (x, y) = (center_x as i32 + dx * turn, center_y as i32 + dy * turn);
                     if !(0..cells).contains(&x) || !(0..cells).contains(&y) || taken.contains(&(x as usize, y as usize)) {
                         continue;
                     }

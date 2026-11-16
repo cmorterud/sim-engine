@@ -5,7 +5,8 @@
 //! Positions are matched within a tolerance, because fixed-point rounding is not symmetric
 //! under negation and leaves the two sides a raw bit or two apart.
 //!
-//! `cargo run --release --example mirror_probe -- <seed> <ticks>`
+//! `cargo run --release --example mirror_probe -- <seed> <ticks> [tolerance] [map]`, where the map is
+//! a bundled one, such as `twin_passes`, or the generated skirmish map by default.
 #![allow(clippy::disallowed_types, clippy::float_arithmetic)]
 
 use sim_engine::ai::AiBrain;
@@ -13,14 +14,24 @@ use sim_engine::math::fp::Vec2Fp;
 use sim_engine::sim::commands::SimCommand;
 use sim_engine::sim::components::{Blueprinted, Construction, Health, Position, Team, UnitStats};
 use sim_engine::sim::config::TERRAIN_CELL_UNITS;
-use sim_engine::sim::scenario::{skirmish, SKIRMISH_MAP_UNITS};
+use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::Arc;
+
+use sim_engine::sim::scenario::{MapSource, SKIRMISH_MAP_UNITS};
 use sim_engine::sim::world::SimWorld;
+
+/// The map's size, set once in `main`, for reflecting Red through the center.
+static MAP_UNITS: AtomicI32 = AtomicI32::new(SKIRMISH_MAP_UNITS);
+
+fn map_units() -> i32 {
+    MAP_UNITS.load(Ordering::Relaxed)
+}
 
 /// Blueprint, position in units, build progress and health share in thousandths.
 type Unit = (u16, f64, f64, i64, i64);
 
 fn units(world: &SimWorld, team: Team) -> Vec<Unit> {
-    let map = f64::from(SKIRMISH_MAP_UNITS);
+    let map = f64::from(map_units());
     world
         .units
         .iter()
@@ -45,14 +56,14 @@ fn units(world: &SimWorld, team: Team) -> Vec<Unit> {
 fn point(team: Team, point: Vec2Fp) -> String {
     let (mut x, mut y) = (point.x.to_num::<i32>(), point.y.to_num::<i32>());
     if team == Team::Red {
-        (x, y) = (SKIRMISH_MAP_UNITS - x, SKIRMISH_MAP_UNITS - y);
+        (x, y) = (map_units() - x, map_units() - y);
     }
     format!("({x},{y})")
 }
 
 /// An order with its ids left out and its places reflected, so the two teams' can be compared.
 fn describe(world: &SimWorld, team: Team, command: &SimCommand) -> String {
-    let last = SKIRMISH_MAP_UNITS / TERRAIN_CELL_UNITS - 1;
+    let last = map_units() / TERRAIN_CELL_UNITS - 1;
     match command {
         SimCommand::Build { units, blueprint, cell_x, cell_y, .. } => {
             let size = i32::from(world.blueprints.get(*blueprint).footprint);
@@ -104,7 +115,12 @@ fn main() {
     let seed: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(1);
     let ticks: u32 = args.next().and_then(|s| s.parse().ok()).unwrap_or(6000);
     let tolerance: f64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(4.0);
-    let mut world = skirmish(seed).world;
+    let source = match args.next() {
+        Some(name) => MapSource::Map(Arc::new(sim_engine::sim::maps::bundled(&name).expect("a bundled map"))),
+        None => MapSource::Skirmish,
+    };
+    let mut world = source.scenario(seed).world;
+    MAP_UNITS.store(world.terrain.map_units(), Ordering::Relaxed);
     let mut brains = [AiBrain::new(Team::Blue, seed, world.starts), AiBrain::new(Team::Red, seed, world.starts)];
     let (mut order_reports, mut unit_reports) = (0, 0);
     while world.current_tick < ticks && world.match_result.is_none() {
