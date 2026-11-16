@@ -29,6 +29,10 @@ const LATE_PUSH_TICKS: u32 = 26_000;
 /// start. Even sides otherwise still traded to the limit now and then, a different seed after
 /// each change.
 const SUDDEN_DEATH_TICKS: u32 = 30_000;
+/// In sudden death, units already on their way are sent again at the enemy commander this often:
+/// sent only once idle, a group walked to where it had been, while it walked home to rebuild, and
+/// was 500 short of it when the time ran out.
+const SUDDEN_DEATH_REAIM_TICKS: u32 = 300;
 /// Enemy deposits farther than this from the enemy's start are raided rather than its base.
 const RAID_DISTANCE_UNITS: i32 = 2_000;
 const FIRST_WAVE: usize = 10;
@@ -278,6 +282,8 @@ struct Forces {
     /// The team's best finished land headquarters' tier, 1 for none.
     headquarters_tier: u8,
     idle_combat: Vec<SimId>,
+    /// Land combat units on an attack-move, which sudden death re-aims.
+    attacking: Vec<SimId>,
     combat_units: usize,
     extractors: Vec<(u32, u32)>,
     /// Finished extractors that could upgrade, with their tier and whether they are upgrading.
@@ -695,6 +701,9 @@ impl AiBrain {
                 }
                 UnitClass::Bot | UnitClass::Artillery | UnitClass::Tank => {
                     forces.combat_units += 1;
+                    if order.kind == OrderKind::AttackMove {
+                        forces.attacking.push(id);
+                    }
                     if order.kind == OrderKind::Idle {
                         forces.idle_combat.push(id);
                         if unit.tier == 1 && finished && world.ecs.get::<&crate::sim::components::Boarding>(entity).is_err() {
@@ -1823,6 +1832,18 @@ impl AiBrain {
     }
 
     fn command_army(&mut self, world: &SimWorld, forces: &Forces, sightings: &[Sighting], commands: &mut Vec<SimCommand>) {
+        let sudden_death = world.current_tick >= SUDDEN_DEATH_TICKS.max(self.skill.commander_push_ticks);
+        if sudden_death && world.current_tick.is_multiple_of(SUDDEN_DEATH_REAIM_TICKS) {
+            let goal = world.commanders[self.team.enemy().index()].and_then(|id| world.unit_position(id)).map_or(self.enemy_home, |at| at.xy());
+            let mut going = forces.attacking.clone();
+            let commander_attacking = forces.commander.and_then(|id| world.unit_entity(id)).is_some_and(|entity| world.ecs.get::<&Order>(entity).is_ok_and(|order| order.kind == OrderKind::AttackMove));
+            if commander_attacking && world.terrain.height_at(goal) >= world.terrain.water_level() {
+                going.extend(forces.commander);
+            }
+            if !going.is_empty() {
+                commands.push(SimCommand::AttackMove { units: going, goal });
+            }
+        }
         if forces.idle_combat.is_empty() {
             return;
         }
@@ -1860,7 +1881,6 @@ impl AiBrain {
             self.gathered = (gathered, world.current_tick);
         }
         let stopped_growing = world.current_tick - self.gathered.1 >= WAVE_PATIENCE_TICKS;
-        let sudden_death = world.current_tick >= SUDDEN_DEATH_TICKS.max(self.skill.commander_push_ticks);
         if sudden_death {
             // Wherever the enemy commander is, seen or not: going for where it was last seen, or
             // else for the enemy's start, two commanders that had each lost their base kept
