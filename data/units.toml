@@ -1377,42 +1377,48 @@ vision = 400
 sonar = 720
 weapon = { range = 1200, reload_ticks = 40, projectile_speed = 30, damage = 720, targets = "naval" }
 
-# FAF's numbers for its hover tank: it hovers over land and water alike. Its riot gun fires both muzzles at once.
+# A landing-craft gunboat: it hovers over land and water alike, slower than the Heavy Tank, with a
+# gun that outranges it and a little splash. It pays about a third over the Heavy Tank's health
+# and firepower per materiel for crossing water and for its range, so it flanks shore bases rather
+# than winning straight fights on land. This game's own numbers, not another game's.
 [[unit]]
 id = "t2_assault_hovercraft"
 name = "Assault Hovercraft"
 class = "tank"
 tier = 2
-mass = 320
-energy = 1650
-build_time = 1420
-health = 1800
-speed = "7.4"
-turn_rate = 90
-turn_radius = 20
-radius = 11
-vision = 360
+mass = 400
+energy = 2000
+build_time = 1600
+health = 2600
+speed = "5.6"
+turn_rate = 60
+turn_radius = 40
+radius = 13
+vision = 480
 movement = "hover"
-weapon = { range = 360, reload_ticks = 3, projectile_speed = 120, damage = 27, turn_rate = 180 }
+weapon = { range = 560, reload_ticks = 15, projectile_speed = 60, damage = 135, splash_radius = 20, turn_rate = 90, spread = 4 }
 
-# A dome that moves with it, which on the water covers 660 around it: FAF's sphere of
-# 1,200 sunk 1,000 below the surface.
+# A fleet escort: a small dome that moves with it, over the ships around it, and an anti-torpedo
+# charge, one torpedo within 600 every 6 seconds. Sturdier and cheaper than a dome boat alone would
+# be, since it sails with the fleet rather than behind it. This game's own numbers.
 [[unit]]
 id = "t2_escort_corvette"
 name = "Escort Corvette"
 class = "defense"
 tier = 2
-mass = 900
-energy = 9000
-build_time = 3600
-health = 550
+mass = 700
+energy = 7000
+build_time = 3000
+health = 1500
 speed = 10
 turn_rate = 45
 turn_radius = 40
 radius = 16
 vision = 640
+sonar = 720
 movement = "naval"
-shield = { radius = 660, health = 5500, regen = 80, recharge_seconds = 30, upkeep = 100 }
+torpedo_defense = { range = 600, reload_ticks = 60 }
+shield = { radius = 400, health = 4000, regen = 80, recharge_seconds = 30, upkeep = 80 }
 
 # FAF's numbers. It builds nuclear missiles as a strategic missile launcher does, on order or one after
 # another, up to three, and fires one only on order. Its cruise missiles it fires on its own at
@@ -1720,14 +1726,14 @@ tier = 2
 mass = 200
 energy = 1000
 build_time = 1000
-health = 650
+health = 800
 speed = "5.8"
 turn_rate = 80
 radius = 10
 vision = 520
-# A gatling that fires 15-round bursts, about 37 damage a second, and a grenade launcher.
-weapon = { range = 680, reload_ticks = 4, projectile_speed = 56, damage = 15, turn_rate = 120, spread = 2 }
-extra_weapons = [{ range = 680, reload_ticks = 17, projectile_speed = 26, damage = 50, splash_radius = 40, spread = 50 }]
+# One automatic grenade launcher, lobbing a grenade a second out to 600 that bursts over 50: less
+# against one target than a gun of its cost, much more against a clump. This game's own numbers.
+weapon = { range = 600, reload_ticks = 10, projectile_speed = 30, damage = 45, splash_radius = 50, turn_rate = 120, spread = 25 }
 
 [[unit]]
 id = "t2_mobile_shield"

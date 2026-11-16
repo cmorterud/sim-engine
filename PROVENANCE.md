@@ -53,12 +53,16 @@ Taken so far:
 * The air factories, aircraft, and anti-air (§10), from FAF's UEF units. How far a bomb is let go
   short of its target is worked out here from its fall.
 * The rest of the UEF's non-experimental units and structures: the Land Scout, Medium Tank,
-  Grenadier Walker, Mobile Shield Generator, Combat Engineer, Heavy and Siege Walkers, Torpedo Boat,
+  Mobile Shield Generator, Combat Engineer, Heavy and Siege Walkers, Torpedo Boat,
   Heavy Point Defense, Heavy Shield Generator, Wall Section, and Field Workshops. The workshops'
   drones are folded into the workshop's own build power.
 * The three air transports and their room by size class, from FAF's UEF units.
 * Veterancy, wreckage, turn rates, firing randomness, and missile speeds (§6, §11, §18.4), from
   FAF's rules and blueprints.
+
+Not taken: the Assault Hovercraft, Grenadier Walker, and Escort Corvette were given new concepts and
+this game's own numbers on 2026-11-15, in place of the hover tank, gatling bot, and shield boat they
+replaced.
 
 ## Names
 

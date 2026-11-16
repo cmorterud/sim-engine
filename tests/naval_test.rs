@@ -340,7 +340,7 @@ fn a_hovercraft_crosses_land_and_water_alike() {
         world.advance_tick(&[]);
         let at = world.unit_position(hovercraft).unwrap();
         if on_water(&world, hovercraft) {
-            assert_eq!(at.z, fp_int(11), "it floats on the water");
+            assert_eq!(at.z, fp_int(13), "it floats on the water, its radius above it");
             floated = true;
         }
         world.unit_order(hovercraft).unwrap().kind == OrderKind::Idle
@@ -503,24 +503,32 @@ fn a_escort_corvettes_dome_moves_with_it_and_stops_shells() {
 
 #[test]
 fn anti_torpedo_charges_shoot_torpedoes_down() {
-    let damage_taken = |charges: bool| {
-        let mut world = lake_world();
-        let destroyer = spawn(&mut world, "t2_destroyer", Team::Blue, point(2_000, 1_000));
-        let entity = world.unit_entity(destroyer).unwrap();
-        world.ecs.get::<&mut sim_engine::sim::components::Combat>(entity).unwrap().range = Fp::ZERO;
-        world.ecs.get::<&mut sim_engine::sim::components::ExtraWeapons>(entity).unwrap().0.clear();
-        if !charges {
-            world.ecs.remove_one::<sim_engine::sim::components::TorpedoDefense>(entity).unwrap();
-            world.torpedo_defenses.clear();
-        }
-        world.spawn_finished_structure(world.blueprints.id("t1_torpedo_launcher"), Team::Red, 120, 50).unwrap();
-        let full = world.unit_health(destroyer).unwrap();
-        run_ticks(&mut world, 400);
-        full - world.unit_health(destroyer).unwrap_or(Fp::ZERO)
-    };
-    let (without, with) = (damage_taken(false), damage_taken(true));
-    assert!(without > Fp::ZERO);
-    assert!(with < without, "the charges stop some torpedoes: {with} against {without}");
+    // The destroyer's charge, and the escort corvette's.
+    for key in ["t2_destroyer", "t2_escort_corvette"] {
+        let damage_taken = |charges: bool| {
+            let mut world = lake_world();
+            let ship = spawn(&mut world, key, Team::Blue, point(2_000, 1_000));
+            let entity = world.unit_entity(ship).unwrap();
+            if let Ok(mut combat) = world.ecs.get::<&mut sim_engine::sim::components::Combat>(entity) {
+                combat.range = Fp::ZERO;
+            }
+            if let Ok(mut extras) = world.ecs.get::<&mut sim_engine::sim::components::ExtraWeapons>(entity) {
+                extras.0.clear();
+            }
+            if !charges {
+                world.ecs.remove_one::<sim_engine::sim::components::TorpedoDefense>(entity).unwrap();
+                world.torpedo_defenses.clear();
+            }
+            world.spawn_finished_structure(world.blueprints.id("t1_torpedo_launcher"), Team::Red, 120, 50).unwrap();
+            let full = world.unit_health(ship).unwrap();
+            // Short enough that the corvette, the lighter of the two, is still afloat with them.
+            run_ticks(&mut world, 200);
+            full - world.unit_health(ship).unwrap_or(Fp::ZERO)
+        };
+        let (without, with) = (damage_taken(false), damage_taken(true));
+        assert!(without > Fp::ZERO, "{key}");
+        assert!(with < without, "{key}'s charges stop some torpedoes: {with} against {without}");
+    }
 }
 
 fn stock(world: &SimWorld, id: SimId) -> u32 {
