@@ -215,3 +215,19 @@ fn a_radar_upgrades_in_place_to_a_t2_radar_and_then_an_deep_scan_array() {
     let sensors = world.snapshot_for(Some(Team::Blue)).sensor_ranges;
     assert_eq!((sensors[0].radar, sensors[0].deep_scan), (fp_int(12_000).to_bits(), fp_int(4_000).to_bits()));
 }
+
+#[test]
+fn a_match_without_fog_of_war_shows_every_team_the_whole_map() {
+    use sim_engine::sim::scenario::skirmish;
+    let foggy = skirmish(1);
+    let clear = skirmish(1).with_fog_of_war(false);
+    assert!(foggy.world.config.fog_of_war, "matches have fog of war unless it is turned off");
+    for (scenario, fog) in [(foggy, true), (clear, false)] {
+        let mut world = scenario.world;
+        run(&mut world, 20);
+        let snapshot = world.snapshot_for(Some(Team::Blue));
+        let red_commander = snapshot.units.iter().any(|unit| unit.team == Team::Red);
+        assert_eq!(snapshot.fog.is_some(), fog, "the snapshot carries fog only when there is fog");
+        assert_eq!(red_commander, !fog, "Red's commander, across the map, shows only without fog");
+    }
+}

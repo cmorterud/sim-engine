@@ -102,6 +102,7 @@ Usage: sim-engine [options]
                        seeing everything. V switches to Blue's or Red's sight, - and =
                        change the speed, and Space pauses
   --view <all|blue|red>  With --watch, whose sight to start with (default all)
+  --fog <on|off>       Fog of war, for every team and the AI too (default on)
 
 Controls:
   Left-drag or click   Select your units
@@ -180,6 +181,17 @@ struct Options {
     watch: bool,
     /// Whose sight a watched match starts in: `None` for everything.
     view: Option<Team>,
+    /// Play with fog of war turned off, for every team. It is on unless asked otherwise.
+    no_fog: bool,
+}
+
+/// On or off, for --fog and ?fog=.
+fn parse_switch(name: &str) -> Option<bool> {
+    match name {
+        "on" => Some(true),
+        "off" => Some(false),
+        _ => None,
+    }
 }
 
 /// A view by name, for --view and ?view=: everything, or one team's sight.
@@ -209,6 +221,7 @@ fn parse_options() -> Result<Option<Options>, String> {
     options.difficulty = params.get("ai").and_then(|name| Difficulty::from_name(&name));
     options.watch = params.has("watch");
     options.view = params.get("view").and_then(|name| parse_view(&name)).flatten();
+    options.no_fog = params.get("fog").and_then(|name| parse_switch(&name)) == Some(false);
     Ok(Some(options))
 }
 
@@ -236,6 +249,7 @@ fn parse_options() -> Result<Option<Options>, String> {
             "--ai" => options.difficulty = Some(Difficulty::from_name(&value("--ai")?).ok_or("--ai needs easy or normal")?),
             "--watch" => options.watch = true,
             "--view" => options.view = parse_view(&value("--view")?).ok_or("--view needs all, blue, or red")?,
+            "--fog" => options.no_fog = !parse_switch(&value("--fog")?).ok_or("--fog needs on or off")?,
             "--help" | "-h" => return Err(USAGE.to_string()),
             other => return Err(format!("unknown option {other}\n\n{USAGE}")),
         }
@@ -295,7 +309,7 @@ fn main() {
         return;
     }
     if let Some(ticks) = options.headless_ticks {
-        run_headless(seed, ticks, options.battle, &map_source);
+        run_headless(seed, ticks, options.battle, &map_source, !options.no_fog);
         return;
     }
     #[cfg(not(target_arch = "wasm32"))]
@@ -305,16 +319,18 @@ fn main() {
     wasm_bindgen_futures::spawn_local(run_windowed(seed, options, map_source));
 }
 
-fn make_scenario(seed: u64, battle: bool, map: &MapSource) -> Scenario {
+/// The match for the seed, or the scripted battle, with fog of war on or off. The battle shows
+/// everything either way.
+fn make_scenario(seed: u64, battle: bool, map: &MapSource, fog: bool) -> Scenario {
     if battle {
         scenario::default_battle(seed)
     } else {
-        map.scenario(seed)
+        map.scenario(seed).with_fog_of_war(fog)
     }
 }
 
-fn run_headless(seed: u64, ticks: u32, battle: bool, map: &MapSource) {
-    let scenario = make_scenario(seed, battle, map);
+fn run_headless(seed: u64, ticks: u32, battle: bool, map: &MapSource, fog: bool) {
+    let scenario = make_scenario(seed, battle, map, fog);
     let opening = scenario.opening_commands;
     let mut world = scenario.world;
     let mut brains = [AiBrain::new(Team::Blue, seed, world.starts), AiBrain::new(Team::Red, seed, world.starts)];
@@ -811,7 +827,8 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
         MapSource::Skirmish => "Skirmish".to_string(),
         MapSource::Map(map) => display_name(&map.name),
     };
-    let scenario = make_scenario(seed, battle, &map_source);
+    let fog = !options.no_fog;
+    let scenario = make_scenario(seed, battle, &map_source, fog);
     // A watcher seeing through one team's eyes starts at its base, as its player would.
     let player_start = scenario.world.starts[if watching { watch_view.unwrap_or(PLAYER_TEAM) } else { PLAYER_TEAM }.index()];
     let map = read_map(&scenario);
@@ -1715,7 +1732,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                 UiAction::WatchSeed(next) => {
                                     seed = next;
                                     let speed = session.driver.as_ref().map_or(1, SimDriver::speed);
-                                    session = Session::start(map_source.scenario(seed), watch_source(seed), driver_options);
+                                    session = Session::start(map_source.scenario(seed).with_fog_of_war(fog), watch_source(seed), driver_options);
                                     if let Some(driver) = &session.driver {
                                         driver.set_speed(speed);
                                     }
@@ -1725,7 +1742,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                     control_groups = ControlGroups::default();
                                     order_drag = None;
                                     let source = if watching { watch_source(seed) } else { CommandSource::PlayerVsAi { seed, difficulty } };
-                                    session = Session::start(map_source.scenario(seed), source, driver_options);
+                                    session = Session::start(map_source.scenario(seed).with_fog_of_war(fog), source, driver_options);
                                     selection.clear();
                                     placing = None;
                                     line_start = None;

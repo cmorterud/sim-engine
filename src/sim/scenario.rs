@@ -35,6 +35,16 @@ pub struct Scenario {
     pub opening_commands: Vec<SimCommand>,
 }
 
+impl Scenario {
+    /// The same scenario with fog of war on or off. Matches have it on unless the players turn
+    /// it off: with it off, every team, the AI's included, sees the whole map.
+    #[must_use]
+    pub fn with_fog_of_war(mut self, on: bool) -> Self {
+        self.world.config.fog_of_war = on;
+        self
+    }
+}
+
 /// The map center of a scenario, where the action starts.
 pub fn map_center(world: &SimWorld) -> Vec2Fp {
     let center = fp_int(world.terrain.map_units() / 2);

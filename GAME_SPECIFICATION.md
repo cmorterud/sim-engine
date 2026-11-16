@@ -206,6 +206,8 @@ Static defenses must be deployed in coordinated layers to resist high-tier assau
 
 Combat occurs far beyond visible optical range. Controlling the intel war dictates weapon accuracy and target acquisition.
 
+Fog of war is on by default. A match can be set up without it (`--fog off`, or Fog of war: Off on the browser's setup page), and then every team, the AI included, sees the whole map, and radar, sonar, stealth, and cloaking have nothing to hide from.
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                     THE INTEL SPECTRUM                      │
