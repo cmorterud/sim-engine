@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use sim_engine::balance::{break_even, duel, mirrored, Side};
+use sim_engine::balance::{break_even, duel, mirrored, Side, Tactics};
 use sim_engine::sim::blueprints::BlueprintDb;
 
 fn db() -> Arc<BlueprintDb> {
@@ -12,7 +12,7 @@ fn db() -> Arc<BlueprintDb> {
 #[test]
 fn a_duel_between_equal_groups_is_even_both_ways_round() {
     let db = db();
-    let tank = Side { unit: db.id("t1_medium_tank"), count: 8 };
+    let tank = Side { unit: db.id("t1_medium_tank"), count: 8, tactics: Tactics::AttackMove };
     let result = mirrored(&db, tank, tank, 1.0);
     assert!(result.finished, "one side should be destroyed");
     assert!(result.score.abs() < 0.05, "equal groups, played both ways round, come out even: {result:?}");
@@ -22,10 +22,10 @@ fn a_duel_between_equal_groups_is_even_both_ways_round() {
 #[test]
 fn more_health_wins_and_a_unit_breaks_even_with_itself() {
     let db = db();
-    let tank = Side { unit: db.id("t1_medium_tank"), count: 8 };
-    assert!(mirrored(&db, tank, tank, 1.5).score > 0.2, "half again the health wins clearly");
-    assert!(mirrored(&db, tank, tank, 0.67).score < -0.2);
-    let even = break_even(&db, tank.unit, tank.unit, 600.0);
+    let tank = Side { unit: db.id("t1_medium_tank"), count: 8, tactics: Tactics::AttackMove };
+    assert!(mirrored(&db, tank, tank, 1.25).score > 0.2, "a quarter more health, against a fifth less, wins clearly");
+    assert!(mirrored(&db, tank, tank, 0.8).score < -0.2);
+    let even = break_even(&db, tank.unit, tank.unit, 600.0, Tactics::AttackMove);
     assert!((even.efficiency - 1.0).abs() < 0.05, "a unit is as good a buy as itself: {even:?}");
     assert!(!even.at_limit);
 }
@@ -33,6 +33,25 @@ fn more_health_wins_and_a_unit_breaks_even_with_itself() {
 #[test]
 fn a_unit_that_cannot_hit_ground_is_reported_at_the_limit() {
     let db = db();
-    let even = break_even(&db, db.id("t1_mobile_aa"), db.id("t1_medium_tank"), 600.0);
+    let even = break_even(&db, db.id("t1_mobile_aa"), db.id("t1_medium_tank"), 600.0, Tactics::AttackMove);
     assert!(even.at_limit && even.health_factor > 1.0, "anti-air cannot win against tanks at any health: {even:?}");
+}
+
+#[test]
+fn a_break_even_is_the_same_whichever_unit_is_measured_first() {
+    let db = db();
+    let (tank, artillery) = (db.id("t1_medium_tank"), db.id("t1_light_artillery"));
+    let one = break_even(&db, tank, artillery, 600.0, Tactics::AttackMove);
+    let other = break_even(&db, artillery, tank, 600.0, Tactics::AttackMove);
+    let product = one.efficiency * other.efficiency;
+    assert!((product - 1.0).abs() < 0.1, "the two answers should be reciprocal: {one:?} and {other:?}");
+}
+
+#[test]
+fn a_micro_side_spreads_out_and_keeps_changing_direction() {
+    let db = db();
+    let tank = db.id("t1_medium_tank");
+    let micro = Side { unit: tank, count: 6, tactics: Tactics::Micro };
+    let plain = Side { unit: tank, count: 6, tactics: Tactics::AttackMove };
+    assert_ne!(duel(&db, micro, plain, [1.0, 1.0]), duel(&db, plain, plain, [1.0, 1.0]), "micro changes how a duel plays out");
 }
