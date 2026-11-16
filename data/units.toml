@@ -57,36 +57,44 @@ build_power = 5
 build_range = 100
 builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "radar", "geothermal_plant", "air_factory", "naval_factory", "t1_aa_turret", "t1_sonar", "t1_torpedo_launcher", "wall"]
 
+# The raider: fast and fragile, half the anchor's time to kill, with a short gun that works
+# inside artillery's least range. Line units beat it; a few of them beat artillery left alone.
+# This game's own numbers, from data/balance_targets.toml by `--balance-derive` (BALANCE.md;
+# reports/balance/2026-11-15-t1-land.md), not another game's.
 [[unit]]
 id = "t1_light_walker"
 name = "Light Walker"
 class = "bot"
 tier = 1
-mass = 30
+mass = 24
 energy = 120
-build_time = 120
-health = 60
-speed = "8.4"
+build_time = 144
+health = 151
+speed = "13"
 turn_rate = 50
 radius = 7
-vision = 360
-weapon = { range = 280, reload_ticks = 3, projectile_speed = 50, damage = 7, turn_rate = 300 }
+vision = 335
+weapon = { range = 210, reload_ticks = 5, projectile_speed = 42, damage = "10.8", turn_rate = 300 }
 
+# Outranges everything at T1, and cannot hit what is within half its range. It beats line units
+# that attack-move into it, and loses to them, and to raiders, spread out and charging.
+# This game's own numbers, from data/balance_targets.toml by `--balance-derive` (BALANCE.md;
+# reports/balance/2026-11-15-t1-land.md), not another game's.
 [[unit]]
 id = "t1_light_artillery"
 name = "Light Artillery"
 class = "artillery"
 tier = 1
-mass = 36
-energy = 180
-build_time = 200
-health = 205
-speed = "5.6"
+mass = 48
+energy = 240
+build_time = 288
+health = 451
+speed = "5.8"
 turn_rate = 90
 turn_radius = 30
-radius = 8
-vision = 360
-weapon = { range = 600, reload_ticks = 83, projectile_speed = 28, damage = 100, splash_radius = 20, turn_rate = 90, spread = 10 }
+radius = 9
+vision = 385
+weapon = { range = 595, reload_ticks = 50, projectile_speed = 28, damage = 140, splash_radius = 16, turn_rate = 90, artillery = true, min_range = 298, spread = 20 }
 
 [[unit]]
 id = "t2_heavy_tank"
@@ -1685,38 +1693,45 @@ energy_income = 1000
 # conversion: distances x20, speeds x2 per tick, build times and health as they are, and salvo
 # weapons as one shot at a time with the same damage a second.
 
+# Sight, not a fighter: cheap, twice the anchor's speed, and it sees nearly twice its range.
+# This game's own numbers, from data/balance_targets.toml by `--balance-derive` (BALANCE.md;
+# reports/balance/2026-11-15-t1-land.md), not another game's.
 [[unit]]
 id = "t1_land_scout"
 name = "Land Scout"
 class = "tank"
 tier = 1
 mass = 12
-energy = 80
-build_time = 60
-health = 29
-speed = 9
+energy = 60
+build_time = 72
+health = 40
+speed = "14.4"
 turn_rate = 90
 turn_radius = 10
-radius = 8
-vision = 480
+radius = 6
+vision = 695
 radar = 880
-weapon = { range = 520, reload_ticks = 20, projectile_speed = 50, damage = 4, turn_rate = 180 }
+weapon = { range = 210, reload_ticks = 10, projectile_speed = 53, damage = "7.1", turn_rate = 180 }
 
+# The anchor every other unit is measured against: kills a copy of itself in 14 seconds, and
+# closes its own range in 0.35 of that.
+# This game's own numbers, from data/balance_targets.toml by `--balance-derive` (BALANCE.md;
+# reports/balance/2026-11-15-t1-land.md), not another game's.
 [[unit]]
 id = "t1_medium_tank"
 name = "Medium Tank"
 class = "tank"
 tier = 1
-mass = 56
-energy = 266
-build_time = 300
-health = 300
-speed = "6.8"
+mass = 40
+energy = 200
+build_time = 240
+health = 420
+speed = "7.2"
 turn_rate = 90
 turn_radius = 30
 radius = 9
-vision = 400
-weapon = { range = 360, reload_ticks = 10, projectile_speed = 50, damage = 24, turn_rate = 90 }
+vision = 385
+weapon = { range = 350, reload_ticks = 10, projectile_speed = 64, damage = 30, turn_rate = 90 }
 
 [[unit]]
 id = "t2_grenadier_walker"

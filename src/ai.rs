@@ -1283,6 +1283,13 @@ impl AiBrain {
             })
             .count();
         let shields_affordable = economy.energy >= economy.energy_capacity / 2 && energy_income >= mass_income * 12;
+        // A light transport waiting at home with too few idle T1 units to take gets raiders built
+        // for it: once factories had moved on to T2, a transport that came late waited forever.
+        let transport_waiting = self.drop.is_none() && forces.transports.first().is_some_and(|transport| transport.idle && transport.cargo == 0);
+        let mut drop_squad = if transport_waiting { DROP_SIZE.saturating_sub(forces.idle_light_combat.len()) } else { 0 };
+        if forces.idle_light_combat.len() >= FEWEST_DROPPED {
+            drop_squad = 0;
+        }
         for factory in forces.factories.iter().filter(|factory| factory.finished) {
             if !self.rally_set_on.contains(&factory.id) {
                 self.rally_set_on.push(factory.id);
@@ -1345,7 +1352,10 @@ impl AiBrain {
                 let roster = self.roster();
                 let turn = self.unit_counter % 6;
                 // Against aircraft, every fourth unit is anti-air.
-                if air_threat && self.unit_counter.is_multiple_of(4) {
+                if drop_squad > 0 {
+                    drop_squad -= 1;
+                    roster.bot
+                } else if air_threat && self.unit_counter.is_multiple_of(4) {
                     roster.mobile_anti_air[usize::from(tier >= 2)]
                 } else {
                 match tier {

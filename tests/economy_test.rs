@@ -179,26 +179,31 @@ fn factory_builds_its_queue_and_assist_speeds_it_up() {
     let factory = world.spawn_finished_structure(factory_blueprint, Team::Blue, 50, 50).unwrap();
     let count_bots = |world: &SimWorld| world.units.len() - 1;
     world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: bot, count: 2 }]);
-    // FAF's 120 build time at 20 power is 6 s, or 60 ticks.
-    run(&mut world, 55);
+    // Its build time at the factory's build power, in ticks.
+    let power = world.blueprints.get(factory_blueprint).build_power;
+    let ticks = (world.blueprints.get(bot).build_time / Res::from_num(power) * Res::from_num(10)).to_num::<u32>();
+    run(&mut world, ticks - 5);
     assert_eq!(count_bots(&world), 0);
     run(&mut world, 10);
-    assert_eq!(count_bots(&world), 1, "the first bot should be out by tick 65");
-    run(&mut world, 60);
+    assert_eq!(count_bots(&world), 1, "the first bot should be out by tick {}", ticks + 5);
+    run(&mut world, ticks);
     assert_eq!(count_bots(&world), 2);
-    run(&mut world, 80);
+    run(&mut world, ticks + 20);
     assert_eq!(count_bots(&world), 2, "the queue should be empty");
 
-    // With an assisting engineer, the same bot takes 120 / 25 = 4.8 s.
+    // With an assisting engineer, the same bot takes its build time over both build powers.
     let engineer_blueprint = id(&world, "t1_engineer");
+    let both = Res::from_num(power + world.blueprints.get(engineer_blueprint).build_power);
+    let assisted = (world.blueprints.get(bot).build_time / both * Res::from_num(10)).to_num::<u32>() + 4;
+    assert!(assisted < ticks, "assisting should be faster");
     let helper = world.spawn_mobile(engineer_blueprint, Team::Blue, point(1_100, 1_100));
     let before = world.units.len();
     world.advance_tick(&[
         SimCommand::Assist { units: vec![helper], target: factory },
         SimCommand::QueueUnit { factory, blueprint: bot, count: 1 },
     ]);
-    run(&mut world, 52);
-    assert_eq!(world.units.len(), before + 1, "assist should finish the bot before 60 ticks");
+    run(&mut world, assisted);
+    assert_eq!(world.units.len(), before + 1, "assist should finish the bot within {assisted} ticks, not {ticks}");
 }
 
 #[test]
@@ -340,7 +345,9 @@ fn factory_repeat_loops_and_rally_sends_units() {
         SimCommand::SetRepeat { factory, repeat: true },
         SimCommand::SetRally { factory, point: point(2_000, 1_000) },
     ]);
-    run(&mut world, 260);
+    // Long enough for four, at its build time and the factory's build power.
+    let ticks = (world.blueprints.get(bot).build_time / Res::from_num(world.blueprints.get(factory_blueprint).build_power) * Res::from_num(10)).to_num::<u32>();
+    run(&mut world, ticks * 4 + 20);
     let units: Vec<SimId> = world.units.iter().map(|unit| unit.0).filter(|unit| *unit != factory).collect();
     assert!(units.len() >= 4, "repeat should keep building, got {}", units.len());
     // At FAF's speed, a light bot may already have reached the rally point.
@@ -579,12 +586,13 @@ fn engineers_reclaim_wrecks_into_mass() {
     assert!(saw_reclaim_link, "reclaiming should show as work");
     assert!(world.wrecks.is_empty(), "the wreck should be gone");
     let mass = world.economies[0].mass.to_num::<f64>();
-    assert!((24.2..=24.4).contains(&mass), "reclaimed {mass} materiel");
+    let held = world.blueprints.get(world.blueprints.id("t1_light_walker")).mass.to_num::<f64>() * 0.81;
+    assert!((held - 0.1..=held + 0.1).contains(&mass), "reclaimed {mass} materiel, not the wreck's {held}");
     // The economy panel shows reclaim coming in while it lasts, and the total once it is done.
     let economy = world.snapshot_for(Some(Team::Blue)).economy;
     assert!(most_reclaim_rate > 0, "reclaim showed no rate");
     assert_eq!(economy.mass_reclaim, 0, "nothing is being reclaimed now");
-    assert_eq!(economy.mass_reclaimed, 24, "all of it, in whole units");
+    assert_eq!(economy.mass_reclaimed, held.floor() as i64, "all of it, in whole units");
     assert!(world.ecs.get::<&Builder>(entity(&world, engineer)).unwrap().tasks.is_empty());
 }
 
@@ -723,7 +731,7 @@ fn fog_hides_enemies_from_targeting_and_the_players_view() {
     let enemy = world.spawn_mobile(bot, Team::Red, point(1_560, 1_000));
     world.ecs.get::<&mut Combat>(entity(&world, enemy)).unwrap().range = Fp::ZERO;
 
-    // Range 600 reaches the enemy, but vision 500 does not.
+    // The artillery's range reaches the enemy, but its sight does not.
     let full = world.blueprints.get(bot).health;
     run(&mut world, 30);
     assert_eq!(world.unit_health(enemy), Some(full), "a unit must not fire at what its team cannot see");
@@ -732,11 +740,12 @@ fn fog_hides_enemies_from_targeting_and_the_players_view() {
     assert!(world.snapshot_for(Some(Team::Red)).units.iter().any(|unit| unit.id == enemy), "a team sees its own units");
 
     // A scout brings the enemy into sight, and the artillery opens fire.
-    let scout = world.spawn_mobile(bot, Team::Blue, point(1_200, 1_000));
+    let scout = world.spawn_mobile(bot, Team::Blue, point(1_300, 1_000));
     world.ecs.get::<&mut Combat>(entity(&world, scout)).unwrap().range = Fp::ZERO;
-    run(&mut world, 120);
-    assert!(world.unit_health(enemy).is_none_or(|health| health < full), "the shot should land once there is sight");
-    // A light bot has FAF's 60 health, so the artillery may well have destroyed it by now.
+    // Long enough for a few shots, since each scatters and may miss.
+    run(&mut world, 300);
+    assert!(world.unit_health(enemy).is_none_or(|health| health < full), "a shot should land once there is sight");
+    // The artillery may well have destroyed it by now.
     assert!(world.unit_health(enemy).is_none() || world.snapshot_for(Some(Team::Blue)).units.iter().any(|unit| unit.id == enemy));
 }
 

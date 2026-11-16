@@ -723,15 +723,17 @@ fn a_ground_attack_walks_into_range_and_fires_into_the_fog_at_nothing_else() {
     }
     let here = world.unit_position(bot).unwrap().xy();
     let distance = (here.x - spot.x).to_num::<f64>().hypot((here.y - spot.y).to_num::<f64>());
-    // A light bot reaches 280, and stops once the spot is in range instead of walking on to it.
-    assert!((240.0..=280.0).contains(&distance), "it stopped {distance} from the spot");
+    // It stops once the spot is in its range instead of walking on to it.
+    let range = world.blueprints.get(world.blueprints.id("t1_light_walker")).weapon.unwrap().range.to_num::<f64>();
+    assert!((range - 40.0..=range).contains(&distance), "it stopped {distance} from the spot, with a range of {range}");
     assert!(shots > 0, "it should fire at the spot");
     assert_eq!(world.unit_health(enemy), Some(enemy_health), "it fires at the spot and nothing else");
 }
 
 #[test]
 fn ground_attack_shells_land_on_the_smallest_debris_at_any_range() {
-    for (gunner, distances) in [("t2_heavy_tank", [60, 250, 455]), ("t1_light_artillery", [100, 350, 595])] {
+    // Artillery cannot fire within its least range, half its reach.
+    for (gunner, distances) in [("t2_heavy_tank", [60, 250, 455]), ("t1_light_artillery", [320, 450, 595])] {
         for distance in distances {
             let mut world = flat_map(false);
             let debris = debris_at(&mut world, "t1_light_walker", point(1_000 + distance, 1_000));

@@ -132,10 +132,15 @@ winner_survivors = [0.40, 0.70]
 even_margin = 0.15
 # One that depends on micro, within this.
 micro_margin = 0.25
-# Matchups meant to turn on micro, where it may be worth far more than [micro] micro_gain: massed
-# line units against massed artillery lose attack-moving, and win spread out and charging.
-micro_cells = [["line", "artillery"], ["assault", "artillery"]]
-micro_cell_gain = [0.5, 1.0]
+# Matchups meant to turn on micro, where it is worth far more than [micro] micro_gain: massed line
+# units, assault units, or raiders against massed artillery lose attack-moving and win spread out
+# and charging. Micro flips them: attack-moving, the artillery keeps at least this share; with
+# micro, the other side does. (As an efficiency ratio, the gain ran to thousands of percent,
+# since attack-moving into artillery is worth next to nothing.)
+micro_cells = [["line", "artillery"], ["assault", "artillery"], ["raider", "artillery"]]
+micro_cell_flip_min = 0.3
+# Raiders beat artillery without micro in a raid: a few of them against artillery left alone.
+raid_raiders = 4
 # Artillery always has counters that need no micro: raiders and fast units that close in, other
 # artillery, mobile shields, and bombers.
 artillery_counters_without_micro = ["raider", "artillery", "mobile_shield", "bomber"]

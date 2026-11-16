@@ -513,12 +513,17 @@ pub fn derive_report() {
     println!("  line against raider:                {:+.2} (line keeps 0.4-0.7)", line_vs("t1_light_walker").score);
     println!("  line against artillery, attack-move: {:+.2} (artillery keeps 0.4-0.7)", line_vs("t1_light_artillery").score);
     let micro = mirrored(&db, side("t1_medium_tank", Tactics::Micro), side("t1_light_artillery", Tactics::AttackMove), 1.0);
-    println!("  line against artillery, with micro:  {:+.2} (line should win)", micro.score);
-    let raider = mirrored(&db, side("t1_light_walker", Tactics::AttackMove), side("t1_light_artillery", Tactics::AttackMove), 1.0);
-    println!("  raider against artillery:           {:+.2} (raider should win)", raider.score);
-    let plain = break_even(&db, db.id("t1_medium_tank"), db.id("t1_light_artillery"), PRICING_MATERIEL, Tactics::AttackMove);
-    let with_micro = break_even(&db, db.id("t1_medium_tank"), db.id("t1_light_artillery"), PRICING_MATERIEL, Tactics::Micro);
-    println!("  micro gain, line against artillery:  {:+.0}% (targets: 50-100%)", (with_micro.efficiency / plain.efficiency - 1.0) * 100.0);
+    println!("  line against artillery, with micro:  {:+.2} (line keeps at least 0.3)", micro.score);
+    let raiders_micro = mirrored(&db, side("t1_light_walker", Tactics::Micro), side("t1_light_artillery", Tactics::AttackMove), 1.0);
+    let raiders_plain = mirrored(&db, side("t1_light_walker", Tactics::AttackMove), side("t1_light_artillery", Tactics::AttackMove), 1.0);
+    println!("  massed raiders against artillery:   {:+.2} attack-moving (artillery keeps at least 0.3), {:+.2} with micro (raiders keep at least 0.3)", raiders_plain.score, raiders_micro.score);
+    let raid = mirrored(
+        &db,
+        Side { unit: db.id("t1_light_walker"), count: 4, tactics: Tactics::AttackMove },
+        Side { unit: db.id("t1_light_artillery"), count: 2, tactics: Tactics::AttackMove },
+        1.0,
+    );
+    println!("  a raid, 4 raiders against 2 artillery: {:+.2} (raiders win)", raid.score);
     let ten = mirrored(&db, Side { count: 10, ..anchor_side }, Side { count: 10, ..anchor_side }, 1.0);
     println!("  ten anchors against ten:            {:.1} s (targets: 25-45 s)", ten.seconds);
 }

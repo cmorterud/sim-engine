@@ -383,13 +383,22 @@ fn spread(world: &SimWorld, units: &[sim_engine::sim::components::SimId]) -> i32
 }
 
 /// Gives the order, then returns the widest the group got on the way and when everyone had arrived.
+/// The way ends 250 short of the goal: there each unit goes to its own spot at its own speed.
 fn travel(world: &mut SimWorld, units: &[sim_engine::sim::components::SimId], order: SimCommand) -> (i32, u32) {
+    let goal = match &order {
+        SimCommand::Move { goal, .. } | SimCommand::FormationMove { goal, .. } => *goal,
+        _ => panic!("a move"),
+    };
     world.advance_tick(&[order]);
     let mut widest = 0;
     for tick in 1..2_000 {
         world.advance_tick(&[]);
+        let positions: Vec<Vec2Fp> = units.iter().filter_map(|id| world.unit_position(*id)).map(|at| at.xy()).collect();
+        let count = Fp::from_num(positions.len() as i32);
+        let middle = Vec2Fp::new(positions.iter().map(|at| at.x).sum::<Fp>() / count, positions.iter().map(|at| at.y).sum::<Fp>() / count);
+        let on_the_way = sqrt_wide(middle.distance_squared(&goal)) > fp_int(250);
         // Forming up at the start takes a few seconds.
-        if tick > 100 {
+        if tick > 100 && on_the_way {
             widest = widest.max(spread(world, units));
         }
         if units.iter().all(|unit| world.unit_order(*unit).unwrap().kind == OrderKind::Idle) {
@@ -459,8 +468,10 @@ fn a_formation_attack_move_stops_the_whole_group_to_fight() {
     });
     assert!(fighting.count() > 0, "nobody is fighting");
     let leader = world.formations.values().next().expect("still on its way").leader;
+    // It stops where its longest gun, the artillery's, reaches the enemy.
     let enemy_at = world.unit_position(enemy).unwrap().xy();
-    assert!(sqrt_wide(leader.distance_squared(&enemy_at)) < fp_int(600), "the group went on without the fight: {leader:?}");
+    let reach = world.blueprints.get(world.blueprints.id("t1_light_artillery")).weapon.unwrap().range + fp_int(150);
+    assert!(sqrt_wide(leader.distance_squared(&enemy_at)) < reach, "the group went on without the fight: {leader:?}");
 }
 
 #[test]

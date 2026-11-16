@@ -78,6 +78,12 @@ Every value traces to a target, a formula with its parameters, or a dated tuning
 `reports/balance/`. Once tuning is done, one comparison against the old values reports which came
 out close and why: evidence about the process, not a target.
 
+## Status
+
+* 2026-11-15: T1 land (the Medium Tank, Light Walker, Light Artillery, and Land Scout) derived and
+  priced, and in the unit data (`reports/balance/2026-11-15-t1-land.md`). Every counter-matrix
+  cell among them meets its target. Next: T2 land, against T1 land frozen.
+
 ## Order of work
 
 1. Targets (this draft), cost model, and archetype templates; first-pass T1 land numbers.
