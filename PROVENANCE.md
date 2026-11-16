@@ -64,6 +64,15 @@ Not taken: the Assault Hovercraft, Grenadier Walker, and Escort Corvette were gi
 this game's own numbers on 2026-11-15, in place of the hover tank, gatling bot, and shield boat they
 replaced.
 
+## Balance targets
+
+`data/balance_targets.toml` (BALANCE.md) is this game's own design intent. Its feel was set on
+2026-11-15 with FAF's ratios for a few UEF land units as a reference: time to kill, closing time
+over time to kill, sight over range, shell flight time, tier efficiency, and role spread, read
+from their blueprints. The targets are chosen deliberately apart from them in places (fights a
+little longer, range worth a little less, units cheaper for their income), and no unit's values
+were taken from them.
+
 ## Names
 
 Replaced on 2026-11-15, in display names, ids, code, tests, and documentation:

@@ -1,35 +1,76 @@
-# Balance targets (BALANCE.md), draft 1, 2026-11-15.
+# Balance targets (BALANCE.md), draft 2, 2026-11-15.
 #
-# These are this game's own design intent, written as numbers the balance harness can check. They
-# are not measured from any other game. Everything in data/units.toml is to be derived from them,
-# from the cost model, and from tuning runs, never seeded from another game's values.
+# This game's own design intent, written as numbers the balance harness can check. The feel was
+# set against the inspiration's ratios (time to kill, closing time, sight, tier efficiency), as
+# PROVENANCE.md records, but no unit's values were taken from it. Everything in data/units.toml is
+# to be derived from these, from the cost model, and from tuning runs.
 #
 # Scale, unchanged: 10 ticks a second, 20 map units to a terrain cell, speeds in map units a tick.
 
 [decisions]
-# The pace of the large-scale RTS this game succeeds, expressed as the targets below.
-pace = "like the inspiration"
-# Fights are decided by position and composition. Micro can win an edge in a pinch, such as against
-# a larger force, but is never needed to play well, and matters a little less than in the
-# inspiration.
+# The pace of the large-scale RTS this game succeeds, with fights a little longer.
+pace = "like the inspiration, fights a little longer"
+# Fights are decided by position and composition. Micro can win an edge in a pinch, such as
+# against a larger force, but is never needed to play well: a touch less kiting than the
+# inspiration, and dodging only by deliberate changes of direction.
 micro = "light"
 # Map scale, engine units, sight, and ranges stay as they are, so maps and the AI keep working.
 scale = "keep"
+# Direct-fire weapons aim where their target will be when the shell arrives. Artillery and bombs
+# do not, so they stay weak against moving targets; missiles and anti-air already home.
+leading_shots = "direct fire only"
+# Bigger armies for the same income than the inspiration, at the same pace, since the engine can
+# carry them: units are cheaper for their income, and tech costs scale with income, so that tech
+# timings stay where [pace] puts them. Tuned with the other global knobs (BALANCE.md, step 5).
+armies = "bigger, same pace"
 
 # The unit everything else is measured against: the T1 Medium Tank, the plainest line unit.
 [anchor]
 unit = "t1_medium_tank"
-materiel = 60
-energy = 300
+materiel = 40
+energy = 200
 # At a T1 land factory alone.
-build_seconds = 15
-health = 360
-# Damage a second, every shot landing. A tank kills a copy of itself in 12 seconds.
+build_seconds = 12
+health = 420
+# Damage a second, every shot landing: a tank kills a copy of itself in 14 seconds.
 dps = 30
-range = 400
-# Crosses a 10 km map, 10,240 units, in about three minutes.
-speed = 6.0
-vision = 480
+# Closing that range at its speed takes 4.9 seconds, 0.35 of the time to kill.
+range = 350
+# Crosses a 10 km map, 10,240 units, in about 142 seconds.
+speed = 7.2
+# Sight about 1.1 times range.
+vision = 385
+radius = 9
+# The shell reaches full range in 0.55 seconds.
+projectile_speed = 64
+
+[ratios]
+# Time to kill a copy of itself, health over damage a second, in seconds.
+anchor_time_to_kill = 14
+# Closing time (range over speed) over time to kill: what range is worth. Lower means less kiting.
+closing_over_time_to_kill = 0.35
+# Sight over range, by kind: scouts see far, line units a little past their guns, heavy units
+# and artillery less than their range, so that they need spotting.
+sight_over_range_scout_min = 1.5
+sight_over_range_line = [1.0, 1.2]
+sight_over_range_heavy = [0.85, 1.0]
+sight_over_range_artillery = [0.5, 0.8]
+
+# Time to kill a copy of itself, as a multiple of the anchor's, by role.
+[roles]
+raider = [0.3, 0.5]
+scout = [0.3, 0.5]
+line = [0.9, 1.1]
+assault = [1.6, 2.2]
+heavy = [1.6, 2.2]
+artillery = [1.0, 1.3]
+
+[economy]
+# One T1 extractor's income buys an anchor every this many seconds: cheaper units for their
+# income than the inspiration's, for bigger armies.
+t1_extractor_seconds_per_anchor = [17, 21]
+# Tech costs (factory upgrades, T2 and T3 structures) scale with income, so the timings in [pace]
+# hold.
 
 [pace]
 # Minutes, AI against AI of equal skill.
@@ -39,23 +80,25 @@ first_t2_minute = [7, 10]
 first_t3_minute = [16, 22]
 first_experimental_minute = [28, 38]
 # Seconds for two equal-materiel armies of ten line units of a tier to fight to a finish.
-fight_seconds_t1 = [20, 40]
-fight_seconds_t2 = [25, 45]
-fight_seconds_t3 = [30, 55]
+fight_seconds_t1 = [25, 45]
+fight_seconds_t2 = [30, 50]
+fight_seconds_t3 = [35, 60]
 
 [tiers]
 # Each tier's line unit costs this much more than the last tier's.
 cost_multiplier = [2.5, 3.5]
-# And is this much stronger per materiel (health times damage a second, per materiel squared,
-# square-rooted): higher tiers win by concentration, not by making lower tiers pointless.
-efficiency_multiplier = [1.2, 1.5]
+# And is about as strong per materiel (health times damage a second, square-rooted, per
+# materiel): higher tiers win by range, toughness per frontage, and concentration, so lower tiers
+# stay useful all game.
+efficiency_multiplier = [1.0, 1.15]
 
 [micro]
-# Light micro. A line weapon's shell reaches its full range within this many seconds, so that
-# dodging by walking sideways is a small edge.
-line_flight_seconds_max = 0.8
-# The share of a line weapon's shots at its full range that a target walking sideways at full
-# speed avoids: by the target's weight class.
+# A line weapon's shell reaches full range within this many seconds.
+line_flight_seconds_max = 0.6
+# Artillery shells take at least this long, so that they miss what moves.
+artillery_flight_seconds_min = 2.0
+# With leading shots, the share of a line weapon's shots at full range that a target avoids by
+# changing direction every second at full speed: by the target's weight class.
 dodge_share_heavy_max = 0.05
 dodge_share_line_max = 0.15
 dodge_share_light_max = 0.35
@@ -69,6 +112,14 @@ skirmisher_speed_share_min = 0.90
 # The extra effective strength scripted micro (focus fire, pulling damaged units back) gives a
 # force over plain attack-moving: worth it in a pinch, never decisive on its own.
 micro_gain = [0.10, 0.25]
+
+[splash]
+# Formations keep units 2.5 radii apart, center to center (FORMATION_SPACING_RADII).
+# Line weapons splash no wider than their target's radius, so it is incidental.
+line_splash_over_target_radius_max = 1.0
+# Splash roles (artillery, grenadiers, the commander's Discharge) reach about twice the spacing,
+# so that a clump takes several times what a spread formation does.
+splash_role_over_spacing = [1.6, 2.4]
 
 [counters]
 # In an equal-materiel fight, the share of its army a designed winner keeps.

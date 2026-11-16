@@ -7,21 +7,32 @@ today's values in `data/units.toml` still come from elsewhere, as PROVENANCE.md 
 
 ## Decisions
 
-Made on 2026-11-15:
+Made on 2026-11-15, with the inspiration's ratios as a reference for feel (PROVENANCE.md):
 
-* **Pace:** about as fast as the game this one succeeds, written as this game's own targets for
-  match length, tech timings, and fight lengths, not measured from it.
+* **Pace:** about as fast as the game this one succeeds, with fights a little longer: the anchor
+  kills a copy of itself in 14 seconds. Matches run about 30 minutes, and the map takes about the
+  same time to cross.
 * **Micro:** position and composition decide fights. Micro can win an edge in a pinch, such as
-  against a larger force, but is never needed to play well, and matters a little less than in the
-  inspiration. Shells are fast enough that dodging is a small edge for line units, kiting belongs
-  to skirmishers and artillery, and scripted micro is worth 10–25% effective strength.
+  against a larger force, but is never needed to play well. Range is worth a touch less than in
+  the inspiration (closing time 0.35 of the time to kill), so kiting belongs to skirmishers and
+  artillery. Shells are fast, and direct-fire weapons lead their targets, so dodging takes
+  deliberate changes of direction. Scripted micro is worth 10–25% effective strength.
+* **Sight** is about the inspiration's: scouts see far, line units a little past their guns,
+  heavy units and artillery less than their range.
+* **Tiers** are about as efficient per materiel as each other, so lower tiers stay useful, and
+  higher tiers win by range, toughness, and concentration.
+* **Roles** spread as widely as the inspiration's, as multiples of the anchor's time to kill:
+  raiders 0.3–0.5, heavy units 1.6–2.2.
+* **Splash** is incidental on line weapons and about twice formation spacing on splash roles.
+* **Armies** are bigger for the same income than in the inspiration, at the same pace: units are
+  cheaper for their income, and tech costs scale with income.
 * **Scale:** maps, engine units, sight, and ranges stay as they are.
 
 ## The method
 
 The idea is to have few free numbers and to solve for them, not to search for them.
 
-1. **Targets.** About fifteen numbers of design intent (`balance_targets.toml`): one anchor unit,
+1. **Targets.** A few dozen numbers of design intent (`balance_targets.toml`): one anchor unit,
    the T1 Medium Tank; fight lengths; tech timings; how much stronger and costlier each tier is;
    how strongly counters win; and how much micro is worth.
 2. **Cost model, before any simulation.** By Lanchester's square law, equal strength per materiel
