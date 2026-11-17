@@ -30,6 +30,42 @@ const FORMATION_SPACING_RADII: i32 = 5;
 const SLOT_EXTRA_TICKS: i64 = 40;
 /// How long a formation waits for members that have fallen behind, before going on without them.
 const FORMATION_PATIENCE_TICKS: u32 = 100;
+/// How often a moving unit looks whether the way straight to its goal is clear, in ticks: often
+/// while it is not, and now and then while it is, in case something has been built in the way.
+const DIRECT_CHECK_TICKS: u32 = 16;
+const DIRECT_RECHECK_TICKS: u32 = 64;
+/// It looks no further than this, in map units, the width of the largest maps. A goal further off
+/// is followed by its route until it is nearer.
+const DIRECT_REACH_UNITS: i32 = 20_480;
+/// Within this of its goal, or three of its turning circles if that is more, a unit that is not
+/// facing it, within about 18 degrees, goes back to its route, which brings it into the goal's
+/// cell to arrive.
+const DIRECT_HANDOVER_UNITS: i32 = 100;
+const DIRECT_FACING_COSINE: f64 = 0.95;
+
+/// Whether a unit of `radius` could walk in a straight line from `from` to `to`: every point along
+/// the way, and as far to each side as the unit is wide, can be walked on.
+fn straight_way_is_clear(passable: &impl Fn(Vec2Fp) -> bool, from: Vec2Fp, to: Vec2Fp, radius: Fp) -> bool {
+    let away = to - from;
+    let length = sqrt_wide(away.length_squared());
+    if length > fp_int(DIRECT_REACH_UNITS) {
+        return false;
+    }
+    if length == Fp::ZERO {
+        return true;
+    }
+    let along = away.normalized();
+    let side = Vec2Fp::new(-along.y, along.x).scaled(radius);
+    // Every cell's width: the lines to each side, as wide apart as the unit, catch a corner the
+    // middle line steps over.
+    let step = fp_int(super::config::TERRAIN_CELL_UNITS);
+    let steps = (length / step).to_num::<i32>() + 1;
+    (1..=steps).all(|index| {
+        let point = from + along.scaled((step * index).min(length));
+        passable(point) && passable(point + side) && passable(point - side)
+    })
+}
+
 /// A ground attack's shell must come down this close to its spot, or the unit walks closer.
 const GROUND_SHOT_REACH_UNITS: i32 = 8;
 /// How long a unit passes over a target that the ground stops its shots at.
@@ -1286,13 +1322,24 @@ impl SimWorld {
             self.formations.insert(route, travel);
         }
         slots.sort_unstable_by_key(|slot| slot.0);
+        let route_goal = self.flow_field.goal(route).unwrap_or(goal);
         members
             .into_iter()
             .map(|id| {
                 let (slot, slot_ticks) = slots
                     .binary_search_by_key(&id, |slot| slot.0)
                     .map_or((None, 0), |index| (Some(slots[index].1), slots[index].2));
-                (id, Order { kind, route, slot, slot_ticks })
+                // Whether it can walk straight there, from the start, rather than only once it
+                // next looks (step_movement).
+                let direct = follow.is_none()
+                    && self.find_unit(id).is_some_and(|(_, entity)| {
+                        let (Ok(position), Ok(stats)) = (self.ecs.get::<&Position>(entity), self.ecs.get::<&UnitStats>(entity)) else {
+                            return false;
+                        };
+                        let passable = |point: Vec2Fp| self.terrain.passable_for(stats.move_class, point);
+                        straight_way_is_clear(&passable, position.0.xy(), route_goal, stats.radius)
+                    });
+                (id, Order { kind, route, slot, slot_ticks, direct })
             })
             .collect()
     }
@@ -1533,6 +1580,33 @@ impl SimWorld {
                 passable(here + direction.scaled(stats.radius + stats.max_speed)).then_some(point)
             });
 
+            // Every so often, it looks whether the way straight to its goal is clear. Not when it
+            // follows a unit, which it would walk straight into.
+            if order.kind != OrderKind::Idle && !flow.is_following(order.route) {
+                let every = if order.direct { DIRECT_RECHECK_TICKS } else { DIRECT_CHECK_TICKS };
+                if stats.phase.wrapping_add(tick).is_multiple_of(every) {
+                    order.direct = flow.goal(order.route).is_some_and(|goal| straight_way_is_clear(&passable, here, goal, stats.radius));
+                }
+            }
+            // Near its goal, it walks straight only while it faces it: one that turns in arcs,
+            // aiming at the very point from beside it, circled it for good, where its route brings
+            // it into the goal's cell.
+            let straight = order.direct && !flow.is_following(order.route) && flow.goal(order.route).is_some_and(|goal| {
+                let circle = turning.as_ref().map_or(Fp::ZERO, |turning| {
+                    let walking = if turning.max_turn > Fp::ZERO { stats.max_speed.saturating_div(turning.max_turn) } else { Fp::ZERO };
+                    walking.max(turning.radius)
+                });
+                let handover = circle.saturating_mul(fp_int(3)).max(fp_int(DIRECT_HANDOVER_UNITS));
+                let facing_it = turning.as_ref().is_none_or(|turning| {
+                    let away = goal - here;
+                    away == Vec2Fp::ZERO || {
+                        let toward = away.normalized();
+                        turning.facing.x * toward.x + turning.facing.y * toward.y >= Fp::from_num(DIRECT_FACING_COSINE)
+                    }
+                });
+                facing_it || !within(here, goal, handover)
+            });
+
             // Steering from the unit's order.
             let mut desired = Vec2Fp::ZERO;
             if let Some(point) = chasing_toward {
@@ -1584,6 +1658,8 @@ impl SimWorld {
                                 let speed = stats.max_speed.min(remaining);
                                 desired = direction.scaled(speed);
                             }
+                        } else if straight {
+                            desired = walk_to_goal(stats.max_speed);
                         } else {
                             match flow.sample(order.route, tick, here, terrain) {
                                 FlowSample::Direction(direction) => desired = direction.scaled(stats.max_speed),
@@ -1605,7 +1681,7 @@ impl SimWorld {
                         *order = Order::IDLE;
                     }
                 } else if may_walk {
-                    if goal_is_here {
+                    if goal_is_here || straight {
                         desired = walk_to_goal(stats.max_speed);
                     } else {
                         match flow.sample(order.route, tick, here, terrain) {
@@ -3525,6 +3601,7 @@ impl SimWorld {
             write_fp(hasher, slot.y);
         }
         hasher.write(&order.slot_ticks.to_le_bytes());
+        hasher.write(&[u8::from(order.direct)]);
         drop(query);
         self.hash_unit_extras(entity, hasher);
     }

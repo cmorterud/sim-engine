@@ -656,7 +656,8 @@ fn a_queued_patrol_starts_where_the_queue_ends() {
     assert_eq!(points[0], at(2_000, 1_000), "from the end of the queued move, not from where it stands");
     let now = patrol_commands(&[tank], &snapshot, &[at(2_000, 2_000)], false);
     let SimCommand::Patrol { points, queued: false, .. } = &now[0] else { panic!("a patrol") };
-    assert_eq!(points[0], at(1_000, 1_000), "unqueued, from where it stands");
+    let here = world.unit_position(tank).unwrap().xy();
+    assert!((points[0] - here).length_squared() < fp_int(1), "unqueued, from where it stands: {:?}, not {here:?}", points[0]);
     // And it does so: down the queue first, then round the patrol.
     world.advance_tick(&queued);
     let mut reached_start = false;

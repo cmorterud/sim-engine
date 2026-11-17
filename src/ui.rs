@@ -4647,7 +4647,7 @@ mod tests {
     }
 
     fn walk(route: u32) -> BuildTask {
-        let order = crate::sim::components::Order { kind: OrderKind::Move, route, slot: None, slot_ticks: 0 };
+        let order = crate::sim::components::Order { kind: OrderKind::Move, route, slot: None, slot_ticks: 0, direct: false };
         BuildTask::Walk { order, started: false }
     }
 
