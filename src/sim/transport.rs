@@ -119,7 +119,12 @@ impl SimWorld {
             return;
         };
         self.clear_unit_plans(&riders);
-        self.assign_route(&riders, OrderKind::Move, transport_at.xy(), Some(transport));
+        // A route each: a group's way ends where all of it has room, which for a large load was
+        // further out than boarding reach, so that a heavy transport took on 18 of 28 tanks and
+        // the rest waited round it for good.
+        for &id in &riders {
+            self.assign_route(&[id], OrderKind::Move, transport_at.xy(), Some(transport));
+        }
         // The transport comes to the middle of them, and settles there.
         let mut sum = (0_i64, 0_i64);
         for &id in &riders {
