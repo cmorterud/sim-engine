@@ -1592,7 +1592,10 @@ impl SimWorld {
                                     *order = Order::IDLE;
                                     unreachable.push(id);
                                 }
-                                FlowSample::Hold => {}
+                                // Its route's way is still being worked out: it keeps going as
+                                // it was, rather than braking for a tick each time it is given a
+                                // new order the same way.
+                                FlowSample::Hold => desired = Vec2Fp::new(velocity.0.x, velocity.0.y),
                             }
                         }
                     }
@@ -1612,7 +1615,7 @@ impl SimWorld {
                                 *order = Order::IDLE;
                                 unreachable.push(id);
                             }
-                            FlowSample::Hold => {}
+                            FlowSample::Hold => desired = Vec2Fp::new(velocity.0.x, velocity.0.y),
                         }
                     }
                 }

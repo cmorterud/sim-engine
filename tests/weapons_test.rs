@@ -10,7 +10,7 @@
 use sim_engine::math::fp::{fp_int, Fp, Vec2Fp};
 use sim_engine::sim::blueprints::{Blueprint, BlueprintId, Res, Targets, WeaponDef, WeaponKind};
 use sim_engine::sim::commands::SimCommand;
-use sim_engine::sim::components::{Combat, Health, MoveClass, Projectile, SimId, Team};
+use sim_engine::sim::components::{Combat, Health, MoveClass, Projectile, SimId, Team, UnitStats};
 use sim_engine::sim::config::{SimConfig, TerrainStyle};
 use sim_engine::sim::terrain::{Terrain, HEIGHT_FRAC_BITS};
 use sim_engine::sim::world::SimWorld;
@@ -283,6 +283,230 @@ fn every_torpedo_hits_ships_and_submarines() {
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
+/// What a dummy target is, which decides which weapons count against it.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum Kind {
+    /// A unit on land: ground weapons.
+    Land,
+    /// A ship on the water: ground weapons and torpedoes.
+    Ship,
+    /// A submarine under the water: torpedoes.
+    Sub,
+    /// An aircraft in flight: anti-air.
+    Air,
+}
+
+impl Kind {
+    const fn dummy(self) -> &'static str {
+        match self {
+            Self::Land => "t1_engineer",
+            Self::Ship => "t1_frigate",
+            Self::Sub => "t1_attack_sub",
+            Self::Air => "t1_air_scout",
+        }
+    }
+}
+
+/// Whether a weapon fires at this kind of target. Under the water, only torpedoes and missiles
+/// fire. Bombs are left to the bomber test, since a bomber's damage comes once a pass.
+fn counts(weapon: &WeaponDef, kind: Kind, submerged: bool) -> bool {
+    let fires = match kind {
+        Kind::Land => hits(weapon, Targets::Ground),
+        Kind::Ship => hits(weapon, Targets::Ground) || weapon.targets == Targets::Naval,
+        Kind::Sub => weapon.targets == Targets::Naval,
+        Kind::Air => hits(weapon, Targets::Air),
+    };
+    let missile = weapon.kind == WeaponKind::TacticalMissile;
+    fires && weapon.kind != WeaponKind::Bomb && (!submerged || weapon.targets == Targets::Naval || missile)
+}
+
+/// Damage a tick, every shot landing.
+fn per_tick(weapons: &[WeaponDef]) -> f64 {
+    weapons.iter().map(|weapon| weapon.damage.to_num::<f64>() / f64::from(weapon.reload_ticks.max(1))).sum()
+}
+
+/// One damage-a-second case: where the shooter and target start, and whether they move.
+struct Setting {
+    what: &'static str,
+    map: i32,
+    shooter: (i32, i32),
+    target: (i32, i32),
+    /// Both go north at this speed, a tick, for a moving case. An aircraft target always flies
+    /// north, at this speed or else slowly enough to stay in reach.
+    speed: Option<Fp>,
+}
+
+/// How far ahead, north, a moving unit's goal is kept: less than a pathfinding sector, 32 cells,
+/// so that it walks straight at it rather than towards the middle of the next sector's edge.
+const GOAL_AHEAD: i32 = 400;
+
+/// Every unit does the damage a second its weapons add up to, to each kind of target they are
+/// for, over a stretch of time long enough for its slowest weapon to fire eight times or more:
+/// standing still at a target standing still (for anti-air, an aircraft flying slowly past), and
+/// moving north at a constant speed beside a target doing the same, so that every shot has to be
+/// aimed ahead. That a unit does all of its damage means that every one of its weapons fires, at
+/// its rate, and lands: a battleship's three guns at a ship, and its anti-air at an aircraft.
+///
+/// Artillery scatters its shells on purpose, so its target is made wide enough to take every one:
+/// what is checked is how often it fires and what each shell does. Cruise missiles fly to where
+/// the target was, so are not counted on against a moving one, though they may hit it. Aircraft
+/// that make passes, rather than hovering, deal their damage a pass at a time, and bombers are
+/// left to the tests above; structures only stand still.
+#[test]
+fn every_unit_deals_its_damage_a_second_to_each_kind_of_target() {
+    let mut failures = Vec::new();
+    let mut checked = 0;
+    let db = world(MAP).blueprints;
+    for def in db.iter() {
+        let all = weapons(def);
+        let flies = def.is_air();
+        let hovers = def.flight.is_some_and(|flight| flight.hovers);
+        if all.is_empty() || (flies && !hovers) {
+            continue;
+        }
+        let at_sea = sails(def);
+        let submarine = def.movement == MoveClass::Submarine;
+        for kind in [Kind::Land, Kind::Ship, Kind::Sub, Kind::Air] {
+            // Submarines fight ships and submarines under the water, and surface for the land.
+            let submerged = submarine && kind != Kind::Land;
+            let counted: Vec<WeaponDef> = all.iter().copied().filter(|weapon| counts(weapon, kind, submerged)).collect();
+            // Land units are not set against ships, nor aircraft against submarines.
+            if counted.is_empty() || ((kind == Kind::Ship || kind == Kind::Sub) && !at_sea) {
+                continue;
+            }
+            let reach = counted.iter().map(|weapon| weapon.range.to_num::<i32>()).min().unwrap();
+            let least = counted.iter().map(|weapon| weapon.min_range.to_num::<i32>()).max().unwrap();
+            let slowest = counted.iter().map(|weapon| weapon.reload_ticks).max().unwrap();
+            let window = (slowest * 8).max(300);
+            let warm_up = 600;
+            let length = if at_sea { 7_000 } else { 8_500 };
+            // Slow enough to keep going north for the whole case.
+            let moving_speed = def.speed.min(Fp::from_num(length) / Fp::from_num(window + warm_up));
+            let mut settings = Vec::new();
+            if kind == Kind::Air {
+                // The aircraft flies north, from well within reach, beside a line through the shooter.
+                let (x, y) = if at_sea { (2_000, 1_500) } else { (LAND.0, 1_000) };
+                let shooter = (x, y + reach * 7 / 10);
+                settings.push(Setting { what: "standing still, at an aircraft flying past", map: MAP, shooter, target: (x + reach * 3 / 10, y), speed: None });
+                if !def.is_structure() && !flies {
+                    settings.push(Setting { what: "moving, beside an aircraft flying alongside", map: MAP, shooter: (x, y), target: (x + reach / 2, y), speed: Some(moving_speed) });
+                }
+            } else {
+                let distance = (reach * 85 / 100).max(least + 20);
+                if at_sea && kind == Kind::Land {
+                    // From just off the shore, at a unit on the land.
+                    settings.push(Setting { what: "standing still, at a target standing still", map: MAP, shooter: SHORE, target: (SHORE.0 + distance, SHORE.1), speed: None });
+                } else if at_sea {
+                    // On the lake, as far as it allows.
+                    let distance = distance.min(LAKE_X_END - 1_300 - 300);
+                    settings.push(Setting { what: "standing still, at a target standing still", map: MAP, shooter: (1_300, 5_000), target: (1_300 + distance, 5_000), speed: None });
+                    if !def.is_structure() {
+                        settings.push(Setting { what: "moving, beside a target moving alongside", map: MAP, shooter: (1_300, 1_500), target: (1_300 + distance, 1_500), speed: Some(moving_speed) });
+                    }
+                } else if LAND.0 + distance > MAP - 300 {
+                    settings.push(Setting { what: "standing still, at a target standing still", map: BIG_MAP, shooter: (600, 10_000), target: (600 + distance, 10_000), speed: None });
+                } else {
+                    settings.push(Setting { what: "standing still, at a target standing still", map: MAP, shooter: LAND, target: (LAND.0 + distance, LAND.1), speed: None });
+                    if !def.is_structure() {
+                        settings.push(Setting { what: "moving, beside a target moving alongside", map: MAP, shooter: (LAND.0, 1_000), target: (LAND.0 + distance, 1_000), speed: Some(moving_speed) });
+                    }
+                }
+            }
+            for setting in settings {
+                let moving = setting.speed.is_some();
+                // What is sure to land, and what may.
+                let sure: Vec<WeaponDef> = counted.iter().copied().filter(|weapon| !(moving && weapon.kind == WeaponKind::TacticalMissile)).collect();
+                if sure.is_empty() {
+                    continue;
+                }
+                checked += 1;
+                let name = format!("{} {} ({:?})", def.key, setting.what, kind);
+                let mut world = world(setting.map);
+                let shooter = place(&mut world, &def.key, Team::Blue, setting.shooter);
+                let target = dummy(&mut world, kind.dummy(), setting.target);
+                let target_entity = world.unit_entity(target).unwrap();
+                // Wide enough to take every scattered shell. A wide unit far off on the shooter's
+                // own side makes shells look that far around them for something to hit.
+                let spread = counted.iter().map(|weapon| weapon.spread).max().unwrap();
+                if spread > Fp::ZERO && kind != Kind::Air {
+                    let wide = spread + fp_int(4);
+                    world.ecs.get::<&mut UnitStats>(target_entity).unwrap().radius = wide;
+                    let mut spawn = sim_engine::sim::scenario::standard_unit(Team::Blue, point(setting.map - 200, setting.map - 200));
+                    spawn.radius = wide;
+                    world.spawn_unit(spawn);
+                }
+                let mut commands = Vec::new();
+                if submarine && kind == Kind::Land {
+                    commands.push(SimCommand::SetSurfaced { units: vec![shooter], surfaced: true });
+                }
+                if kind == Kind::Air {
+                    // Already flying north, at the speed it is to keep.
+                    let speed = setting.speed.unwrap_or_else(|| Fp::from_num(reach * 14 / 10) / Fp::from_num(window + warm_up));
+                    world.ecs.get::<&mut UnitStats>(target_entity).unwrap().max_speed = speed;
+                    world.ecs.get::<&mut sim_engine::sim::components::Flight>(target_entity).unwrap().speed = speed;
+                    world.ecs.get::<&mut sim_engine::sim::components::Turning>(target_entity).unwrap().facing = Vec2Fp::new(Fp::ZERO, Fp::ONE);
+                } else if let Some(speed) = setting.speed {
+                    world.ecs.get::<&mut UnitStats>(target_entity).unwrap().max_speed = speed;
+                }
+                if let (Some(speed), false) = (setting.speed, flies) {
+                    world.ecs.get::<&mut UnitStats>(world.unit_entity(shooter).unwrap()).unwrap().max_speed = speed;
+                } else if !def.is_structure() {
+                    commands.push(SimCommand::Attack { units: vec![shooter], target });
+                }
+                // Moving units are kept going north, the target always, the shooter if it walks.
+                let drive = |world: &SimWorld| -> Vec<SimCommand> {
+                    let mut orders = Vec::new();
+                    let mut ahead = |id: SimId, x: i32| {
+                        if let Some(at) = world.unit_position(id) {
+                            orders.push(SimCommand::Move { units: vec![id], goal: point(x, at.y.to_num::<i32>() + GOAL_AHEAD) });
+                        }
+                    };
+                    if moving || kind == Kind::Air {
+                        ahead(target, setting.target.0);
+                    }
+                    if moving && !flies {
+                        ahead(shooter, setting.shooter.0);
+                    }
+                    orders
+                };
+                commands.extend(drive(&world));
+                world.advance_tick(&commands);
+                let mut tick = 0;
+                let mut step = |world: &mut SimWorld| {
+                    tick += 1;
+                    let orders = if tick % 10 == 0 { drive(world) } else { Vec::new() };
+                    world.advance_tick(&orders);
+                };
+                let mut started = false;
+                for _ in 0..warm_up {
+                    step(&mut world);
+                    if damage(&world, target) > 0 {
+                        started = true;
+                        break;
+                    }
+                }
+                if !started {
+                    failures.push(format!("{name}: no damage within {warm_up} ticks"));
+                    continue;
+                }
+                let before = damage(&world, target);
+                for _ in 0..window {
+                    step(&mut world);
+                }
+                let done = f64::from(damage(&world, target) - before);
+                let (low, high) = (per_tick(&sure) * f64::from(window), per_tick(&counted) * f64::from(window));
+                let volley: f64 = counted.iter().map(|weapon| weapon.damage.to_num::<f64>()).sum();
+                if done < low * 0.92 - volley || done > high * 1.08 + volley {
+                    let seconds = f64::from(window) / 10.0;
+                    failures.push(format!("{name}: {:.1} damage a second, expected {:.1} (over {seconds} s)", done / seconds, low / seconds));
+                }
+            }
+        }
+    }
+    assert!(checked >= 60, "only {checked} cases were checked");
+    assert!(failures.is_empty(), "{} of {checked} cases:\n{failures:#?}", failures.len());
+}
+
 /// The test covers what it should: a unit of each kind, so that a mistake in the filters above
 /// cannot quietly test nothing.
 #[test]
@@ -301,4 +525,3 @@ fn the_weapon_tests_cover_each_kind_of_unit() {
     }
     let _ = BlueprintId(0);
 }
-
