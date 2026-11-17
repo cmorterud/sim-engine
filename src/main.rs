@@ -924,9 +924,13 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     let mut last_selected: Vec<SimId> = Vec::new();
     let mut attack_alarm = AttackAlarm::default();
     let mut sound_settings = SoundSettings::default();
+    // Whether the player has clicked or pressed a key yet, which the browser waits for before it
+    // plays any sound.
+    let mut sound_unlocked = false;
     // Test runs stay silent. The game plays on without sound if there is no device. Browsers
-    // only allow sound after the player clicks, so the browser build is silent for now.
-    let sound = (is_match && !watching && autotest_seconds.is_none() && !cfg!(target_arch = "wasm32")).then(SoundEngine::start).and_then(|started| match started {
+    // only let sound start once the page has been clicked or typed on: the first click or key
+    // press resumes it (`sound_unlocked`).
+    let sound = (is_match && !watching && autotest_seconds.is_none()).then(SoundEngine::start).and_then(|started| match started {
         Ok(engine) => Some(engine),
         Err(error) => {
             eprintln!("playing without sound: {error}");
@@ -947,6 +951,15 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
             Event::AboutToWait => window.request_redraw(),
             Event::WindowEvent { event, .. } => {
                 let response = egui_state.on_window_event(&window, &event);
+                // The browser lets sound start only from a click or key press on the page.
+                let gesture = matches!(event, WindowEvent::MouseInput { state: ElementState::Pressed, .. })
+                    || matches!(&event, WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed);
+                if gesture && !sound_unlocked {
+                    sound_unlocked = true;
+                    if let Some(engine) = &sound {
+                        engine.resume();
+                    }
+                }
                 match event {
                     WindowEvent::CloseRequested => target.exit(),
                     WindowEvent::Resized(new_size) => {

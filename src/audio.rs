@@ -205,10 +205,12 @@ impl SharedTargets {
     }
 }
 
-/// Plays sound through the default output device for as long as it is kept.
+/// Plays sound through the default output device for as long as it is kept. In the browser,
+/// that is Web Audio, which stays silent until the page has been clicked or typed on: call
+/// `resume` then.
 pub struct SoundEngine {
     shared: Arc<SharedTargets>,
-    _stream: cpal::Stream,
+    stream: cpal::Stream,
 }
 
 impl SoundEngine {
@@ -228,7 +230,15 @@ impl SoundEngine {
             other => Err(format!("unsupported sample format {other}")),
         }?;
         stream.play().map_err(|error| error.to_string())?;
-        Ok(Self { shared, _stream: stream })
+        Ok(Self { shared, stream })
+    }
+
+    /// Starts the sound again: in the browser, which holds it back until the player clicks or
+    /// presses a key, call this on the first click or key press.
+    pub fn resume(&self) {
+        if let Err(error) = self.stream.play() {
+            log::warn!("sound could not start: {error}");
+        }
     }
 
     pub fn set_levels(&self, levels: SoundLevels) {
