@@ -650,3 +650,131 @@ fn every_missile_launcher_lands_each_missile_it_is_ordered_to_fire() {
     assert!(checked >= 3, "only {checked} launchers were checked");
     assert!(failures.is_empty(), "{failures:#?}");
 }
+
+/// The weapons that can be aimed at a spot on the ground, for checking where their blasts reach.
+fn ground_attack_weapons(def: &Blueprint) -> Vec<WeaponDef> {
+    weapons(def).into_iter().filter(|weapon| hits(weapon, Targets::Ground) && weapon.kind != WeaponKind::Bomb).collect()
+}
+
+/// Nothing is hurt by a unit or structure standing idle with it just beyond the reach of every
+/// weapon that could hit it: on land a unit there, on the water a ship.
+#[test]
+fn nothing_is_hit_beyond_a_weapons_range() {
+    let mut failures = Vec::new();
+    let mut checked = 0;
+    let db = world(MAP).blueprints;
+    for def in db.iter().filter(|def| !def.is_air()) {
+        let at_sea = sails(def);
+        for kind in [Kind::Land, Kind::Ship] {
+            let counted: Vec<WeaponDef> = weapons(def).into_iter().filter(|weapon| counts(weapon, kind, false)).collect();
+            if counted.is_empty() || (kind == Kind::Ship && !at_sea) || (kind == Kind::Land && at_sea) {
+                continue;
+            }
+            let reach = counted.iter().map(|weapon| weapon.range.to_num::<i32>()).max().unwrap();
+            let (map, from) = if at_sea { (MAP, (1_300, 5_000)) } else if LAND.0 + reach + 400 > MAP { (BIG_MAP, (600, 10_000)) } else { (MAP, LAND) };
+            if at_sea && from.0 + reach + 200 > LAKE_X_END {
+                continue;
+            }
+            checked += 1;
+            let mut world = world(map);
+            let shooter = place(&mut world, &def.key, Team::Blue, from);
+            let radius = world.blueprints.get(world.blueprints.id(kind.dummy())).radius.to_num::<i32>();
+            let probe = dummy(&mut world, kind.dummy(), (from.0 + reach + radius + 40, from.1));
+            for _ in 0..300 {
+                world.advance_tick(&[]);
+            }
+            let fired = world.projectiles.iter().any(|&(_, entity)| world.ecs.get::<&Projectile>(entity).is_ok_and(|projectile| projectile.source == shooter));
+            if damage(&world, probe) > 0 || fired {
+                failures.push(format!("{} fired at a {kind:?} target {} beyond its {reach} range", def.key, radius + 40));
+            }
+        }
+    }
+    assert!(checked >= 25, "only {checked} cases were checked");
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// Artillery cannot hit what is closer than its minimum range: told to attack a target there, it
+/// does it no harm.
+#[test]
+fn artillery_cannot_hit_inside_its_minimum_range() {
+    let mut failures = Vec::new();
+    let mut checked = 0;
+    let db = world(MAP).blueprints;
+    for def in db.iter() {
+        let counted = ground_attack_weapons(def);
+        if counted.is_empty() || counted.iter().any(|weapon| weapon.min_range == Fp::ZERO) {
+            continue;
+        }
+        checked += 1;
+        let least = counted.iter().map(|weapon| weapon.min_range.to_num::<i32>()).min().unwrap();
+        let mut world = world(MAP);
+        let shooter = place(&mut world, &def.key, Team::Blue, LAND);
+        let target = dummy(&mut world, Kind::Land.dummy(), (LAND.0 + least * 6 / 10, LAND.1));
+        if !def.is_structure() {
+            world.advance_tick(&[SimCommand::Attack { units: vec![shooter], target }]);
+            // It may back off to fire; held in place, it must not fire at all.
+            world.ecs.get::<&mut UnitStats>(world.unit_entity(shooter).unwrap()).unwrap().max_speed = Fp::ZERO;
+        }
+        for _ in 0..400 {
+            world.advance_tick(&[]);
+        }
+        if damage(&world, target) > 0 {
+            failures.push(format!("{} hurt a target {} away, inside its {least} minimum range", def.key, least * 6 / 10));
+        }
+    }
+    assert!(checked >= 4, "only {checked} cases were checked");
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// A blast reaches as far as its splash radius, plus the radius of what it reaches: told to fire
+/// at a spot on the ground, every weapon with a blast hurts a unit just inside that reach of the
+/// spot, its own side's too, and never one just outside it, allowing for a scattering weapon's
+/// spread.
+#[test]
+fn every_blast_reaches_exactly_its_splash_radius() {
+    let mut failures = Vec::new();
+    let mut checked = 0;
+    let db = world(MAP).blueprints;
+    for def in db.iter().filter(|def| !def.is_air()) {
+        let counted: Vec<WeaponDef> = ground_attack_weapons(def).into_iter().filter(|weapon| weapon.splash_radius > Fp::ZERO).collect();
+        if counted.is_empty() || ground_attack_weapons(def).len() != counted.len() {
+            continue;
+        }
+        let reach = counted.iter().map(|weapon| weapon.range.to_num::<i32>()).min().unwrap();
+        let least = counted.iter().map(|weapon| weapon.min_range.to_num::<i32>()).max().unwrap();
+        let distance = (reach * 7 / 10).max(least + 50);
+        let at_sea = sails(def);
+        let (map, from) = if at_sea { (MAP, SHORE) } else if LAND.0 + distance + 600 > MAP { (BIG_MAP, (600, 10_000)) } else { (MAP, LAND) };
+        checked += 1;
+        let smallest = counted.iter().map(|weapon| weapon.splash_radius.to_num::<i32>()).min().unwrap();
+        let widest = counted.iter().map(|weapon| (weapon.splash_radius + weapon.spread).to_num::<i32>()).max().unwrap();
+        let scatters = counted.iter().any(|weapon| weapon.spread > Fp::ZERO);
+        let spot = (from.0 + distance, from.1);
+        let mut world = world(map);
+        let shooter = place(&mut world, &def.key, Team::Blue, from);
+        // A friendly unit just inside the smallest blast, beside the spot, and an enemy just
+        // outside the widest, on the other side.
+        let inside = dummy(&mut world, Kind::Land.dummy(), spot);
+        let inner_radius = world.ecs.get::<&UnitStats>(world.unit_entity(inside).unwrap()).unwrap().radius.to_num::<i32>();
+        world.ecs.get::<&mut UnitStats>(world.unit_entity(inside).unwrap()).unwrap().team = Team::Blue;
+        let outside = dummy(&mut world, Kind::Land.dummy(), spot);
+        let outer_radius = world.ecs.get::<&UnitStats>(world.unit_entity(outside).unwrap()).unwrap().radius.to_num::<i32>();
+        world.ecs.get::<&mut sim_engine::sim::components::Position>(world.unit_entity(inside).unwrap()).unwrap().0.y = fp_int(spot.1 + smallest + inner_radius - 3);
+        world.ecs.get::<&mut sim_engine::sim::components::Position>(world.unit_entity(outside).unwrap()).unwrap().0.y = fp_int(spot.1 - widest - outer_radius - 6);
+        // The friendly one is not a target, and the enemy one is not shot at directly.
+        world.ecs.get::<&mut Combat>(world.unit_entity(shooter).unwrap()).unwrap().blocked = Some((outside, u32::MAX));
+        world.advance_tick(&[SimCommand::AttackGround { units: vec![shooter], point: point(spot.0, spot.1) }]);
+        let slowest = counted.iter().map(|weapon| weapon.reload_ticks).max().unwrap();
+        for _ in 0..(slowest * 4 + 400) {
+            world.advance_tick(&[]);
+        }
+        if !scatters && damage(&world, inside) == 0 {
+            failures.push(format!("{}: a friend {} from the spot, inside its {smallest} blast, took nothing", def.key, smallest + inner_radius - 3));
+        }
+        if damage(&world, outside) > 0 {
+            failures.push(format!("{}: a unit {} from the spot, beyond its {widest} blast and spread, was hurt", def.key, widest + outer_radius + 6));
+        }
+    }
+    assert!(checked >= 8, "only {checked} cases were checked");
+    assert!(failures.is_empty(), "{failures:#?}");
+}
