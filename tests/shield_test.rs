@@ -222,3 +222,172 @@ fn a_dome_is_not_up_until_its_generator_is_built() {
     assert!(!view.up);
     assert_eq!(view.recharging, 0);
 }
+
+/// Flat land with a lake in the middle third of the map, for ships, and plenty of everything.
+fn open_world() -> SimWorld {
+    use sim_engine::sim::terrain::{Terrain, HEIGHT_FRAC_BITS};
+    let map = 10_240;
+    let cells = (map / 20) as usize;
+    let samples = cells + 1;
+    let height = |x: usize, _y: usize| if (3_000..=7_000).contains(&(x as i32 * 20)) { -40 } else { 20 };
+    let heights: Vec<i16> = (0..samples * samples).map(|index| (height(index % samples, index / samples) << HEIGHT_FRAC_BITS) as i16).collect();
+    let blocked: Vec<bool> = (0..cells * cells)
+        .map(|cell| {
+            let (x, y) = (cell % cells, cell / cells);
+            [(x, y), (x + 1, y), (x, y + 1), (x + 1, y + 1)].iter().any(|&(cx, cy)| height(cx, cy) < 0)
+        })
+        .collect();
+    let terrain = Terrain::from_heights(map, heights, &blocked, Fp::ZERO);
+    let config = SimConfig { map_units: map, terrain: TerrainStyle::Flat, fog_of_war: false, ..SimConfig::default() };
+    let mut world = SimWorld::with_terrain(config, 1, terrain);
+    world.prepare_map();
+    for economy in &mut world.economies {
+        for value in [&mut economy.base_mass_capacity, &mut economy.mass_capacity, &mut economy.base_energy_capacity, &mut economy.energy_capacity] {
+            *value = Res::from_num(10_000_000);
+        }
+        economy.mass = Res::from_num(5_000_000);
+        economy.energy = Res::from_num(5_000_000);
+    }
+    world
+}
+
+/// Every shield in the unit data, on a generator, a unit, or from an enhancement, does what its
+/// numbers say: shells from outside hurt only the dome while it is up, and take exactly their
+/// damage from it; it regenerates at its rate; it collapses when it runs out, after which what it
+/// covered is hit; and it comes back at full strength after its recharge time.
+#[test]
+fn every_shield_absorbs_regenerates_collapses_and_recharges() {
+    use sim_engine::sim::components::{Health, MoveClass, UnitStats};
+    let db = open_world().blueprints;
+    // The unit carrying it, and the enhancement that gives it, if any.
+    let mut cases: Vec<(String, Option<String>)> = db.iter().filter(|def| def.shield.is_some()).map(|def| (def.key.clone(), None)).collect();
+    for def in db.iter() {
+        for enhancement in db.enhancements_for(db.id(&def.key)).filter(|enhancement| enhancement.effects.shield.is_some()) {
+            cases.push((def.key.clone(), Some(enhancement.key.clone())));
+        }
+    }
+    assert!(cases.len() >= 8, "only {} shields found", cases.len());
+    let mut failures = Vec::new();
+    for (key, enhancement) in cases {
+        let name = format!("{key}{}", enhancement.as_ref().map_or(String::new(), |enhancement| format!(" with {enhancement}")));
+        let mut world = open_world();
+        let blueprint = world.blueprints.id(&key);
+        let def = world.blueprints.get(blueprint).clone();
+        let at_sea = matches!(def.movement, MoveClass::Naval | MoveClass::Submarine);
+        let at = if at_sea { point(5_000, 5_000) } else { point(1_500, 5_000) };
+        let carrier = if def.is_structure() {
+            world.spawn_finished_structure(blueprint, Team::Blue, 75, 250).unwrap()
+        } else {
+            world.spawn_mobile(blueprint, Team::Blue, at)
+        };
+        if let Some(enhancement) = &enhancement {
+            let id = world.blueprints.enhancement_id(enhancement);
+            world.install_enhancement(carrier, id);
+        }
+        let entity = world.unit_entity(carrier).unwrap();
+        world.ecs.get::<&mut Combat>(entity).unwrap().enabled = false;
+        {
+            let mut health = world.ecs.get::<&mut Health>(entity).unwrap();
+            health.max = fp_int(400_000);
+            health.current = health.max;
+        }
+        let Ok(dome) = world.ecs.get::<&Shield>(entity).map(|shield| *shield) else {
+            failures.push(format!("{name}: no shield"));
+            continue;
+        };
+        let here = world.unit_position(carrier).unwrap().xy();
+        let carrier_radius = world.ecs.get::<&UnitStats>(entity).unwrap().radius;
+
+        // Regeneration, from half strength, with nothing shooting.
+        world.ecs.get::<&mut Shield>(entity).unwrap().health = dome.max_health / 2;
+        for _ in 0..20 {
+            world.advance_tick(&[]);
+        }
+        let regained = shield(&world, carrier).health - dome.max_health / 2;
+        let expected = (dome.regen_per_tick * 20).min(dome.max_health / 2);
+        if (regained - expected).abs() > dome.regen_per_tick * 2 {
+            failures.push(format!("{name}: regained {regained} in 2 s, expected {expected}"));
+        }
+        world.ecs.get::<&mut Shield>(entity).unwrap().health = dome.max_health;
+
+        // A gun outside the dome, firing at what it covers, enough a shot to wear it down.
+        let reload = 10;
+        let damage = (dome.max_health / 8).max(dome.regen_per_tick * reload * 4);
+        // On the shore, for a ship.
+        let distance = if at_sea { here.x - fp_int(2_800) } else { dome.radius + carrier_radius + fp_int(150) };
+        let mut gun = sim_engine::sim::scenario::standard_unit(Team::Red, Vec2Fp::new(here.x - distance, here.y));
+        gun.range = distance + fp_int(60);
+        gun.reload_ticks = reload as u32;
+        gun.projectile_speed = fp_int(40);
+        gun.projectile_damage = damage;
+        gun.health = fp_int(400_000);
+        let gun = world.spawn_unit(gun);
+        // An aircraft's dome covers the ground beneath it: the gun fires at a unit there instead.
+        let covered = if def.is_air() {
+            // Idle, it glides on as it lands: once down, the unit goes beside it, on the gun's side,
+            // so that the transport is not in the way of the shells.
+            for _ in 0..200 {
+                world.advance_tick(&[]);
+            }
+            let landed = world.unit_position(carrier).unwrap().xy();
+            let under = world.spawn_mobile(world.blueprints.id("t1_engineer"), Team::Blue, landed - Vec2Fp::new(carrier_radius + fp_int(12), Fp::ZERO));
+            let gun_entity = world.unit_entity(gun).unwrap();
+            world.ecs.get::<&mut sim_engine::sim::components::Position>(gun_entity).unwrap().0.x = landed.x - distance;
+            world.ecs.get::<&mut sim_engine::sim::components::Position>(gun_entity).unwrap().0.y = landed.y;
+            let mut health = world.ecs.get::<&mut Health>(world.unit_entity(under).unwrap()).unwrap();
+            health.max = fp_int(400_000);
+            health.current = health.max;
+            under
+        } else {
+            carrier
+        };
+        world.advance_tick(&[SimCommand::Attack { units: vec![gun], target: covered }]);
+        let full = fp_int(400_000);
+        let mut collapsed_at = None;
+        for tick in 0..2_000 {
+            world.advance_tick(&[]);
+            let now = shield(&world, carrier);
+            if now.is_up() {
+                if world.unit_health(covered).unwrap() < full {
+                    failures.push(format!("{name}: hurt under a dome still up, with {} left", now.health));
+                    break;
+                }
+            } else {
+                collapsed_at = Some(tick);
+                break;
+            }
+        }
+        let Some(_) = collapsed_at else {
+            failures.push(format!("{name}: never collapsed under {damage} a shot"));
+            continue;
+        };
+        // Down, what it covered is hit.
+        for _ in 0..60 {
+            world.advance_tick(&[]);
+        }
+        if world.unit_health(covered).unwrap() >= full {
+            failures.push(format!("{name}: not hurt with its dome down"));
+        }
+        // The gun stops, and the dome comes back, at full strength, after its recharge time.
+        world.ecs.get::<&mut Combat>(world.unit_entity(gun).unwrap()).unwrap().enabled = false;
+        let back = (0..dome.recharge_ticks + 200).find(|_| {
+            world.advance_tick(&[]);
+            shield(&world, carrier).is_up()
+        });
+        match back {
+            None => failures.push(format!("{name}: never came back")),
+            Some(ticks) => {
+                // 60 of its recharge ticks went by while it was being hit.
+                let waited = ticks + 1 + 60;
+                if waited.abs_diff(dome.recharge_ticks) > 2 {
+                    failures.push(format!("{name}: back after {waited} ticks, expected {}", dome.recharge_ticks));
+                }
+                let strength = shield(&world, carrier).health;
+                if strength < dome.max_health - dome.regen_per_tick * 2 {
+                    failures.push(format!("{name}: back at {strength}, not full {}", dome.max_health));
+                }
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}

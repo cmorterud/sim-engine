@@ -964,7 +964,11 @@ impl SimWorld {
         if self.economy_dirty {
             self.recompute_economy();
         }
-        if self.builders.is_empty() && self.factories.is_empty() && self.structures.is_empty() && self.patrols.is_empty() {
+        // With nothing that builds, makes, pays upkeep, or patrols, there is nothing to do. A side
+        // down to an army with mobile shields used to stop here, so its domes never healed or came
+        // back.
+        let idle = self.builders.is_empty() && self.factories.is_empty() && self.structures.is_empty() && self.patrols.is_empty();
+        if idle && self.shields.is_empty() && self.intel.is_empty() && self.teleporting.is_empty() {
             return;
         }
         self.step_patrols();
