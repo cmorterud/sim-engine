@@ -126,3 +126,54 @@ fn builders_that_cannot_build_a_new_structure_help_those_that_can() {
     let links = world.snapshot().work_links;
     assert!(links.iter().any(|link| link.builder == engineer), "the engineer should be working on the generator {generator:?}");
 }
+
+fn queue(world: &SimWorld, factory: SimId) -> Vec<sim_engine::sim::blueprints::BlueprintId> {
+    world.ecs.get::<&sim_engine::sim::components::Factory>(world.unit_entity(factory).unwrap()).unwrap().queue.clone()
+}
+
+/// A factory told to assist another builds off that one's queue whenever it has nothing of its
+/// own: it takes the next item the other has not started, so that both make units at once, and
+/// the queue drains twice as fast.
+#[test]
+fn a_factory_assisting_another_builds_off_its_queue() {
+    let mut world = rich_world();
+    let factory = world.blueprints.id("land_factory_t1");
+    let (x, y) = (world.spawn_finished_structure(factory, Team::Blue, 50, 50).unwrap(), world.spawn_finished_structure(factory, Team::Blue, 60, 50).unwrap());
+    let tank = world.blueprints.id("t1_medium_tank");
+    world.advance_tick(&[SimCommand::QueueUnit { factory: x, blueprint: tank, count: 4 }, SimCommand::Assist { units: vec![y], target: x }]);
+    world.advance_tick(&[]);
+    assert_eq!(queue(&world, y), vec![tank], "Y takes the next tank");
+    assert_eq!(queue(&world, x).len(), 3, "X keeps the one it started and the rest");
+    let tanks = |world: &SimWorld| world.units.iter().filter(|&&(_, entity)| world.ecs.get::<&sim_engine::sim::components::Blueprinted>(entity).is_ok_and(|unit| unit.0 == tank)).count();
+    // Two at a time: four tanks in the time X alone takes for two, and a little.
+    let build = world.blueprints.get(tank).build_time.to_num::<f64>() * 10.0 / 20.0;
+    for _ in 0..(build * 2.0) as u32 + 20 {
+        world.advance_tick(&[]);
+    }
+    assert_eq!(tanks(&world), 4, "both should have built two");
+    assert!(queue(&world, x).is_empty() && queue(&world, y).is_empty());
+    // Y builds nothing X does not ask for, and stops helping when told to.
+    world.advance_tick(&[SimCommand::Stop { units: vec![y] }]);
+    world.advance_tick(&[SimCommand::QueueUnit { factory: x, blueprint: tank, count: 3 }]);
+    world.advance_tick(&[]);
+    world.advance_tick(&[]);
+    assert!(queue(&world, y).is_empty(), "stopped, it no longer helps");
+}
+
+/// It takes only what it can build itself, and leaves a repeating queue's cycle as it was.
+#[test]
+fn a_factory_assisting_takes_only_what_it_can_build_and_keeps_a_repeat() {
+    let mut world = rich_world();
+    let (t1, t2) = (world.blueprints.id("land_factory_t1"), world.blueprints.id("land_factory_t2"));
+    let (x, y) = (world.spawn_finished_structure(t2, Team::Blue, 50, 50).unwrap(), world.spawn_finished_structure(t1, Team::Blue, 60, 50).unwrap());
+    let (heavy, light) = (world.blueprints.id("t2_heavy_tank"), world.blueprints.id("t1_medium_tank"));
+    world.advance_tick(&[
+        SimCommand::QueueUnit { factory: x, blueprint: heavy, count: 2 },
+        SimCommand::QueueUnit { factory: x, blueprint: light, count: 1 },
+        SimCommand::SetRepeat { factory: x, repeat: true },
+        SimCommand::Assist { units: vec![y], target: x },
+    ]);
+    world.advance_tick(&[]);
+    assert_eq!(queue(&world, y), vec![light], "a T1 factory takes the T1 tank, not the heavy tanks");
+    assert_eq!(queue(&world, x), vec![heavy, heavy, light], "on repeat, the tank goes round to the back of X's queue");
+}

@@ -179,3 +179,37 @@ fn a_unit_with_a_wall_in_its_way_goes_round_it() {
     let at = world.unit_position(tank).unwrap().xy();
     assert!((at - point(5_000, 8_000)).length_squared() < fp_int(40) * fp_int(40), "it should have got round, not stopped at {at:?}");
 }
+
+/// A unit goes round a friend standing in its way, rather than shoving it ahead of itself and
+/// stopping short: an engineer coming out of a factory, with the commander standing at work in
+/// front of it, stayed stuck against it.
+#[test]
+fn a_unit_goes_round_a_friend_standing_in_its_way() {
+    for (blocker, working) in [("command_rig", true), ("t1_engineer", true), ("t1_medium_tank", false)] {
+        let mut world = world(false);
+        for economy in &mut world.economies {
+            for value in [&mut economy.base_mass_capacity, &mut economy.mass_capacity, &mut economy.mass] {
+                *value = Res::from_num(100_000);
+            }
+        }
+        let in_the_way = world.spawn_mobile(world.blueprints.id(blocker), Team::Blue, point(1_060, 1_000));
+        if working {
+            // Building just beside where it stands, so that it stays put.
+            world.advance_tick(&[SimCommand::Build { units: vec![in_the_way], blueprint: world.blueprints.id("power_generator"), cell_x: 52, cell_y: 52, queued: false }]);
+        }
+        for _ in 0..40 {
+            world.advance_tick(&[]);
+        }
+        let start = world.unit_position(in_the_way).unwrap().xy();
+        let engineer = world.spawn_mobile(world.blueprints.id("t1_engineer"), Team::Blue, point(1_000, 1_000));
+        world.ecs.get::<&mut Turning>(world.unit_entity(engineer).unwrap()).unwrap().facing = Vec2Fp::new(Fp::ONE, Fp::ZERO);
+        world.advance_tick(&[SimCommand::Move { units: vec![engineer], goal: point(1_500, 1_000) }]);
+        for _ in 0..300 {
+            world.advance_tick(&[]);
+        }
+        let here = world.unit_position(engineer).unwrap().xy();
+        assert!((here - point(1_500, 1_000)).length_squared() < fp_int(20) * fp_int(20), "past a {blocker}: stopped at {here:?}");
+        let shoved = (world.unit_position(in_the_way).unwrap().xy() - start).length_squared().to_num::<f64>().sqrt();
+        assert!(shoved < 20.0, "it shoved the {blocker} {shoved:.0} out of its way");
+    }
+}

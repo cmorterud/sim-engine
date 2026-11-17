@@ -12,6 +12,9 @@ pub const CLICK_THRESHOLD_PX: f64 = 4.0;
 const DOUBLE_CLICK_SECONDS: f64 = 0.4;
 /// How far from a unit's center a click can land and still select it.
 const CLICK_RADIUS_PX: f64 = 12.0;
+/// How far from an enemy a right-click can land and still be an order at it: twice a far-off
+/// unit's symbol, which is all there is to click when zoomed out.
+pub const TARGET_CLICK_RADIUS_PX: f64 = 22.0;
 
 /// Tracks the left-button drag and the current selection (sorted by `SimId`).
 #[derive(Default)]
@@ -278,6 +281,12 @@ pub fn units_in_box(units: &[UnitView], camera: &Camera, team: Team, min: [f64; 
 
 /// The team's unit closest to a screen point, if any is close enough.
 pub fn nearest_unit(units: &[UnitView], camera: &Camera, team: Team, point: [f64; 2]) -> Option<SimId> {
+    nearest_unit_within(units, camera, team, point, CLICK_RADIUS_PX)
+}
+
+/// The team's unit closest to a screen point, within `reach_px` of it or anywhere on it as it is
+/// drawn, if bigger.
+pub fn nearest_unit_within(units: &[UnitView], camera: &Camera, team: Team, point: [f64; 2], reach_px: f64) -> Option<SimId> {
     let mut best: Option<(f64, SimId)> = None;
     for unit in units.iter().filter(|unit| unit.team == team) {
         if let Some(p) = screen_position(unit, camera) {
@@ -286,7 +295,7 @@ pub fn nearest_unit(units: &[UnitView], camera: &Camera, team: Team, point: [f64
             let radius = raw_to_world(unit.radius);
             let edge = camera.world_to_screen([raw_to_world(unit.x) + radius, raw_to_world(unit.y), raw_to_world(unit.z)]);
             let apparent = edge.map_or(0.0, |edge| (edge[0] - p[0]).hypot(edge[1] - p[1]));
-            let reach = CLICK_RADIUS_PX.max(apparent);
+            let reach = reach_px.max(apparent);
             if distance <= reach * reach && best.is_none_or(|(closest, _)| distance < closest) {
                 best = Some((distance, unit.id));
             }

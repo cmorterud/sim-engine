@@ -672,3 +672,26 @@ fn a_queued_patrol_starts_where_the_queue_ends() {
     }
     assert!(reached_start && reached_point, "it finished the queued move, then patrolled on");
 }
+
+/// Shift-patrolling a unit already on patrol adds the point to its loop, rather than starting a
+/// new patrol: it goes on round its points, the new one included.
+#[test]
+fn a_shift_patrol_adds_a_point_to_the_loop() {
+    use sim_engine::sim::components::Patrol;
+    let config = sim_engine::sim::config::SimConfig { map_units: 5_120, terrain: sim_engine::sim::config::TerrainStyle::Flat, ..Default::default() };
+    let mut world = sim_engine::sim::world::SimWorld::new(config, 1);
+    let at = |x: i32, y: i32| sim_engine::math::fp::Vec2Fp::new(fp_int(x), fp_int(y));
+    let tank = world.spawn_mobile(world.blueprints.id("t1_medium_tank"), sim_engine::sim::components::Team::Blue, at(1_000, 1_000));
+    world.advance_tick(&[SimCommand::Patrol { units: vec![tank], points: vec![at(1_000, 1_000), at(1_400, 1_000)], queued: false }]);
+    // The second click: the first point is where its queue ends, which is already on the loop.
+    world.advance_tick(&[SimCommand::Patrol { units: vec![tank], points: vec![at(1_400, 1_000), at(1_400, 1_400)], queued: true }]);
+    let points = world.ecs.get::<&Patrol>(world.unit_entity(tank).unwrap()).unwrap().points.clone();
+    assert_eq!(points, vec![at(1_000, 1_000), at(1_400, 1_000), at(1_400, 1_400)]);
+    let mut reached = false;
+    for _ in 0..600 {
+        world.advance_tick(&[]);
+        let here = world.unit_position(tank).unwrap().xy();
+        reached |= (here - at(1_400, 1_400)).length_squared() < fp_int(40) * fp_int(40);
+    }
+    assert!(reached, "it should patrol to the added point");
+}

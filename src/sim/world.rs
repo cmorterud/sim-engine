@@ -1091,6 +1091,9 @@ impl SimWorld {
                 combat.forced_target = None;
                 combat.ground_target = None;
             }
+            if let Ok(mut factory) = self.ecs.get::<&mut super::components::Factory>(entity) {
+                factory.assisting = None;
+            }
             let _ = self.ecs.remove_one::<DischargeOrder>(entity);
             // And an aircraft's trip to refuel.
             if let Ok(mut flight) = self.ecs.get::<&mut Flight>(entity) {
@@ -1434,10 +1437,10 @@ impl SimWorld {
     pub fn rebuild_grid(&mut self) {
         let terrain = &self.terrain;
         let surfaced = &self.surfaced;
-        let mut query = self.ecs.query::<(&Position, &UnitStats, &Order, Option<&Flight>, Option<&Velocity>)>();
+        let mut query = self.ecs.query::<(&Position, &UnitStats, &Order, Option<&Flight>, Option<&Velocity>, Option<&Builder>)>();
         let view = query.view();
         self.spatial_grid.rebuild(self.units.iter().map(|&(id, entity)| {
-            let (position, stats, order, flight, velocity) = view.get(entity).expect("unit list only holds live units");
+            let (position, stats, order, flight, velocity, builder) = view.get(entity).expect("unit list only holds live units");
             GridUnit {
                 id,
                 entity,
@@ -1453,7 +1456,11 @@ impl SimWorld {
                 is_sub: (stats.move_class == MoveClass::Submarine && surfaced.binary_search(&id).is_err())
                     || (stats.move_class == MoveClass::Seabed && position.0.z + stats.radius < terrain.water_level()),
                 is_naval: (stats.move_class == MoveClass::Naval && !stats.is_structure) || (stats.move_class == MoveClass::Submarine && surfaced.binary_search(&id).is_ok()),
-                is_idle: order.kind == OrderKind::Idle,
+                // A builder standing still at work has somewhere to be: a unit that bumps into it
+                // has not reached the crowd round its own goal. Counted as settled, a commander
+                // building beside a factory stopped the engineers coming out of it short of the
+                // rally point, stuck against it.
+                is_idle: order.kind == OrderKind::Idle && builder.is_none_or(|builder| builder.tasks.is_empty()),
                 velocity: velocity.map_or([0, 0], |velocity| [velocity.0.x.to_bits(), velocity.0.y.to_bits()]),
             }
         }));
@@ -1716,6 +1723,12 @@ impl SimWorld {
             // Local separation. Reads positions from the grid, so results cannot depend on update order.
             let me = grid.entry(index);
             let (mut push_x, mut push_y) = (0i64, 0i64);
+            // A friend in the way that is stopped, or going much slower the same way, is gone round:
+            // the unit slides sideways past it, away from the side it is on, rather than shoving it
+            // ahead of itself, as an engineer did a commander at work for 200 units.
+            let (mut slide_x, mut slide_y) = (0i64, 0i64);
+            let (vx, vy) = (i64::from(velocity.0.x.to_bits()), i64::from(velocity.0.y.to_bits()));
+            let my_speed_squared = vx * vx + vy * vy;
             let mut touches_settled_friend = false;
             grid.for_each_candidate(None, Layer::Mobile, me.x, me.y, me.radius + max_radius, |other| {
                 if other.index == me.index {
@@ -1728,6 +1741,17 @@ impl SimWorld {
                     return;
                 }
                 touches_settled_friend |= other.is_idle && other.team == me.team;
+                if other.team == me.team && my_speed_squared > 0 {
+                    let ahead = -(dx * vx + dy * vy) > 0;
+                    let its_way = i64::from(other.velocity[0]) * vx + i64::from(other.velocity[1]) * vy;
+                    if ahead && its_way * 2 < my_speed_squared {
+                        // Which side of the unit's path it is on; dead ahead, a side from their ids.
+                        let cross = dx * vy - dy * vx;
+                        let side = if cross != 0 { cross.signum() } else if me.id < other.id { 1 } else { -1 };
+                        slide_x += side * vy;
+                        slide_y -= side * vx;
+                    }
+                }
                 let distance = (distance_squared as u64).isqrt() as i64;
                 let overlap = contact - distance;
                 if distance == 0 {
@@ -1768,9 +1792,12 @@ impl SimWorld {
             let cap = (i64::from(me.radius) / 2).max(i64::from(stats.max_speed.to_bits()));
             let push_x = (push_x / 3).clamp(-cap, cap) as i32;
             let push_y = (push_y / 3).clamp(-cap, cap) as i32;
+            let speed = i64::from(stats.max_speed.to_bits());
+            let slide_x = slide_x.clamp(-speed, speed) as i32;
+            let slide_y = slide_y.clamp(-speed, speed) as i32;
 
-            let step_x = velocity.0.x.to_bits() + push_x;
-            let step_y = velocity.0.y.to_bits() + push_y;
+            let step_x = velocity.0.x.to_bits() + push_x + slide_x;
+            let step_y = velocity.0.y.to_bits() + push_y + slide_y;
             if step_x == 0 && step_y == 0 {
                 continue;
             }

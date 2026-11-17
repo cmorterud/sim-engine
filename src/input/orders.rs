@@ -85,7 +85,7 @@ pub fn right_click_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
     }
 
     // On an enemy, armed units attack, and builders that cannot fight capture it.
-    let enemy = nearest_unit(click.units, click.camera, click.team.enemy(), click.cursor);
+    let enemy = crate::input::selection::nearest_unit_within(click.units, click.camera, click.team.enemy(), click.cursor, crate::input::selection::TARGET_CLICK_RADIUS_PX);
     if let Some(target) = enemy {
         let unarmed: Vec<SimId> = parts.builders.iter().copied().filter(|id| !parts.armed.contains(id)).collect();
         let index = click.units.binary_search_by_key(&target, |unit| unit.id).expect("found in this list");
@@ -139,6 +139,21 @@ pub fn right_click_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
             return commands;
         }
     }
+    // Selected factories right-clicked onto another factory help it with its queue.
+    let mut helping = Vec::new();
+    if let Some(target) = friend {
+        let index = click.units.binary_search_by_key(&target, |unit| unit.id).expect("found in this list");
+        let unit = &click.units[index];
+        let is_factory = unit.blueprint != u16::MAX && click.blueprints.get(BlueprintId(unit.blueprint)).is_factory();
+        let factories: Vec<SimId> = parts.factories.iter().copied().filter(|&id| id != target).collect();
+        if is_factory && !factories.is_empty() {
+            helping.push(SimCommand::Assist { units: factories, target });
+            if parts.builders.is_empty() && parts.mobile.is_empty() {
+                return helping;
+            }
+        }
+    }
+    commands.extend(helping);
     if let (Some(target), false) = (friend, parts.builders.is_empty()) {
         let index = click.units.binary_search_by_key(&target, |unit| unit.id).expect("found in this list");
         let unit = &click.units[index];
@@ -229,7 +244,7 @@ pub fn formation_commands(commands: Vec<SimCommand>) -> Vec<SimCommand> {
 
 /// Discharge the enemy under the cursor with each selected unit that has it.
 pub fn discharge_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
-    let Some(target) = nearest_unit(click.units, click.camera, click.team.enemy(), click.cursor) else {
+    let Some(target) = crate::input::selection::nearest_unit_within(click.units, click.camera, click.team.enemy(), click.cursor, crate::input::selection::TARGET_CLICK_RADIUS_PX) else {
         return Vec::new();
     };
     click
@@ -252,7 +267,7 @@ fn capturable(unit: &UnitView, blueprints: &BlueprintDb) -> bool {
 
 /// The selected builders capture the enemy under the cursor.
 pub fn capture_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
-    let Some(target) = nearest_unit(click.units, click.camera, click.team.enemy(), click.cursor) else {
+    let Some(target) = crate::input::selection::nearest_unit_within(click.units, click.camera, click.team.enemy(), click.cursor, crate::input::selection::TARGET_CLICK_RADIUS_PX) else {
         return Vec::new();
     };
     let builders = sort_selection(click.selected, click.units, click.blueprints).builders;
@@ -794,6 +809,44 @@ mod tests {
         ];
         let orders = click_at(&[SimId(1), SimId(2)], &units, &[], &db, &camera(), [2_000.0, 2_050.0]);
         assert_eq!(orders, [SimCommand::Attack { units: vec![SimId(1)], target: SimId(3) }, SimCommand::Capture { units: vec![SimId(2)], target: SimId(3) }]);
+    }
+
+    /// Zoomed out, an enemy is a symbol a few pixels across: a right-click near it, not only dead
+    /// on it, attacks it, and one further off is a move.
+    #[test]
+    fn a_right_click_near_a_far_off_enemy_attacks_it() {
+        let db = db();
+        let mut camera = Camera::new(10_240.0, [1600.0, 1000.0]);
+        camera.look_at(2_000.0, 2_000.0, 6_000.0);
+        let units = [view(1, Team::Blue, db.id("t1_medium_tank"), &db, 1_500.0, 2_000.0), view(2, Team::Red, db.id("t1_medium_tank"), &db, 2_000.0, 2_000.0)];
+        let on_screen = camera.world_to_screen([2_000.0, 2_000.0, 9.0]).unwrap();
+        let click = |offset: f64| {
+            right_click_orders(&RightClick {
+                selected: &[SimId(1)],
+                units: &units,
+                wrecks: &[],
+                blueprints: &db,
+                team: Team::Blue,
+                camera: &camera,
+                cursor: [on_screen[0] + offset, on_screen[1]],
+                ground: Some([2_000.0, 2_000.0]),
+                attack_move: false,
+            })
+        };
+        assert_eq!(click(18.0), [SimCommand::Attack { units: vec![SimId(1)], target: SimId(2) }], "18 pixels off still attacks");
+        assert!(matches!(click(30.0)[..], [SimCommand::Move { .. }]), "30 pixels off is a move: {:?}", click(30.0));
+    }
+
+    #[test]
+    fn right_clicking_a_factory_with_factories_selected_assists_it() {
+        let db = db();
+        let units = [
+            view(1, Team::Blue, db.id("land_factory_t1"), &db, 1_700.0, 2_050.0),
+            view(3, Team::Blue, db.id("land_factory_t1"), &db, 1_900.0, 2_050.0),
+        ];
+        let camera = camera();
+        let orders = click_at(&[SimId(1)], &units, &[], &db, &camera, [1_900.0, 2_050.0]);
+        assert_eq!(orders, [SimCommand::Assist { units: vec![SimId(1)], target: SimId(3) }], "not a rally point on it");
     }
 
     #[test]

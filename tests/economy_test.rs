@@ -510,10 +510,12 @@ fn structures_block_movement_and_units_walk_out_from_under_them() {
     let mut world = test_world();
     let (bot, factory) = (id(&world, "t1_light_walker"), id(&world, "land_factory_t1"));
     let unit = world.spawn_mobile(bot, Team::Blue, point(1_030, 1_030));
+    let footprint = |at: Vec2Fp| (1_000..1_080).contains(&at.x.to_num::<i32>()) && (1_000..1_080).contains(&at.y.to_num::<i32>());
+    assert!(footprint(world.unit_position(unit).unwrap().xy()), "the setup should place the unit where the factory goes");
     world.spawn_finished_structure(factory, Team::Blue, 50, 50).unwrap();
-    assert!(!world.terrain.is_passable(world.unit_position(unit).unwrap().xy()), "the setup should place the unit inside the factory");
+    // Moved off the footprint the moment the factory is placed.
+    assert!(world.terrain.is_passable(world.unit_position(unit).unwrap().xy()), "the unit should have been moved off");
     run(&mut world, 30);
-    assert!(world.terrain.is_passable(world.unit_position(unit).unwrap().xy()), "the unit should have walked out");
 
     world.advance_tick(&[SimCommand::Move { units: vec![unit], goal: point(1_030, 1_200) }]);
     let start = world.unit_position(unit).unwrap().xy();

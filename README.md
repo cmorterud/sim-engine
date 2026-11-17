@@ -40,12 +40,12 @@ Destroy the enemy commander to win. Yours explodes if it dies, and your whole te
 | M, then left-click | Move there, whatever is under the cursor |
 | F, then left-click | Attack-move: stop to fire when enemies are in range |
 | Y, then left-click a friendly unit | Assist: stay with it and protect it, and builders also help it build |
-| P, then left-click each point, then right-click or P | Patrol |
+| P, then left-click | Patrol there; Shift queues it, and each further Shift-click adds a point to the loop |
 | Alt + right-click | Attack-move, as above |
 | Ctrl (or Cmd) + right-click the ground | Formation move: the group travels at its slowest unit's pace, keeping its shape all the way. Add Alt to attack-move, which stops the whole group to fight |
 | J, then left-click | Formation move, as above. Hold Alt when clicking to attack-move |
 | I, then left-click | Attack ground: armed units keep firing at a spot, even out of sight, until given another order. Click debris to aim at its middle. Shells that land on debris destroy it, so the enemy cannot reclaim it |
-| Hold P + right-click | Add patrol points, then release P |
+| Hold P + right-click | Patrol: the first point starts it, the rest join the loop |
 | Hold Shift, drag an order's icon | Move a move, build, or rally point somewhere else. Right-click or Esc cancels |
 | Shift + right-click | Queue the order after what the selection is already doing, including moves for groups |
 | Shift + left-click | Queue a structure, and keep placing. With M, F, J, or Y armed, queue that order and stay armed |

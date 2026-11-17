@@ -324,6 +324,7 @@ impl SimWorld {
         self.structures.push((id, entity));
         self.terrain.set_structure_cells(cell_x, cell_y, size, true);
         self.flow_field.invalidate_cells(cell_x, cell_y, size);
+        self.move_units_off(cell_x, cell_y, size);
         for y in cell_y..cell_y + size {
             for x in cell_x..cell_x + size {
                 let cell = self.cell_index(x, y);
@@ -340,6 +341,55 @@ impl SimWorld {
             self.ecs.insert_one(entity, Construction { progress: Res::ZERO }).expect("entity was just spawned");
         }
         Some(id)
+    }
+
+    /// Moves every unit standing on a structure's new footprint off it, to the nearest open ground
+    /// beside it. One left there was walled in: an engineer coming out of a factory, onto the spot
+    /// where the commander began a generator, could not take a step, and its order to the rally
+    /// point was given up as unreachable.
+    fn move_units_off(&mut self, cell_x: u32, cell_y: u32, size: u32) {
+        let cell = fp_int(TERRAIN_CELL_UNITS);
+        let (min_x, min_y) = (cell * cell_x as i32, cell * cell_y as i32);
+        let (max_x, max_y) = (min_x + cell * size as i32, min_y + cell * size as i32);
+        let inside = |at: Vec2Fp| at.x >= min_x && at.x < max_x && at.y >= min_y && at.y < max_y;
+        let trapped: Vec<(SimId, hecs::Entity)> = self
+            .units
+            .iter()
+            .copied()
+            .filter(|&(_, entity)| {
+                let stats = self.ecs.get::<&UnitStats>(entity).expect("units have stats");
+                !stats.is_structure && stats.move_class != super::components::MoveClass::Air && inside(self.ecs.get::<&Position>(entity).expect("units have positions").0.xy())
+            })
+            .collect();
+        for (_, entity) in trapped {
+            let (class, radius) = {
+                let stats = self.ecs.get::<&UnitStats>(entity).expect("units have stats");
+                (stats.move_class, stats.radius)
+            };
+            let here = self.ecs.get::<&Position>(entity).expect("units have positions").0.xy();
+            let clear = radius + fp_int(2);
+            // Out the nearest side, then the others.
+            let mut ways = [
+                (here.x - min_x, Vec2Fp::new(min_x - clear, here.y)),
+                (max_x - here.x, Vec2Fp::new(max_x + clear, here.y)),
+                (here.y - min_y, Vec2Fp::new(here.x, min_y - clear)),
+                (max_y - here.y, Vec2Fp::new(here.x, max_y + clear)),
+            ];
+            ways.sort_by_key(|way| way.0);
+            let spot = ways
+                .iter()
+                .map(|way| way.1)
+                .find(|&spot| self.terrain.in_bounds(spot) && self.terrain.passable_for(class, spot))
+                .or_else(|| super::flowfield::nearest_passable_cell_for(&self.terrain, class, here).map(|(x, y)| cell_center(x as u32, y as u32, 1)));
+            let Some(spot) = spot else { continue };
+            let height = self.ecs.get::<&Position>(entity).expect("units have positions").0.z;
+            self.ecs.get::<&mut Position>(entity).expect("units have positions").0 = crate::math::fp::Vec3Fp::new(spot.x, spot.y, height);
+            if let Ok(mut leaving) = self.ecs.get::<&mut super::components::LeavingFactory>(entity) {
+                if inside(leaving.exit) {
+                    leaving.exit = spot;
+                }
+            }
+        }
     }
 
     fn attach_blueprint_parts(&mut self, id: SimId, entity: hecs::Entity, blueprint: BlueprintId) {
@@ -485,7 +535,7 @@ impl SimWorld {
             self.transports.push((id, entity));
         }
         if is_factory {
-            let factory = Factory { power, queue: Vec::new(), repeat: false, progress: Res::ZERO, rally: None };
+            let factory = Factory { power, queue: Vec::new(), repeat: false, progress: Res::ZERO, rally: None, assisting: None };
             self.ecs.insert_one(entity, factory).expect("entity was just spawned");
             self.factories.push((id, entity));
         } else if power > Fp::ZERO && (!unit.is_structure() || unit.assists) {
@@ -522,9 +572,13 @@ impl SimWorld {
                         continue;
                     }
                     let (_, entity) = self.find_unit(id).expect("just checked");
+                    // Queued onto a patrol, its points join the loop, as Shift-clicking more patrol
+                    // points does: the first point, where the queue ends, is already on it.
                     if *queued {
-                        // A patrol never ends by itself, so one queued after another replaces it.
-                        self.end_patrol(id, entity);
+                        if let Ok(mut patrol) = self.ecs.get::<&mut Patrol>(entity) {
+                            patrol.points.extend(points.iter().skip(1).copied());
+                            continue;
+                        }
                     } else {
                         self.set_order(id, Order::IDLE);
                     }
@@ -619,7 +673,19 @@ impl SimWorld {
                 }
                 self.push_task(&builders, *task);
             }
-            SimCommand::Assist { units, target } => self.replace_tasks(units, BuildTask::Assist { target: *target }),
+            SimCommand::Assist { units, target } => {
+                self.replace_tasks(units, BuildTask::Assist { target: *target });
+                // Factories told to assist another factory take work from its queue.
+                if self.factory_entity(*target).is_some() {
+                    let team = self.find_unit(*target).and_then(|(_, entity)| self.ecs.get::<&UnitStats>(entity).ok().map(|stats| stats.team));
+                    for &id in units.iter().filter(|&&id| id != *target) {
+                        let Some(entity) = self.factory_entity(id) else { continue };
+                        if self.ecs.get::<&UnitStats>(entity).ok().map(|stats| stats.team) == team {
+                            self.ecs.get::<&mut Factory>(entity).expect("factory list only holds factories").assisting = Some(*target);
+                        }
+                    }
+                }
+            }
             SimCommand::Reclaim { units, target } => self.replace_tasks(units, BuildTask::Reclaim { target: *target }),
             SimCommand::Repair { units, target } => self.replace_tasks(units, BuildTask::Repair { target: *target }),
             SimCommand::Capture { units, target } => self.replace_tasks(units, BuildTask::Capture { target: *target }),
@@ -651,6 +717,7 @@ impl SimWorld {
                     let mut factory = self.ecs.get::<&mut Factory>(entity).expect("factory list only holds factories");
                     factory.queue.clear();
                     factory.progress = Res::ZERO;
+                    factory.assisting = None;
                 }
             }
             SimCommand::SetPaused { units, paused } => {
@@ -973,6 +1040,7 @@ impl SimWorld {
         }
         self.step_patrols();
         self.step_stations();
+        self.step_factory_assists();
 
         for economy in &mut self.economies {
             economy.mass_reclaimed = Res::ZERO;
@@ -1483,8 +1551,11 @@ impl SimWorld {
                 if factory.repeat && !self.blueprints.get(finished).is_factory() {
                     factory.queue.push(finished);
                 }
-                let rally = factory.rally;
+                let (rally, helped) = (factory.rally, factory.assisting);
                 drop(factory);
+                // A factory helping another sends what it makes to that one's rally point, if it
+                // has none of its own.
+                let rally = rally.or_else(|| helped.and_then(|helped| self.factory_entity(helped)).and_then(|entity| self.ecs.get::<&Factory>(entity).ok().and_then(|factory| factory.rally)));
                 self.finish_factory_item(item.entity, item.team, finished, rally);
             }
         }
@@ -1786,6 +1857,49 @@ impl SimWorld {
             drop(patrol);
             let kind = if is_builder { OrderKind::Move } else { OrderKind::AttackMove };
             self.assign_route(&[id], kind, goal, None);
+        }
+    }
+
+    /// Each factory helping another, with nothing of its own to build, takes the next item that
+    /// one has not started and can build it itself, onto its own queue, in `SimId` order: off
+    /// the other's queue, or, if that one repeats, to the back of it, so that its cycle goes on.
+    /// One whose factory is gone, or no longer its team's, stops helping.
+    fn step_factory_assists(&mut self) {
+        for index in 0..self.factories.len() {
+            let (_, entity) = self.factories[index];
+            let Some(helped) = self.ecs.get::<&Factory>(entity).ok().and_then(|factory| factory.assisting.filter(|_| factory.queue.is_empty())) else {
+                continue;
+            };
+            if self.ecs.get::<&Construction>(entity).is_ok() || self.ecs.get::<&Paused>(entity).is_ok() {
+                continue;
+            }
+            let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team;
+            let other = self.factory_entity(helped).filter(|&other| self.ecs.get::<&UnitStats>(other).is_ok_and(|stats| stats.team == team));
+            let Some(other) = other else {
+                self.ecs.get::<&mut Factory>(entity).expect("factory list only holds factories").assisting = None;
+                continue;
+            };
+            let builds = self.ecs.get::<&Blueprinted>(entity).map(|unit| self.blueprints.get(unit.0).builds.clone()).unwrap_or_default();
+            let (queue, started, repeats) = {
+                let factory = self.ecs.get::<&Factory>(other).expect("checked above");
+                (factory.queue.clone(), factory.progress > Res::ZERO, factory.repeat)
+            };
+            // What it is building already stays with it.
+            let first = usize::from(started);
+            let taken = (first..queue.len()).find(|&at| {
+                let item = queue[at];
+                builds.contains(&item) && !self.blueprints.get(item).is_factory() && self.factory_may_build(entity, item)
+            });
+            let Some(at) = taken else { continue };
+            let item = queue[at];
+            {
+                let mut factory = self.ecs.get::<&mut Factory>(other).expect("checked above");
+                factory.queue.remove(at);
+                if repeats {
+                    factory.queue.push(item);
+                }
+            }
+            self.ecs.get::<&mut Factory>(entity).expect("factory list only holds factories").queue.push(item);
         }
     }
 
@@ -2198,6 +2312,10 @@ impl SimWorld {
             if let Some(rally) = factory.rally {
                 hasher.write(&rally.x.to_bits().to_le_bytes());
                 hasher.write(&rally.y.to_bits().to_le_bytes());
+            }
+            if let Some(helped) = factory.assisting {
+                hasher.write(&[7]);
+                hasher.write(&helped.0.to_le_bytes());
             }
         }
         if self.ecs.get::<&Paused>(entity).is_ok() {

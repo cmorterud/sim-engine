@@ -139,7 +139,7 @@ impl ArmedOrder {
             Self::AttackMove => "Attack-move: left-click a destination. Right-click or Esc to cancel.",
             Self::Formation => "Formation move: left-click a destination, holding Alt to attack-move. Right-click or Esc to cancel.",
             Self::AttackGround => "Attack ground: left-click a spot or some debris. Right-click or Esc to cancel.",
-            Self::Patrol => "Patrol: left-click each point, then right-click or press P to start. Esc to cancel.",
+            Self::Patrol => "Patrol: left-click to patrol there. Shift-click to queue it, and again to add points to the loop. Right-click or Esc to cancel.",
             Self::Assist => "Assist: left-click a friendly unit. Right-click or Esc to cancel.",
             Self::Discharge => "Discharge: left-click an enemy. Right-click or Esc to cancel.",
             Self::Teleport => "Teleport: left-click open ground you can see or have on radar. Right-click or Esc to cancel.",

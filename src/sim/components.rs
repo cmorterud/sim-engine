@@ -695,6 +695,9 @@ pub struct Factory {
     /// Progress on the front item, from 0 to 1.
     pub progress: Res,
     pub rally: Option<Vec2Fp>,
+    /// Another factory this one helps: with nothing of its own to build, it takes the next item
+    /// that factory has not started, that it can build itself, and builds it.
+    pub assisting: Option<SimId>,
 }
 
 /// A repeating route through waypoints.
