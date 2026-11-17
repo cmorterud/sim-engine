@@ -1053,12 +1053,18 @@ impl SimWorld {
         for item in &items {
             let team = item.team.index();
             let share = satisfaction[team];
-            spent[team].0 += item.mass * share;
-            spent[team].1 += item.energy * share;
+            // The last bit of work costs only its part: a step rounds down, so a whole number of
+            // them falls a hair short, and the one more that was needed was charged in full, a tank
+            // costing 40.33 materiel rather than 40.
+            let wanted = item.step * share;
+            let amount = self.work_left(item.kind, item.entity).map_or(wanted, |left| wanted.min(left));
+            let part = if wanted > Res::ZERO { share * (amount / wanted) } else { share };
+            spent[team].0 += item.mass * part;
+            spent[team].1 += item.energy * part;
             if item.kind == WorkKind::FactoryItem {
-                self.factory_spending.push((item.target, item.mass * share, item.energy * share));
+                self.factory_spending.push((item.target, item.mass * part, item.energy * part));
             }
-            self.apply_work(item, item.step * share);
+            self.apply_work(item, amount);
         }
         if !self.being_captured.is_empty() {
             self.drop_stopped_captures();
@@ -1394,6 +1400,20 @@ impl SimWorld {
         let mass = Adjacency::less(unit.mass * step, mass_discount);
         let energy = Adjacency::less(unit.energy * step, energy_discount);
         Some(WorkItem { target, entity, kind, team, step, mass, energy })
+    }
+
+    /// How much of a piece of work is left to do, if it has a progress bar: repairs are limited by
+    /// health instead.
+    fn work_left(&self, kind: WorkKind, entity: hecs::Entity) -> Option<Res> {
+        let done = match kind {
+            WorkKind::FactoryItem => self.ecs.get::<&Factory>(entity).map(|factory| factory.progress).ok(),
+            WorkKind::Construct => self.ecs.get::<&Construction>(entity).map(|construction| construction.progress).ok(),
+            WorkKind::Upgrade => self.ecs.get::<&Upgrading>(entity).map(|upgrading| upgrading.progress).ok(),
+            WorkKind::Enhance => self.ecs.get::<&super::components::Enhancing>(entity).map(|enhancing| enhancing.progress).ok(),
+            WorkKind::Capture => Some(self.ecs.get::<&BeingCaptured>(entity).map_or(Res::ZERO, |capture| capture.progress)),
+            WorkKind::Repair => None,
+        };
+        done.map(|done| (Res::ONE - done).max(Res::ZERO))
     }
 
     fn apply_work(&mut self, item: &WorkItem, amount: Res) {

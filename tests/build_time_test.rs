@@ -327,3 +327,92 @@ fn every_structure_upgrades_at_its_rate() {
     assert!(checked >= 8, "only {checked} upgrades were checked");
     assert!(failures.is_empty(), "{} failures:\n{failures:#?}", failures.len());
 }
+
+/// Everything costs what its data says: built in a world with no income, a factory's units and a
+/// builder's structures take exactly their materiel and energy from the store, by the time they
+/// are done. Those that take more than a minute are left out, to keep the test quick.
+#[test]
+fn everything_costs_exactly_its_materiel_and_energy() {
+    let mut failures = Vec::new();
+    let mut checked = 0;
+    let db = world().blueprints;
+    let spent = |world: &SimWorld, start: (Res, Res)| (start.0 - world.economies[0].mass, start.1 - world.economies[0].energy);
+    let near = |value: Res, wanted: Res| (value - wanted).abs() <= wanted / 1000 + Res::from_num(1);
+    // Units, from the first factory that builds each.
+    let mut done_units = std::collections::BTreeSet::new();
+    for factory_def in db.iter().filter(|def| def.is_factory() && def.is_structure()) {
+        for &item in &factory_def.builds {
+            let item_def = db.get(item).clone();
+            if item_def.is_structure() || item_def.mass == Res::ZERO || !done_units.insert(item) {
+                continue;
+            }
+            let mut world = world();
+            headquarters_for(&mut world, &factory_def.key, factory_def.on_water);
+            let cell: (u32, u32) = if factory_def.on_water { (LAKE_X as u32 / 20 + 40, 200) } else { (100, 200) };
+            let factory = world.spawn_finished_structure(world.blueprints.id(&factory_def.key), Team::Blue, cell.0, cell.1).unwrap();
+            let power = world.ecs.get::<&Factory>(world.unit_entity(factory).unwrap()).unwrap().power;
+            let ticks = 1.0 / rate(&item_def, power);
+            if ticks > 600.0 {
+                continue;
+            }
+            checked += 1;
+            let made = |world: &SimWorld| (world.units.len(), stock(world, factory));
+            let before = made(&world);
+            let start = (world.economies[0].mass, world.economies[0].energy);
+            world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: item, count: 1 }]);
+            let finished = (0..(ticks as u32 + 40)).any(|_| {
+                world.advance_tick(&[]);
+                let now = made(&world);
+                now.0 > before.0 || now.1 > before.1
+            });
+            let (mass, energy) = spent(&world, start);
+            if !finished {
+                failures.push(format!("{}: not finished", item_def.key));
+            } else if !near(mass, item_def.mass) || !near(energy, item_def.energy) {
+                failures.push(format!("{} from {}: cost {mass} materiel and {energy} energy, stated {} and {}", item_def.key, factory_def.key, item_def.mass, item_def.energy));
+            }
+        }
+    }
+    // Structures, each by the first builder that can build it and has no income of its own,
+    // which would be counted against what it spends.
+    let builders: Vec<Blueprint> = db
+        .iter()
+        .filter(|def| !def.is_structure() && def.build_power > Fp::ZERO && !def.builds.is_empty() && def.mass_income == Res::ZERO && def.energy_income == Res::ZERO)
+        .cloned()
+        .collect();
+    for structure in db.iter().filter(|def| def.is_structure() && def.mass > Res::ZERO) {
+        let Some(builder_def) = builders.iter().find(|builder| builder.builds.contains(&db.id(&structure.key))) else { continue };
+        if rate(structure, builder_def.build_power) * 600.0 < 1.0 {
+            continue;
+        }
+        checked += 1;
+        let mut world = world();
+        headquarters_for(&mut world, &structure.key, structure.on_water);
+        let (cell_x, cell_y, at): (u32, u32, Vec2Fp) = if structure.on_water { (LAKE_X as u32 / 20 + 30, 200, Vec2Fp::new(fp_int(LAKE_X - 100), fp_int(4_000))) } else { (100, 200, Vec2Fp::new(fp_int(1_800), fp_int(4_000))) };
+        if structure.requires_deposit {
+            world.deposits.push((cell_x, cell_y));
+        }
+        if structure.requires_vent {
+            let half = u32::from(structure.footprint) / 2;
+            world.vents.push((cell_x + half, cell_y + half));
+        }
+        let builder = world.spawn_mobile(world.blueprints.id(&builder_def.key), Team::Blue, at);
+        let start = (world.economies[0].mass, world.economies[0].energy);
+        let blueprint = world.blueprints.id(&structure.key);
+        world.advance_tick(&[SimCommand::Build { units: vec![builder], blueprint, cell_x, cell_y, queued: false }]);
+        let finished = (0..2_500).any(|_| {
+            world.advance_tick(&[]);
+            world.units.iter().any(|&(_, entity)| {
+                world.ecs.get::<&sim_engine::sim::components::Blueprinted>(entity).is_ok_and(|unit| unit.0 == blueprint) && world.ecs.get::<&Construction>(entity).is_err()
+            })
+        });
+        let (mass, energy) = spent(&world, start);
+        if !finished {
+            failures.push(format!("{}: not finished", structure.key));
+        } else if !near(mass, structure.mass) || !near(energy, structure.energy) {
+            failures.push(format!("{} by {}: cost {mass} materiel and {energy} energy, stated {} and {}", structure.key, builder_def.key, structure.mass, structure.energy));
+        }
+    }
+    assert!(checked >= 30, "only {checked} units and structures were checked");
+    assert!(failures.is_empty(), "{} failures:\n{failures:#?}", failures.len());
+}
