@@ -117,3 +117,40 @@ fn every_builder_reclaims_at_its_build_powers_rate() {
     }
     assert!(failures.is_empty(), "{failures:#?}");
 }
+
+/// Every builder repairs at its build power's rate: what it restores a tick is the same share of
+/// the unit's full health as its build power is of the unit's build time, so a full repair takes
+/// as long as building it.
+#[test]
+fn every_builder_repairs_at_its_build_powers_rate() {
+    use sim_engine::sim::components::Health;
+    let mut failures = Vec::new();
+    for def in walking_builders() {
+        let mut world = world();
+        let builder = world.spawn_mobile(world.blueprints.id(&def.key), Team::Blue, Vec2Fp::new(fp_int(3_000), fp_int(3_000)));
+        let patient_def = world.blueprints.get(world.blueprints.id("t2_heavy_tank")).clone();
+        let patient = world.spawn_mobile(world.blueprints.id("t2_heavy_tank"), Team::Blue, Vec2Fp::new(fp_int(3_040), fp_int(3_000)));
+        let entity = world.unit_entity(patient).unwrap();
+        world.ecs.get::<&mut UnitStats>(entity).unwrap().max_speed = Fp::ZERO;
+        {
+            let mut health = world.ecs.get::<&mut Health>(entity).unwrap();
+            health.current = health.max / 10;
+        }
+        let power = world.ecs.get::<&Builder>(world.unit_entity(builder).unwrap()).unwrap().power;
+        world.advance_tick(&[SimCommand::Repair { units: vec![builder], target: patient }]);
+        for _ in 0..20 {
+            world.advance_tick(&[]);
+        }
+        let before = world.unit_health(patient).unwrap();
+        let ticks = 30;
+        for _ in 0..ticks {
+            world.advance_tick(&[]);
+        }
+        let gained = (world.unit_health(patient).unwrap() - before).to_num::<f64>() / f64::from(ticks);
+        let expected = patient_def.health.to_num::<f64>() * power.to_num::<f64>() / (patient_def.build_time.to_num::<f64>() * 10.0);
+        if (gained - expected).abs() > expected * 0.01 + 0.01 {
+            failures.push(format!("{}: repaired {gained:.2} a tick, expected {expected:.2}", def.key));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
