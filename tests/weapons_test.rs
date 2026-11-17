@@ -4,8 +4,9 @@
 //! aircraft flying over; torpedoes ships and submarines. Checked against the real unit data, so
 //! that a new unit, or a change to one, is covered.
 //!
-//! Missile launchers that fire only the missiles they are told to build, and nuclear missiles,
-//! are left to their own tests (missile_test.rs).
+//! Every unit also deals the damage a second its weapons add up to, standing still and on the
+//! move; aircraft that make passes fire whenever a target is in reach; and launchers land every
+//! missile they are ordered to fire.
 
 use sim_engine::math::fp::{fp_int, Fp, Vec2Fp};
 use sim_engine::sim::blueprints::{Blueprint, BlueprintId, Res, Targets, WeaponDef, WeaponKind};
@@ -524,4 +525,128 @@ fn the_weapon_tests_cover_each_kind_of_unit() {
         assert!(keys(Targets::Naval, false).contains(&key.to_string()), "{key} should be checked against ships");
     }
     let _ = BlueprintId(0);
+}
+
+/// Keeps an aircraft in the air for as long as a test runs.
+fn endless_fuel(world: &mut SimWorld, id: SimId) {
+    let entity = world.unit_entity(id).unwrap();
+    if let Ok(mut flight) = world.ecs.get::<&mut sim_engine::sim::components::Flight>(entity) {
+        flight.max_fuel = u32::MAX / 2;
+        flight.fuel = flight.max_fuel;
+    }
+}
+
+/// Aircraft that make passes fire whenever a weapon is reloaded and its target in reach: over a
+/// long stretch of passes at a target moving in a straight line, each weapon does its damage for
+/// every reload's worth of time its target was within its range. Interceptors and air superiority
+/// fighters at an aircraft, bombers' own guns at one, and torpedo bombers at a ship.
+#[test]
+fn every_aircraft_that_makes_passes_fires_whenever_its_target_is_in_reach() {
+    let mut failures = Vec::new();
+    let mut checked = 0;
+    let db = world(MAP).blueprints;
+    for def in db.iter().filter(|def| def.is_air() && !def.flight.is_some_and(|flight| flight.hovers)) {
+        for kind in [Kind::Air, Kind::Ship, Kind::Land] {
+            let counted: Vec<WeaponDef> = weapons(def).into_iter().filter(|weapon| counts(weapon, kind, false)).collect();
+            if counted.is_empty() {
+                continue;
+            }
+            checked += 1;
+            let name = format!("{} ({kind:?})", def.key);
+            let mut world = world(MAP);
+            let (from, to) = match kind {
+                Kind::Ship => (LAND, (2_500, 1_500)),
+                _ => ((LAND.0, 2_000), (LAND.0 + 1_500, 1_000)),
+            };
+            let shooter = place(&mut world, &def.key, Team::Blue, from);
+            let target = dummy(&mut world, kind.dummy(), to);
+            endless_fuel(&mut world, shooter);
+            endless_fuel(&mut world, target);
+            let target_entity = world.unit_entity(target).unwrap();
+            let speed = if kind == Kind::Air { fp_int(4) } else { fp_int(2) };
+            world.ecs.get::<&mut UnitStats>(target_entity).unwrap().max_speed = speed;
+            if kind == Kind::Air {
+                world.ecs.get::<&mut sim_engine::sim::components::Flight>(target_entity).unwrap().speed = speed;
+                world.ecs.get::<&mut sim_engine::sim::components::Turning>(target_entity).unwrap().facing = Vec2Fp::new(Fp::ZERO, Fp::ONE);
+            }
+            let ahead = |world: &SimWorld| -> Vec<SimCommand> {
+                world.unit_position(target).map(|at| SimCommand::Move { units: vec![target], goal: point(to.0, at.y.to_num::<i32>() + GOAL_AHEAD) }).into_iter().collect()
+            };
+            let mut first = ahead(&world);
+            first.push(SimCommand::Attack { units: vec![shooter], target });
+            world.advance_tick(&first);
+            let target_radius = world.ecs.get::<&UnitStats>(target_entity).unwrap().radius.to_num::<f64>();
+            let mut in_reach = vec![0u32; counted.len()];
+            let ticks = 1_500;
+            for tick in 0..ticks {
+                world.advance_tick(&if tick % 10 == 0 { ahead(&world) } else { Vec::new() });
+                let (Some(here), Some(there)) = (world.unit_position(shooter), world.unit_position(target)) else { break };
+                let apart = (here.xy() - there.xy()).length_squared().to_num::<f64>().sqrt();
+                for (count, weapon) in in_reach.iter_mut().zip(&counted) {
+                    if apart <= weapon.range.to_num::<f64>() + target_radius {
+                        *count += 1;
+                    }
+                }
+            }
+            let expected: f64 = counted.iter().zip(&in_reach).map(|(weapon, &count)| weapon.damage.to_num::<f64>() * f64::from(count) / f64::from(weapon.reload_ticks.max(1))).sum();
+            let done = f64::from(damage(&world, target));
+            if expected < 1.0 {
+                failures.push(format!("{name}: its target was never in reach"));
+            // A pass's first and last ticks in reach may or may not give a shot, so a little over
+            // or under is in order.
+            } else if done < expected * 0.8 || done > expected * 1.3 {
+                failures.push(format!("{name}: {done:.0} damage, expected {expected:.0} from {in_reach:?} ticks in reach"));
+            }
+        }
+    }
+    assert!(checked >= 5, "only {checked} cases were checked");
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// Launchers that fire only the missiles they have built land each one they are ordered to fire,
+/// for its full damage: the tactical missile launcher's three, one after another at one order,
+/// and a nuclear missile for each of three orders from the strategic launcher and the missile
+/// submarine.
+#[test]
+fn every_missile_launcher_lands_each_missile_it_is_ordered_to_fire() {
+    let mut failures = Vec::new();
+    let mut checked = 0;
+    let db = world(MAP).blueprints;
+    for def in db.iter() {
+        let Some(weapon) = def.weapon.filter(|weapon| matches!(weapon.kind, WeaponKind::TacticalMissile | WeaponKind::StrategicMissile) && !weapon.automatic) else {
+            continue;
+        };
+        checked += 1;
+        let strategic = weapon.kind == WeaponKind::StrategicMissile;
+        let reach = weapon.range.to_num::<i32>();
+        let at_sea = sails(def);
+        let (map, from, distance) = if at_sea { (MAP, (1_300, 5_000), (reach * 85 / 100).min(MAP - 1_300 - 600)) } else { (BIG_MAP, (600, 10_000), (reach * 85 / 100).min(BIG_MAP - 1_200)) };
+        let mut world = world(map);
+        let shooter = place(&mut world, &def.key, Team::Blue, from);
+        let target = dummy(&mut world, "t1_engineer", (from.0 + distance, from.1));
+        let missiles = 3;
+        world.ecs.get::<&mut sim_engine::sim::components::Launcher>(world.unit_entity(shooter).unwrap()).unwrap().stock = missiles;
+        let per_missile = weapon.damage.to_num::<f64>() + weapon.inner_damage.to_num::<f64>();
+        let flight = f64::from(distance) / weapon.projectile_speed.to_num::<f64>();
+        let wait = (flight * 2.0) as u32 + 300;
+        let orders = if strategic { missiles } else { 1 };
+        for _ in 0..orders {
+            world.advance_tick(&[SimCommand::Attack { units: vec![shooter], target }]);
+            for _ in 0..wait {
+                world.advance_tick(&[]);
+            }
+        }
+        if !strategic {
+            for _ in 0..(weapon.reload_ticks * missiles + wait) {
+                world.advance_tick(&[]);
+            }
+        }
+        let done = f64::from(damage(&world, target));
+        let expected = per_missile * f64::from(missiles);
+        if (done - expected).abs() > expected * 0.01 {
+            failures.push(format!("{}: {done:.0} damage from {missiles} missiles, expected {expected:.0}", def.key));
+        }
+    }
+    assert!(checked >= 3, "only {checked} launchers were checked");
+    assert!(failures.is_empty(), "{failures:#?}");
 }
