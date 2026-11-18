@@ -103,6 +103,8 @@ fn a_player_can_build_an_economy_and_army_through_commands() {
         cursor,
         ground: Some(target),
         attack_move: false,
+        contacts: &snapshot.contacts,
+        surfaced: &snapshot.surfaced,
     });
     assert_eq!(orders.len(), 1);
     assert!(matches!(orders[0], SimCommand::Move { .. }));

@@ -68,6 +68,96 @@ pub struct RightClick<'a> {
     pub cursor: [f64; 2],
     pub ground: Option<[f64; 2]>,
     pub attack_move: bool,
+    /// Enemy contacts on radar, which can be attacked as if seen.
+    pub contacts: &'a [crate::sim::world::ContactView],
+    /// Submarines on the surface, which guns reach as well as torpedoes.
+    pub surfaced: &'a [SimId],
+}
+
+/// What a target is, which decides what weapons reach it.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum TargetKind {
+    /// On land, or a structure.
+    Ground,
+    Air,
+    /// A ship, or a submarine on the surface: guns and torpedoes.
+    Surface,
+    /// A submarine under the water: torpedoes.
+    Submerged,
+}
+
+/// What an enemy unit in sight is.
+pub fn unit_target_kind(unit: &UnitView, blueprints: &BlueprintDb, surfaced: &[SimId]) -> TargetKind {
+    if unit.blueprint == u16::MAX {
+        return TargetKind::Ground;
+    }
+    let def = blueprints.get(BlueprintId(unit.blueprint));
+    match def.movement {
+        _ if def.is_air() => TargetKind::Air,
+        crate::sim::components::MoveClass::Submarine if surfaced.binary_search(&unit.id).is_err() => TargetKind::Submerged,
+        crate::sim::components::MoveClass::Submarine | crate::sim::components::MoveClass::Naval if !def.is_structure() => TargetKind::Surface,
+        _ => TargetKind::Ground,
+    }
+}
+
+/// What a radar contact is.
+pub fn contact_target_kind(contact: &crate::sim::world::ContactView) -> TargetKind {
+    if contact.is_air {
+        TargetKind::Air
+    } else if contact.is_sub {
+        TargetKind::Submerged
+    } else if contact.is_naval {
+        TargetKind::Surface
+    } else {
+        TargetKind::Ground
+    }
+}
+
+/// Whether any of a unit's weapons reaches this kind of target.
+pub fn weapons_reach(def: &crate::sim::blueprints::Blueprint, kind: TargetKind) -> bool {
+    use crate::sim::blueprints::Targets;
+    def.weapon.iter().chain(&def.extra_weapons).any(|weapon| match kind {
+        TargetKind::Air => matches!(weapon.targets, Targets::Air | Targets::Both),
+        TargetKind::Submerged => weapon.targets == Targets::Naval,
+        TargetKind::Surface => matches!(weapon.targets, Targets::Ground | Targets::Both | Targets::Naval),
+        TargetKind::Ground => matches!(weapon.targets, Targets::Ground | Targets::Both),
+    })
+}
+
+/// The enemy under the cursor, in sight or on radar, and what it is: a unit, or a contact's
+/// position when it names none (a decoy, which looks the same).
+pub enum Hovered {
+    Unit(SimId, TargetKind),
+    Contact(Option<SimId>, [f64; 2], TargetKind),
+}
+
+pub fn hovered_enemy(click: &RightClick<'_>) -> Option<Hovered> {
+    let reach = crate::input::selection::TARGET_CLICK_RADIUS_PX;
+    if let Some(id) = crate::input::selection::nearest_unit_within(click.units, click.camera, click.team.enemy(), click.cursor, reach) {
+        let unit = &click.units[click.units.binary_search_by_key(&id, |unit| unit.id).ok()?];
+        return Some(Hovered::Unit(id, unit_target_kind(unit, click.blueprints, click.surfaced)));
+    }
+    let raw = |value: i32| f64::from(value) / 4096.0;
+    click
+        .contacts
+        .iter()
+        .filter_map(|contact| {
+            let on_screen = click.camera.world_to_screen([raw(contact.x), raw(contact.y), raw(contact.z)])?;
+            let distance = (on_screen[0] - click.cursor[0]).hypot(on_screen[1] - click.cursor[1]);
+            (distance <= reach).then_some((distance, contact))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, contact)| Hovered::Contact(contact.unit, [raw(contact.x), raw(contact.y)], contact_target_kind(contact)))
+}
+
+/// Whether any selected unit has a weapon that reaches this kind of target.
+pub fn selection_reaches(click: &RightClick<'_>, kind: TargetKind) -> bool {
+    click.selected.iter().any(|id| {
+        click.units.binary_search_by_key(id, |unit| unit.id).ok().is_some_and(|index| {
+            let unit = &click.units[index];
+            unit.blueprint != u16::MAX && weapons_reach(click.blueprints.get(BlueprintId(unit.blueprint)), kind)
+        })
+    })
 }
 
 /// Works out the orders for a right-click: attack what is under the cursor, help with
@@ -86,6 +176,17 @@ pub fn right_click_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
 
     // On an enemy, armed units attack, and builders that cannot fight capture it.
     let enemy = crate::input::selection::nearest_unit_within(click.units, click.camera, click.team.enemy(), click.cursor, crate::input::selection::TARGET_CLICK_RADIUS_PX);
+    // A contact on radar, with nothing in sight there: attacked as if seen. A decoy, which looks
+    // the same, is gone to, to find nothing.
+    if enemy.is_none() && !parts.armed.is_empty() {
+        if let Some(Hovered::Contact(unit, at, _)) = hovered_enemy(click) {
+            match unit {
+                Some(target) => commands.push(SimCommand::Attack { units: parts.armed.clone(), target }),
+                None => commands.push(order_command(&parts.mobile, at, true)),
+            }
+            return commands;
+        }
+    }
     if let Some(target) = enemy {
         let unarmed: Vec<SimId> = parts.builders.iter().copied().filter(|id| !parts.armed.contains(id)).collect();
         let index = click.units.binary_search_by_key(&target, |unit| unit.id).expect("found in this list");
@@ -572,12 +673,14 @@ mod tests {
             cursor,
             ground: Some(world),
             attack_move: false,
+            contacts: &[],
+            surfaced: &[],
         })
     }
 
     fn click_for<'a>(selected: &'a [SimId], units: &'a [UnitView], db: &'a BlueprintDb, camera: &'a Camera, world: [f64; 2]) -> RightClick<'a> {
         let cursor = camera.world_to_screen([world[0], world[1], 8.0]).unwrap();
-        RightClick { selected, units, wrecks: &[], blueprints: db, team: Team::Blue, camera, cursor, ground: Some(world), attack_move: false }
+        RightClick { selected, units, wrecks: &[], blueprints: db, team: Team::Blue, camera, cursor, ground: Some(world), attack_move: false, contacts: &[], surfaced: &[] }
     }
 
     #[test]
@@ -612,7 +715,7 @@ mod tests {
         let selected = [SimId(1), SimId(2), SimId(3), SimId(4)];
         let at = |world: [f64; 2]| {
             let cursor = camera.world_to_screen([world[0], world[1], 8.0]).unwrap();
-            attack_ground_orders(&RightClick { selected: &selected, units: &units, wrecks: &wrecks, blueprints: &db, team: Team::Blue, camera: &camera, cursor, ground: Some(world), attack_move: false })
+            attack_ground_orders(&RightClick { selected: &selected, units: &units, wrecks: &wrecks, blueprints: &db, team: Team::Blue, camera: &camera, cursor, ground: Some(world), attack_move: false, contacts: &[], surfaced: &[] })
         };
         let point = |x: f64, y: f64| Vec2Fp::new(Fp::from_num(x), Fp::from_num(y));
         let armed = vec![SimId(1), SimId(3)];
@@ -774,6 +877,8 @@ mod tests {
             cursor,
             ground: Some(world),
             attack_move: true,
+            contacts: &[],
+            surfaced: &[],
         });
         let goal = Vec2Fp::new(Fp::from_num(world[0]), Fp::from_num(world[1]));
         assert_eq!(orders, [SimCommand::AttackMove { units: vec![SimId(1)], goal }]);
@@ -795,6 +900,8 @@ mod tests {
             cursor,
             ground: Some([2_000.0, 2_050.0]),
             attack_move: true,
+            contacts: &[],
+            surfaced: &[],
         });
         assert!(orders.is_empty());
     }
@@ -831,10 +938,33 @@ mod tests {
                 cursor: [on_screen[0] + offset, on_screen[1]],
                 ground: Some([2_000.0, 2_000.0]),
                 attack_move: false,
+                contacts: &[],
+                surfaced: &[],
             })
         };
         assert_eq!(click(18.0), [SimCommand::Attack { units: vec![SimId(1)], target: SimId(2) }], "18 pixels off still attacks");
         assert!(matches!(click(30.0)[..], [SimCommand::Move { .. }]), "30 pixels off is a move: {:?}", click(30.0));
+    }
+
+    /// A right-click on a radar contact, with nothing in sight there, attacks the unit it is; on
+    /// a decoy, which looks the same, the units go there to find nothing.
+    #[test]
+    fn a_right_click_on_a_radar_contact_attacks_it() {
+        let db = db();
+        let camera = camera();
+        let units = [view(1, Team::Blue, db.id("t1_medium_tank"), &db, 1_800.0, 2_000.0)];
+        let raw = |value: f64| (value * 4096.0) as i32;
+        let contact = |unit: Option<SimId>| crate::sim::world::ContactView { unit, x: raw(2_100.0), y: raw(2_000.0), z: raw(9.0), is_air: false, is_naval: false, is_sub: false, is_structure: false };
+        let cursor = camera.world_to_screen([2_100.0, 2_000.0, 9.0]).unwrap();
+        let click = |contacts: &[crate::sim::world::ContactView]| {
+            right_click_orders(&RightClick { selected: &[SimId(1)], units: &units, wrecks: &[], blueprints: &db, team: Team::Blue, camera: &camera, cursor, ground: Some([2_100.0, 2_000.0]), attack_move: false, contacts, surfaced: &[] })
+        };
+        assert_eq!(click(&[contact(Some(SimId(7)))]), [SimCommand::Attack { units: vec![SimId(1)], target: SimId(7) }]);
+        assert!(matches!(click(&[contact(None)])[..], [SimCommand::AttackMove { .. }]), "a decoy is gone to");
+        // What the cursor says: a tank reaches a contact on land, not one in the air.
+        let hover = RightClick { selected: &[SimId(1)], units: &units, wrecks: &[], blueprints: &db, team: Team::Blue, camera: &camera, cursor, ground: None, attack_move: false, contacts: &[], surfaced: &[] };
+        assert!(selection_reaches(&hover, TargetKind::Ground));
+        assert!(!selection_reaches(&hover, TargetKind::Air));
     }
 
     #[test]

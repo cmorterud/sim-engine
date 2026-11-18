@@ -26,6 +26,23 @@ fn blue_has_five_of_every_unit_and_no_commander_and_red_two_bases() {
     }
 }
 
+/// Blue can afford a strategic missile launcher and nuclear missiles for it.
+#[test]
+fn blue_can_afford_a_strategic_launcher_and_nuclear_missiles() {
+    let mut world = playtest(1).world;
+    world.advance_tick(&[]);
+    let launcher = world.blueprints.get(world.blueprints.id("strategic_missile_launcher")).clone();
+    let missile = world.blueprints.get(world.blueprints.id("strategic_missile")).clone();
+    let blue = &world.economies[Team::Blue.index()];
+    assert!(blue.mass >= launcher.mass + missile.mass * 3, "materiel {} for the launcher and three missiles", blue.mass);
+    assert!(blue.energy >= launcher.energy + missile.energy * 3, "energy {} for the launcher and three missiles", blue.energy);
+    let t3_builder = world.units.iter().any(|&(_, entity)| {
+        let def = world.blueprints.get(world.ecs.get::<&Blueprinted>(entity).unwrap().0);
+        world.ecs.get::<&UnitStats>(entity).unwrap().team == Team::Blue && def.builds.contains(&world.blueprints.id("strategic_missile_launcher"))
+    });
+    assert!(t3_builder, "and has engineers that can build the launcher");
+}
+
 /// Left alone for ten minutes, the turtle builds and keeps everything that fights at home, and
 /// both sides' shields stay up.
 #[test]

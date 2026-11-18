@@ -675,6 +675,8 @@ fn issue_planned_orders(
         cursor: selection.cursor(),
         ground,
         attack_move,
+        contacts: &session.current.contacts,
+        surfaced: &session.current.surfaced,
     });
     let orders = if queued { queued_commands(orders, &session.current.units) } else { orders };
     let orders = if formation { formation_commands(orders) } else { orders };
@@ -702,6 +704,8 @@ fn issue_minimap_order(session: &Session, selection: &Selection, camera: &Camera
         cursor: [f64::MIN, f64::MIN],
         ground,
         attack_move,
+        contacts: &[],
+        surfaced: &session.current.surfaced,
     };
     let orders = if attack_move { right_click_orders(&click) } else { move_orders(&click) };
     let orders = if queued { queued_commands(orders, &session.current.units) } else { orders };
@@ -905,8 +909,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     );
 
     let mut selection = Selection::default();
-    // Units that fight: armed, and not builders, apart from the commander.
-    selection.set_armed(map.blueprints.iter().map(|blueprint| (blueprint.weapon.is_some() || !blueprint.extra_weapons.is_empty()) && (blueprint.build_power == Fp::ZERO || blueprint.is_commander())).collect());
+    selection.set_armed(sim_engine::input::selection::army_table(&map.blueprints));
     let mut placing: Option<BlueprintId> = None;
     let mut armed: Option<ArmedOrder> = None;
     // Where a Shift-drag row of structures began, while the button is held.
@@ -1625,6 +1628,30 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                             }
                             if (armed.is_some() || placing.is_some()) && order_drag.is_none() {
                                 ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
+                            }
+                            // Over an enemy, in sight or on radar, the pointer says what a right-click
+                            // does: an attack, if any selected unit can hit it, or not, if none can.
+                            if armed.is_none() && placing.is_none() && order_drag.is_none() && hovered_handle.is_none() && !selected.is_empty() && !watching && !ctx.is_pointer_over_area() {
+                                let click = RightClick {
+                                    selected: &selected,
+                                    units: &snapshot.units,
+                                    wrecks: &snapshot.wrecks,
+                                    blueprints: &map.blueprints,
+                                    team: PLAYER_TEAM,
+                                    camera: &camera,
+                                    cursor: selection.cursor(),
+                                    ground: None,
+                                    attack_move: false,
+                                    contacts: &snapshot.contacts,
+                                    surfaced: &snapshot.surfaced,
+                                };
+                                if let Some(hovered) = sim_engine::input::orders::hovered_enemy(&click) {
+                                    let kind = match hovered {
+                                        sim_engine::input::orders::Hovered::Unit(_, kind) | sim_engine::input::orders::Hovered::Contact(_, _, kind) => kind,
+                                    };
+                                    let icon = if sim_engine::input::orders::selection_reaches(&click, kind) { egui::CursorIcon::Crosshair } else { egui::CursorIcon::NotAllowed };
+                                    ctx.set_cursor_icon(icon);
+                                }
                             }
                             if watching {
                                 ui::world_overlay(ctx, &camera, &snapshot, &selected, &map.blueprints, pixels_per_point);

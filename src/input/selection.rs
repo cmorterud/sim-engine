@@ -31,6 +31,22 @@ pub struct Selection {
     armed: Vec<bool>,
 }
 
+/// Which blueprints, by index, belong with an army when a group is picked (`prefer_fighters`):
+/// those with a weapon, a shield, or a missile or torpedo defense, such as mobile shields and
+/// escort corvettes, but not those that build structures, engineers, apart from the commander.
+/// A missile submarine, which builds its own missiles, belongs; counting anything with build
+/// power as an engineer left it out, and the corvettes, which have no gun.
+pub fn army_table(blueprints: &crate::sim::blueprints::BlueprintDb) -> Vec<bool> {
+    blueprints
+        .iter()
+        .map(|def| {
+            let fights = def.weapon.is_some() || !def.extra_weapons.is_empty() || def.shield.is_some() || def.missile_defense.is_some() || def.torpedo_defense.is_some();
+            let engineer = def.builds.iter().any(|&built| blueprints.get(built).is_structure()) && !def.is_commander();
+            !def.is_structure() && fights && !engineer
+        })
+        .collect()
+}
+
 /// Of a group picked together, the units that can fight, if there are any: a box over an army
 /// and its engineers means the army. Otherwise mobile units, if any, over structures: a box over
 /// a base and an army means the army. The commander can fight.
@@ -465,6 +481,21 @@ mod tests {
         // Without a fighter, the engineer; without units, the structures.
         assert_eq!(prefer_fighters(vec![SimId(2), SimId(3)], &units, &armed), [SimId(2)]);
         assert_eq!(prefer_fighters(vec![SimId(3)], &units, &armed), [SimId(3)]);
+    }
+
+    /// The whole fleet, missile submarines and escort corvettes too, belongs with an army, and so
+    /// do mobile shields and the commander; engineers do not.
+    #[test]
+    fn the_army_includes_support_ships_and_missile_submarines_but_not_engineers() {
+        let db = crate::sim::blueprints::BlueprintDb::standard();
+        let table = army_table(&db);
+        let army = |key: &str| table[usize::from(db.id(key).0)];
+        for key in ["t3_missile_sub", "t2_escort_corvette", "t2_mobile_shield", "t3_battleship", "t1_attack_sub", "command_rig", "t1_medium_tank"] {
+            assert!(army(key), "{key} belongs with the army");
+        }
+        for key in ["t1_engineer", "t2_engineer", "t3_engineer", "t2_combat_engineer", "field_rig", "land_factory_t1"] {
+            assert!(!army(key), "{key} does not");
+        }
     }
 
     #[test]

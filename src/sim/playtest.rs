@@ -21,13 +21,17 @@ const EACH: usize = 5;
 /// Where Blue's land army, aircraft, and fleet start.
 const BLUE_LAND: (i32, i32) = (1_400, 5_000);
 const BLUE_AIR: (i32, i32) = (1_400, 8_200);
-const BLUE_SEA: (i32, i32) = (8_400, 5_000);
+// Out of the battleships' 3,000 reach of Red's naval factory and torpedo launchers, which they
+// would otherwise shell, on radar, from the start.
+const BLUE_SEA: (i32, i32) = (9_300, 5_000);
 /// Red's two bases, on the coast, in cells: the main one, with its commander, and the outpost.
 const RED_MAIN: (u32, u32) = (215, 125);
 const RED_OUTPOST: (u32, u32) = (215, 385);
-/// Blue starts with a little to build with, and no income.
-const BLUE_MASS: i64 = 3_000;
-const BLUE_ENERGY: i64 = 30_000;
+/// Blue starts with enough, and room to store it, to build a strategic missile launcher (16,500
+/// materiel and 412,500 energy) and several nuclear missiles (12,000 and 1,500,000 each), on top
+/// of its generators' income.
+const BLUE_MASS: i64 = 100_000;
+const BLUE_ENERGY: i64 = 5_000_000;
 const RED_MASS: i64 = 2_000;
 const RED_ENERGY: i64 = 20_000;
 
@@ -77,8 +81,16 @@ pub fn playtest(seed: u64) -> Scenario {
     world.spawn_mobile(commander, Team::Red, world.starts[1]);
     blue_army(&mut world);
     world.start_economy(0, 0);
-    world.economies[Team::Blue.index()].mass = crate::sim::blueprints::Res::from_num(BLUE_MASS);
-    world.economies[Team::Blue.index()].energy = crate::sim::blueprints::Res::from_num(BLUE_ENERGY);
+    {
+        use crate::sim::blueprints::Res;
+        let blue = &mut world.economies[Team::Blue.index()];
+        blue.base_mass_capacity = Res::from_num(BLUE_MASS);
+        blue.base_energy_capacity = Res::from_num(BLUE_ENERGY);
+        blue.mass_capacity = blue.base_mass_capacity;
+        blue.energy_capacity = blue.base_energy_capacity;
+        blue.mass = Res::from_num(BLUE_MASS);
+        blue.energy = Res::from_num(BLUE_ENERGY);
+    }
     world.economies[Team::Red.index()].mass = crate::sim::blueprints::Res::from_num(RED_MASS);
     world.economies[Team::Red.index()].energy = crate::sim::blueprints::Res::from_num(RED_ENERGY);
     world.prepare_map();

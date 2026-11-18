@@ -257,6 +257,21 @@ pub struct EconomyView {
     pub energy_reclaimed: i64,
 }
 
+/// An enemy contact on radar that the viewer cannot see. Values are raw `Fp` bits. A decoy has
+/// no unit; the interface shows it like any other, and an attack on it goes there and finds
+/// nothing.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct ContactView {
+    pub unit: Option<SimId>,
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+    pub is_air: bool,
+    pub is_naval: bool,
+    pub is_sub: bool,
+    pub is_structure: bool,
+}
+
 /// Read-only projectile state for the renderer. Values are raw `Fp` bits.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct ProjectileView {
@@ -346,6 +361,9 @@ pub struct SimSnapshot {
     /// Enemy contacts on the viewer's radar that it cannot see, real and decoy alike, as raw
     /// `Fp` positions. Nothing says which is which.
     pub blips: Vec<[i32; 3]>,
+    /// The same contacts, with the unit each is and what it is, for orders at them. A decoy
+    /// names no unit.
+    pub contacts: Vec<ContactView>,
     /// The viewer's working sensors, for drawing their coverage.
     pub sensor_ranges: Vec<SensorRangeView>,
     /// The viewer's units with a cloak: whether it is switched on, and whether it is hiding them.
@@ -601,6 +619,9 @@ pub struct SimWorld {
     /// For each team, the cloaked enemies it cannot see this tick, sorted by `SimId`. Worked out
     /// again every tick from what is hashed, so it is not hashed itself.
     concealed: [Vec<SimId>; 2],
+    /// By team: the enemy units it has on radar, deep scan, or, under the water, sonar, that no
+    /// stealth hides, in `SimId` order. They can be fired at as if seen.
+    detected: [Vec<SimId>; 2],
     /// Missiles shot down this tick, from where to where. Only for drawing, so not in the checksum.
     interceptions: Vec<[[i32; 3]; 2]>,
     /// Groups on a formation move, by the route they share.
@@ -724,6 +745,7 @@ impl SimWorld {
             pending_grabs: Vec::new(),
             captured_this_tick: Vec::new(),
             concealed: [Vec::new(), Vec::new()],
+            detected: [Vec::new(), Vec::new()],
             interceptions: Vec::new(),
             formations: BTreeMap::new(),
             commanders: [None, None],
@@ -2048,6 +2070,7 @@ impl SimWorld {
             }
         }
         self.concealed = concealed;
+        self.detected = [self.radar_contacts(Team::Blue), self.radar_contacts(Team::Red)];
     }
 
     pub fn step_combat(&mut self) {
@@ -2057,6 +2080,7 @@ impl SimWorld {
         let terrain = &self.terrain;
         let visibility = &self.visibility;
         let concealed = &self.concealed;
+        let detected = &self.detected;
         let fog = self.config.fog_of_war;
         let shots = &mut self.pending_shots;
         let economies = &mut self.economies;
@@ -2136,20 +2160,18 @@ impl SimWorld {
             // Artillery cannot hit what is closer than its least range.
             let least = artillery.map_or(0, |artillery| i64::from(artillery.min_range.to_bits()));
             let far_enough = |distance: i64| distance >= least * least;
-            // A bomber lets its bombs go far short of its target, beyond its own sight from a
-            // fast, high one such as the fighter-bomber, so it bombs what its team has on radar
-            // or deep scan as well as what it sees. Seeing only what was in sight, it never let go.
-            let sensed = |x: i32, y: i32| {
-                !fog
-                    || visibility.is_visible(stats.team, x, y)
-                    || (bomb_bay.is_some() && (visibility.senses(super::visibility::Sense::Radar, stats.team, x, y) || visibility.senses(super::visibility::Sense::DeepScan, stats.team, x, y)))
+            // What its team sees, or has on radar, deep scan, or sonar: any of it can be fired at,
+            // as the team knows where it is and what it is. A bomber lets its bombs go far short of
+            // its target, beyond its own sight, so it needs this most.
+            let sensed = |entry: &super::spatial::GridEntry| {
+                !fog || visibility.is_visible(stats.team, entry.x, entry.y) || detected[stats.team.index()].binary_search(&entry.id).is_ok()
             };
             let can_engage = |entry: &super::spatial::GridEntry| {
                 let reach = range + i64::from(entry.radius);
                 squared_distance(entry.x, entry.y) <= reach * reach
                     && far_enough(squared_distance(entry.x, entry.y))
                     && can_hit(entry)
-                    && sensed(entry.x, entry.y)
+                    && sensed(entry)
                     && !hidden(entry.id)
             };
             let locate = |target: SimId| units.binary_search_by_key(&target, |unit| unit.0).ok().map(|i| grid.entry(i));
@@ -2222,7 +2244,7 @@ impl SimWorld {
                         let mut consider = |other: &super::spatial::GridEntry| {
                             let distance = squared_distance(other.x, other.y);
                             let reach = radius + i64::from(other.radius);
-                            let visible = sensed(other.x, other.y) && !hidden(other.id);
+                            let visible = sensed(other) && !hidden(other.id);
                             if distance <= reach * reach && far_enough(distance) && visible && blocked != Some(other.id) && can_hit(other) {
                                 let candidate = (other.is_structure, distance, other.id);
                                 if best.is_none_or(|current| candidate < current) {
@@ -2473,7 +2495,7 @@ impl SimWorld {
                         };
                         squared_distance(entry.x, entry.y) <= within * within
                             && hit
-                            && (!fog || visibility.is_visible(stats.team, entry.x, entry.y))
+                            && sensed(entry)
                             && !hidden(entry.id)
                     };
                     let spot = ground.filter(|spot| weapon.hits_ground && squared_distance(spot.x.to_bits(), spot.y.to_bits()) <= reach * reach);
@@ -3880,10 +3902,11 @@ impl SimWorld {
             .into_iter()
             .filter_map(|(id, entity)| Some((id, self.ecs.get::<&super::components::SelfDestructing>(entity).ok()?.ticks_left)))
             .collect();
-        let blips = match viewer {
-            Some(viewer) if self.config.fog_of_war => self.blips_for(viewer),
+        let contacts = match viewer {
+            Some(viewer) if self.config.fog_of_war => self.contacts_for(viewer),
             _ => Vec::new(),
         };
+        let blips = contacts.iter().map(|contact| [contact.x, contact.y, contact.z]).collect();
         let own_intel = |viewer: Team| self.intel.iter().filter(move |&&(_, entity)| self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team == viewer));
         let sensor_ranges = viewer.map_or_else(Vec::new, |viewer| {
             own_intel(viewer)
@@ -3971,6 +3994,7 @@ impl SimWorld {
             cargo,
             adjacency,
             blips,
+            contacts,
             sensor_ranges,
             cloaks,
             surfaced: self.surfaced.clone(),
@@ -4011,56 +4035,44 @@ impl SimWorld {
 }
 
 impl SimWorld {
-    /// What the viewer's radar shows that it cannot see: enemies on its radar or deep scan, except
-    /// those hidden by a stealth field or a cloak where it has no deep scan, and decoys from enemy
-    /// jammers, except where its deep scan or its sight shows there is nothing there. Each is its
-    /// position's raw bits. The AI reads these too, so it can be fooled by decoys as a player can.
-    pub fn blips_for(&self, viewer: Team) -> Vec<[i32; 3]> {
+    /// The enemy units `viewer` has on radar or deep scan, or, under the water, on sonar, and
+    /// that no stealth field, suppression, or cloak hides from it unless deep scan strips them,
+    /// in `SimId` order: whether or not it can see them too. Its units can fire at them all.
+    pub fn radar_contacts(&self, viewer: Team) -> Vec<SimId> {
         let visibility = &self.visibility;
-        if !visibility.has_any(Sense::Radar, viewer) && !visibility.has_any(Sense::DeepScan, viewer) && !visibility.has_any(Sense::Sonar, viewer) {
+        if !self.config.fog_of_war || (!visibility.has_any(Sense::Radar, viewer) && !visibility.has_any(Sense::DeepScan, viewer) && !visibility.has_any(Sense::Sonar, viewer)) {
             return Vec::new();
         }
         let enemy = viewer.enemy();
         let on_radar = |x: i32, y: i32| visibility.senses(Sense::Radar, viewer, x, y) || visibility.senses(Sense::DeepScan, viewer, x, y);
-        // The enemy's working stealth fields and jammers.
+        // The enemy's working stealth fields.
         let mut fields: Vec<(i32, i32, i64)> = Vec::new();
-        let mut jammers: Vec<(SimId, i32, i32, i32, u32)> = Vec::new();
-        for &(id, entity) in &self.intel {
+        for &(_, entity) in &self.intel {
             let running = self.ecs.get::<&Intel>(entity).is_ok_and(|intel| intel.running) && self.ecs.get::<&Construction>(entity).is_err();
             if !running || self.ecs.get::<&UnitStats>(entity).map_or(true, |stats| stats.team != enemy) {
                 continue;
             }
             let unit = self.blueprints.get(self.ecs.get::<&Blueprinted>(entity).expect("intel units have blueprints").0);
-            let at = self.ecs.get::<&Position>(entity).expect("units have positions").0;
             if unit.stealth_field > Fp::ZERO {
+                let at = self.ecs.get::<&Position>(entity).expect("units have positions").0;
                 fields.push((at.x.to_bits(), at.y.to_bits(), i64::from(unit.stealth_field.to_bits())));
             }
-            if let Some(jammer) = unit.jammer {
-                jammers.push((id, at.x.to_bits(), at.y.to_bits(), jammer.radius.to_num::<i32>(), jammer.decoys));
-            }
-            // A jammer enhancement, while it is paid for.
-            if self.ecs.get::<&Intel>(entity).is_ok_and(|intel| intel.jamming) {
-                if let Some(jammer) = self.enhancement_effects(entity).jammer {
-                    jammers.push((id, at.x.to_bits(), at.y.to_bits(), jammer.radius.to_num::<i32>(), jammer.decoys));
-                }
-            }
         }
-        let mut blips = Vec::new();
+        let mut contacts = Vec::new();
         for &(id, entity) in &self.units {
             let Ok(stats) = self.ecs.get::<&UnitStats>(entity) else {
                 continue;
             };
-            if stats.team != enemy {
+            if stats.team != enemy || self.concealed[viewer.index()].binary_search(&id).is_ok() {
                 continue;
             }
             let at = self.ecs.get::<&Position>(entity).expect("units have positions").0;
             let (x, y) = (at.x.to_bits(), at.y.to_bits());
-            let shown = visibility.is_visible(viewer, x, y) && self.concealed[viewer.index()].binary_search(&id).is_err();
             // Radar does not reach under the water: a submarine shows only where sonar finds it.
             let submerged = (stats.move_class == MoveClass::Submarine && self.surfaced.binary_search(&id).is_err())
                 || (stats.move_class == MoveClass::Seabed && at.z + stats.radius < self.terrain.water_level());
             let sensed = if submerged { visibility.senses(Sense::Sonar, viewer, x, y) } else { on_radar(x, y) };
-            if shown || !sensed {
+            if !sensed {
                 continue;
             }
             if !visibility.senses(Sense::DeepScan, viewer, x, y) {
@@ -4073,7 +4085,48 @@ impl SimWorld {
                     continue;
                 }
             }
-            blips.push([x, y, at.z.to_bits()]);
+            contacts.push(id);
+        }
+        contacts
+    }
+
+    /// The enemy contacts `viewer` has on radar that it cannot see, as raw `Fp` positions with
+    /// what each is, real and decoy alike: a real one names its unit; a decoy names none, which
+    /// only the interface knows, and shows like any other.
+    pub fn contacts_for(&self, viewer: Team) -> Vec<ContactView> {
+        let visibility = &self.visibility;
+        let mut contacts: Vec<ContactView> = Vec::new();
+        for &id in &self.detected[viewer.index()] {
+            let Some((index, entity)) = self.units.binary_search_by_key(&id, |unit| unit.0).ok().map(|index| (index, self.units[index].1)) else {
+                continue;
+            };
+            let entry = self.spatial_grid.entry(index);
+            if entry.id != id || visibility.is_visible(viewer, entry.x, entry.y) {
+                continue;
+            }
+            let _ = entity;
+            contacts.push(ContactView { unit: Some(id), x: entry.x, y: entry.y, z: entry.z, is_air: entry.is_air, is_naval: entry.is_naval, is_sub: entry.is_sub, is_structure: entry.is_structure });
+        }
+        // Decoys from the enemy's working jammers.
+        let enemy = viewer.enemy();
+        let on_radar = |x: i32, y: i32| visibility.senses(Sense::Radar, viewer, x, y) || visibility.senses(Sense::DeepScan, viewer, x, y);
+        let mut jammers: Vec<(SimId, i32, i32, i32, u32)> = Vec::new();
+        for &(id, entity) in &self.intel {
+            let running = self.ecs.get::<&Intel>(entity).is_ok_and(|intel| intel.running) && self.ecs.get::<&Construction>(entity).is_err();
+            if !running || self.ecs.get::<&UnitStats>(entity).map_or(true, |stats| stats.team != enemy) {
+                continue;
+            }
+            let unit = self.blueprints.get(self.ecs.get::<&Blueprinted>(entity).expect("intel units have blueprints").0);
+            let at = self.ecs.get::<&Position>(entity).expect("units have positions").0;
+            if let Some(jammer) = unit.jammer {
+                jammers.push((id, at.x.to_bits(), at.y.to_bits(), jammer.radius.to_num::<i32>(), jammer.decoys));
+            }
+            // A jammer enhancement, while it is paid for.
+            if self.ecs.get::<&Intel>(entity).is_ok_and(|intel| intel.jamming) {
+                if let Some(jammer) = self.enhancement_effects(entity).jammer {
+                    jammers.push((id, at.x.to_bits(), at.y.to_bits(), jammer.radius.to_num::<i32>(), jammer.decoys));
+                }
+            }
         }
         let period = self.current_tick / DECOY_SHUFFLE_TICKS;
         for (id, jx, jy, radius, decoys) in jammers {
@@ -4084,10 +4137,16 @@ impl SimWorld {
                 if !self.terrain.in_bounds(point) || !on_radar(x, y) || visibility.senses(Sense::DeepScan, viewer, x, y) || visibility.is_visible(viewer, x, y) {
                     continue;
                 }
-                blips.push([x, y, (self.terrain.height_at(point) + fp_int(8)).to_bits()]);
+                let z = (self.terrain.height_at(point) + fp_int(8)).to_bits();
+                contacts.push(ContactView { unit: None, x, y, z, is_air: false, is_naval: false, is_sub: false, is_structure: false });
             }
         }
-        blips
+        contacts
+    }
+
+    /// The radar contacts `viewer` cannot see, as raw `Fp` positions, real and decoy alike.
+    pub fn blips_for(&self, viewer: Team) -> Vec<[i32; 3]> {
+        self.contacts_for(viewer).into_iter().map(|contact| [contact.x, contact.y, contact.z]).collect()
     }
 }
 

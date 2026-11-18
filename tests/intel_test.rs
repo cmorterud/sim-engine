@@ -231,3 +231,36 @@ fn a_match_without_fog_of_war_shows_every_team_the_whole_map() {
         assert_eq!(red_commander, !fog, "Red's commander, across the map, shows only without fog");
     }
 }
+
+/// Units fire at what their team has on radar, as if seen: a mobile heavy artillery piece shells
+/// an enemy beyond its own sight that a friendly radar covers, and not one that nothing covers.
+#[test]
+fn units_fire_at_enemies_on_radar_beyond_their_sight() {
+    for radar in [true, false] {
+        let mut world = foggy_world();
+        let artillery = world.spawn_mobile(world.blueprints.id("t3_mobile_artillery"), Team::Blue, point(1_000, 2_500));
+        if radar {
+            structure(&mut world, "radar", Team::Blue, 52, 120);
+        }
+        // 1,400 away: well within its 1,800 reach, far beyond its sight.
+        let enemy = passive(&mut world, "t1_engineer", Team::Red, point(2_400, 2_500));
+        world.ecs.get::<&mut sim_engine::sim::components::Health>(world.unit_entity(enemy).unwrap()).unwrap().max = fp_int(100_000);
+        world.ecs.get::<&mut sim_engine::sim::components::Health>(world.unit_entity(enemy).unwrap()).unwrap().current = fp_int(100_000);
+        run(&mut world, 400);
+        let _ = artillery;
+        let hurt = world.unit_health(enemy).unwrap() < fp_int(100_000);
+        assert_eq!(hurt, radar, "with a radar: {radar}");
+    }
+}
+
+/// A stealth field keeps an enemy off radar, so it is not fired at until seen.
+#[test]
+fn a_stealthed_enemy_on_radar_is_not_fired_at() {
+    let mut world = foggy_world();
+    world.spawn_mobile(world.blueprints.id("t3_mobile_artillery"), Team::Blue, point(1_000, 2_500));
+    structure(&mut world, "radar", Team::Blue, 52, 120);
+    structure(&mut world, "stealth_field_generator", Team::Red, 125, 130);
+    let enemy = passive(&mut world, "t1_engineer", Team::Red, point(2_400, 2_500));
+    run(&mut world, 400);
+    assert_eq!(world.unit_health(enemy), Some(world.blueprints.get(world.blueprints.id("t1_engineer")).health), "hidden in the field, it is no target");
+}
