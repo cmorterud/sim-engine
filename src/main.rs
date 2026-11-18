@@ -1534,6 +1534,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                         let mut actions = std::mem::take(&mut hotkey_actions);
                         let raw_input = egui_state.take_egui_input(&window);
                         let pixels_per_point = window.scale_factor() as f32;
+                        camera.set_pixels_per_point(f64::from(pixels_per_point));
                         let snapshot = demo_snapshot.unwrap_or_else(|| Arc::clone(&session.current));
                         let selected = selection.selected().to_vec();
                         let mut trails = if is_match { ui::build_trails(&session.previous, &snapshot, alpha, &selected) } else { Vec::new() };

@@ -33,7 +33,7 @@ const MIN_SELECTION_RING_POINTS: f32 = 4.0;
 const GRID_REACH_CELLS: i32 = 8;
 
 /// Above this altitude, units are drawn with tactical icons.
-const ICON_ALTITUDE: f64 = 1_200.0;
+use crate::icons::ICON_ALTITUDE;
 const BLUE: Color32 = Color32::from_rgb(90, 160, 255);
 const RED: Color32 = Color32::from_rgb(255, 95, 80);
 const STALLED: Color32 = Color32::from_rgb(255, 110, 90);
@@ -3488,8 +3488,8 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
         // around it.
         let icon = Icon::for_key(&blueprint.key);
         let icon_half = icons::map_half(icon);
-        let icon_top = icon_half * icons::frame_reach(icon.frame());
-        let icon_bottom = icon_top + if blueprint.tier > 0 { icon_half * 0.32 + 3.0 } else { 0.0 };
+        let icon_top = icon_half * icons::frame_reach(icon.frame()).0;
+        let icon_bottom = icons::reach_below(icon, icon_half, blueprint.tier);
         if show_icons {
             draw_icon(&painter, center, &blueprint.key, blueprint.tier, team_color(unit.team), is_selected);
         }

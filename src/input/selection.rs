@@ -306,6 +306,11 @@ pub fn nearest_unit(units: &[UnitView], camera: &Camera, team: Team, point: [f64
 /// drawn, if bigger.
 pub fn nearest_unit_within(units: &[UnitView], camera: &Camera, team: Team, point: [f64; 2], reach_px: f64) -> Option<SimId> {
     let mut best: Option<(f64, SimId)> = None;
+    // Zoomed out, where units show as icons, a click anywhere on an icon picks its unit, its
+    // edges and tech chevrons too.
+    let icons = camera.altitude() >= crate::icons::ICON_ALTITUDE;
+    let scale = camera.pixels_per_point();
+    let (half_width, above, below) = (crate::icons::HIT_HALF_WIDTH_PT * scale, crate::icons::HIT_ABOVE_PT * scale, crate::icons::HIT_BELOW_PT * scale);
     for unit in units.iter().filter(|unit| unit.team == team) {
         if let Some(p) = screen_position(unit, camera) {
             let distance = (p[0] - point[0]).powi(2) + (p[1] - point[1]).powi(2);
@@ -314,7 +319,8 @@ pub fn nearest_unit_within(units: &[UnitView], camera: &Camera, team: Team, poin
             let edge = camera.world_to_screen([raw_to_world(unit.x) + radius, raw_to_world(unit.y), raw_to_world(unit.z)]);
             let apparent = edge.map_or(0.0, |edge| (edge[0] - p[0]).hypot(edge[1] - p[1]));
             let reach = reach_px.max(apparent);
-            if distance <= reach * reach && best.is_none_or(|(closest, _)| distance < closest) {
+            let on_icon = icons && (point[0] - p[0]).abs() <= half_width && (-above..=below).contains(&(point[1] - p[1]));
+            if (on_icon || distance <= reach * reach) && best.is_none_or(|(closest, _)| distance < closest) {
                 best = Some((distance, unit.id));
             }
         }
@@ -526,6 +532,27 @@ mod tests {
         assert!(selection.drag_box().is_none());
         selection.end_drag(&units, &camera, Team::Blue);
         assert_eq!(selection.selected(), [SimId(1)]);
+    }
+
+    /// Zoomed out to icons, a click anywhere on a unit's icon picks it, out to its edges and its
+    /// tech chevrons beneath, on a screen of any scale; beyond the icon it does not.
+    #[test]
+    fn a_click_anywhere_on_an_icon_picks_its_unit() {
+        for scale in [1.0, 2.0] {
+            let mut camera = Camera::new(81_920.0, [1000.0 * scale, 800.0 * scale]);
+            camera.look_at(40_000.0, 40_000.0, crate::icons::ICON_ALTITUDE * 3.0);
+            camera.set_pixels_per_point(scale);
+            let units = [unit(1, Team::Blue, 40_000.0, 40_000.0)];
+            let at = camera.world_to_screen([40_000.0, 40_000.0, 1.0]).unwrap();
+            let pick = |dx: f64, dy: f64| nearest_unit(&units, &camera, Team::Blue, [at[0] + dx * scale, at[1] + dy * scale]);
+            // A land unit's frame reaches 13 points to either side; T3 chevrons, 18 below.
+            for (dx, dy) in [(13.0, 0.0), (-13.0, 8.0), (12.0, -8.0), (0.0, 18.0), (6.0, 15.0)] {
+                assert_eq!(pick(dx, dy), Some(SimId(1)), "at ({dx}, {dy}) points, scale {scale}");
+            }
+            for (dx, dy) in [(24.0, 0.0), (0.0, -24.0), (0.0, 28.0)] {
+                assert_eq!(pick(dx, dy), None, "at ({dx}, {dy}) points, scale {scale}");
+            }
+        }
     }
 
     #[test]

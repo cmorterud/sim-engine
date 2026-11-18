@@ -68,6 +68,8 @@ pub struct Camera {
     min_altitude: f64,
     max_altitude: f64,
     zoom_anchor: Option<[f64; 2]>,
+    /// Screen pixels to an interface point, for what is sized in points, such as map icons.
+    pixels_per_point: f64,
 }
 
 impl Camera {
@@ -83,6 +85,7 @@ impl Camera {
             min_altitude: MIN_ALTITUDE,
             max_altitude: map_units * ALTITUDE_PER_MAP_UNIT,
             zoom_anchor: None,
+            pixels_per_point: 1.0,
         }
     }
 
@@ -110,6 +113,14 @@ impl Camera {
 
     pub fn set_viewport(&mut self, viewport: [f64; 2]) {
         self.viewport = viewport;
+    }
+
+    pub const fn pixels_per_point(&self) -> f64 {
+        self.pixels_per_point
+    }
+
+    pub fn set_pixels_per_point(&mut self, pixels_per_point: f64) {
+        self.pixels_per_point = pixels_per_point.max(0.25);
     }
 
     /// Jumps straight to a view, with no smoothing.
