@@ -39,7 +39,9 @@ fn sort_selection(selected: &[SimId], units: &[UnitView], blueprints: &Blueprint
         if blueprint.weapon.is_some_and(|weapon| weapon.kind != WeaponKind::Shell) {
             parts.armed.push(*id);
         }
-        if blueprint.is_factory() {
+        // A factory that moves, the missile submarine, which builds its own missiles, is a
+        // ship to orders: a right-click moves it, as a rally point would mean nothing.
+        if blueprint.is_factory() && blueprint.is_structure() {
             parts.factories.push(*id);
             continue;
         }
@@ -50,7 +52,8 @@ fn sort_selection(selected: &[SimId], units: &[UnitView], blueprints: &Blueprint
         if blueprint.weapon.is_some() {
             parts.armed.push(*id);
         }
-        if blueprint.build_power > Fp::ZERO {
+        // Its build power builds its missiles; it does not help with work elsewhere.
+        if blueprint.build_power > Fp::ZERO && !blueprint.is_factory() {
             parts.builders.push(*id);
         }
     }
@@ -965,6 +968,24 @@ mod tests {
         let hover = RightClick { selected: &[SimId(1)], units: &units, wrecks: &[], blueprints: &db, team: Team::Blue, camera: &camera, cursor, ground: None, attack_move: false, contacts: &[], surfaced: &[] };
         assert!(selection_reaches(&hover, TargetKind::Ground));
         assert!(!selection_reaches(&hover, TargetKind::Air));
+    }
+
+    /// Every unit that moves is moved by a right-click on the ground and by a move order, the
+    /// missile submarine, which counts as a factory as it builds its missiles, included. It was
+    /// given a rally point instead, and could not be moved at all.
+    #[test]
+    fn every_mobile_unit_moves_on_a_right_click() {
+        let db = db();
+        let camera = camera();
+        let ground = [2_000.0, 2_000.0];
+        let cursor = camera.world_to_screen([ground[0], ground[1], 0.0]).unwrap();
+        for def in db.iter().filter(|def| !def.is_structure() && def.speed > Fp::ZERO && def.class != crate::sim::blueprints::UnitClass::Ammo) {
+            let units = [view(1, Team::Blue, db.id(&def.key), &db, 1_000.0, 1_000.0)];
+            let click = RightClick { selected: &[SimId(1)], units: &units, wrecks: &[], blueprints: &db, team: Team::Blue, camera: &camera, cursor, ground: Some(ground), attack_move: false, contacts: &[], surfaced: &[] };
+            let orders = right_click_orders(&click);
+            assert!(matches!(orders[..], [SimCommand::Move { .. }]), "{} on a right-click: {orders:?}", def.key);
+            assert!(matches!(move_orders(&click)[..], [SimCommand::Move { .. }]), "{} on a move order", def.key);
+        }
     }
 
     #[test]

@@ -1459,7 +1459,7 @@ pub fn quick_select_groups(snapshot: &SimSnapshot, team: Team, db: &BlueprintDb)
         let blueprint = db.get(BlueprintId(unit.blueprint));
         if blueprint.is_commander() {
             groups.commander.get_or_insert(unit.id);
-        } else if blueprint.is_factory() {
+        } else if blueprint.is_factory() && blueprint.is_structure() {
             families.entry(factory_family_name(&blueprint.key)).or_default().entry(blueprint.tier).or_default().push(unit.id);
         }
     }
@@ -2023,7 +2023,10 @@ fn selection_info(ui: &mut egui::Ui, snapshot: &SimSnapshot, selected: &[SimId],
             ui.label(egui::RichText::new(note).size(11.0).color(hud::DIM_TEXT));
         }
         if menu.queue.is_empty() {
-            ui.label(egui::RichText::new("Queue is empty. Right-click the ground to set a rally point.").size(11.0).color(hud::DIM_TEXT));
+            // A missile submarine has a queue for its missiles, but no rally point: it moves.
+            let moves = menu.factories.iter().any(|id| find_unit(snapshot, *id).is_some_and(|unit| unit.blueprint != u16::MAX && !db.get(BlueprintId(unit.blueprint)).is_structure()));
+            let hint = if moves { "Queue is empty." } else { "Queue is empty. Right-click the ground to set a rally point." };
+            ui.label(egui::RichText::new(hint).size(11.0).color(hud::DIM_TEXT));
         }
     }
 }
