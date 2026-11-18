@@ -3436,12 +3436,7 @@ pub fn draw_deposit_markers(ctx: &egui::Context, camera: &Camera, heights: &crat
 /// green when selected, with a dot beneath for each tech level.
 fn draw_icon(painter: &egui::Painter, center: Pos2, key: &str, tier: u8, color: Color32, selected: bool) {
     let icon = Icon::for_key(key);
-    let half = match icon.frame() {
-        icons::Frame::Commander => 7.0,
-        icons::Frame::Structure => 6.5,
-        _ => 5.5,
-    };
-    icons::draw(painter, center, half, icon, tier, if selected { Color32::from_rgb(170, 255, 170) } else { color });
+    icons::draw(painter, center, icons::map_half(icon), icon, tier, if selected { Color32::from_rgb(170, 255, 170) } else { color });
 }
 
 /// How far along one of the viewer's own upgrades is, from 0 to 1: an enhancement, an upgrade in
@@ -3489,13 +3484,19 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
         }
         let is_selected = selected.binary_search(&unit.id).is_ok();
         let blueprint = db.get(BlueprintId(unit.blueprint));
+        // How far the icon reaches above and below, with its tech level dots, for what is drawn
+        // around it.
+        let icon = Icon::for_key(&blueprint.key);
+        let icon_half = icons::map_half(icon);
+        let icon_top = icon_half * icons::frame_reach(icon.frame());
+        let icon_bottom = icon_top + if blueprint.tier > 0 { icon_half * 0.32 + 3.0 } else { 0.0 };
         if show_icons {
             draw_icon(&painter, center, &blueprint.key, blueprint.tier, team_color(unit.team), is_selected);
         }
         // Commanders carry their side's name, underlined in its color, so they can be found.
         if blueprint.is_commander() {
             let name = commander_name(unit.team);
-            let below = center + Vec2::new(0.0, if show_icons { 11.0 } else { 18.0 });
+            let below = center + Vec2::new(0.0, if show_icons { icon_bottom + 2.0 } else { 18.0 });
             let galley = painter.layout_no_wrap(name.to_string(), FontId::proportional(12.0), Color32::WHITE);
             let width = galley.size().x;
             hud::outlined_text(&painter, below, Align2::CENTER_TOP, name, FontId::proportional(12.0), Color32::WHITE);
@@ -3515,7 +3516,7 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
             // One gold pip per rank, under the unit, and under its icon's tech level dots.
             let spacing = 5.0;
             let left = center.x - spacing * f32::from(rank - 1) / 2.0;
-            let below = if show_icons { 15.0 } else { 10.0 };
+            let below = if show_icons { icon_bottom + 4.0 } else { 10.0 };
             for pip in 0..rank {
                 painter.circle_filled(Pos2::new(left + spacing * f32::from(pip), center.y + below), 2.0, VETERAN);
             }
@@ -3528,15 +3529,15 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
         if upgrading {
             // The same pulsing ring on every upgrade, the enemy's included, as long as it is in sight.
             let pulse = ((time * UPGRADE_PULSE_RATE).sin() * 0.5 + 0.5) as f32;
-            let radius = if show_icons { 13.0 } else { apparent * 1.35 } + pulse * 3.0;
+            let radius = if show_icons { icon_half * 1.9 } else { apparent * 1.35 } + pulse * 3.0;
             let alpha = (120.0 + pulse * 135.0) as u8;
             painter.circle_stroke(center, radius, Stroke::new(2.0_f32, Color32::from_rgba_unmultiplied(UPGRADING.r(), UPGRADING.g(), UPGRADING.b(), alpha)));
         }
         // How far along it is, only for the viewer's own upgrades.
         let upgrade_share = upgrade_progress(snapshot, unit.id, db).filter(|_| upgrading);
         if hurt || building || is_selected || upgrade_share.is_some() {
-            let above = if show_icons { 12.0 } else { apparent + 4.0 };
-            let width = if show_icons { 18.0 } else { (apparent * 2.0).clamp(14.0, 70.0) };
+            let above = if show_icons { icon_top + 4.0 } else { apparent + 4.0 };
+            let width = if show_icons { icon_half * 2.8 } else { (apparent * 2.0).clamp(14.0, 70.0) };
             let share = f32::from(unit.health_permille) / 1000.0;
             let color = if share > 0.5 { HEALTHY } else if share > 0.25 { Color32::YELLOW } else { STALLED };
             draw_bar(&painter, center - Vec2::new(0.0, above), width, share, color);

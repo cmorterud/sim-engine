@@ -1,7 +1,8 @@
 //! Icons for units and structures: one symbol for each kind of thing, the same at every tech
-//! level, with the level shown as dots beneath. The frame says what moves where: a rectangle on
-//! land, a diamond in the air, a rounded hull on the water, and a square for a structure. All are
-//! vector shapes, drawn in code, so they stay sharp at any size and need no image files.
+//! level, with the level shown as dots beneath. The frame says what moves where, by its outline
+//! alone: a wide rectangle on land, a diamond in the air, a hull pointed at both ends on the
+//! water, a circle for the command rigs, and a square for a structure. All are vector shapes,
+//! drawn in code, so they stay sharp at any size and need no image files.
 
 use egui::{Color32, Painter, Pos2, Rect, Rounding, Shape, Stroke, Vec2};
 
@@ -12,7 +13,7 @@ pub enum Frame {
     Air,
     Naval,
     Structure,
-    /// Wider, so that the commander is found at a glance.
+    /// A circle, larger, so that the command rigs are found at a glance.
     Commander,
 }
 
@@ -309,12 +310,31 @@ pub fn bar_shapes(rect: Rect, icon: Icon) -> Vec<Shape> {
     // Below and right of center, clear of the key in the corner.
     let center = rect.center() + Vec2::new(rect.width() * 0.06, rect.height() * 0.08);
     let mut out = Vec::new();
-    symbol(&mut out, center, size, icon, stroke);
+    symbol(&mut out, center, size, icon, stroke, false);
     out
 }
 
-/// Draws an icon: its frame, filled dark and outlined in `color`, its symbol, and a dot beneath
-/// for each tech level. `half` is half the frame's height, in points.
+/// Half the height, in points, of an icon on the map: large enough that its symbol reads without
+/// squinting, and the command rigs larger still.
+pub const fn map_half(icon: Icon) -> f32 {
+    match icon.frame() {
+        Frame::Commander => 10.5,
+        Frame::Structure => 9.5,
+        _ => 9.0,
+    }
+}
+
+/// How far the frame reaches above and below its center, as a share of `half`.
+pub const fn frame_reach(frame: Frame) -> f32 {
+    match frame {
+        Frame::Air => 1.15,
+        Frame::Commander => 1.2,
+        _ => 1.0,
+    }
+}
+
+/// Draws an icon: its frame, filled with a dark shade of `color` and outlined in it, its symbol,
+/// and a dot beneath for each tech level. `half` is half the frame's height, in points.
 pub fn draw(painter: &Painter, center: Pos2, half: f32, icon: Icon, tier: u8, color: Color32) {
     for shape in shapes(center, half, icon, tier, color) {
         painter.add(shape);
@@ -323,31 +343,39 @@ pub fn draw(painter: &Painter, center: Pos2, half: f32, icon: Icon, tier: u8, co
 
 /// The shapes `draw` paints, for drawing and for testing that no two icons look alike.
 pub fn shapes(center: Pos2, half: f32, icon: Icon, tier: u8, color: Color32) -> Vec<Shape> {
-    let stroke = Stroke::new((half / 5.0).clamp(1.0, 2.5), color);
-    let fill = Color32::from_black_alpha(150);
+    let stroke = Stroke::new((half / 4.5).clamp(1.2, 3.0), color);
+    // A dark shade of the team's color, so the outline stands out and the frame reads as the
+    // team's from a distance.
+    let fill = Color32::from_rgba_unmultiplied(color.r() / 5, color.g() / 5, color.b() / 5, 215);
     let mut out = Vec::new();
-    let half_width = match icon.frame() {
-        Frame::Commander => half * 1.5,
-        Frame::Land | Frame::Naval => half * 1.35,
-        Frame::Air | Frame::Structure => half,
-    };
-    match icon.frame() {
+    let frame = icon.frame();
+    let at = |x: f32, y: f32| center + Vec2::new(x * half, y * half);
+    match frame {
         Frame::Air => {
-            let points = vec![center + Vec2::new(0.0, -half * 1.15), center + Vec2::new(half * 1.25, 0.0), center + Vec2::new(0.0, half * 1.15), center + Vec2::new(-half * 1.25, 0.0)];
+            let points = vec![at(0.0, -1.15), at(1.3, 0.0), at(0.0, 1.15), at(-1.3, 0.0)];
             out.push(Shape::convex_polygon(points, fill, stroke));
         }
-        frame => {
+        Frame::Naval => {
+            // A hull from above, pointed at the bow and the stern.
+            let points = vec![at(-1.6, 0.0), at(-1.05, -1.0), at(1.05, -1.0), at(1.6, 0.0), at(1.05, 1.0), at(-1.05, 1.0)];
+            out.push(Shape::convex_polygon(points, fill, stroke));
+        }
+        Frame::Commander => {
+            out.push(Shape::circle_filled(center, half * 1.2, fill));
+            out.push(Shape::circle_stroke(center, half * 1.2, stroke));
+        }
+        Frame::Land | Frame::Structure => {
+            let half_width = if frame == Frame::Land { half * 1.45 } else { half };
             let rect = Rect::from_center_size(center, Vec2::new(half_width * 2.0, half * 2.0));
-            let rounding = if frame == Frame::Naval { Rounding { nw: 0.0, ne: 0.0, sw: half * 0.8, se: half * 0.8 } } else { Rounding::ZERO };
-            out.push(Shape::rect_filled(rect, rounding, fill));
-            out.push(Shape::rect_stroke(rect, rounding, stroke));
+            out.push(Shape::rect_filled(rect, Rounding::ZERO, fill));
+            out.push(Shape::rect_stroke(rect, Rounding::ZERO, stroke));
         }
     }
-    symbol(&mut out, center, half * 0.62, icon, stroke);
+    symbol(&mut out, center, half * 0.75, icon, stroke, true);
     // A dot for each tech level, beneath the frame.
-    let gap = (half * 0.42).max(3.0);
-    let radius = (half * 0.13).max(1.1);
-    let below = center.y + half * if icon.frame() == Frame::Air { 1.15 } else { 1.0 } + radius + 2.0;
+    let gap = (half * 0.5).max(3.0);
+    let radius = (half * 0.16).max(1.2);
+    let below = center.y + half * frame_reach(frame) + radius + 2.0;
     for index in 0..tier {
         let x = center.x + (f32::from(index) - f32::from(tier.saturating_sub(1)) * 0.5) * gap;
         out.push(Shape::circle_filled(Pos2::new(x, below), radius, color));
@@ -355,9 +383,11 @@ pub fn shapes(center: Pos2, half: f32, icon: Icon, tier: u8, color: Color32) -> 
     out
 }
 
-/// The symbol inside the frame, in a box `size` either way of `center`.
+/// The symbol inside the frame, in a box `size` either way of `center`. A ship's symbol draws
+/// its hull only when there is no frame, as on the build bar: in its frame, the frame is the hull,
+/// and its guns fill it.
 #[allow(clippy::too_many_lines)]
-fn symbol(out: &mut Vec<Shape>, center: Pos2, size: f32, icon: Icon, stroke: Stroke) {
+fn symbol(out: &mut Vec<Shape>, center: Pos2, size: f32, icon: Icon, stroke: Stroke, framed: bool) {
     let at = |x: f32, y: f32| center + Vec2::new(x * size, y * size);
     let line = |points: &[(f32, f32)]| Shape::line(points.iter().map(|&(x, y)| at(x, y)).collect(), stroke);
     let solid = |points: &[(f32, f32)]| Shape::convex_polygon(points.iter().map(|&(x, y)| at(x, y)).collect(), stroke.color, Stroke::NONE);
@@ -371,8 +401,13 @@ fn symbol(out: &mut Vec<Shape>, center: Pos2, size: f32, icon: Icon, stroke: Str
         });
         Shape::line(points.collect(), stroke)
     };
-    // A ship's hull from above the waterline.
+    // A ship's hull from above the waterline, and how far its guns are raised to clear it; in a
+    // frame, neither.
     let hull = [(-1.1, 0.25), (-0.8, 0.75), (0.8, 0.75), (1.1, 0.25)];
+    let (deck, mast) = if framed { (0.7_f32, -0.7_f32) } else { (0.25, -0.5) };
+    if !framed && icon.frame() == Frame::Naval && !matches!(icon, Icon::Submarine | Icon::MissileSubmarine) {
+        out.push(line(&hull));
+    }
     match icon {
         Icon::Commander => {
             out.push(ring(0.0, 0.0, 0.8));
@@ -391,7 +426,12 @@ fn symbol(out: &mut Vec<Shape>, center: Pos2, size: f32, icon: Icon, stroke: Str
             out.push(line(&[(-0.9, -0.8), (0.9, 0.8)]));
             out.push(line(&[(-0.9, 0.8), (0.9, -0.8)]));
         }
-        Icon::Tank => out.push(line(&[(-0.9, -0.5), (0.9, -0.5), (0.9, 0.5), (-0.9, 0.5), (-0.9, -0.5)])),
+        Icon::Tank => {
+            // A hull with a turret and a gun.
+            out.push(solid(&[(-0.95, 0.15), (0.95, 0.15), (0.8, 0.75), (-0.8, 0.75)]));
+            out.push(ring(-0.15, -0.3, 0.38));
+            out.push(line(&[(0.23, -0.3), (1.05, -0.3)]));
+        }
         Icon::AssaultHovercraft => {
             out.push(line(&[(-0.9, -0.7), (0.9, -0.7), (0.9, 0.1), (-0.9, 0.1), (-0.9, -0.7)]));
             out.push(line(&[(-0.9, 0.6), (-0.45, 0.35), (0.0, 0.6), (0.45, 0.35), (0.9, 0.6)]));
@@ -433,29 +473,20 @@ fn symbol(out: &mut Vec<Shape>, center: Pos2, size: f32, icon: Icon, stroke: Str
             out.push(line(&[(-0.75, 0.0), (0.75, 0.0)]));
             out.push(line(&[(0.0, -0.75), (0.0, 0.75)]));
         }
-        Icon::Frigate => {
-            out.push(line(&hull));
-            out.push(dot(0.0, -0.15, 0.22));
-        }
-        Icon::Destroyer => {
-            out.push(line(&hull));
-            out.push(line(&[(0.0, 0.25), (0.0, -0.45)]));
-        }
+        Icon::Frigate => out.push(dot(0.0, (deck + mast) / 2.0, if framed { 0.32 } else { 0.22 })),
+        Icon::Destroyer => out.push(line(&[(0.0, deck), (0.0, mast)])),
         Icon::Cruiser => {
-            out.push(line(&hull));
-            out.push(line(&[(-0.35, 0.25), (-0.35, -0.45)]));
-            out.push(line(&[(0.35, 0.25), (0.35, -0.45)]));
+            out.push(line(&[(-0.4, deck), (-0.4, mast)]));
+            out.push(line(&[(0.4, deck), (0.4, mast)]));
         }
         Icon::Battleship => {
-            out.push(line(&hull));
-            for x in [-0.55, 0.0, 0.55] {
-                out.push(line(&[(x, 0.25), (x, -0.6)]));
+            for x in [-0.6, 0.0, 0.6] {
+                out.push(line(&[(x, deck), (x, mast - 0.1)]));
             }
         }
         Icon::Battlecruiser => {
-            out.push(line(&hull));
-            out.push(line(&[(-0.6, 0.25), (-0.2, -0.6)]));
-            out.push(line(&[(0.1, 0.25), (0.5, -0.6)]));
+            out.push(line(&[(-0.65, deck), (-0.15, mast - 0.1)]));
+            out.push(line(&[(0.15, deck), (0.65, mast - 0.1)]));
         }
         Icon::Submarine => {
             out.push(line(&[(-1.0, 0.4), (-0.6, 0.0), (0.6, 0.0), (1.0, 0.4), (0.6, 0.8), (-0.6, 0.8), (-1.0, 0.4)]));
@@ -467,8 +498,9 @@ fn symbol(out: &mut Vec<Shape>, center: Pos2, size: f32, icon: Icon, stroke: Str
             out.push(line(&[(-0.35, -0.5), (0.0, -0.85), (0.35, -0.5)]));
         }
         Icon::EscortCorvette => {
-            out.push(line(&hull));
-            out.push(arc(0.0, 0.25, 0.75, 180.0, 360.0));
+            // A dome over the deck: it shields the fleet from missiles.
+            out.push(arc(0.0, deck, 0.8 + (deck - 0.25) * 0.4, 180.0, 360.0));
+            out.push(dot(0.0, deck - 0.2, 0.18));
         }
         Icon::LandFactory => {
             out.push(solid(&[(-0.85, -0.2), (0.85, -0.2), (0.85, 0.8), (-0.85, 0.8)]));
@@ -606,9 +638,10 @@ fn symbol(out: &mut Vec<Shape>, center: Pos2, size: f32, icon: Icon, stroke: Str
             out.push(ring(0.0, 0.0, 0.3));
         }
         Icon::TorpedoBoat => {
-            out.push(line(&hull));
-            out.push(line(&[(-0.6, -0.15), (0.45, -0.15)]));
-            out.push(line(&[(0.15, -0.45), (0.5, -0.15), (0.15, 0.15)]));
+            // A torpedo running ahead.
+            let y = if framed { 0.0 } else { -0.15 };
+            out.push(line(&[(-0.8, y), (0.6, y)]));
+            out.push(line(&[(0.2, y - 0.4), (0.65, y), (0.2, y + 0.4)]));
         }
         Icon::Wall => {
             // Courses of bricks.
@@ -654,6 +687,28 @@ mod tests {
         assert_ne!(Icon::for_key("t1_air_scout"), Icon::for_key("t1_interceptor"));
         let dots = |tier: u8| shapes(Pos2::ZERO, 10.0, Icon::Scout, tier, Color32::WHITE).len();
         assert_eq!(dots(3) - dots(1), 2);
+    }
+
+    /// Every unit's frame says what it is, by its outline alone: all aircraft one shape, all land
+    /// units another, all ships and submarines another, the command rigs another, and structures
+    /// another, whatever their symbols.
+    #[test]
+    fn every_unit_has_the_frame_of_its_kind() {
+        let db = crate::sim::blueprints::BlueprintDb::standard();
+        for def in db.iter().filter(|def| def.class != crate::sim::blueprints::UnitClass::Ammo) {
+            let expected = if def.is_commander() || def.key == "field_rig" {
+                Frame::Commander
+            } else if def.is_structure() {
+                Frame::Structure
+            } else if def.is_air() {
+                Frame::Air
+            } else if matches!(def.movement, crate::sim::components::MoveClass::Naval | crate::sim::components::MoveClass::Submarine) {
+                Frame::Naval
+            } else {
+                Frame::Land
+            };
+            assert_eq!(Icon::for_key(&def.key).frame(), expected, "{}", def.key);
+        }
     }
 
     #[test]
