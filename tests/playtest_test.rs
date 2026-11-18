@@ -26,7 +26,8 @@ fn blue_has_five_of_every_unit_and_no_commander_and_red_two_bases() {
     }
 }
 
-/// Left alone for ten minutes, the turtle builds and keeps everything that fights at home.
+/// Left alone for ten minutes, the turtle builds and keeps everything that fights at home, and
+/// both sides' shields stay up.
 #[test]
 fn the_turtle_builds_up_and_never_sets_out() {
     let scenario = playtest(1);
@@ -54,5 +55,12 @@ fn the_turtle_builds_up_and_never_sets_out() {
         }
     }
     assert!(world.match_result.is_none(), "with nothing to lose, the match goes on");
+    // Blue's power keeps every one of its shields up, and Red's its.
+    for &(_, entity) in &world.units {
+        if let Ok(shield) = world.ecs.get::<&sim_engine::sim::components::Shield>(entity) {
+            let team = world.ecs.get::<&UnitStats>(entity).unwrap().team;
+            assert!(shield.is_up(), "a {team:?} shield went down for want of energy");
+        }
+    }
     assert!(structures(&world) > before, "it should have built more");
 }

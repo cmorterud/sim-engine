@@ -70,6 +70,7 @@ pub fn playtest(seed: u64) -> Scenario {
     for (x, y) in [(60, 240), (60, 270), (80, 255), (100, 230), (100, 280)] {
         world.deposits.push((x, y));
     }
+    blue_power(&mut world);
     red_base(&mut world, RED_MAIN, true);
     red_base(&mut world, RED_OUTPOST, false);
     let commander = world.blueprints.id("command_rig");
@@ -82,6 +83,17 @@ pub fn playtest(seed: u64) -> Scenario {
     world.economies[Team::Red.index()].energy = crate::sim::blueprints::Res::from_num(RED_ENERGY);
     world.prepare_map();
     Scenario { world, opening_commands: Vec::new() }
+}
+
+/// Blue's power, behind its army: two T3 generators, far more than its shields and the rest
+/// draw, so that none of them goes down, and storage for the energy it starts with. With none,
+/// its mobile shields, corvettes, and walkers' and transports' shields wanted ten times what its
+/// field rigs make, and most collapsed in the first half minute.
+fn blue_power(world: &mut SimWorld) {
+    for (key, cell_x, cell_y) in [("power_generator_t3", 12, 228), ("power_generator_t3", 12, 238), ("energy_storage", 20, 230), ("energy_storage", 20, 240)] {
+        let blueprint = world.blueprints.id(key);
+        let _ = world.spawn_finished_structure(blueprint, Team::Blue, cell_x, cell_y);
+    }
 }
 
 /// A Red base round `center`, in cells, on the coast: a factory, generators and extractors, point
