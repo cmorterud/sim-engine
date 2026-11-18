@@ -1,0 +1,58 @@
+//! The playtest sandbox (README, Playtest): Blue has 5 of every unit and no commander, Red two
+//! coastal bases, which a turtling AI holds without ever setting out.
+
+use sim_engine::ai::{AiBrain, Difficulty};
+use sim_engine::math::fp::fp_int;
+use sim_engine::sim::blueprints::UnitClass;
+use sim_engine::sim::components::{Blueprinted, Builder, Team, UnitStats};
+use sim_engine::sim::playtest::playtest;
+
+#[test]
+fn blue_has_five_of_every_unit_and_no_commander_and_red_two_bases() {
+    let world = playtest(1).world;
+    let count = |team: Team, key: &str| {
+        world.units.iter().filter(|&&(_, entity)| {
+            world.ecs.get::<&UnitStats>(entity).unwrap().team == team && world.blueprints.get(world.ecs.get::<&Blueprinted>(entity).unwrap().0).key == key
+        }).count()
+    };
+    for def in world.blueprints.iter().filter(|def| !def.is_structure() && def.class != UnitClass::Ammo && def.speed > fp_int(0)) {
+        let expected = if def.is_commander() { 0 } else { 5 };
+        assert_eq!(count(Team::Blue, &def.key), expected, "Blue's {}", def.key);
+    }
+    assert!(world.commanders[Team::Blue.index()].is_none(), "Blue has no commander, so it cannot lose");
+    assert!(world.commanders[Team::Red.index()].is_some());
+    for (key, bases) in [("land_factory_t2", 2), ("shield_generator", 2), ("t1_torpedo_launcher", 4), ("naval_factory", 1)] {
+        assert_eq!(count(Team::Red, key), bases, "Red's {key}s");
+    }
+}
+
+/// Left alone for ten minutes, the turtle builds and keeps everything that fights at home.
+#[test]
+fn the_turtle_builds_up_and_never_sets_out() {
+    let scenario = playtest(1);
+    let mut world = scenario.world;
+    let mut red = AiBrain::with_difficulty(Team::Red, 1, world.starts, Difficulty::Turtle);
+    let structures = |world: &sim_engine::sim::world::SimWorld| world.units.iter().filter(|&&(_, entity)| {
+        let stats = world.ecs.get::<&UnitStats>(entity).unwrap();
+        stats.team == Team::Red && stats.is_structure
+    }).count();
+    let before = structures(&world);
+    let home = world.starts[Team::Red.index()];
+    let outpost = home + sim_engine::math::fp::Vec2Fp::new(fp_int(0), fp_int(5_200));
+    for _ in 0..6_000 {
+        let commands = red.think(&world);
+        world.advance_tick(&commands);
+        for &(_, entity) in &world.units {
+            let stats = *world.ecs.get::<&UnitStats>(entity).unwrap();
+            let builds = world.ecs.get::<&Builder>(entity).is_ok();
+            if stats.team != Team::Red || stats.is_structure || builds {
+                continue;
+            }
+            let at = world.ecs.get::<&sim_engine::sim::components::Position>(entity).unwrap().0.xy();
+            let near = |base: sim_engine::math::fp::Vec2Fp| (at.x - base.x).to_num::<f64>().hypot((at.y - base.y).to_num::<f64>()) < 3_000.0;
+            assert!(near(home) || near(outpost), "a Red unit set out, to {at:?}");
+        }
+    }
+    assert!(world.match_result.is_none(), "with nothing to lose, the match goes on");
+    assert!(structures(&world) > before, "it should have built more");
+}

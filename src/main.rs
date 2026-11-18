@@ -96,8 +96,11 @@ Usage: sim-engine [options]
   --seed <number>      Scenario seed
   --sound-check        Play each sound in turn, and exit
   --map <name>         Play on a map that comes with the game: highland or twin_passes,
-                       for any of the modes above
-  --ai <easy|normal>   How hard the AI opponent plays (default easy)
+                       for any of the modes above, or playtest: a sandbox with 5 of every
+                       unit and no commander, against two coastal bases that a turtling
+                       AI holds
+  --ai <easy|normal|turtle>  How the AI opponent plays (default easy; turtle in the
+                       playtest): turtle builds up and defends, and never attacks
   --watch              Watch the AI-vs-AI match the soak plays for --map and --seed,
                        seeing everything. V switches to Blue's or Red's sight, - and =
                        change the speed, and Space pauses
@@ -249,7 +252,7 @@ fn parse_options() -> Result<Option<Options>, String> {
             "--seed" => options.seed = Some(number("--seed", value("--seed")?)?),
             "--sound-check" => options.sound_check = true,
             "--map" => options.map = Some(PathBuf::from(value("--map")?)),
-            "--ai" => options.difficulty = Some(Difficulty::from_name(&value("--ai")?).ok_or("--ai needs easy or normal")?),
+            "--ai" => options.difficulty = Some(Difficulty::from_name(&value("--ai")?).ok_or("--ai needs easy, normal, or turtle")?),
             "--watch" => options.watch = true,
             "--view" => options.view = parse_view(&value("--view")?).ok_or("--view needs all, blue, or red")?,
             "--fog" => options.no_fog = !parse_switch(&value("--fog")?).ok_or("--fog needs on or off")?,
@@ -281,6 +284,7 @@ fn main() {
     let bundled = options.map.as_ref().and_then(|name| name.to_str()).and_then(sim_engine::sim::maps::bundled);
     let map_source = match &options.map {
         None => MapSource::Skirmish,
+        Some(name) if name.to_str() == Some("playtest") => MapSource::Playtest,
         Some(_) if bundled.is_some() => {
             let map = bundled.expect("just checked");
             let trees = map.scenery.iter().filter(|(kind, _)| *kind == sim_engine::sim::components::WreckKind::Tree).count();
@@ -288,7 +292,7 @@ fn main() {
             MapSource::Map(Arc::new(map))
         }
         Some(name) => {
-            println!("unknown map {}: the maps are highland and twin_passes", name.display());
+            println!("unknown map {}: the maps are highland and twin_passes, and the playtest sandbox", name.display());
             std::process::exit(1);
         }
     };
@@ -836,6 +840,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     let map_name = match &map_source {
         MapSource::Skirmish => "Skirmish".to_string(),
         MapSource::Map(map) => display_name(&map.name),
+        MapSource::Playtest => "Playtest".to_string(),
     };
     let fog = !options.no_fog;
     let scenario = make_scenario(seed, battle, &map_source, fog);
@@ -845,7 +850,8 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     let is_match = !battle;
     let autotest_seconds = options.autotest_seconds;
     let fast_forward = options.fast_forward;
-    let difficulty = options.difficulty.unwrap_or(Difficulty::Easy);
+    // The playtest sandbox is played against a turtle unless asked otherwise.
+    let difficulty = options.difficulty.unwrap_or(if matches!(map_source, MapSource::Playtest) { Difficulty::Turtle } else { Difficulty::Easy });
 
     let mut autotest = autotest_seconds.map(|seconds| Autotest::new(seconds, options.capture_dir.clone()));
     let source = match (autotest_seconds, battle) {

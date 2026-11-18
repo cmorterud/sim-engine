@@ -425,6 +425,10 @@ pub enum Difficulty {
     Easy,
     /// Everything it knows.
     Normal,
+    /// Builds up and defends, and never sets out: no waves, no fleet or bombers sent at the
+    /// enemy, no drops or missiles. More point defenses. For playtesting against a base that
+    /// holds.
+    Turtle,
 }
 
 impl Difficulty {
@@ -433,6 +437,7 @@ impl Difficulty {
         match name {
             "easy" => Some(Self::Easy),
             "normal" => Some(Self::Normal),
+            "turtle" => Some(Self::Turtle),
             _ => None,
         }
     }
@@ -458,6 +463,7 @@ impl Difficulty {
                 discharge: false,
                 enhancements: false,
                 transports: false,
+                attacks: true,
             },
             Self::Normal => Skill {
                 think_interval: THINK_INTERVAL,
@@ -477,6 +483,16 @@ impl Difficulty {
                 discharge: true,
                 enhancements: true,
                 transports: true,
+                attacks: true,
+            },
+            Self::Turtle => Skill {
+                max_point_defenses: MAX_POINT_DEFENSES * 3,
+                first_attack_tick: u32::MAX,
+                commander_push_ticks: u32::MAX,
+                missiles: false,
+                transports: false,
+                attacks: false,
+                ..Self::Normal.skill()
             },
         }
     }
@@ -511,6 +527,9 @@ struct Skill {
     enhancements: bool,
     /// Whether it drops raiders by transport.
     transports: bool,
+    /// Whether it ever sends its army, fleet, or bombers at the enemy, beyond meeting what comes
+    /// near home.
+    attacks: bool,
 }
 
 pub struct AiBrain {
@@ -1507,7 +1526,7 @@ impl AiBrain {
             commands.push(SimCommand::AttackMove { units: forces.idle_naval.clone(), goal: enemy.position });
             return;
         }
-        if forces.idle_naval.len() < self.fleet_size {
+        if forces.idle_naval.len() < self.fleet_size || !self.skill.attacks {
             return;
         }
         let Some(goal) = plan.enemy_water else {
@@ -1628,13 +1647,18 @@ impl AiBrain {
         if forces.idle_strike.len() < self.air_wave_size {
             return;
         }
-        // Structures first, which cannot dodge, then anything else on the ground.
+        // Structures first, which cannot dodge, then anything else on the ground; only near home
+        // for one that never attacks.
+        let defend = fp_int(DEFEND_RADIUS_UNITS);
         let target = sightings
             .iter()
             .filter(|enemy| !enemy.is_air)
+            .filter(|enemy| self.skill.attacks || enemy.position.distance_squared(&self.home) <= wide_mul(defend, defend))
             .min_by_key(|enemy| (!enemy.is_structure, enemy.position.distance_squared(&self.home), enemy.id))
             .map(|enemy| enemy.position);
-        let goal = target.unwrap_or_else(|| self.search_point(world, false));
+        let Some(goal) = target.or_else(|| self.skill.attacks.then(|| self.search_point(world, false))) else {
+            return;
+        };
         commands.push(SimCommand::AttackMove { units: forces.idle_strike.clone(), goal });
         commands.push(SimCommand::QueueMove { units: forces.idle_strike.clone(), goal: self.home, attack: false });
         self.air_wave_size = (self.air_wave_size + 2).min(LARGEST_AIR_WAVE);
@@ -1883,7 +1907,7 @@ impl AiBrain {
             commands.push(SimCommand::AttackMove { units: forces.idle_combat.clone(), goal: at });
             return;
         }
-        if world.current_tick < self.skill.first_attack_tick {
+        if world.current_tick < self.skill.first_attack_tick || !self.skill.attacks {
             return;
         }
         let gathered = forces.idle_combat.len();
