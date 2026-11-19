@@ -438,8 +438,8 @@ impl SimWorld {
             self.aircraft.push((id, entity));
         }
         match unit.weapon.map(|weapon| weapon.targets) {
-            Some(Targets::Air) => self.ecs.insert_one(entity, AntiAir { also_ground: false }).expect("entity was just spawned"),
-            Some(Targets::Both) => self.ecs.insert_one(entity, AntiAir { also_ground: true }).expect("entity was just spawned"),
+            Some(Targets::Air) => self.ecs.insert_one(entity, AntiAir { also_ground: false, flak: unit.weapon.is_some_and(|weapon| weapon.kind == WeaponKind::Flak) }).expect("entity was just spawned"),
+            Some(Targets::Both) => self.ecs.insert_one(entity, AntiAir { also_ground: true, flak: unit.weapon.is_some_and(|weapon| weapon.kind == WeaponKind::Flak) }).expect("entity was just spawned"),
             Some(Targets::Naval) => self.ecs.insert_one(entity, super::components::Torpedo).expect("entity was just spawned"),
             Some(Targets::Ground) | None => {}
         }
@@ -459,6 +459,7 @@ impl SimWorld {
                     splash: weapon.splash_radius,
                     hits_air: matches!(weapon.targets, Targets::Air | Targets::Both),
                     hits_ground: matches!(weapon.targets, Targets::Ground | Targets::Both),
+                    flak: weapon.kind == WeaponKind::Flak,
                     torpedo: weapon.targets == Targets::Naval,
                     missile_height: (weapon.kind == WeaponKind::TacticalMissile).then_some(weapon.cruise_height),
                     target: None,

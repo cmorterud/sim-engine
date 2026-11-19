@@ -386,15 +386,21 @@ fn gunships_hover_over_what_they_attack() {
 fn flak_bursts_hit_every_enemy_aircraft_around_it() {
     let mut world = world();
     let flak = world.spawn_finished_structure(world.blueprints.id("t2_flak"), Team::Blue, 125, 125).unwrap();
-    // Three scouts flying close together over the cannon.
-    let scouts: Vec<SimId> = (0..3).map(|index| spawn(&mut world, "t1_air_scout", Team::Red, point(3_000 + index * 15, 2_510))).collect();
-    world.advance_tick(&[SimCommand::Follow { units: scouts.clone(), target: flak }]);
-    let first = (0..300).find(|_| {
+    // Without its scatter, so that the burst is where it was aimed.
+    let entity = world.unit_entity(flak).unwrap();
+    world.ecs.get::<&mut sim_engine::sim::components::Scatter>(entity).unwrap().0 = Fp::ZERO;
+    // Three gunships hovering close together over what they attack, beside the cannon: hovering,
+    // they are where flak expects them.
+    let target = spawn(&mut world, "t1_engineer", Team::Blue, point(2_700, 2_500));
+    let gunships: Vec<SimId> = (0..3).map(|index| spawn(&mut world, "t2_gunship", Team::Red, point(2_000 + index * 20, 2_000))).collect();
+    world.advance_tick(&[SimCommand::Attack { units: gunships.clone(), target }]);
+    let full = |world: &SimWorld, id: SimId| world.unit_health(id) == Some(world.blueprints.get(world.blueprints.id("t2_gunship")).health);
+    let first = (0..600).find(|_| {
         world.advance_tick(&[]);
-        scouts.iter().any(|&scout| world.unit_health(scout).is_none())
+        gunships.iter().any(|&gunship| !full(&world, gunship))
     });
     assert!(first.is_some(), "the cannon should hit them");
-    assert!(scouts.iter().all(|&scout| world.unit_health(scout).is_none()), "one burst takes all three");
+    assert!(gunships.iter().all(|&gunship| !full(&world, gunship)), "one burst hits all three");
 }
 
 #[test]

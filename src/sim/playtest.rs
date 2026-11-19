@@ -1,6 +1,7 @@
 //! A sandbox for trying units out (README, Playtest): 5 of every unit for Blue, with no commander,
 //! so that there is nothing to lose, on a map that is land to the west and sea to the east, with
-//! two Red bases on the coast between, which a turtling AI keeps and defends.
+//! two Red bases on the coast between, which a turtling AI keeps and defends, and a range of Red
+//! anti-air of each tech level to fly over.
 
 use crate::math::fp::{fp_int, Fp, Vec2Fp};
 
@@ -32,6 +33,16 @@ const RED_OUTPOST: (u32, u32) = (215, 385);
 /// of its generators' income.
 const BLUE_MASS: i64 = 100_000;
 const BLUE_ENERGY: i64 = 5_000_000;
+/// Red's anti-air range, along the south edge of the land, away from both bases and Blue's
+/// army: a row of each tech level, west to east, about 2 km apart, so that each can be flown
+/// over alone, in cells.
+const RANGE_ROWS: [(&str, u32, u32); 3] = [("t1_aa_turret", 30, 40), ("t2_flak", 120, 40), ("t3_sam", 220, 40)];
+/// How many of each row, and how far apart, in cells.
+const RANGE_COUNT: u32 = 4;
+const RANGE_GAP: u32 = 5;
+/// Red's two cruisers, the fleet's anti-air, offshore near its main base, which the turtle keeps
+/// them by, and out of reach of Blue's fleet, which their cruise missiles would otherwise go for.
+const RED_CRUISERS: [(i32, i32); 2] = [(5_800, 4_200), (5_800, 4_500)];
 const RED_MASS: i64 = 2_000;
 const RED_ENERGY: i64 = 20_000;
 
@@ -77,6 +88,7 @@ pub fn playtest(seed: u64) -> Scenario {
     blue_power(&mut world);
     red_base(&mut world, RED_MAIN, true);
     red_base(&mut world, RED_OUTPOST, false);
+    anti_air_range(&mut world);
     let commander = world.blueprints.id("command_rig");
     world.spawn_mobile(commander, Team::Red, world.starts[1]);
     blue_army(&mut world);
@@ -149,6 +161,21 @@ fn red_base(world: &mut SimWorld, center: (u32, u32), main: bool) {
         place(world, "air_factory", -16, 14);
         place(world, "naval_factory", (SEA_FROM / TERRAIN_CELL_UNITS) - cx + 14, -2);
         place(world, "t2_artillery", -8, -14);
+    }
+}
+
+/// Red's anti-air range: T1 turrets, flak, and SAMs in rows, and cruisers offshore, for trying
+/// each kind of aircraft against each tech level of anti-air.
+fn anti_air_range(world: &mut SimWorld) {
+    for (key, cell_x, cell_y) in RANGE_ROWS {
+        let blueprint = world.blueprints.id(key);
+        for index in 0..RANGE_COUNT {
+            let _ = world.spawn_finished_structure(blueprint, Team::Red, cell_x + index * RANGE_GAP, cell_y);
+        }
+    }
+    let cruiser = world.blueprints.id("t2_cruiser");
+    for (x, y) in RED_CRUISERS {
+        world.spawn_mobile(cruiser, Team::Red, point(x, y));
     }
 }
 

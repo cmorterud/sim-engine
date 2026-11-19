@@ -274,6 +274,7 @@ pub fn item_details(db: &BlueprintDb, blueprint: BlueprintId) -> String {
         let seconds = f64::from(weapon.reload_ticks) / TICKS_PER_SECOND as f64;
         let aims = match (weapon.kind, weapon.targets) {
             (WeaponKind::Bomb, _) => ", bombs ground targets",
+            (WeaponKind::Flak, _) => ", flak at aircraft only",
             (_, Targets::Air) => ", at aircraft only",
             (_, Targets::Both) => ", at aircraft and ground",
             (WeaponKind::TacticalMissile | WeaponKind::StrategicMissile, _) => ", fires on order",

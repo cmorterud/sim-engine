@@ -140,6 +140,11 @@ pub enum WeaponKind {
     StrategicMissile,
     /// A bomb, dropped from an aircraft as it passes over its target.
     Bomb,
+    /// A flak shell: fired at where an aircraft will be if it keeps its course, it flies there
+    /// straight and bursts, hitting every enemy aircraft within its blast. It does not steer,
+    /// and the faster the aircraft and the longer the flight, the wider it scatters
+    /// (`FLAK_LEAD_ERROR`), so that slow aircraft are caught and fast ones mostly are not.
+    Flak,
     /// A gravity beam (GAME_SPECIFICATION.md §12): it lifts an enemy land unit, holds it, and
     /// crushes it once `crush_ticks` have passed.
     Tractor,
@@ -925,6 +930,7 @@ impl BlueprintDb {
                         Some("tactical_missile") => WeaponKind::TacticalMissile,
                         Some("strategic_missile") => WeaponKind::StrategicMissile,
                         Some("bomb") => WeaponKind::Bomb,
+                        Some("flak") => WeaponKind::Flak,
                         Some("tractor") => WeaponKind::Tractor,
                         Some(other) => return Err(context(format!("unknown weapon kind {other:?}"))),
                     },

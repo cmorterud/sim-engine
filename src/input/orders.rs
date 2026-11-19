@@ -36,7 +36,7 @@ fn sort_selection(selected: &[SimId], units: &[UnitView], blueprints: &Blueprint
         }
         let blueprint = blueprints.get(BlueprintId(unit.blueprint));
         // A missile launcher fires only on order, so a right-click on an enemy is one.
-        if blueprint.weapon.is_some_and(|weapon| weapon.kind != WeaponKind::Shell) {
+        if blueprint.weapon.is_some_and(|weapon| !matches!(weapon.kind, WeaponKind::Shell | WeaponKind::Flak)) {
             parts.armed.push(*id);
         }
         // A factory that moves, the missile submarine, which builds its own missiles, is a

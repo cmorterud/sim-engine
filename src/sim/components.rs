@@ -342,6 +342,8 @@ pub struct ExtraWeapon {
     pub splash: Fp,
     pub hits_air: bool,
     pub hits_ground: bool,
+    /// Flak, which bursts where it was aimed, at aircraft.
+    pub flak: bool,
     /// A torpedo: ships and submarines only.
     pub torpedo: bool,
     /// Cruise missiles, which pick their own targets, fly at this height, and need none built.
@@ -374,7 +376,13 @@ pub struct Scatter(pub Fp);
 pub struct AntiAir {
     /// Whether it can also hit what is on the ground.
     pub also_ground: bool,
+    /// Its shots are flak (`WeaponKind::Flak`), which burst where they were aimed.
+    pub flak: bool,
 }
+
+/// A flak shell, flying straight to where it bursts as its lifetime runs out.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Fused;
 
 /// A torpedo weapon: it hits ships and submarines, and nothing else.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

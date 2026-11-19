@@ -79,6 +79,12 @@ const UNREACHABLE_CHASE_TICKS: u32 = 300;
 const GROUND_AIM_DEPTH: Fp = Fp::from_bits(256);
 /// Long enough for a bomb to fall from any aircraft's height.
 const BOMB_LIFETIME_TICKS: u32 = 100;
+/// How wide flak scatters for the aircraft it is aimed at: on top of its weapon's spread, an
+/// eighth of how far the aircraft flies while the shell is in the air. A strategic bomber at 40
+/// a tick, 25 ticks off, gets 125 more; a gunship hovering over its target, none.
+const FLAK_LEAD_ERROR: i32 = 12;
+/// The longest a flak shell flies before it bursts, if it can never catch its aircraft.
+const FLAK_MAX_TICKS: u32 = 60;
 
 /// Settings for spawning a unit.
 #[derive(Copy, Clone, Debug)]
@@ -528,6 +534,8 @@ struct PendingShot {
     stun: u32,
     /// A shell aims where this unit will be when it arrives (§7.1, Leading Shots).
     lead: Option<hecs::Entity>,
+    /// Flak, which flies straight to where it is aimed and bursts there.
+    fused: bool,
 }
 
 /// What a launcher gives the missile it fires.
@@ -2160,6 +2168,7 @@ impl SimWorld {
             // Under the water, only torpedoes and missiles can be fired.
             let can_fire = !me.is_sub || torpedo || launcher.is_some();
             let hits_air = anti_air.is_some() && !torpedo;
+            let flak = anti_air.is_some_and(|anti_air| anti_air.flak);
             let hits_ground = anti_air.is_none_or(|anti_air| anti_air.also_ground) && !torpedo;
             let can_hit = |entry: &super::spatial::GridEntry| {
                 // A tractor beam lifts only what moves on land.
@@ -2349,6 +2358,7 @@ impl SimWorld {
                             underwater: false,
                             stun: 0,
                             lead: Some(entry.entity),
+                            fused: false,
                         });
                         weapon.ticks_until_ready = weapon.def.reload_ticks;
                         finished_discharges.push(id);
@@ -2389,9 +2399,12 @@ impl SimWorld {
                 if let Some(target) = combat.target {
                     let entry = locate(target).expect("target was just validated or found");
                     let (from, to) = (raw(me.x, me.y, muzzle), raw(entry.x, entry.y, entry.z));
-                    let homing = (entry.is_air || torpedo).then_some(target);
+                    // Shots at aircraft steer themselves to them, but flak, which bursts where it
+                    // was aimed.
+                    let fused = flak && entry.is_air;
+                    let homing = ((entry.is_air && !fused) || torpedo).then_some(target);
                     // Missiles, bombs and shots at aircraft are never blocked by the ground.
-                    let direct = missile.is_none() && homing.is_none() && bomb.is_none() && tractor.is_none();
+                    let direct = missile.is_none() && homing.is_none() && bomb.is_none() && tractor.is_none() && !fused;
                     let clear = !direct || shot_is_clear(terrain, from, to, combat.projectile_speed);
                     // A target the player ordered is walked closer to until the shot is clear, rather
                     // than shelling the ground in the way. Artillery lobs over most of it, and fires.
@@ -2432,6 +2445,7 @@ impl SimWorld {
                             // Every shell leads, artillery's too. Bombs, shots that home, and cruise missiles, which fly to
                             // where the target was at launch, do not.
                             lead: (missile.is_none() && homing.is_none() && bomb.is_none()).then_some(entry.entity),
+                            fused,
                         });
                         economies[stats.team.index()].energy -= weapon_energy;
                         combat.ticks_until_ready = reload;
@@ -2483,6 +2497,7 @@ impl SimWorld {
                         underwater: false,
                         stun,
                         lead: None,
+                        fused: false,
                     });
                     economies[stats.team.index()].energy -= weapon_energy;
                     combat.ticks_until_ready = reload;
@@ -2575,14 +2590,15 @@ impl SimWorld {
                     let from = raw(me.x, me.y, muzzle);
                     let (to, homing) = match (spot, target) {
                         (Some(spot), _) => (Vec3Fp::new(spot.x, spot.y, terrain.height_at(spot) - GROUND_AIM_DEPTH), None),
-                        (None, Some(entry)) => (raw(entry.x, entry.y, entry.z), (entry.is_air || weapon.torpedo).then_some(entry.id)),
+                        (None, Some(entry)) => (raw(entry.x, entry.y, entry.z), ((entry.is_air && !weapon.flak) || weapon.torpedo).then_some(entry.id)),
                         (None, None) => continue,
                     };
                     // Missiles fly over the ground. A shell the ground would stop is not fired, and
                     // the weapon looks again.
                     let missile = weapon.missile_height.map(|cruise_height| MissileShot { cruise_height, strategic: false, inner_radius: Fp::ZERO, inner_damage: Fp::ZERO });
                     let homing = if missile.is_some() { None } else { homing };
-                    if missile.is_none() && homing.is_none() && spot.is_none() && !shot_is_clear(terrain, from, to, weapon.projectile_speed) {
+                    let fused = weapon.flak && spot.is_none() && target.is_some_and(|entry| entry.is_air);
+                    if missile.is_none() && homing.is_none() && spot.is_none() && !fused && !shot_is_clear(terrain, from, to, weapon.projectile_speed) {
                         weapon.target = None;
                         continue;
                     }
@@ -2605,6 +2621,7 @@ impl SimWorld {
                             (None, Some(entry)) if missile.is_none() && homing.is_none() => Some(entry.entity),
                             _ => None,
                         },
+                        fused,
                     });
                     weapon.ticks_until_ready = weapon.reload_ticks;
                 }
@@ -2691,20 +2708,40 @@ impl SimWorld {
                 continue;
             }
             // A shell aims where its target will be when it arrives.
-            let aim = match shot.lead.and_then(|target| self.ecs.get::<&Velocity>(target).ok().map(|velocity| velocity.0)) {
-                Some(velocity) => {
+            let target_velocity = shot.lead.and_then(|target| self.ecs.get::<&Velocity>(target).ok().map(|velocity| velocity.0));
+            // Flak flies straight, in three dimensions, to where the aircraft meets it.
+            let flak_ticks = shot.fused.then(|| super::combat::intercept_ticks(shot.from, shot.to, target_velocity.unwrap_or(Vec3Fp::ZERO), shot.speed, FLAK_MAX_TICKS));
+            let aim = match (flak_ticks, target_velocity) {
+                (Some(ticks), Some(velocity)) => {
+                    let ahead = |value: Fp| Fp::from_bits((i64::from(value.to_bits()) * i64::from(ticks)).clamp(i64::from(i32::MIN / 2), i64::from(i32::MAX / 2)) as i32);
+                    let terrain = &self.terrain;
+                    let surface = |at: Vec2Fp| terrain.height_at(at).max(terrain.water_level());
+                    let (x, y) = (shot.to.x + ahead(velocity.x), shot.to.y + ahead(velocity.y));
+                    Vec3Fp::new(x, y, surface(Vec2Fp::new(x, y)) + (shot.to.z - surface(shot.to.xy())))
+                }
+                (Some(_), None) => shot.to,
+                (None, Some(velocity)) => {
                     let terrain = &self.terrain;
                     super::combat::lead_point(shot.from, shot.to, velocity, shot.speed, |at| terrain.height_at(at).max(terrain.water_level()))
                 }
-                None => shot.to,
+                (None, None) => shot.to,
+            };
+            // Flak scatters the more, the faster the aircraft and the longer the shell is in the
+            // air: the guess at where it will be is only as good as its course is steady.
+            let spread = match (flak_ticks, target_velocity) {
+                (Some(ticks), Some(velocity)) => {
+                    let speed = sqrt_wide(velocity.xy().length_squared());
+                    shot.spread + speed * i32::try_from(ticks).unwrap_or(i32::MAX) / FLAK_LEAD_ERROR
+                }
+                _ => shot.spread,
             };
             // A shell with a spread, artillery's or a scattering gun's, lands somewhere within it of
             // where it was aimed.
-            let to = if shot.spread > Fp::ZERO {
+            let to = if spread > Fp::ZERO {
                 let stream = &mut self.scatter_rngs[shot.team.index()];
                 loop {
-                    let (x, y) = (stream.range_fp(-shot.spread, shot.spread), stream.range_fp(-shot.spread, shot.spread));
-                    if wide_mul(x, x) + wide_mul(y, y) <= wide_mul(shot.spread, shot.spread) {
+                    let (x, y) = (stream.range_fp(-spread, spread), stream.range_fp(-spread, spread));
+                    if wide_mul(x, x) + wide_mul(y, y) <= wide_mul(spread, spread) {
                         let (x, y) = if shot.team == Team::Red { (-x, -y) } else { (x, y) };
                         break Vec3Fp::new(aim.x + x, aim.y + y, aim.z);
                     }
@@ -2712,6 +2749,24 @@ impl SimWorld {
             } else {
                 aim
             };
+            // Flak flies straight to where it was aimed, and bursts there.
+            if let Some(ticks) = flak_ticks {
+                let offset = to - shot.from;
+                let ticks = i32::try_from(ticks).unwrap_or(1).max(1);
+                let projectile = Projectile {
+                    velocity: Vec3Fp::new(offset.x / ticks, offset.y / ticks, offset.z / ticks),
+                    damage: shot.damage,
+                    source: shot.source,
+                    source_team: shot.team,
+                    lifetime_ticks: ticks as u32,
+                    splash_radius: shot.splash,
+                    allied_safe_ticks: 0,
+                };
+                let id = self.spawn_projectile(shot.from, projectile);
+                let entity = self.projectiles.last().filter(|last| last.0 == id).expect("just spawned").1;
+                self.ecs.insert_one(entity, super::components::Fused).expect("just spawned");
+                continue;
+            }
             let solution = firing_solution(shot.from, to, shot.speed);
             let projectile = self.spawn_projectile(
                 shot.from,
@@ -2884,16 +2939,40 @@ impl SimWorld {
         self.pending_stuns.clear();
         let units = &self.units;
         let stuns = &mut self.pending_stuns;
-        let mut query = self.ecs.query_mut::<(&mut Position, &mut Projectile, Option<&Discharged>, Option<&Missile>, Option<&Homing>, Option<&Falling>, Option<&Stunning>)>();
+        let mut query = self.ecs.query_mut::<(&mut Position, &mut Projectile, Option<&Discharged>, Option<&Missile>, Option<&Homing>, Option<&Falling>, Option<&Stunning>, Option<&super::components::Fused>)>();
         let mut view = query.view();
         for &(id, entity) in &self.projectiles {
             if shot_down.binary_search(&id).is_ok() {
                 dead.push(id);
                 continue;
             }
-            let (position, projectile, discharged, missile, homing, falling, stunning) = view.get_mut(entity).expect("projectile list only holds live projectiles");
+            let (position, projectile, discharged, missile, homing, falling, stunning, fused) = view.get_mut(entity).expect("projectile list only holds live projectiles");
             let stun = stunning.map_or(0, |stunning| stunning.0);
             let start = position.0;
+            // Flak flies straight on, and bursts where it was aimed, hitting every enemy aircraft
+            // within its blast of where it bursts.
+            if fused.is_some() {
+                position.0 = start + projectile.velocity;
+                projectile.lifetime_ticks = projectile.lifetime_ticks.saturating_sub(1);
+                if projectile.lifetime_ticks == 0 {
+                    let at = position.0;
+                    let (x, y, z) = (at.x.to_bits(), at.y.to_bits(), at.z.to_bits());
+                    let reach = i64::from(projectile.splash_radius.to_bits());
+                    let (damage, source) = (projectile.damage, projectile.source);
+                    grid.for_each_candidate(Some(projectile.source_team.enemy()), Layer::Air, x, y, projectile.splash_radius.to_bits() + max_mobile, |other| {
+                        if !other.is_air {
+                            return;
+                        }
+                        let (dx, dy, dz) = (i64::from(other.x - x), i64::from(other.y - y), i64::from(other.z - z));
+                        let within = reach + i64::from(other.radius);
+                        if dx * dx + dy * dy + dz * dz <= within * within {
+                            hits.push((other.entity, damage, Some(source)));
+                        }
+                    });
+                    dead.push(id);
+                }
+                continue;
+            }
             // A shot at an aircraft flies to it and hits only it. With the aircraft gone, it is spent.
             if let Some(homing) = homing {
                 projectile.lifetime_ticks = projectile.lifetime_ticks.saturating_sub(1);

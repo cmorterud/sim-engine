@@ -24,6 +24,11 @@ fn blue_has_five_of_every_unit_and_no_commander_and_red_two_bases() {
     for (key, bases) in [("land_factory_t2", 2), ("shield_generator", 2), ("t1_torpedo_launcher", 4), ("naval_factory", 1)] {
         assert_eq!(count(Team::Red, key), bases, "Red's {key}s");
     }
+    // And its anti-air range, a row of each tech level, beside what its bases have, and two
+    // cruisers offshore.
+    for (key, all) in [("t1_aa_turret", 4 + 4), ("t2_flak", 4 + 2), ("t3_sam", 4), ("t2_cruiser", 2)] {
+        assert_eq!(count(Team::Red, key), all, "Red's {key}s");
+    }
 }
 
 /// Blue can afford a strategic missile launcher and nuclear missiles for it.

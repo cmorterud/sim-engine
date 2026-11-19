@@ -54,6 +54,23 @@ pub fn lead_point(from: Vec3Fp, to: Vec3Fp, velocity: Vec3Fp, horizontal_speed: 
     Vec3Fp::new(aim.x, aim.y, surface(aim.xy()) + height)
 }
 
+/// How many ticks a shell flying straight at `speed` a tick, in three dimensions, from `from`
+/// takes to meet a target now at `to` that moves on at `velocity` a tick: the first tick by which
+/// it can reach where the target will be. If it never can within `most`, `most`.
+pub fn intercept_ticks(from: Vec3Fp, to: Vec3Fp, velocity: Vec3Fp, speed: Fp, most: u32) -> u32 {
+    let raw = |value: Fp| i128::from(value.to_bits());
+    let (dx, dy, dz) = (raw(to.x) - raw(from.x), raw(to.y) - raw(from.y), raw(to.z) - raw(from.z));
+    let (vx, vy, vz) = (raw(velocity.x), raw(velocity.y), raw(velocity.z));
+    let speed = raw(speed).max(1);
+    (1..=most)
+        .find(|&ticks| {
+            let t = i128::from(ticks);
+            let (x, y, z) = (dx + vx * t, dy + vy * t, dz + vz * t);
+            x * x + y * y + z * z <= speed * speed * t * t
+        })
+        .unwrap_or(most)
+}
+
 /// A segment's closest approach to a sphere around `(x, y, z)`. Returns how far along
 /// the segment that happens, as raw `Fp` from 0 to 1, if it is within `radius`.
 pub fn segment_hit(start: Vec3Fp, step: Vec3Fp, x: i32, y: i32, z: i32, radius: i32) -> Option<i32> {
