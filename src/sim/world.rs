@@ -5,7 +5,7 @@ use twox_hash::XxHash64;
 
 use super::blueprints::{BlueprintDb, Res, UnitClass};
 use super::air::{bomb_lands_on, BOMB_GRAVITY};
-use super::combat::{entry_hit, firing_solution, missile_velocity, probe_terrain, shot_is_clear, sphere_entry, GRAVITY};
+use super::combat::{entry_hit, firing_solution_within, missile_velocity, probe_terrain, shot_is_clear, sphere_entry, GRAVITY};
 use super::commands::SimCommand;
 use super::components::{BuildTask, AntiAir, Artillery, BombBay, Falling, Flight, Homing,
     Blueprinted, Builder, Combat, Construction, Factory, Footprint, Health, MoveClass, Order, OrderKind, OrderQueue, Patrol,
@@ -2726,6 +2726,7 @@ impl SimWorld {
             let turn = shot.lead.and_then(|target| self.ecs.get::<&super::components::Flight>(target).ok().map(|flight| flight.turn)).unwrap_or(Vec2Fp::new(Fp::ONE, Fp::ZERO));
             let meeting = shot.fused.then(|| super::combat::intercept(shot.from, shot.to, target_velocity.unwrap_or(Vec3Fp::ZERO), turn, shot.speed, FLAK_MAX_TICKS));
             let flak_ticks = meeting.map(|(ticks, _)| ticks);
+            let mut least_ticks = 1;
             let aim = match (meeting, target_velocity) {
                 (Some((_, at)), Some(_)) => {
                     let terrain = &self.terrain;
@@ -2735,7 +2736,9 @@ impl SimWorld {
                 (Some(_), None) => shot.to,
                 (None, Some(velocity)) => {
                     let terrain = &self.terrain;
-                    super::combat::lead_point(shot.from, shot.to, velocity, shot.speed, |at| terrain.height_at(at).max(terrain.water_level()))
+                    let (aim, ticks) = super::combat::lead_point(shot.from, shot.to, velocity, shot.speed, |at| terrain.height_at(at).max(terrain.water_level()));
+                    least_ticks = ticks;
+                    aim
                 }
                 (None, None) => shot.to,
             };
@@ -2780,7 +2783,7 @@ impl SimWorld {
                 self.ecs.insert_one(entity, super::components::Fused).expect("just spawned");
                 continue;
             }
-            let solution = firing_solution(shot.from, to, shot.speed);
+            let solution = firing_solution_within(shot.from, to, shot.speed, least_ticks);
             let projectile = self.spawn_projectile(
                 shot.from,
                 Projectile {

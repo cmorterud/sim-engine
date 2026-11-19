@@ -20,10 +20,16 @@ pub struct FiringSolution {
 /// Solves the ballistic arc from `from` to `to`, with no trigonometry. Under
 /// `P += V; Vz -= g`, the height after `t` ticks is `Vz * t - g * t * (t - 1) / 2`.
 pub fn firing_solution(from: Vec3Fp, to: Vec3Fp, horizontal_speed: Fp) -> FiringSolution {
+    firing_solution_within(from, to, horizontal_speed, 1)
+}
+
+/// As `firing_solution`, but taking no fewer than `least` ticks, so that a shell can arrive just
+/// as a target coming on does, flying a little slower than it could.
+pub fn firing_solution_within(from: Vec3Fp, to: Vec3Fp, horizontal_speed: Fp, least: u32) -> FiringSolution {
     let delta = to - from;
     let distance = sqrt_wide(delta.xy().length_squared()).to_bits() as i64;
     let speed = i64::from(horizontal_speed.to_bits()).max(1);
-    let ticks = ((distance + speed - 1) / speed).max(1);
+    let ticks = ((distance + speed - 1) / speed).max(i64::from(least)).max(1);
     let divide = |raw: i32| Fp::from_bits((i64::from(raw) / ticks) as i32);
     let arc = (i64::from(GRAVITY_RAW) * (ticks - 1)) / 2;
     FiringSolution {
@@ -37,22 +43,37 @@ pub fn firing_solution(from: Vec3Fp, to: Vec3Fp, horizontal_speed: Fp) -> Firing
 }
 
 /// Where to aim a shell so that it meets a target moving at `velocity` a tick (GAME_SPECIFICATION.md
-/// §7.1, Leading Shots): where the target will be once the shell has flown there, refined twice,
-/// since a farther point takes longer to reach. Only the ground position leads; the height keeps
-/// the target's height over the surface beneath it, given by `surface`.
-pub fn lead_point(from: Vec3Fp, to: Vec3Fp, velocity: Vec3Fp, horizontal_speed: Fp, surface: impl Fn(Vec2Fp) -> Fp) -> Vec3Fp {
+/// §7.1, Leading Shots): the first point along the target's course that the shell can reach by
+/// the time the target gets there. The shell moves first on the tick it is fired, after the
+/// target has, so by its `t`th move the target has moved `t - 1` times. Only the ground position
+/// leads; the height keeps the target's height over the surface beneath it, given by `surface`.
+/// A target the shell could never catch within `LEAD_MAX_TICKS` is aimed at where it will be then.
+/// Returns the point and the ticks the shell should take to get there, which, against a target
+/// coming on, can be a little more than it needs, so that it does not arrive early.
+pub fn lead_point(from: Vec3Fp, to: Vec3Fp, velocity: Vec3Fp, horizontal_speed: Fp, surface: impl Fn(Vec2Fp) -> Fp) -> (Vec3Fp, u32) {
     if velocity.x == Fp::ZERO && velocity.y == Fp::ZERO {
-        return to;
+        return (to, 1);
     }
-    let ahead = |value: Fp, ticks: u32| Fp::from_bits((i64::from(value.to_bits()) * i64::from(ticks)).clamp(i64::from(i32::MIN / 2), i64::from(i32::MAX / 2)) as i32);
-    let mut aim = to;
-    for _ in 0..2 {
-        let ticks = firing_solution(from, aim, horizontal_speed).flight_ticks;
-        aim = Vec3Fp::new(to.x + ahead(velocity.x, ticks), to.y + ahead(velocity.y, ticks), to.z);
-    }
+    let raw = |value: Fp| i128::from(value.to_bits());
+    let speed = raw(horizontal_speed).max(1);
+    let (vx, vy) = (raw(velocity.x), raw(velocity.y));
+    let (x, y) = (raw(to.x) - raw(from.x), raw(to.y) - raw(from.y));
+    let reach = |t: i128| {
+        let (ax, ay) = (x + vx * (t - 1), y + vy * (t - 1));
+        ax * ax + ay * ay <= speed * speed * t * t
+    };
+    // The shell closes at most its speed plus the target's a tick, so none sooner than this.
+    let closing = speed + i128::from(sqrt_wide(velocity.xy().length_squared()).to_bits());
+    let soonest = (i128::from(sqrt_wide((to.xy() - from.xy()).length_squared()).to_bits()) / closing).max(1);
+    let ticks = (soonest..=LEAD_MAX_TICKS).find(|&t| reach(t)).unwrap_or(LEAD_MAX_TICKS);
+    let clamp = |value: i128| Fp::from_bits(value.clamp(i128::from(i32::MIN / 2), i128::from(i32::MAX / 2)) as i32);
+    let aim = Vec2Fp::new(clamp(raw(to.x) + vx * (ticks - 1)), clamp(raw(to.y) + vy * (ticks - 1)));
     let height = to.z - surface(to.xy());
-    Vec3Fp::new(aim.x, aim.y, surface(aim.xy()) + height)
+    (Vec3Fp::new(aim.x, aim.y, surface(aim) + height), ticks as u32)
 }
+
+/// The longest flight a shell leads its target for: past the slowest artillery's longest.
+const LEAD_MAX_TICKS: i128 = 600;
 
 /// Where a shell flying straight at `speed` a tick, in three dimensions, from `from` meets a
 /// target now at `to`, moving at `velocity` a tick across the ground and turning by `turn` (the
@@ -267,15 +288,31 @@ mod tests {
     fn a_shell_leads_a_moving_target_by_its_flight_time() {
         let flat = |_: Vec2Fp| Fp::ZERO;
         let (from, to) = (v(0, 0, 0), v(300, 0, 0));
-        assert_eq!(lead_point(from, to, Vec3Fp::ZERO, fp_int(60), flat), to, "a target standing still is aimed at");
-        // Moving sideways at 6 a tick: 300 at 60 is 5 ticks, and the aim point's own distance
-        // still rounds up to 6 ticks, so it aims 36 ahead.
-        let aim = lead_point(from, to, v(0, 6, 0), fp_int(60), flat);
-        assert_eq!((aim.x, aim.z), (to.x, to.z));
-        assert_eq!(aim.y, fp_int(36));
+        assert_eq!(lead_point(from, to, Vec3Fp::ZERO, fp_int(60), flat), (to, 1), "a target standing still is aimed at");
+        // Moving sideways at 6 a tick: in 5 ticks it has moved 4 times, to (300, 24), just past
+        // 300 away; in 6 it has moved 5 times, to (300, 30), well within 360.
+        let (aim, ticks) = lead_point(from, to, v(0, 6, 0), fp_int(60), flat);
+        assert_eq!((aim.x, aim.y, aim.z, ticks), (to.x, fp_int(30), to.z, 6));
         // The height follows the ground under the aim point.
         let slope = |at: Vec2Fp| at.y / 2;
-        assert_eq!(lead_point(from, v(300, 0, 5), v(0, 6, 0), fp_int(60), slope).z, fp_int(23));
+        assert_eq!(lead_point(from, v(300, 0, 5), v(0, 6, 0), fp_int(60), slope).0.z, fp_int(20));
+    }
+
+    /// The shell and the target arrive together on any course, however slow the shell: straight
+    /// at the gun, straight away, across, and faster than the shell closes.
+    #[test]
+    fn a_shell_meets_its_target_on_any_course() {
+        let flat = |_: Vec2Fp| Fp::ZERO;
+        let (from, to) = (v(0, 0, 0), v(800, 0, 0));
+        for speed in [10, 20, 40, 60] {
+            for (x, y) in [(-6, 0), (6, 0), (0, 6), (-12, 0), (5, -5)] {
+                let (aim, least) = lead_point(from, to, v(x, y, 0), fp_int(speed), flat);
+                let ticks = firing_solution_within(from, aim, fp_int(speed), least).flight_ticks as i32;
+                assert_eq!(aim, v(800 + x * (ticks - 1), y * (ticks - 1), 0), "speed {speed}, moving ({x}, {y})");
+                let solution = firing_solution_within(from, aim, fp_int(speed), least);
+                assert!(sqrt_wide(Vec2Fp::new(solution.velocity.x, solution.velocity.y).length_squared()) <= fp_int(speed), "no faster than it can fly");
+            }
+        }
     }
 
     #[test]

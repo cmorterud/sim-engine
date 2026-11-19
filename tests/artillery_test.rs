@@ -89,6 +89,46 @@ fn artillery_leads_a_target_moving_steadily() {
     assert!(hits * 2 >= fired, "most shells should land on a tank driving steadily: {hits} of {fired}");
 }
 
+/// Artillery leads a tank on any steady course: driving across its front, straight at it, or
+/// straight away. Until 2026-11-19 the aim was refined only twice from where the tank was, which
+/// for slow shells fell well short of a tank coming on and of one going away.
+#[test]
+fn artillery_leads_a_target_on_any_steady_course() {
+    // Each starts out of range, so that it is at full speed by the time it is fired at.
+    for (name, start, goal) in [
+        ("across", point(0, 1_500), point(2_400, 1_500)),
+        ("toward", point(1_000, 2_000), point(1_000, 1_250)),
+        ("away", point(1_000, 1_000 - 100), point(1_000, 2_400)),
+    ] {
+        let mut world = world(5_120);
+        // Four of the slowest shells, with no scatter and no splash, so that only the aim counts.
+        let mut batteries = Vec::new();
+        for x in [880, 960, 1_040, 1_120] {
+            let artillery = world.spawn_mobile(world.blueprints.id("t1_light_artillery"), Team::Blue, point(x, 1_000));
+            let entity = world.unit_entity(artillery).unwrap();
+            world.ecs.get::<&mut Artillery>(entity).unwrap().spread = Fp::ZERO;
+            world.ecs.get::<&mut Combat>(entity).unwrap().projectile_splash = Fp::ZERO;
+            batteries.push(artillery);
+        }
+        let damage = world.ecs.get::<&Combat>(world.unit_entity(batteries[0]).unwrap()).unwrap().projectile_damage;
+        let tank = passing_tank(&mut world, start, goal);
+        let mut fired = std::collections::BTreeSet::new();
+        for _ in 0..300 {
+            world.advance_tick(&[]);
+            for &(id, shell) in &world.projectiles {
+                if world.ecs.get::<&Projectile>(shell).is_ok_and(|shell| batteries.contains(&shell.source)) {
+                    fired.insert(id);
+                }
+            }
+        }
+        let fired = fired.len();
+        let hits = ((fp_int(100_000) - world.unit_health(tank).unwrap()) / damage).to_num::<usize>();
+        println!("{name}: {hits} of {fired}");
+        assert!(fired >= 4, "{name}: they should have fired several times, not {fired}");
+        assert!(hits * 10 >= fired * 9, "{name}: nearly every shell should land on a tank driving steadily: {hits} of {fired}");
+    }
+}
+
 /// Cruise missiles do not lead, and do not follow a target that moves: they fly to where it was
 /// when they were launched, so that their long range is no help against what keeps moving.
 #[test]
