@@ -89,8 +89,10 @@ fn everything_that_blows_up_hurts_within_its_blast_and_not_beyond() {
         // It is destroyed while running.
         world.advance_tick(&[]);
         world.advance_tick(&[sim_engine::sim::commands::SimCommand::SelfDestruct { units: vec![doomed] }]);
+        let mut shown = Vec::new();
         for _ in 0..80 {
             world.advance_tick(&[]);
+            shown.extend(world.snapshot().blasts);
             if world.unit_position(doomed).is_none() {
                 break;
             }
@@ -98,6 +100,10 @@ fn everything_that_blows_up_hurts_within_its_blast_and_not_beyond() {
         if world.unit_position(doomed).is_some() {
             failures.push(format!("{}: could not be destroyed", def.key));
             continue;
+        }
+        // And the renderer is told, so that it draws an explosion as wide as the blast.
+        if !shown.iter().any(|view| view.radius == blast.radius.to_bits() && (view.x, view.y) == (at.x.to_bits(), at.y.to_bits())) {
+            failures.push(format!("{}: its blast was not in the snapshot: {shown:?}", def.key));
         }
         for _ in 0..3 {
             world.advance_tick(&[]);

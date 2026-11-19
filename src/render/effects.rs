@@ -71,6 +71,11 @@ impl Puff {
     }
 }
 
+/// How fast a fireball swells, and how wide it then gets at its widest, as a share of its size
+/// at the start: (1 + 0.8 t)(1 - t³) is largest, 1.237, at t = 0.428.
+const FIREBALL_GROWTH: f32 = 0.8;
+const FIREBALL_PEAK: f32 = 1.237;
+
 /// A number from 0 to 1 that depends only on `seed`, so that effects vary without randomness.
 fn noise(seed: u64) -> f64 {
     let mut value = seed.wrapping_add(0x9e37_79b9_7f4a_7c15);
@@ -155,10 +160,11 @@ impl Effects {
         self.puffs.push_back(puff);
     }
 
-    /// A blast of `size` across at `at`: a fireball, and smoke that rises and drifts off.
+    /// A blast of `size` across at `at`: a fireball that swells to that width, and smoke that
+    /// rises and drifts off.
     fn explode(&mut self, at: [f64; 3], size: f32, time: f64, seed: u64) {
         let life = 0.25 + f64::from(size).sqrt() * 0.08;
-        self.add(Puff { shape: Shape::Fireball, at, rise: 0.0, born: time, life, size, growth: 0.8, height_share: 1.0, color: FIRE_HOT, fade_to: FIRE_COOL });
+        self.add(Puff { shape: Shape::Fireball, at, rise: 0.0, born: time, life, size: size / FIREBALL_PEAK, growth: FIREBALL_GROWTH, height_share: 1.0, color: FIRE_HOT, fade_to: FIRE_COOL });
         let clouds = if size < 4.0 { 1 } else { 3 };
         for index in 0..clouds {
             let angle = noise(seed ^ (index * 7 + 1)) * std::f64::consts::TAU;
@@ -233,6 +239,18 @@ impl Effects {
                 gone.push(*unit);
             }
         });
+        // Units that blow up as they are destroyed, as wide as the damage they do.
+        for (index, blast) in current.blasts.iter().enumerate() {
+            let (x, y) = (f64::from(blast.x) * RAW_TO_WORLD, f64::from(blast.y) * RAW_TO_WORLD);
+            let height = ground(x, y);
+            let at = [x, y, water.map_or(height, |water| height.max(water))];
+            let size = (f64::from(blast.radius) * RAW_TO_WORLD * 2.0) as f32;
+            let seed = (u64::from(current.tick) << 20) ^ index as u64 ^ 0x5eed;
+            self.explode(at, size, time, seed);
+            if let Some(spot) = marks(at, SCAR_REACH) {
+                self.scar(spot, size * 0.55, false, time, seed);
+            }
+        }
         if gone.is_empty() {
             return;
         }
@@ -460,6 +478,53 @@ mod tests {
         assert!(width >= 20.0, "a blast reaching 12 is about 24 across, not {width}");
         let crater = scars(&mut effects, 1.0)[0];
         assert!(crater.model_matrix[0][0].hypot(crater.model_matrix[0][1]) >= 24.0, "and leaves a crater as wide");
+    }
+
+    /// How wide the fireball gets at its widest, across the ground, with `effects` holding one.
+    fn widest_fireball(effects: &mut Effects) -> f32 {
+        (0..400)
+            .map(|step| {
+                let mut out = InstanceBatches::default();
+                effects.build(f64::from(step) * 0.005, [0.0; 3], &mut out);
+                out.shape(Shape::Fireball).first().map_or(0.0, |fireball| {
+                    let across = |row: usize| fireball.model_matrix[row][0].hypot(fireball.model_matrix[row][1]);
+                    (across(0) + across(1)) / 2.0
+                })
+            })
+            .fold(0.0, f32::max)
+    }
+
+    /// Every blast, of every weapon of every unit and of every unit that blows up as it is
+    /// destroyed, swells to about as wide as the damage it does, and no wider.
+    #[test]
+    fn every_explosion_is_as_wide_as_its_blast() {
+        let db = crate::sim::blueprints::BlueprintDb::standard();
+        let mut checked = 0;
+        for def in db.iter() {
+            let splashes = def.weapon.iter().chain(&def.extra_weapons).map(|weapon| (weapon.splash_radius, false));
+            let discharge = def.discharge.iter().map(|discharge| (discharge.splash_radius, false));
+            let death = def.death_explosion.iter().map(|blast| (blast.radius, true));
+            for (radius, dies) in splashes.chain(discharge).chain(death).filter(|(radius, _)| *radius > crate::math::fp::Fp::ZERO) {
+                let mut effects = Effects::new();
+                let before = snapshot(1);
+                let mut after = snapshot(2);
+                if dies {
+                    after.blasts = vec![crate::sim::world::BlastView { team: Team::Red, x: 0, y: 0, radius: radius.to_bits() }];
+                    effects.note_events(&before, &after, 0.0, &|_, _| 0.0, None);
+                } else {
+                    let mut before = before;
+                    let mut bomb = shell(5, ProjectileKind::Shell);
+                    bomb.splash = radius.to_bits();
+                    before.projectiles = vec![bomb];
+                    effects.note_events(&before, &after, 0.0, &|_, _| 0.0, None);
+                }
+                let across = radius.to_num::<f32>() * 2.0;
+                let width = widest_fireball(&mut effects);
+                assert!(width >= across * 0.7 && width <= across.max(2.5) * 1.3, "{}: a blast reaching {} swells to {width} across, not about {across}", def.key, radius.to_num::<f32>());
+                checked += 1;
+            }
+        }
+        assert!(checked > 20, "only {checked} blasts");
     }
 
     #[test]

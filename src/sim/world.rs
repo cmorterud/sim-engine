@@ -288,6 +288,16 @@ pub struct ProjectileView {
     pub splash: i32,
 }
 
+/// A unit's blast as it is destroyed, where it was and how far it reaches, as raw `Fp` bits: for
+/// drawing an explosion as wide as the damage it does.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct BlastView {
+    pub team: Team,
+    pub x: i32,
+    pub y: i32,
+    pub radius: i32,
+}
+
 /// What a projectile is, for drawing it.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ProjectileKind {
@@ -345,6 +355,8 @@ pub struct SimSnapshot {
     pub projectiles: Vec<ProjectileView>,
     /// Projectiles gone since the last tick, at the point where they struck, or ran out.
     pub landed: Vec<ProjectileView>,
+    /// Blasts of units destroyed this tick that blow up as they go.
+    pub blasts: Vec<BlastView>,
     pub wrecks: Vec<WreckView>,
     /// The shields of generators the viewer can see.
     pub shields: Vec<ShieldView>,
@@ -660,6 +672,8 @@ pub struct SimWorld {
     /// Projectiles that struck something, or ran out, this tick, where they did: for drawing
     /// them all the way to what they hit. Not part of the game state.
     landed: Vec<ProjectileView>,
+    /// Units' blasts as they were destroyed this tick, for drawing. Not part of the game state.
+    blasts: Vec<BlastView>,
 }
 
 /// How a projectile looks to the renderer, at its position.
@@ -671,7 +685,9 @@ fn projectile_view(id: SimId, position: &Position, projectile: &Projectile, disc
         (None, Some(_)) => ProjectileKind::TacticalMissile,
         (None, None) => ProjectileKind::Shell,
     };
-    ProjectileView { id, team: projectile.source_team, x, y, z, kind, source: projectile.source, splash: projectile.splash_radius.to_bits() }
+    // A Discharge shell's blast is worked out when it lands, by its own reach.
+    let splash = discharged.map_or(projectile.splash_radius, |discharged| discharged.def.splash_radius);
+    ProjectileView { id, team: projectile.source_team, x, y, z, kind, source: projectile.source, splash: splash.to_bits() }
 }
 
 impl SimWorld {
@@ -767,6 +783,7 @@ impl SimWorld {
             dead_units: Vec::new(),
             dead_projectiles: Vec::new(),
             landed: Vec::new(),
+            blasts: Vec::new(),
         }
     }
 
@@ -3169,6 +3186,7 @@ impl SimWorld {
     /// chain reactions they cause, then removes everything that died.
     pub fn step_cleanup(&mut self) {
         self.dead_units.clear();
+        self.blasts.clear();
         self.step_exotic();
         let mut kills: Vec<(SimId, Team, Res)> = Vec::new();
         if !self.config.invulnerable_units {
@@ -3231,6 +3249,7 @@ impl SimWorld {
                                     && self.economies[team.index()].extractor_efficiency > Res::ZERO;
                                 if !blast.only_while_running || running {
                                     self.pending_explosions.push(Explosion { x, y, radius: blast.radius, damage: blast.damage, source: None, stun: 0 });
+                                    self.blasts.push(BlastView { team, x, y, radius: blast.radius.to_bits() });
                                 }
                             }
                             if let Some(storm) = self.blueprints.get(blueprint).death_storm {
@@ -3781,6 +3800,7 @@ impl SimWorld {
             })
             .collect();
         let landed = self.landed.iter().filter(|view| seen(view.team, view.x, view.y)).copied().collect();
+        let blasts = self.blasts.iter().filter(|view| seen(view.team, view.x, view.y)).copied().collect();
         let wrecks = self
             .wrecks
             .iter()
@@ -3987,6 +4007,7 @@ impl SimWorld {
             units,
             projectiles,
             landed,
+            blasts,
             wrecks,
             shields,
             interceptions,
