@@ -430,6 +430,7 @@ impl SimWorld {
                 hovers: flight.hovers,
                 break_off: flight.break_off,
                 breaking_off: false,
+                turn: Vec2Fp::new(Fp::ONE, Fp::ZERO),
             };
             self.ecs.insert_one(entity, airborne).expect("entity was just spawned");
             let mut position = self.ecs.get::<&mut Position>(entity).expect("units have positions");
@@ -438,8 +439,11 @@ impl SimWorld {
             self.aircraft.push((id, entity));
         }
         match unit.weapon.map(|weapon| weapon.targets) {
-            Some(Targets::Air) => self.ecs.insert_one(entity, AntiAir { also_ground: false, flak: unit.weapon.is_some_and(|weapon| weapon.kind == WeaponKind::Flak) }).expect("entity was just spawned"),
-            Some(Targets::Both) => self.ecs.insert_one(entity, AntiAir { also_ground: true, flak: unit.weapon.is_some_and(|weapon| weapon.kind == WeaponKind::Flak) }).expect("entity was just spawned"),
+            Some(targets @ (Targets::Air | Targets::Both)) => {
+                let weapon = unit.weapon.expect("it has a weapon");
+                let anti_air = AntiAir { also_ground: targets == Targets::Both, flak: weapon.kind == WeaponKind::Flak, homing: weapon.homing };
+                self.ecs.insert_one(entity, anti_air).expect("entity was just spawned");
+            }
             Some(Targets::Naval) => self.ecs.insert_one(entity, super::components::Torpedo).expect("entity was just spawned"),
             Some(Targets::Ground) | None => {}
         }
@@ -460,6 +464,7 @@ impl SimWorld {
                     hits_air: matches!(weapon.targets, Targets::Air | Targets::Both),
                     hits_ground: matches!(weapon.targets, Targets::Ground | Targets::Both),
                     flak: weapon.kind == WeaponKind::Flak,
+                    homing: weapon.homing,
                     torpedo: weapon.targets == Targets::Naval,
                     missile_height: (weapon.kind == WeaponKind::TacticalMissile).then_some(weapon.cruise_height),
                     target: None,

@@ -54,21 +54,27 @@ pub fn lead_point(from: Vec3Fp, to: Vec3Fp, velocity: Vec3Fp, horizontal_speed: 
     Vec3Fp::new(aim.x, aim.y, surface(aim.xy()) + height)
 }
 
-/// How many ticks a shell flying straight at `speed` a tick, in three dimensions, from `from`
-/// takes to meet a target now at `to` that moves on at `velocity` a tick: the first tick by which
-/// it can reach where the target will be. If it never can within `most`, `most`.
-pub fn intercept_ticks(from: Vec3Fp, to: Vec3Fp, velocity: Vec3Fp, speed: Fp, most: u32) -> u32 {
+/// Where a shell flying straight at `speed` a tick, in three dimensions, from `from` meets a
+/// target now at `to`, moving at `velocity` a tick across the ground and turning by `turn` (the
+/// cosine and sine of the angle) each tick, as an aircraft in a steady turn does, and how many
+/// ticks the shell takes. The shell moves first this tick, after the target has, so by its last
+/// move the target has moved one tick fewer. If it can never catch it within `most` ticks, where
+/// the target will be by then.
+pub fn intercept(from: Vec3Fp, to: Vec3Fp, velocity: Vec3Fp, turn: Vec2Fp, speed: Fp, most: u32) -> (u32, Vec3Fp) {
     let raw = |value: Fp| i128::from(value.to_bits());
-    let (dx, dy, dz) = (raw(to.x) - raw(from.x), raw(to.y) - raw(from.y), raw(to.z) - raw(from.z));
-    let (vx, vy, vz) = (raw(velocity.x), raw(velocity.y), raw(velocity.z));
     let speed = raw(speed).max(1);
-    (1..=most)
-        .find(|&ticks| {
-            let t = i128::from(ticks);
-            let (x, y, z) = (dx + vx * t, dy + vy * t, dz + vz * t);
-            x * x + y * y + z * z <= speed * speed * t * t
-        })
-        .unwrap_or(most)
+    let (mut at, mut step) = (to, velocity.xy());
+    for ticks in 1..=most {
+        let (x, y, z) = (raw(at.x) - raw(from.x), raw(at.y) - raw(from.y), raw(at.z) - raw(from.z));
+        let t = i128::from(ticks);
+        if x * x + y * y + z * z <= speed * speed * t * t || ticks == most {
+            return (ticks, at);
+        }
+        // Each tick it turns, then moves along its new heading.
+        step = Vec2Fp::new(step.x * turn.x - step.y * turn.y, step.x * turn.y + step.y * turn.x);
+        at = Vec3Fp::new(at.x + step.x, at.y + step.y, at.z);
+    }
+    (most, at)
 }
 
 /// A segment's closest approach to a sphere around `(x, y, z)`. Returns how far along

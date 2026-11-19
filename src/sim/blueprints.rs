@@ -292,6 +292,9 @@ pub struct WeaponDef {
     pub energy_per_shot: Res,
     /// A missile weapon that picks its own targets and needs no missiles built, as a ship's do.
     pub automatic: bool,
+    /// An anti-air missile, which steers itself to its aircraft. Anti-air guns and flak do not:
+    /// their shells fly straight to where the aircraft will be if it holds its course.
+    pub homing: bool,
     /// EMP (GAME_SPECIFICATION.md §12): what it hits, directly or in its blast, is stunned this long.
     pub stun_ticks: u32,
     /// For a tractor beam: how long it holds a unit before crushing it.
@@ -553,6 +556,8 @@ struct RawWeapon {
     energy_per_shot: Option<Number>,
     #[serde(default)]
     automatic: bool,
+    #[serde(default)]
+    homing: bool,
     stun_seconds: Option<u32>,
     crush_seconds: Option<u32>,
 }
@@ -949,6 +954,7 @@ impl BlueprintDb {
                     spread: whole(&weapon.spread)?,
                     energy_per_shot: weapon.energy_per_shot.as_ref().map_or(Ok(Res::ZERO), Number::res).map_err(context)?,
                     automatic: weapon.automatic,
+                    homing: weapon.homing,
                     stun_ticks: weapon.stun_seconds.unwrap_or(0) * TICKS_PER_SECOND as u32,
                     crush_ticks: weapon.crush_seconds.unwrap_or(0) * TICKS_PER_SECOND as u32,
                 })

@@ -347,6 +347,11 @@ impl SimWorld {
                 }
             };
 
+            // How far it has been turning a tick, over the last few, for aiming at it along its
+            // turn: aircraft that follow or circle turn on some ticks and not others.
+            let now = turning.facing;
+            let turned = Vec2Fp::new(facing.x * now.x + facing.y * now.y, facing.x * now.y - facing.y * now.x);
+            flight.turn = Vec2Fp::new((flight.turn.x * 3 + turned.x) / 4, (flight.turn.y * 3 + turned.y) / 4);
             let step = turning.facing.scaled(speed);
             let next = Vec2Fp::new(Fp::from_bits((here.x + step.x).to_bits().clamp(0, max)), Fp::from_bits((here.y + step.y).to_bits().clamp(0, max)));
             // Landed, it rests on the ground like any other unit.

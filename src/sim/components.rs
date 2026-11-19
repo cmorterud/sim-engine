@@ -314,6 +314,9 @@ pub struct Flight {
     pub break_off: Fp,
     /// Flying on, away from its target.
     pub breaking_off: bool,
+    /// How its heading turned over the last tick, as the cosine and sine of the angle: for
+    /// anti-air guns and flak, which aim along a steady turn.
+    pub turn: Vec2Fp,
 }
 
 impl Flight {
@@ -344,6 +347,8 @@ pub struct ExtraWeapon {
     pub hits_ground: bool,
     /// Flak, which bursts where it was aimed, at aircraft.
     pub flak: bool,
+    /// Missiles that steer themselves to aircraft; otherwise its shots fly straight.
+    pub homing: bool,
     /// A torpedo: ships and submarines only.
     pub torpedo: bool,
     /// Cruise missiles, which pick their own targets, fly at this height, and need none built.
@@ -378,9 +383,14 @@ pub struct AntiAir {
     pub also_ground: bool,
     /// Its shots are flak (`WeaponKind::Flak`), which burst where they were aimed.
     pub flak: bool,
+    /// Its shots are missiles that steer themselves to their aircraft. Otherwise they fly
+    /// straight to where it will be.
+    pub homing: bool,
 }
 
-/// A flak shell, flying straight to where it bursts as its lifetime runs out.
+/// A shell at an aircraft that does not steer, an anti-air gun's or flak's, flying straight to
+/// where it was aimed as its lifetime runs out: flak bursts there, and a gun's shell hits the
+/// aircraft there, if it is.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Fused;
 

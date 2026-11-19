@@ -817,7 +817,8 @@ health = 5000
 footprint = 1
 vision = 560
 # The deterrent to T3 aircraft: one badly damages a strategic bomber in a pass, two bring it down.
-weapon = { range = 1200, reload_ticks = 32, projectile_speed = 90, damage = 2400, splash_radius = 30, targets = "air", turn_rate = 180 }
+# Its missiles steer themselves to their aircraft, as only anti-air missiles do.
+weapon = { range = 1200, reload_ticks = 32, projectile_speed = 90, damage = 2400, splash_radius = 30, targets = "air", turn_rate = 180, homing = true }
 
 # Two shells of 36 a volley in FAF, one of 72 here, and at 90 for the reason above.
 [[unit]]
@@ -834,7 +835,7 @@ turn_rate = 90
 turn_radius = 20
 radius = 10
 vision = 400
-weapon = { kind = "flak", range = 800, reload_ticks = 5, projectile_speed = 40, damage = 72, splash_radius = 80, targets = "air", turn_rate = 180, spread = 50 }
+weapon = { kind = "flak", range = 800, reload_ticks = 5, projectile_speed = 40, damage = 72, splash_radius = 80, targets = "air", turn_rate = 180, spread = 60 }
 
 # Support factories (GAME_SPECIFICATION.md §15), as in FAF: T2 and T3 builders
 # build them for less than an upgrade costs, but only while the team has a headquarters, a factory
@@ -1227,8 +1228,9 @@ movement = "naval"
 weapon = { kind = "tactical_missile", automatic = true, range = 3000, reload_ticks = 25, projectile_speed = 32, damage = 300, splash_radius = 40, cruise_height = 400 }
 extra_weapons = [
     { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 200, splash_radius = 40, turn_rate = 90, spread = 10 },
-    # The fleet's anti-air: about three quarters of a SAM against T3 aircraft.
-    { range = 1400, reload_ticks = 20, projectile_speed = 90, damage = 1100, splash_radius = 6, targets = "air", turn_rate = 180 },
+    # The fleet's anti-air missiles, which steer themselves: about three quarters of a SAM
+    # against T3 aircraft.
+    { range = 1400, reload_ticks = 20, projectile_speed = 90, damage = 1100, splash_radius = 6, targets = "air", turn_rate = 180, homing = true },
 ]
 missile_defense = { kind = "tactical", range = 1200, reload_ticks = 10 }
 
