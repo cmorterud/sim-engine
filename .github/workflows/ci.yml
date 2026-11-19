@@ -60,9 +60,16 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /opt/hostedtoolcache/CodeQL
           df -h /
 
-      # The audio library needs the system's sound headers to compile.
+      # The audio library needs the system's sound headers to compile. The package mirrors
+      # sometimes time out, so each download is retried, and the whole install tried again.
       - name: Install audio headers
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+        run: |
+          for attempt in 1 2 3; do
+            sudo apt-get -o Acquire::Retries=5 update && sudo apt-get -o Acquire::Retries=5 install -y libasound2-dev && exit 0
+            echo "Install attempt $attempt failed; trying again in 20 seconds."
+            sleep 20
+          done
+          exit 1
 
       - name: Install Rust
         run: |
