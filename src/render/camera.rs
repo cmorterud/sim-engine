@@ -9,6 +9,9 @@ pub const MIN_ALTITUDE: f64 = 10.0;
 const ALTITUDE_PER_MAP_UNIT: f64 = 100_000.0 / 81_920.0;
 const NEAR_PITCH_DEGREES: f64 = 45.0;
 const FAR_PITCH_DEGREES: f64 = 89.0;
+/// The lowest an orbit can tilt the camera, from the horizontal: low enough to look across the
+/// land, not so low that the horizon fills the screen.
+const LOWEST_ORBIT_PITCH_DEGREES: f64 = 20.0;
 const VERTICAL_FOV_DEGREES: f32 = 45.0;
 const NEAR_PLANE: f32 = 0.5;
 /// How quickly the altitude closes on its target, per second.
@@ -70,6 +73,9 @@ pub struct Camera {
     zoom_anchor: Option<[f64; 2]>,
     /// Screen pixels to an interface point, for what is sized in points, such as map icons.
     pixels_per_point: f64,
+    /// While orbiting, how far the camera has turned round its focus, in radians clockwise
+    /// from looking north (+y), and its tilt in degrees. Otherwise it looks north, tilted by zoom.
+    orbit: Option<(f64, f64)>,
 }
 
 impl Camera {
@@ -86,6 +92,7 @@ impl Camera {
             max_altitude: map_units * ALTITUDE_PER_MAP_UNIT,
             zoom_anchor: None,
             pixels_per_point: 1.0,
+            orbit: None,
         }
     }
 
@@ -140,11 +147,37 @@ impl Camera {
         self.zoom_anchor = anchor;
     }
 
-    /// Pans by a fraction of the current view per call, so speed scales with altitude.
+    /// Pans by a fraction of the current view per call, so speed scales with altitude. Right and
+    /// up are the screen's, whichever way an orbit has turned the camera.
     pub fn pan(&mut self, dx: f64, dy: f64, dt: f64) {
         let speed = self.altitude * 1.2;
-        self.focus[0] = (self.focus[0] + dx * speed * dt).clamp(0.0, self.map_units);
-        self.focus[1] = (self.focus[1] + dy * speed * dt).clamp(0.0, self.map_units);
+        let (sin, cos) = self.yaw().sin_cos();
+        let (x, y) = (dx * cos + dy * sin, dy * cos - dx * sin);
+        self.focus[0] = (self.focus[0] + x * speed * dt).clamp(0.0, self.map_units);
+        self.focus[1] = (self.focus[1] + y * speed * dt).clamp(0.0, self.map_units);
+    }
+
+    /// Turns the camera round the point at the middle of the view by `yaw` radians clockwise, seen
+    /// from above, and tilts it by `pitch` degrees, positive looking down more steeply. The
+    /// point it looks at stays where it is.
+    pub fn orbit(&mut self, yaw: f64, pitch: f64) {
+        let (turned, tilt) = self.orbit.unwrap_or((0.0, self.zoom_pitch_degrees()));
+        let turned = (turned + yaw).rem_euclid(std::f64::consts::TAU);
+        self.orbit = Some((turned, (tilt + pitch).clamp(LOWEST_ORBIT_PITCH_DEGREES, FAR_PITCH_DEGREES)));
+    }
+
+    /// Back to the usual view, looking north and tilted by zoom, over the same point.
+    pub fn end_orbit(&mut self) {
+        self.orbit = None;
+    }
+
+    pub const fn is_orbiting(&self) -> bool {
+        self.orbit.is_some()
+    }
+
+    /// How far an orbit has turned the camera, in radians clockwise from north.
+    pub fn yaw(&self) -> f64 {
+        self.orbit.map_or(0.0, |(yaw, _)| yaw)
     }
 
     /// Exponential decay towards the target altitude, in log space so that it feels even at every scale.
@@ -174,12 +207,18 @@ impl Camera {
     }
 
     pub fn pitch_degrees(&self) -> f64 {
+        self.orbit.map_or_else(|| self.zoom_pitch_degrees(), |(_, tilt)| tilt)
+    }
+
+    /// The tilt for the altitude, steeper further out: the usual view's.
+    fn zoom_pitch_degrees(&self) -> f64 {
         NEAR_PITCH_DEGREES + (FAR_PITCH_DEGREES - NEAR_PITCH_DEGREES) * self.zoom_fraction()
     }
 
     fn direction(&self) -> [f64; 3] {
         let pitch = self.pitch_degrees().to_radians();
-        [0.0, pitch.cos(), -pitch.sin()]
+        let (sin, cos) = self.yaw().sin_cos();
+        [sin * pitch.cos(), cos * pitch.cos(), -pitch.sin()]
     }
 
     /// The camera's world position.
@@ -253,6 +292,45 @@ mod tests {
 
     fn flat() -> HeightField {
         HeightField::new(3, vec![0; 9], 20.0, 1.0 / 16.0)
+    }
+
+    /// Orbiting (Space held) turns and tilts the camera round the point in the middle of the view,
+    /// which stays there; letting go puts it back looking north at its usual tilt.
+    #[test]
+    fn an_orbit_turns_round_the_middle_of_the_view_and_ends_where_it_began() {
+        let mut camera = Camera::new(10_240.0, [1600.0, 1000.0]);
+        camera.look_at(5_000.0, 5_000.0, 600.0);
+        let (eye, pitch) = (camera.eye(), camera.pitch_degrees());
+        let middle = |camera: &Camera| camera.world_to_screen([5_000.0, 5_000.0, 0.0]).unwrap();
+        // A quarter turn clockwise: the camera now looks east, from the west.
+        camera.orbit(std::f64::consts::FRAC_PI_2, 0.0);
+        assert!(camera.is_orbiting());
+        let [x, y] = middle(&camera);
+        assert!((x - 800.0).abs() < 0.5 && (y - 500.0).abs() < 0.5, "the focus stays in the middle: {x}, {y}");
+        let turned = camera.eye();
+        assert!(turned[0] < 5_000.0 - 100.0 && (turned[1] - 5_000.0).abs() < 1.0, "looking east from the west: {turned:?}");
+        assert!((turned[2] - eye[2]).abs() < 1e-9, "at the same height");
+        // A point east of the focus is now straight up the screen from it.
+        let ahead = camera.world_to_screen([5_200.0, 5_000.0, 0.0]).unwrap();
+        assert!((ahead[0] - 800.0).abs() < 0.5 && ahead[1] < 500.0, "{ahead:?}");
+        // Up on the screen pans east, the way it now looks.
+        let before = camera.focus();
+        camera.pan(0.0, 1.0, 0.1);
+        assert!(camera.focus()[0] > before[0] && (camera.focus()[1] - before[1]).abs() < 1e-9);
+        camera.look_at(5_000.0, 5_000.0, 600.0);
+        // Tilting stays between 20 degrees and nearly straight down.
+        camera.orbit(0.0, -500.0);
+        assert!((camera.pitch_degrees() - LOWEST_ORBIT_PITCH_DEGREES).abs() < 1e-9);
+        camera.orbit(0.0, 500.0);
+        assert!((camera.pitch_degrees() - FAR_PITCH_DEGREES).abs() < 1e-9);
+        let [x, y] = middle(&camera);
+        assert!((x - 800.0).abs() < 0.5 && (y - 500.0).abs() < 0.5);
+        camera.end_orbit();
+        assert!(!camera.is_orbiting());
+        assert_eq!(camera.yaw(), 0.0);
+        assert!((camera.pitch_degrees() - pitch).abs() < 1e-9, "back to the usual tilt");
+        let back = camera.eye();
+        assert!((back[0] - eye[0]).abs() < 1e-9 && (back[1] - eye[1]).abs() < 1e-9, "and the usual place: {back:?} against {eye:?}");
     }
 
 

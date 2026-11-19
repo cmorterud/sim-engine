@@ -26,7 +26,7 @@ trunk serve --release    # then open http://127.0.0.1:8080
 
 Destroy the enemy commander to win. Yours explodes if it dies, and your whole team goes with it.
 
-1. Press Space to select your commander. Choose a structure from the bottom panel, then left-click the ground to place it.
+1. Tap Space to select your commander. Choose a structure from the bottom panel, then left-click the ground to place it.
 2. Materiel extractors go on the teal deposits, and snap to the nearest free one near the cursor. Power generators supply energy. Land factories build units.
 3. Click a factory to queue units. Every build menu is one bar: pick T1, T2, or T3 at its left to see that level's items, and hover over an item for its cost and what it does. Factories build in the open: you can watch each unit take shape in the bay, then drive out of the end facing the rally point (aircraft lift off their pad). Right-click the ground with a factory selected to set its rally point. With several factories selected, every order goes to all of them that can follow it. A factory still under construction takes orders too, and starts on them once it is built. Once an upgrade is queued, the factory can also queue what the upgrade unlocks, which waits for it to finish.
 4. If a row of the economy panel at the top left glows red and says Stalled, you are spending faster than you earn, and everything slows down.
@@ -68,7 +68,7 @@ Destroy the enemy commander to win. Yours explodes if it dies, and your whole te
 | Right-click your transport with land units selected | Board it: it flies to them, and they get in while there is room |
 | Ctrl (or Cmd) + U, then left-click | Unload: the selected transports fly there and set everything down |
 | U, R, K | With a factory selected: Upgrade, Repeat, Clear queue |
-| Space | Jump to your commander and select it |
+| Space | Tap: jump to your commander and select it. Hold and move the mouse: turn the camera round the middle of the view (left and right turn it, up and down tilt it); let go and it looks as it usually does again |
 | Ctrl (or Cmd) + P, or the Pause button at the top right | Pause or resume the game. Orders given while paused are carried out when it resumes |
 | Scroll | Zoom, towards the cursor |
 | Arrow keys, or click or drag on the minimap | Pan |
@@ -92,7 +92,7 @@ cargo run --release -- --autotest 60 --fast-forward 10000   # Opens a window for
 
 Every push to `main` also runs the soak on GitHub's runners (`.github/workflows/soak.yml`): the 200 skirmish matches and 120 on each bundled map, in shards of 25 seeds, one runner each, all from one release build. The run's summary page adds up wins by side, unfinished matches, and replay mismatches per map, with the chance of a split at least that lopsided between equally strong sides (a p below 0.05 suggests a real lean). Tick times are reported there but do not fail the run (`--no-tick-gate`), since a shared runner's other load would fail it falsely; the benchmarks check speed locally. Start a soak by hand from the Actions tab, or with `gh workflow run soak.yml`; its inputs set the matches per map and per runner, for example `gh workflow run soak.yml -f bundled_matches=500` for a closer look at a map's fairness.
 
-Any soak match can be watched: the simulation and the AIs are deterministic, so the map and seed alone replay it. `cargo run --release -- --watch --map highland --seed 223` shows everything, with both teams' economies; `--view blue` or `--view red` starts in one side's sight instead. In the match, V steps between everything, Blue, and Red, - and = change the speed up to 16x, and Space pauses. In the browser, use the page's Watch section, or `?watch&map=highland&seed=223&view=all`.
+Any soak match can be watched: the simulation and the AIs are deterministic, so the map and seed alone replay it. `cargo run --release -- --watch --map highland --seed 223` shows everything, with both teams' economies; `--view blue` or `--view red` starts in one side's sight instead. In the match, V steps between everything, Blue, and Red, - and = change the speed up to 16x, and A tap of Space pauses; held, with the mouse, it turns the camera. In the browser, use the page's Watch section, or `?watch&map=highland&seed=223&view=all`.
 
 The stored checksums in `tests/golden/` change whenever simulation behavior changes on purpose. Update them with `UPDATE_GOLDEN=1 cargo test --release --test determinism_test`, then confirm that the x86-64 run still matches.
 

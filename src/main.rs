@@ -42,6 +42,12 @@ use winit::window::WindowBuilder;
 
 const DEFAULT_SEED: u64 = 0x5EED_2026;
 const PLAYER_TEAM: Team = Team::Blue;
+/// How far the camera orbits for each pixel the mouse moves with Space held: across a wide
+/// screen is most of a turn.
+const ORBIT_RADIANS_PER_PIXEL: f64 = 0.004;
+const ORBIT_DEGREES_PER_PIXEL: f64 = 0.08;
+/// A press of Space shorter than this, with no orbit, is a tap.
+const SPACE_TAP: Duration = Duration::from_millis(300);
 /// Frames ignored at the start of a test run, while shaders and buffers warm up.
 const WARMUP_FRAMES: usize = 120;
 /// At 60 Hz, a frame interval this long means a vsync was missed. Intervals near
@@ -103,7 +109,8 @@ Usage: sim-engine [options]
                        playtest): turtle builds up and defends, and never attacks
   --watch              Watch the AI-vs-AI match the soak plays for --map and --seed,
                        seeing everything. V switches to Blue's or Red's sight, - and =
-                       change the speed, and Space pauses
+                       change the speed, a tap of Space pauses, and Space held
+                       with the mouse turns the camera
   --view <all|blue|red>  With --watch, whose sight to start with (default all)
   --fog <on|off>       Fog of war, for every team and the AI too (default on)
 
@@ -151,7 +158,9 @@ Controls:
                        Z radar and sonar, C shields and missile defense, V support
   N                    Mute or unmute
   - and =              Sound quieter and louder
-  Space                Jump to your commander
+  Space                Tap: jump to your commander. Hold and move the mouse:
+                       turn the camera round the middle of the view; let go
+                       and it looks as usual again
   Right-click a transport  With land units selected, board it
   Ctrl + U             Unload the selected transports where you click next
   Ctrl + A             Select all your units that fight, or all your units if none do
@@ -930,6 +939,9 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     let mut last_frame = Instant::now();
     let mut frames_seen = 0usize;
     let mut held_keys = [false; 4];
+    // Space held: when it went down, whether the mouse has turned the camera since, and where
+    // the cursor last was.
+    let mut orbit_key: Option<(Instant, bool, [f64; 2])> = None;
     let (mut alt_held, mut shift_held, mut command_held) = (false, false, false);
     let mut hotkey_actions: Vec<UiAction> = Vec::new();
     let mut quick_select = QuickSelectState::default();
@@ -989,7 +1001,23 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                         command_held = modifiers.state().super_key() || modifiers.state().control_key();
                         shift_held = modifiers.state().shift_key();
                     }
-                    WindowEvent::CursorMoved { position, .. } => selection.move_cursor([position.x, position.y]),
+                    WindowEvent::CursorMoved { position, .. } => {
+                        // With Space held, the mouse turns the camera round the middle of the view.
+                        if let Some((_, moved, last)) = &mut orbit_key {
+                            let (dx, dy) = (position.x - last[0], position.y - last[1]);
+                            if dx != 0.0 || dy != 0.0 {
+                                camera.orbit(dx * ORBIT_RADIANS_PER_PIXEL, -dy * ORBIT_DEGREES_PER_PIXEL);
+                                *moved = true;
+                            }
+                            *last = [position.x, position.y];
+                        }
+                        selection.move_cursor([position.x, position.y]);
+                    }
+                    // Space let go while the window was elsewhere: back to the usual view.
+                    WindowEvent::Focused(false) => {
+                        orbit_key = None;
+                        camera.end_orbit();
+                    }
                     WindowEvent::MouseWheel { delta, .. } if !response.consumed => {
                         let steps = match delta {
                             MouseScrollDelta::LineDelta(_, y) => f64::from(y),
@@ -1184,13 +1212,36 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                             PhysicalKey::Code(KeyCode::ArrowDown) => held_keys[1] = pressed,
                             PhysicalKey::Code(KeyCode::ArrowLeft) => held_keys[2] = pressed,
                             PhysicalKey::Code(KeyCode::ArrowRight) => held_keys[3] = pressed,
+                            // Held, the mouse orbits the camera round the middle of the view, and
+                            // letting go puts it back as it usually looks. A quick tap that does not
+                            // move the mouse jumps to the commander, or pauses a watched match.
+                            PhysicalKey::Code(KeyCode::Space) => {
+                                if pressed {
+                                    if orbit_key.is_none() {
+                                        orbit_key = Some((Instant::now(), false, selection.cursor()));
+                                    }
+                                } else if let Some((since, moved, _)) = orbit_key.take() {
+                                    camera.end_orbit();
+                                    if !moved && since.elapsed() < SPACE_TAP {
+                                        if watching {
+                                            hotkey_actions.push(UiAction::TogglePause);
+                                        } else if is_match {
+                                            if let Some(commander) = commander_of(&session.current, &map.blueprints) {
+                                                let index = session.current.units.binary_search_by_key(&commander, |unit| unit.id).expect("found in this list");
+                                                let unit = &session.current.units[index];
+                                                camera.look_at(raw_to_world(unit.x), raw_to_world(unit.y), 0.0);
+                                                selection.select(vec![commander]);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             // A watcher's keys: pause, whose sight, and speed. No other key
                             // gives orders.
                             PhysicalKey::Code(code) if watching => {
                                 if pressed && !event.repeat {
                                     let speed = session.driver.as_ref().map_or(1, SimDriver::speed);
                                     match code {
-                                        KeyCode::Space => hotkey_actions.push(UiAction::TogglePause),
                                         KeyCode::KeyV => hotkey_actions.push(UiAction::SetView(ui::next_watch_view(watch_view))),
                                         KeyCode::Minus => hotkey_actions.push(UiAction::SetSpeed(ui::step_watch_speed(speed, false))),
                                         KeyCode::Equal => hotkey_actions.push(UiAction::SetSpeed(ui::step_watch_speed(speed, true))),
@@ -1208,14 +1259,6 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                 patrol_points.clear();
                                 if placing.take().is_none() && !was_armed {
                                     selection.clear();
-                                }
-                            }
-                            PhysicalKey::Code(KeyCode::Space) if pressed && is_match => {
-                                if let Some(commander) = commander_of(&session.current, &map.blueprints) {
-                                    let index = session.current.units.binary_search_by_key(&commander, |unit| unit.id).expect("found in this list");
-                                    let unit = &session.current.units[index];
-                                    camera.look_at(raw_to_world(unit.x), raw_to_world(unit.y), 0.0);
-                                    selection.select(vec![commander]);
                                 }
                             }
                             // Ctrl (or Cmd) + P stops the clock. Its release is not a patrol tap.
