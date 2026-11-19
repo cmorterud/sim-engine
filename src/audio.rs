@@ -27,9 +27,9 @@ const FULL_VOLUME_ZOOM: f64 = 0.12;
 const SILENT_ZOOM: f64 = 0.3;
 
 const SELECT_GAIN: f32 = 0.14;
-const SELECT_SECONDS: f32 = 0.09;
+const SELECT_SECONDS: f32 = 0.12;
 
-const ALARM_NOTE_SECONDS: f32 = 0.18;
+const ALARM_NOTE_SECONDS: f32 = 0.2;
 const ALARM_STEP_SECONDS: f32 = 0.22;
 const ALARM_NOTES: u32 = 4;
 
@@ -53,11 +53,6 @@ fn advance(phase: &mut f32, frequency: f32, rate: f32) -> f32 {
 
 fn sine(phase: f32) -> f32 {
     (phase * TAU).sin()
-}
-
-/// Rich in harmonics, which is what makes the factory sound harsher than the builders.
-fn saw(phase: f32) -> f32 {
-    phase * 2.0 - 1.0
 }
 
 /// Makes the samples. It does not know about audio devices, so that tests can check its output.
@@ -85,7 +80,7 @@ impl Synth {
         Self {
             rate,
             fade: 1.0 - (-1.0 / (FADE_SECONDS * rate)).exp(),
-            filter: 1.0 - (-TAU * 2_600.0 / rate).exp(),
+            filter: 1.0 - (-TAU * 700.0 / rate).exp(),
             build_level: 0.0,
             factory_level: 0.0,
             volume: 0.0,
@@ -101,31 +96,37 @@ impl Synth {
         }
     }
 
-    /// A soft hum with a slow shimmer. A second, slightly detuned voice makes a crowd sound fuller.
+    /// A soft, warm hum with a slow shimmer. A second, slightly detuned voice makes a crowd sound
+    /// fuller.
     fn build_voice(&mut self) -> f32 {
         let rate = self.rate;
         let [low, fifth, octave, detuned, shimmer] = &mut self.build_phases;
         let tone = 0.5 * sine(advance(low, 164.81, rate))
-            + 0.3 * sine(advance(fifth, 246.94, rate))
-            + 0.05 * sine(advance(octave, 329.63, rate))
-            + 0.3 * self.build_level * sine(advance(detuned, 165.5, rate));
-        tone * (0.92 + 0.08 * sine(advance(shimmer, 2.5, rate)))
+            + 0.25 * sine(advance(fifth, 246.94, rate))
+            + 0.04 * sine(advance(octave, 329.63, rate))
+            + 0.25 * self.build_level * sine(advance(detuned, 165.4, rate));
+        tone * (0.93 + 0.07 * sine(advance(shimmer, 1.3, rate)))
     }
 
-    /// A low, buzzing machine sound, pulsing as if something is being stamped out.
+    /// A low, rounded machine sound that swells and settles about once a second, as if a press
+    /// is working: warm and low beside the builders' hum, with nothing sharp in it. Until
+    /// 2026-11-19 it was a buzz of sawtooth and narrow pulse waves, gated five times a second.
     fn factory_voice(&mut self) -> f32 {
         let rate = self.rate;
-        let [first, second, buzz, pulse] = &mut self.factory_phases;
-        let gate = if advance(pulse, 5.0, rate) < 0.5 { 1.0 } else { 0.88 };
-        // A narrow pulse is full of upper harmonics, and clipping adds a little grit.
-        let narrow = if advance(buzz, 246.94, rate) < 0.15 { 1.0 } else { -0.2 };
-        let tone = 0.45 * saw(advance(first, 82.41, rate)) + 0.35 * saw(advance(second, 123.47, rate)) + 0.2 * narrow;
-        let raw = (tone * gate * 1.1).clamp(-1.0, 1.0);
+        let [first, second, third, pulse] = &mut self.factory_phases;
+        // A raised cosine, so that the swell rises and falls smoothly.
+        let beat = 0.5 - 0.5 * sine(advance(pulse, 1.1, rate) + 0.25);
+        let swell = 0.72 + 0.28 * beat * beat;
+        // A triangle's overtones fall away fast, so it is round where a sawtooth buzzes.
+        let triangle = |phase: f32| 1.0 - 4.0 * (phase - 0.5).abs();
+        let tone = 0.5 * triangle(advance(first, 98.0, rate)) + 0.3 * sine(advance(second, 146.83, rate)) + 0.12 * sine(advance(third, 196.0, rate));
+        let raw = tone * swell;
         self.factory_filtered += self.filter * (raw - self.factory_filtered);
         self.factory_filtered
     }
 
-    /// A short, soft tick that rises a little, so that it reads as a response and not a warning.
+    /// A short, soft blip that rises a little, so that it reads as a response and not a warning.
+    /// Until 2026-11-19 it swept far higher, to nearly 1 kHz above, and clicked in sharply.
     fn select_voice(&mut self, serial: u32) -> f32 {
         if serial != self.select_serial {
             self.select_serial = serial;
@@ -139,9 +140,9 @@ impl Synth {
             return 0.0;
         }
         self.select_elapsed = Some(elapsed + 1.0 / self.rate);
-        let phase = advance(&mut self.select_phase, 880.0 + 1_800.0 * elapsed, self.rate);
-        let envelope = (elapsed / 0.003).min(1.0) * (-elapsed / 0.025).exp() * ((SELECT_SECONDS - elapsed) / 0.01).min(1.0);
-        envelope * sine(phase)
+        let phase = advance(&mut self.select_phase, 620.0 + 900.0 * elapsed, self.rate);
+        let envelope = (elapsed / 0.006).min(1.0) * (-elapsed / 0.03).exp() * ((SELECT_SECONDS - elapsed) / 0.02).min(1.0);
+        envelope * (sine(phase) + 0.15 * sine((phase * 2.0).fract()))
     }
 
     /// Two notes, high then low, played twice.
@@ -159,14 +160,16 @@ impl Synth {
             return 0.0;
         }
         self.alarm_elapsed = Some(elapsed + 1.0 / self.rate);
-        let frequency = if note.is_multiple_of(2) { 880.0 } else { 660.0 };
+        // A falling fourth, struck softly and ringing out like a chime, rather than switched on
+        // and off: clear over everything else without being shrill.
+        let frequency = if note.is_multiple_of(2) { 784.0 } else { 587.33 };
         let phase = advance(&mut self.alarm_phase, frequency, self.rate);
         let within = elapsed - note as f32 * ALARM_STEP_SECONDS;
         if within >= ALARM_NOTE_SECONDS {
             return 0.0;
         }
-        let envelope = (within / 0.005).min((ALARM_NOTE_SECONDS - within) / 0.005).min(1.0);
-        envelope * (sine(phase) + 0.25 * sine((phase * 3.0).fract()))
+        let envelope = (within / 0.012).min(1.0) * (-within / 0.12).exp() * ((ALARM_NOTE_SECONDS - within) / 0.03).min(1.0);
+        1.1 * envelope * (sine(phase) + 0.2 * sine((phase * 2.0).fract()))
     }
 
     pub fn next_sample(&mut self, targets: SoundTargets) -> f32 {
@@ -427,6 +430,15 @@ mod tests {
         render(&mut synth, 2.0, targets)
     }
 
+    /// The steepest rise in loudness from one 25 ms window to the next, against the sound's
+    /// average: how abruptly it starts or pulses.
+    fn abruptness(samples: &[f32]) -> f32 {
+        let window = (RATE * 0.025) as usize;
+        let levels: Vec<f32> = samples.chunks(window).map(loudness).collect();
+        let rise = levels.windows(2).map(|pair| pair[1] - pair[0]).fold(0.0, f32::max);
+        rise / loudness(samples).max(1e-6)
+    }
+
     #[test]
     fn silence_when_nothing_is_happening_or_when_muted() {
         let quiet = settled(SoundTargets { volume: 1.0, ..SoundTargets::default() });
@@ -435,16 +447,25 @@ mod tests {
         assert!(muted.iter().all(|sample| sample.abs() < 1e-3));
     }
 
+    /// How often the sound crosses zero a second: about twice its main pitch.
+    fn crossings(samples: &[f32]) -> f32 {
+        samples.windows(2).filter(|pair| (pair[0] < 0.0) != (pair[1] < 0.0)).count() as f32 / (samples.len() as f32 / RATE)
+    }
+
+    /// Played on repeat for a whole match, so neither may nag. The factory was a buzz of sawtooth
+    /// and narrow pulse waves, about 0.055 harsh and gated five times a second, until it was
+    /// called jarring (2026-11-19); the first version, at about 0.1, was called annoying. Now it is
+    /// a low, rounded swell, told from the builders by its lower pitch rather than by grit.
     #[test]
-    fn the_factory_is_harsher_than_the_builders_and_both_stay_light() {
+    fn the_factory_sounds_lower_than_the_builders_and_neither_is_harsh() {
         let build = settled(SoundTargets { build: 1.0, volume: 1.0, ..SoundTargets::default() });
         let factory = settled(SoundTargets { factory: 1.0, volume: 1.0, ..SoundTargets::default() });
-        assert!(harshness(&factory) > harshness(&build) * 1.3, "factory {} builders {}", harshness(&factory), harshness(&build));
-        // Played on repeat for a whole match, so they must not nag. The first version was
-        // called annoying at about 0.1 harshness, and with 0.06 loudness.
-        assert!(harshness(&factory) < 0.075, "factory at {}", harshness(&factory));
+        assert!(harshness(&factory) < 0.02, "factory at {}", harshness(&factory));
+        assert!(harshness(&build) < 0.035, "builders at {}", harshness(&build));
+        assert!(crossings(&factory) < crossings(&build) * 0.8, "factory {} a second, builders {}", crossings(&factory), crossings(&build));
         for (name, samples) in [("builders", &build), ("factory", &factory)] {
             assert!((0.015..0.045).contains(&loudness(samples)), "{name} at {}", loudness(samples));
+            assert!(abruptness(samples) < 0.3, "{name} pulses at {}", abruptness(samples));
         }
     }
 
@@ -468,6 +489,11 @@ mod tests {
         let alarm = render(&mut synth, 0.8, SoundTargets { alarm_serial: 1, ..before });
         assert!(loudness(&alarm) > background * 2.0, "alarm {} over {background}", loudness(&alarm));
         assert!(alarm.iter().all(|sample| sample.abs() <= 1.0));
+        // Struck like a chime, not switched on: each note takes over 10 ms to sound fully.
+        let start = alarm.iter().position(|sample| sample.abs() > 1e-4).expect("it plays");
+        let first_ms = peak(&alarm[start..start + (RATE * 0.002) as usize]);
+        let tenth = peak(&alarm[start..start + (RATE * 0.1) as usize]);
+        assert!(first_ms < tenth * 0.5, "it starts at {first_ms} of {tenth} within 2 ms");
         let after = render(&mut synth, 1.0, SoundTargets { alarm_serial: 1, ..before });
         assert!(loudness(&after[RATE as usize / 4..]) < background * 1.1, "the alarm must end, and not repeat");
         let again = render(&mut synth, 0.8, SoundTargets { alarm_serial: 2, ..before });
@@ -488,6 +514,8 @@ mod tests {
         assert!(peak(&cue[..tail]) > 0.05, "it should be heard, at {}", peak(&cue[..tail]));
         assert!(peak(&cue) < ALARM_GAIN * 0.5, "it should be well under the alarm, at {}", peak(&cue));
         assert!(peak(&cue[tail..]) < 1e-6, "it should be over quickly");
+        // It swept up past 2 kHz until 2026-11-19, at 0.39 harshness.
+        assert!(harshness(&cue[..tail]) < 0.3, "it should be soft, at {}", harshness(&cue[..tail]));
         let jump = cue.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0, f32::max);
         assert!(jump < 0.05, "a jump of {jump} would click");
 
