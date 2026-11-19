@@ -1,7 +1,7 @@
 //! Icons for units and structures: one symbol for each kind of thing, the same at every tech
-//! level, with the level shown as bold chevrons beneath. The frame says what role it plays, by
+//! level, with the level shown as white dots beneath. The frame says what role it plays, by
 //! its outline alone (`Frame`), and the symbol inside says what it does, never by counting: the
-//! chevrons are the only thing on an icon to count. All are vector shapes, drawn in code, so they
+//! dots are the only thing on an icon to count. All are vector shapes, drawn in code, so they
 //! stay sharp at any size and need no image files.
 
 use egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, Vec2};
@@ -34,8 +34,8 @@ pub enum Frame {
 /// How far the camera must be from the ground before units show as icons.
 pub const ICON_ALTITUDE: f64 = 1_200.0;
 /// The area round a unit's icon where a click picks it, in points from its center: half its
-/// width, and how far it reaches above and below, the chevrons being beneath. Enough to take in
-/// every icon, its frame and tech chevrons, whatever its kind (a test checks).
+/// width, and how far it reaches above and below, the tech dots being beneath. Enough to take in
+/// every icon, its frame and tech dots, whatever its kind (a test checks).
 pub const HIT_HALF_WIDTH_PT: f64 = 16.0;
 pub const HIT_ABOVE_PT: f64 = 16.0;
 pub const HIT_BELOW_PT: f64 = 21.0;
@@ -366,18 +366,19 @@ pub const fn frame_reach(frame: Frame) -> (f32, f32) {
     }
 }
 
-/// How far, in points, an icon with `half` and its tech chevrons reach below its center.
+/// How far, in points, an icon with `half` and its tech dots reach below its center.
 pub fn reach_below(icon: Icon, half: f32, tier: u8) -> f32 {
     let frame = half * frame_reach(icon.frame()).1;
     if tier == 0 {
         frame
     } else {
-        frame + CHEVRON_GAP + half * CHEVRON_HEIGHT + 1.5
+        frame + DOT_GAP + dot_radius(half) * 2.0 + DOT_RIM
     }
 }
 
-const CHEVRON_GAP: f32 = 2.5;
-const CHEVRON_HEIGHT: f32 = 0.38;
+/// The space between a frame and its tech dots, and the width of the dark ring round each.
+const DOT_GAP: f32 = 2.5;
+const DOT_RIM: f32 = 1.2;
 
 /// The outline of a frame, in shares of `half` from the center, clockwise. The humanoid's head is
 /// drawn apart.
@@ -424,7 +425,7 @@ const fn symbol_place(frame: Frame) -> (f32, f32) {
 }
 
 /// Draws an icon: its frame, filled with a dark shade of `color` and outlined in it, its symbol,
-/// and a bold chevron beneath for each tech level. `half` is half the frame's height, in points.
+/// and a white dot beneath for each tech level. `half` is half the frame's height, in points.
 pub fn draw(painter: &Painter, center: Pos2, half: f32, icon: Icon, tier: u8, color: Color32) {
     for shape in shapes(center, half, icon, tier, color) {
         painter.add(shape);
@@ -448,26 +449,25 @@ pub fn shapes(center: Pos2, half: f32, icon: Icon, tier: u8, color: Color32) -> 
     }
     let (down, size) = symbol_place(frame);
     symbol(&mut out, at(0.0, down), half * size, icon, stroke);
-    // A bold chevron for each tech level, beneath the frame, outlined dark so it reads on any
+    // A white dot for each tech level, in a row beneath the frame, ringed dark so it reads on any
     // ground.
     if tier > 0 {
-        let width = half * 0.62;
-        let height = half * CHEVRON_HEIGHT;
-        let gap = width * 1.15;
-        let top = center.y + half * frame_reach(frame).1 + CHEVRON_GAP;
-        let thick = (half / 3.6).clamp(1.6, 3.4);
+        let radius = dot_radius(half);
+        let gap = radius * 3.0;
+        let y = center.y + half * frame_reach(frame).1 + DOT_GAP + radius;
         for index in 0..tier {
             let x = center.x + (f32::from(index) - f32::from(tier - 1) * 0.5) * gap;
-            let chevron = vec![Pos2::new(x - width / 2.0, top + height), Pos2::new(x, top), Pos2::new(x + width / 2.0, top + height)];
-            out.push(Shape::line(chevron.clone(), Stroke::new(thick + 2.0, Color32::from_black_alpha(200))));
-            out.push(Shape::line(chevron, Stroke::new(thick, CHEVRON)));
+            out.push(Shape::circle_filled(Pos2::new(x, y), radius + DOT_RIM, Color32::from_black_alpha(200)));
+            out.push(Shape::circle_filled(Pos2::new(x, y), radius, Color32::WHITE));
         }
     }
     out
 }
 
-/// The tech chevrons' color: bright, and the same for every team, so the level reads at once.
-const CHEVRON: Color32 = Color32::from_rgb(255, 236, 150);
+/// The radius, in points, of the tech dots under an icon with `half`.
+fn dot_radius(half: f32) -> f32 {
+    (half * 0.2).clamp(1.6, 2.6)
+}
 
 /// The symbol inside the frame, in a box `size` either way of `center`. It shows what the unit
 /// does, and never a count of anything, which would read as a tech level.
@@ -783,15 +783,15 @@ mod tests {
     }
 
     #[test]
-    fn tiers_of_one_kind_share_an_icon_and_differ_by_chevrons() {
+    fn tiers_of_one_kind_share_an_icon_and_differ_by_dots() {
         assert_eq!(Icon::for_key("t1_air_scout"), Icon::for_key("t3_spy_plane"));
         assert_ne!(Icon::for_key("t1_air_scout"), Icon::for_key("t1_interceptor"));
-        // Each chevron is drawn twice, its dark outline and itself.
+        // Each dot is drawn twice, its dark ring and itself.
         let marks = |tier: u8| shapes(Pos2::ZERO, 10.0, Icon::Scout, tier, Color32::WHITE).len();
         assert_eq!(marks(3) - marks(1), 4);
     }
 
-    /// A click anywhere on an icon, frame and tech chevrons, is within the area that picks its
+    /// A click anywhere on an icon, frame and tech dots, is within the area that picks its
     /// unit, for every icon at every tier.
     #[test]
     fn every_icon_lies_within_its_click_area() {
@@ -803,7 +803,7 @@ mod tests {
                 }
                 let (width, above, below) = (HIT_HALF_WIDTH_PT as f32, HIT_ABOVE_PT as f32, HIT_BELOW_PT as f32);
                 assert!(bounds.min.x >= -width && bounds.max.x <= width && bounds.min.y >= -above && bounds.max.y <= below, "{icon:?} at T{tier} reaches {bounds:?}");
-                assert!(reach_below(icon, map_half(icon), tier) <= bounds.max.y + 0.5, "{icon:?} at T{tier}: what is drawn under it clears its chevrons");
+                assert!(reach_below(icon, map_half(icon), tier) <= bounds.max.y + 0.5, "{icon:?} at T{tier}: what is drawn under it clears its dots");
             }
         }
     }

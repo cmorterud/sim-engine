@@ -307,7 +307,7 @@ pub fn nearest_unit(units: &[UnitView], camera: &Camera, team: Team, point: [f64
 pub fn nearest_unit_within(units: &[UnitView], camera: &Camera, team: Team, point: [f64; 2], reach_px: f64) -> Option<SimId> {
     let mut best: Option<(f64, SimId)> = None;
     // Zoomed out, where units show as icons, a click anywhere on an icon picks its unit, its
-    // edges and tech chevrons too.
+    // edges and tech dots too.
     let icons = camera.altitude() >= crate::icons::ICON_ALTITUDE;
     let scale = camera.pixels_per_point();
     let (half_width, above, below) = (crate::icons::HIT_HALF_WIDTH_PT * scale, crate::icons::HIT_ABOVE_PT * scale, crate::icons::HIT_BELOW_PT * scale);
@@ -535,7 +535,7 @@ mod tests {
     }
 
     /// Zoomed out to icons, a click anywhere on a unit's icon picks it, out to its edges and its
-    /// tech chevrons beneath, on a screen of any scale; beyond the icon it does not.
+    /// tech dots beneath, on a screen of any scale; beyond the icon it does not.
     #[test]
     fn a_click_anywhere_on_an_icon_picks_its_unit() {
         for scale in [1.0, 2.0] {
@@ -545,8 +545,8 @@ mod tests {
             let units = [unit(1, Team::Blue, 40_000.0, 40_000.0)];
             let at = camera.world_to_screen([40_000.0, 40_000.0, 1.0]).unwrap();
             let pick = |dx: f64, dy: f64| nearest_unit(&units, &camera, Team::Blue, [at[0] + dx * scale, at[1] + dy * scale]);
-            // A land unit's frame reaches 13 points to either side; T3 chevrons, 18 below.
-            for (dx, dy) in [(13.0, 0.0), (-13.0, 8.0), (12.0, -8.0), (0.0, 18.0), (6.0, 15.0)] {
+            // A land unit's frame reaches 13 points to either side; its T3 dots, 16 below.
+            for (dx, dy) in [(13.0, 0.0), (-13.0, 8.0), (12.0, -8.0), (0.0, 16.0), (6.0, 15.0)] {
                 assert_eq!(pick(dx, dy), Some(SimId(1)), "at ({dx}, {dy}) points, scale {scale}");
             }
             for (dx, dy) in [(24.0, 0.0), (0.0, -24.0), (0.0, 28.0)] {
