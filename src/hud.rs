@@ -201,6 +201,8 @@ pub enum Glyph {
     /// Take a submarine down (`Dive`) or bring it up (`Surface`).
     Dive,
     Surface,
+    /// Which ranges to outline on the map.
+    Ranges,
 }
 
 /// Draws a glyph inside `rect`. Each order has its own shape as well as its own color, so that
@@ -330,6 +332,13 @@ pub fn draw_glyph(painter: &egui::Painter, rect: Rect, glyph: Glyph) {
             let tip = at(0.0, to);
             let back = if glyph == Glyph::Dive { -0.35 } else { 0.35 };
             painter.add(Shape::line(vec![at(-0.35, to + back), tip, at(0.35, to + back)], line(blue)));
+        }
+        Glyph::Ranges => {
+            // Two overlapping rings round their centers, as range outlines on the ground.
+            painter.circle_stroke(at(-0.3, 0.1), r * 0.62, line(yellow));
+            painter.circle_stroke(at(0.35, -0.1), r * 0.5, line(green));
+            painter.circle_filled(at(-0.3, 0.1), r * 0.1, yellow);
+            painter.circle_filled(at(0.35, -0.1), r * 0.1, green);
         }
         Glyph::Sound => {
             let gray = Color32::from_rgb(200, 210, 222);

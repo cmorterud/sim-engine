@@ -894,6 +894,10 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     }
     // Whether the fog has been cleared for seeing everything, since snapshots then carry none.
     let mut fog_cleared = false;
+    // Which kinds of range are outlined for all the viewer's units, and those outlines' rings,
+    // gathered again only when the snapshot, the toggles, or the view changes.
+    let mut range_toggles = ui::RangeToggles::default();
+    let mut overlay_cache: ((u32, ui::RangeToggles, Option<Team>), ui::RangeRings) = ((u32::MAX, range_toggles, None), Vec::new());
 
     let egui_context = egui::Context::default();
     ui::install_fonts(&egui_context);
@@ -1596,7 +1600,12 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                             ui::draw_interceptions(ctx, &camera, &snapshot.interceptions, pixels_per_point);
                             ui::draw_teleports(ctx, &camera, &map.heights, &snapshot.teleports, pixels_per_point);
                             ui::draw_exotic(ctx, &camera, &map.heights, &snapshot, pixels_per_point);
-                            ui::draw_sensor_coverage(ctx, &camera, &map.heights, &snapshot.sensor_ranges, pixels_per_point);
+                            // The kinds of range toggled on, for all the viewer's units.
+                            let overlay_team = if watching { watch_view } else { viewer };
+                            if overlay_cache.0 != (snapshot.tick, range_toggles, overlay_team) {
+                                overlay_cache = ((snapshot.tick, range_toggles, overlay_team), ui::overlay_ranges(&snapshot, overlay_team, &range_toggles, &map.blueprints));
+                            }
+                            ui::draw_range_outlines(ctx, &camera, &map.heights, &overlay_cache.1, ui::RingStyle::Faint, pixels_per_point);
                             // What the structure being placed will reach, around where it would go.
                             if let (Some(blueprint), Some(cell)) = (placing, placement_spot) {
                                 let unit = map.blueprints.get(blueprint);
@@ -1609,7 +1618,8 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                             ui::draw_adjacency(ctx, &camera, &snapshot.adjacency, pixels_per_point);
                             // What the selection reaches, while nothing is being placed.
                             if placing.is_none() {
-                                ui::draw_selection_ranges(ctx, &camera, &map.heights, &snapshot, &selected, &map.blueprints, pixels_per_point);
+                                let ranges = ui::selection_ranges(&snapshot, &selected, &map.blueprints);
+                                ui::draw_range_outlines(ctx, &camera, &map.heights, &ranges, ui::RingStyle::Labelled, pixels_per_point);
                             }
                             ui::draw_blips(ctx, &camera, &snapshot.blips, pixels_per_point);
                             ui::order_trails(ctx, &camera, &trails, pixels_per_point);
@@ -1658,14 +1668,14 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                 ui::world_overlay(ctx, &camera, &snapshot, &selected, &map.blueprints, pixels_per_point);
                                 let speed = session.driver.as_ref().map_or(1, SimDriver::speed);
                                 let state = ui::WatchState { map: &map_name, seed, view: watch_view, speed, paused: game_paused };
-                                ui::watch_bar(ctx, &snapshot, &map.blueprints, &state, &mut actions);
+                                ui::watch_bar(ctx, &snapshot, &map.blueprints, &state, &mut range_toggles, &mut actions);
                                 minimap.show(ctx, &camera, &map.heights, f64::from(map.water_level), &snapshot, map.fog_side, &mut actions);
                                 let stopped = snapshot.tick >= sim_engine::soak::MATCH_TICK_LIMIT;
                                 ui::watch_end_window(ctx, snapshot.match_result, stopped, snapshot.tick, seed, &mut actions);
                             } else if is_match {
                                 ui::world_overlay(ctx, &camera, &snapshot, &selected, &map.blueprints, pixels_per_point);
                                 let sound_label = sound.as_ref().map(|_| sound_settings.label());
-                                ui::resource_bar(ctx, &snapshot, &map.blueprints, &map_name, sound_label.as_deref(), game_paused, &mut actions);
+                                ui::resource_bar(ctx, &snapshot, &map.blueprints, &map_name, sound_label.as_deref(), game_paused, &mut range_toggles, &mut actions);
                                 minimap.show(ctx, &camera, &map.heights, f64::from(map.water_level), &snapshot, map.fog_side, &mut actions);
                                 ui::commander_alert(ctx, attack_alarm.alert_strength());
                                 ui::control_group_bar(ctx, &group_rows, &snapshot, PLAYER_TEAM, &map.blueprints, &selected, &mut actions);

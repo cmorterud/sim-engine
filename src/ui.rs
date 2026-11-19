@@ -1839,7 +1839,8 @@ fn paused_banner(ctx: &egui::Context) {
 
 /// The panels along the top of the screen: the economy at the top left, game controls in the
 /// middle, and the clock, the players, and the map at the top right.
-pub fn resource_bar(ctx: &egui::Context, snapshot: &SimSnapshot, db: &BlueprintDb, map: &str, sound: Option<&str>, paused: bool, actions: &mut Vec<UiAction>) {
+#[allow(clippy::too_many_arguments)]
+pub fn resource_bar(ctx: &egui::Context, snapshot: &SimSnapshot, db: &BlueprintDb, map: &str, sound: Option<&str>, paused: bool, ranges: &mut RangeToggles, actions: &mut Vec<UiAction>) {
     if paused {
         paused_banner(ctx);
     }
@@ -1855,6 +1856,7 @@ pub fn resource_bar(ctx: &egui::Context, snapshot: &SimSnapshot, db: &BlueprintD
             if let Some(sound) = sound {
                 hud::square_button(ui, Vec2::splat(ORDER_BUTTON), false, true, |painter, rect| hud::draw_glyph(painter, rect.shrink(2.0), Glyph::Sound)).on_hover_text(sound);
             }
+            range_menu(ui, ranges);
         });
     });
     let ((), score) = hud::panel_rect(ctx, "score", Align2::RIGHT_TOP, Vec2::new(-4.0, 4.0), |ui| {
@@ -2435,7 +2437,7 @@ fn view_name(view: Option<Team>) -> &'static str {
 /// The bars of a watched AI-vs-AI match. At the top, the match and both teams' economies, or
 /// when seeing through one team's eyes, that team's economy as its player would see it. At the
 /// bottom, whose sight to see through, how fast to play, and pause.
-pub fn watch_bar(ctx: &egui::Context, snapshot: &SimSnapshot, db: &BlueprintDb, state: &WatchState, actions: &mut Vec<UiAction>) {
+pub fn watch_bar(ctx: &egui::Context, snapshot: &SimSnapshot, db: &BlueprintDb, state: &WatchState, ranges: &mut RangeToggles, actions: &mut Vec<UiAction>) {
     if state.paused {
         paused_banner(ctx);
     }
@@ -2481,6 +2483,8 @@ pub fn watch_bar(ctx: &egui::Context, snapshot: &SimSnapshot, db: &BlueprintDb, 
                     actions.push(UiAction::SetSpeed(speed));
                 }
             }
+            ui.add_space(6.0);
+            range_menu(ui, ranges);
         });
     });
     let ((), score) = hud::panel_rect(ctx, "score", Align2::RIGHT_TOP, Vec2::new(-4.0, 4.0), |ui| {
@@ -2929,8 +2933,11 @@ pub fn coverage_outline(circles: &[([f64; 2], f64)]) -> Vec<[[f64; 2]; 2]> {
         // About 40 units a piece, which looks round from anywhere it is drawn.
         let count = (std::f64::consts::TAU * radius / 40.0).clamp(32.0, 512.0) as usize;
         let at = |angle: f64| [center[0] + radius * angle.cos(), center[1] + radius * angle.sin()];
+        // Only a circle that overlaps this one can hide part of its rim.
+        let near: Vec<(usize, ([f64; 2], f64))> =
+            circles.iter().copied().enumerate().filter(|&(other, (middle, reach))| other != index && (center[0] - middle[0]).hypot(center[1] - middle[1]) < radius + reach).collect();
         let inside_another = |point: [f64; 2]| {
-            circles.iter().enumerate().any(|(other, &(middle, reach))| {
+            near.iter().any(|&(other, (middle, reach))| {
                 if other == index {
                     false
                 } else if middle == center && reach == radius {
@@ -2951,117 +2958,287 @@ pub fn coverage_outline(circles: &[([f64; 2], f64)]) -> Vec<[[f64; 2]; 2]> {
     pieces
 }
 
-/// When zoomed out, outlines what the viewer's radar covers, and within that, its deep scan.
-pub fn draw_sensor_coverage(ctx: &egui::Context, camera: &Camera, heights: &crate::render::camera::HeightField, ranges: &[crate::sim::world::SensorRangeView], pixels_per_point: f32) {
-    // Fades in from about halfway out, so that it never clutters play up close.
-    let strength = ((camera.zoom_from_closest() - 0.45) / 0.15).clamp(0.0, 1.0) as f32;
-    if strength <= 0.0 || ranges.is_empty() {
-        return;
-    }
-    let painter = ctx.layer_painter(egui::LayerId::background());
-    let to_points = |point: [f64; 2]| {
-        let world = [point[0], point[1], heights.height_at(point[0], point[1]) + 2.0];
-        camera.world_to_screen(world).map(|pixels| Pos2::new(pixels[0] as f32 / pixels_per_point, pixels[1] as f32 / pixels_per_point))
-    };
-    let world = |raw: i32| f64::from(raw) / 4096.0;
-    for (pick, color) in [(0usize, Color32::from_rgb(96, 214, 236)), (1, Color32::from_rgb(200, 140, 255))] {
-        let circles: Vec<([f64; 2], f64)> =
-            ranges.iter().map(|range| ([world(range.center[0]), world(range.center[1])], world(if pick == 0 { range.radar } else { range.deep_scan }))).filter(|circle| circle.1 > 0.0).collect();
-        for [from, to] in coverage_outline(&circles) {
-            if let (Some(from), Some(to)) = (to_points(from), to_points(to)) {
-                painter.line_segment([from, to], Stroke::new(1.2_f32, color.gamma_multiply(0.75 * strength)));
-            }
+/// A kind of range a unit can reach: what it shoots at, what it guards, and what it senses.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum RangeKind {
+    /// Weapons that fire at units on the ground or the water.
+    GroundFire,
+    /// Weapons that can fire at aircraft, including those that fire at the ground too.
+    AntiAir,
+    Torpedoes,
+    /// Artillery's inner edge, within which it cannot hit.
+    TooClose,
+    Shield,
+    MissileDefense,
+    TorpedoDefense,
+    Radar,
+    Sonar,
+    DeepScan,
+    Stealth,
+}
+
+impl RangeKind {
+    pub const ALL: [RangeKind; 11] = [
+        RangeKind::GroundFire,
+        RangeKind::AntiAir,
+        RangeKind::Torpedoes,
+        RangeKind::TooClose,
+        RangeKind::Shield,
+        RangeKind::MissileDefense,
+        RangeKind::TorpedoDefense,
+        RangeKind::Radar,
+        RangeKind::Sonar,
+        RangeKind::DeepScan,
+        RangeKind::Stealth,
+    ];
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            RangeKind::GroundFire => "Ground fire",
+            RangeKind::AntiAir => "Anti-air",
+            RangeKind::Torpedoes => "Torpedoes",
+            RangeKind::TooClose => "Too close to hit",
+            RangeKind::Shield => "Shield",
+            RangeKind::MissileDefense => "Missile defense",
+            RangeKind::TorpedoDefense => "Torpedo defense",
+            RangeKind::Radar => "Radar",
+            RangeKind::Sonar => "Sonar",
+            RangeKind::DeepScan => "Deep scan",
+            RangeKind::Stealth => "Stealth field",
         }
+    }
+
+    /// Each its own color, so that rings of different kinds can be told apart where they cross.
+    pub const fn color(self) -> Color32 {
+        match self {
+            RangeKind::GroundFire => Color32::from_rgb(255, 212, 72),
+            RangeKind::AntiAir => Color32::from_rgb(255, 120, 220),
+            RangeKind::Torpedoes => Color32::from_rgb(90, 220, 190),
+            RangeKind::TooClose => Color32::from_rgb(255, 96, 84),
+            RangeKind::Shield => Color32::from_rgb(140, 190, 255),
+            RangeKind::MissileDefense => Color32::from_rgb(255, 160, 70),
+            RangeKind::TorpedoDefense => Color32::from_rgb(170, 240, 240),
+            RangeKind::Radar => Color32::from_rgb(120, 230, 140),
+            RangeKind::Sonar => Color32::from_rgb(80, 140, 255),
+            RangeKind::DeepScan => Color32::from_rgb(200, 140, 255),
+            RangeKind::Stealth => Color32::from_rgb(190, 190, 200),
+        }
+    }
+
+    const fn index(self) -> usize {
+        self as usize
     }
 }
 
-/// The ranges a structure reaches, for showing while it is placed: each with a name and color.
-pub fn placement_ranges(unit: &crate::sim::blueprints::Blueprint) -> Vec<(&'static str, f64, Color32)> {
+/// Which kinds of range are outlined for all the viewer's units, selected or not. Radar and sonar
+/// are, to begin with, so that what the army can see is always on the map.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct RangeToggles([bool; RangeKind::ALL.len()]);
+
+impl Default for RangeToggles {
+    fn default() -> Self {
+        let mut shown = [false; RangeKind::ALL.len()];
+        shown[RangeKind::Radar.index()] = true;
+        shown[RangeKind::Sonar.index()] = true;
+        Self(shown)
+    }
+}
+
+impl RangeToggles {
+    pub const fn shown(&self, kind: RangeKind) -> bool {
+        self.0[kind.index()]
+    }
+
+    pub fn set(&mut self, kind: RangeKind, shown: bool) {
+        self.0[kind.index()] = shown;
+    }
+}
+
+/// The ranges a unit's blueprint reaches, by kind, for placing a structure and for what is
+/// selected. A weapon that fires at both the ground and aircraft reaches as both.
+pub fn placement_ranges(unit: &crate::sim::blueprints::Blueprint) -> Vec<(RangeKind, f64)> {
+    use crate::sim::blueprints::Targets;
     let world = |value: Fp| value.to_num::<f64>();
     let mut ranges = Vec::new();
-    let weapon = Color32::from_rgb(255, 212, 72);
-    // Each weapon by what it shoots at: ground, aircraft, or ships.
-    let kind = |gun: &crate::sim::blueprints::WeaponDef| match gun.targets {
-        crate::sim::blueprints::Targets::Air => ("Anti-air", Color32::from_rgb(110, 200, 255)),
-        crate::sim::blueprints::Targets::Naval => ("Torpedoes", Color32::from_rgb(90, 220, 190)),
-        crate::sim::blueprints::Targets::Both => ("Weapon (and air)", weapon),
-        crate::sim::blueprints::Targets::Ground => ("Weapon", weapon),
-    };
-    if let Some(gun) = &unit.weapon {
-        let (name, color) = kind(gun);
-        ranges.push((name, world(gun.range), color));
+    for gun in unit.weapon.iter().chain(&unit.extra_weapons) {
+        let range = world(gun.range);
+        match gun.targets {
+            Targets::Air => ranges.push((RangeKind::AntiAir, range)),
+            Targets::Naval => ranges.push((RangeKind::Torpedoes, range)),
+            Targets::Both => ranges.extend([(RangeKind::GroundFire, range), (RangeKind::AntiAir, range)]),
+            Targets::Ground => ranges.push((RangeKind::GroundFire, range)),
+        }
         if gun.min_range > Fp::ZERO {
-            ranges.push(("Too close to hit", world(gun.min_range), Color32::from_rgb(255, 96, 84)));
+            ranges.push((RangeKind::TooClose, world(gun.min_range)));
         }
     }
-    for gun in &unit.extra_weapons {
-        let (name, color) = kind(gun);
-        ranges.push((name, world(gun.range), color.gamma_multiply(0.85)));
-    }
     if let Some(shield) = &unit.shield {
-        ranges.push(("Shield", world(shield.radius), Color32::from_rgb(120, 190, 255)));
+        ranges.push((RangeKind::Shield, world(shield.radius)));
     }
     if let Some(defense) = &unit.missile_defense {
-        ranges.push(("Missile defense", world(defense.range), Color32::from_rgb(255, 220, 120)));
+        ranges.push((RangeKind::MissileDefense, world(defense.range)));
     }
     if let Some(defense) = &unit.torpedo_defense {
-        ranges.push(("Torpedo defense", world(defense.range), Color32::from_rgb(120, 220, 230)));
+        ranges.push((RangeKind::TorpedoDefense, world(defense.range)));
     }
-    ranges.push(("Radar", world(unit.radar), Color32::from_rgb(120, 230, 140)));
-    ranges.push(("Sonar", world(unit.sonar), Color32::from_rgb(90, 200, 255)));
-    ranges.push(("Deep scan", world(unit.deep_scan), Color32::from_rgb(200, 140, 255)));
-    ranges.push(("Stealth field", world(unit.stealth_field), Color32::from_rgb(190, 190, 200)));
+    ranges.push((RangeKind::Radar, world(unit.radar)));
+    ranges.push((RangeKind::Sonar, world(unit.sonar)));
+    ranges.push((RangeKind::DeepScan, world(unit.deep_scan)));
+    ranges.push((RangeKind::Stealth, world(unit.stealth_field)));
     ranges.retain(|range| range.1 > 0.0);
-    // One ring for ranges that coincide, under the first name.
-    ranges.dedup_by(|later, earlier| (later.1 - earlier.1).abs() < 0.5 && later.0 == earlier.0);
-    ranges
+    // One ring for each kind and reach: a unit's two guns of one range draw once.
+    let mut unique: Vec<(RangeKind, f64)> = Vec::new();
+    for range in ranges {
+        if !unique.iter().any(|seen| seen.0 == range.0 && (seen.1 - range.1).abs() < 0.5) {
+            unique.push(range);
+        }
+    }
+    unique
 }
 
 /// While a structure is being placed, rings on the ground for each range it will reach, around
 /// where it would go, each named at its top.
-pub fn draw_placement_ranges(ctx: &egui::Context, camera: &Camera, heights: &crate::render::camera::HeightField, center: [f64; 2], ranges: &[(&'static str, f64, Color32)], pixels_per_point: f32) {
-    draw_range_rings(ctx, camera, heights, center, ranges, true, pixels_per_point);
+pub fn draw_placement_ranges(ctx: &egui::Context, camera: &Camera, heights: &crate::render::camera::HeightField, center: [f64; 2], ranges: &[(RangeKind, f64)], pixels_per_point: f32) {
+    let kinds: Vec<(RangeKind, Vec<Circle>)> = ranges.iter().map(|&(kind, radius)| (kind, vec![(center, radius)])).collect();
+    draw_range_outlines(ctx, camera, heights, &kinds, RingStyle::Labelled, pixels_per_point);
 }
 
 /// The most selected units whose ranges are drawn, so that a whole army does not bury the map.
 const MOST_RANGES_SHOWN: usize = 60;
 
-/// A circle on the ground: its center and radius, in world units.
-type Circle = ([f64; 2], f64);
+/// The most rings of one kind outlined for all the viewer's units.
+const MOST_OVERLAY_RINGS: usize = 600;
 
-/// Rings for the ranges of what is selected, mobile units and structures alike: weapons,
-/// anti-air, torpedoes, shields, missile defense, radar, sonar, deep scan, and stealth. Rings of the
-/// same kind merge into one outline around the group, so a selected army shows where it reaches
-/// rather than a tangle of circles. Each kind is labelled once, up close.
-pub fn draw_selection_ranges(ctx: &egui::Context, camera: &Camera, heights: &crate::render::camera::HeightField, snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb, pixels_per_point: f32) {
-    let mut kinds: Vec<(&'static str, Color32, Vec<Circle>)> = Vec::new();
+/// A circle on the ground: its center and radius, in world units.
+pub type Circle = ([f64; 2], f64);
+
+/// Rings grouped by the kind of range they show.
+pub type RangeRings = Vec<(RangeKind, Vec<Circle>)>;
+
+/// Adds a ring of a kind to the list, beside the others of that kind.
+fn add_ring(kinds: &mut Vec<(RangeKind, Vec<Circle>)>, kind: RangeKind, circle: Circle) {
+    match kinds.iter_mut().find(|(existing, _)| *existing == kind) {
+        Some((_, circles)) => circles.push(circle),
+        None => kinds.push((kind, vec![circle])),
+    }
+}
+
+/// The rings of what is selected, mobile units and structures alike, grouped by kind.
+pub fn selection_ranges(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb) -> Vec<(RangeKind, Vec<Circle>)> {
+    let mut kinds = Vec::new();
     for unit in selected.iter().filter_map(|id| find_unit(snapshot, *id)).filter(|unit| unit.blueprint != u16::MAX).take(MOST_RANGES_SHOWN) {
         let center = [f64::from(unit.x) / 4096.0, f64::from(unit.y) / 4096.0];
-        for (name, radius, color) in placement_ranges(db.get(BlueprintId(unit.blueprint))) {
-            match kinds.iter_mut().find(|(existing, shade, _)| *existing == name && *shade == color) {
-                Some((_, _, circles)) => circles.push((center, radius)),
-                None => kinds.push((name, color, vec![(center, radius)])),
+        for (kind, radius) in placement_ranges(db.get(BlueprintId(unit.blueprint))) {
+            add_ring(&mut kinds, kind, (center, radius));
+        }
+    }
+    kinds
+}
+
+/// The rings of every finished unit of `team` (of both teams for `None`), for the kinds toggled
+/// on. Radar and deep scan come from what the viewer's sensors really reach, powered and
+/// enhanced, when there is a viewer; everything else from the units' blueprints.
+pub fn overlay_ranges(snapshot: &SimSnapshot, team: Option<Team>, toggles: &RangeToggles, db: &BlueprintDb) -> Vec<(RangeKind, Vec<Circle>)> {
+    let world = |raw: i32| f64::from(raw) / 4096.0;
+    let sensed = |kind: RangeKind| team.is_some() && matches!(kind, RangeKind::Radar | RangeKind::DeepScan);
+    let mut kinds = Vec::new();
+    for unit in snapshot.units.iter().filter(|unit| unit.blueprint != u16::MAX && unit.built_permille >= 1000 && team.is_none_or(|team| unit.team == team)) {
+        let center = [world(unit.x), world(unit.y)];
+        for (kind, radius) in placement_ranges(db.get(BlueprintId(unit.blueprint))) {
+            if toggles.shown(kind) && !sensed(kind) {
+                add_ring(&mut kinds, kind, (center, radius));
             }
         }
     }
+    for sensor in snapshot.sensor_ranges.iter().filter(|_| team.is_some()) {
+        let center = [world(sensor.center[0]), world(sensor.center[1])];
+        for (kind, radius) in [(RangeKind::Radar, sensor.radar), (RangeKind::DeepScan, sensor.deep_scan)] {
+            if toggles.shown(kind) && radius > 0 {
+                add_ring(&mut kinds, kind, (center, world(radius)));
+            }
+        }
+    }
+    for (_, circles) in &mut kinds {
+        circles.truncate(MOST_OVERLAY_RINGS);
+    }
+    kinds.sort_by_key(|(kind, _)| kind.index());
+    kinds
+}
+
+/// How rings are drawn: bold and named up close for what is selected or being placed, or thin
+/// and unnamed for what is toggled on for all units.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum RingStyle {
+    Labelled,
+    Faint,
+}
+
+/// Rings on the ground for each kind of range, those of one kind merged into one outline around
+/// the group, so that an army shows where it reaches rather than a tangle of circles.
+pub fn draw_range_outlines(ctx: &egui::Context, camera: &Camera, heights: &crate::render::camera::HeightField, kinds: &[(RangeKind, Vec<Circle>)], style: RingStyle, pixels_per_point: f32) {
     let painter = ctx.layer_painter(egui::LayerId::background());
     let to_points = |point: [f64; 2]| {
         let world = [point[0], point[1], heights.height_at(point[0], point[1]) + 1.5];
         camera.world_to_screen(world).map(|pixels| Pos2::new(pixels[0] as f32 / pixels_per_point, pixels[1] as f32 / pixels_per_point))
     };
-    let labels = camera.altitude() < ICON_ALTITUDE;
-    for (name, color, circles) in &kinds {
+    let (width, shadow, opacity) = match style {
+        RingStyle::Labelled => (1.8_f32, 0.35, 1.0),
+        RingStyle::Faint => (1.2_f32, 0.2, 0.7),
+    };
+    let labels = style == RingStyle::Labelled && camera.altitude() < ICON_ALTITUDE;
+    let mut named: Vec<Pos2> = Vec::new();
+    for (kind, circles) in kinds {
+        let color = kind.color().gamma_multiply(opacity);
         for [from, to] in coverage_outline(circles) {
             if let (Some(from), Some(to)) = (to_points(from), to_points(to)) {
-                painter.line_segment([from, to], Stroke::new(3.5_f32, Color32::BLACK.gamma_multiply(0.35)));
-                painter.line_segment([from, to], Stroke::new(1.8_f32, *color));
+                painter.line_segment([from, to], Stroke::new(width + 1.7, Color32::BLACK.gamma_multiply(shadow)));
+                painter.line_segment([from, to], Stroke::new(width, color));
             }
         }
-        // On the ring's far side from the camera, where it is least in the way.
-        let &(center, radius) = circles.iter().max_by(|a, b| (a.0[1] + a.1).total_cmp(&(b.0[1] + b.1))).expect("a kind has a ring");
-        if let Some(top) = to_points([center[0], center[1] + radius]).filter(|_| labels) {
-            painter.text(top + Vec2::new(0.0, -3.0), Align2::CENTER_BOTTOM, format!("{name} {}", radius.round() as i64), FontId::proportional(12.0), *color);
+        // On the ring's far side from the camera, where it is least in the way, and above any
+        // other label already there, as for a gun that reaches the ground and the air alike.
+        let Some(&(center, radius)) = circles.iter().max_by(|a, b| (a.0[1] + a.1).total_cmp(&(b.0[1] + b.1))) else {
+            continue;
+        };
+        if let Some(mut top) = to_points([center[0], center[1] + radius]).filter(|_| labels) {
+            top.y -= 3.0;
+            while named.iter().any(|other| (other.x - top.x).abs() < 60.0 && (other.y - top.y).abs() < 13.0) {
+                top.y -= 14.0;
+            }
+            named.push(top);
+            painter.text(top, Align2::CENTER_BOTTOM, format!("{} {}", kind.name(), radius.round() as i64), FontId::proportional(12.0), kind.color());
         }
+    }
+}
+
+/// The ranges toggle at the top: a button that opens a list of every kind of range, each with a
+/// checkbox in its own color, to outline it for all the viewer's units.
+fn range_menu(ui: &mut egui::Ui, toggles: &mut RangeToggles) {
+    let id = ui.make_persistent_id("range menu");
+    let open = ui.memory(|memory| memory.data.get_temp::<bool>(id).unwrap_or(false));
+    let button = glyph_button(ui, Glyph::Ranges, "", open, "Ranges\nChoose which ranges to outline for all your units. What is selected always shows all of its own.");
+    if button.clicked() {
+        ui.memory_mut(|memory| memory.data.insert_temp(id, !open));
+    }
+    if !open {
+        return;
+    }
+    let below = button.rect.left_bottom() + Vec2::new(0.0, 8.0);
+    let area = egui::Area::new(id.with("list")).order(egui::Order::Foreground).fixed_pos(below).constrain(true).show(ui.ctx(), |ui| {
+        hud::framed(ui, Vec2::new(11.0, 8.0), |ui| {
+            ui.spacing_mut().item_spacing.y = 2.0;
+            ui.label(egui::RichText::new("Show for all units").size(12.0).color(hud::DIM_TEXT));
+            for kind in RangeKind::ALL {
+                let mut shown = toggles.shown(kind);
+                if ui.checkbox(&mut shown, egui::RichText::new(kind.name()).color(kind.color())).changed() {
+                    toggles.set(kind, shown);
+                }
+            }
+        })
+    });
+    // A click anywhere else closes it.
+    if ui.input(|input| input.pointer.any_click()) && !button.hovered() && !area.response.hovered() && !area.response.contains_pointer() {
+        ui.memory_mut(|memory| memory.data.insert_temp(id, false));
     }
 }
 
@@ -3132,31 +3309,6 @@ pub fn draw_map_frame(ctx: &egui::Context, camera: &Camera, heights: &crate::ren
             if let [Some(from), Some(to)] = pair {
                 painter.line_segment([*from, *to], Stroke::new(width, color));
             }
-        }
-    }
-}
-
-fn draw_range_rings(ctx: &egui::Context, camera: &Camera, heights: &crate::render::camera::HeightField, center: [f64; 2], ranges: &[(&'static str, f64, Color32)], labels: bool, pixels_per_point: f32) {
-    const SEGMENTS: usize = 96;
-    let painter = ctx.layer_painter(egui::LayerId::background());
-    let to_points = |point: [f64; 2]| {
-        let world = [point[0], point[1], heights.height_at(point[0], point[1]) + 1.5];
-        camera.world_to_screen(world).map(|pixels| Pos2::new(pixels[0] as f32 / pixels_per_point, pixels[1] as f32 / pixels_per_point))
-    };
-    for &(name, radius, color) in ranges {
-        let at = |index: usize| {
-            let angle = index as f64 / SEGMENTS as f64 * std::f64::consts::TAU;
-            to_points([center[0] + angle.cos() * radius, center[1] + angle.sin() * radius])
-        };
-        for index in 0..SEGMENTS {
-            if let (Some(from), Some(to)) = (at(index), at(index + 1)) {
-                painter.line_segment([from, to], Stroke::new(3.5_f32, Color32::BLACK.gamma_multiply(0.35)));
-                painter.line_segment([from, to], Stroke::new(1.8_f32, color));
-            }
-        }
-        // The label sits at the ring's far side from the camera, where it is least in the way.
-        if let Some(top) = to_points([center[0], center[1] + radius]).filter(|_| labels) {
-            painter.text(top + Vec2::new(0.0, -3.0), Align2::CENTER_BOTTOM, format!("{name} {}", radius.round() as i64), FontId::proportional(12.0), color);
         }
     }
 }
@@ -4154,9 +4306,9 @@ mod tests {
     #[test]
     fn placing_shows_the_ranges_a_structure_reaches() {
         let db = BlueprintDb::standard();
-        let names = |key: &str| placement_ranges(db.get(db.id(key))).into_iter().map(|range| range.0).collect::<Vec<_>>();
+        let names = |key: &str| placement_ranges(db.get(db.id(key))).into_iter().map(|range| range.0.name()).collect::<Vec<_>>();
         assert!(names("radar").contains(&"Radar"));
-        assert!(names("t1_point_defense").contains(&"Weapon"));
+        assert!(names("t1_point_defense").contains(&"Ground fire"));
         assert!(names("shield_generator").contains(&"Shield"));
         assert!(names("t2_artillery").contains(&"Too close to hit"), "artillery cannot hit what is close");
         assert!(names("mass_storage").is_empty(), "a storage reaches nothing");
@@ -4440,14 +4592,105 @@ mod tests {
     #[test]
     fn ranges_say_what_each_weapon_shoots_at_and_include_sensors() {
         let db = BlueprintDb::standard();
-        let names = |key: &str| placement_ranges(db.get(db.id(key))).iter().map(|range| range.0).collect::<Vec<_>>();
+        let names = |key: &str| placement_ranges(db.get(db.id(key))).iter().map(|range| range.0.name()).collect::<Vec<_>>();
         assert!(names("t1_interceptor").contains(&"Anti-air"));
         assert!(names("t2_fighter_bomber").contains(&"Radar"), "the fighter-bomber's radar shows");
         assert!(names("t1_attack_sub").contains(&"Torpedoes"));
-        assert!(names("t2_heavy_tank").contains(&"Weapon"));
+        assert!(names("t2_heavy_tank").contains(&"Ground fire"));
         assert!(names("radar").contains(&"Radar"));
         assert!(names("stealth_field_generator").contains(&"Stealth field"));
         assert!(names("command_rig").contains(&"Deep scan"));
+    }
+
+    /// Every unit's every weapon rings as what it shoots at: ground fire, anti-air, or both for a
+    /// gun that fires at either, and torpedoes; and every sense and field it has rings too.
+    #[test]
+    fn every_unit_rings_each_weapon_by_what_it_shoots_at_and_each_sense() {
+        use crate::sim::blueprints::Targets;
+        let db = BlueprintDb::standard();
+        for (index, unit) in db.iter().enumerate() {
+            let ranges = placement_ranges(unit);
+            let has = |kind: RangeKind, reach: Fp| ranges.iter().any(|&(shown, radius)| shown == kind && (radius - reach.to_num::<f64>()).abs() < 0.5);
+            for gun in unit.weapon.iter().chain(&unit.extra_weapons).filter(|gun| gun.range > Fp::ZERO) {
+                let kinds: &[RangeKind] = match gun.targets {
+                    Targets::Ground => &[RangeKind::GroundFire],
+                    Targets::Air => &[RangeKind::AntiAir],
+                    Targets::Both => &[RangeKind::GroundFire, RangeKind::AntiAir],
+                    Targets::Naval => &[RangeKind::Torpedoes],
+                };
+                for &kind in kinds {
+                    assert!(has(kind, gun.range), "{} (#{index}): no {} ring at {}", unit.key, kind.name(), gun.range);
+                }
+            }
+            for (kind, reach) in [(RangeKind::Radar, unit.radar), (RangeKind::Sonar, unit.sonar), (RangeKind::DeepScan, unit.deep_scan), (RangeKind::Stealth, unit.stealth_field)] {
+                assert_eq!(has(kind, reach), reach > Fp::ZERO, "{}: {} ring", unit.key, kind.name());
+            }
+            let anti_air = unit.weapon.iter().chain(&unit.extra_weapons).any(|gun| gun.range > Fp::ZERO && matches!(gun.targets, Targets::Air | Targets::Both));
+            assert_eq!(ranges.iter().any(|range| range.0 == RangeKind::AntiAir), anti_air, "{}: an anti-air ring only for what can fire at aircraft", unit.key);
+        }
+    }
+
+    #[test]
+    fn only_radar_and_sonar_are_outlined_for_all_units_to_begin_with() {
+        let toggles = RangeToggles::default();
+        let shown: Vec<_> = RangeKind::ALL.into_iter().filter(|&kind| toggles.shown(kind)).collect();
+        assert_eq!(shown, [RangeKind::Radar, RangeKind::Sonar]);
+        let colors: std::collections::BTreeSet<_> = RangeKind::ALL.iter().map(|kind| kind.color().to_array()).collect();
+        assert_eq!(colors.len(), RangeKind::ALL.len(), "each kind has its own color");
+    }
+
+    /// The overlay rings the viewer's finished units for each kind toggled on, and not the enemy's
+    /// or what is still being built; radar comes from what the viewer's sensors really reach.
+    #[test]
+    fn the_overlay_rings_the_viewers_finished_units_for_the_kinds_toggled_on() {
+        let db = BlueprintDb::standard();
+        let placed = |id: u32, key: &str, x: f64, team: Team, built: u16| {
+            let mut view = unit(id, x);
+            view.blueprint = db.id(key).0;
+            view.team = team;
+            view.built_permille = built;
+            view
+        };
+        let mut current = snapshot(
+            vec![
+                placed(1, "t1_aa_turret", 100.0, Team::Blue, 1000),
+                placed(2, "t1_aa_turret", 300.0, Team::Red, 1000),
+                placed(3, "t1_aa_turret", 500.0, Team::Blue, 400),
+                placed(4, "t2_heavy_tank", 700.0, Team::Blue, 1000),
+            ],
+            Vec::new(),
+        );
+        current.sensor_ranges = vec![crate::sim::world::SensorRangeView { center: [raw(900.0), 0], radar: raw(1_234.0), deep_scan: 0 }];
+        let kinds = |toggles: &RangeToggles, team: Option<Team>| overlay_ranges(&current, team, toggles, &db);
+        let mut toggles = RangeToggles::default();
+        let radar = kinds(&toggles, Some(Team::Blue));
+        assert_eq!(radar.iter().map(|kind| kind.0).collect::<Vec<_>>(), [RangeKind::Radar], "the radar shows, from the sensors seen");
+        assert_eq!(radar[0].1, [([900.0, 0.0], 1_234.0)]);
+        toggles.set(RangeKind::AntiAir, true);
+        toggles.set(RangeKind::Radar, false);
+        let anti_air = kinds(&toggles, Some(Team::Blue));
+        let centers: Vec<f64> = anti_air.iter().find(|kind| kind.0 == RangeKind::AntiAir).unwrap().1.iter().map(|circle| circle.0[0]).collect();
+        assert_eq!(centers, [100.0], "only the viewer's finished anti-air");
+        let everyone = kinds(&toggles, None);
+        assert_eq!(everyone.iter().find(|kind| kind.0 == RangeKind::AntiAir).unwrap().1.len(), 2, "with no viewer, both teams'");
+        assert!(kinds(&RangeToggles([false; RangeKind::ALL.len()]), Some(Team::Blue)).is_empty());
+    }
+
+    /// A gun that fires at both the ground and aircraft rings as both, and a selection rings every
+    /// kind its units reach.
+    #[test]
+    fn a_gun_for_ground_and_air_rings_as_both_and_a_selection_rings_every_kind() {
+        let db = BlueprintDb::standard();
+        let mut both = db.get(db.id("t2_heavy_tank")).clone();
+        both.weapon.as_mut().unwrap().targets = crate::sim::blueprints::Targets::Both;
+        let kinds: Vec<RangeKind> = placement_ranges(&both).into_iter().map(|range| range.0).collect();
+        assert!(kinds.contains(&RangeKind::GroundFire) && kinds.contains(&RangeKind::AntiAir), "{kinds:?}");
+        let mut tank = unit(1, 50.0);
+        tank.blueprint = db.id("t2_heavy_tank").0;
+        let mut turret = unit(2, 90.0);
+        turret.blueprint = db.id("t1_aa_turret").0;
+        let rings = selection_ranges(&snapshot(vec![tank, turret], Vec::new()), &[SimId(1), SimId(2)], &db);
+        assert!(rings.iter().any(|kind| kind.0 == RangeKind::GroundFire) && rings.iter().any(|kind| kind.0 == RangeKind::AntiAir), "{rings:?}");
     }
 
     #[test]
