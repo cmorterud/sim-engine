@@ -149,6 +149,15 @@ pub enum Shape {
     /// An air transport, pointing along +Y: a long body with a cargo bay under it and a fan
     /// in a ring at each side.
     Transport,
+    /// A recon plane, pointing along +Y: a slim body on long, straight, narrow wings, a T-tail,
+    /// and a radar disc on a pylon over its back.
+    Scout,
+    /// A strike fighter, pointing along +Y: wings swept back, two tail fins, two engines, and
+    /// bomb canisters under its wings.
+    FighterBomber,
+    /// A torpedo bomber, pointing along +Y: a stout body on straight wings with an engine on
+    /// each, twin tail fins, and a long torpedo slung under its belly.
+    TorpedoBomber,
     /// A shield's dome: an open half-sphere, drawn see-through.
     Dome,
     /// Flat, around the feet of a selected mobile unit.
@@ -158,7 +167,7 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub const ALL: [Self; 81] = [
+    pub const ALL: [Self; 84] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -237,6 +246,9 @@ impl Shape {
         Self::Wall,
         Self::FieldWorkshop,
         Self::Transport,
+        Self::Scout,
+        Self::FighterBomber,
+        Self::TorpedoBomber,
         Self::Dome,
         Self::SelectionRing,
         Self::SelectionBox,
@@ -1129,6 +1141,72 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Metal);
             mesh.body(0.0, &[[0.08, 0.02, 0.012, 0.065], [0.16, 0.042, 0.03, 0.07], [0.27, 0.03, 0.02, 0.058], [0.32, 0.006, 0.005, 0.05]], 6);
         }
+        Shape::Scout => {
+            mesh.paint(Material::Hull);
+            mesh.body(0.0, &[[-0.5, 0.02, 0.02, 0.03], [-0.25, 0.045, 0.045, 0.01], [0.15, 0.06, 0.055, 0.0], [0.38, 0.045, 0.04, -0.01], [0.5, 0.008, 0.008, -0.02]], 6);
+            // Long, straight, narrow wings, set high, for loitering over what it watches.
+            mesh.wings(0.04, 0.5, [-0.04, 0.08], [-0.02, 0.05], [0.012, 0.005], 0.04);
+            mesh.paint(Material::Trim);
+            mesh.fin(0.0, [-0.5, -0.38], 0.02, [-0.5, -0.44], 0.13, 0.01);
+            mesh.paint(Material::Hull);
+            mesh.wings(0.01, 0.17, [-0.5, -0.43], [-0.5, -0.46], [0.008, 0.004], 0.13);
+            mesh.paint(Material::Glow);
+            mesh.body(0.0, &[[0.18, 0.025, 0.02, 0.045], [0.3, 0.02, 0.015, 0.035]], 6);
+            // The radar disc on its pylon, in team colors.
+            mesh.paint(Material::Metal);
+            mesh.beam([0.0, -0.16, 0.04], [0.0, -0.16, 0.13], 0.012, 0.035);
+            mesh.paint(Material::Trim);
+            mesh.frustum([0.0, -0.16], [0.13, 0.17], [0.17, 0.17], 14);
+        }
+        Shape::FighterBomber => {
+            mesh.paint(Material::Hull);
+            mesh.body(0.0, &[[-0.44, 0.07, 0.05, 0.0], [-0.1, 0.09, 0.07, 0.0], [0.2, 0.07, 0.06, 0.0], [0.4, 0.035, 0.035, -0.01], [0.5, 0.006, 0.006, -0.015]], 6);
+            // Wings swept well back from the middle, and a swept tailplane.
+            mesh.wings(0.08, 0.47, [-0.3, 0.14], [-0.44, -0.33], [0.022, 0.006], -0.01);
+            mesh.wings(0.06, 0.22, [-0.5, -0.36], [-0.5, -0.45], [0.01, 0.004], 0.0);
+            mesh.paint(Material::Trim);
+            for x in [-0.075_f32, 0.075] {
+                mesh.fin(x, [-0.48, -0.3], 0.04, [-0.5, -0.42], 0.22, 0.01);
+            }
+            mesh.paint(Material::Glow);
+            for x in [-0.035_f32, 0.035] {
+                mesh.body(x, &[[-0.5, 0.028, 0.028, 0.0], [-0.44, 0.034, 0.034, 0.0]], 6);
+            }
+            mesh.paint(Material::Metal);
+            mesh.body(0.0, &[[0.14, 0.03, 0.02, 0.06], [0.24, 0.045, 0.035, 0.06], [0.34, 0.025, 0.02, 0.04]], 6);
+            // Bombs and napalm canisters under the wings.
+            for x in [-0.3_f32, -0.18, 0.18, 0.3] {
+                mesh.body(x, &[[-0.24, 0.008, 0.008, -0.055], [-0.18, 0.028, 0.028, -0.055], [-0.02, 0.028, 0.028, -0.055], [0.04, 0.01, 0.01, -0.055]], 6);
+            }
+        }
+        Shape::TorpedoBomber => {
+            mesh.paint(Material::Hull);
+            mesh.body(0.0, &[[-0.5, 0.025, 0.025, 0.03], [-0.25, 0.07, 0.07, 0.01], [0.15, 0.1, 0.09, 0.0], [0.38, 0.08, 0.07, -0.01], [0.48, 0.03, 0.03, -0.02]], 6);
+            // Straight wings, and a tailplane with a fin at each end.
+            mesh.wings(0.09, 0.5, [-0.08, 0.14], [-0.04, 0.06], [0.025, 0.008], 0.03);
+            mesh.wings(0.02, 0.22, [-0.5, -0.4], [-0.49, -0.43], [0.01, 0.004], 0.03);
+            mesh.paint(Material::Trim);
+            for x in [-0.22_f32, 0.22] {
+                mesh.fin(x, [-0.5, -0.4], 0.03, [-0.5, -0.44], 0.17, 0.01);
+            }
+            // An engine on each wing.
+            for x in [-0.25_f32, 0.25] {
+                mesh.paint(Material::Hull);
+                mesh.body(x, &[[-0.1, 0.035, 0.035, 0.02], [0.12, 0.045, 0.045, 0.02], [0.2, 0.03, 0.03, 0.02]], 6);
+                mesh.paint(Material::Glow);
+                mesh.body(x, &[[-0.14, 0.026, 0.026, 0.02], [-0.1, 0.035, 0.035, 0.02]], 6);
+            }
+            mesh.paint(Material::Metal);
+            mesh.body(0.0, &[[0.3, 0.05, 0.03, 0.07], [0.4, 0.06, 0.04, 0.06], [0.46, 0.025, 0.02, 0.03]], 6);
+            // The torpedo, long and slung under the belly, with a team-colored warhead and fins.
+            mesh.body(0.0, &[[-0.38, 0.006, 0.006, -0.14], [-0.32, 0.04, 0.04, -0.14], [0.2, 0.04, 0.04, -0.14], [0.24, 0.036, 0.036, -0.14]], 6);
+            mesh.paint(Material::Trim);
+            mesh.body(0.0, &[[0.24, 0.036, 0.036, -0.14], [0.33, 0.008, 0.008, -0.14]], 6);
+            mesh.wings(0.0, 0.07, [-0.38, -0.32], [-0.38, -0.35], [0.004, 0.003], -0.14);
+            mesh.paint(Material::Metal);
+            mesh.beam([0.0, -0.1, -0.09], [0.0, -0.1, -0.03], 0.01, 0.03);
+            mesh.beam([0.0, 0.12, -0.09], [0.0, 0.12, -0.03], 0.01, 0.03);
+        }
         Shape::Scaffold => {
             mesh.paint(Material::Metal);
             const EDGE: f32 = 0.47;
@@ -1370,6 +1448,11 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Metal);
             mesh.frustum([0.0, -0.02], [0.07, 0.42], [0.015, 0.009], 6);
             mesh.block([-0.07, -0.03, 0.32], [0.07, -0.01, 0.34]);
+            // A big raked funnel behind the tower: a fast ship, low and lean.
+            mesh.paint(Material::Hull);
+            mesh.beam([0.0, -0.17, -0.06], [0.0, -0.23, 0.14], 0.035, 0.05);
+            mesh.paint(Material::Metal);
+            mesh.beam([0.0, -0.225, 0.13], [0.0, -0.232, 0.15], 0.03, 0.045);
             // Torpedo tubes either side, behind the tower.
             for x in [-0.075_f32, 0.075] {
                 mesh.beam([x, -0.28, -0.17], [x, -0.18, -0.17], 0.015, 0.015);
@@ -1392,7 +1475,17 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             }
             mesh.paint(Material::Trim);
             mesh.bevel([-0.06, -0.06, 0.0], [0.06, 0.05, 0.12], 0.025);
+            // A tall, square block over the bridge, its radar faces in team colors, and two big
+            // radar domes either side: the fleet's anti-air at a glance.
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.05, -0.04, 0.12], [0.05, 0.04, 0.24], 0.015);
+            mesh.paint(Material::Trim);
+            mesh.block([-0.052, 0.035, 0.15], [0.052, 0.042, 0.22]);
             mesh.paint(Material::Metal);
+            for x in [-0.085_f32, 0.085] {
+                mesh.frustum([x, -0.02], [-0.2, 0.06], [0.02, 0.02], 6);
+                mesh.ball([x, -0.02, 0.1], 0.05, 10, 6);
+            }
             mesh.frustum([0.0, -0.12], [0.0, 0.4], [0.016, 0.011], 6);
             mesh.paint(Material::Hull);
             mesh.cuboid(

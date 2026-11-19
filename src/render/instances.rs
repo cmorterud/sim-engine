@@ -333,7 +333,7 @@ pub fn unit_look(key: &str) -> UnitLook {
         "t2_escort_corvette" => look(Shape::EscortCorvette, Some([0.55, 0.85, 1.00]), 0.5),
         "t3_missile_sub" => look(Shape::MissileSubmarine, Some([0.05, 0.10, 0.20]), 0.35),
         "t2_mobile_missile_launcher" => UnitLook { base: Some(Shape::ArtilleryHull), ..look(Shape::MissileLauncher, Some([0.80, 0.80, 0.70]), 1.0) },
-        "t2_torpedo_bomber" => look(Shape::Bomber, Some([0.40, 0.55, 0.70]), 0.55),
+        "t2_torpedo_bomber" => look(Shape::TorpedoBomber, Some([0.40, 0.55, 0.70]), 0.55),
         "t1_sonar" => look(Shape::Radar, Some([0.30, 0.60, 0.90]), 1.0),
         "t2_sonar" => look(Shape::Radar, Some([0.20, 0.45, 0.85]), 1.2),
         "t1_torpedo_launcher" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::SamLauncher, Some([0.20, 0.40, 0.60]), 0.7) },
@@ -358,14 +358,14 @@ pub fn unit_look(key: &str) -> UnitLook {
         "air_factory_t3" => look(Shape::AirFactoryT3, Some([0.15, 0.25, 0.45]), 0.8),
         "t2_gunship" => look(Shape::Gunship, None, 0.6),
         "t3_heavy_gunship" => look(Shape::HeavyGunship, Some([0.20, 0.20, 0.25]), 0.6),
-        "t3_spy_plane" => look(Shape::Aircraft, Some([0.30, 0.30, 0.35]), 0.5),
+        "t3_spy_plane" => look(Shape::Scout, Some([0.30, 0.30, 0.35]), 0.5),
         "t3_air_superiority" => look(Shape::AirSuperiority, Some([0.95, 0.95, 1.00]), 0.5),
         "t3_strategic_bomber" => look(Shape::StrategicBomber, None, 0.5),
-        "t2_fighter_bomber" => look(Shape::Bomber, Some([0.85, 0.70, 0.55]), 0.55),
+        "t2_fighter_bomber" => look(Shape::FighterBomber, Some([0.85, 0.70, 0.55]), 0.55),
         "t2_flak" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::FlakGun, Some([0.35, 0.75, 0.95]), 1.0) },
         "t2_mobile_flak" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::FlakGun, None, 1.0) },
         "t3_sam" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::SamLauncher, Some([0.55, 0.85, 1.00]), 1.1) },
-        "t1_air_scout" => look(Shape::Aircraft, Some([0.85, 0.90, 0.95]), 0.5),
+        "t1_air_scout" => look(Shape::Scout, Some([0.85, 0.90, 0.95]), 0.5),
         "t1_interceptor" => look(Shape::Aircraft, None, 0.5),
         "t1_bomber" => look(Shape::Bomber, None, 0.6),
         "t1_aa_turret" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::AntiAirGun, Some([0.35, 0.75, 0.95]), 0.9) },
@@ -792,8 +792,9 @@ mod tests {
             assert_ne!(unit_look(&unit.key).shape, Shape::Cube, "{} has no shape of its own", unit.key);
         }
         // Higher tiers of the factory and the engineer, the radar's deep scan upgrade, and the support
-        // commander share the shape they come from, the air factory is a factory, the scout a small
-        // fighter, and the anti-air turret has the mobile anti-air's guns. Everything else is unique.
+        // commander share the shape they come from, the air factory is a factory, the spy plane is
+        // the air scout's T3, and the anti-air turret has the mobile anti-air's guns. Everything
+        // else is unique.
         let shared = [
             "land_factory_t2",
             "land_factory_t3",
@@ -805,7 +806,6 @@ mod tests {
             "mass_extractor_t3",
             "mass_fabricator_t3",
             "air_factory",
-            "t1_air_scout",
             "t1_aa_turret",
             "air_factory_t2",
             "air_factory_t3",
@@ -820,14 +820,12 @@ mod tests {
             "energy_storage",
             "t3_artillery",
             "t3_mobile_artillery",
-            "t2_fighter_bomber",
             "t2_destroyer",
             "t1_attack_sub",
             "t2_assault_hovercraft",
             "t2_escort_corvette",
             "t3_missile_sub",
             "t2_mobile_missile_launcher",
-            "t2_torpedo_bomber",
             "t1_sonar",
             "t2_sonar",
             "t1_torpedo_launcher",
