@@ -1983,3 +1983,71 @@ fn adjacency_links_show_bonuses_that_are_used() {
     assert_eq!(world.snapshot_for(Some(Team::Blue)).adjacency.len(), world.adjacency_links.len());
     assert!(world.snapshot_for(Some(Team::Red)).adjacency.is_empty(), "the enemy sees none of it");
 }
+
+#[test]
+fn the_spending_breakdown_shares_each_job_by_build_power_and_adds_upkeep() {
+    let mut world = test_world();
+    set_resources(&mut world, Team::Blue, 100_000, 100_000);
+    let (factory_blueprint, bot, engineer_blueprint) = (id(&world, "land_factory_t1"), id(&world, "t1_light_walker"), id(&world, "t1_engineer"));
+    let factory = world.spawn_finished_structure(factory_blueprint, Team::Blue, 100, 100).unwrap();
+    let helper = world.spawn_mobile(engineer_blueprint, Team::Blue, point(2_100, 2_100));
+    let shield = world.spawn_finished_structure(id(&world, "shield_generator"), Team::Blue, 80, 80).unwrap();
+    let (builder, _) = engineer_at_site(&mut world);
+    // The other side's spending is none of the viewer's business.
+    let red_factory = world.spawn_finished_structure(factory_blueprint, Team::Red, 150, 150).unwrap();
+    world.advance_tick(&[
+        SimCommand::QueueUnit { factory, blueprint: bot, count: 5 },
+        SimCommand::QueueUnit { factory: red_factory, blueprint: bot, count: 5 },
+        SimCommand::Assist { units: vec![helper], target: factory },
+    ]);
+    run(&mut world, 30);
+    let snapshot = world.snapshot_for(Some(Team::Blue));
+    let spent = |unit: SimId| snapshot.spending.iter().find(|spending| spending.id == unit).map(|spending| (spending.mass, spending.energy));
+    assert_eq!(spent(red_factory), None);
+    let (factory_mass, _) = spent(factory).expect("the factory is building");
+    let (helper_mass, _) = spent(helper).expect("its helper is too");
+    let power = |blueprint: BlueprintId| world.blueprints.get(blueprint).build_power.to_num::<i32>();
+    assert_eq!(factory_mass * power(engineer_blueprint) / power(factory_blueprint), helper_mass, "each pays for its share of the power");
+    assert!(spent(builder).is_some_and(|(mass, energy)| mass > 0 && energy > 0), "the engineer building on its own pays for all of its site");
+    let upkeep = world.blueprints.get(id(&world, "shield_generator")).shield.as_ref().unwrap().upkeep;
+    assert_eq!(spent(shield), Some((0, (upkeep * 10 * 10).round().to_num::<i32>())), "the dome pays its upkeep, and nothing else");
+    // Everything listed adds up to what the economy panel says goes out, give or take rounding.
+    let (mass, energy) = snapshot.spending.iter().fold((0, 0), |(mass, energy), spending| (mass + spending.mass, energy + spending.energy));
+    let close = |tenths: i32, whole: i64| (f64::from(tenths) / 10.0 - whole as f64).abs() <= 1.0;
+    assert!(close(mass, snapshot.economy.mass_demand), "{mass} tenths against {}", snapshot.economy.mass_demand);
+    assert!(close(energy, snapshot.economy.energy_demand), "{energy} tenths against {}", snapshot.economy.energy_demand);
+}
+
+#[test]
+fn a_factory_is_idle_with_nothing_queued_and_nothing_to_help() {
+    let mut world = test_world();
+    set_resources(&mut world, Team::Blue, 100_000, 100_000);
+    let (t1, bot) = (id(&world, "land_factory_t1"), id(&world, "t1_light_walker"));
+    let busy = world.spawn_finished_structure(t1, Team::Blue, 50, 50).unwrap();
+    let empty = world.spawn_finished_structure(t1, Team::Blue, 50, 70).unwrap();
+    let helping = world.spawn_finished_structure(t1, Team::Blue, 50, 90).unwrap();
+    let unfinished = world.spawn_site(t1, Team::Blue, 50, 110).unwrap();
+    let launcher = world.spawn_finished_structure(id(&world, "tactical_missile_launcher"), Team::Blue, 80, 50).unwrap();
+    let theirs = world.spawn_finished_structure(t1, Team::Red, 150, 150).unwrap();
+    // The helper takes the next bot the busy one has not started, so there are three.
+    world.advance_tick(&[SimCommand::QueueUnit { factory: busy, blueprint: bot, count: 3 }, SimCommand::Assist { units: vec![helping], target: busy }]);
+    let idle = |world: &SimWorld| world.snapshot_for(Some(Team::Blue)).idle_factories;
+    let shown = idle(&world);
+    for (unit, expected, why) in [
+        (busy, false, "a factory with a queue"),
+        (empty, true, "a factory with an empty queue"),
+        (helping, false, "a factory helping another"),
+        (unfinished, false, "a factory still being built"),
+        (launcher, false, "a missile launcher, which is ready with what it has"),
+        (theirs, false, "the other side's factory"),
+    ] {
+        assert_eq!(shown.contains(&unit), expected, "{why}");
+    }
+    // Once its bots are out, the busy factory has nothing to do either.
+    let mut ticks = 0;
+    while !idle(&world).contains(&busy) {
+        assert!(ticks < 3_000, "the queue should have run out by now");
+        run(&mut world, 10);
+        ticks += 10;
+    }
+}

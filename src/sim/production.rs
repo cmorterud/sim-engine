@@ -14,7 +14,7 @@ use super::config::{
     PATROL_SEARCH_INTERVAL, PATROL_SEARCH_RADIUS_UNITS, RECLAIM_ENERGY_PER_POWER, RECLAIM_MASS_PER_POWER, ROCK_MASS_PER_RADIUS, TERRAIN_CELL_UNITS, TREE_ENERGY, TREE_MASS, TREE_RADIUS_UNITS,
 };
 use super::spatial::{GridEntry, Layer};
-use super::world::{BuildQueueView, EconomyView, OrderStopView, PlanStep, UnitRatesView, PlanStepKind, SimWorld, UnitPlanView, UnitSpawn, WorkLinkView};
+use super::world::{BuildQueueView, EconomyView, OrderStopView, PlanStep, UnitRatesView, PlanStepKind, SimWorld, UnitPlanView, UnitSpawn, UnitSpendingView, WorkLinkView};
 use crate::math::fp::{fp_int, wide_mul, Fp, FpWide, Vec2Fp};
 
 /// A new site starts with this share of its health, so that it exists to be shot at.
@@ -111,7 +111,7 @@ pub struct WorkLink {
 
 /// What a unit of build power is being spent on.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum WorkKind {
+pub(super) enum WorkKind {
     Construct,
     FactoryItem,
     Repair,
@@ -1031,6 +1031,8 @@ impl SimWorld {
     pub fn step_production(&mut self) {
         self.work_links.clear();
         self.factory_spending.clear();
+        self.work_sources.clear();
+        self.work_demand.clear();
         if !self.self_destructing.is_empty() {
             self.step_self_destructs();
         }
@@ -1063,17 +1065,25 @@ impl SimWorld {
             let (id, entity) = self.builders[index];
             self.step_builder(id, entity, &mut power_by_target);
         }
-        for &(id, entity) in &self.upgrading {
-            *power_by_target.entry((id, WorkKind::Upgrade)).or_insert(Fp::ZERO) += self.upgrade_power(entity);
+        for index in 0..self.upgrading.len() {
+            let (id, entity) = self.upgrading[index];
+            let power = self.upgrade_power(entity);
+            *power_by_target.entry((id, WorkKind::Upgrade)).or_insert(Fp::ZERO) += power;
+            self.work_sources.push((id, WorkKind::Upgrade, id, power));
         }
-        for &(id, entity) in &self.enhancing {
-            *power_by_target.entry((id, WorkKind::Enhance)).or_insert(Fp::ZERO) += self.upgrade_power(entity);
+        for index in 0..self.enhancing.len() {
+            let (id, entity) = self.enhancing[index];
+            let power = self.upgrade_power(entity);
+            *power_by_target.entry((id, WorkKind::Enhance)).or_insert(Fp::ZERO) += power;
+            self.work_sources.push((id, WorkKind::Enhance, id, power));
         }
-        for &(id, entity) in &self.factories {
+        for index in 0..self.factories.len() {
+            let (id, entity) = self.factories[index];
             let has_item = self.ecs.get::<&Factory>(entity).is_ok_and(|factory| !factory.queue.is_empty());
             if has_item && self.ecs.get::<&Construction>(entity).is_err() {
                 let power = self.ecs.get::<&Factory>(entity).expect("factory list only holds factories").power;
                 *power_by_target.entry((id, WorkKind::FactoryItem)).or_insert(Fp::ZERO) += power;
+                self.work_sources.push((id, WorkKind::FactoryItem, id, power));
             }
         }
 
@@ -1088,6 +1098,7 @@ impl SimWorld {
         let mut items = Vec::with_capacity(power_by_target.len());
         for (&(target, kind), &power) in &power_by_target {
             if let Some(item) = self.work_item(target, kind, power) {
+                self.work_demand.push((target, kind, item.mass, item.energy, power));
                 items.push(item);
             }
         }
@@ -1273,6 +1284,7 @@ impl SimWorld {
             TaskStep::Work { target, kind } => {
                 self.halt(id, entity);
                 *power_by_target.entry((target, kind)).or_insert(Fp::ZERO) += power;
+                self.work_sources.push((target, kind, id, power));
                 self.work_links.push(WorkLink { builder: id, target, reclaim: false });
             }
             TaskStep::Reclaim { target, entity: wreck_entity } => {
@@ -2134,51 +2146,118 @@ impl SimWorld {
     /// What the viewer's structures and commander make and spend, in tenths per second.
     pub(super) fn rates_for(&self, team: Team) -> Vec<UnitRatesView> {
         let tenths_per_second = |per_tick: Res| (per_tick * TICKS_PER_SECOND * 10).round().to_num::<i32>();
-        let commander = self.commanders[team.index()].and_then(|id| self.find_unit(id).map(|(_, entity)| (id, entity)));
+        let efficiency = self.economies[team.index()].extractor_efficiency;
         let mut rates: Vec<UnitRatesView> = self
-            .structures
-            .iter()
-            .copied()
-            .chain(commander)
-            .filter(|&(_, entity)| self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team == team) && self.ecs.get::<&Construction>(entity).is_err())
+            .finished_earners(team)
             .filter_map(|(id, entity)| {
                 let unit = self.blueprints.get(self.ecs.get::<&Blueprinted>(entity).ok()?.0);
                 let adjacency = self.ecs.get::<&Adjacency>(entity).map_or(Adjacency::default(), |adjacency| *adjacency);
                 let mut mass = Adjacency::more(unit.mass_income, adjacency.mass_output_bonus);
+                // An extractor makes the share of its mass its team can power.
+                if unit.mass_income > Res::ZERO && unit.upkeep > Res::ZERO {
+                    mass = if self.ecs.get::<&Paused>(entity).is_ok() { Res::ZERO } else { mass * efficiency };
+                }
                 let spent = self.factory_spending.iter().find(|spending| spending.0 == id);
-                // An extractor makes, and pays for, the share of its mass its team can power.
-                let extractor_use = if unit.mass_income > Res::ZERO && unit.upkeep > Res::ZERO {
-                    let efficiency = self.economies[team.index()].extractor_efficiency;
-                    if self.ecs.get::<&Paused>(entity).is_ok() {
-                        mass = Res::ZERO;
-                        Res::ZERO
-                    } else {
-                        mass *= efficiency;
-                        Adjacency::less(unit.upkeep, adjacency.upkeep_discount) * efficiency
-                    }
-                } else {
-                    Res::ZERO
-                };
-                // A dome that is up costs its upkeep, less the discount from neighbors.
-                let upkeep = self.ecs.get::<&Shield>(entity).ok().filter(|shield| shield.is_up() && self.ecs.get::<&Paused>(entity).is_err()).map_or(Res::ZERO, |shield| {
-                    Adjacency::less(shield.upkeep, adjacency.upkeep_discount)
-                });
-                // So does running intel, and a cloak.
-                let intel = self.ecs.get::<&Intel>(entity).ok().map_or(Res::ZERO, |intel| {
-                    let running = if intel.running { Adjacency::less(unit.upkeep, adjacency.upkeep_discount) } else { Res::ZERO };
-                    running + if intel.cloaked { unit.cloak_upkeep.unwrap_or(Res::ZERO) } else { Res::ZERO }
-                });
                 Some(UnitRatesView {
                     id,
                     mass_income: tenths_per_second(mass),
                     energy_income: tenths_per_second(Adjacency::more(unit.energy_income, adjacency.energy_output_bonus)),
                     mass_use: spent.map_or(0, |spending| tenths_per_second(spending.1)),
-                    energy_use: spent.map_or(0, |spending| tenths_per_second(spending.2)) + tenths_per_second(upkeep + intel + extractor_use),
+                    energy_use: spent.map_or(0, |spending| tenths_per_second(spending.2)) + tenths_per_second(self.upkeep_of(entity, efficiency)),
                 })
             })
             .collect();
         rates.sort_unstable_by_key(|rates| rates.id);
         rates
+    }
+
+    /// A team's finished structures, and its commander: what makes resources and pays upkeep.
+    fn finished_earners(&self, team: Team) -> impl Iterator<Item = (SimId, hecs::Entity)> + '_ {
+        let commander = self.commanders[team.index()].and_then(|id| self.find_unit(id).map(|(_, entity)| (id, entity)));
+        self.structures
+            .iter()
+            .copied()
+            .chain(commander)
+            .filter(move |&(_, entity)| self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team == team) && self.ecs.get::<&Construction>(entity).is_err())
+    }
+
+    /// The energy a unit's upkeep takes a tick: a dome that is up, running intel and a cloak, and
+    /// an extractor, which pays for the `efficiency` share of its mass its team can power.
+    fn upkeep_of(&self, entity: hecs::Entity, efficiency: Res) -> Res {
+        let Ok(blueprinted) = self.ecs.get::<&Blueprinted>(entity) else {
+            return Res::ZERO;
+        };
+        let unit = self.blueprints.get(blueprinted.0);
+        let adjacency = self.ecs.get::<&Adjacency>(entity).map_or(Adjacency::default(), |adjacency| *adjacency);
+        let paused = self.ecs.get::<&Paused>(entity).is_ok();
+        let extractor = if unit.mass_income > Res::ZERO && unit.upkeep > Res::ZERO && !paused {
+            Adjacency::less(unit.upkeep, adjacency.upkeep_discount) * efficiency
+        } else {
+            Res::ZERO
+        };
+        // A dome that is up costs its upkeep, less the discount from neighbors.
+        let shield = self.ecs.get::<&Shield>(entity).ok().filter(|shield| shield.is_up() && !paused).map_or(Res::ZERO, |shield| Adjacency::less(shield.upkeep, adjacency.upkeep_discount));
+        // So does running intel, and a cloak.
+        let intel = self.ecs.get::<&Intel>(entity).ok().map_or(Res::ZERO, |intel| {
+            let running = if intel.running { Adjacency::less(unit.upkeep, adjacency.upkeep_discount) } else { Res::ZERO };
+            running + if intel.cloaked { unit.cloak_upkeep.unwrap_or(Res::ZERO) } else { Res::ZERO }
+        });
+        extractor + shield + intel
+    }
+
+    /// What each of a team's units would spend this tick at full speed, in tenths a second: its
+    /// share of each job it puts build power into, by how much of the job's power is its, and its
+    /// upkeep. Units spending nothing are left out.
+    pub(super) fn spending_for(&self, team: Team) -> Vec<UnitSpendingView> {
+        let tenths_per_second = |per_tick: Res| i64::from((per_tick * TICKS_PER_SECOND * 10).round().to_num::<i32>());
+        let mut by_unit: BTreeMap<SimId, (i64, i64)> = BTreeMap::new();
+        for &(target, kind, source, power) in &self.work_sources {
+            let Some((_, entity)) = self.find_unit(source) else { continue };
+            if self.ecs.get::<&UnitStats>(entity).map_or(true, |stats| stats.team != team) {
+                continue;
+            }
+            let Ok(at) = self.work_demand.binary_search_by(|job| (job.0, job.1).cmp(&(target, kind))) else { continue };
+            let (_, _, mass, energy, total) = self.work_demand[at];
+            if total <= Fp::ZERO {
+                continue;
+            }
+            let share = |amount: Res| tenths_per_second(amount) * i64::from(power.to_bits()) / i64::from(total.to_bits());
+            let spent = by_unit.entry(source).or_default();
+            spent.0 += share(mass);
+            spent.1 += share(energy);
+        }
+        for (id, entity) in self.finished_earners(team) {
+            let upkeep = tenths_per_second(self.upkeep_of(entity, Res::ONE));
+            if upkeep > 0 {
+                by_unit.entry(id).or_default().1 += upkeep;
+            }
+        }
+        by_unit
+            .into_iter()
+            .filter(|&(_, (mass, energy))| mass > 0 || energy > 0)
+            .map(|(id, (mass, energy))| UnitSpendingView { id, mass: i32::try_from(mass).unwrap_or(i32::MAX), energy: i32::try_from(energy).unwrap_or(i32::MAX) })
+            .collect()
+    }
+
+    /// A team's finished factories with nothing queued and no other factory to help. A missile
+    /// launcher is not one: with nothing queued, it is ready with what it has.
+    pub(super) fn idle_factories(&self, team: Team) -> Vec<SimId> {
+        let makes_units = |entity: hecs::Entity| {
+            self.ecs.get::<&Blueprinted>(entity).is_ok_and(|unit| self.blueprints.get(unit.0).builds.iter().any(|&item| self.blueprints.get(item).class != UnitClass::Ammo))
+        };
+        let mut idle: Vec<SimId> = self
+            .factories
+            .iter()
+            .filter(|&&(_, entity)| {
+                self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team == team)
+                    && self.ecs.get::<&Construction>(entity).is_err()
+                    && makes_units(entity)
+                    && self.ecs.get::<&Factory>(entity).is_ok_and(|factory| factory.queue.is_empty() && factory.assisting.is_none())
+            })
+            .map(|&(id, _)| id)
+            .collect();
+        idle.sort_unstable();
+        idle
     }
 
     /// This tick's work, limited to what `seen` allows. A team with nothing to spend is

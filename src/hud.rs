@@ -165,6 +165,18 @@ pub fn outlined_text(painter: &egui::Painter, at: Pos2, align: Align2, text: &st
     painter.text(at, align, text, font, color);
 }
 
+/// A rectangle filled with `fill` and crossed by diagonal `stripe`s, leaning right.
+pub fn hatched(painter: &egui::Painter, rect: Rect, fill: Color32, stripe: Color32) {
+    painter.rect_filled(rect, 0.0, fill);
+    let clipped = painter.with_clip_rect(rect.intersect(painter.clip_rect()));
+    let spacing = 5.0;
+    let mut x = rect.left() - rect.height();
+    while x < rect.right() {
+        clipped.line_segment([Pos2::new(x, rect.bottom()), Pos2::new(x + rect.height(), rect.top())], Stroke::new(1.6_f32, stripe));
+        x += spacing;
+    }
+}
+
 /// A thin bar that fills from the left, with a dark track.
 pub fn meter(painter: &egui::Painter, rect: Rect, share: f32, color: Color32) {
     painter.rect_filled(rect, 1.5, Color32::from_rgb(8, 10, 13));

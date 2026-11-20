@@ -38,6 +38,10 @@ const BLUE: Color32 = Color32::from_rgb(90, 160, 255);
 const RED: Color32 = Color32::from_rgb(255, 95, 80);
 const STALLED: Color32 = Color32::from_rgb(255, 110, 90);
 const HEALTHY: Color32 = Color32::from_rgb(120, 230, 120);
+/// A factory with nothing to do: red, hatched with paler stripes, and edged paler still.
+const IDLE: Color32 = Color32::from_rgb(184, 58, 38);
+const IDLE_STRIPE: Color32 = Color32::from_rgb(232, 140, 122);
+const IDLE_EDGE: Color32 = Color32::from_rgb(255, 209, 200);
 const BUILDING: Color32 = Color32::from_rgb(120, 200, 255);
 const SPENDING: Color32 = Color32::from_rgb(250, 190, 120);
 const VETERAN: Color32 = Color32::from_rgb(255, 205, 60);
@@ -1517,10 +1521,26 @@ const QUICK_BUTTON: f32 = 48.0;
 /// The height of a tier's button, under its kind of factory.
 const QUICK_TIER_HEIGHT: f32 = 24.0;
 
-/// A big square with a unit's symbol, and a count in its corner.
-fn quick_square(ui: &mut egui::Ui, key: &str, count: Option<usize>, chosen: bool, health: Option<u16>) -> egui::Response {
+/// Where a quick select square's idle badge sits, in its top right corner, for this many idle.
+fn idle_badge_rect(button: Rect, idle: usize) -> Rect {
+    let width = if idle > 9 { 40.0 } else { 34.0 };
+    Rect::from_min_size(Pos2::new(button.right() - width - 1.0, button.top() + 1.0), Vec2::new(width, 13.0))
+}
+
+/// The idle badge: a red hatched tag saying how many have nothing to do.
+fn draw_idle_badge(painter: &egui::Painter, rect: Rect, idle: usize) {
+    hud::hatched(painter, rect, IDLE, IDLE_STRIPE);
+    painter.rect_stroke(rect, 1.0, Stroke::new(1.0_f32, IDLE_EDGE));
+    painter.text(rect.center(), Align2::CENTER_CENTER, format!("{idle} IDLE"), FontId::new(9.0, egui::FontFamily::Name(BOLD.into())), Color32::WHITE);
+}
+
+/// A big square with a unit's symbol, a count in its corner, and how many are idle.
+fn quick_square(ui: &mut egui::Ui, key: &str, count: Option<usize>, chosen: bool, health: Option<u16>, idle: usize) -> egui::Response {
     hud::square_button(ui, Vec2::splat(QUICK_BUTTON), chosen, true, |painter, rect| {
         unit_art(painter, rect.shrink(1.0), key);
+        if idle > 0 {
+            draw_idle_badge(painter, idle_badge_rect(rect.expand(2.0), idle), idle);
+        }
         if let Some(count) = count {
             hud::outlined_text(painter, rect.right_bottom() + Vec2::new(-2.0, 1.0), Align2::RIGHT_BOTTOM, &count.to_string(), FontId::new(16.0, egui::FontFamily::Name(BOLD.into())), Color32::WHITE);
         }
@@ -1548,7 +1568,7 @@ fn quick_rows(
     let key_of = |id: SimId| find_unit(snapshot, id).filter(|unit| unit.blueprint != u16::MAX).map_or_else(String::new, |unit| db.get(BlueprintId(unit.blueprint)).key.clone());
     if let Some(commander) = groups.commander {
         let health = find_unit(snapshot, commander).map(|unit| unit.health_permille);
-        if quick_square(ui, &key_of(commander), None, selected.contains(&commander), health).on_hover_text("Commander: click to select. The view stays where it is.").clicked() {
+        if quick_square(ui, &key_of(commander), None, selected.contains(&commander), health, 0).on_hover_text("Commander: click to select. The view stays where it is.").clicked() {
             actions.push(UiAction::QuickSelect { units: vec![commander], add: shift });
         }
     }
@@ -1557,9 +1577,19 @@ fn quick_rows(
         let total: usize = family.tiers.iter().map(|tier| tier.units.len()).sum();
         // The family's lowest tier, which the portrait shows.
         let key = family.tiers.first().and_then(|tier| tier.units.first()).map_or_else(|| family.name.to_lowercase().replace(' ', "_"), |id| key_of(*id));
-        let hint = format!("{}: {total}. Click to {} the tech levels.", family.name, if open { "hide" } else { "show" });
-        if quick_square(ui, &key, Some(total), open, None).on_hover_text(hint).clicked() {
-            if open {
+        let idle: Vec<SimId> = family.tiers.iter().flat_map(|tier| &tier.units).copied().filter(|id| snapshot.idle_factories.binary_search(id).is_ok()).collect();
+        let shown = if open { "hide" } else { "show" };
+        let hint = if idle.is_empty() {
+            format!("{}: {total}. Click to {shown} the tech levels.", family.name)
+        } else {
+            format!("{}: {total}, {} with nothing to build. Click the red tag to select those, or elsewhere to {shown} the tech levels.", family.name, idle.len())
+        };
+        let square = quick_square(ui, &key, Some(total), open, None, idle.len());
+        let on_badge = !idle.is_empty() && square.interact_pointer_pos().is_some_and(|at| idle_badge_rect(square.rect, idle.len()).expand(2.0).contains(at));
+        if square.on_hover_text(hint).clicked() {
+            if on_badge {
+                actions.push(UiAction::QuickSelect { units: idle, add: shift });
+            } else if open {
                 state.expanded.remove(&family.name);
             } else {
                 state.expanded.insert(family.name.clone());
@@ -1723,7 +1753,7 @@ const ECONOMY_ROW: f32 = 30.0;
 /// One resource's row: its mark, how full its store is, the net rate in large figures, and income
 /// over spending at the end. Lit red while it is what stalls building.
 #[allow(clippy::too_many_arguments)]
-fn economy_row(ui: &mut egui::Ui, energy: bool, stored: i64, capacity: i64, income: i64, demand: i64, reclaim: (i64, i64), stalling: bool) {
+fn economy_row(ui: &mut egui::Ui, energy: bool, stored: i64, capacity: i64, income: i64, demand: i64, reclaim: (i64, i64), stalling: bool, hint: bool) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::new(ECONOMY_WIDTH, ECONOMY_ROW), egui::Sense::hover());
     let painter = ui.painter();
     if stalling {
@@ -1747,26 +1777,162 @@ fn economy_row(ui: &mut egui::Ui, energy: bool, stored: i64, capacity: i64, inco
     painter.text(Pos2::new(rect.right() - 54.0, rect.bottom() - 1.0), Align2::RIGHT_BOTTOM, hud::compact(total), small.clone(), hud::DIM_TEXT);
     painter.text(Pos2::new(rect.right(), rect.top() + 1.0), Align2::RIGHT_TOP, format!("+{income}"), small.clone(), hud::GAIN);
     painter.text(Pos2::new(rect.right(), rect.bottom() - 1.0), Align2::RIGHT_BOTTOM, format!("-{demand}"), small, hud::LOSS);
+    if !hint {
+        return response;
+    }
+    response.on_hover_text(economy_summary(energy, stored, capacity, income, demand, reclaim))
+}
+
+/// What hovering over a resource says about it, before what it is spent on.
+fn economy_summary(energy: bool, stored: i64, capacity: i64, income: i64, demand: i64, (rate, total): (i64, i64)) -> String {
     let name = if energy { "Energy" } else { "Materiel" };
-    response.on_hover_text(format!(
+    format!(
         "{name}: {stored} stored of {capacity}.\nNet {} a second: {income} coming in, {demand} going out.\nReclaim: {rate} a second now, {total} in all.",
         hud::signed(income - demand)
-    ));
+    )
 }
 
 /// Both resources, one row each, and what a stall slows building to. `title` names whose
-/// economy it is, when watching.
-fn economy_rows(ui: &mut egui::Ui, economy: &EconomyView, title: Option<(&str, Color32)>) {
+/// economy it is, when watching. With `hints`, hovering a row says what it shows; without, the
+/// breakdown of what spends it says so instead.
+fn economy_rows(ui: &mut egui::Ui, economy: &EconomyView, title: Option<(&str, Color32)>, hints: bool) -> [egui::Response; 2] {
     ui.spacing_mut().item_spacing.y = 2.0;
     if let Some((name, color)) = title {
         ui.label(egui::RichText::new(name).color(color).strong().size(12.0));
     }
     let stalled = economy.satisfaction_permille < 1000;
-    economy_row(ui, false, economy.mass, economy.mass_capacity, economy.mass_income, economy.mass_demand, (economy.mass_reclaim, economy.mass_reclaimed), stalled && economy.mass == 0);
-    economy_row(ui, true, economy.energy, economy.energy_capacity, economy.energy_income, economy.energy_demand, (economy.energy_reclaim, economy.energy_reclaimed), stalled && economy.energy == 0);
+    let rows = [
+        economy_row(ui, false, economy.mass, economy.mass_capacity, economy.mass_income, economy.mass_demand, (economy.mass_reclaim, economy.mass_reclaimed), stalled && economy.mass == 0, hints),
+        economy_row(ui, true, economy.energy, economy.energy_capacity, economy.energy_income, economy.energy_demand, (economy.energy_reclaim, economy.energy_reclaimed), stalled && economy.energy == 0, hints),
+    ];
     if stalled {
         ui.label(egui::RichText::new(format!("Stalled: building at {}%", economy.satisfaction_permille / 10)).color(STALLED).size(12.0));
     }
+    rows
+}
+
+/// Everything of one kind that spends a resource, and how much it would at full speed, in tenths
+/// a second.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SpendingGroup {
+    pub name: String,
+    pub units: Vec<SimId>,
+    pub tenths: i32,
+}
+
+/// What spends one resource, by kind of unit, the most first. Kinds spending the same stay in
+/// blueprint order.
+pub fn spending_groups(snapshot: &SimSnapshot, db: &BlueprintDb, energy: bool) -> Vec<SpendingGroup> {
+    let mut kinds: BTreeMap<u16, (Vec<SimId>, i32)> = BTreeMap::new();
+    for spending in &snapshot.spending {
+        let amount = if energy { spending.energy } else { spending.mass };
+        let Some(unit) = find_unit(snapshot, spending.id).filter(|unit| amount > 0 && unit.blueprint != u16::MAX) else {
+            continue;
+        };
+        let kind = kinds.entry(unit.blueprint).or_default();
+        kind.0.push(spending.id);
+        kind.1 += amount;
+    }
+    let mut groups: Vec<SpendingGroup> = kinds
+        .into_iter()
+        .map(|(blueprint, (units, tenths))| {
+            let name = &db.get(BlueprintId(blueprint)).name;
+            let name = if units.len() > 1 { format!("{name} \u{d7}{}", units.len()) } else { name.clone() };
+            SpendingGroup { name, units, tenths }
+        })
+        .collect();
+    groups.sort_by_key(|group| std::cmp::Reverse(group.tenths));
+    groups
+}
+
+/// A rate in tenths a second as the breakdown shows it: whole, unless it is under ten.
+pub fn breakdown_amount(tenths: i32) -> String {
+    if tenths < 100 {
+        per_second(tenths)
+    } else {
+        ((tenths + 5) / 10).to_string()
+    }
+}
+
+/// Which resource's breakdown is open, `true` for energy: a row opens its own, and the one open
+/// stays so while the pointer is on the panel between rows, or on the breakdown itself.
+pub const fn breakdown_shown(open: Option<bool>, row: Option<bool>, on_panel: bool, on_breakdown: bool) -> Option<bool> {
+    match row {
+        Some(_) => row,
+        None if on_panel || on_breakdown => open,
+        None => None,
+    }
+}
+
+/// How many kinds the breakdown lists, and how wide it is.
+const BREAKDOWN_KINDS: usize = 6;
+const BREAKDOWN_WIDTH: f32 = 300.0;
+const BREAKDOWN: &str = "economy breakdown";
+
+/// Beside the economy panel while a resource is hovered: what it is spent on, by kind, the most
+/// first. Clicking a kind selects those units.
+fn economy_breakdown(ctx: &egui::Context, snapshot: &SimSnapshot, db: &BlueprintDb, panel: Rect, rows: &[egui::Response; 2], actions: &mut Vec<UiAction>) {
+    let id = egui::Id::new(BREAKDOWN);
+    let (open, shown_at) = ctx.data(|data| data.get_temp::<(Option<bool>, Option<Rect>)>(id)).unwrap_or_default();
+    let pointer = ctx.pointer_hover_pos();
+    let on = |rect: Rect| pointer.is_some_and(|at| rect.expand(10.0).contains(at));
+    let row = rows.iter().position(egui::Response::hovered).map(|index| index == 1);
+    let Some(energy) = breakdown_shown(open, row, on(panel), shown_at.is_some_and(on)) else {
+        ctx.data_mut(|data| data.insert_temp(id, (None::<bool>, None::<Rect>)));
+        return;
+    };
+    let top = rows[usize::from(energy)].rect.top() - 8.0;
+    let shown = egui::Area::new(egui::Id::new("economy breakdown panel"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(Pos2::new(panel.right() + 4.0, top))
+        .constrain(true)
+        .show(ctx, |ui| hud::framed(ui, Vec2::new(10.0, 8.0), |ui| breakdown_contents(ui, snapshot, db, energy, actions)));
+    ctx.data_mut(|data| data.insert_temp(id, (Some(energy), Some(shown.response.rect))));
+}
+
+fn breakdown_contents(ui: &mut egui::Ui, snapshot: &SimSnapshot, db: &BlueprintDb, energy: bool, actions: &mut Vec<UiAction>) {
+    ui.set_width(BREAKDOWN_WIDTH);
+    ui.spacing_mut().item_spacing.y = 2.0;
+    let economy = &snapshot.economy;
+    let (stored, capacity, income, demand, reclaim) = if energy {
+        (economy.energy, economy.energy_capacity, economy.energy_income, economy.energy_demand, (economy.energy_reclaim, economy.energy_reclaimed))
+    } else {
+        (economy.mass, economy.mass_capacity, economy.mass_income, economy.mass_demand, (economy.mass_reclaim, economy.mass_reclaimed))
+    };
+    ui.label(egui::RichText::new(economy_summary(energy, stored, capacity, income, demand, reclaim)).size(12.0).color(hud::DIM_TEXT));
+    ui.add_space(4.0);
+    let title = if energy { "ENERGY GOES TO" } else { "MATERIEL GOES TO" };
+    ui.label(egui::RichText::new(title).size(11.0).strong().color(hud::DIM_TEXT));
+    let groups = spending_groups(snapshot, db, energy);
+    if groups.is_empty() {
+        ui.label(egui::RichText::new("Nothing is spending it.").size(12.0).color(hud::TEXT));
+    }
+    let color = if energy { hud::ENERGY } else { hud::MASS };
+    let most = groups.first().map_or(1, |group| group.tenths.max(1));
+    let shift = ui.input(|input| input.modifiers.shift);
+    for group in groups.iter().take(BREAKDOWN_KINDS) {
+        let (rect, response) = ui.allocate_exact_size(Vec2::new(BREAKDOWN_WIDTH, 20.0), egui::Sense::click());
+        let painter = ui.painter();
+        if response.hovered() {
+            painter.rect_filled(rect, 2.0, hud::GLOW.gamma_multiply(0.16));
+        }
+        let name = Rect::from_min_max(rect.left_top(), Pos2::new(rect.right() - 120.0, rect.bottom()));
+        painter.with_clip_rect(name).text(Pos2::new(name.left() + 6.0, rect.center().y), Align2::LEFT_CENTER, &group.name, FontId::proportional(13.0), hud::TEXT);
+        let bar = Rect::from_min_size(Pos2::new(rect.right() - 112.0, rect.center().y - 3.0), Vec2::new(70.0, 6.0));
+        hud::meter(painter, bar, group.tenths as f32 / most as f32, color);
+        painter.text(Pos2::new(rect.right() - 6.0, rect.center().y), Align2::RIGHT_CENTER, breakdown_amount(group.tenths), FontId::proportional(12.0), hud::TEXT);
+        if response.clicked() {
+            actions.push(UiAction::QuickSelect { units: group.units.clone(), add: shift });
+        }
+    }
+    if groups.len() > BREAKDOWN_KINDS {
+        ui.label(egui::RichText::new(format!("and {} more kinds", groups.len() - BREAKDOWN_KINDS)).size(11.0).color(hud::DIM_TEXT));
+    }
+    ui.add_space(2.0);
+    // Only an empty store holds building back.
+    let short = if stored == 0 { demand - income - reclaim.0 } else { 0 };
+    let footer = if short > 0 { format!("Click a kind to select it. Short by {short} a second.") } else { "Click a kind to select it.".to_string() };
+    ui.label(egui::RichText::new(footer).size(11.0).color(if short > 0 { hud::LOSS } else { hud::DIM_TEXT }));
 }
 
 /// A team's row in the score panel: its color and name, then its figures in columns, each
@@ -1844,8 +2010,9 @@ pub fn resource_bar(ctx: &egui::Context, snapshot: &SimSnapshot, db: &BlueprintD
     if paused {
         paused_banner(ctx);
     }
-    let ((), economy) = hud::panel_rect(ctx, "economy", Align2::LEFT_TOP, Vec2::new(4.0, 4.0), |ui| economy_rows(ui, &snapshot.economy, None));
+    let (rows, economy) = hud::panel_rect(ctx, "economy", Align2::LEFT_TOP, Vec2::new(4.0, 4.0), |ui| economy_rows(ui, &snapshot.economy, None, false));
     crate::minimap::note_economy_bottom(ctx, economy.bottom());
+    economy_breakdown(ctx, snapshot, db, economy, &rows, actions);
     hud::panel(ctx, "game controls", Align2::CENTER_TOP, Vec2::new(0.0, 4.0), |ui| {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 6.0;
@@ -2453,7 +2620,7 @@ pub fn watch_bar(ctx: &egui::Context, snapshot: &SimSnapshot, db: &BlueprintDb, 
     if !economies.is_empty() {
         let ((), panel) = hud::panel_rect(ctx, "economy", Align2::LEFT_TOP, Vec2::new(4.0, 4.0), |ui| {
             for (team, economy) in &economies {
-                economy_rows(ui, economy, Some((team_name(*team), team_text(*team))));
+                economy_rows(ui, economy, Some((team_name(*team), team_text(*team))), true);
             }
         });
         crate::minimap::note_economy_bottom(ctx, panel.bottom());
@@ -3644,6 +3811,8 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
     let raw = |value: i32| f64::from(value) / 4096.0;
     let viewport = ctx.screen_rect();
     let time = ctx.input(|input| input.time);
+    // Where idle factories' markers go, drawn after every icon so that none covers them.
+    let mut idle_marks: Vec<(Pos2, f32)> = Vec::new();
     for unit in &snapshot.units {
         if unit.blueprint == u16::MAX {
             continue;
@@ -3694,6 +3863,12 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
                 painter.circle_filled(Pos2::new(left + spacing * f32::from(pip), center.y + below), 2.0, VETERAN);
             }
         }
+        // A factory with nothing to do, under its icon, so it can be found from afar.
+        if snapshot.idle_factories.binary_search(&unit.id).is_ok() {
+            let below = if show_icons { icon_bottom + 3.0 } else { 12.0 };
+            let width = if show_icons { (icon_half * 2.6).max(24.0) } else { 28.0 };
+            idle_marks.push((center + Vec2::new(0.0, below + 2.5), width));
+        }
         let hurt = unit.health_permille < 1000;
         let building = unit.built_permille < 1000;
         let upgrading = snapshot.upgrading.binary_search(&unit.id).is_ok();
@@ -3729,6 +3904,12 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
             }
         }
     }
+    for (middle, width) in idle_marks {
+        let bar = Rect::from_center_size(middle, Vec2::new(width, 5.0));
+        hud::hatched(&painter, bar, IDLE, IDLE_STRIPE);
+        painter.rect_stroke(bar, 0.0, Stroke::new(1.0_f32, IDLE_EDGE));
+        hud::outlined_text(&painter, Pos2::new(middle.x, bar.bottom() + 1.0), Align2::CENTER_TOP, "IDLE", FontId::new(10.0, egui::FontFamily::Name(BOLD.into())), IDLE_EDGE);
+    }
     if show_icons {
         painter.text(
             Pos2::new(viewport.right() - 8.0, viewport.bottom() - COMMAND_BAR_HEIGHT - 6.0),
@@ -3743,7 +3924,7 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sim::world::{BuildQueueView, FactoryView, OrderStopView, PlanStep, UnitPlanView, WorkLinkView};
+    use crate::sim::world::{BuildQueueView, FactoryView, OrderStopView, PlanStep, UnitPlanView, UnitSpendingView, WorkLinkView};
 
     fn raw(value: f64) -> i32 {
         (value * 4096.0) as i32
@@ -4879,7 +5060,10 @@ mod tests {
         /// then two short buttons, each 4 points apart, inside the panel's 8 point margin.
         fn click(&mut self, row: usize, modifiers: egui::Modifiers) -> Vec<UiAction> {
             let middles = [32.0, 84.0, 124.0, 152.0];
-            let at = egui::pos2(32.0, middles[row]);
+            self.click_at(egui::pos2(32.0, middles[row]), modifiers)
+        }
+
+        fn click_at(&mut self, at: Pos2, modifiers: egui::Modifiers) -> Vec<UiAction> {
             let press = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers };
             let mut actions = self.frame(vec![egui::Event::PointerMoved(at)], modifiers);
             actions.extend(self.frame(vec![press(true)], modifiers));
@@ -4895,6 +5079,64 @@ mod tests {
         assert_eq!(bar.click(0, egui::Modifiers::NONE), [UiAction::QuickSelect { units: vec![SimId(1)], add: false }]);
         bar.time += 1.0;
         assert_eq!(bar.click(0, egui::Modifiers::SHIFT), [UiAction::QuickSelect { units: vec![SimId(1)], add: true }]);
+    }
+
+    #[test]
+    fn the_idle_tag_selects_the_idle_factories_and_the_rest_of_the_square_opens_the_kind() {
+        // The kind's square runs from 8 to 56 across and 60 to 108 down; the tag is in its top
+        // right corner.
+        let corner = egui::pos2(48.0, 66.0);
+        let mut bar = BarTest::new();
+        assert!(bar.click_at(corner, egui::Modifiers::NONE).is_empty(), "with none idle there is no tag, so the corner opens the kind");
+        assert!(bar.state.expanded.contains("Land Factory"));
+
+        let mut bar = BarTest::new();
+        bar.current.idle_factories = vec![SimId(2), SimId(5)];
+        assert_eq!(bar.click_at(corner, egui::Modifiers::NONE), [UiAction::QuickSelect { units: vec![SimId(2), SimId(5)], add: false }]);
+        assert!(!bar.state.expanded.contains("Land Factory"), "the tag selects without opening the kind");
+        bar.time += 1.0;
+        assert_eq!(bar.click_at(corner, egui::Modifiers::SHIFT), [UiAction::QuickSelect { units: vec![SimId(2), SimId(5)], add: true }]);
+        bar.time += 1.0;
+        assert!(bar.click(1, egui::Modifiers::NONE).is_empty(), "the rest of the square still opens it");
+        assert!(bar.state.expanded.contains("Land Factory"));
+    }
+
+    #[test]
+    fn spending_is_listed_by_kind_the_most_first() {
+        let db = BlueprintDb::standard();
+        let mut current = base_with_factories(&db);
+        let spends = |id: u32, mass: i32, energy: i32| UnitSpendingView { id: SimId(id), mass, energy };
+        // The commander, two T2 factories, the generator, and one unit the viewer cannot see.
+        current.spending = vec![spends(1, 50, 0), spends(4, 40, 200), spends(5, 45, 210), spends(6, 0, 30), spends(99, 500, 500)];
+        let listed = |energy: bool| spending_groups(&current, &db, energy).into_iter().map(|group| (group.name, group.units, group.tenths)).collect::<Vec<_>>();
+        let t2 = format!("{} \u{d7}2", db.get(db.id("land_factory_t2")).name);
+        let name = |key: &str| db.get(db.id(key)).name.clone();
+        assert_eq!(listed(false), [(t2.clone(), vec![SimId(4), SimId(5)], 85), (name("command_rig"), vec![SimId(1)], 50)]);
+        assert_eq!(listed(true), [(t2, vec![SimId(4), SimId(5)], 410), (name("power_generator"), vec![SimId(6)], 30)], "the commander spends no energy, so it is not listed");
+    }
+
+    #[test]
+    fn breakdown_amounts_are_whole_unless_small() {
+        for (tenths, shown) in [(0, "0.0"), (5, "0.5"), (99, "9.9"), (100, "10"), (104, "10"), (105, "11"), (1500, "150")] {
+            assert_eq!(breakdown_amount(tenths), shown, "{tenths} tenths");
+        }
+    }
+
+    #[test]
+    fn the_breakdown_follows_the_row_hovered_and_stays_while_the_pointer_is_on_it() {
+        let (mass, energy) = (Some(false), Some(true));
+        // What is open, the row hovered, whether the pointer is on the panel, and on the breakdown.
+        for (open, row, on_panel, on_breakdown, shown) in [
+            (None, None, false, false, None),
+            (None, mass, true, false, mass),
+            (mass, energy, true, false, energy),
+            (energy, None, true, false, energy),
+            (energy, None, false, true, energy),
+            (energy, None, false, false, None),
+            (None, None, true, false, None),
+        ] {
+            assert_eq!(breakdown_shown(open, row, on_panel, on_breakdown), shown, "{open:?} open, {row:?} hovered, on the panel {on_panel}, on the breakdown {on_breakdown}");
+        }
     }
 
     #[test]

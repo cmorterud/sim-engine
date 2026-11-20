@@ -15,7 +15,7 @@ use super::components::{BuildTask, AntiAir, Artillery, BombBay, Falling, Flight,
 use super::config::{SimConfig, TARGET_SEARCH_INTERVAL, TERRAIN_CELL_UNITS, WRECK_HEALTH_PERMILLE, WRECK_MASS_PERMILLE, WRECK_SUNK_PERMILLE, WRECK_TECH_PERMILLE};
 use super::flowfield::{nearest_passable_cell_for, FlowField, FlowSample};
 use super::formation::{plan_formation, within, Travel};
-use super::production::{Economy, WorkLink};
+use super::production::{Economy, WorkKind, WorkLink};
 use super::spatial::{GridUnit, Layer, SpatialGrid};
 use super::terrain::Terrain;
 use super::visibility::{Sense, Visibility, VISION_REFRESH_TICKS};
@@ -223,6 +223,15 @@ pub struct UnitRatesView {
     pub energy_use: i32,
 }
 
+/// What one of the viewer's units would spend at full speed, in tenths per second: its share of
+/// the work it is putting build power into, and its upkeep. Only for the viewer's team.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct UnitSpendingView {
+    pub id: SimId,
+    pub mass: i32,
+    pub energy: i32,
+}
+
 /// A builder that is doing work this tick, and where. Only present while work is really
 /// happening, so not while walking to a site, waiting, or out of resources.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -427,6 +436,11 @@ pub struct SimSnapshot {
     pub order_stops: Vec<OrderStopView>,
     /// Sorted by `SimId`.
     pub rates: Vec<UnitRatesView>,
+    /// Everything of the viewer's that spends, sorted by `SimId`.
+    pub spending: Vec<UnitSpendingView>,
+    /// The viewer's finished factories with nothing to build and no factory to help, sorted by
+    /// `SimId`.
+    pub idle_factories: Vec<SimId>,
     /// How many of the viewer's orders have been cancelled because they could not be reached.
     pub orders_cancelled: u32,
     /// The viewer's paused factories and sites, sorted by `SimId`.
@@ -665,6 +679,12 @@ pub struct SimWorld {
     /// What each factory spent this tick. Rebuilt every tick and only used for showing,
     /// so it is not part of the checksum.
     pub(super) factory_spending: Vec<(SimId, Res, Res)>,
+    /// Who put build power into what this tick: the job, what kind of work, who, and how much.
+    /// Rebuilt every tick and only used for showing, so it is not part of the checksum.
+    pub(super) work_sources: Vec<(SimId, WorkKind, SimId, Fp)>,
+    /// What each job this tick costs a tick at full speed, and all the power put into it, in the
+    /// order of job and kind. Rebuilt every tick and only used for showing, so not hashed.
+    pub(super) work_demand: Vec<(SimId, WorkKind, Res, Res, Fp)>,
     /// Units whose order was cancelled this tick because they cannot reach it, sorted by `SimId`.
     pub(super) unreachable: Vec<SimId>,
     /// How many orders each team has had cancelled that way, for telling the player.
@@ -785,6 +805,8 @@ impl SimWorld {
             economy_dirty: false,
             work_links: Vec::new(),
             factory_spending: Vec::new(),
+            work_sources: Vec::new(),
+            work_demand: Vec::new(),
             unreachable: Vec::new(),
             orders_cancelled: [0; 2],
             max_mobile_radius: 0,
@@ -4136,6 +4158,8 @@ impl SimWorld {
         let build_queues = viewer.map_or_else(Vec::new, |viewer| self.build_queues_for(viewer));
         let order_stops = viewer.map_or_else(Vec::new, |viewer| self.order_stops_for(viewer));
         let rates = viewer.map_or_else(Vec::new, |viewer| self.rates_for(viewer));
+        let spending = viewer.map_or_else(Vec::new, |viewer| self.spending_for(viewer));
+        let idle_factories = viewer.map_or_else(Vec::new, |viewer| self.idle_factories(viewer));
         let economy = viewer.map_or_else(EconomyView::default, |viewer| self.economies[viewer.index()].view());
         let team_economies = viewer.is_none().then(|| [self.economies[0].view(), self.economies[1].view()]);
         let fog = match viewer {
@@ -4186,6 +4210,8 @@ impl SimWorld {
             build_queues,
             order_stops,
             rates,
+            spending,
+            idle_factories,
             orders_cancelled: viewer.map_or(0, |viewer| self.orders_cancelled[viewer.index()]),
             paused: viewer.map_or_else(Vec::new, |viewer| self.paused_for(viewer)),
             veterans: self
