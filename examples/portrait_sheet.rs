@@ -74,7 +74,9 @@ fn matte(with: &[u8], without: &[u8]) -> [u8; 4] {
         // A shadow: a faint dark patch.
         return [0, 0, 0, ((1.0 - mean) * 160.0).clamp(0.0, 110.0) as u8];
     }
-    let alpha = (difference as f32 / 28.0).clamp(0.0, 1.0);
+    // Fully solid soon past the threshold, so that a hull close to the ground's color does not
+    // come out see-through, mottled by the pattern of the grass behind it.
+    let alpha = (difference as f32 / 12.0).clamp(0.0, 1.0);
     [with[0], with[1], with[2], (alpha * 255.0) as u8]
 }
 

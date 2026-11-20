@@ -49,6 +49,10 @@ const DEPOSIT: [f32; 3] = [0.10, 0.75, 0.62];
 const VENT: [f32; 3] = [0.75, 0.55, 0.20];
 const GHOST_VALID: [f32; 3] = [0.35, 0.95, 0.45];
 const GHOST_INVALID: [f32; 3] = [0.95, 0.25, 0.20];
+/// How much wider a structure's foundation is than the structure, and how thick it is, in
+/// world units, half of it below the ground so that it sits flush on a slope.
+const APRON_WIDTH: f32 = 1.1;
+const APRON_HEIGHT: f32 = 2.4;
 /// Bare armor, before it takes on a little of the team's and the blueprint's color.
 const ARMOR: [f32; 3] = [0.50, 0.52, 0.55];
 /// How much of the blueprint's tint, then the team's color, the armor takes on.
@@ -282,11 +286,14 @@ pub struct UnitLook {
     pub size: f32,
     /// Its tech level, which darkens its armor. Zero from `unit_look`; `unit_looks` sets it.
     pub tier: u8,
+    /// Whether it stands on a concrete foundation: structures on land, but walls. False from
+    /// `unit_look`; `unit_looks` sets it.
+    pub apron: bool,
 }
 
 /// Maps a blueprint to its look. Unknown keys fall back to a plain cube.
 pub fn unit_look(key: &str) -> UnitLook {
-    let look = |shape, tint, height_share| UnitLook { shape, tint, height_share, base: None, size: 0.0, tier: 0 };
+    let look = |shape, tint, height_share| UnitLook { shape, tint, height_share, base: None, size: 0.0, tier: 0, apron: false };
     match key {
         "command_rig" => UnitLook { base: Some(Shape::CommanderLegs), ..look(Shape::Commander, Some([1.00, 1.00, 1.00]), 1.0) },
         "field_rig" => UnitLook { base: Some(Shape::CommanderLegs), ..look(Shape::Commander, Some([0.70, 0.75, 0.85]), 1.0) },
@@ -294,16 +301,16 @@ pub fn unit_look(key: &str) -> UnitLook {
         "geothermal_plant" => look(Shape::GeothermalPlant, Some([0.85, 0.60, 0.25]), 0.7),
         "mass_fabricator" => look(Shape::Fabricator, Some([0.40, 0.95, 0.85]), 1.0),
         "mass_fabricator_t3" => look(Shape::Fabricator, Some([0.70, 0.45, 1.00]), 0.8),
-        "t2_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([0.95, 0.65, 0.25]), 1.0) },
-        "t3_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([0.95, 0.50, 0.20]), 1.0) },
+        "t2_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([1.00, 0.56, 0.10]), 1.0) },
+        "t3_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([0.98, 0.44, 0.10]), 1.0) },
         "land_factory_t3" => look(Shape::FactoryT3, Some([0.10, 0.10, 0.20]), 0.85),
-        "t1_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([0.95, 0.80, 0.30]), 1.0) },
+        "t1_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([1.00, 0.70, 0.12]), 1.0) },
         "t1_light_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::Bot, None, 1.0) },
         "t1_land_scout" => look(Shape::LandScout, Some([0.75, 0.95, 1.00]), 1.0),
         "t1_medium_tank" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::Tank, Some([0.80, 0.85, 0.70]), 1.0) },
         "t2_grenadier_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::GrenadierWalker, None, 1.0) },
         "t2_mobile_shield" => UnitLook { base: Some(Shape::WheeledHull), ..look(Shape::ShieldEmitter, Some([0.55, 0.85, 1.00]), 1.0) },
-        "t2_combat_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([0.95, 0.40, 0.25]), 1.0) },
+        "t2_combat_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([0.95, 0.32, 0.22]), 1.0) },
         "t3_heavy_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::HeavyWalker, None, 1.0) },
         "t3_siege_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::SiegeWalker, Some([0.70, 0.70, 0.75]), 1.0) },
         "t2_torpedo_boat" => look(Shape::TorpedoBoat, Some([0.90, 0.78, 0.30]), 0.5),
@@ -323,14 +330,14 @@ pub fn unit_look(key: &str) -> UnitLook {
         "mass_extractor" => look(Shape::Extractor, Some([0.10, 0.95, 0.75]), 0.8),
         "mass_extractor_t2" => look(Shape::ExtractorT2, Some([0.10, 0.75, 0.95]), 1.0),
         "mass_extractor_t3" => look(Shape::ExtractorT3, Some([0.55, 0.40, 1.00]), 1.2),
-        "power_generator" => look(Shape::Generator, Some([1.00, 0.85, 0.20]), 1.2),
+        "power_generator" => look(Shape::Generator, Some([1.00, 0.95, 0.75]), 1.2),
         "mass_storage" => look(Shape::Storage, Some([0.60, 0.90, 0.60]), 0.65),
-        "energy_storage" => look(Shape::Storage, Some([1.00, 0.90, 0.40]), 0.65),
+        "energy_storage" => look(Shape::EnergyStorage, Some([1.00, 0.90, 0.40]), 0.65),
         "t2_artillery" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::ArtilleryGun, Some([0.80, 0.55, 0.30]), 1.0) },
         "t3_artillery" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::ArtilleryGun, Some([0.50, 0.30, 0.20]), 0.6) },
         "t3_mobile_artillery" => UnitLook { base: Some(Shape::HeavyTankHull), ..look(Shape::HeavyArtillery, Some([0.55, 0.45, 0.35]), 1.0) },
         "radar" => look(Shape::Radar, Some([0.40, 0.90, 0.55]), 1.3),
-        "deep_scan_array" => look(Shape::Radar, Some([0.75, 0.55, 1.00]), 1.6),
+        "deep_scan_array" => look(Shape::DeepScan, Some([0.75, 0.55, 1.00]), 1.2),
         "stealth_field_generator" => look(Shape::StealthGenerator, Some([0.30, 0.30, 0.35]), 1.2),
         "shield_generator" => look(Shape::ShieldGenerator, Some([0.55, 0.85, 1.00]), 1.0),
         "tactical_missile_launcher" => look(Shape::MissileLauncher, Some([0.85, 0.85, 0.80]), 0.9),
@@ -346,8 +353,8 @@ pub fn unit_look(key: &str) -> UnitLook {
         "t3_missile_sub" => look(Shape::MissileSubmarine, Some([0.05, 0.10, 0.20]), 0.35),
         "t2_mobile_missile_launcher" => UnitLook { base: Some(Shape::ArtilleryHull), ..look(Shape::MissileRack, Some([0.80, 0.80, 0.70]), 1.0) },
         "t2_torpedo_bomber" => look(Shape::TorpedoBomber, Some([0.40, 0.55, 0.70]), 0.55),
-        "t1_sonar" => look(Shape::Radar, Some([0.30, 0.60, 0.90]), 1.0),
-        "t2_sonar" => look(Shape::Radar, Some([0.20, 0.45, 0.85]), 1.2),
+        "t1_sonar" => look(Shape::Sonar, Some([0.30, 0.60, 0.90]), 1.0),
+        "t2_sonar" => look(Shape::Sonar, Some([0.20, 0.45, 0.85]), 1.2),
         "t1_torpedo_launcher" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::SamLauncher, Some([0.20, 0.68, 0.56]), 0.7) },
         "t2_torpedo_launcher" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::SamLauncher, Some([0.14, 0.55, 0.44]), 0.8) },
         "t2_destroyer" => look(Shape::Destroyer, Some([0.12, 0.30, 0.62]), 0.5),
@@ -362,8 +369,8 @@ pub fn unit_look(key: &str) -> UnitLook {
         "land_factory_t3_support" => look(Shape::FactoryT3, Some([0.48, 0.42, 0.30]), 0.78),
         "air_factory_t2_support" => look(Shape::AirFactoryT2, Some([0.66, 0.60, 0.46]), 0.58),
         "air_factory_t3_support" => look(Shape::AirFactoryT3, Some([0.52, 0.46, 0.34]), 0.72),
-        "power_generator_t2" => look(Shape::GeneratorT2, Some([1.00, 0.70, 0.15]), 1.0),
-        "power_generator_t3" => look(Shape::GeneratorT3, Some([1.00, 0.55, 0.10]), 0.9),
+        "power_generator_t2" => look(Shape::GeneratorT2, Some([1.00, 0.88, 0.62]), 1.0),
+        "power_generator_t3" => look(Shape::GeneratorT3, Some([1.00, 0.80, 0.50]), 0.9),
         "radar_t2" => look(Shape::Radar, Some([0.50, 0.95, 0.75]), 1.45),
         "t2_point_defense" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::PointDefense, Some([0.85, 0.30, 0.65]), 1.0) },
         "air_factory_t2" => look(Shape::AirFactoryT2, Some([0.30, 0.45, 0.65]), 0.65),
@@ -389,7 +396,15 @@ pub fn unit_look(key: &str) -> UnitLook {
 
 /// Per-blueprint looks, indexed by raw blueprint id.
 pub fn unit_looks(blueprints: &BlueprintDb) -> Vec<UnitLook> {
-    blueprints.iter().map(|unit| UnitLook { size: unit.radius.to_num::<f32>() * 2.0, tier: unit.tier, ..unit_look(&unit.key) }).collect()
+    blueprints
+        .iter()
+        .map(|unit| UnitLook {
+            size: unit.radius.to_num::<f32>() * 2.0,
+            tier: unit.tier,
+            apron: unit.is_structure() && !unit.on_water && unit_look(&unit.key).shape != Shape::Wall,
+            ..unit_look(&unit.key)
+        })
+        .collect()
 }
 
 /// Units with no heading yet face the middle of the map.
@@ -529,6 +544,11 @@ pub fn build_unit_instances(
             }
             let aim = unit_vector(unit.aim).unwrap_or(NORTH);
             out.push(shape, animated(painted(center, [size, size, height], aim, trim, hull, glow, UNIT_ICON_PX * 1.6, eye), spin));
+            // The foundation it stands on, laid before it rises, a little wider than it.
+            if look.is_some_and(|look| look.apron) {
+                let ground = center[2] - f64::from(height) * 0.5;
+                out.push(Shape::Apron, painted([center[0], center[1], ground], [size * APRON_WIDTH, size * APRON_WIDTH, APRON_HEIGHT], NORTH, color, hull, hull, NO_ICON, eye));
+            }
             // Scaffolding stands around the whole of what it will be until it is finished.
             if unit.built_permille < 1000 {
                 let full = size * height_share;
@@ -1146,7 +1166,8 @@ mod tests {
         assert_eq!(out.shape(Shape::Generator).len(), 1);
         assert_eq!(out.shape(Shape::Cube).len(), 0);
         assert_eq!(out.shape(Shape::TankHull).len(), 1, "a tank is drawn as a hull and a turret");
-        assert_eq!(out.total(), 3);
+        assert_eq!(out.shape(Shape::Apron).len(), 1, "and the generator stands on its foundation");
+        assert_eq!(out.total(), 4);
     }
 
     fn facing(instance: &UnitInstanceRaw) -> [f32; 2] {

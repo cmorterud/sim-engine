@@ -21,7 +21,11 @@ struct Globals {
 @group(0) @binding(2) var fog_texture: texture_2d<f32>;
 @group(0) @binding(3) var fog_sampler: sampler;
 
-const LIGHT: vec3<f32> = vec3<f32>(0.38, 0.27, 0.88);
+// Where the sun shines from: high, from the east-south-east, a little behind the camera,
+// which looks north, so that the faces of units and buildings that face it are lit, not only
+// their tops. Until 2026-11-20 it shone from the north-east, behind them, and every wall facing
+// the camera stood in shade.
+const LIGHT: vec3<f32> = vec3<f32>(0.449, -0.249, 0.858);
 
 // ---- Units, projectiles, and obstacles ----
 

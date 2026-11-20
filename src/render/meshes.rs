@@ -177,10 +177,18 @@ pub enum Shape {
     HeavyArtillery,
     /// A launcher box of missile tubes, raised on a pedestal.
     MissileRack,
+    /// A bank of energy cells with glowing caps, on a slab.
+    EnergyStorage,
+    /// A sonar float with a hydrophone mast.
+    Sonar,
+    /// A deep scan array: a great sensor sphere on a tripod.
+    DeepScan,
+    /// The concrete foundation a structure on land stands on, with the team's corner marks.
+    Apron,
 }
 
 impl Shape {
-    pub const ALL: [Self; 90] = [
+    pub const ALL: [Self; 94] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -271,13 +279,17 @@ impl Shape {
         Self::WheeledHull,
         Self::HeavyArtillery,
         Self::MissileRack,
+        Self::EnergyStorage,
+        Self::Sonar,
+        Self::DeepScan,
+        Self::Apron,
     ];
     pub const COUNT: usize = Self::ALL.len();
 
     /// Whether the shape throws a shadow on the ground. Markers, see-through domes, and shells
     /// too small to see do not.
     pub const fn casts_shadow(self) -> bool {
-        !matches!(self, Self::Dome | Self::SelectionRing | Self::SelectionBox | Self::Shell | Self::Fireball | Self::Smoke | Self::Wake | Self::Scar)
+        !matches!(self, Self::Dome | Self::SelectionRing | Self::SelectionBox | Self::Shell | Self::Fireball | Self::Smoke | Self::Wake | Self::Scar | Self::Apron)
     }
 
     /// How many turns a second the shape's spinning parts make, if it has any.
@@ -288,6 +300,8 @@ impl Shape {
             Self::Radar => Some(0.25),
             Self::AirFactoryT3 => Some(0.3),
             Self::LandScout => Some(0.6),
+            // The extractor's pump nods as it works.
+            Self::Extractor => Some(0.35),
             _ => None,
         }
     }
@@ -1031,20 +1045,103 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Metal);
             mesh.frustum([-0.36, 0.43], [-0.1, 0.42], [0.05, 0.04], 6);
         }
-        // A squat hexagonal collar with a central drill spike.
+        // A pump rig over the deposit: a team-colored pad, a glowing well head, and a walking
+        // beam on an A-frame that nods as it pumps.
         Shape::Extractor => {
-            mesh.frustum([0.0, 0.0], [-0.5, -0.15], [0.5, 0.36], 6);
+            mesh.paint(Material::Hull);
+            mesh.frustum([0.0, 0.0], [-0.5, -0.38], [0.5, 0.44], 6);
+            mesh.paint(Material::Trim);
+            mesh.frustum([0.0, 0.0], [-0.38, -0.35], [0.43, 0.41], 6);
             mesh.paint(Material::Glow);
-            mesh.frustum([0.0, 0.0], [-0.15, 0.5], [0.16, 0.0], 6);
+            mesh.frustum([0.0, 0.24], [-0.35, -0.14], [0.08, 0.06], 6);
+            mesh.paint(Material::Metal);
+            for x in [-0.14_f32, 0.14] {
+                for y in [-0.16_f32, 0.06] {
+                    mesh.beam([x, y, -0.35], [x * 0.15, -0.05, 0.2], 0.018, 0.018);
+                }
+            }
+            mesh.moving(motion::SWING, [0.01, -0.05, 0.22], |mesh| {
+                mesh.paint(Material::Trim);
+                mesh.block([-0.05, -0.38, 0.18], [0.05, 0.28, 0.26]);
+                mesh.block([-0.06, 0.22, 0.02], [0.06, 0.32, 0.28]);
+                mesh.paint(Material::Metal);
+                mesh.block([-0.09, -0.44, 0.04], [0.09, -0.32, 0.2]);
+            });
         }
-        // A cooling tower, pinched at the waist.
+        // A generator hall with a glowing window, and a cooling tower beside it, pinched at the
+        // waist, with the team's band round its top.
         Shape::Generator => {
             mesh.paint(Material::Hull);
-            mesh.frustum([0.0, 0.0], [-0.5, 0.2], [0.5, 0.26], 10);
-            mesh.paint(Material::Glow);
-            mesh.frustum([0.0, 0.0], [0.14, 0.26], [0.31, 0.31], 10);
+            mesh.bevel([-0.5, -0.5, -0.5], [0.5, 0.5, -0.42], 0.02);
+            mesh.bevel([-0.46, -0.4, -0.42], [-0.06, 0.3, -0.02], 0.03);
             mesh.paint(Material::Trim);
-            mesh.frustum([0.0, 0.0], [0.2, 0.5], [0.26, 0.36], 10);
+            mesh.block([-0.47, -0.41, -0.02], [-0.05, 0.31, 0.03]);
+            mesh.paint(Material::Glow);
+            mesh.block([-0.4, 0.3, -0.3], [-0.12, 0.31, -0.2]);
+            mesh.paint(Material::Metal);
+            mesh.beam([-0.06, -0.05, -0.2], [0.04, -0.05, -0.2], 0.04, 0.04);
+            mesh.paint(Material::Hull);
+            mesh.frustum([0.24, 0.0], [-0.42, 0.22], [0.25, 0.16], 10);
+            mesh.frustum([0.24, 0.0], [0.22, 0.46], [0.16, 0.2], 10);
+            mesh.paint(Material::Trim);
+            mesh.frustum([0.24, 0.0], [0.3, 0.4], [0.185, 0.205], 10);
+            mesh.paint(Material::Glow);
+            mesh.frustum([0.24, 0.0], [0.44, 0.47], [0.17, 0.17], 10);
+        }
+        Shape::EnergyStorage => {
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.5, -0.5, -0.5], [0.5, 0.5, -0.38], 0.03);
+            for x in [-0.3_f32, 0.0, 0.3] {
+                mesh.paint(Material::Trim);
+                mesh.bevel([x - 0.11, -0.36, -0.38], [x + 0.11, 0.36, 0.26], 0.02);
+                mesh.paint(Material::Panel);
+                mesh.block([x - 0.115, -0.365, -0.02], [x + 0.115, 0.365, 0.08]);
+                mesh.paint(Material::Glow);
+                mesh.block([x - 0.07, -0.3, 0.26], [x + 0.07, 0.3, 0.31]);
+            }
+            mesh.paint(Material::Metal);
+            mesh.block([-0.42, -0.04, 0.31], [0.42, 0.04, 0.35]);
+        }
+        Shape::Sonar => {
+            let float = [[-0.2, -0.36], [0.2, -0.36], [0.4, 0.0], [0.2, 0.36], [-0.2, 0.36], [-0.4, 0.0]];
+            mesh.paint(Material::Hull);
+            mesh.prism(&float, [-0.5, -0.3], [0.85, 1.0]);
+            mesh.paint(Material::Trim);
+            mesh.prism(&float, [-0.3, -0.26], [0.98, 0.9]);
+            mesh.paint(Material::Metal);
+            mesh.frustum([0.0, 0.0], [-0.26, 0.32], [0.05, 0.035], 6);
+            mesh.paint(Material::Glow);
+            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
+                for z in [-0.02_f32, 0.16] {
+                    mesh.frustum([0.0, 0.0], [z, z + 0.04], [0.17, 0.17], 10);
+                }
+            });
+            mesh.paint(Material::Trim);
+            mesh.ball([0.0, 0.0, 0.38], 0.09, 8, 4);
+        }
+        Shape::DeepScan => {
+            mesh.paint(Material::Hull);
+            mesh.frustum([0.0, 0.0], [-0.5, -0.36], [0.48, 0.42], 8);
+            mesh.paint(Material::Metal);
+            for index in 0..3 {
+                let angle = index as f32 / 3.0 * std::f32::consts::TAU + 0.3;
+                mesh.beam([angle.cos() * 0.34, angle.sin() * 0.34, -0.36], [angle.cos() * 0.12, angle.sin() * 0.12, -0.05], 0.025, 0.025);
+            }
+            mesh.paint(Material::Trim);
+            mesh.ball([0.0, 0.0, 0.16], 0.3, 10, 6);
+            mesh.paint(Material::Glow);
+            mesh.frustum([0.0, 0.0], [0.12, 0.2], [0.305, 0.305], 14);
+        }
+        Shape::Apron => {
+            mesh.paint(Material::Panel);
+            mesh.block([-0.5, -0.5, -0.5], [0.5, 0.5, 0.1]);
+            // The team's marks at the corners.
+            mesh.paint(Material::Trim);
+            for (x, y) in [(-1.0_f32, -1.0_f32), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+                let (corner_x, corner_y) = (0.47 * x, 0.47 * y);
+                mesh.block([corner_x.min(corner_x - 0.16 * x), corner_y.min(corner_y - 0.04 * y), 0.1], [corner_x.max(corner_x - 0.16 * x), corner_y.max(corner_y - 0.04 * y), 0.5]);
+                mesh.block([corner_x.min(corner_x - 0.04 * x), corner_y.min(corner_y - 0.16 * y), 0.1], [corner_x.max(corner_x - 0.04 * x), corner_y.max(corner_y - 0.16 * y), 0.5]);
+            }
         }
         // A wide storage drum with a domed lid.
         Shape::Storage => {
@@ -1310,16 +1407,25 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.frustum([x, y], [0.15, 0.5], [0.12, 0.12], 6);
             }
         }
+        // A lattice mast over an equipment hut, with a turning antenna on top.
         Shape::Radar => {
             mesh.paint(Material::Hull);
-            mesh.frustum([0.0, 0.0], [-0.5, -0.35], [0.4, 0.32], 6);
+            mesh.frustum([0.0, 0.0], [-0.5, -0.4], [0.42, 0.36], 6);
+            mesh.paint(Material::Trim);
+            mesh.bevel([-0.3, -0.32, -0.4], [-0.02, -0.06, -0.2], 0.02);
             mesh.paint(Material::Metal);
-            mesh.frustum([0.0, 0.0], [-0.35, 0.15], [0.07, 0.05], 6);
+            for (x, y) in [(-1.0_f32, -1.0_f32), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+                mesh.beam([x * 0.14, y * 0.14, -0.4], [x * 0.04, y * 0.04, 0.24], 0.014, 0.014);
+            }
+            for z in [-0.2_f32, 0.02] {
+                let half = 0.14 - (z + 0.4) / 0.64 * 0.1;
+                mesh.block([-half, -half, z], [half, half, z + 0.02]);
+            }
             mesh.paint(Material::Trim);
             mesh.moving(motion::SPIN, [0.0; 3], |mesh| {
                 mesh.cuboid(
-                    [Vec3::new(-0.45, -0.1, 0.1), Vec3::new(0.45, -0.1, 0.1), Vec3::new(0.45, 0.05, 0.1), Vec3::new(-0.45, 0.05, 0.1)],
-                    [Vec3::new(-0.45, 0.1, 0.5), Vec3::new(0.45, 0.1, 0.5), Vec3::new(0.45, 0.25, 0.5), Vec3::new(-0.45, 0.25, 0.5)],
+                    [Vec3::new(-0.42, -0.06, 0.24), Vec3::new(0.42, -0.06, 0.24), Vec3::new(0.42, 0.04, 0.24), Vec3::new(-0.42, 0.04, 0.24)],
+                    [Vec3::new(-0.42, 0.06, 0.5), Vec3::new(0.42, 0.06, 0.5), Vec3::new(0.42, 0.16, 0.5), Vec3::new(-0.42, 0.16, 0.5)],
                 );
             });
         }
@@ -2618,10 +2724,15 @@ pub(super) mod tests {
         }
         let walking: Vec<_> = Shape::ALL.into_iter().filter(|shape| shape.walks()).collect();
         for (index, shape) in Shape::ALL.into_iter().enumerate() {
+            // Legs swing as a unit walks; anything else that moves, spinning or rocking, does so
+            // at its spin rate, and nothing moves without one or the other to drive it.
             let swings = shape_vertices(&set, index).iter().any(|vertex| vertex.material & motion::SWING != 0);
-            assert_eq!(swings, walking.contains(&shape), "{shape:?} swings only if it walks");
             let spins = shape_vertices(&set, index).iter().any(|vertex| vertex.material & motion::SPIN != 0);
-            assert_eq!(spins, shape.spin_rate().is_some(), "{shape:?} spins only if it has a spin rate");
+            if walking.contains(&shape) {
+                assert!(swings, "{shape:?} walks, so its legs swing");
+            } else {
+                assert_eq!(spins || swings, shape.spin_rate().is_some(), "{shape:?} moves only if it has a spin rate");
+            }
         }
     }
 
