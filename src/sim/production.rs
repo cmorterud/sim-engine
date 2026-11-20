@@ -1033,6 +1033,7 @@ impl SimWorld {
         self.factory_spending.clear();
         self.work_sources.clear();
         self.work_demand.clear();
+        self.upkeep_paid.clear();
         if !self.self_destructing.is_empty() {
             self.step_self_destructs();
         }
@@ -1169,7 +1170,8 @@ impl SimWorld {
     /// Returns what each team paid this tick.
     fn step_shields(&mut self) -> [Res; 2] {
         let mut paid = [Res::ZERO; 2];
-        for &(_, entity) in &self.shields {
+        let mut paid_by = Vec::new();
+        for &(id, entity) in &self.shields {
             if self.ecs.get::<&Construction>(entity).is_ok() || self.ecs.get::<&Paused>(entity).is_ok() {
                 continue;
             }
@@ -1190,8 +1192,10 @@ impl SimWorld {
                 continue;
             }
             paid[team] += cost;
+            paid_by.push((id, cost));
             shield.health = (shield.health + shield.regen_per_tick).min(shield.max_health);
         }
+        self.upkeep_paid.extend(paid_by);
         paid
     }
 
@@ -1199,6 +1203,7 @@ impl SimWorld {
     /// jamming run while paid for, and a cloak that cannot be paid for switches off. Paused and
     /// unfinished structures neither pay nor run. Returns what each team has paid, shields included.
     fn step_intel_upkeep(&mut self, mut paid: [Res; 2]) -> [Res; 2] {
+        let mut paid_by = Vec::new();
         for &(id, entity) in &self.intel {
             let blueprint = self.blueprints.get(self.ecs.get::<&Blueprinted>(entity).expect("intel units have blueprints").0);
             let (upkeep, cloak_upkeep) = (blueprint.upkeep, self.cloak_upkeep(entity).unwrap_or(Res::ZERO));
@@ -1219,6 +1224,9 @@ impl SimWorld {
                 let ok = economy.energy + economy.energy_income - paid[team] >= cost;
                 if ok {
                     paid[team] += cost;
+                    if cost > Res::ZERO {
+                        paid_by.push((id, cost));
+                    }
                 }
                 ok
             };
@@ -1236,6 +1244,7 @@ impl SimWorld {
                 intel.jamming = afford(cost);
             }
         }
+        self.upkeep_paid.extend(paid_by);
         paid
     }
 
@@ -2190,11 +2199,7 @@ impl SimWorld {
         let unit = self.blueprints.get(blueprinted.0);
         let adjacency = self.ecs.get::<&Adjacency>(entity).map_or(Adjacency::default(), |adjacency| *adjacency);
         let paused = self.ecs.get::<&Paused>(entity).is_ok();
-        let extractor = if unit.mass_income > Res::ZERO && unit.upkeep > Res::ZERO && !paused {
-            Adjacency::less(unit.upkeep, adjacency.upkeep_discount) * efficiency
-        } else {
-            Res::ZERO
-        };
+        let extractor = self.extractor_upkeep(entity, efficiency);
         // A dome that is up costs its upkeep, less the discount from neighbors.
         let shield = self.ecs.get::<&Shield>(entity).ok().filter(|shield| shield.is_up() && !paused).map_or(Res::ZERO, |shield| Adjacency::less(shield.upkeep, adjacency.upkeep_discount));
         // So does running intel, and a cloak.
@@ -2205,9 +2210,24 @@ impl SimWorld {
         extractor + shield + intel
     }
 
+    /// The energy an extractor takes a tick to run at the `efficiency` share its team can power.
+    /// Nothing for anything else, or for one that is paused.
+    fn extractor_upkeep(&self, entity: hecs::Entity, efficiency: Res) -> Res {
+        let Ok(blueprinted) = self.ecs.get::<&Blueprinted>(entity) else {
+            return Res::ZERO;
+        };
+        let unit = self.blueprints.get(blueprinted.0);
+        if unit.mass_income == Res::ZERO || unit.upkeep == Res::ZERO || self.ecs.get::<&Paused>(entity).is_ok() {
+            return Res::ZERO;
+        }
+        let discount = self.ecs.get::<&Adjacency>(entity).map_or(0, |adjacency| adjacency.upkeep_discount);
+        Adjacency::less(unit.upkeep, discount) * efficiency
+    }
+
     /// What each of a team's units would spend this tick at full speed, in tenths a second: its
-    /// share of each job it puts build power into, by how much of the job's power is its, and its
-    /// upkeep. Units spending nothing are left out.
+    /// share of each job it puts build power into, by how much of the job's power is its, and the
+    /// upkeep it paid for its shield, intel, cloak, stealth, jamming, or a teleport, mobile units'
+    /// as well as structures', and an extractor's in full. Units spending nothing are left out.
     pub(super) fn spending_for(&self, team: Team) -> Vec<UnitSpendingView> {
         let tenths_per_second = |per_tick: Res| i64::from((per_tick * TICKS_PER_SECOND * 10).round().to_num::<i32>());
         let mut by_unit: BTreeMap<SimId, (i64, i64)> = BTreeMap::new();
@@ -2226,8 +2246,20 @@ impl SimWorld {
             spent.0 += share(mass);
             spent.1 += share(energy);
         }
+        // Until 2026-11-20 only structures' and the commander's upkeep was counted here, so mobile
+        // shields and cloaks spent energy the list did not show.
+        let mut paid: BTreeMap<SimId, Res> = BTreeMap::new();
+        for &(id, cost) in &self.upkeep_paid {
+            *paid.entry(id).or_insert(Res::ZERO) += cost;
+        }
+        for (id, cost) in paid {
+            let ours = self.find_unit(id).is_some_and(|(_, entity)| self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team == team));
+            if ours {
+                by_unit.entry(id).or_default().1 += tenths_per_second(cost);
+            }
+        }
         for (id, entity) in self.finished_earners(team) {
-            let upkeep = tenths_per_second(self.upkeep_of(entity, Res::ONE));
+            let upkeep = tenths_per_second(self.extractor_upkeep(entity, Res::ONE));
             if upkeep > 0 {
                 by_unit.entry(id).or_default().1 += upkeep;
             }

@@ -685,6 +685,9 @@ pub struct SimWorld {
     /// What each job this tick costs a tick at full speed, and all the power put into it, in the
     /// order of job and kind. Rebuilt every tick and only used for showing, so not hashed.
     pub(super) work_demand: Vec<(SimId, WorkKind, Res, Res, Fp)>,
+    /// The upkeep each unit paid this tick: shields, intel, cloaks, stealth, jamming, and
+    /// teleports. Rebuilt every tick and only used for showing, so not hashed.
+    pub(super) upkeep_paid: Vec<(SimId, Res)>,
     /// Units whose order was cancelled this tick because they cannot reach it, sorted by `SimId`.
     pub(super) unreachable: Vec<SimId>,
     /// How many orders each team has had cancelled that way, for telling the player.
@@ -807,6 +810,7 @@ impl SimWorld {
             factory_spending: Vec::new(),
             work_sources: Vec::new(),
             work_demand: Vec::new(),
+            upkeep_paid: Vec::new(),
             unreachable: Vec::new(),
             orders_cancelled: [0; 2],
             max_mobile_radius: 0,

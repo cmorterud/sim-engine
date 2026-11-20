@@ -1993,6 +1993,9 @@ fn the_spending_breakdown_shares_each_job_by_build_power_and_adds_upkeep() {
     let helper = world.spawn_mobile(engineer_blueprint, Team::Blue, point(2_100, 2_100));
     let shield = world.spawn_finished_structure(id(&world, "shield_generator"), Team::Blue, 80, 80).unwrap();
     let (builder, _) = engineer_at_site(&mut world);
+    // Mobile units pay upkeep too: once only structures' was listed.
+    let mobile_shield = world.spawn_mobile(id(&world, "t2_mobile_shield"), Team::Blue, point(3_000, 1_000));
+    let jammer = world.spawn_mobile(id(&world, "t2_combat_engineer"), Team::Blue, point(3_000, 1_200));
     // The other side's spending is none of the viewer's business.
     let red_factory = world.spawn_finished_structure(factory_blueprint, Team::Red, 150, 150).unwrap();
     world.advance_tick(&[
@@ -2011,6 +2014,9 @@ fn the_spending_breakdown_shares_each_job_by_build_power_and_adds_upkeep() {
     assert!(spent(builder).is_some_and(|(mass, energy)| mass > 0 && energy > 0), "the engineer building on its own pays for all of its site");
     let upkeep = world.blueprints.get(id(&world, "shield_generator")).shield.as_ref().unwrap().upkeep;
     assert_eq!(spent(shield), Some((0, (upkeep * 10 * 10).round().to_num::<i32>())), "the dome pays its upkeep, and nothing else");
+    for (unit, what) in [(mobile_shield, "a mobile shield"), (jammer, "a combat engineer, with its stealth")] {
+        assert!(spent(unit).is_some_and(|(mass, energy)| mass == 0 && energy > 0), "{what} pays its upkeep: {:?}", spent(unit));
+    }
     // Everything listed adds up to what the economy panel says goes out, give or take rounding.
     let (mass, energy) = snapshot.spending.iter().fold((0, 0), |(mass, energy), spending| (mass + spending.mass, energy + spending.energy));
     let close = |tenths: i32, whole: i64| (f64::from(tenths) / 10.0 - whole as f64).abs() <= 1.0;

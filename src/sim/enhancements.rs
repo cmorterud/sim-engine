@@ -342,6 +342,7 @@ impl SimWorld {
     pub(super) fn step_teleports(&mut self, mut paid: [Res; 2]) -> [Res; 2] {
         let mut aborted = Vec::new();
         let mut arrived = Vec::new();
+        let mut paid_by = Vec::new();
         for &(id, entity) in &self.teleporting {
             let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team.index();
             let mut charge = self.ecs.get::<&mut Teleporting>(entity).expect("teleport list only holds teleports");
@@ -351,6 +352,7 @@ impl SimWorld {
                 continue;
             }
             paid[team] += charge.energy_per_tick;
+            paid_by.push((id, charge.energy_per_tick));
             charge.ticks_left -= 1;
             if charge.ticks_left == 0 {
                 arrived.push((id, entity, charge.destination));
@@ -365,6 +367,7 @@ impl SimWorld {
             self.teleporting.retain(|unit| unit.0 != id);
             self.jump(id, entity, destination);
         }
+        self.upkeep_paid.extend(paid_by);
         paid
     }
 
