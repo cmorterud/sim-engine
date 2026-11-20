@@ -328,7 +328,7 @@ pub fn unit_look(key: &str) -> UnitLook {
         "air_factory" => look(Shape::AirFactory, Some([0.45, 0.60, 0.80]), 0.5),
         "airfield" => look(Shape::Airfield, Some([0.70, 0.80, 0.90]), 0.5),
         "naval_factory" => look(Shape::NavalFactory, Some([0.35, 0.45, 0.55]), 0.5),
-        "t1_frigate" => look(Shape::Frigate, None, 0.5),
+        "t1_frigate" => look(Shape::Frigate, Some([0.45, 0.62, 0.28]), 0.5),
         "t1_attack_sub" => look(Shape::Submarine, Some([0.10, 0.20, 0.30]), 0.3),
         "t2_escort_corvette" => look(Shape::EscortCorvette, Some([0.55, 0.85, 1.00]), 0.5),
         "t3_missile_sub" => look(Shape::MissileSubmarine, Some([0.05, 0.10, 0.20]), 0.35),
@@ -338,10 +338,10 @@ pub fn unit_look(key: &str) -> UnitLook {
         "t2_sonar" => look(Shape::Radar, Some([0.20, 0.45, 0.85]), 1.2),
         "t1_torpedo_launcher" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::SamLauncher, Some([0.20, 0.40, 0.60]), 0.7) },
         "t2_torpedo_launcher" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::SamLauncher, Some([0.15, 0.30, 0.50]), 0.8) },
-        "t2_destroyer" => look(Shape::Destroyer, Some([0.45, 0.45, 0.50]), 0.5),
-        "t2_cruiser" => look(Shape::Cruiser, Some([0.70, 0.75, 0.80]), 0.5),
-        "t3_battleship" => look(Shape::Battleship, Some([0.25, 0.25, 0.30]), 0.6),
-        "t3_battlecruiser" => look(Shape::Battlecruiser, Some([0.40, 0.35, 0.30]), 0.55),
+        "t2_destroyer" => look(Shape::Destroyer, Some([0.12, 0.30, 0.62]), 0.5),
+        "t2_cruiser" => look(Shape::Cruiser, Some([1.00, 1.00, 1.00]), 0.5),
+        "t3_battleship" => look(Shape::Battleship, Some([0.04, 0.04, 0.07]), 0.6),
+        "t3_battlecruiser" => look(Shape::Battlecruiser, Some([0.78, 0.30, 0.12]), 0.55),
         "naval_factory_t2" => look(Shape::NavalFactoryT2, Some([0.25, 0.35, 0.45]), 0.6),
         "naval_factory_t3" => look(Shape::NavalFactoryT3, Some([0.15, 0.22, 0.32]), 0.7),
         "naval_factory_t2_support" => look(Shape::NavalFactoryT2, Some([0.30, 0.40, 0.50]), 0.55),
@@ -851,6 +851,25 @@ mod tests {
         let shapes: Vec<Shape> = drawn().filter(|unit| !shared.contains(&unit.key.as_str())).map(|unit| unit_look(&unit.key).shape).collect();
         for (index, shape) in shapes.iter().enumerate() {
             assert!(!shapes[index + 1..].contains(shape), "{shape:?} is used twice");
+        }
+    }
+
+    /// Surface warships look much alike at a glance, long grey hulls, so each is painted a hull
+    /// of its own, for either team, far enough from every other's to tell apart in a button.
+    #[test]
+    fn every_surface_warship_has_a_hull_color_of_its_own() {
+        use crate::sim::components::MoveClass;
+        let db = BlueprintDb::standard();
+        let ships: Vec<_> = db.iter().filter(|unit| unit.movement == MoveClass::Naval && !unit.is_structure()).collect();
+        assert!(ships.len() >= 5, "the fleet is there");
+        for team in [[0.25, 0.5, 1.0], [1.0, 0.3, 0.25]] {
+            let hulls: Vec<(&str, [f32; 3])> = ships.iter().map(|unit| (unit.key.as_str(), armor(team, unit_look(&unit.key).tint))).collect();
+            for (index, (first, a)) in hulls.iter().enumerate() {
+                for (second, b) in &hulls[index + 1..] {
+                    let distance = (0..3).map(|channel| (a[channel] - b[channel]).powi(2)).sum::<f32>().sqrt();
+                    assert!(distance > 0.08, "{first} and {second} have hulls too alike: {a:?} and {b:?}");
+                }
+            }
         }
     }
 

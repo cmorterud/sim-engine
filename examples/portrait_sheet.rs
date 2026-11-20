@@ -28,6 +28,8 @@ const MAP: i32 = 6_400;
 const TILE: usize = 96;
 /// Portraits a row of the sheet.
 const COLUMNS: usize = 12;
+/// How steeply a ship's portrait looks down on it, in degrees.
+const SHIP_TILT_DEGREES: f64 = 50.0;
 /// Ships and naval structures need water: a strip across the map, between these heights.
 const WATER: std::ops::RangeInclusive<i32> = 1_600..=2_400;
 
@@ -198,9 +200,12 @@ fn main() {
     }
     let mut snapshot = world.snapshot();
     let raw = |value: f64| (value * 4096.0) as i32;
+    let ships: Vec<u16> = drawn.iter().filter(|unit| !unit.is_structure() && matches!(unit.movement, MoveClass::Naval | MoveClass::Submarine)).map(|unit| unit.id.0).collect();
     for unit in &mut snapshot.units {
-        // Turned three quarters towards the camera, which looks along +Y.
-        unit.facing = [raw(0.55), raw(-0.83)];
+        // Turned three quarters towards the camera, which looks along +Y. Ships show more of
+        // their side, bow to the right, since what tells one from another is its profile:
+        // its turrets, funnels, domes, and towers.
+        unit.facing = if ships.contains(&unit.blueprint) { [raw(0.85), raw(-0.53)] } else { [raw(0.55), raw(-0.83)] };
         unit.aim = unit.facing;
     }
     let cell = TERRAIN_CELL_UNITS;
@@ -226,6 +231,11 @@ fn main() {
         let altitude = above + radius * 6.0 + 30.0;
         camera.look_at(x, y, altitude);
         camera.update(0.0, &heights);
+        // A ship is seen from lower down, more from the side, so that its profile shows.
+        if ships.contains(&unit.id.0) {
+            camera.orbit(0.0, SHIP_TILT_DEGREES - camera.pitch_degrees());
+            camera.update(0.0, &heights);
+        }
         if above > 0.0 {
             let beyond = above / camera.pitch_degrees().to_radians().tan();
             camera.look_at(x, y + beyond, altitude);
