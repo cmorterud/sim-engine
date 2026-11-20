@@ -607,6 +607,29 @@ impl MeshBuilder {
         }
     }
 
+    /// The outer `share` of a pair of `wings` drawn with the same arguments, in the current
+    /// material, a little thicker so that it wraps the wing under it: team-colored wingtips,
+    /// which show from above.
+    // The same arguments as `wings`, to be called with them, and the share.
+    #[allow(clippy::too_many_arguments)]
+    fn wing_tips(&mut self, root_x: f32, tip_x: f32, root_chord: [f32; 2], tip_chord: [f32; 2], half_thickness: [f32; 2], z: f32, share: f32) {
+        let along = 1.0 - share;
+        let lerp = |from: f32, to: f32| from + (to - from) * along;
+        let inner_x = lerp(root_x, tip_x);
+        let inner_chord = [lerp(root_chord[0], tip_chord[0]), lerp(root_chord[1], tip_chord[1])];
+        let inner_thickness = lerp(half_thickness[0], half_thickness[1]);
+        let wrap = 0.003_f32;
+        let inside = |value: f32| value.clamp(-0.5, 0.5);
+        self.wings(
+            inner_x,
+            inside(tip_x + wrap.copysign(tip_x)),
+            [inside(inner_chord[0] - wrap), inside(inner_chord[1] + wrap)],
+            [inside(tip_chord[0] - wrap), inside(tip_chord[1] + wrap)],
+            [inner_thickness + wrap, half_thickness[1] + wrap],
+            z,
+        );
+    }
+
     /// An upright fin at `x`, from its root chord at height `root_z` up to its tip chord at
     /// `tip_z`, each `[trailing edge, leading edge]` along Y.
     fn fin(&mut self, x: f32, root_chord: [f32; 2], root_z: f32, tip_chord: [f32; 2], tip_z: f32, half_thickness: f32) {
@@ -1010,6 +1033,8 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.frustum([0.0, -0.02], [-0.04, 0.26], [0.015, 0.01], 6);
             mesh.paint(Material::Trim);
             mesh.block([-0.1, -0.4, -0.2], [0.1, -0.28, -0.19]);
+            // A team-colored foredeck.
+            mesh.prism(&[[-0.1, 0.14], [0.1, 0.14], [0.1, 0.2], [0.0, 0.36], [-0.1, 0.2]], [-0.16, -0.15], [1.0, 1.0]);
             mesh.paint(Material::Glow);
             mesh.ball([0.0, -0.02, 0.27], 0.025, 6, 3);
         }
@@ -1045,6 +1070,10 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Hull);
             mesh.bevel([-0.5, -0.5, -0.5], [0.5, 0.5, -0.38], 0.03);
             mesh.paint(Material::Trim);
+            // The team's edging round the pad.
+            for (min, max) in [([-0.47, -0.47], [0.47, -0.41]), ([-0.47, 0.41], [0.47, 0.47]), ([-0.47, -0.41], [-0.41, 0.41]), ([0.41, -0.41], [0.47, 0.41])] {
+                mesh.block([min[0], min[1], -0.39], [max[0], max[1], -0.37]);
+            }
             mesh.frustum([-0.18, -0.18], [-0.38, 0.12], [0.16, 0.12], 8);
             mesh.paint(Material::Metal);
             mesh.frustum([-0.18, -0.18], [0.12, 0.3], [0.04, 0.03], 6);
@@ -1112,7 +1141,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             // A collar in the team's colors round the column's foot, where it shows from above:
             // the band up the column flares out, so only its underside faces the camera.
             mesh.paint(Material::Trim);
-            mesh.frustum([0.0, 0.0], [-0.3, -0.24], [0.28, 0.25], 8);
+            mesh.frustum([0.0, 0.0], [-0.3, -0.24], [0.34, 0.3], 8);
             mesh.paint(Material::Metal);
             mesh.frustum([0.0, 0.0], [-0.3, 0.2], [0.16, 0.12], 6);
             mesh.paint(Material::Trim);
@@ -1183,6 +1212,9 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             for z in [-0.3_f32, 0.0, 0.3] {
                 mesh.frustum([0.0, 0.0], [z, z + 0.08], [0.48, 0.48], 12);
             }
+            // A team-colored cap over the core.
+            mesh.paint(Material::Trim);
+            mesh.frustum([0.0, 0.0], [0.38, 0.47], [0.3, 0.22], 12);
         }
         // A fighter: a team-colored body tapering to a point, delta wings, and a swept fin.
         Shape::Aircraft => {
@@ -1221,6 +1253,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.wings(0.08, 0.47, [-0.3, 0.14], [-0.44, -0.33], [0.022, 0.006], -0.01);
             mesh.wings(0.06, 0.22, [-0.5, -0.36], [-0.5, -0.45], [0.01, 0.004], 0.0);
             mesh.paint(Material::Trim);
+            mesh.wing_tips(0.08, 0.47, [-0.3, 0.14], [-0.44, -0.33], [0.022, 0.006], -0.01, 0.4);
             for x in [-0.075_f32, 0.075] {
                 mesh.fin(x, [-0.48, -0.3], 0.04, [-0.5, -0.42], 0.22, 0.01);
             }
@@ -1228,8 +1261,9 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             for x in [-0.035_f32, 0.035] {
                 mesh.body(x, &[[-0.5, 0.028, 0.028, 0.0], [-0.44, 0.034, 0.034, 0.0]], 6);
             }
-            mesh.paint(Material::Metal);
+            mesh.paint(Material::Glass);
             mesh.body(0.0, &[[0.14, 0.03, 0.02, 0.06], [0.24, 0.045, 0.035, 0.06], [0.34, 0.025, 0.02, 0.04]], 6);
+            mesh.paint(Material::Metal);
             // Bombs and napalm canisters under the wings.
             for x in [-0.3_f32, -0.18, 0.18, 0.3] {
                 mesh.body(x, &[[-0.24, 0.008, 0.008, -0.055], [-0.18, 0.028, 0.028, -0.055], [-0.02, 0.028, 0.028, -0.055], [0.04, 0.01, 0.01, -0.055]], 6);
@@ -1242,6 +1276,8 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.wings(0.09, 0.5, [-0.08, 0.14], [-0.04, 0.06], [0.025, 0.008], 0.03);
             mesh.wings(0.02, 0.22, [-0.5, -0.4], [-0.49, -0.43], [0.01, 0.004], 0.03);
             mesh.paint(Material::Trim);
+            mesh.wing_tips(0.09, 0.5, [-0.08, 0.14], [-0.04, 0.06], [0.025, 0.008], 0.03, 0.35);
+            mesh.wing_tips(0.02, 0.22, [-0.5, -0.4], [-0.49, -0.43], [0.01, 0.004], 0.03, 0.5);
             for x in [-0.22_f32, 0.22] {
                 mesh.fin(x, [-0.5, -0.4], 0.03, [-0.5, -0.44], 0.17, 0.01);
             }
@@ -1252,8 +1288,9 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.paint(Material::Glow);
                 mesh.body(x, &[[-0.14, 0.026, 0.026, 0.02], [-0.1, 0.035, 0.035, 0.02]], 6);
             }
-            mesh.paint(Material::Metal);
+            mesh.paint(Material::Glass);
             mesh.body(0.0, &[[0.3, 0.05, 0.03, 0.07], [0.4, 0.06, 0.04, 0.06], [0.46, 0.025, 0.02, 0.03]], 6);
+            mesh.paint(Material::Metal);
             // The torpedo, long and slung under the belly, with a team-colored warhead and fins.
             mesh.body(0.0, &[[-0.38, 0.006, 0.006, -0.14], [-0.32, 0.04, 0.04, -0.14], [0.2, 0.04, 0.04, -0.14], [0.24, 0.036, 0.036, -0.14]], 6);
             mesh.paint(Material::Trim);
@@ -1450,6 +1487,12 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             for y in [-0.5_f32, 0.32] {
                 mesh.bevel([-0.5, y, -0.5], [0.5, y + 0.18, -0.32], 0.03);
             }
+            // The team's stripe along each pier's outer edge.
+            mesh.paint(Material::Trim);
+            for y in [-0.49_f32, 0.43] {
+                mesh.block([-0.47, y, -0.33], [0.47, y + 0.06, -0.31]);
+            }
+            mesh.paint(Material::Hull);
             // Bollards along the piers' inner edges.
             mesh.paint(Material::Metal);
             for y in [-0.33_f32, 0.33] {
@@ -1608,6 +1651,8 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.prism(&outline, [-0.32, -0.25], [1.0, 0.7]);
             mesh.paint(Material::Trim);
             mesh.bevel([-0.035, 0.02, -0.27], [0.035, 0.2, -0.08], 0.02);
+            // The team's stripe down the deck.
+            mesh.block([-0.03, -0.36, -0.255], [0.03, 0.36, -0.245]);
             mesh.paint(Material::Hull);
             mesh.block([-0.1, 0.1, -0.13], [0.1, 0.14, -0.115]);
             mesh.block([-0.09, -0.46, -0.38], [0.09, -0.41, -0.365]);
@@ -1620,6 +1665,10 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.prism(&outline, [-0.3, -0.23], [1.0, 0.75]);
             mesh.paint(Material::Trim);
             mesh.bevel([-0.04, 0.14, -0.25], [0.04, 0.34, -0.04], 0.02);
+            // The team's stripe down the deck, either side of the hatches.
+            for x in [-0.075_f32, 0.075] {
+                mesh.block([x - 0.012, -0.36, -0.235], [x + 0.012, 0.4, -0.225]);
+            }
             mesh.paint(Material::Hull);
             mesh.block([-0.11, 0.22, -0.09], [0.11, 0.26, -0.075]);
             mesh.block([-0.008, -0.47, -0.3], [0.008, -0.38, -0.17]);
@@ -1741,6 +1790,13 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.block([-0.42, inner - 0.006, -0.1], [0.42, inner + 0.006, -0.06]);
                 mesh.paint(Material::Trim);
                 mesh.block([-0.47, top_low, 0.06], [0.47, top_high, 0.1]);
+                // And a band across the sloped armor outside.
+                let face = |z: f32| outer + (top_outer - outer) * ((z + 0.44) / 0.5);
+                let ring = |z: f32| {
+                    let (inside, outside) = (face(z) - 0.002 * outward, face(z) + 0.012 * outward);
+                    [Vec3::new(-0.47, inside, z), Vec3::new(0.47, inside, z), Vec3::new(0.47, outside, z), Vec3::new(-0.47, outside, z)]
+                };
+                mesh.cuboid(ring(-0.24), ring(-0.12));
             }
             // A heavy double gantry with an operator's cab, spanning the bay.
             mesh.paint(Material::Metal);
@@ -1750,7 +1806,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 }
                 mesh.block([x - 0.05, -0.47, 0.36], [x + 0.05, 0.47, 0.44]);
             }
-            mesh.paint(Material::Hull);
+            mesh.paint(Material::Trim);
             mesh.bevel([-0.17, -0.12, 0.26], [0.17, 0.12, 0.36], 0.02);
             mesh.paint(Material::Glow);
             mesh.block([-0.14, -0.125, 0.3], [0.14, -0.115, 0.34]);
@@ -1943,6 +1999,12 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             for y in [-0.5_f32, 0.32] {
                 mesh.bevel([-0.5, y, -0.5], [0.5, y + 0.18, -0.32], 0.03);
             }
+            // The team's stripe along each pier's outer edge.
+            mesh.paint(Material::Trim);
+            for y in [-0.49_f32, 0.43] {
+                mesh.block([-0.47, y, -0.33], [0.47, y + 0.06, -0.31]);
+            }
+            mesh.paint(Material::Hull);
             // Bollards along the piers' inner edges.
             mesh.paint(Material::Metal);
             for y in [-0.33_f32, 0.33] {
@@ -1989,6 +2051,12 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             for y in [-0.5_f32, 0.32] {
                 mesh.bevel([-0.5, y, -0.5], [0.5, y + 0.18, -0.32], 0.03);
             }
+            // The team's stripe along each pier's outer edge.
+            mesh.paint(Material::Trim);
+            for y in [-0.49_f32, 0.43] {
+                mesh.block([-0.47, y, -0.33], [0.47, y + 0.06, -0.31]);
+            }
+            mesh.paint(Material::Hull);
             // Bollards along the piers' inner edges.
             mesh.paint(Material::Metal);
             for y in [-0.33_f32, 0.33] {

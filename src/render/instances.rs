@@ -97,6 +97,16 @@ fn armor(team: [f32; 3], tint: Option<[f32; 3]>) -> [f32; 3] {
     mix(tint.map_or(ARMOR, |tint| mix(ARMOR, tint, ARMOR_TINT)), team, ARMOR_TEAM)
 }
 
+/// How much of its armor's brightness a unit keeps by tech level, from none to T3: higher
+/// tiers are heavier and darker, so that a tier reads on the model as the dots read on its icon.
+const TIER_SHADE: [f32; 4] = [1.0, 1.0, 0.88, 0.76];
+
+/// The color of a unit's body: its armor, darkened by its tier.
+fn hull_of(team: [f32; 3], look: &UnitLook) -> [f32; 3] {
+    let shade = TIER_SHADE[usize::from(look.tier.min(3))];
+    armor(team, look.tint).map(|channel| channel * shade)
+}
+
 /// A color at full brightness, lifted a little towards white, for parts lit from inside.
 fn glowing(color: [f32; 3]) -> [f32; 3] {
     let brightest = color.iter().copied().fold(0.01_f32, f32::max);
@@ -270,11 +280,13 @@ pub struct UnitLook {
     /// How wide a mobile unit is drawn, in world units, for drawing it in a factory's bay
     /// before it exists. Zero from `unit_look`, which knows only the key; `unit_looks` sets it.
     pub size: f32,
+    /// Its tech level, which darkens its armor. Zero from `unit_look`; `unit_looks` sets it.
+    pub tier: u8,
 }
 
 /// Maps a blueprint to its look. Unknown keys fall back to a plain cube.
 pub fn unit_look(key: &str) -> UnitLook {
-    let look = |shape, tint, height_share| UnitLook { shape, tint, height_share, base: None, size: 0.0 };
+    let look = |shape, tint, height_share| UnitLook { shape, tint, height_share, base: None, size: 0.0, tier: 0 };
     match key {
         "command_rig" => UnitLook { base: Some(Shape::CommanderLegs), ..look(Shape::Commander, Some([1.00, 1.00, 1.00]), 1.0) },
         "field_rig" => UnitLook { base: Some(Shape::CommanderLegs), ..look(Shape::Commander, Some([0.70, 0.75, 0.85]), 1.0) },
@@ -294,7 +306,7 @@ pub fn unit_look(key: &str) -> UnitLook {
         "t2_combat_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([0.95, 0.40, 0.25]), 1.0) },
         "t3_heavy_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::HeavyWalker, None, 1.0) },
         "t3_siege_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::SiegeWalker, Some([0.70, 0.70, 0.75]), 1.0) },
-        "t2_torpedo_boat" => look(Shape::TorpedoBoat, Some([0.40, 0.90, 0.80]), 0.5),
+        "t2_torpedo_boat" => look(Shape::TorpedoBoat, Some([0.90, 0.78, 0.30]), 0.5),
         "t3_heavy_point_defense" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::HeavyPointDefense, Some([0.95, 0.35, 0.30]), 1.0) },
         "t3_heavy_shield" => look(Shape::ShieldGenerator, Some([0.45, 0.70, 1.00]), 0.9),
         "wall" => look(Shape::Wall, Some([0.70, 0.70, 0.70]), 0.9),
@@ -336,20 +348,20 @@ pub fn unit_look(key: &str) -> UnitLook {
         "t2_torpedo_bomber" => look(Shape::TorpedoBomber, Some([0.40, 0.55, 0.70]), 0.55),
         "t1_sonar" => look(Shape::Radar, Some([0.30, 0.60, 0.90]), 1.0),
         "t2_sonar" => look(Shape::Radar, Some([0.20, 0.45, 0.85]), 1.2),
-        "t1_torpedo_launcher" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::SamLauncher, Some([0.20, 0.40, 0.60]), 0.7) },
-        "t2_torpedo_launcher" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::SamLauncher, Some([0.15, 0.30, 0.50]), 0.8) },
+        "t1_torpedo_launcher" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::SamLauncher, Some([0.20, 0.68, 0.56]), 0.7) },
+        "t2_torpedo_launcher" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::SamLauncher, Some([0.14, 0.55, 0.44]), 0.8) },
         "t2_destroyer" => look(Shape::Destroyer, Some([0.12, 0.30, 0.62]), 0.5),
         "t2_cruiser" => look(Shape::Cruiser, Some([1.00, 1.00, 1.00]), 0.5),
         "t3_battleship" => look(Shape::Battleship, Some([0.04, 0.04, 0.07]), 0.6),
         "t3_battlecruiser" => look(Shape::Battlecruiser, Some([0.78, 0.30, 0.12]), 0.55),
         "naval_factory_t2" => look(Shape::NavalFactoryT2, Some([0.25, 0.35, 0.45]), 0.6),
         "naval_factory_t3" => look(Shape::NavalFactoryT3, Some([0.15, 0.22, 0.32]), 0.7),
-        "naval_factory_t2_support" => look(Shape::NavalFactoryT2, Some([0.30, 0.40, 0.50]), 0.55),
-        "naval_factory_t3_support" => look(Shape::NavalFactoryT3, Some([0.20, 0.28, 0.38]), 0.65),
-        "land_factory_t2_support" => look(Shape::FactoryT2, Some([0.28, 0.28, 0.36]), 0.62),
-        "land_factory_t3_support" => look(Shape::FactoryT3, Some([0.16, 0.16, 0.26]), 0.78),
-        "air_factory_t2_support" => look(Shape::AirFactoryT2, Some([0.36, 0.52, 0.72]), 0.58),
-        "air_factory_t3_support" => look(Shape::AirFactoryT3, Some([0.22, 0.34, 0.54]), 0.72),
+        "naval_factory_t2_support" => look(Shape::NavalFactoryT2, Some([0.64, 0.58, 0.44]), 0.55),
+        "naval_factory_t3_support" => look(Shape::NavalFactoryT3, Some([0.50, 0.44, 0.32]), 0.65),
+        "land_factory_t2_support" => look(Shape::FactoryT2, Some([0.62, 0.55, 0.40]), 0.62),
+        "land_factory_t3_support" => look(Shape::FactoryT3, Some([0.48, 0.42, 0.30]), 0.78),
+        "air_factory_t2_support" => look(Shape::AirFactoryT2, Some([0.66, 0.60, 0.46]), 0.58),
+        "air_factory_t3_support" => look(Shape::AirFactoryT3, Some([0.52, 0.46, 0.34]), 0.72),
         "power_generator_t2" => look(Shape::GeneratorT2, Some([1.00, 0.70, 0.15]), 1.0),
         "power_generator_t3" => look(Shape::GeneratorT3, Some([1.00, 0.55, 0.10]), 0.9),
         "radar_t2" => look(Shape::Radar, Some([0.50, 0.95, 0.75]), 1.45),
@@ -363,13 +375,13 @@ pub fn unit_look(key: &str) -> UnitLook {
         "t3_strategic_bomber" => look(Shape::StrategicBomber, None, 0.5),
         "t2_fighter_bomber" => look(Shape::FighterBomber, Some([0.85, 0.70, 0.55]), 0.55),
         "t2_flak" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::FlakGun, Some([0.35, 0.75, 0.95]), 1.0) },
-        "t2_mobile_flak" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::FlakGun, None, 1.0) },
-        "t3_sam" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::SamLauncher, Some([0.55, 0.85, 1.00]), 1.1) },
+        "t2_mobile_flak" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::FlakGun, Some([0.22, 0.70, 0.98]), 1.0) },
+        "t3_sam" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::SamLauncher, Some([0.15, 0.72, 1.00]), 1.1) },
         "t1_air_scout" => look(Shape::Scout, Some([0.85, 0.90, 0.95]), 0.5),
         "t1_interceptor" => look(Shape::Aircraft, None, 0.5),
         "t1_bomber" => look(Shape::Bomber, None, 0.6),
         "t1_aa_turret" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::AntiAirGun, Some([0.35, 0.75, 0.95]), 0.9) },
-        "t1_mobile_aa" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::AntiAirGun, None, 1.0) },
+        "t1_mobile_aa" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::AntiAirGun, Some([0.30, 0.78, 0.98]), 1.0) },
         "t1_point_defense" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::PointDefense, Some([0.75, 0.25, 0.85]), 0.9) },
         _ => look(Shape::Cube, None, 0.6),
     }
@@ -377,7 +389,7 @@ pub fn unit_look(key: &str) -> UnitLook {
 
 /// Per-blueprint looks, indexed by raw blueprint id.
 pub fn unit_looks(blueprints: &BlueprintDb) -> Vec<UnitLook> {
-    blueprints.iter().map(|unit| UnitLook { size: unit.radius.to_num::<f32>() * 2.0, ..unit_look(&unit.key) }).collect()
+    blueprints.iter().map(|unit| UnitLook { size: unit.radius.to_num::<f32>() * 2.0, tier: unit.tier, ..unit_look(&unit.key) }).collect()
 }
 
 /// Units with no heading yet face the middle of the map.
@@ -478,7 +490,7 @@ pub fn build_unit_instances(
         };
         let look = looks.get(usize::from(unit.blueprint));
         let tint = look.and_then(|look| look.tint);
-        let hull = armor(color, tint);
+        let hull = look.map_or_else(|| armor(color, None), |look| hull_of(color, look));
         let glow = glowing(tint.unwrap_or(color));
         let shape = look.map_or(Shape::Cube, |look| look.shape);
         let size = (f64::from(unit.radius) * RAW_TO_WORLD * 2.0) as f32;
@@ -533,7 +545,7 @@ pub fn build_unit_instances(
                     let full = size * next.height_share;
                     let rising = full * (0.1 + 0.9 * progress);
                     let at = [center[0], center[1], ground + f64::from(rising) * 0.5];
-                    let next_hull = armor(color, next.tint).map(|channel| channel * (0.6 + 0.4 * progress));
+                    let next_hull = hull_of(color, next).map(|channel| channel * (0.6 + 0.4 * progress));
                     let next_trim = color.map(|channel| channel * (0.6 + 0.4 * progress));
                     let grown = size * 1.02;
                     if let Some(base) = next.base {
@@ -554,7 +566,7 @@ pub fn build_unit_instances(
                     let at = [center[0], center[1], ground + f64::from(height * floor + rise * 0.5)];
                     let dim = 0.55 + 0.45 * progress;
                     let made_trim = color.map(|channel| channel * dim);
-                    let made_hull = armor(color, made.tint).map(|channel| channel * dim);
+                    let made_hull = hull_of(color, made).map(|channel| channel * dim);
                     let extent = [made.size, made.size, rise];
                     if let Some(base) = made.base {
                         out.push(base, painted(at, extent, EAST, made_trim, made_hull, made_hull, NO_ICON, eye));
@@ -860,14 +872,63 @@ mod tests {
     fn every_surface_warship_has_a_hull_color_of_its_own() {
         use crate::sim::components::MoveClass;
         let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
         let ships: Vec<_> = db.iter().filter(|unit| unit.movement == MoveClass::Naval && !unit.is_structure()).collect();
         assert!(ships.len() >= 5, "the fleet is there");
         for team in [[0.25, 0.5, 1.0], [1.0, 0.3, 0.25]] {
-            let hulls: Vec<(&str, [f32; 3])> = ships.iter().map(|unit| (unit.key.as_str(), armor(team, unit_look(&unit.key).tint))).collect();
+            let hulls: Vec<(&str, [f32; 3])> = ships.iter().map(|unit| (unit.key.as_str(), hull_of(team, &looks[usize::from(unit.id.0)]))).collect();
             for (index, (first, a)) in hulls.iter().enumerate() {
                 for (second, b) in &hulls[index + 1..] {
                     let distance = (0..3).map(|channel| (a[channel] - b[channel]).powi(2)).sum::<f32>().sqrt();
                     assert!(distance > 0.08, "{first} and {second} have hulls too alike: {a:?} and {b:?}");
+                }
+            }
+        }
+    }
+
+    /// Units drawn with the same model tell apart by their hulls: a higher tier is darker, as
+    /// a heavier version of the same thing, and different units are colored apart.
+    #[test]
+    fn units_sharing_a_model_differ_by_tier_or_hull_color() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let units: Vec<_> = db.iter().filter(|unit| unit.class != crate::sim::blueprints::UnitClass::Ammo).collect();
+        let brightness = |color: [f32; 3]| color[0] * 0.3 + color[1] * 0.59 + color[2] * 0.11;
+        for team in [BLUE, RED] {
+            for (index, first) in units.iter().enumerate() {
+                for second in &units[index + 1..] {
+                    let (a, b) = (&looks[usize::from(first.id.0)], &looks[usize::from(second.id.0)]);
+                    if (a.shape, a.base) != (b.shape, b.base) {
+                        continue;
+                    }
+                    let (hull_a, hull_b) = (hull_of(team, a), hull_of(team, b));
+                    let distance = (0..3).map(|channel| (hull_a[channel] - hull_b[channel]).powi(2)).sum::<f32>().sqrt();
+                    let darker_by_tier = first.tier != second.tier && {
+                        let (lower, higher) = if first.tier < second.tier { (hull_a, hull_b) } else { (hull_b, hull_a) };
+                        brightness(higher) < brightness(lower) - 0.02
+                    };
+                    assert!(darker_by_tier || distance > 0.05, "{} and {} share a model, and their hulls are too alike: {hull_a:?} and {hull_b:?}", first.key, second.key);
+                }
+            }
+        }
+    }
+
+    /// A unit's role shows in its color, whoever's it is: mobile builders are work yellow and
+    /// orange, and what only shoots at aircraft, on the ground or the water, is a cool cyan.
+    #[test]
+    fn builders_are_work_yellow_and_anti_air_is_cyan() {
+        use crate::sim::blueprints::Targets;
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        for team in [BLUE, RED] {
+            for unit in db.iter() {
+                let hull = hull_of(team, &looks[usize::from(unit.id.0)]);
+                let builds_structures = unit.builds.iter().any(|&made| db.get(made).is_structure());
+                if builds_structures && !unit.is_structure() && !unit.is_commander() && unit.class != crate::sim::blueprints::UnitClass::FieldRig {
+                    assert!(hull[0] > hull[2] + 0.05, "{} builds, but its hull is not warm: {hull:?}", unit.key);
+                }
+                if !unit.is_air() && unit.weapon.is_some_and(|weapon| weapon.targets == Targets::Air) {
+                    assert!(hull[2] > hull[0] + 0.05 && hull[1] > hull[0], "{} shoots at aircraft, but its hull is not cyan: {hull:?}", unit.key);
                 }
             }
         }
@@ -902,14 +963,15 @@ mod tests {
         std::array::from_fn(|index| seen.iter().filter(|material| material.map(|material| material as usize) == Some(index)).count() as f32 / covered)
     }
 
-    /// The team's color is never hidden: some of it shows on every unit as the camera sees it.
+    /// The team's color shows on every unit as the camera sees it, on at least a sixth of it,
+    /// so that whose it is reads at a glance: once only on turrets, many hulls showed too little.
     #[test]
     fn every_units_team_color_shows_from_the_camera() {
         let db = BlueprintDb::standard();
         let set = super::super::meshes::MeshSet::build();
         for unit in db.iter().filter(|unit| unit.class != crate::sim::blueprints::UnitClass::Ammo) {
             let trim = seen_shares(&set, &unit.key)[0];
-            assert!(trim > 0.01, "{} shows {:.0}% team color", unit.key, trim * 100.0);
+            assert!(trim >= 0.15, "{} shows {:.0}% team color", unit.key, trim * 100.0);
         }
     }
 
