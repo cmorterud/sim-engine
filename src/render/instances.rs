@@ -887,6 +887,32 @@ mod tests {
         }
     }
 
+    /// How steeply the camera looks down on units close up, in degrees, for measuring what
+    /// shows of them in play.
+    pub(crate) const PLAY_PITCH_DEGREES: f32 = 50.0;
+
+    /// What share of a unit, as the camera sees it close up, is each material: its base and
+    /// what turns on it, facing the same way.
+    pub(crate) fn seen_shares(set: &super::super::meshes::MeshSet, key: &str) -> [f32; 4] {
+        use super::super::meshes::tests::view;
+        let look = unit_look(key);
+        let parts: Vec<(Shape, f32)> = look.base.into_iter().chain([look.shape]).map(|shape| (shape, 0.0)).collect();
+        let seen = view(set, &parts, PLAY_PITCH_DEGREES);
+        let covered = seen.iter().filter(|material| material.is_some()).count().max(1) as f32;
+        std::array::from_fn(|index| seen.iter().filter(|material| material.map(|material| material as usize) == Some(index)).count() as f32 / covered)
+    }
+
+    /// The team's color is never hidden: some of it shows on every unit as the camera sees it.
+    #[test]
+    fn every_units_team_color_shows_from_the_camera() {
+        let db = BlueprintDb::standard();
+        let set = super::super::meshes::MeshSet::build();
+        for unit in db.iter().filter(|unit| unit.class != crate::sim::blueprints::UnitClass::Ammo) {
+            let trim = seen_shares(&set, &unit.key)[0];
+            assert!(trim > 0.01, "{} shows {:.0}% team color", unit.key, trim * 100.0);
+        }
+    }
+
     fn shell(id: u32, source: u32) -> ProjectileView {
         ProjectileView { id: SimId(id), team: Team::Blue, x: 0, y: 0, z: 0, kind: ProjectileKind::Shell, source: SimId(source), splash: 0 }
     }

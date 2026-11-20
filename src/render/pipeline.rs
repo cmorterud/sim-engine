@@ -851,7 +851,7 @@ impl Renderer {
 
         pass.set_vertex_buffer(0, self.mesh_vertices.slice(..));
         pass.set_vertex_buffer(1, self.instance_buffer.buffer.slice(..));
-        pass.set_index_buffer(self.mesh_indices.slice(..), wgpu::IndexFormat::Uint16);
+        pass.set_index_buffer(self.mesh_indices.slice(..), wgpu::IndexFormat::Uint32);
         // Battle scars go on the bare ground, under the shadows.
         let scars = &self.shape_instances[Shape::Scar as usize];
         if !scars.is_empty() {
@@ -877,7 +877,7 @@ impl Renderer {
             pass.set_pipeline(&self.water_pipeline);
             pass.set_index_buffer(self.terrain_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..self.terrain_index_count, 0, 0..1);
-            pass.set_index_buffer(self.mesh_indices.slice(..), wgpu::IndexFormat::Uint16);
+            pass.set_index_buffer(self.mesh_indices.slice(..), wgpu::IndexFormat::Uint32);
         }
         let smoke = &self.shape_instances[Shape::Smoke as usize];
         if !smoke.is_empty() {

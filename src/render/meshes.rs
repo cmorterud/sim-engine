@@ -342,7 +342,7 @@ pub struct MeshVertex {
 #[derive(Default)]
 struct MeshBuilder {
     vertices: Vec<MeshVertex>,
-    indices: Vec<u16>,
+    indices: Vec<u32>,
     /// What the parts added next are made of.
     material: Material,
     /// How the parts added next move, and about where.
@@ -410,11 +410,11 @@ impl MeshBuilder {
         let normal = normal.normalize_or_zero();
         let flipped = normal.dot(face_center - part_center) < 0.0;
         let normal = if flipped { -normal } else { normal };
-        let base = self.vertices.len() as u16;
+        let base = self.vertices.len() as u32;
         for point in points {
             self.vertices.push(MeshVertex { position: point.to_array(), normal: normal.to_array(), material: self.material as u32 | self.motion, pivot: self.pivot.to_array() });
         }
-        for index in 1..points.len() as u16 - 1 {
+        for index in 1..points.len() as u32 - 1 {
             let (second, third) = if flipped { (index + 1, index) } else { (index, index + 1) };
             self.indices.extend_from_slice(&[base, base + second, base + third]);
         }
@@ -1057,6 +1057,10 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         Shape::ShieldGenerator => {
             mesh.paint(Material::Hull);
             mesh.frustum([0.0, 0.0], [-0.5, -0.3], [0.5, 0.42], 8);
+            // A collar in the team's colors round the column's foot, where it shows from above:
+            // the band up the column flares out, so only its underside faces the camera.
+            mesh.paint(Material::Trim);
+            mesh.frustum([0.0, 0.0], [-0.3, -0.24], [0.28, 0.25], 8);
             mesh.paint(Material::Metal);
             mesh.frustum([0.0, 0.0], [-0.3, 0.2], [0.16, 0.12], 6);
             mesh.paint(Material::Trim);
@@ -2059,7 +2063,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
 /// Every shape, in one vertex and index buffer.
 pub struct MeshSet {
     pub vertices: Vec<MeshVertex>,
-    pub indices: Vec<u16>,
+    pub indices: Vec<u32>,
     /// The indices belonging to each shape, in the order of `Shape::ALL`.
     pub ranges: Vec<std::ops::Range<u32>>,
 }
@@ -2076,7 +2080,6 @@ impl MeshSet {
             build_shape(shape, &mut mesh);
             ranges.push(start..mesh.indices.len() as u32);
         }
-        assert!(mesh.vertices.len() < usize::from(u16::MAX), "too many vertices for 16-bit indices");
         Self { vertices: mesh.vertices, indices: mesh.indices, ranges }
     }
 }
@@ -2088,7 +2091,7 @@ pub(super) mod tests {
     fn shape_vertices(set: &MeshSet, shape: usize) -> Vec<MeshVertex> {
         set.indices[set.ranges[shape].start as usize..set.ranges[shape].end as usize]
             .iter()
-            .map(|&index| set.vertices[usize::from(index)])
+            .map(|&index| set.vertices[index as usize])
             .collect()
     }
 
@@ -2111,9 +2114,9 @@ pub(super) mod tests {
     fn triangles_face_the_way_their_normals_say() {
         let set = MeshSet::build();
         for triangle in set.indices.chunks(3) {
-            let at = |i: usize| Vec3::from(set.vertices[usize::from(triangle[i])].position);
+            let at = |i: usize| Vec3::from(set.vertices[triangle[i] as usize].position);
             let facing = (at(1) - at(0)).cross(at(2) - at(0));
-            let normal = Vec3::from(set.vertices[usize::from(triangle[0])].normal);
+            let normal = Vec3::from(set.vertices[triangle[0] as usize].normal);
             assert!(facing.dot(normal) >= -1e-5, "triangle {triangle:?} faces against its normal");
         }
     }
@@ -2146,6 +2149,75 @@ pub(super) mod tests {
             }
         }
         found
+    }
+
+    /// The side of a `view`, in pixels.
+    pub const VIEW_SIDE: usize = 96;
+
+    /// A shape drawn as the camera sees it, looking north and tilted down by `pitch` degrees
+    /// (90 is straight down), without perspective: each pixel holds the material nearest the
+    /// eye there, if any. `parts` are drawn together, as a unit's base and the part on it are,
+    /// each turned by its angle in radians about the vertical. The view spans -0.8 to 0.8 of
+    /// the shape's box either way, so that nothing tilted leaves it.
+    pub fn view(set: &MeshSet, parts: &[(Shape, f32)], pitch: f32) -> Vec<Option<Material>> {
+        let (sin, cos) = pitch.to_radians().sin_cos();
+        let mut depth = vec![f32::MAX; VIEW_SIDE * VIEW_SIDE];
+        let mut seen = vec![None; VIEW_SIDE * VIEW_SIDE];
+        let span = 0.8_f32;
+        for &(shape, turn) in parts {
+            let (turn_sin, turn_cos) = turn.sin_cos();
+            let range = set.ranges[shape as usize].clone();
+            for triangle in set.indices[range.start as usize..range.end as usize].chunks(3) {
+                let corners: Vec<(f32, f32, f32)> = triangle
+                    .iter()
+                    .map(|&index| {
+                        let [x, y, z] = set.vertices[index as usize].position;
+                        let (x, y) = (x * turn_cos - y * turn_sin, x * turn_sin + y * turn_cos);
+                        // Screen right is +X, screen up is north and up tilted, depth runs away from the eye.
+                        let (up, away) = (y * sin + z * cos, y * cos - z * sin);
+                        (((x + span) / (2.0 * span)) * VIEW_SIDE as f32, ((span - up) / (2.0 * span)) * VIEW_SIDE as f32, away)
+                    })
+                    .collect();
+                let material = [Material::Trim, Material::Hull, Material::Metal, Material::Glow][(set.vertices[triangle[0] as usize].material & motion::MATERIAL_MASK) as usize];
+                let (a, b, c) = (corners[0], corners[1], corners[2]);
+                let area = (b.0 - a.0) * (c.1 - a.1) - (c.0 - a.0) * (b.1 - a.1);
+                if area.abs() < 1e-9 {
+                    continue;
+                }
+                let (left, right) = (a.0.min(b.0).min(c.0).floor().max(0.0) as usize, (a.0.max(b.0).max(c.0).ceil() as usize).min(VIEW_SIDE - 1));
+                let (top, bottom) = (a.1.min(b.1).min(c.1).floor().max(0.0) as usize, (a.1.max(b.1).max(c.1).ceil() as usize).min(VIEW_SIDE - 1));
+                for py in top..=bottom {
+                    for px in left..=right {
+                        let (x, y) = (px as f32 + 0.5, py as f32 + 0.5);
+                        let w0 = ((b.0 - x) * (c.1 - y) - (c.0 - x) * (b.1 - y)) / area;
+                        let w1 = ((c.0 - x) * (a.1 - y) - (a.0 - x) * (c.1 - y)) / area;
+                        let w2 = 1.0 - w0 - w1;
+                        if w0 < 0.0 || w1 < 0.0 || w2 < 0.0 {
+                            continue;
+                        }
+                        let away = w0 * a.2 + w1 * b.2 + w2 * c.2;
+                        let at = py * VIEW_SIDE + px;
+                        if away < depth[at] {
+                            depth[at] = away;
+                            seen[at] = Some(material);
+                        }
+                    }
+                }
+            }
+        }
+        seen
+    }
+
+    /// The most triangles one shape may have, so that a crowd of units stays cheap to draw.
+    const TRIANGLE_BUDGET: u32 = 1_200;
+
+    #[test]
+    fn every_shape_keeps_to_its_triangle_budget() {
+        let set = MeshSet::build();
+        for shape in Shape::ALL {
+            let triangles = (set.ranges[shape as usize].end - set.ranges[shape as usize].start) / 3;
+            assert!(triangles <= TRIANGLE_BUDGET, "{shape:?} has {triangles} triangles, over {TRIANGLE_BUDGET}");
+        }
     }
 
     #[test]

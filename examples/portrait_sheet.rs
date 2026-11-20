@@ -1,7 +1,7 @@
 //! Renders a portrait of every unit and structure, for the interface's buttons, and packs them
 //! into `assets/portraits.png`, with their keys, tile by tile, in `assets/portraits.txt`.
 //!
-//! `cargo run --release --example portrait_sheet`
+//! `cargo run --release --example portrait_sheet [-- --review <folder>]`
 //!
 //! Run it again after changing a unit's model. Each unit is drawn alone, close up, from the
 //! interface's usual angle, then the same view is drawn without it: what differs is the unit,
@@ -220,6 +220,7 @@ fn main() {
 
     let mut keys: Vec<String> = Vec::new();
     let mut tiles: Vec<Vec<u8>> = Vec::new();
+    let mut kinds: Vec<&'static str> = Vec::new();
     for unit in drawn {
         let Some(view) = snapshot.units.iter().find(|view| view.blueprint == unit.id.0).cloned() else {
             eprintln!("{} could not be placed", unit.key);
@@ -253,6 +254,15 @@ fn main() {
         let (_, _, without) = frame(&[]);
         tiles.push(portrait(&with, &without, width as usize, height as usize));
         keys.push(unit.key.clone());
+        kinds.push(if unit.is_structure() {
+            "structures"
+        } else if unit.is_air() {
+            "air"
+        } else if on_water {
+            "naval"
+        } else {
+            "land"
+        });
         println!("{}", unit.key);
     }
 
@@ -277,4 +287,48 @@ fn main() {
     let index = format!("{TILE} {COLUMNS}\n{}\n", keys.join("\n"));
     std::fs::write(assets.join("portraits.txt"), index).expect("index writes");
     println!("{} portraits", keys.len());
+    let mut args = std::env::args().skip(1);
+    if args.next().as_deref() == Some("--review") {
+        let folder = std::path::PathBuf::from(args.next().expect("a folder for the review sheets"));
+        std::fs::create_dir_all(&folder).expect("the review folder can be made");
+        for kind in ["land", "air", "naval", "structures"] {
+            let chosen: Vec<&Vec<u8>> = tiles.iter().zip(&kinds).filter(|(_, tile_kind)| **tile_kind == kind).map(|(tile, _)| tile).collect();
+            let path = folder.join(format!("{kind}.png"));
+            write_review(&path, &chosen);
+            println!("saved {}", path.display());
+        }
+    }
+}
+
+/// Portraits of one kind of unit, twice their size on a dark ground in rows of eight, for
+/// comparing models before and after a change as the buttons would show them.
+fn write_review(path: &Path, tiles: &[&Vec<u8>]) {
+    const PER_ROW: usize = 8;
+    const SCALE: usize = 2;
+    const GROUND: f32 = 34.0;
+    let side = TILE * SCALE;
+    let rows = tiles.len().div_ceil(PER_ROW).max(1);
+    let (width, height) = (PER_ROW * side, rows * side);
+    let mut picture = vec![0u8; width * height * 4];
+    for pixel in picture.as_chunks_mut::<4>().0 {
+        *pixel = [GROUND as u8, GROUND as u8, GROUND as u8, 255];
+    }
+    for (index, tile) in tiles.iter().enumerate() {
+        let (left, top) = ((index % PER_ROW) * side, (index / PER_ROW) * side);
+        for y in 0..side {
+            for x in 0..side {
+                let from = ((y / SCALE) * TILE + x / SCALE) * 4;
+                let alpha = f32::from(tile[from + 3]) / 255.0;
+                let at = ((top + y) * width + left + x) * 4;
+                for channel in 0..3 {
+                    picture[at + channel] = (f32::from(tile[from + channel]) * alpha + GROUND * (1.0 - alpha)).round() as u8;
+                }
+            }
+        }
+    }
+    let file = std::fs::File::create(path).expect("the review sheet can be written");
+    let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), width as u32, height as u32);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder.write_header().expect("header writes").write_image_data(&picture).expect("sheet writes");
 }
