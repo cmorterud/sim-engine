@@ -3609,6 +3609,26 @@ pub fn upgrade_progress(snapshot: &SimSnapshot, id: SimId, db: &BlueprintDb) -> 
     (factory.queue.first() == Some(&upgrade.0)).then(|| share(factory.progress_permille))
 }
 
+/// How far along what one of the viewer's own factories is making is, from 0 to 1: a unit, or a
+/// missile in a silo, such as the strategic missile submarine's. `None` while it makes nothing,
+/// is unfinished, upgrades (which has a bar of its own), or holds all the missiles it can, and
+/// for every enemy, whose progress the viewer is never told.
+pub fn production_progress(snapshot: &SimSnapshot, id: SimId, db: &BlueprintDb) -> Option<f32> {
+    let factory = snapshot.factories.iter().find(|factory| factory.id == id)?;
+    let made = db.get(BlueprintId(*factory.queue.first()?));
+    if made.is_factory() || find_unit(snapshot, id)?.built_permille < 1000 {
+        return None;
+    }
+    if made.class == UnitClass::Ammo {
+        let limit = db.get(BlueprintId(find_unit(snapshot, id)?.blueprint)).max_stock;
+        let stock = snapshot.stocks.iter().find(|(silo, _)| *silo == id).map_or(0, |&(_, stock)| stock);
+        if limit > 0 && stock >= limit {
+            return None;
+        }
+    }
+    Some(f32::from(factory.progress_permille) / 1000.0)
+}
+
 fn draw_bar(painter: &egui::Painter, center: Pos2, width: f32, share: f32, color: Color32) {
     let back = Rect::from_center_size(center, Vec2::new(width, 3.0));
     painter.rect_filled(back, Rounding::ZERO, Color32::from_black_alpha(180));
@@ -3688,7 +3708,8 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
         }
         // How far along it is, only for the viewer's own upgrades.
         let upgrade_share = upgrade_progress(snapshot, unit.id, db).filter(|_| upgrading);
-        if hurt || building || is_selected || upgrade_share.is_some() {
+        let production_share = production_progress(snapshot, unit.id, db);
+        if hurt || building || is_selected || upgrade_share.is_some() || production_share.is_some() {
             let above = if show_icons { icon_top + 4.0 } else { apparent + 4.0 };
             let width = if show_icons { icon_half * 2.8 } else { (apparent * 2.0).clamp(14.0, 70.0) };
             let share = f32::from(unit.health_permille) / 1000.0;
@@ -3701,6 +3722,10 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
             }
             if let Some(share) = upgrade_share {
                 draw_bar(&painter, center - Vec2::new(0.0, next), width, share, UPGRADING);
+                next += 4.0;
+            }
+            if let Some(share) = production_share {
+                draw_bar(&painter, center - Vec2::new(0.0, next), width, share, BUILDING);
             }
         }
     }
@@ -4063,6 +4088,42 @@ mod tests {
         current.enhancing = vec![(SimId(10), db.enhancement_id("t2_fabrication").0, 300)];
         let options = builder_options(&current, &[SimId(10)], &db);
         assert!(options.contains(&shield) && !options.contains(&nuke), "T2 while the T2 suite is fitted");
+    }
+
+    /// Every factory, silo, and missile submarine of the viewer's that is making something shows
+    /// how far along it is; one making nothing, unfinished, upgrading, or with its silo full does
+    /// not, nor does an enemy's, which the viewer is not told about.
+    #[test]
+    fn whatever_makes_units_or_missiles_shows_how_far_along_the_current_one_is() {
+        let db = BlueprintDb::standard();
+        let makers: Vec<_> = db.iter().filter(|def| def.is_factory() && !def.builds.is_empty()).collect();
+        assert!(makers.iter().any(|def| def.key == "t3_missile_sub"), "the missile submarine makes missiles");
+        for def in makers {
+            let mut maker = unit(20, 0.0);
+            maker.blueprint = def.id.0;
+            let made = def.builds[0];
+            let mut current = snapshot(vec![maker], vec![]);
+            current.factories = vec![FactoryView { id: SimId(20), queue: vec![made.0], repeat: false, progress_permille: 350, rally: None }];
+            assert_eq!(production_progress(&current, SimId(20), &db), Some(0.35), "{} making {}", def.key, db.get(made).key);
+            current.factories[0].queue.clear();
+            assert_eq!(production_progress(&current, SimId(20), &db), None, "{} making nothing", def.key);
+            current.factories[0].queue = vec![made.0];
+            current.units[0].built_permille = 600;
+            assert_eq!(production_progress(&current, SimId(20), &db), None, "{} unfinished", def.key);
+            current.units[0].built_permille = 1000;
+            if let Some(upgrade) = def.upgrades_to {
+                current.factories[0].queue = vec![upgrade.0, made.0];
+                assert_eq!(production_progress(&current, SimId(20), &db), None, "{} upgrading has a bar of its own", def.key);
+                current.factories[0].queue = vec![made.0];
+            }
+            if db.get(made).class == UnitClass::Ammo && def.max_stock > 0 {
+                current.stocks = vec![(SimId(20), def.max_stock)];
+                assert_eq!(production_progress(&current, SimId(20), &db), None, "{} with a full silo builds no more", def.key);
+                current.stocks.clear();
+            }
+            current.factories.clear();
+            assert_eq!(production_progress(&current, SimId(20), &db), None, "{} is an enemy's", def.key);
+        }
     }
 
     #[test]
