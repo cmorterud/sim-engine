@@ -23,7 +23,7 @@ pub enum Frame {
     Ship,
     /// A keel, flat on top and pointed beneath: submarines.
     Submarine,
-    /// A diamond: fighters and scouts.
+    /// A triangle pointing up, the bomber's flipped: fighters and scouts.
     Fighter,
     /// A triangle pointing down: bombers, the torpedo bomber, and the fighter-bomber.
     Bomber,
@@ -403,7 +403,7 @@ fn outline(frame: Frame) -> Vec<(f32, f32)> {
         }
         Frame::Ship => vec![(-1.6, 0.0), (-1.05, -1.0), (1.05, -1.0), (1.6, 0.0), (1.05, 1.0), (-1.05, 1.0)],
         Frame::Submarine => vec![(-1.5, -0.8), (1.5, -0.8), (1.15, 0.3), (0.0, 1.05), (-1.15, 0.3)],
-        Frame::Fighter => vec![(0.0, -1.15), (1.3, 0.0), (0.0, 1.15), (-1.3, 0.0)],
+        Frame::Fighter => vec![(0.0, -1.15), (1.55, 1.15), (-1.55, 1.15)],
         Frame::Bomber => vec![(-1.55, -1.15), (1.55, -1.15), (0.0, 1.15)],
         Frame::Gunship => arc(0.0, 0.0, 1.15, 0.0, 360.0, 28),
     }
@@ -418,7 +418,7 @@ const fn symbol_place(frame: Frame) -> (f32, f32) {
         Frame::Vehicle | Frame::Structure => (0.0, 0.75),
         Frame::Bot | Frame::Ship => (0.0, 0.72),
         Frame::Submarine => (-0.1, 0.6),
-        Frame::Fighter => (0.0, 0.62),
+        Frame::Fighter => (0.4, 0.55),
         Frame::Bomber => (-0.4, 0.55),
         Frame::Gunship => (0.0, 0.72),
     }
@@ -841,6 +841,23 @@ mod tests {
             };
             assert_eq!(Icon::for_key(&def.key).frame(), expected, "{}", def.key);
         }
+    }
+
+    /// A fighter's frame is a bomber's turned upside down, pointing north, with its symbol held
+    /// in the wide end as the bomber's is.
+    #[test]
+    fn a_fighter_points_north_where_a_bomber_points_south() {
+        let flipped = |points: Vec<(f32, f32)>| {
+            let mut points: Vec<(i32, i32)> = points.into_iter().map(|(x, y)| ((x * 100.0).round() as i32, (-y * 100.0).round() as i32)).collect();
+            points.sort_unstable();
+            points
+        };
+        let mut fighter: Vec<(i32, i32)> = outline(Frame::Fighter).into_iter().map(|(x, y)| ((x * 100.0).round() as i32, (y * 100.0).round() as i32)).collect();
+        fighter.sort_unstable();
+        assert_eq!(fighter, flipped(outline(Frame::Bomber)));
+        let apex = outline(Frame::Fighter).into_iter().fold(f32::MAX, |top, (_, y)| top.min(y));
+        assert!(apex < 0.0, "the fighter's point is at the top");
+        assert_eq!(symbol_place(Frame::Fighter), (-symbol_place(Frame::Bomber).0, symbol_place(Frame::Bomber).1));
     }
 
     #[test]
