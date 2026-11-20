@@ -302,7 +302,7 @@ pub fn unit_look(key: &str) -> UnitLook {
         "t1_land_scout" => look(Shape::LandScout, Some([0.75, 0.95, 1.00]), 1.0),
         "t1_medium_tank" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::Tank, Some([0.80, 0.85, 0.70]), 1.0) },
         "t2_grenadier_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::GrenadierWalker, None, 1.0) },
-        "t2_mobile_shield" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::ShieldEmitter, Some([0.55, 0.85, 1.00]), 1.0) },
+        "t2_mobile_shield" => UnitLook { base: Some(Shape::WheeledHull), ..look(Shape::ShieldEmitter, Some([0.55, 0.85, 1.00]), 1.0) },
         "t2_combat_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([0.95, 0.40, 0.25]), 1.0) },
         "t3_heavy_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::HeavyWalker, None, 1.0) },
         "t3_siege_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::SiegeWalker, Some([0.70, 0.70, 0.75]), 1.0) },
@@ -316,8 +316,8 @@ pub fn unit_look(key: &str) -> UnitLook {
         "t3_heavy_transport" => look(Shape::Transport, Some([0.55, 0.60, 0.75]), 1.0),
         "field_workshop_t3" => look(Shape::FieldWorkshop, Some([0.95, 0.55, 0.20]), 0.95),
         "t1_light_artillery" => UnitLook { base: Some(Shape::ArtilleryHull), ..look(Shape::Artillery, None, 1.0) },
-        "t2_heavy_tank" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::Tank, None, 1.0) },
-        "t2_assault_hovercraft" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::Tank, Some([0.45, 0.65, 0.75]), 1.0) },
+        "t2_heavy_tank" => UnitLook { base: Some(Shape::HeavyTankHull), ..look(Shape::HeavyTank, None, 1.0) },
+        "t2_assault_hovercraft" => UnitLook { base: Some(Shape::HoverHull), ..look(Shape::Tank, Some([0.45, 0.65, 0.75]), 1.0) },
         "land_factory_t1" => look(Shape::Factory, Some([0.35, 0.35, 0.45]), 0.55),
         "land_factory_t2" => look(Shape::FactoryT2, Some([0.20, 0.20, 0.30]), 0.7),
         "mass_extractor" => look(Shape::Extractor, Some([0.10, 0.95, 0.75]), 0.8),
@@ -328,7 +328,7 @@ pub fn unit_look(key: &str) -> UnitLook {
         "energy_storage" => look(Shape::Storage, Some([1.00, 0.90, 0.40]), 0.65),
         "t2_artillery" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::ArtilleryGun, Some([0.80, 0.55, 0.30]), 1.0) },
         "t3_artillery" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::ArtilleryGun, Some([0.50, 0.30, 0.20]), 0.6) },
-        "t3_mobile_artillery" => UnitLook { base: Some(Shape::ArtilleryHull), ..look(Shape::Artillery, Some([0.55, 0.45, 0.35]), 1.0) },
+        "t3_mobile_artillery" => UnitLook { base: Some(Shape::HeavyTankHull), ..look(Shape::HeavyArtillery, Some([0.55, 0.45, 0.35]), 1.0) },
         "radar" => look(Shape::Radar, Some([0.40, 0.90, 0.55]), 1.3),
         "deep_scan_array" => look(Shape::Radar, Some([0.75, 0.55, 1.00]), 1.6),
         "stealth_field_generator" => look(Shape::StealthGenerator, Some([0.30, 0.30, 0.35]), 1.2),
@@ -344,7 +344,7 @@ pub fn unit_look(key: &str) -> UnitLook {
         "t1_attack_sub" => look(Shape::Submarine, Some([0.10, 0.20, 0.30]), 0.3),
         "t2_escort_corvette" => look(Shape::EscortCorvette, Some([0.55, 0.85, 1.00]), 0.5),
         "t3_missile_sub" => look(Shape::MissileSubmarine, Some([0.05, 0.10, 0.20]), 0.35),
-        "t2_mobile_missile_launcher" => UnitLook { base: Some(Shape::ArtilleryHull), ..look(Shape::MissileLauncher, Some([0.80, 0.80, 0.70]), 1.0) },
+        "t2_mobile_missile_launcher" => UnitLook { base: Some(Shape::ArtilleryHull), ..look(Shape::MissileRack, Some([0.80, 0.80, 0.70]), 1.0) },
         "t2_torpedo_bomber" => look(Shape::TorpedoBomber, Some([0.40, 0.55, 0.70]), 0.55),
         "t1_sonar" => look(Shape::Radar, Some([0.30, 0.60, 0.90]), 1.0),
         "t2_sonar" => look(Shape::Radar, Some([0.20, 0.45, 0.85]), 1.2),
@@ -381,7 +381,7 @@ pub fn unit_look(key: &str) -> UnitLook {
         "t1_interceptor" => look(Shape::Aircraft, None, 0.5),
         "t1_bomber" => look(Shape::Bomber, None, 0.6),
         "t1_aa_turret" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::AntiAirGun, Some([0.35, 0.75, 0.95]), 0.9) },
-        "t1_mobile_aa" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::AntiAirGun, Some([0.30, 0.78, 0.98]), 1.0) },
+        "t1_mobile_aa" => UnitLook { base: Some(Shape::WheeledHull), ..look(Shape::AntiAirGun, Some([0.30, 0.78, 0.98]), 1.0) },
         "t1_point_defense" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::PointDefense, Some([0.75, 0.25, 0.85]), 0.9) },
         _ => look(Shape::Cube, None, 0.6),
     }
@@ -985,7 +985,7 @@ mod tests {
         let db = BlueprintDb::standard();
         let looks = unit_looks(&db);
         let mut tank = unit(1, 0);
-        tank.blueprint = db.id("t2_heavy_tank").0;
+        tank.blueprint = db.id("t1_medium_tank").0;
         let action = |motion: &mut Motion| {
             let mut out = InstanceBatches::default();
             build_unit_instances(&[tank], &[tank], 1.0, [0.0; 3], &[], &looks, &[], motion, &mut out);
@@ -1136,7 +1136,7 @@ mod tests {
         let db = BlueprintDb::standard();
         let looks = unit_looks(&db);
         let mut tank = unit(1, 0);
-        tank.blueprint = db.id("t2_heavy_tank").0;
+        tank.blueprint = db.id("t1_medium_tank").0;
         let mut generator = unit(2, 0);
         generator.blueprint = db.id("power_generator").0;
         generator.is_structure = true;
@@ -1160,7 +1160,7 @@ mod tests {
         let db = BlueprintDb::standard();
         let looks = unit_looks(&db);
         let mut tank = unit(1, 0);
-        tank.blueprint = db.id("t2_heavy_tank").0;
+        tank.blueprint = db.id("t1_medium_tank").0;
         let mut moved = tank;
         moved.x = 4096 * 4;
         let mut motion = Motion::new();
@@ -1269,7 +1269,7 @@ mod tests {
         let db = BlueprintDb::standard();
         let looks = unit_looks(&db);
         let mut tank = unit(1, 0);
-        tank.blueprint = db.id("t2_heavy_tank").0;
+        tank.blueprint = db.id("t1_medium_tank").0;
         tank.facing = [4096, 0];
         tank.aim = [0, -4096];
         let mut motion = Motion::new();
@@ -1301,7 +1301,7 @@ mod tests {
         let db = BlueprintDb::standard();
         let looks = unit_looks(&db);
         let mut before = unit(1, 0);
-        before.blueprint = db.id("t2_heavy_tank").0;
+        before.blueprint = db.id("t1_medium_tank").0;
         before.facing = [4096, 0];
         let mut after = before;
         after.facing = [0, 4096];
