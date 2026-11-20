@@ -10,7 +10,7 @@ use egui::{Align2, Color32, FontId, Pos2, Rect, Stroke, TextureId, Vec2};
 use sim_engine::icons::{self, Icon};
 
 const COLUMNS: usize = 10;
-const CELL: f32 = 62.0;
+const CELL: f32 = 66.0;
 const BUTTON: f32 = 46.0;
 
 fn main() {
@@ -35,8 +35,8 @@ fn main() {
                 icons::draw_bar(painter, rect, *icon);
                 let font = FontId::new(13.0, egui::FontFamily::Name("bold".into()));
                 painter.text(rect.left_top() + Vec2::new(3.0, 1.0), Align2::LEFT_TOP, "Q", font, visuals.text_color());
-                let map_center = corner + Vec2::new(BUTTON * 0.5, rows as f32 * CELL + 20.0 + BUTTON * 0.5);
-                icons::draw(painter, map_center, 8.0, *icon, 2, Color32::from_rgb(80, 150, 255));
+                let map_center = corner + Vec2::new(BUTTON * 0.5, rows as f32 * CELL + 30.0 + BUTTON * 0.25);
+                icons::draw(painter, map_center, icons::map_half(*icon), *icon, (index % 3) as u8 + 1, Color32::from_rgb(80, 150, 255));
             }
             painter.line_segment([Pos2::new(0.0, rows as f32 * CELL + 6.0), Pos2::new(size.x, rows as f32 * CELL + 6.0)], Stroke::new(1.0_f32, Color32::from_gray(60)));
         });

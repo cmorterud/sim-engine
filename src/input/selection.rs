@@ -535,7 +535,7 @@ mod tests {
     }
 
     /// Zoomed out to icons, a click anywhere on a unit's icon picks it, out to its edges and its
-    /// tech dots beneath, on a screen of any scale; beyond the icon it does not.
+    /// tech tab beneath, on a screen of any scale; beyond the icon it does not.
     #[test]
     fn a_click_anywhere_on_an_icon_picks_its_unit() {
         for scale in [1.0, 2.0] {
@@ -545,11 +545,11 @@ mod tests {
             let units = [unit(1, Team::Blue, 40_000.0, 40_000.0)];
             let at = camera.world_to_screen([40_000.0, 40_000.0, 1.0]).unwrap();
             let pick = |dx: f64, dy: f64| nearest_unit(&units, &camera, Team::Blue, [at[0] + dx * scale, at[1] + dy * scale]);
-            // A land unit's frame reaches 13 points to either side; its T3 dots, 16 below.
-            for (dx, dy) in [(13.0, 0.0), (-13.0, 8.0), (12.0, -8.0), (0.0, 16.0), (6.0, 15.0)] {
+            // A vehicle's frame reaches 18 points to either side at its base; its T3 tab, 24 below.
+            for (dx, dy) in [(17.0, 0.0), (-17.0, 8.0), (16.0, -8.0), (0.0, 24.0), (6.0, 23.0)] {
                 assert_eq!(pick(dx, dy), Some(SimId(1)), "at ({dx}, {dy}) points, scale {scale}");
             }
-            for (dx, dy) in [(24.0, 0.0), (0.0, -24.0), (0.0, 28.0)] {
+            for (dx, dy) in [(30.0, 0.0), (0.0, -30.0), (0.0, 36.0)] {
                 assert_eq!(pick(dx, dy), None, "at ({dx}, {dy}) points, scale {scale}");
             }
         }

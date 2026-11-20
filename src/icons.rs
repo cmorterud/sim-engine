@@ -1,75 +1,100 @@
-//! Icons for units and structures: one symbol for each kind of thing, the same at every tech
-//! level, with the level shown as white dots beneath. The frame says what role it plays, by
-//! its outline alone (`Frame`), and the symbol inside says what it does, never by counting: the
-//! dots are the only thing on an icon to count. All are vector shapes, drawn in code, so they
-//! stay sharp at any size and need no image files.
+//! Icons for units and structures. An icon is a frame, a mark inside it, and a tab of rank bars
+//! beneath for its tech level.
+//!
+//! - The frame says how the unit moves, by its outline alone (`Frame`): squares and rectangles
+//!   are structures and nothing else; land units stand on a flat base with angled sides; ships
+//!   are a curved hull under a flat deck and submarines a cigar, with no corner below the
+//!   waterline; aircraft are triangles and a trapezoid.
+//! - The mark says what it does (`Mark`), and the same job has the same mark in every domain: a
+//!   gun is a disc on a tank, a walker, a warship, a gunship, or a point defense. Upgrades share a
+//!   mark. Where two units would otherwise share frame, mark, and tech level, one of them carries
+//!   a small extra mark (`Extra`).
+//! - The tab holds one to three upright bars, white, yellow, and orange, so the level reads by
+//!   count or by color. It is dark, so it reads the same on any ground.
+//!
+//! All are vector shapes, drawn in code, so they stay sharp at any size and need no image files.
+//! Until 2026-11-20 every kind of unit had a small picture of its own (a turret, a funnel, an
+//! arrowhead), which blurred together at map size, and the tech level was small white dots.
 
 use egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, Vec2};
 
-/// What role an icon's unit plays, which sets its frame's outline.
+/// How an icon's unit moves, which sets its frame's outline.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Frame {
-    /// A head and shoulders, larger: the command rig and the support command rig.
+    /// A head over rounded shoulders, larger: the command rig and the field rig.
     Commander,
-    /// A building with a pitched roof: every factory.
+    /// A rectangle, wider than tall: every factory.
     Factory,
-    /// An octagon, a square with its corners cut: every other structure.
+    /// A square: every other structure.
     Structure,
-    /// A wide rectangle: tanks, artillery, anti-air, mobile shields, scouts, and engineers.
+    /// A trapezoid on its wide base, like tracks under a hull: tanks, artillery, anti-air,
+    /// mobile shields, scouts, and engineers.
     Vehicle,
-    /// A rounded pill: the walkers.
+    /// A pentagon on a flat base with a peaked top, standing up: the walkers.
     Bot,
-    /// A hull pointed at bow and stern: surface ships.
+    /// A flat deck over a curved hull: surface ships.
     Ship,
-    /// A keel, flat on top and pointed beneath: submarines.
+    /// A long rounded hull, like a cigar, with no corner anywhere: submarines.
     Submarine,
     /// A triangle pointing up, the bomber's flipped: fighters and scouts.
     Fighter,
     /// A triangle pointing down: bombers, the torpedo bomber, and the fighter-bomber.
     Bomber,
-    /// A circle, a rotor's disc: gunships and transports.
+    /// A trapezoid on its narrow end, the vehicle's turned over and squatter: gunships and
+    /// transports (a circle until 2026-11-20).
     Gunship,
+    /// No frame: what a silo builds, which only ever shows on its build bar.
+    Munition,
 }
 
 /// How far the camera must be from the ground before units show as icons.
 pub const ICON_ALTITUDE: f64 = 1_200.0;
 /// The area round a unit's icon where a click picks it, in points from its center: half its
-/// width, and how far it reaches above and below, the tech dots being beneath. Enough to take in
-/// every icon, its frame and tech dots, whatever its kind (a test checks).
-pub const HIT_HALF_WIDTH_PT: f64 = 16.0;
-pub const HIT_ABOVE_PT: f64 = 16.0;
-pub const HIT_BELOW_PT: f64 = 21.0;
+/// width, and how far it reaches above and below, the tech tab being beneath. Enough to take in
+/// every icon, its frame and tech tab, whatever its kind (a test checks).
+pub const HIT_HALF_WIDTH_PT: f64 = 20.0;
+pub const HIT_ABOVE_PT: f64 = 20.0;
+pub const HIT_BELOW_PT: f64 = 30.0;
 
-/// One kind of unit or structure, whatever its tech level.
+/// One look on the map: units sharing it share frame and mark, and differ by tech level.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Icon {
     Commander,
     FieldRig,
     Engineer,
-    LightWalker,
-    SiegeWalker,
+    CombatEngineer,
+    /// The medium and heavy tanks.
     Tank,
     AssaultHovercraft,
     Artillery,
     MobileMissile,
     MobileAntiAir,
+    MobileShield,
+    LandScout,
+    /// The light, grenadier, and siege walkers.
+    Walker,
+    HeavyWalker,
     Scout,
     Fighter,
     Bomber,
     FighterBomber,
     TorpedoBomber,
     Gunship,
-    Frigate,
-    Destroyer,
-    Cruiser,
+    Transport,
+    /// The frigate, destroyer, and battlecruiser.
+    Warship,
     Battleship,
-    Battlecruiser,
+    Cruiser,
+    TorpedoBoat,
+    EscortCorvette,
     Submarine,
     MissileSubmarine,
-    EscortCorvette,
     LandFactory,
+    LandSupportFactory,
     AirFactory,
+    AirSupportFactory,
     NavalFactory,
+    NavalSupportFactory,
     RigYard,
     Airfield,
     Extractor,
@@ -90,18 +115,90 @@ pub enum Icon {
     Radar,
     Sonar,
     Stealth,
+    Wall,
+    FieldWorkshop,
     TacticalMissile,
     StrategicMissile,
     StrategicInterceptor,
-    LandScout,
-    MobileShield,
-    CombatEngineer,
-    TorpedoBoat,
-    Wall,
-    FieldWorkshop,
-    Transport,
     /// Anything without an icon of its own, such as the stress test's plain cubes.
     Unknown,
+}
+
+/// What an icon's mark shows: what the unit does. The same job has the same mark wherever it is.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Mark {
+    /// A solid disc: guns that fire straight at what they see.
+    Gun,
+    /// A shell's arc ending in a dot: what fires over what is in the way.
+    Artillery,
+    /// A chevron pointing up, at the sky: fires only at aircraft.
+    AntiAir,
+    /// A chevron pointing down, under the water: torpedoes.
+    Torpedo,
+    /// A missile with fins.
+    Missile,
+    /// A falling bomb.
+    Bomb,
+    /// Three blades round a dot: the strategic missile.
+    Strategic,
+    /// A dome on a base line.
+    Shield,
+    /// A small missile under a bar: stops tactical missiles.
+    MissileDefense,
+    /// A small strategic mark under a bar: stops strategic missiles.
+    StrategicDefense,
+    /// A dot with two arcs above it: radar, and scouts.
+    Radar,
+    /// The radar mark turned to face down.
+    Sonar,
+    /// The radar mark struck out.
+    Stealth,
+    /// A wrench: builders.
+    Build,
+    /// A cradle holding a load.
+    Transport,
+    /// A filled star: the command rig.
+    Star,
+    /// The star as an outline: the field rig, and the yard that makes it.
+    HollowStar,
+    /// The economy panel's materiel diamond.
+    Materiel,
+    /// The economy panel's energy bolt.
+    Energy,
+    /// The bolt over a wave.
+    Geothermal,
+    /// The diamond in a box.
+    MaterielStore,
+    /// The bolt in a box.
+    EnergyStore,
+    /// The bolt inside the diamond: energy made into materiel.
+    Fabricator,
+    /// A small vehicle trapezoid, filled for a headquarters and outlined for a support factory.
+    MakesLand { support: bool },
+    /// A small aircraft triangle.
+    MakesAir { support: bool },
+    /// A small ship's bowl.
+    MakesNaval { support: bool },
+    /// An H, for the landing pad.
+    Airfield,
+    /// Courses of bricks.
+    Wall,
+    /// A dot, for what has no icon.
+    Unknown,
+}
+
+/// A small mark beside the main one, telling apart two units that would otherwise look alike.
+/// Each means the same wherever it appears.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Extra {
+    /// A small dome over the mark: it carries a shield of its own (the heavy walker).
+    Dome,
+    /// A wave under the mark: it crosses water (the assault hovercraft).
+    Wave,
+    /// A dot beside the mark: it also fights (the combat engineer).
+    Armed,
+    /// A small chevron over the mark: it also fires at aircraft (the fighter-bomber).
+    AlsoAntiAir,
 }
 
 /// The groups a builder's bar is laid out in, in order, with a divider between each.
@@ -117,34 +214,40 @@ pub enum BarGroup {
 }
 
 impl Icon {
-    pub const ALL: [Self; 58] = [
+    pub const ALL: [Self; 59] = [
         Self::Commander,
         Self::FieldRig,
         Self::Engineer,
-        Self::LightWalker,
-        Self::SiegeWalker,
+        Self::CombatEngineer,
         Self::Tank,
         Self::AssaultHovercraft,
         Self::Artillery,
         Self::MobileMissile,
         Self::MobileAntiAir,
+        Self::MobileShield,
+        Self::LandScout,
+        Self::Walker,
+        Self::HeavyWalker,
         Self::Scout,
         Self::Fighter,
         Self::Bomber,
         Self::FighterBomber,
         Self::TorpedoBomber,
         Self::Gunship,
-        Self::Frigate,
-        Self::Destroyer,
-        Self::Cruiser,
+        Self::Transport,
+        Self::Warship,
         Self::Battleship,
-        Self::Battlecruiser,
+        Self::Cruiser,
+        Self::TorpedoBoat,
+        Self::EscortCorvette,
         Self::Submarine,
         Self::MissileSubmarine,
-        Self::EscortCorvette,
         Self::LandFactory,
+        Self::LandSupportFactory,
         Self::AirFactory,
+        Self::AirSupportFactory,
         Self::NavalFactory,
+        Self::NavalSupportFactory,
         Self::RigYard,
         Self::Airfield,
         Self::Extractor,
@@ -165,54 +268,48 @@ impl Icon {
         Self::Radar,
         Self::Sonar,
         Self::Stealth,
+        Self::Wall,
+        Self::FieldWorkshop,
         Self::TacticalMissile,
         Self::StrategicMissile,
         Self::StrategicInterceptor,
-        Self::LandScout,
-        Self::MobileShield,
-        Self::CombatEngineer,
-        Self::TorpedoBoat,
-        Self::Wall,
-        Self::FieldWorkshop,
-        Self::Transport,
         Self::Unknown,
     ];
 
-    /// The icon for a blueprint, by its key. Tiers of the same kind share one.
     pub fn for_key(key: &str) -> Self {
         match key {
             "command_rig" => Self::Commander,
             "field_rig" => Self::FieldRig,
             "t1_engineer" | "t2_engineer" | "t3_engineer" => Self::Engineer,
-            // Bots and tanks of each tier share a symbol.
-            "t1_light_walker" | "t2_grenadier_walker" | "t3_heavy_walker" => Self::LightWalker,
-            "t1_medium_tank" | "t2_heavy_tank" => Self::Tank,
-            "t3_siege_walker" => Self::SiegeWalker,
-            "t1_land_scout" => Self::LandScout,
-            "t2_mobile_shield" => Self::MobileShield,
             "t2_combat_engineer" => Self::CombatEngineer,
-            "t2_torpedo_boat" => Self::TorpedoBoat,
-            "wall" => Self::Wall,
-            "field_workshop" | "field_workshop_t3" => Self::FieldWorkshop,
-            "t1_light_transport" | "t2_transport" | "t3_heavy_transport" => Self::Transport,
+            "t1_medium_tank" | "t2_heavy_tank" => Self::Tank,
             "t2_assault_hovercraft" => Self::AssaultHovercraft,
             "t1_light_artillery" | "t3_mobile_artillery" => Self::Artillery,
             "t2_mobile_missile_launcher" => Self::MobileMissile,
             "t1_mobile_aa" | "t2_mobile_flak" => Self::MobileAntiAir,
+            "t2_mobile_shield" => Self::MobileShield,
+            "t1_land_scout" => Self::LandScout,
+            // The grenadier lobs its grenades, but plays as the walkers' gun at T2.
+            "t1_light_walker" | "t2_grenadier_walker" | "t3_siege_walker" => Self::Walker,
+            "t3_heavy_walker" => Self::HeavyWalker,
             "t1_air_scout" | "t3_spy_plane" => Self::Scout,
             "t1_interceptor" | "t3_air_superiority" => Self::Fighter,
             "t1_bomber" | "t3_strategic_bomber" => Self::Bomber,
             "t2_fighter_bomber" => Self::FighterBomber,
             "t2_torpedo_bomber" => Self::TorpedoBomber,
             "t2_gunship" | "t3_heavy_gunship" => Self::Gunship,
-            "t1_frigate" => Self::Frigate,
-            "t2_destroyer" => Self::Destroyer,
-            "t2_cruiser" => Self::Cruiser,
+            "t1_light_transport" | "t2_transport" | "t3_heavy_transport" => Self::Transport,
+            "t1_frigate" | "t2_destroyer" | "t3_battlecruiser" => Self::Warship,
+            // It fires from 3,000 away, over the horizon.
             "t3_battleship" => Self::Battleship,
-            "t3_battlecruiser" => Self::Battlecruiser,
+            "t2_cruiser" => Self::Cruiser,
+            "t2_torpedo_boat" => Self::TorpedoBoat,
+            "t2_escort_corvette" => Self::EscortCorvette,
             "t1_attack_sub" => Self::Submarine,
             "t3_missile_sub" => Self::MissileSubmarine,
-            "t2_escort_corvette" => Self::EscortCorvette,
+            "land_factory_t2_support" | "land_factory_t3_support" => Self::LandSupportFactory,
+            "air_factory_t2_support" | "air_factory_t3_support" => Self::AirSupportFactory,
+            "naval_factory_t2_support" | "naval_factory_t3_support" => Self::NavalSupportFactory,
             key if key.starts_with("land_factory") => Self::LandFactory,
             key if key.starts_with("air_factory") => Self::AirFactory,
             key if key.starts_with("naval_factory") => Self::NavalFactory,
@@ -236,6 +333,8 @@ impl Icon {
             "radar" | "radar_t2" | "deep_scan_array" => Self::Radar,
             "t1_sonar" | "t2_sonar" => Self::Sonar,
             "stealth_field_generator" => Self::Stealth,
+            "wall" => Self::Wall,
+            "field_workshop" | "field_workshop_t3" => Self::FieldWorkshop,
             "tactical_missile" => Self::TacticalMissile,
             "strategic_missile" => Self::StrategicMissile,
             "strategic_interceptor" => Self::StrategicInterceptor,
@@ -246,21 +345,68 @@ impl Icon {
     pub const fn frame(self) -> Frame {
         match self {
             Self::Commander | Self::FieldRig => Frame::Commander,
-            Self::LightWalker | Self::SiegeWalker => Frame::Bot,
-            Self::Engineer | Self::Tank | Self::AssaultHovercraft | Self::Artillery | Self::MobileMissile | Self::MobileAntiAir | Self::LandScout | Self::MobileShield | Self::CombatEngineer | Self::Unknown => Frame::Vehicle,
+            Self::Walker | Self::HeavyWalker => Frame::Bot,
+            Self::Engineer | Self::CombatEngineer | Self::Tank | Self::AssaultHovercraft | Self::Artillery | Self::MobileMissile | Self::MobileAntiAir | Self::MobileShield | Self::LandScout | Self::Unknown => Frame::Vehicle,
             Self::Scout | Self::Fighter => Frame::Fighter,
             Self::Bomber | Self::FighterBomber | Self::TorpedoBomber => Frame::Bomber,
             Self::Gunship | Self::Transport => Frame::Gunship,
-            Self::Frigate | Self::Destroyer | Self::Cruiser | Self::Battleship | Self::Battlecruiser | Self::EscortCorvette | Self::TorpedoBoat => Frame::Ship,
+            Self::Warship | Self::Battleship | Self::Cruiser | Self::TorpedoBoat | Self::EscortCorvette => Frame::Ship,
             Self::Submarine | Self::MissileSubmarine => Frame::Submarine,
-            Self::LandFactory | Self::AirFactory | Self::NavalFactory | Self::RigYard => Frame::Factory,
+            Self::LandFactory | Self::LandSupportFactory | Self::AirFactory | Self::AirSupportFactory | Self::NavalFactory | Self::NavalSupportFactory | Self::RigYard => Frame::Factory,
+            Self::TacticalMissile | Self::StrategicMissile | Self::StrategicInterceptor => Frame::Munition,
             _ => Frame::Structure,
         }
     }
 
+    /// The mark inside the frame, and any small extra mark beside it.
+    pub const fn mark(self) -> (Mark, Option<Extra>) {
+        let mark = match self {
+            Self::Commander => Mark::Star,
+            Self::FieldRig | Self::RigYard => Mark::HollowStar,
+            Self::Engineer | Self::CombatEngineer | Self::FieldWorkshop => Mark::Build,
+            Self::Tank | Self::AssaultHovercraft | Self::Walker | Self::HeavyWalker | Self::Gunship | Self::Warship | Self::PointDefense => Mark::Gun,
+            Self::Artillery | Self::Battleship | Self::ArtilleryInstallation => Mark::Artillery,
+            Self::MobileAntiAir | Self::Fighter | Self::AntiAirTurret => Mark::AntiAir,
+            Self::TorpedoBomber | Self::TorpedoBoat | Self::Submarine | Self::TorpedoLauncher => Mark::Torpedo,
+            Self::MobileMissile | Self::Cruiser | Self::TacticalLauncher | Self::TacticalMissile => Mark::Missile,
+            Self::Bomber | Self::FighterBomber => Mark::Bomb,
+            Self::MissileSubmarine | Self::StrategicLauncher | Self::StrategicMissile => Mark::Strategic,
+            Self::MobileShield | Self::EscortCorvette | Self::ShieldGenerator => Mark::Shield,
+            Self::TacticalDefense => Mark::MissileDefense,
+            Self::StrategicDefense | Self::StrategicInterceptor => Mark::StrategicDefense,
+            Self::LandScout | Self::Scout | Self::Radar => Mark::Radar,
+            Self::Sonar => Mark::Sonar,
+            Self::Stealth => Mark::Stealth,
+            Self::Transport => Mark::Transport,
+            Self::Extractor => Mark::Materiel,
+            Self::Generator => Mark::Energy,
+            Self::Geothermal => Mark::Geothermal,
+            Self::MassStorage => Mark::MaterielStore,
+            Self::EnergyStorage => Mark::EnergyStore,
+            Self::Fabricator => Mark::Fabricator,
+            Self::LandFactory => Mark::MakesLand { support: false },
+            Self::LandSupportFactory => Mark::MakesLand { support: true },
+            Self::AirFactory => Mark::MakesAir { support: false },
+            Self::AirSupportFactory => Mark::MakesAir { support: true },
+            Self::NavalFactory => Mark::MakesNaval { support: false },
+            Self::NavalSupportFactory => Mark::MakesNaval { support: true },
+            Self::Airfield => Mark::Airfield,
+            Self::Wall => Mark::Wall,
+            Self::Unknown => Mark::Unknown,
+        };
+        let extra = match self {
+            Self::HeavyWalker => Some(Extra::Dome),
+            Self::AssaultHovercraft => Some(Extra::Wave),
+            Self::CombatEngineer => Some(Extra::Armed),
+            Self::FighterBomber => Some(Extra::AlsoAntiAir),
+            _ => None,
+        };
+        (mark, extra)
+    }
+
     pub const fn group(self) -> BarGroup {
         match self {
-            Self::LandFactory | Self::AirFactory | Self::NavalFactory | Self::RigYard | Self::Airfield | Self::FieldWorkshop => BarGroup::Factories,
+            Self::LandFactory | Self::LandSupportFactory | Self::AirFactory | Self::AirSupportFactory | Self::NavalFactory | Self::NavalSupportFactory | Self::RigYard | Self::Airfield | Self::FieldWorkshop => BarGroup::Factories,
             Self::Extractor | Self::Generator | Self::Geothermal | Self::MassStorage | Self::EnergyStorage | Self::Fabricator => BarGroup::Resources,
             Self::PointDefense | Self::AntiAirTurret | Self::TorpedoLauncher | Self::ShieldGenerator | Self::TacticalDefense | Self::StrategicDefense | Self::Wall => BarGroup::Defenses,
             Self::Radar | Self::Sonar | Self::Stealth => BarGroup::Intel,
@@ -268,65 +414,88 @@ impl Icon {
             _ => BarGroup::Units,
         }
     }
+
+    pub const fn role(self) -> Role {
+        self.mark().0.role()
+    }
 }
 
-/// What a unit or structure is for, which colors its symbol on the build bar, so that a bar of a
-/// dozen items reads by color first and shape second.
+/// What a mark is for, which colors it on the build bar: the color of the range ring it draws,
+/// where it has one, so that a bar of a dozen items reads by color first and shape second.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Role {
-    /// Factories, builders, and commanders.
+    /// Builders, commanders, factories, transports, airfields, and walls.
     Build,
     Mass,
     Energy,
-    /// Guns that fire straight at what they see.
+    /// Guns and bombs: ground fire's yellow.
     DirectFire,
+    /// The red of artillery's too-close ring.
+    Artillery,
     AntiAir,
-    /// Artillery and missiles, which fire over what is in the way.
-    Indirect,
-    /// Torpedoes and what fires them.
-    Underwater,
-    /// Shields and missile defenses.
-    Protection,
-    /// Radar, sonar, scouts, and stealth.
+    Torpedo,
+    /// Missiles, and what stops them: missile defense's orange.
+    Missile,
+    /// Strategic missiles, and what stops them.
+    Strategic,
+    Shield,
+    /// Radar and scouts.
     Intel,
+    Sonar,
+    Stealth,
 }
 
 impl Role {
-    /// Hues spaced around the wheel, light enough to read on the bar's dark grey.
+    pub const ALL: [Self; 13] = [
+        Self::Build, Self::Mass, Self::Energy, Self::DirectFire, Self::Artillery, Self::AntiAir, Self::Torpedo, Self::Missile, Self::Strategic, Self::Shield, Self::Intel, Self::Sonar, Self::Stealth,
+    ];
+
+    /// The range rings' colors (`ui::RangeKind::color`), light enough to read on the bar's grey.
     pub const fn color(self) -> Color32 {
         match self {
-            Self::Build => Color32::from_rgb(245, 165, 70),
-            Self::Mass => Color32::from_rgb(110, 215, 105),
-            Self::Energy => Color32::from_rgb(245, 225, 75),
-            Self::DirectFire => Color32::from_rgb(245, 95, 85),
-            Self::AntiAir => Color32::from_rgb(95, 185, 255),
-            Self::Indirect => Color32::from_rgb(225, 115, 235),
-            Self::Underwater => Color32::from_rgb(60, 215, 180),
-            Self::Protection => Color32::from_rgb(150, 150, 255),
-            Self::Intel => Color32::from_rgb(235, 235, 235),
+            Self::Build => Color32::from_rgb(232, 238, 245),
+            Self::Mass => Color32::from_rgb(132, 214, 92),
+            Self::Energy => Color32::from_rgb(250, 230, 90),
+            Self::DirectFire => Color32::from_rgb(255, 212, 72),
+            Self::Artillery => Color32::from_rgb(255, 96, 84),
+            Self::AntiAir => Color32::from_rgb(255, 120, 220),
+            Self::Torpedo => Color32::from_rgb(90, 220, 190),
+            Self::Missile => Color32::from_rgb(255, 160, 70),
+            Self::Strategic => Color32::from_rgb(200, 140, 255),
+            Self::Shield => Color32::from_rgb(140, 190, 255),
+            Self::Intel => Color32::from_rgb(120, 230, 140),
+            Self::Sonar => Color32::from_rgb(80, 140, 255),
+            Self::Stealth => Color32::from_rgb(190, 190, 200),
         }
     }
 }
 
-impl Icon {
+impl Mark {
     pub const fn role(self) -> Role {
         match self {
-            Self::Commander | Self::FieldRig | Self::Engineer | Self::CombatEngineer | Self::FieldWorkshop | Self::Transport | Self::LandFactory | Self::AirFactory | Self::NavalFactory | Self::RigYard | Self::Airfield | Self::Unknown => Role::Build,
-            Self::Extractor | Self::MassStorage | Self::Fabricator => Role::Mass,
-            Self::Generator | Self::Geothermal | Self::EnergyStorage => Role::Energy,
-            Self::LightWalker | Self::SiegeWalker | Self::Tank | Self::AssaultHovercraft | Self::Gunship | Self::Frigate | Self::Destroyer | Self::Cruiser | Self::Battleship | Self::Battlecruiser | Self::PointDefense => Role::DirectFire,
-            Self::MobileAntiAir | Self::Fighter | Self::AntiAirTurret => Role::AntiAir,
-            Self::Artillery | Self::MobileMissile | Self::Bomber | Self::FighterBomber | Self::MissileSubmarine | Self::ArtilleryInstallation | Self::TacticalLauncher | Self::StrategicLauncher | Self::TacticalMissile | Self::StrategicMissile => Role::Indirect,
-            Self::TorpedoBomber | Self::Submarine | Self::TorpedoLauncher | Self::TorpedoBoat => Role::Underwater,
-            Self::EscortCorvette | Self::ShieldGenerator | Self::TacticalDefense | Self::StrategicDefense | Self::StrategicInterceptor | Self::MobileShield | Self::Wall => Role::Protection,
-            Self::Scout | Self::Radar | Self::Sonar | Self::Stealth | Self::LandScout => Role::Intel,
+            Self::Gun | Self::Bomb => Role::DirectFire,
+            Self::Artillery => Role::Artillery,
+            Self::AntiAir => Role::AntiAir,
+            Self::Torpedo => Role::Torpedo,
+            Self::Missile | Self::MissileDefense => Role::Missile,
+            Self::Strategic | Self::StrategicDefense => Role::Strategic,
+            Self::Shield => Role::Shield,
+            Self::Radar => Role::Intel,
+            Self::Sonar => Role::Sonar,
+            Self::Stealth => Role::Stealth,
+            Self::Materiel | Self::MaterielStore | Self::Fabricator => Role::Mass,
+            Self::Energy | Self::Geothermal | Self::EnergyStore => Role::Energy,
+            Self::Build | Self::Transport | Self::Star | Self::HollowStar | Self::MakesLand { .. } | Self::MakesAir { .. } | Self::MakesNaval { .. } | Self::Airfield | Self::Wall | Self::Unknown => Role::Build,
         }
     }
 }
 
-/// Draws an icon to fill a build bar button: the symbol alone, large, in its role's color. The
-/// button is the frame, and the bar's tech toggle says the level, so neither is drawn. The top
-/// left corner is left for the button's key.
+/// The colors of the rank bars, T1 to T3.
+pub const TIER_COLORS: [Color32; 3] = [Color32::WHITE, Color32::from_rgb(255, 212, 72), Color32::from_rgb(255, 138, 61)];
+
+/// Draws an icon to fill a build bar button: its frame and mark, large, in its role's color. The
+/// bar's tech toggle says the level, so no tab is drawn. The top left corner is left for the
+/// button's key.
 pub fn draw_bar(painter: &Painter, rect: Rect, icon: Icon) {
     for shape in bar_shapes(rect, icon) {
         painter.add(shape);
@@ -335,23 +504,19 @@ pub fn draw_bar(painter: &Painter, rect: Rect, icon: Icon) {
 
 /// The shapes `draw_bar` paints.
 pub fn bar_shapes(rect: Rect, icon: Icon) -> Vec<Shape> {
-    let color = icon.role().color();
-    let size = rect.height() * 0.3;
-    let stroke = Stroke::new((size / 5.5).clamp(1.5, 3.0), color);
+    let half = rect.height() * 0.23;
     // Below and right of center, clear of the key in the corner.
-    let center = rect.center() + Vec2::new(rect.width() * 0.06, rect.height() * 0.08);
-    let mut out = Vec::new();
-    symbol(&mut out, center, size, icon, stroke);
-    out
+    let center = rect.center() + Vec2::new(rect.width() * 0.08, rect.height() * 0.1);
+    shapes(center, half, icon, 0, icon.role().color())
 }
 
-/// Half the height, in points, of an icon on the map: large enough that its symbol reads without
-/// squinting, and the command rigs larger still.
+/// Half the height, in points, of an icon on the map: large enough that its mark reads without
+/// squinting, and the command rigs larger still. A quarter larger than until 2026-11-20.
 pub const fn map_half(icon: Icon) -> f32 {
     match icon.frame() {
-        Frame::Commander => 10.5,
-        Frame::Factory | Frame::Structure => 9.5,
-        _ => 9.0,
+        Frame::Commander => 13.1,
+        Frame::Factory | Frame::Structure => 11.9,
+        _ => 11.25,
     }
 }
 
@@ -359,73 +524,93 @@ pub const fn map_half(icon: Icon) -> f32 {
 pub const fn frame_reach(frame: Frame) -> (f32, f32) {
     match frame {
         Frame::Commander => (1.17, 1.0),
-        Frame::Factory => (1.1, 1.0),
-        Frame::Fighter | Frame::Bomber | Frame::Gunship => (1.15, 1.15),
-        Frame::Submarine => (0.8, 1.05),
-        _ => (1.0, 1.0),
+        Frame::Factory | Frame::Ship => (0.85, 1.0),
+        Frame::Fighter | Frame::Bomber => (1.15, 1.15),
+        Frame::Gunship => (0.85, 0.85),
+        Frame::Submarine => (0.8, 0.8),
+        Frame::Bot => (1.1, 1.0),
+        Frame::Structure | Frame::Vehicle | Frame::Munition => (1.0, 1.0),
     }
 }
 
-/// How far, in points, an icon with `half` and its tech dots reach below its center.
+/// The rank bars' sizes, as shares of `half`: each bar's width and height, the space between
+/// bars, the tab's margin round them, and the gap between frame and tab, in points.
+const BAR_WIDTH: f32 = 0.3;
+const BAR_HEIGHT: f32 = 0.62;
+const BAR_GAP: f32 = 0.24;
+const TAB_MARGIN: f32 = 0.2;
+const TAB_GAP: f32 = 1.0;
+
+/// How far, in points, an icon with `half` and its tech tab reach below its center.
 pub fn reach_below(icon: Icon, half: f32, tier: u8) -> f32 {
     let frame = half * frame_reach(icon.frame()).1;
-    if tier == 0 {
-        frame
+    if tier == 0 || icon.frame() == Frame::Munition {
+        // With half its outline's width.
+        frame + (half / 4.5).clamp(1.2, 3.0) * 0.5
     } else {
-        frame + DOT_GAP + dot_radius(half) * 2.0 + DOT_RIM
+        frame + TAB_GAP + half * (BAR_HEIGHT + TAB_MARGIN * 2.0) + 1.0
     }
 }
 
-/// The space between a frame and its tech dots, and the width of the dark ring round each.
-const DOT_GAP: f32 = 2.5;
-const DOT_RIM: f32 = 1.2;
-
-/// The outline of a frame, in shares of `half` from the center, clockwise. The humanoid's head is
+/// A frame's outline, in shares of `half` from the center, clockwise. The commander's head is
 /// drawn apart.
+#[cfg(test)]
 fn outline(frame: Frame) -> Vec<(f32, f32)> {
-    let arc = |cx: f32, cy: f32, r: f32, from: f32, to: f32, steps: usize| -> Vec<(f32, f32)> {
-        (0..=steps)
-            .map(|step| {
-                let angle = (from + (to - from) * step as f32 / steps as f32).to_radians();
-                (cx + angle.cos() * r, cy + angle.sin() * r)
-            })
-            .collect()
-    };
+    parts(frame).into_iter().next().unwrap_or_default()
+}
+
+/// Points round an ellipse, from one angle to another, measured clockwise from the right.
+fn arc(cx: f32, cy: f32, rx: f32, ry: f32, from: f32, to: f32, steps: usize) -> Vec<(f32, f32)> {
+    (0..=steps)
+        .map(|step| {
+            let angle = (from + (to - from) * step as f32 / steps as f32).to_radians();
+            (cx + angle.cos() * rx, cy + angle.sin() * ry)
+        })
+        .collect()
+}
+
+/// The convex pieces a frame is drawn as.
+fn parts(frame: Frame) -> Vec<Vec<(f32, f32)>> {
     match frame {
-        Frame::Commander => vec![(-1.15, -0.2), (1.15, -0.2), (0.85, 1.0), (-0.85, 1.0)],
-        Frame::Factory => vec![(-1.15, -0.35), (0.0, -1.1), (1.15, -0.35), (1.15, 1.0), (-1.15, 1.0)],
-        Frame::Structure => vec![(-0.7, -1.0), (0.7, -1.0), (1.0, -0.7), (1.0, 0.7), (0.7, 1.0), (-0.7, 1.0), (-1.0, 0.7), (-1.0, -0.7)],
-        Frame::Vehicle => vec![(-1.45, -1.0), (1.45, -1.0), (1.45, 1.0), (-1.45, 1.0)],
-        Frame::Bot => {
-            let mut points = arc(0.55, 0.0, 1.0, -90.0, 90.0, 10);
-            points.extend(arc(-0.55, 0.0, 1.0, 90.0, 270.0, 10));
-            points
+        // Rounded shoulders on a flat base; the head is drawn apart.
+        Frame::Commander => vec![arc(0.0, 1.0, 1.15, 1.2, 180.0, 360.0, 16)],
+        Frame::Factory => vec![vec![(-1.45, -0.85), (1.45, -0.85), (1.45, 1.0), (-1.45, 1.0)]],
+        Frame::Structure => vec![vec![(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]],
+        Frame::Vehicle => vec![vec![(-0.95, -1.0), (0.95, -1.0), (1.6, 1.0), (-1.6, 1.0)]],
+        Frame::Bot => vec![vec![(0.0, -1.1), (1.15, -0.3), (1.15, 1.0), (-1.15, 1.0), (-1.15, -0.3)]],
+        Frame::Ship => {
+            let mut deck = vec![(-1.6, -0.85), (1.6, -0.85)];
+            deck.extend(arc(0.0, -0.85, 1.6, 1.85, 0.0, 180.0, 18).into_iter().skip(1));
+            vec![deck]
         }
-        Frame::Ship => vec![(-1.6, 0.0), (-1.05, -1.0), (1.05, -1.0), (1.6, 0.0), (1.05, 1.0), (-1.05, 1.0)],
-        Frame::Submarine => vec![(-1.5, -0.8), (1.5, -0.8), (1.15, 0.3), (0.0, 1.05), (-1.15, 0.3)],
-        Frame::Fighter => vec![(0.0, -1.15), (1.55, 1.15), (-1.55, 1.15)],
-        Frame::Bomber => vec![(-1.55, -1.15), (1.55, -1.15), (0.0, 1.15)],
-        Frame::Gunship => arc(0.0, 0.0, 1.15, 0.0, 360.0, 28),
+        Frame::Submarine => vec![arc(0.0, 0.0, 1.6, 0.8, 0.0, 360.0, 48)],
+        Frame::Fighter => vec![vec![(0.0, -1.15), (1.55, 1.15), (-1.55, 1.15)]],
+        Frame::Bomber => vec![vec![(-1.55, -1.15), (1.55, -1.15), (0.0, 1.15)]],
+        Frame::Gunship => vec![vec![(-1.55, -0.85), (1.55, -0.85), (0.95, 0.85), (-0.95, 0.85)]],
+        Frame::Munition => Vec::new(),
     }
 }
 
-/// Where in its frame an icon's symbol sits, as a share of `half` down from the center, and how
+/// Where in its frame an icon's mark sits, as a share of `half` down from the center, and how
 /// large it is: a frame narrow at one end holds it toward the other.
-const fn symbol_place(frame: Frame) -> (f32, f32) {
+const fn mark_place(frame: Frame) -> (f32, f32) {
     match frame {
-        Frame::Commander => (0.38, 0.5),
-        Frame::Factory => (0.15, 0.68),
-        Frame::Vehicle | Frame::Structure => (0.0, 0.75),
-        Frame::Bot | Frame::Ship => (0.0, 0.72),
-        Frame::Submarine => (-0.1, 0.6),
+        Frame::Commander => (0.48, 0.42),
+        Frame::Factory => (0.08, 0.72),
+        Frame::Structure => (0.0, 0.75),
+        Frame::Vehicle => (0.1, 0.7),
+        Frame::Bot => (0.15, 0.66),
+        Frame::Ship => (-0.12, 0.7),
+        Frame::Submarine => (0.0, 0.55),
         Frame::Fighter => (0.4, 0.55),
         Frame::Bomber => (-0.4, 0.55),
-        Frame::Gunship => (0.0, 0.72),
+        Frame::Gunship => (-0.05, 0.66),
+        Frame::Munition => (0.0, 0.85),
     }
 }
 
-/// Draws an icon: its frame, filled with a dark shade of `color` and outlined in it, its symbol,
-/// and a white dot beneath for each tech level. `half` is half the frame's height, in points.
+/// Draws an icon: its frame, filled with a dark shade of `color` and outlined in it, its mark,
+/// and its tech level as rank bars in a tab beneath. `half` is half the frame's height, in points.
 pub fn draw(painter: &Painter, center: Pos2, half: f32, icon: Icon, tier: u8, color: Color32) {
     for shape in shapes(center, half, icon, tier, color) {
         painter.add(shape);
@@ -437,342 +622,212 @@ pub fn shapes(center: Pos2, half: f32, icon: Icon, tier: u8, color: Color32) -> 
     let stroke = Stroke::new((half / 4.5).clamp(1.2, 3.0), color);
     // A dark shade of the team's color, so the outline stands out and the frame reads as the
     // team's from a distance.
-    let fill = Color32::from_rgba_unmultiplied(color.r() / 5, color.g() / 5, color.b() / 5, 215);
+    let fill = Color32::from_rgba_unmultiplied(color.r() / 5, color.g() / 5, color.b() / 5, 225);
     let mut out = Vec::new();
     let frame = icon.frame();
     let at = |x: f32, y: f32| center + Vec2::new(x * half, y * half);
-    let points: Vec<Pos2> = outline(frame).into_iter().map(|(x, y)| at(x, y)).collect();
-    out.push(Shape::convex_polygon(points, fill, stroke));
+    for part in parts(frame) {
+        out.push(Shape::convex_polygon(part.into_iter().map(|(x, y)| at(x, y)).collect(), fill, stroke));
+    }
     if frame == Frame::Commander {
         out.push(Shape::circle_filled(at(0.0, -0.72), half * 0.45, fill));
         out.push(Shape::circle_stroke(at(0.0, -0.72), half * 0.45, stroke));
     }
-    let (down, size) = symbol_place(frame);
-    symbol(&mut out, at(0.0, down), half * size, icon, stroke);
-    // A white dot for each tech level, in a row beneath the frame, ringed dark so it reads on any
-    // ground.
-    if tier > 0 {
-        let radius = dot_radius(half);
-        let gap = radius * 3.0;
-        let y = center.y + half * frame_reach(frame).1 + DOT_GAP + radius;
-        for index in 0..tier {
-            let x = center.x + (f32::from(index) - f32::from(tier - 1) * 0.5) * gap;
-            out.push(Shape::circle_filled(Pos2::new(x, y), radius + DOT_RIM, Color32::from_black_alpha(200)));
-            out.push(Shape::circle_filled(Pos2::new(x, y), radius, Color32::WHITE));
-        }
+    let (down, size) = mark_place(frame);
+    let (mark, extra) = icon.mark();
+    draw_mark(&mut out, at(0.0, down), half * size, mark, extra, stroke);
+    if tier > 0 && frame != Frame::Munition {
+        rank_tab(&mut out, Pos2::new(center.x, center.y + half * frame_reach(frame).1 + TAB_GAP), half, tier, color);
     }
     out
 }
 
-/// The radius, in points, of the tech dots under an icon with `half`.
-fn dot_radius(half: f32) -> f32 {
-    (half * 0.2).clamp(1.6, 2.6)
+/// The tech tab: a dark tab hanging from `top`, edged in `color`, with one upright bar for each
+/// level, in the level's color.
+fn rank_tab(out: &mut Vec<Shape>, top: Pos2, half: f32, tier: u8, color: Color32) {
+    let tier = tier.min(3);
+    let (width, height, gap, margin) = (half * BAR_WIDTH, half * BAR_HEIGHT, half * BAR_GAP, half * TAB_MARGIN);
+    let bars = f32::from(tier);
+    let tab = Rect::from_min_size(Pos2::new(top.x - (bars * width + (bars - 1.0) * gap) * 0.5 - margin, top.y), Vec2::new(bars * width + (bars - 1.0) * gap + margin * 2.0, height + margin * 2.0));
+    out.push(Shape::rect_filled(tab, half * 0.18, Color32::from_black_alpha(230)));
+    out.push(Shape::rect_stroke(tab, half * 0.18, Stroke::new((half / 9.0).clamp(0.8, 1.4), color)));
+    let level = TIER_COLORS[usize::from(tier - 1)];
+    for index in 0..tier {
+        let left = tab.left() + margin + f32::from(index) * (width + gap);
+        out.push(Shape::rect_filled(Rect::from_min_size(Pos2::new(left, tab.top() + margin), Vec2::new(width, height)), width * 0.25, level));
+    }
 }
 
-/// The symbol inside the frame, in a box `size` either way of `center`. It shows what the unit
-/// does, and never a count of anything, which would read as a tech level.
+/// A mark, in a box `size` either way of `center`, and its extra mark if it has one.
 #[allow(clippy::too_many_lines)]
-fn symbol(out: &mut Vec<Shape>, center: Pos2, size: f32, icon: Icon, stroke: Stroke) {
+fn draw_mark(out: &mut Vec<Shape>, center: Pos2, size: f32, mark: Mark, extra: Option<Extra>, stroke: Stroke) {
     let at = |x: f32, y: f32| center + Vec2::new(x * size, y * size);
     let line = |points: &[(f32, f32)]| Shape::line(points.iter().map(|&(x, y)| at(x, y)).collect(), stroke);
+    let heavy = |points: &[(f32, f32)]| Shape::line(points.iter().map(|&(x, y)| at(x, y)).collect(), Stroke::new(stroke.width * 1.3, stroke.color));
+    let thin = |points: &[(f32, f32)]| Shape::line(points.iter().map(|&(x, y)| at(x, y)).collect(), Stroke::new(stroke.width * 0.8, stroke.color));
+    let closed = |points: &[(f32, f32)]| {
+        let mut points: Vec<Pos2> = points.iter().map(|&(x, y)| at(x, y)).collect();
+        points.push(points[0]);
+        Shape::line(points, stroke)
+    };
     let solid = |points: &[(f32, f32)]| Shape::convex_polygon(points.iter().map(|&(x, y)| at(x, y)).collect(), stroke.color, Stroke::NONE);
-    let ring = |x: f32, y: f32, radius: f32| Shape::circle_stroke(at(x, y), radius * size, stroke);
     let dot = |x: f32, y: f32, radius: f32| Shape::circle_filled(at(x, y), radius * size, stroke.color);
-    // An arc, from one angle to another, measured clockwise from the right.
-    let arc = |x: f32, y: f32, radius: f32, from: f32, to: f32| {
-        let points = (0..=12).map(|step| {
-            let angle = (from + (to - from) * step as f32 / 12.0).to_radians();
-            at(x + angle.cos() * radius, y + angle.sin() * radius)
-        });
-        Shape::line(points.collect(), stroke)
+    let curve = |cx: f32, cy: f32, radius: f32, from: f32, to: f32| Shape::line(arc(cx, cy, radius, radius, from, to, 12).into_iter().map(|(x, y)| at(x, y)).collect(), stroke);
+    let wave = |y: f32| thin(&[(-0.95, y), (-0.6, y - 0.25), (-0.25, y), (0.1, y - 0.25), (0.45, y), (0.8, y - 0.25), (0.95, y - 0.1)]);
+    // A missile with fins, scaled and moved down.
+    let missile = |out: &mut Vec<Shape>, scale: f32, down: f32| {
+        let p = |x: f32, y: f32| (x * scale, y * scale + down);
+        out.push(solid(&[p(0.0, -1.0), p(0.4, -0.38), p(0.4, 0.45), p(-0.4, 0.45), p(-0.4, -0.38)]));
+        out.push(solid(&[p(0.4, 0.42), p(0.72, 0.95), p(-0.72, 0.95), p(-0.4, 0.42)]));
     };
-    // A turret with its gun to the right, filled or not.
-    let turret = |out: &mut Vec<Shape>, radius: f32, filled: bool| {
-        out.push(if filled { dot(-0.25, 0.0, radius) } else { ring(-0.25, 0.0, radius) });
-        out.push(line(&[(-0.25 + radius, 0.0), (1.0, 0.0)]));
+    // Three blades round a dot, scaled and moved down.
+    let trefoil = |out: &mut Vec<Shape>, scale: f32, down: f32| {
+        for angle in [-90.0_f32, 30.0, 150.0] {
+            let mut blade = arc(0.0, 0.0, 0.92 * scale, 0.92 * scale, angle - 30.0, angle + 30.0, 6);
+            blade.extend(arc(0.0, 0.0, 0.3 * scale, 0.3 * scale, angle + 30.0, angle - 30.0, 1));
+            out.push(solid(&blade.into_iter().map(|(x, y)| (x, y + down)).collect::<Vec<_>>()));
+        }
+        out.push(dot(0.0, down, 0.15 * scale));
     };
-    match icon {
-        Icon::Commander => {
-            out.push(ring(0.0, 0.0, 0.8));
-            out.push(dot(0.0, 0.0, 0.3));
+    // Five points round a center.
+    let star_points = || -> Vec<(f32, f32)> {
+        (0..10)
+            .map(|index| {
+                let radius = if index % 2 == 0 { 0.95 } else { 0.4 };
+                let angle = (-90.0 + 36.0 * index as f32).to_radians();
+                (angle.cos() * radius, angle.sin() * radius + 0.05)
+            })
+            .collect()
+    };
+    let diamond = |scale: f32| [(0.0, -0.85 * scale), (0.8 * scale, 0.0), (0.0, 0.85 * scale), (-0.8 * scale, 0.0)];
+    let bolt = |scale: f32, down: f32| [(0.25 * scale, -0.9 * scale + down), (-0.45 * scale, 0.1 * scale + down), (0.15 * scale, 0.1 * scale + down), (-0.25 * scale, 0.9 * scale + down)];
+    match mark {
+        Mark::Gun => out.push(dot(0.0, 0.0, 0.58)),
+        Mark::Artillery => {
+            // A shell lobbed high, from the lower left, landing at the right.
+            let path: Vec<(f32, f32)> = (0..=12)
+                .map(|step| {
+                    let t = step as f32 / 12.0;
+                    let (from, control, to) = ((-0.9, 0.65), (-0.15, -1.3), (0.62, 0.3));
+                    let u = 1.0 - t;
+                    (u * u * from.0 + 2.0 * u * t * control.0 + t * t * to.0, u * u * from.1 + 2.0 * u * t * control.1 + t * t * to.1)
+                })
+                .collect();
+            out.push(line(&path));
+            out.push(dot(0.68, 0.52, 0.3));
         }
-        Icon::FieldRig => {
-            out.push(ring(0.0, 0.0, 0.8));
-            out.push(line(&[(-0.4, 0.0), (0.4, 0.0)]));
+        Mark::AntiAir => out.push(heavy(&[(-0.88, 0.55), (0.0, -0.55), (0.88, 0.55)])),
+        Mark::Torpedo => out.push(heavy(&[(-0.88, -0.55), (0.0, 0.55), (0.88, -0.55)])),
+        Mark::Missile => missile(out, 1.0, 0.0),
+        Mark::Bomb => {
+            out.push(Shape::convex_polygon(arc(0.0, 0.3, 0.48, 0.62, 0.0, 360.0, 16).into_iter().map(|(x, y)| at(x, y)).collect(), stroke.color, Stroke::NONE));
+            out.push(thin(&[(-0.45, -0.85), (0.0, -0.38), (0.45, -0.85), (-0.45, -0.85)]));
         }
-        Icon::Engineer => {
-            // A wrench.
-            out.push(line(&[(-0.75, 0.75), (0.2, -0.2)]));
-            out.push(arc(0.42, -0.42, 0.38, 135.0, 405.0));
+        Mark::Strategic => trefoil(out, 1.0, 0.0),
+        Mark::Shield => {
+            out.push(Shape::line(arc(0.0, 0.62, 0.92, 0.92, 180.0, 360.0, 14).into_iter().map(|(x, y)| at(x, y)).collect(), Stroke::new(stroke.width * 1.15, stroke.color)));
+            out.push(thin(&[(-1.05, 0.62), (1.05, 0.62)]));
         }
-        Icon::LightWalker => {
-            out.push(line(&[(-0.9, -0.8), (0.9, 0.8)]));
-            out.push(line(&[(-0.9, 0.8), (0.9, -0.8)]));
+        Mark::MissileDefense => {
+            missile(out, 0.7, 0.28);
+            out.push(heavy(&[(-0.92, -0.8), (0.92, -0.8)]));
         }
-        Icon::SiegeWalker => {
-            // A heavy gun on legs: a solid turret, a long barrel, and a stance beneath.
-            out.push(dot(-0.25, -0.15, 0.42));
-            out.push(line(&[(0.1, -0.15), (1.05, -0.15)]));
-            out.push(line(&[(-0.75, 0.85), (-0.25, 0.25), (0.25, 0.85)]));
+        Mark::StrategicDefense => {
+            trefoil(out, 0.72, 0.3);
+            out.push(heavy(&[(-0.92, -0.8), (0.92, -0.8)]));
         }
-        Icon::Tank => {
-            // A hull with a turret and a gun.
-            out.push(solid(&[(-0.95, 0.15), (0.95, 0.15), (0.8, 0.75), (-0.8, 0.75)]));
-            out.push(ring(-0.15, -0.3, 0.38));
-            out.push(line(&[(0.23, -0.3), (1.05, -0.3)]));
-        }
-        Icon::AssaultHovercraft => {
-            out.push(line(&[(-0.9, -0.7), (0.9, -0.7), (0.9, 0.1), (-0.9, 0.1), (-0.9, -0.7)]));
-            out.push(line(&[(-0.9, 0.6), (-0.45, 0.35), (0.0, 0.6), (0.45, 0.35), (0.9, 0.6)]));
-        }
-        Icon::Artillery => {
-            // A shell lobbed high, from the lower left.
-            out.push(arc(0.25, 0.75, 1.05, 180.0, 285.0));
-            out.push(dot(0.52, -0.26, 0.24));
-            out.push(line(&[(-0.95, 0.85), (0.95, 0.85)]));
-        }
-        Icon::MobileMissile => {
-            out.push(line(&[(0.0, 0.8), (0.0, -0.8)]));
-            out.push(line(&[(-0.45, -0.3), (0.0, -0.8), (0.45, -0.3)]));
-            out.push(line(&[(-0.45, 0.8), (0.45, 0.8)]));
-        }
-        Icon::MobileAntiAir => {
-            // Aimed at the sky: one chevron over the vehicle's gun.
-            out.push(line(&[(-0.85, 0.15), (0.0, -0.75), (0.85, 0.15)]));
-            out.push(dot(0.0, 0.55, 0.22));
-        }
-        Icon::Scout => {
-            out.push(ring(0.0, 0.0, 0.55));
-            out.push(dot(0.0, 0.0, 0.18));
-        }
-        Icon::Fighter => {
-            out.push(line(&[(-0.9, 0.7), (0.0, -0.8), (0.9, 0.7)]));
-            out.push(line(&[(0.0, -0.8), (0.0, 0.7)]));
-        }
-        Icon::Bomber => {
-            // A bomb falling: a body and its fins.
-            out.push(solid(&[(0.0, 0.9), (0.38, 0.35), (0.38, -0.35), (0.0, -0.55), (-0.38, -0.35), (-0.38, 0.35)]));
-            out.push(line(&[(-0.5, -0.9), (0.0, -0.55), (0.5, -0.9)]));
-        }
-        Icon::FighterBomber => {
-            // A bomb under a fighter's chevron.
-            out.push(line(&[(-0.95, -0.25), (0.0, -0.9), (0.95, -0.25)]));
-            out.push(solid(&[(0.0, 0.95), (0.3, 0.5), (0.3, 0.0), (-0.3, 0.0), (-0.3, 0.5)]));
-        }
-        Icon::TorpedoBomber => {
-            // A torpedo over the waves.
-            out.push(line(&[(-0.85, -0.3), (0.55, -0.3)]));
-            out.push(line(&[(0.15, -0.7), (0.6, -0.3), (0.15, 0.1)]));
-            out.push(line(&[(-0.9, 0.6), (-0.45, 0.35), (0.0, 0.6), (0.45, 0.35), (0.9, 0.6)]));
-        }
-        Icon::Gunship => {
-            // Rotor blades round a gun.
-            out.push(line(&[(-0.8, -0.8), (0.8, 0.8)]));
-            out.push(line(&[(-0.8, 0.8), (0.8, -0.8)]));
-            out.push(dot(0.0, 0.0, 0.3));
-        }
-        Icon::Frigate => {
-            // A light, fast picket: one arrowhead.
-            out.push(solid(&[(0.9, 0.0), (-0.5, -0.55), (-0.2, 0.0), (-0.5, 0.55)]));
-        }
-        Icon::Destroyer => turret(out, 0.38, false),
-        Icon::Cruiser => {
-            // Missiles and anti-air: a missile rising.
-            out.push(solid(&[(0.0, -0.95), (0.3, -0.45), (0.3, 0.55), (-0.3, 0.55), (-0.3, -0.45)]));
-            out.push(line(&[(-0.6, 0.9), (0.0, 0.55), (0.6, 0.9)]));
-        }
-        Icon::Battleship => {
-            // One great turret.
-            out.push(dot(-0.2, 0.0, 0.55));
-            out.push(Shape::line(vec![at(0.3, 0.0), at(1.05, 0.0)], Stroke::new(stroke.width * 1.8, stroke.color)));
-        }
-        Icon::Battlecruiser => {
-            // A great gun, fast: a turret with a wake behind it.
-            turret(out, 0.38, true);
-            out.push(line(&[(-1.0, -0.55), (-0.7, 0.0), (-1.0, 0.55)]));
-        }
-        Icon::Submarine => {
-            // The conning tower above the hull.
-            out.push(line(&[(-0.9, 0.45), (0.9, 0.45)]));
-            out.push(solid(&[(-0.3, 0.45), (-0.3, -0.45), (0.35, -0.45), (0.35, 0.45)]));
-        }
-        Icon::MissileSubmarine => {
-            // A missile leaving the water.
-            out.push(solid(&[(0.0, -0.95), (0.3, -0.45), (0.3, 0.35), (-0.3, 0.35), (-0.3, -0.45)]));
-            out.push(line(&[(-0.95, 0.75), (-0.5, 0.5), (0.0, 0.75), (0.5, 0.5), (0.95, 0.75)]));
-        }
-        Icon::EscortCorvette => {
-            // A dome: it shields the fleet from missiles.
-            out.push(arc(0.0, 0.55, 0.9, 180.0, 360.0));
-            out.push(line(&[(-0.9, 0.55), (0.9, 0.55)]));
-        }
-        Icon::LandFactory => {
-            // A works with its chimney.
-            out.push(solid(&[(-0.85, -0.15), (0.85, -0.15), (0.85, 0.8), (-0.85, 0.8)]));
-            out.push(solid(&[(0.3, -0.85), (0.65, -0.85), (0.65, -0.15), (0.3, -0.15)]));
-        }
-        Icon::AirFactory => {
-            out.push(solid(&[(-0.85, 0.1), (0.85, 0.1), (0.85, 0.8), (-0.85, 0.8)]));
-            out.push(line(&[(-0.9, -0.35), (0.0, -0.8), (0.9, -0.35)]));
-        }
-        Icon::NavalFactory => {
-            out.push(solid(&[(-0.85, -0.6), (0.85, -0.6), (0.85, 0.15), (-0.85, 0.15)]));
-            out.push(line(&[(-0.9, 0.65), (-0.45, 0.4), (0.0, 0.65), (0.45, 0.4), (0.9, 0.65)]));
-        }
-        Icon::RigYard => {
-            out.push(line(&[(-0.7, 0.8), (-0.7, -0.2)]));
-            out.push(line(&[(0.7, 0.8), (0.7, -0.2)]));
-            out.push(arc(0.0, -0.2, 0.7, 180.0, 360.0));
-            out.push(dot(0.0, 0.3, 0.2));
-        }
-        Icon::Airfield => {
-            out.push(line(&[(-0.55, -0.75), (-0.55, 0.75)]));
-            out.push(line(&[(0.55, -0.75), (0.55, 0.75)]));
-            out.push(line(&[(-0.55, 0.0), (0.55, 0.0)]));
-        }
-        Icon::Extractor => {
-            out.push(line(&[(0.0, -0.85), (0.8, 0.0), (0.0, 0.85), (-0.8, 0.0), (0.0, -0.85)]));
-            out.push(dot(0.0, 0.0, 0.22));
-        }
-        Icon::Generator => out.push(line(&[(0.25, -0.9), (-0.45, 0.1), (0.15, 0.1), (-0.25, 0.9)])),
-        Icon::Geothermal => {
-            out.push(line(&[(0.0, -0.9), (0.55, 0.15), (0.35, 0.65), (0.0, 0.85), (-0.35, 0.65), (-0.55, 0.15), (0.0, -0.9)]));
-            out.push(dot(0.0, 0.35, 0.18));
-        }
-        Icon::MassStorage => {
-            out.push(line(&[(-0.85, -0.7), (0.85, -0.7), (0.85, 0.7), (-0.85, 0.7), (-0.85, -0.7)]));
-            out.push(line(&[(0.0, -0.4), (0.4, 0.0), (0.0, 0.4), (-0.4, 0.0), (0.0, -0.4)]));
-        }
-        Icon::EnergyStorage => {
-            out.push(line(&[(-0.85, -0.7), (0.85, -0.7), (0.85, 0.7), (-0.85, 0.7), (-0.85, -0.7)]));
-            out.push(line(&[(0.15, -0.5), (-0.25, 0.05), (0.15, 0.05), (-0.15, 0.5)]));
-        }
-        Icon::Fabricator => {
-            out.push(line(&[(0.0, -0.85), (0.8, 0.0), (0.0, 0.85), (-0.8, 0.0), (0.0, -0.85)]));
-            out.push(line(&[(-0.35, 0.0), (0.35, 0.0)]));
-            out.push(line(&[(0.0, -0.35), (0.0, 0.35)]));
-        }
-        Icon::PointDefense => {
-            out.push(ring(0.0, 0.0, 0.55));
-            out.push(line(&[(0.0, -0.95), (0.0, 0.95)]));
-            out.push(line(&[(-0.95, 0.0), (0.95, 0.0)]));
-        }
-        Icon::AntiAirTurret => {
-            out.push(line(&[(-0.85, 0.2), (0.0, -0.7), (0.85, 0.2)]));
-            out.push(line(&[(-0.85, 0.7), (0.85, 0.7)]));
-        }
-        Icon::ArtilleryInstallation => {
-            out.push(dot(0.0, 0.35, 0.3));
-            out.push(arc(0.0, 0.35, 0.8, 200.0, 340.0));
-        }
-        Icon::TorpedoLauncher => {
-            out.push(line(&[(-0.85, -0.2), (0.7, -0.2)]));
-            out.push(line(&[(0.3, -0.55), (0.75, -0.2), (0.3, 0.15)]));
-            out.push(line(&[(-0.9, 0.6), (-0.45, 0.35), (0.0, 0.6), (0.45, 0.35), (0.9, 0.6)]));
-        }
-        Icon::ShieldGenerator => {
-            out.push(arc(0.0, 0.6, 0.9, 180.0, 360.0));
-            out.push(dot(0.0, 0.35, 0.25));
-        }
-        Icon::TacticalLauncher => {
-            out.push(line(&[(0.0, 0.85), (0.0, -0.85)]));
-            out.push(line(&[(-0.5, -0.35), (0.0, -0.85), (0.5, -0.35)]));
-        }
-        Icon::TacticalDefense => {
-            out.push(line(&[(0.0, 0.85), (0.0, -0.3)]));
-            out.push(line(&[(-0.5, 0.2), (0.0, -0.3), (0.5, 0.2)]));
-            out.push(line(&[(-0.75, -0.75), (0.75, -0.75)]));
-        }
-        Icon::StrategicLauncher => {
-            out.push(ring(0.0, 0.0, 0.85));
-            for angle in [-90.0_f32, 30.0, 150.0] {
-                let (from, to) = ((angle - 30.0).to_radians(), (angle + 30.0).to_radians());
-                out.push(solid(&[(0.0, 0.0), (from.cos() * 0.75, from.sin() * 0.75), (to.cos() * 0.75, to.sin() * 0.75)]));
+        Mark::Radar | Mark::Stealth => {
+            out.push(dot(0.0, 0.62, 0.24));
+            out.push(curve(0.0, 0.62, 0.62, 225.0, 315.0));
+            out.push(curve(0.0, 0.62, 1.12, 225.0, 315.0));
+            if mark == Mark::Stealth {
+                out.push(line(&[(-0.92, 0.88), (0.92, -0.9)]));
             }
         }
-        Icon::StrategicDefense => {
-            out.push(ring(0.0, 0.0, 0.85));
-            out.push(line(&[(-0.55, 0.0), (0.55, 0.0)]));
-            out.push(line(&[(0.0, -0.55), (0.0, 0.55)]));
+        Mark::Sonar => {
+            out.push(dot(0.0, -0.62, 0.24));
+            out.push(curve(0.0, -0.62, 0.62, 45.0, 135.0));
+            out.push(curve(0.0, -0.62, 1.12, 45.0, 135.0));
+        }
+        Mark::Build => {
+            // A wrench.
+            out.push(heavy(&[(-0.78, 0.78), (0.18, -0.18)]));
+            out.push(curve(0.42, -0.42, 0.4, 135.0, 405.0));
+        }
+        Mark::Transport => {
+            out.push(line(&[(-0.88, -0.62), (-0.88, 0.56), (0.88, 0.56), (0.88, -0.62)]));
+            out.push(dot(0.0, -0.06, 0.3));
+        }
+        Mark::Star => {
+            let points = star_points();
+            // A star is not convex: its middle, and a triangle for each point.
+            out.push(solid(&points.iter().skip(1).step_by(2).copied().collect::<Vec<_>>()));
+            for index in (0..10).step_by(2) {
+                out.push(solid(&[points[(index + 9) % 10], points[index], points[index + 1]]));
+            }
+        }
+        Mark::HollowStar => out.push(closed(&star_points())),
+        Mark::Materiel => {
+            out.push(closed(&diamond(1.0)));
             out.push(dot(0.0, 0.0, 0.2));
         }
-        Icon::Radar => {
-            // A dish and its sweep.
-            out.push(arc(-0.6, 0.6, 1.1, 270.0, 360.0));
-            out.push(line(&[(-0.6, 0.6), (0.2, -0.2)]));
-            out.push(dot(-0.6, 0.6, 0.22));
+        Mark::Energy => out.push(line(&bolt(1.0, 0.0))),
+        Mark::Geothermal => {
+            out.push(line(&bolt(0.72, -0.22)));
+            out.push(wave(0.85));
         }
-        Icon::Sonar => {
-            out.push(arc(0.0, 0.2, 0.8, 200.0, 340.0));
-            out.push(dot(0.0, 0.0, 0.2));
-            out.push(line(&[(-0.9, 0.7), (-0.45, 0.45), (0.0, 0.7), (0.45, 0.45), (0.9, 0.7)]));
+        Mark::MaterielStore => {
+            out.push(closed(&[(-0.85, -0.75), (0.85, -0.75), (0.85, 0.75), (-0.85, 0.75)]));
+            out.push(closed(&diamond(0.48)));
         }
-        Icon::Stealth => {
-            out.push(line(&[(-0.9, 0.0), (-0.45, -0.45), (0.45, -0.45), (0.9, 0.0), (0.45, 0.45), (-0.45, 0.45), (-0.9, 0.0)]));
-            out.push(line(&[(-0.8, 0.8), (0.8, -0.8)]));
+        Mark::EnergyStore => {
+            out.push(closed(&[(-0.85, -0.75), (0.85, -0.75), (0.85, 0.75), (-0.85, 0.75)]));
+            out.push(line(&bolt(0.55, 0.0)));
         }
-        Icon::TacticalMissile => {
-            out.push(solid(&[(0.0, -0.9), (0.3, -0.4), (0.3, 0.7), (-0.3, 0.7), (-0.3, -0.4)]));
+        Mark::Fabricator => {
+            out.push(closed(&diamond(1.12)));
+            out.push(thin(&bolt(0.48, 0.0)));
         }
-        Icon::StrategicMissile => {
-            out.push(solid(&[(0.0, -0.9), (0.4, -0.3), (0.4, 0.7), (-0.4, 0.7), (-0.4, -0.3)]));
-            out.push(line(&[(-0.75, 0.85), (0.75, 0.85)]));
+        Mark::MakesLand { support } => {
+            let shape = [(-0.95, 0.55), (-0.58, -0.55), (0.58, -0.55), (0.95, 0.55)];
+            out.push(if support { closed(&shape) } else { solid(&shape) });
         }
-        Icon::StrategicInterceptor => {
-            out.push(line(&[(0.0, 0.85), (0.0, -0.85)]));
-            out.push(line(&[(-0.5, -0.35), (0.0, -0.85), (0.5, -0.35)]));
-            out.push(ring(0.0, 0.2, 0.5));
+        Mark::MakesAir { support } => {
+            let shape = [(0.0, -0.7), (0.82, 0.62), (-0.82, 0.62)];
+            out.push(if support { closed(&shape) } else { solid(&shape) });
         }
-        Icon::LandScout => {
-            // An eye: a lens with a pupil.
-            out.push(line(&[(-0.95, 0.0), (-0.45, -0.45), (0.45, -0.45), (0.95, 0.0), (0.45, 0.45), (-0.45, 0.45), (-0.95, 0.0)]));
-            out.push(dot(0.0, 0.0, 0.25));
+        Mark::MakesNaval { support } => {
+            let mut shape = vec![(-1.0, -0.5), (1.0, -0.5)];
+            shape.extend(arc(0.0, -0.5, 1.0, 1.1, 0.0, 180.0, 10).into_iter().skip(1));
+            out.push(if support { closed(&shape) } else { solid(&shape) });
         }
-        Icon::MobileShield => {
-            // A dome over what it guards.
-            out.push(arc(0.0, 0.6, 0.95, 180.0, 360.0));
-            out.push(dot(0.0, 0.3, 0.25));
+        Mark::Airfield => {
+            out.push(heavy(&[(-0.6, -0.8), (-0.6, 0.8)]));
+            out.push(heavy(&[(0.6, -0.8), (0.6, 0.8)]));
+            out.push(heavy(&[(-0.6, 0.0), (0.6, 0.0)]));
         }
-        Icon::CombatEngineer => {
-            // A wrench, and a gun's sight.
-            out.push(line(&[(-0.75, 0.75), (0.2, -0.2)]));
-            out.push(arc(0.42, -0.42, 0.38, 135.0, 405.0));
-            out.push(ring(-0.55, -0.45, 0.3));
+        Mark::Wall => {
+            out.push(closed(&[(-0.9, -0.6), (0.9, -0.6), (0.9, 0.6), (-0.9, 0.6)]));
+            out.push(thin(&[(-0.9, 0.0), (0.9, 0.0)]));
+            out.push(thin(&[(0.0, -0.6), (0.0, 0.0)]));
+            out.push(thin(&[(-0.45, 0.0), (-0.45, 0.6)]));
+            out.push(thin(&[(0.45, 0.0), (0.45, 0.6)]));
         }
-        Icon::TorpedoBoat => {
-            // A torpedo running ahead.
-            out.push(line(&[(-0.85, 0.0), (0.6, 0.0)]));
-            out.push(line(&[(0.2, -0.4), (0.65, 0.0), (0.2, 0.4)]));
-        }
-        Icon::Wall => {
-            // Courses of bricks.
-            out.push(line(&[(-0.9, -0.6), (0.9, -0.6), (0.9, 0.6), (-0.9, 0.6), (-0.9, -0.6)]));
-            out.push(line(&[(-0.9, 0.0), (0.9, 0.0)]));
-            out.push(line(&[(0.0, -0.6), (0.0, 0.0)]));
-            out.push(line(&[(-0.45, 0.0), (-0.45, 0.6)]));
-            out.push(line(&[(0.45, 0.0), (0.45, 0.6)]));
-        }
-        Icon::FieldWorkshop => {
-            // A tower with a drone circling it.
-            out.push(line(&[(-0.5, 0.85), (0.5, 0.85)]));
-            out.push(line(&[(0.0, 0.85), (0.0, -0.1)]));
-            out.push(arc(0.0, -0.1, 0.8, 200.0, 340.0));
-            out.push(dot(0.55, -0.55, 0.2));
-        }
-        Icon::Transport => {
-            // A box with an arrow up out of it: something lifted and carried.
-            out.push(line(&[(-0.7, 0.1), (0.7, 0.1), (0.7, 0.85), (-0.7, 0.85), (-0.7, 0.1)]));
-            out.push(line(&[(0.0, -0.1), (0.0, -0.9)]));
-            out.push(line(&[(-0.4, -0.5), (0.0, -0.9), (0.4, -0.5)]));
-        }
-        Icon::Unknown => out.push(dot(0.0, 0.0, 0.25)),
+        Mark::Unknown => out.push(dot(0.0, 0.0, 0.25)),
+    }
+    match extra {
+        Some(Extra::Dome) => out.push(Shape::line(arc(0.0, 0.0, 1.0, 1.0, 205.0, 335.0, 10).into_iter().map(|(x, y)| at(x, y)).collect(), Stroke::new(stroke.width * 0.8, stroke.color))),
+        Some(Extra::Wave) => out.push(wave(0.98)),
+        Some(Extra::Armed) => out.push(dot(0.86, 0.72, 0.3)),
+        Some(Extra::AlsoAntiAir) => out.push(thin(&[(-0.55, -0.8), (0.0, -1.25), (0.55, -0.8)])),
+        None => {}
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sim::blueprints::BlueprintDb;
+    use crate::sim::blueprints::{Blueprint, BlueprintDb, Targets, UnitClass, WeaponKind};
 
     #[test]
     fn every_unit_and_structure_has_an_icon_of_its_own_kind() {
@@ -782,17 +837,105 @@ mod tests {
         }
     }
 
+    /// On the map, no two units or structures look the same: those sharing an icon differ by
+    /// tech level.
     #[test]
-    fn tiers_of_one_kind_share_an_icon_and_differ_by_dots() {
-        assert_eq!(Icon::for_key("t1_air_scout"), Icon::for_key("t3_spy_plane"));
-        assert_ne!(Icon::for_key("t1_air_scout"), Icon::for_key("t1_interceptor"));
-        // Each dot is drawn twice, its dark ring and itself.
-        let marks = |tier: u8| shapes(Pos2::ZERO, 10.0, Icon::Scout, tier, Color32::WHITE).len();
-        assert_eq!(marks(3) - marks(1), 4);
+    fn every_unit_can_be_told_from_every_other_on_the_map() {
+        let db = BlueprintDb::standard();
+        let mut seen: Vec<(Icon, u8, &str)> = Vec::new();
+        for unit in db.iter() {
+            let icon = Icon::for_key(&unit.key);
+            if let Some((_, _, other)) = seen.iter().find(|(seen_icon, tier, _)| *seen_icon == icon && *tier == unit.tier) {
+                panic!("{} and {other} share {icon:?} at T{}", unit.key, unit.tier);
+            }
+            seen.push((icon, unit.tier, &unit.key));
+        }
     }
 
-    /// A click anywhere on an icon, frame and tech dots, is within the area that picks its
-    /// unit, for every icon at every tier.
+    #[test]
+    fn tiers_of_one_kind_share_an_icon_and_differ_by_rank_bars() {
+        for (lower, higher) in [("t1_air_scout", "t3_spy_plane"), ("t1_frigate", "t2_destroyer"), ("t2_destroyer", "t3_battlecruiser"), ("t1_light_walker", "t2_grenadier_walker"), ("radar", "deep_scan_array")] {
+            assert_eq!(Icon::for_key(lower), Icon::for_key(higher), "{lower} and {higher}");
+        }
+        assert_ne!(Icon::for_key("t1_air_scout"), Icon::for_key("t1_interceptor"));
+        // One bar more for each level, in the level's own color.
+        let drawn = |tier: u8| shapes(Pos2::ZERO, 10.0, Icon::Scout, tier, Color32::WHITE);
+        assert_eq!(drawn(3).len() - drawn(1).len(), 2);
+        for tier in 1..=3_u8 {
+            let bars = drawn(tier).into_iter().filter(|shape| matches!(shape, Shape::Rect(rect) if rect.fill == TIER_COLORS[usize::from(tier - 1)])).count();
+            assert_eq!(bars, usize::from(tier), "T{tier}");
+        }
+        assert!(TIER_COLORS.iter().enumerate().all(|(index, color)| TIER_COLORS[index + 1..].iter().all(|other| other != color)), "each level has its own color");
+    }
+
+    /// The mark follows from what the unit does, by its data, so that one job has one mark in
+    /// every domain. The few that are chosen rather than derived are listed with why.
+    #[test]
+    fn every_mark_says_what_its_unit_does() {
+        let db = BlueprintDb::standard();
+        let chosen: &[(&str, Mark, &str)] = &[
+            ("t3_battleship", Mark::Artillery, "fires from 3,000 away, over the horizon"),
+            ("t2_grenadier_walker", Mark::Gun, "lobs grenades, but plays as the walkers' gun at T2"),
+            ("t1_land_scout", Mark::Radar, "a scout, whose gun is a pea shooter"),
+        ];
+        let makes_units = |unit: &Blueprint| unit.builds.iter().any(|&made| !db.get(made).is_structure() && db.get(made).class != UnitClass::Ammo);
+        let expected = |unit: &Blueprint| -> Mark {
+            let all_air = unit.weapon.iter().chain(&unit.extra_weapons).all(|weapon| weapon.targets == Targets::Air);
+            if unit.is_commander() {
+                Mark::Star
+            } else if unit.class == UnitClass::FieldRig {
+                Mark::HollowStar
+            } else if unit.transport.is_some() {
+                Mark::Transport
+            } else if unit.class == UnitClass::Engineer || unit.assists {
+                Mark::Build
+            } else if let Some(weapon) = &unit.weapon {
+                match weapon.kind {
+                    WeaponKind::StrategicMissile => Mark::Strategic,
+                    WeaponKind::TacticalMissile => Mark::Missile,
+                    WeaponKind::Bomb => Mark::Bomb,
+                    _ if weapon.artillery => Mark::Artillery,
+                    _ if all_air => Mark::AntiAir,
+                    _ if weapon.targets == Targets::Naval => Mark::Torpedo,
+                    _ => Mark::Gun,
+                }
+            } else if unit.missile_defense.is_some() && unit.builds.iter().any(|&made| db.get(made).class == UnitClass::Ammo) {
+                Mark::StrategicDefense
+            } else if unit.missile_defense.is_some() && unit.shield.is_none() {
+                Mark::MissileDefense
+            } else if unit.shield.is_some() {
+                Mark::Shield
+            } else if unit.stealth_field > crate::math::fp::Fp::ZERO {
+                Mark::Stealth
+            } else if unit.radar > crate::math::fp::Fp::ZERO {
+                Mark::Radar
+            } else if unit.sonar > crate::math::fp::Fp::ZERO {
+                Mark::Sonar
+            } else {
+                // Economy and the rest: their marks are their own.
+                Icon::for_key(&unit.key).mark().0
+            }
+        };
+        for unit in db.iter().filter(|unit| unit.class != UnitClass::Ammo && !makes_units(unit)) {
+            let mark = Icon::for_key(&unit.key).mark().0;
+            let want = chosen.iter().find(|(key, _, _)| *key == unit.key).map_or_else(|| expected(unit), |&(_, mark, _)| mark);
+            assert_eq!(mark, want, "{}", unit.key);
+        }
+        // Factories show what they make, filled for a headquarters and outlined for support.
+        for unit in db.iter().filter(|unit| makes_units(unit)) {
+            let support = unit.key.ends_with("_support");
+            let mark = Icon::for_key(&unit.key).mark().0;
+            let fits = match mark {
+                Mark::MakesLand { support: outlined } | Mark::MakesAir { support: outlined } | Mark::MakesNaval { support: outlined } => outlined == support,
+                Mark::HollowStar => unit.key == "rig_yard",
+                _ => false,
+            };
+            assert!(fits, "{} shows {mark:?}", unit.key);
+        }
+    }
+
+    /// A click anywhere on an icon, frame and tech tab, is within the area that picks its unit,
+    /// for every icon at every tier.
     #[test]
     fn every_icon_lies_within_its_click_area() {
         for icon in Icon::ALL {
@@ -803,22 +946,21 @@ mod tests {
                 }
                 let (width, above, below) = (HIT_HALF_WIDTH_PT as f32, HIT_ABOVE_PT as f32, HIT_BELOW_PT as f32);
                 assert!(bounds.min.x >= -width && bounds.max.x <= width && bounds.min.y >= -above && bounds.max.y <= below, "{icon:?} at T{tier} reaches {bounds:?}");
-                assert!(reach_below(icon, map_half(icon), tier) <= bounds.max.y + 0.5, "{icon:?} at T{tier}: what is drawn under it clears its dots");
+                assert!(reach_below(icon, map_half(icon), tier) + 0.01 >= bounds.max.y, "{icon:?} at T{tier}: what is drawn under it clears its tab");
             }
         }
     }
 
-    /// Every unit's frame says what role it plays, by its outline alone, whatever its symbol:
-    /// the command rigs, factories, other structures, vehicles, walkers, surface ships,
-    /// submarines, fighters and scouts, bombers, and gunships and transports, each their own.
+    /// Every unit's frame says how it moves, by its outline alone, whatever its mark.
     #[test]
     fn every_unit_has_the_frame_of_its_role() {
-        use crate::sim::blueprints::{Targets, UnitClass, WeaponKind};
         use crate::sim::components::MoveClass;
-        let db = crate::sim::blueprints::BlueprintDb::standard();
-        for def in db.iter().filter(|def| def.class != UnitClass::Ammo) {
+        let db = BlueprintDb::standard();
+        for def in db.iter() {
             let bombs = def.weapon.is_some_and(|weapon| weapon.kind == WeaponKind::Bomb || weapon.targets == Targets::Naval);
-            let expected = if def.is_commander() || def.class == UnitClass::FieldRig {
+            let expected = if def.class == UnitClass::Ammo {
+                Frame::Munition
+            } else if def.is_commander() || def.class == UnitClass::FieldRig {
                 Frame::Commander
             } else if def.is_structure() && def.builds.iter().any(|&made| !db.get(made).is_structure() && db.get(made).class != UnitClass::Ammo) {
                 Frame::Factory
@@ -843,8 +985,8 @@ mod tests {
         }
     }
 
-    /// A fighter's frame is a bomber's turned upside down, pointing north, with its symbol held
-    /// in the wide end as the bomber's is.
+    /// A fighter's frame is a bomber's turned upside down, pointing north, with its mark held in
+    /// the wide end as the bomber's is.
     #[test]
     fn a_fighter_points_north_where_a_bomber_points_south() {
         let flipped = |points: Vec<(f32, f32)>| {
@@ -857,63 +999,103 @@ mod tests {
         assert_eq!(fighter, flipped(outline(Frame::Bomber)));
         let apex = outline(Frame::Fighter).into_iter().fold(f32::MAX, |top, (_, y)| top.min(y));
         assert!(apex < 0.0, "the fighter's point is at the top");
-        assert_eq!(symbol_place(Frame::Fighter), (-symbol_place(Frame::Bomber).0, symbol_place(Frame::Bomber).1));
+        assert_eq!(mark_place(Frame::Fighter), (-mark_place(Frame::Bomber).0, mark_place(Frame::Bomber).1));
     }
 
-    /// Every frame's outline is told from every other's by what the eye goes by at a glance:
-    /// how many corners it has (curves have none), which end is wider, top or bottom, or how
-    /// wide it is for its height, by more than half its height. A structure's square and a
-    /// vehicle's wider rectangle, alike in all three, read as one shape on the map until
-    /// structures were given cut corners.
-    #[test]
-    fn every_frame_has_an_outline_of_its_own() {
-        let frames = [
-            Frame::Commander, Frame::Factory, Frame::Structure, Frame::Vehicle, Frame::Bot, Frame::Ship, Frame::Submarine, Frame::Fighter, Frame::Bomber, Frame::Gunship,
-        ];
-        // The width of the outline along the line at height `y`.
-        let width_at = |points: &[(f32, f32)], y: f32| {
-            let crossings: Vec<f32> = (0..points.len())
+    const FRAMES: [Frame; 10] = [Frame::Commander, Frame::Factory, Frame::Structure, Frame::Vehicle, Frame::Bot, Frame::Ship, Frame::Submarine, Frame::Fighter, Frame::Bomber, Frame::Gunship];
+
+    /// How an outline looks at a glance: its corners (curves have none), which end is wider, top
+    /// or bottom, and how wide it is for its height, with where its corners are and whether its
+    /// bottom and top are flat edges.
+    struct Look {
+        corners: Vec<(f32, f32)>,
+        right_angles: usize,
+        wider: &'static str,
+        aspect: f32,
+        flat_bottom: bool,
+        flat_top: bool,
+    }
+
+    fn look(frame: Frame) -> Look {
+        let mut points = outline(frame);
+        points.dedup_by(|a, b| (a.0 - b.0).hypot(a.1 - b.1) < 1e-4);
+        if points.len() > 1 && (points[0].0 - points[points.len() - 1].0).hypot(points[0].1 - points[points.len() - 1].1) < 1e-4 {
+            points.pop();
+        }
+        let count = points.len();
+        let turns: Vec<f32> = (0..count)
+            .map(|index| {
+                let (before, at, after) = (points[(index + count - 1) % count], points[index], points[(index + 1) % count]);
+                let turn = (after.1 - at.1).atan2(after.0 - at.0) - (at.1 - before.1).atan2(at.0 - before.0);
+                (turn + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI
+            })
+            .collect();
+        let corners: Vec<(f32, f32)> = (0..count).filter(|&index| turns[index].abs() > 25_f32.to_radians()).map(|index| points[index]).collect();
+        let right_angles = (0..count).filter(|&index| (turns[index].abs() - std::f32::consts::FRAC_PI_2).abs() < 4_f32.to_radians()).count();
+        let (top, bottom) = (points.iter().map(|p| p.1).fold(f32::MAX, f32::min), points.iter().map(|p| p.1).fold(f32::MIN, f32::max));
+        let (left, right) = (points.iter().map(|p| p.0).fold(f32::MAX, f32::min), points.iter().map(|p| p.0).fold(f32::MIN, f32::max));
+        let height = bottom - top;
+        let width_at = |y: f32| {
+            let crossings: Vec<f32> = (0..count)
                 .filter_map(|edge| {
-                    let (p, q) = (points[edge], points[(edge + 1) % points.len()]);
+                    let (p, q) = (points[edge], points[(edge + 1) % count]);
                     ((p.1 - y) * (q.1 - y) <= 0.0 && (q.1 - p.1).abs() > 1e-6).then(|| p.0 + (q.0 - p.0) * (y - p.1) / (q.1 - p.1))
                 })
                 .collect();
             crossings.iter().copied().fold(f32::MIN, f32::max) - crossings.iter().copied().fold(f32::MAX, f32::min)
         };
-        let look = |frame: Frame| {
-            let mut points = outline(frame);
-            points.dedup_by(|a, b| (a.0 - b.0).hypot(a.1 - b.1) < 1e-4);
-            if points.len() > 1 && (points[0].0 - points[points.len() - 1].0).hypot(points[0].1 - points[points.len() - 1].1) < 1e-4 {
-                points.pop();
-            }
-            let count = points.len();
-            let corners = (0..count)
-                .filter(|&index| {
-                    let (before, at, after) = (points[(index + count - 1) % count], points[index], points[(index + 1) % count]);
-                    let turn = (after.1 - at.1).atan2(after.0 - at.0) - (at.1 - before.1).atan2(at.0 - before.0);
-                    let turn = (turn + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
-                    turn.abs() > 25_f32.to_radians()
-                })
-                .count();
-            let (top, bottom) = (points.iter().map(|p| p.1).fold(f32::MAX, f32::min), points.iter().map(|p| p.1).fold(f32::MIN, f32::max));
-            let (left, right) = (points.iter().map(|p| p.0).fold(f32::MAX, f32::min), points.iter().map(|p| p.0).fold(f32::MIN, f32::max));
-            let height = bottom - top;
-            let (upper, lower) = (width_at(&points, top + height * 0.15), width_at(&points, bottom - height * 0.15));
-            let wider = if upper > lower * 1.2 { "top" } else if lower > upper * 1.2 { "bottom" } else { "neither" };
-            (corners, wider, (right - left) / height)
+        let (upper, lower) = (width_at(top + height * 0.15), width_at(bottom - height * 0.15));
+        let wider = if upper > lower * 1.2 { "top" } else if lower > upper * 1.2 { "bottom" } else { "neither" };
+        // A flat edge along the bottom or top: two points at that height, at least half the
+        // outline's width apart.
+        let flat = |y: f32| {
+            let along: Vec<f32> = points.iter().filter(|p| (p.1 - y).abs() < 1e-3).map(|p| p.0).collect();
+            along.len() >= 2 && along.iter().copied().fold(f32::MIN, f32::max) - along.iter().copied().fold(f32::MAX, f32::min) >= (right - left) * 0.5
         };
-        for (index, &first) in frames.iter().enumerate() {
-            for &second in &frames[index + 1..] {
+        Look { corners, right_angles, wider, aspect: (right - left) / height, flat_bottom: flat(bottom), flat_top: flat(top) }
+    }
+
+    /// Every frame's outline is told from every other's by what the eye goes by at a glance: how
+    /// many corners it has, which end is wider, or how wide it is for its height, by more than
+    /// half its height.
+    #[test]
+    fn every_frame_has_an_outline_of_its_own() {
+        for (index, &first) in FRAMES.iter().enumerate() {
+            for &second in &FRAMES[index + 1..] {
                 let (a, b) = (look(first), look(second));
-                let alike = a.0 == b.0 && a.1 == b.1 && (a.2 - b.2).abs() <= 0.5;
-                assert!(!alike, "{first:?} {a:?} and {second:?} {b:?} are too alike in shape");
+                let alike = a.corners.len() == b.corners.len() && a.wider == b.wider && (a.aspect - b.aspect).abs() <= 0.5;
+                assert!(!alike, "{first:?} ({} corners, {} wider, {:.2}) and {second:?} ({} corners, {} wider, {:.2}) are too alike", a.corners.len(), a.wider, a.aspect, b.corners.len(), b.wider, b.aspect);
             }
         }
-        // The square structures had, against the vehicle's rectangle, is what this guards.
-        let square = |corners: usize| (corners, "neither", 1.0_f32);
-        let vehicle = look(Frame::Vehicle);
-        assert!(vehicle.0 == square(4).0 && vehicle.1 == square(4).1 && (vehicle.2 - square(4).2).abs() <= 0.5, "a square would read as a vehicle");
-        assert_eq!(look(Frame::Structure).0, 8, "a structure has its corners cut");
+    }
+
+    /// The rules the frames keep: squares and rectangles are structures and nothing else; land
+    /// units stand on a flat base with corners; ships and submarines are curved below, with no
+    /// corner under the waterline, a ship under a flat deck; and a gunship is a vehicle turned over.
+    #[test]
+    fn frames_keep_to_their_domain() {
+        for frame in FRAMES {
+            let shape = look(frame);
+            let boxy = shape.corners.len() == 4 && shape.right_angles == 4;
+            assert_eq!(boxy, matches!(frame, Frame::Structure | Frame::Factory), "{frame:?}: only structures are squares or rectangles");
+        }
+        assert!(look(Frame::Factory).aspect > look(Frame::Structure).aspect + 0.5, "a factory is wider than a square");
+        for frame in [Frame::Vehicle, Frame::Bot, Frame::Commander] {
+            let shape = look(frame);
+            assert!(shape.flat_bottom, "{frame:?} stands on a flat base");
+            assert!(!shape.corners.is_empty(), "{frame:?} has corners");
+        }
+        for frame in [Frame::Ship, Frame::Submarine] {
+            let shape = look(frame);
+            assert!(!shape.flat_bottom, "{frame:?} has a curved hull");
+            let middle = outline(frame).iter().map(|p| p.1).fold(f32::MAX, f32::min) * 0.5 + outline(frame).iter().map(|p| p.1).fold(f32::MIN, f32::max) * 0.5;
+            assert!(shape.corners.iter().all(|corner| corner.1 < middle), "{frame:?} has no corner below the waterline: {:?}", shape.corners);
+        }
+        assert!(look(Frame::Ship).flat_top, "a ship has a flat deck");
+        assert!(look(Frame::Submarine).corners.is_empty(), "a submarine has no corner at all");
+        let (vehicle, gunship) = (look(Frame::Vehicle), look(Frame::Gunship));
+        assert_eq!((vehicle.wider, gunship.wider, vehicle.corners.len(), gunship.corners.len()), ("bottom", "top", 4, 4), "a gunship is a vehicle turned over");
+        assert!(gunship.aspect > vehicle.aspect, "and squatter, apart from the bomber's triangle");
     }
 
     #[test]
@@ -935,20 +1117,21 @@ mod tests {
                 assert_ne!(drawn[first], drawn[second], "{:?} and {:?} look the same on the bar", Icon::ALL[first], Icon::ALL[second]);
             }
         }
-        let roles = [Role::Build, Role::Mass, Role::Energy, Role::DirectFire, Role::AntiAir, Role::Indirect, Role::Underwater, Role::Protection, Role::Intel];
-        for first in 0..roles.len() {
-            for second in first + 1..roles.len() {
-                assert_ne!(roles[first].color(), roles[second].color(), "{:?} and {:?} share a color", roles[first], roles[second]);
+        for (index, first) in Role::ALL.iter().enumerate() {
+            for second in &Role::ALL[index + 1..] {
+                assert_ne!(first.color(), second.color(), "{first:?} and {second:?} share a color");
             }
         }
     }
 
     #[test]
-    fn a_build_bar_symbol_fills_most_of_its_button() {
+    fn a_build_bar_icon_fills_most_of_its_button() {
         let rect = Rect::from_min_size(Pos2::ZERO, Vec2::splat(46.0));
-        let bounds = bar_shapes(rect, Icon::LightWalker).iter().fold(Rect::NOTHING, |bounds, shape| bounds.union(shape.visual_bounding_rect()));
-        assert!(bounds.width() > 23.0 && bounds.height() > 23.0, "the symbol is only {bounds:?}");
-        assert!(rect.contains_rect(bounds), "the symbol spills out of its button: {bounds:?}");
+        for icon in Icon::ALL.into_iter().filter(|icon| icon.frame() != Frame::Munition) {
+            let bounds = bar_shapes(rect, icon).iter().fold(Rect::NOTHING, |bounds, shape| bounds.union(shape.visual_bounding_rect()));
+            assert!(bounds.width() > 23.0 && bounds.height() > 18.0, "{icon:?} is only {bounds:?}");
+            assert!(rect.contains_rect(bounds), "{icon:?} spills out of its button: {bounds:?}");
+        }
     }
 
     #[test]
