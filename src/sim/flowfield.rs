@@ -646,6 +646,11 @@ impl FlowField {
         self.holder(id)?.routes.get(&id).map(|route| route.arrive_radius)
     }
 
+    /// The unit a route follows, while it is still there to follow.
+    pub fn follow_target(&self, id: u32) -> Option<SimId> {
+        self.holder(id)?.routes.get(&id)?.follow
+    }
+
     pub fn is_following(&self, id: u32) -> bool {
         self.holder(id).is_some_and(|field| field.routes.get(&id).is_some_and(|route| route.follow.is_some()))
     }

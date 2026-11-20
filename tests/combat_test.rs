@@ -942,3 +942,107 @@ fn a_tank_told_to_attack_past_a_ridge_closes_in_instead_of_shelling_it() {
     assert_eq!(short, 0, "no shells into the ridge");
     assert!(world.unit_health(target).unwrap() < fp_int(100_000), "it should have closed in and hit");
 }
+
+fn distance(world: &SimWorld, unit: SimId, to: Vec2Fp) -> f64 {
+    let here = world.unit_position(unit).unwrap().xy();
+    (here.x - to.x).to_num::<f64>().hypot((here.y - to.y).to_num::<f64>())
+}
+
+/// A Shift-attack after a move: the unit finishes the move, firing only as anything would,
+/// and then goes after its target wherever that has got to, which an attack-move to where
+/// the target was would not. The plan shows both, the move then the attack.
+#[test]
+fn a_queued_attack_waits_its_turn_then_follows_its_target() {
+    use sim_engine::sim::world::PlanStepKind;
+    let mut world = flat_world(false);
+    let shooter = world.spawn_unit(standard_unit(Team::Blue, point(500, 500)));
+    let target = passive_unit(&mut world, Team::Red, point(2_500, 500));
+    let (stop, refuge) = (point(500, 1_500), point(2_500, 3_000));
+    world.advance_tick(&[
+        SimCommand::Move { units: vec![shooter], goal: stop },
+        SimCommand::QueueAttack { units: vec![shooter], target },
+        SimCommand::Move { units: vec![target], goal: refuge },
+    ]);
+    let plan = world.snapshot_for(Some(Team::Blue)).plans.into_iter().find(|plan| plan.id == shooter).expect("a plan");
+    let kinds: Vec<PlanStepKind> = plan.steps.iter().map(|step| step.kind).collect();
+    assert_eq!(kinds, [PlanStepKind::Move, PlanStepKind::Attack]);
+
+    let forced = |world: &SimWorld| world.ecs.get::<&Combat>(world.unit_entity(shooter).unwrap()).unwrap().forced_target;
+    let mut ticks = 0;
+    while distance(&world, shooter, stop) > 20.0 {
+        assert_eq!(forced(&world), None, "the attack waits for the move");
+        world.advance_tick(&[]);
+        ticks += 1;
+        assert!(ticks < 2_000, "never reached its stop");
+    }
+    for _ in 0..300 {
+        if forced(&world).is_some() {
+            break;
+        }
+        world.advance_tick(&[]);
+    }
+    assert_eq!(forced(&world), Some(target), "then it attacks");
+    for _ in 0..6_000 {
+        if world.unit_position(target).is_none() {
+            break;
+        }
+        world.advance_tick(&[]);
+    }
+    assert!(world.unit_position(target).is_none(), "it followed its target to where it went, and destroyed it");
+    for _ in 0..200 {
+        world.advance_tick(&[]);
+    }
+    assert!(world.order_queues.is_empty());
+    assert_eq!(world.flow_field.route_count(), 0, "every route should have been handed back");
+}
+
+/// A queued attack on something destroyed before its turn is skipped, and what was queued
+/// after it goes ahead.
+#[test]
+fn a_queued_attack_on_what_is_already_gone_is_skipped() {
+    let mut world = flat_world(false);
+    let shooter = world.spawn_unit(standard_unit(Team::Blue, point(500, 500)));
+    let target = passive_unit(&mut world, Team::Red, point(2_500, 500));
+    let (stop, last) = (point(500, 1_000), point(1_000, 1_000));
+    world.advance_tick(&[
+        SimCommand::Move { units: vec![shooter], goal: stop },
+        SimCommand::QueueAttack { units: vec![shooter], target },
+        SimCommand::QueueMove { units: vec![shooter], goal: last, attack: false },
+    ]);
+    world.ecs.get::<&mut Health>(world.unit_entity(target).unwrap()).unwrap().current = fp_int(1);
+    shoot(&mut world, point(2_400, 500), point(2_500, 500), fp_int(4), shooter, Team::Blue);
+    run_until_projectiles_gone(&mut world, 200);
+    assert!(world.unit_position(target).is_none(), "destroyed before the attack's turn");
+    for _ in 0..2_000 {
+        world.advance_tick(&[]);
+    }
+    assert!(distance(&world, shooter, last) < 20.0, "it went on to its last stop");
+    assert!(world.order_queues.is_empty());
+    assert_eq!(world.flow_field.route_count(), 0, "every route should have been handed back");
+}
+
+/// The commander, a builder, keeps its orders as tasks, and a queued attack waits among them
+/// in the same way.
+#[test]
+fn a_commanders_queued_attack_waits_for_its_move() {
+    let mut world = flat_map(false);
+    let commander = world.spawn_mobile(world.blueprints.id("command_rig"), Team::Blue, point(1_000, 1_000));
+    let target = passive_unit(&mut world, Team::Red, point(3_000, 1_000));
+    let stop = point(1_000, 1_600);
+    world.advance_tick(&[SimCommand::Move { units: vec![commander], goal: stop }, SimCommand::QueueAttack { units: vec![commander], target }]);
+    let forced = |world: &SimWorld| world.ecs.get::<&Combat>(world.unit_entity(commander).unwrap()).unwrap().forced_target;
+    let mut ticks = 0;
+    while distance(&world, commander, stop) > 30.0 {
+        assert_eq!(forced(&world), None, "the attack waits for the move");
+        world.advance_tick(&[]);
+        ticks += 1;
+        assert!(ticks < 3_000, "never reached its stop");
+    }
+    for _ in 0..300 {
+        if forced(&world).is_some() {
+            break;
+        }
+        world.advance_tick(&[]);
+    }
+    assert_eq!(forced(&world), Some(target), "then it attacks");
+}

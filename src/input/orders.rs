@@ -307,26 +307,16 @@ pub fn patrol_commands(units: &[SimId], snapshot: &crate::sim::world::SimSnapsho
         .collect()
 }
 
-/// The same orders, to carry out after what units are already doing. An attack becomes an
-/// attack-move to where the target is now, in sight or, for a contact on radar, where it
-/// shows. A rally point or a follow order has no end to wait for, so those stay as they are.
-pub fn queued_commands(commands: Vec<SimCommand>, units: &[UnitView], contacts: &[crate::sim::world::ContactView]) -> Vec<SimCommand> {
-    let position = |target: SimId| {
-        units
-            .binary_search_by_key(&target, |unit| unit.id)
-            .ok()
-            .map(|index| (units[index].x, units[index].y))
-            .or_else(|| contacts.iter().find(|contact| contact.unit == Some(target)).map(|contact| (contact.x, contact.y)))
-    };
+/// The same orders, to carry out after what units are already doing. An attack follows its
+/// target until its turn comes, whether the target is in sight or a contact on radar. A rally
+/// point or a follow order has no end to wait for, so those stay as they are.
+pub fn queued_commands(commands: Vec<SimCommand>) -> Vec<SimCommand> {
     commands
         .into_iter()
         .map(|command| match command {
             SimCommand::Move { units, goal } => SimCommand::QueueMove { units, goal, attack: false },
             SimCommand::AttackMove { units, goal } => SimCommand::QueueMove { units, goal, attack: true },
-            SimCommand::Attack { units: attackers, target } => match position(target) {
-                Some((x, y)) => SimCommand::QueueMove { units: attackers, goal: Vec2Fp::new(Fp::from_bits(x), Fp::from_bits(y)), attack: true },
-                None => SimCommand::Attack { units: attackers, target },
-            },
+            SimCommand::Attack { units, target } => SimCommand::QueueAttack { units, target },
             SimCommand::Assist { units, target } => SimCommand::QueueTask { units, task: BuildTask::Assist { target } },
             SimCommand::Repair { units, target } => SimCommand::QueueTask { units, task: BuildTask::Repair { target } },
             SimCommand::Capture { units, target } => SimCommand::QueueTask { units, task: BuildTask::Capture { target } },
@@ -735,12 +725,8 @@ mod tests {
 
     #[test]
     fn shift_turns_orders_into_their_queued_forms() {
-        let db = db();
-        let units = [view(1, Team::Blue, db.id("t1_light_walker"), &db, 2_000.0, 1_950.0), view(2, Team::Red, db.id("t1_light_walker"), &db, 2_100.0, 2_050.0)];
         let goal = Vec2Fp::new(Fp::from_num(10.0), Fp::from_num(20.0));
         let ids = || vec![SimId(1)];
-        let raw = |value: f64| Fp::from_bits((value * 4096.0) as i32);
-        let at_enemy = Vec2Fp::new(raw(2_100.0), raw(2_050.0));
         let target = SimId(2);
         let queued = queued_commands(
             vec![
@@ -751,15 +737,13 @@ mod tests {
                 SimCommand::Repair { units: ids(), target },
                 SimCommand::Reclaim { units: ids(), target },
             ],
-            &units,
-            &[],
         );
         assert_eq!(
             queued,
             [
                 SimCommand::QueueMove { units: ids(), goal, attack: false },
                 SimCommand::QueueMove { units: ids(), goal, attack: true },
-                SimCommand::QueueMove { units: ids(), goal: at_enemy, attack: true },
+                SimCommand::QueueAttack { units: ids(), target },
                 SimCommand::QueueTask { units: ids(), task: BuildTask::Assist { target } },
                 SimCommand::QueueTask { units: ids(), task: BuildTask::Repair { target } },
                 SimCommand::QueueTask { units: ids(), task: BuildTask::Reclaim { target } },
@@ -771,9 +755,7 @@ mod tests {
     fn orders_with_no_end_to_wait_for_are_not_queued() {
         let goal = Vec2Fp::new(Fp::from_num(10.0), Fp::from_num(20.0));
         let unchanged = vec![SimCommand::SetRally { factory: SimId(1), point: goal }, SimCommand::Follow { units: vec![SimId(2)], target: SimId(1) }];
-        assert_eq!(queued_commands(unchanged.clone(), &[], &[]), unchanged);
-        let gone = vec![SimCommand::Attack { units: vec![SimId(2)], target: SimId(9) }];
-        assert_eq!(queued_commands(gone.clone(), &[], &[]), gone, "a target that cannot be found has no position to go to");
+        assert_eq!(queued_commands(unchanged.clone()), unchanged);
     }
 
     #[test]
@@ -975,9 +957,9 @@ mod tests {
         assert!(!selection_reaches(&hover, TargetKind::Air));
     }
 
-    /// With Shift, an attack on a radar contact waits its turn like one on a unit in sight: an
-    /// attack-move to where the contact shows. A contact is not among the units in sight, and
-    /// the attack was sent unqueued, so it replaced the move before it.
+    /// With Shift, an attack on a radar contact waits its turn like one on a unit in sight. A
+    /// contact is not among the units in sight, and the attack was sent unqueued, so it
+    /// replaced the move before it.
     #[test]
     fn a_queued_attack_on_a_radar_contact_waits_its_turn() {
         let db = db();
@@ -987,8 +969,7 @@ mod tests {
         let contacts = [crate::sim::world::ContactView { unit: Some(SimId(7)), x: raw(2_100.0), y: raw(2_000.0), z: raw(9.0), is_air: false, is_naval: false, is_sub: false, is_structure: false }];
         let cursor = camera.world_to_screen([2_100.0, 2_000.0, 9.0]).unwrap();
         let click = RightClick { selected: &[SimId(1)], units: &units, wrecks: &[], blueprints: &db, team: Team::Blue, camera: &camera, cursor, ground: Some([2_100.0, 2_000.0]), attack_move: false, contacts: &contacts, surfaced: &[] };
-        let goal = Vec2Fp::new(Fp::from_bits(raw(2_100.0)), Fp::from_bits(raw(2_000.0)));
-        assert_eq!(queued_commands(right_click_orders(&click), &units, &contacts), [SimCommand::QueueMove { units: vec![SimId(1)], goal, attack: true }]);
+        assert_eq!(queued_commands(right_click_orders(&click)), [SimCommand::QueueAttack { units: vec![SimId(1)], target: SimId(7) }]);
     }
 
     /// Every unit that moves is moved by a right-click on the ground and by a move order, the

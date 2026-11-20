@@ -687,7 +687,7 @@ fn issue_planned_orders(
         contacts: &session.current.contacts,
         surfaced: &session.current.surfaced,
     });
-    let orders = if queued { queued_commands(orders, &session.current.units, &session.current.contacts) } else { orders };
+    let orders = if queued { queued_commands(orders) } else { orders };
     let orders = if formation { formation_commands(orders) } else { orders };
     let reason = if selection.selected().is_empty() { "No units selected" } else { reason };
     feedback.show_orders(&orders, ground_point(ground, &map.heights), &map.blueprints, reason);
@@ -717,7 +717,7 @@ fn issue_minimap_order(session: &Session, selection: &Selection, camera: &Camera
         surfaced: &session.current.surfaced,
     };
     let orders = if attack_move { right_click_orders(&click) } else { move_orders(&click) };
-    let orders = if queued { queued_commands(orders, &session.current.units, &session.current.contacts) } else { orders };
+    let orders = if queued { queued_commands(orders) } else { orders };
     let orders = if formation { formation_commands(orders) } else { orders };
     let reason = if selection.selected().is_empty() { "No units selected" } else { "The selected units cannot move" };
     feedback.show_orders(&orders, ground_point(ground, &map.heights), &map.blueprints, reason);

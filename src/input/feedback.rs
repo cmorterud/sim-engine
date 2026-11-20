@@ -88,6 +88,7 @@ pub fn describe(command: &SimCommand, blueprints: &BlueprintDb) -> Option<(Marke
         SimCommand::Build { blueprint, .. } => (MarkerKind::Build, format!("Build: {}", blueprints.get(*blueprint).name), None),
         SimCommand::QueueMove { units, attack: false, .. } => (MarkerKind::Move, format!("Queued move: {}", unit_count(units)), None),
         SimCommand::QueueMove { units, attack: true, .. } => (MarkerKind::AttackMove, format!("Queued attack-move: {}", unit_count(units)), None),
+        SimCommand::QueueAttack { units, target } => (MarkerKind::Attack, format!("Queued attack: {}", unit_count(units)), Some(*target)),
         SimCommand::FormationMove { units, attack, queued, .. } => {
             let kind = if *attack { MarkerKind::AttackMove } else { MarkerKind::Move };
             let order = match (*queued, *attack) {
@@ -199,6 +200,7 @@ mod tests {
             (SimCommand::Move { units: units(12), goal }, MarkerKind::Move, "Move: 12 units"),
             (SimCommand::AttackMove { units: units(1), goal }, MarkerKind::AttackMove, "Attack-move: 1 unit"),
             (SimCommand::Attack { units: units(3), target: SimId(9) }, MarkerKind::Attack, "Attack: 3 units"),
+            (SimCommand::QueueAttack { units: units(3), target: SimId(9) }, MarkerKind::Attack, "Queued attack: 3 units"),
             (SimCommand::Assist { units: units(2), target: SimId(9) }, MarkerKind::Support, "Assist: 2 units"),
             (SimCommand::Reclaim { units: units(2), target: SimId(9) }, MarkerKind::Support, "Reclaim: 2 units"),
             (SimCommand::SetRally { factory: SimId(1), point: goal }, MarkerKind::Rally, "Rally point set"),

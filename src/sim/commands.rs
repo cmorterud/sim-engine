@@ -23,6 +23,9 @@ pub enum SimCommand {
     /// Go there after finishing what is already ordered. A group shares one route, and ends
     /// up in a formation there.
     QueueMove { units: Vec<SimId>, goal: Vec2Fp, attack: bool },
+    /// Attack one enemy after finishing what is already ordered, following it wherever it goes
+    /// in the meantime. If it is gone by then, the attack is skipped.
+    QueueAttack { units: Vec<SimId>, target: SimId },
     /// Travel together at the pace of the slowest, keeping a formation all the way there.
     /// `attack` stops the whole group to fight, and `queued` goes after what is already ordered.
     FormationMove { units: Vec<SimId>, goal: Vec2Fp, attack: bool, queued: bool },

@@ -966,6 +966,7 @@ impl SimWorld {
                 SimCommand::AttackGround { units, point } => self.command_attack_ground(units, *point),
                 SimCommand::Discharge { unit, target } => self.command_discharge(*unit, *target),
                 SimCommand::QueueMove { units, goal, attack } => self.queue_move(units, *goal, *attack, false),
+                SimCommand::QueueAttack { units, target } => self.queue_attack(units, *target),
                 SimCommand::FormationMove { units, goal, attack, queued: true } => self.queue_move(units, *goal, *attack, true),
                 SimCommand::FormationMove { units, goal, attack, queued: false } => {
                     self.clear_unit_plans(units);
@@ -999,19 +1000,53 @@ impl SimWorld {
             .collect();
         let kind = if attack { OrderKind::AttackMove } else { OrderKind::Move };
         for (id, order) in self.plan_orders(&mobile, kind, goal, None, true, formation) {
-            let (_, entity) = self.find_unit(id).expect("just checked");
-            self.end_patrol(id, entity);
-            if self.ecs.get::<&Builder>(entity).is_ok() {
-                self.adopt_current_order(id);
-                self.ecs.get::<&mut Builder>(entity).expect("just checked").tasks.push(BuildTask::Walk { order, started: false });
-            } else if self.ecs.get::<&OrderQueue>(entity).is_ok() {
-                self.ecs.get::<&mut OrderQueue>(entity).expect("just checked").0.push(order);
-            } else {
-                self.ecs.insert_one(entity, OrderQueue(vec![order])).expect("unit is live");
-                let at = self.order_queues.partition_point(|queue| queue.0 < id);
-                self.order_queues.insert(at, (id, entity));
+            self.enqueue_order(id, order);
+        }
+    }
+
+    /// An attack on one enemy, after what the units are already doing. Its route follows the
+    /// target from now on, so that the attack goes wherever the target has got to by its turn.
+    fn queue_attack(&mut self, units: &[SimId], target: SimId) {
+        let Some(position) = self.unit_position(target) else {
+            return;
+        };
+        let armed = self.armed_against(units, target);
+        for (id, order) in self.plan_orders(&armed, OrderKind::Attack, position.xy(), Some(target), true, false) {
+            self.enqueue_order(id, order);
+        }
+    }
+
+    /// Puts an order at the end of a unit's queue: a builder's tasks, or the order queue.
+    fn enqueue_order(&mut self, id: SimId, order: Order) {
+        let (_, entity) = self.find_unit(id).expect("orders are planned for live units");
+        self.end_patrol(id, entity);
+        if self.ecs.get::<&Builder>(entity).is_ok() {
+            self.adopt_current_order(id);
+            self.ecs.get::<&mut Builder>(entity).expect("just checked").tasks.push(BuildTask::Walk { order, started: false });
+        } else if self.ecs.get::<&OrderQueue>(entity).is_ok() {
+            self.ecs.get::<&mut OrderQueue>(entity).expect("just checked").0.push(order);
+        } else {
+            self.ecs.insert_one(entity, OrderQueue(vec![order])).expect("unit is live");
+            let at = self.order_queues.partition_point(|queue| queue.0 < id);
+            self.order_queues.insert(at, (id, entity));
+        }
+    }
+
+    /// Starts an order that was waiting its turn. A queued attack fires only at its target,
+    /// as one given straight away does; if the target is gone, its route is handed back and
+    /// nothing starts. Returns whether the order started.
+    pub(super) fn start_queued_order(&mut self, id: SimId, order: Order) -> bool {
+        if order.kind == OrderKind::Attack {
+            let Some(target) = self.flow_field.follow_target(order.route) else {
+                self.flow_field.release(order.route);
+                return false;
+            };
+            if let Some(mut combat) = self.find_unit(id).and_then(|(_, entity)| self.ecs.get::<&mut Combat>(entity).ok()) {
+                (combat.forced_target, combat.chasing) = (Some(target), false);
             }
         }
+        self.set_order(id, order);
+        true
     }
 
     /// Whether a unit is on, or is waiting to start, an order on this route.
@@ -1079,10 +1114,14 @@ impl SimWorld {
                 let next = queue.0.remove(0);
                 let finished = queue.0.is_empty();
                 drop(queue);
-                self.set_order(id, next);
+                let started = self.start_queued_order(id, next);
                 if finished {
                     self.ecs.remove_one::<OrderQueue>(entity).expect("just checked");
                     self.order_queues.remove(index);
+                    continue;
+                }
+                if !started {
+                    // An attack on something already gone: straight on to the next order.
                     continue;
                 }
             }
@@ -1185,19 +1224,16 @@ impl SimWorld {
         self.assign_route(&[unit], OrderKind::Move, position, Some(target));
     }
 
-    fn command_attack(&mut self, units: &[SimId], target: SimId) {
-        let Some(position) = self.unit_position(target) else {
-            return;
-        };
+    /// Those of `units` with a weapon that can hit `target`: anti-air for an aircraft, a
+    /// torpedo for a submarine, and for anything else, a ground weapon, or a torpedo for a ship.
+    fn armed_against(&self, units: &[SimId], target: SimId) -> Vec<SimId> {
         let (target_flies, target_dives, target_sails) = self.find_unit(target).map_or((false, false, false), |(_, entity)| {
             let flies = self.ecs.get::<&Flight>(entity).is_ok_and(|flight| flight.airborne());
             let class = self.ecs.get::<&UnitStats>(entity).map_or(MoveClass::Land, |stats| stats.move_class);
             let up = self.surfaced.binary_search(&target).is_ok();
             (flies, class == MoveClass::Submarine && !up, class == MoveClass::Naval || (class == MoveClass::Submarine && up))
         });
-        // Only units with a weapon that can hit it: anti-air for an aircraft, a torpedo for a
-        // submarine, and for anything else, a ground weapon, or a torpedo for a ship.
-        let armed: Vec<SimId> = units
+        units
             .iter()
             .copied()
             .filter(|id| *id != target)
@@ -1224,7 +1260,14 @@ impl SimWorld {
                     can_hit && self.ecs.get::<&Combat>(entity).is_ok_and(|combat| combat.range > Fp::ZERO)
                 })
             })
-            .collect();
+            .collect()
+    }
+
+    fn command_attack(&mut self, units: &[SimId], target: SimId) {
+        let Some(position) = self.unit_position(target) else {
+            return;
+        };
+        let armed = self.armed_against(units, target);
         self.clear_unit_plans(&armed);
         for &id in &armed {
             let (_, entity) = self.find_unit(id).expect("just checked");

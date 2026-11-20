@@ -841,6 +841,7 @@ impl SimWorld {
             | SimCommand::Unload { .. }
             | SimCommand::AttackMove { .. }
             | SimCommand::QueueMove { .. }
+            | SimCommand::QueueAttack { .. }
             | SimCommand::FormationMove { .. }
             | SimCommand::AttackGround { .. }
             | SimCommand::Discharge { .. }
@@ -1253,7 +1254,10 @@ impl SimWorld {
                 } else {
                     builder.tasks[0] = BuildTask::Walk { order, started: true };
                     drop(builder);
-                    self.set_order(id, order);
+                    if !self.start_queued_order(id, order) {
+                        // An attack on something already gone: on to the next task.
+                        self.ecs.get::<&mut Builder>(entity).expect("builder list only holds builders").tasks.remove(0);
+                    }
                 }
             }
             return;
