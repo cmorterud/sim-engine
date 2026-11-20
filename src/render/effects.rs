@@ -39,6 +39,14 @@ const SCAR_FADE: f64 = 90.0;
 const SCAR_APPEAR: f64 = 0.3;
 /// How high over the ground a blast can be and still mark it.
 const SCAR_REACH: f64 = 4.0;
+/// The most track marks kept at once, apart from the scars, so that driving never wipes out
+/// the marks of a battle.
+const MAX_TRACKS: usize = 2_000;
+/// How long track marks last, in seconds, the last part of it fading away.
+const TRACK_LIFE: f64 = 8.0;
+const TRACK_FADE: f64 = 5.0;
+/// How far apart a vehicle's track marks are laid, as a share of its width.
+const TRACK_SPACING: f64 = 0.8;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 struct Puff {
@@ -111,12 +119,33 @@ impl Scar {
     }
 }
 
+/// A stretch of the marks a tracked vehicle leaves behind it on the ground.
+#[derive(Copy, Clone, Debug, PartialEq)]
+struct Track {
+    at: [f64; 3],
+    width: f32,
+    length: f32,
+    /// Which way the vehicle was heading, as a unit vector.
+    heading: [f32; 2],
+    born: f64,
+}
+
+impl Track {
+    /// How strongly it shows at `time`, from 0 to 1.
+    fn strength(&self, time: f64) -> f32 {
+        (((TRACK_LIFE - (time - self.born)) / TRACK_FADE).clamp(0.0, 1.0)) as f32
+    }
+}
+
 /// What is going on, kept between frames.
 #[derive(Default)]
 pub struct Effects {
     // Queues, so that dropping the oldest when full costs nothing however many there are.
     puffs: VecDeque<Puff>,
     scars: VecDeque<Scar>,
+    tracks: VecDeque<Track>,
+    /// Where each tracked vehicle last left a mark.
+    track_ends: Vec<(SimId, [f64; 3])>,
     /// The latest snapshot already looked at for explosions, by its tick.
     seen_tick: Option<u32>,
     /// Where each missile and ship last left a puff.
@@ -338,6 +367,54 @@ impl Effects {
             });
         }
         self.trail_ends = next_ends;
+        self.lay_tracks(previous, current, alpha, looks, water, time);
+    }
+
+    /// Lays track marks behind tracked vehicles on the ground, as far as each has moved since
+    /// the last frame.
+    fn lay_tracks(&mut self, previous: &SimSnapshot, current: &SimSnapshot, alpha: f64, looks: &[UnitLook], water: Option<f64>, time: f64) {
+        let mut ends = std::mem::take(&mut self.track_ends);
+        ends.sort_unstable_by_key(|end| end.0);
+        let mut next_ends = Vec::with_capacity(ends.len());
+        merge_by_id(&previous.units, &current.units, |unit| unit.id, |before, unit| {
+            let Some(before) = before else { return };
+            let tracked = looks.get(usize::from(unit.blueprint)).is_some_and(|look| look.base.is_some_and(Shape::leaves_tracks) || look.shape.leaves_tracks());
+            if !tracked || unit.built_permille < 1000 {
+                return;
+            }
+            let at: [f64; 3] = std::array::from_fn(|axis| {
+                let (from, to) = ([before.x, before.y, before.z][axis], [unit.x, unit.y, unit.z][axis]);
+                (f64::from(from) + (f64::from(to) - f64::from(from)) * alpha) * RAW_TO_WORLD
+            });
+            if water.is_some_and(|water| at[2] < water) {
+                return;
+            }
+            let width = f64::from(unit.radius) * RAW_TO_WORLD * 1.6;
+            let spacing = width * TRACK_SPACING;
+            let last = ends.binary_search_by_key(&unit.id, |end| end.0).ok().map_or(at, |index| ends[index].1);
+            let (dx, dy) = (at[0] - last[0], at[1] - last[1]);
+            let distance = dx.hypot(dy);
+            let mut end = last;
+            if distance > spacing * 40.0 {
+                // Out of view, or new: start afresh.
+                end = at;
+            } else if distance >= spacing {
+                let heading = [(dx / distance) as f32, (dy / distance) as f32];
+                let steps = (distance / spacing) as usize;
+                for step in 1..=steps {
+                    let share = step as f64 * spacing / distance;
+                    let spot: [f64; 3] = std::array::from_fn(|axis| last[axis] + (at[axis] - last[axis]) * share);
+                    if self.tracks.len() >= MAX_TRACKS {
+                        self.tracks.pop_front();
+                    }
+                    // Each stretch reaches back over the one before, so that they join.
+                    self.tracks.push_back(Track { at: spot, width: width as f32, length: (spacing * 1.7) as f32, heading, born: time });
+                    end = spot;
+                }
+            }
+            next_ends.push((unit.id, end));
+        });
+        self.track_ends = next_ends;
     }
 
     /// Forgets puffs and scars that have gone, and draws the rest.
@@ -345,6 +422,12 @@ impl Effects {
         // A clock that went backwards is a new game: start clean.
         self.puffs.retain(|puff| time - puff.born < puff.life && puff.born - time < 10.0);
         self.scars.retain(|scar| time - scar.born < SCAR_LIFE && scar.born - time < 10.0);
+        self.tracks.retain(|track| time - track.born < TRACK_LIFE && track.born - time < 10.0);
+        for track in &self.tracks {
+            // The shader reads a scar's look from its color: tracks are its third kind.
+            let look = [2.0, track.strength(time), 0.0];
+            out.push(Shape::Scar, painted(track.at, [track.width, track.length, 1.0], track.heading, look, look, look, 0.0, eye));
+        }
         for scar in &self.scars {
             let strength = scar.strength(time);
             if strength <= 0.0 {
@@ -596,6 +679,40 @@ mod tests {
         effects.trail(&before, &after, 1.0, &[], None, 0.1);
         // 30 units at a puff every 1.8.
         assert_eq!(count(&mut effects, 0.1, Shape::Smoke), 16);
+    }
+
+    /// A tracked vehicle on the move leaves marks behind it that fade; one standing still, or
+    /// a walker, leaves none.
+    #[test]
+    fn tracked_vehicles_leave_marks_that_fade() {
+        use crate::sim::blueprints::BlueprintDb;
+        let db = BlueprintDb::standard();
+        let looks = crate::render::instances::unit_looks(&db);
+        let marks = |key: &str, moves: i32| {
+            let mut effects = Effects::new();
+            let mut start = unit(1);
+            start.blueprint = db.id(key).0;
+            let mut before = snapshot(1);
+            before.units = vec![start];
+            let mut after = snapshot(2);
+            let mut moved = start;
+            moved.x += 4096 * moves;
+            after.units = vec![moved];
+            effects.trail(&before, &before, 0.0, &looks, None, 0.0);
+            effects.trail(&before, &after, 1.0, &looks, None, 0.1);
+            let scars = |effects: &mut Effects, time: f64| {
+                let mut out = InstanceBatches::default();
+                effects.build(time, [0.0; 3], &mut out);
+                out.shape(Shape::Scar).iter().filter(|instance| instance.color[0] > 1.5).map(|instance| instance.color[1]).collect::<Vec<f32>>()
+            };
+            (scars(&mut effects, 0.2), scars(&mut effects, TRACK_LIFE - TRACK_FADE * 0.5), scars(&mut effects, TRACK_LIFE + 1.0))
+        };
+        let (fresh, fading, gone) = marks("t2_heavy_tank", 30);
+        assert!(fresh.len() >= 2 && fresh.iter().all(|strength| *strength > 0.99), "fresh marks behind a tank: {fresh:?}");
+        assert!(fading.iter().all(|strength| *strength < 0.6), "fading: {fading:?}");
+        assert!(gone.is_empty(), "gone");
+        assert!(marks("t2_heavy_tank", 0).0.is_empty(), "a tank standing still leaves none");
+        assert!(marks("t1_light_walker", 30).0.is_empty(), "a walker leaves none");
     }
 
     #[test]

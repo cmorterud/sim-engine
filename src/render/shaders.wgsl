@@ -30,8 +30,23 @@ const TRIM: u32 = 0u;
 const HULL: u32 = 1u;
 const METAL: u32 = 2u;
 const GLOW: u32 = 3u;
+const PANEL: u32 = 4u;
+const GLASS: u32 = 5u;
+// How much of the body's color a recessed panel keeps.
+const PANEL_SHADE: f32 = 0.55;
+// Glass: a dark blue-green tint, in linear light.
+const GLASS_COLOR: vec3<f32> = vec3<f32>(0.012, 0.03, 0.045);
 // How parts move, as flags above the material (meshes.rs, `motion`).
 const MATERIAL_MASK: u32 = 0xffu;
+const OPENNESS_SHIFT: u32 = 24u;
+// How much of the sun's light crowded corners lose, beside the sky's.
+const SUN_OCCLUSION: f32 = 0.6;
+// How brightly edges facing away from the eye catch the light, close up and from further out,
+// and the distances, in world units, between which it grows.
+const RIM_NEAR: f32 = 0.18;
+const RIM_FAR: f32 = 0.42;
+const RIM_NEAR_DISTANCE: f32 = 300.0;
+const RIM_FAR_DISTANCE: f32 = 1100.0;
 const SPIN: u32 = 256u;
 const SWING: u32 = 512u;
 const RECOIL: u32 = 1024u;
@@ -69,6 +84,8 @@ struct UnitOutput {
     @location(3) @interpolate(flat) material: u32,
     // 0 for a lit shape, up to 1 for a flat tactical dot.
     @location(4) morph: f32,
+    // How open the surface is to the sky, from the mesh: less where parts crowd one another.
+    @location(5) openness: f32,
 };
 
 struct Animated {
@@ -156,12 +173,16 @@ fn vs_unit(
     var albedo = instance.color.rgb;
     if (kind == HULL) {
         albedo = instance.hull.rgb;
+    } else if (kind == PANEL) {
+        albedo = instance.hull.rgb * PANEL_SHADE;
     } else if (kind == GLOW) {
         albedo = instance.glow.rgb;
     }
     var linear = to_linear(albedo);
     if (kind == METAL) {
         linear = GUNMETAL * GUNMETAL;
+    } else if (kind == GLASS) {
+        linear = GLASS_COLOR;
     }
     if ((material & FLASH) != 0u) {
         linear = FLASH_COLOR;
@@ -176,6 +197,7 @@ fn vs_unit(
     out.relative = relative;
     out.material = kind;
     out.morph = morph;
+    out.openness = f32(material >> OPENNESS_SHIFT) / 255.0;
     return out;
 }
 
@@ -188,18 +210,26 @@ fn fs_unit(input: UnitOutput) -> @location(0) vec4<f32> {
     let to_eye = normalize(-input.relative);
     let sun = max(dot(normal, LIGHT), 0.0);
     let ambient = mix(GROUND_BOUNCE, SKY, normal.z * 0.5 + 0.5);
-    var diffuse = input.albedo * (ambient + SUN * sun);
+    // Crowded corners lose most of the sky's light and some of the sun's, which sets parts
+    // apart where they meet, as a stylized contact shadow.
+    let open = input.openness;
+    var diffuse = input.albedo * (ambient * open + SUN * sun * mix(1.0, open, SUN_OCCLUSION));
     // Metal shines sharply, paint softly.
     var shininess = 20.0;
     var strength = 0.18;
     if (input.material == METAL) {
         shininess = 48.0;
         strength = 0.35;
+    } else if (input.material == GLASS) {
+        shininess = 70.0;
+        strength = 0.9;
     }
     let halfway = normalize(LIGHT + to_eye);
     let shine = pow(max(dot(normal, halfway), 0.0), shininess) * strength * step(0.0, sun);
-    // Edges facing away from the eye catch a little light, so that outlines show against the ground.
-    let rim = pow(1.0 - max(dot(normal, to_eye), 0.0), 3.0) * 0.18;
+    // Edges facing away from the eye catch a little light, so that outlines show against the
+    // ground: more from further out, where units are small and the ground busy around them.
+    let rim_strength = mix(RIM_NEAR, RIM_FAR, smoothstep(RIM_NEAR_DISTANCE, RIM_FAR_DISTANCE, length(input.relative)));
+    let rim = pow(1.0 - max(dot(normal, to_eye), 0.0), 3.0) * rim_strength;
     let lit = diffuse + vec3<f32>(shine) + rim * mix(input.albedo, vec3<f32>(1.0), 0.5);
     return vec4<f32>(mix(lit, input.albedo, input.morph), 1.0);
 }
@@ -296,6 +326,8 @@ struct ScarOutput {
     @location(2) fog_coordinates: vec2<f32>,
 };
 
+// How dark fresh track marks are, as the share of the ground they cover.
+const TRACK_DARKNESS: f32 = 0.32;
 const SCORCH: vec3<f32> = vec3<f32>(0.035, 0.03, 0.025);
 const CRATER_BOWL: vec3<f32> = vec3<f32>(0.05, 0.04, 0.03);
 const THROWN_EARTH: vec3<f32> = vec3<f32>(0.19, 0.15, 0.10);
@@ -328,6 +360,15 @@ fn fs_scar(input: ScarOutput) -> @location(0) vec4<f32> {
     let reach = length(input.across) + ragged;
     var color = SCORCH;
     var alpha = 0.0;
+    if (input.look.x > 1.5) {
+        // Track marks: two dark bands of churned earth along the way the vehicle went, faint
+        // and broken a little, fading out at either end of the stretch so that stretches join.
+        let side = abs(input.across.x);
+        let band = smoothstep(0.32, 0.42, side) * (1.0 - smoothstep(0.72, 0.84, side));
+        let along = 1.0 - smoothstep(0.45, 0.8, abs(input.across.y));
+        let broken = 0.7 + 0.3 * value_noise(input.across * vec2<f32>(3.0, 9.0));
+        return vec4<f32>(CRATER_BOWL * sight, band * along * broken * TRACK_DARKNESS * input.look.y);
+    }
     if (input.look.x < 0.5) {
         // Blackened ground, solid in the middle and streaked outwards towards its edge.
         let direction = input.across / max(length(input.across), 0.001);

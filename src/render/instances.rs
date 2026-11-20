@@ -893,7 +893,7 @@ mod tests {
 
     /// What share of a unit, as the camera sees it close up, is each material: its base and
     /// what turns on it, facing the same way.
-    pub(crate) fn seen_shares(set: &super::super::meshes::MeshSet, key: &str) -> [f32; 4] {
+    pub(crate) fn seen_shares(set: &super::super::meshes::MeshSet, key: &str) -> [f32; 6] {
         use super::super::meshes::tests::view;
         let look = unit_look(key);
         let parts: Vec<(Shape, f32)> = look.base.into_iter().chain([look.shape]).map(|shape| (shape, 0.0)).collect();

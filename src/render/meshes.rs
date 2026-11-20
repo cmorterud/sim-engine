@@ -289,6 +289,11 @@ impl Shape {
         matches!(self, Self::Frigate | Self::Destroyer | Self::Cruiser | Self::Battleship | Self::Battlecruiser | Self::Submarine | Self::MissileSubmarine | Self::EscortCorvette | Self::TorpedoBoat)
     }
 
+    /// Whether the shape runs on tracks, and leaves their marks on the ground behind it.
+    pub const fn leaves_tracks(self) -> bool {
+        matches!(self, Self::TankHull | Self::ArtilleryHull | Self::EngineerHull)
+    }
+
     /// Whether the shape is a pair of legs, which swing as the unit walks.
     pub const fn walks(self) -> bool {
         matches!(self, Self::CommanderLegs | Self::BotLegs)
@@ -308,6 +313,14 @@ pub enum Material {
     Metal = 2,
     /// Lit from inside: engines, emitters, and cores. Never shaded.
     Glow = 3,
+    /// Recessed armor: the body's color darkened, for hatches, vents, and panel insets.
+    Panel = 4,
+    /// Cockpit canopies, bridge windows, and vision slits: dark, tinted, and shiny.
+    Glass = 5,
+}
+
+impl Material {
+    pub const ALL: [Self; 6] = [Self::Trim, Self::Hull, Self::Metal, Self::Glow, Self::Panel, Self::Glass];
 }
 
 /// How a part moves, as flags above a vertex's material. Each moves about the vertex's pivot,
@@ -326,6 +339,9 @@ pub mod motion {
     pub const PULSE: u32 = 1 << 12;
     /// The bits that hold the material.
     pub const MATERIAL_MASK: u32 = 0xff;
+    /// How far up the top byte holds how open the vertex is to the sky: 255 for nothing in
+    /// the way, less where other parts of the shape, or the ground, crowd it.
+    pub const OPENNESS_SHIFT: u32 = 24;
 }
 
 #[repr(C)]
@@ -348,6 +364,8 @@ struct MeshBuilder {
     /// How the parts added next move, and about where.
     motion: u32,
     pivot: Vec3,
+    /// Whether large faces are cut into grids, for shapes shaded where their parts meet.
+    subdivide: bool,
 }
 
 impl MeshBuilder {
@@ -411,8 +429,42 @@ impl MeshBuilder {
         let flipped = normal.dot(face_center - part_center) < 0.0;
         let normal = if flipped { -normal } else { normal };
         let base = self.vertices.len() as u32;
+        let vertex = |point: Vec3| MeshVertex {
+            position: point.to_array(),
+            normal: normal.to_array(),
+            material: self.material as u32 | self.motion | (255 << motion::OPENNESS_SHIFT),
+            pivot: self.pivot.to_array(),
+        };
+        // A large four-sided face is cut into a grid, so that the shading baked into its
+        // vertices where parts meet can show across it, not only at its corners.
+        if let (&[p0, p1, p2, p3], true) = (points, self.subdivide) {
+            let across = ((p1 - p0).length().max((p2 - p3).length()) / SUBDIVIDE_EDGE).ceil().max(1.0) as u32;
+            let along = ((p3 - p0).length().max((p2 - p1).length()) / SUBDIVIDE_EDGE).ceil().max(1.0) as u32;
+            if across * along > 1 {
+                for j in 0..=along {
+                    let v = j as f32 / along as f32;
+                    for i in 0..=across {
+                        let u = i as f32 / across as f32;
+                        let point = (p0 * (1.0 - u) + p1 * u) * (1.0 - v) + (p3 * (1.0 - u) + p2 * u) * v;
+                        self.vertices.push(vertex(point));
+                    }
+                }
+                let at = |i: u32, j: u32| base + j * (across + 1) + i;
+                for j in 0..along {
+                    for i in 0..across {
+                        let (a, b, c, d) = (at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1));
+                        if flipped {
+                            self.indices.extend_from_slice(&[a, c, b, a, d, c]);
+                        } else {
+                            self.indices.extend_from_slice(&[a, b, c, a, c, d]);
+                        }
+                    }
+                }
+                return;
+            }
+        }
         for point in points {
-            self.vertices.push(MeshVertex { position: point.to_array(), normal: normal.to_array(), material: self.material as u32 | self.motion, pivot: self.pivot.to_array() });
+            self.vertices.push(vertex(*point));
         }
         for index in 1..points.len() as u32 - 1 {
             let (second, third) = if flipped { (index + 1, index) } else { (index, index + 1) };
@@ -1142,7 +1194,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.wings(0.05, 0.2, [-0.46, -0.32], [-0.47, -0.42], [0.01, 0.004], 0.0);
             mesh.paint(Material::Trim);
             mesh.fin(0.0, [-0.44, -0.22], 0.05, [-0.47, -0.37], 0.28, 0.012);
-            mesh.paint(Material::Metal);
+            mesh.paint(Material::Glass);
             mesh.body(0.0, &[[0.08, 0.02, 0.012, 0.065], [0.16, 0.042, 0.03, 0.07], [0.27, 0.03, 0.02, 0.058], [0.32, 0.006, 0.005, 0.05]], 6);
         }
         Shape::Scout => {
@@ -2060,6 +2112,128 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
     }
 }
 
+/// Whether a shape is shaded darker where its parts crowd one another (`Some`), and if so
+/// whether it stands on the ground, which crowds its lowest parts too. Markers and effects are
+/// not shaded so; aircraft fly and ships float, clear of the ground at the bottom of their box.
+const fn occlusion_ground(shape: Shape) -> Option<bool> {
+    match shape {
+        Shape::Cube | Shape::Shell | Shape::Missile | Shape::Fireball | Shape::Smoke | Shape::Wake | Shape::Scar | Shape::Dome | Shape::SelectionRing | Shape::SelectionBox => None,
+        Shape::Aircraft
+        | Shape::Bomber
+        | Shape::Gunship
+        | Shape::StrategicBomber
+        | Shape::AirSuperiority
+        | Shape::HeavyGunship
+        | Shape::Transport
+        | Shape::Scout
+        | Shape::FighterBomber
+        | Shape::TorpedoBomber
+        | Shape::Frigate
+        | Shape::Destroyer
+        | Shape::Cruiser
+        | Shape::Battleship
+        | Shape::Battlecruiser
+        | Shape::Submarine
+        | Shape::MissileSubmarine
+        | Shape::EscortCorvette
+        | Shape::TorpedoBoat => Some(false),
+        _ => Some(true),
+    }
+}
+
+/// The longest a side of a four-sided face may be, in shares of the shape's box, before the
+/// face is cut into a grid for its shading.
+const SUBDIVIDE_EDGE: f32 = 0.25;
+
+/// Cells along each side of the grid a shape is sampled into for shading where parts meet.
+const OPENNESS_CELLS: usize = 40;
+/// How far, in shares of the shape's box, a vertex looks for parts crowding it.
+const OPENNESS_REACH: f32 = 0.3;
+/// How dark the most crowded vertex gets, as a share of its light.
+const OPENNESS_FLOOR: f32 = 0.2;
+/// How much darker the foot of a grounded shape is than its top.
+const OPENNESS_FOOT: f32 = 0.22;
+
+/// Works out how open each vertex of one shape is to the sky, from `first_vertex` on, and
+/// keeps it in the top byte of its material: the shape's surfaces are marked in a grid, and
+/// from each vertex a fan of rays over its side of the surface looks for them nearby. A
+/// vertex in a corner, under an overhang, or by the ground sees less sky, and is shaded darker.
+fn bake_openness(vertices: &mut [MeshVertex], first_vertex: usize, indices: &[u32], grounded: bool) {
+    let cells = OPENNESS_CELLS;
+    let cell = 1.0 / cells as f32;
+    let index_of = |point: Vec3| -> Option<usize> {
+        let at = ((point + Vec3::splat(0.5)) / cell).floor();
+        if at.min_element() < 0.0 || at.max_element() >= cells as f32 {
+            return None;
+        }
+        Some((at.z as usize * cells + at.y as usize) * cells + at.x as usize)
+    };
+    let mut solid = vec![false; cells * cells * cells];
+    for triangle in indices.chunks(3) {
+        let [a, b, c] = [0, 1, 2].map(|corner| Vec3::from(vertices[triangle[corner] as usize].position));
+        let longest = (b - a).length().max((c - a).length()).max((c - b).length());
+        let steps = ((longest / (cell * 0.5)).ceil() as usize).max(1);
+        for i in 0..=steps {
+            for j in 0..=steps - i {
+                let (u, v) = (i as f32 / steps as f32, j as f32 / steps as f32);
+                if let Some(at) = index_of(a + (b - a) * u + (c - a) * v) {
+                    solid[at] = true;
+                }
+            }
+        }
+    }
+    // A fixed fan of directions spread evenly over the hemisphere about +Z, low ones as many
+    // as high, so that walls close by count: exaggerated, for a stylized look, beside light
+    // from the sky, which falls mostly from overhead.
+    const RAYS: usize = 32;
+    let fan: Vec<Vec3> = (0..RAYS)
+        .map(|index| {
+            let height = (index as f32 + 0.5) / RAYS as f32;
+            let around = index as f32 * 2.399_963;
+            let spread = (1.0 - height * height).sqrt();
+            Vec3::new(around.cos() * spread, around.sin() * spread, height)
+        })
+        .collect();
+    let steps = (OPENNESS_REACH / cell).ceil() as usize;
+    let mut done = std::collections::HashSet::new();
+    for &index in indices {
+        let index = index as usize;
+        if index < first_vertex || !done.insert(index) {
+            continue;
+        }
+        let vertex = vertices[index];
+        let (normal, position) = (Vec3::from(vertex.normal), Vec3::from(vertex.position));
+        if normal.length_squared() < 0.5 {
+            continue;
+        }
+        // Turn the fan from +Z to the normal.
+        let helper = if normal.z.abs() < 0.9 { Vec3::Z } else { Vec3::X };
+        let side = helper.cross(normal).normalize();
+        let other = normal.cross(side);
+        let start = position + normal * cell * 1.5;
+        let mut blocked = 0.0;
+        for direction in &fan {
+            let ray = side * direction.x + other * direction.y + normal * direction.z;
+            for step in 0..steps {
+                let point = start + ray * (step as f32 * cell);
+                let hit = if grounded && point.z < -0.5 { true } else { index_of(point).is_some_and(|at| solid[at]) };
+                if hit {
+                    // Nearer parts crowd it more.
+                    blocked += 1.0 - step as f32 / steps as f32 * 0.5;
+                    break;
+                }
+            }
+        }
+        let mut openness = 1.0 - (blocked / RAYS as f32) * (1.0 - OPENNESS_FLOOR);
+        // What stands on the ground darkens a little towards its foot, which grounds it.
+        if grounded {
+            openness *= 1.0 - OPENNESS_FOOT * (0.5 - position.z).clamp(0.0, 1.0);
+        }
+        let byte = (openness.clamp(0.0, 1.0) * 255.0).round() as u32;
+        vertices[index].material = (vertex.material & !(0xff << motion::OPENNESS_SHIFT)) | (byte << motion::OPENNESS_SHIFT);
+    }
+}
+
 /// Every shape, in one vertex and index buffer.
 pub struct MeshSet {
     pub vertices: Vec<MeshVertex>,
@@ -2077,8 +2251,14 @@ impl MeshSet {
             mesh.paint(Material::Trim);
             mesh.motion = 0;
             mesh.pivot = Vec3::ZERO;
+            let first_vertex = mesh.vertices.len();
+            mesh.subdivide = occlusion_ground(shape).is_some();
             build_shape(shape, &mut mesh);
-            ranges.push(start..mesh.indices.len() as u32);
+            let end = mesh.indices.len() as u32;
+            if let Some(grounded) = occlusion_ground(shape) {
+                bake_openness(&mut mesh.vertices, first_vertex, &mesh.indices[start as usize..end as usize], grounded);
+            }
+            ranges.push(start..end);
         }
         Self { vertices: mesh.vertices, indices: mesh.indices, ranges }
     }
@@ -2143,7 +2323,7 @@ pub(super) mod tests {
     pub fn materials(set: &MeshSet, shape: Shape) -> Vec<Material> {
         let mut found = Vec::new();
         for vertex in shape_vertices(set, shape as usize) {
-            let material = [Material::Trim, Material::Hull, Material::Metal, Material::Glow][(vertex.material & motion::MATERIAL_MASK) as usize];
+            let material = Material::ALL[(vertex.material & motion::MATERIAL_MASK) as usize];
             if !found.contains(&material) {
                 found.push(material);
             }
@@ -2178,7 +2358,7 @@ pub(super) mod tests {
                         (((x + span) / (2.0 * span)) * VIEW_SIDE as f32, ((span - up) / (2.0 * span)) * VIEW_SIDE as f32, away)
                     })
                     .collect();
-                let material = [Material::Trim, Material::Hull, Material::Metal, Material::Glow][(set.vertices[triangle[0] as usize].material & motion::MATERIAL_MASK) as usize];
+                let material = Material::ALL[(set.vertices[triangle[0] as usize].material & motion::MATERIAL_MASK) as usize];
                 let (a, b, c) = (corners[0], corners[1], corners[2]);
                 let area = (b.0 - a.0) * (c.1 - a.1) - (c.0 - a.0) * (b.1 - a.1);
                 if area.abs() < 1e-9 {
@@ -2223,7 +2403,7 @@ pub(super) mod tests {
     #[test]
     fn every_vertex_has_a_known_material() {
         let set = MeshSet::build();
-        assert!(set.vertices.iter().all(|vertex| vertex.material & motion::MATERIAL_MASK <= Material::Glow as u32));
+        assert!(set.vertices.iter().all(|vertex| vertex.material & motion::MATERIAL_MASK <= Material::Glass as u32));
     }
 
     /// Only glowing parts flash or pulse, and a flash never shows until a gun fires.
