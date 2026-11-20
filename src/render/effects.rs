@@ -19,6 +19,10 @@ const TRAIL_SPACING: f64 = 0.6;
 const SMOKE_OPACITY: f32 = 0.55;
 /// How far apart a ship's wake puffs are, as a share of the ship's size.
 const WAKE_SPACING: f64 = 0.35;
+/// How far apart a ship's bow spray is thrown, as a share of its radius, and the bit that
+/// keeps where the spray last went apart from where the wake did, which share the ship's id.
+const BOW_SPRAY_SPACING: f64 = 0.5;
+const BOW_SPRAY_ID: u32 = 1 << 31;
 
 const FIRE_HOT: [f32; 3] = [1.0, 0.92, 0.55];
 const FIRE_COOL: [f32; 3] = [0.85, 0.28, 0.05];
@@ -144,6 +148,9 @@ pub struct Effects {
     puffs: VecDeque<Puff>,
     scars: VecDeque<Scar>,
     tracks: VecDeque<Track>,
+    /// Which unit each wreck seen made was, and which way it faced, by wreck, sorted by wreck:
+    /// wrecks are drawn as the burnt-out shell of what they were.
+    wreck_origins: Vec<(SimId, u16, [f32; 2])>,
     /// Where each tracked vehicle last left a mark.
     track_ends: Vec<(SimId, [f64; 3])>,
     /// The latest snapshot already looked at for explosions, by its tick.
@@ -215,6 +222,14 @@ impl Effects {
         }
     }
 
+    /// Which unit a wreck was, as a raw blueprint id, and which way it faced, if its making was
+    /// seen: wrecks already there, or made out of sight, are not known.
+    pub fn wreck_origin(&self, wreck: SimId) -> Option<(u16, [f32; 2])> {
+        let index = self.wreck_origins.binary_search_by_key(&wreck, |origin| origin.0).ok()?;
+        let (_, blueprint, facing) = self.wreck_origins[index];
+        Some((blueprint, facing))
+    }
+
     /// Starts what the latest snapshot shows has happened since the one before: shells and
     /// missiles that have hit, and units that have died. Call every frame; each snapshot is
     /// looked at once. `ground` gives the ground's height at a point, so that what lands on it
@@ -268,6 +283,8 @@ impl Effects {
                 gone.push(*unit);
             }
         });
+        // Wrecks that are gone, reclaimed or burnt away, are forgotten.
+        self.wreck_origins.retain(|(wreck, _, _)| current.wrecks.binary_search_by_key(wreck, |seen| seen.id).is_ok());
         // Units that blow up as they are destroyed, as wide as the damage they do.
         for (index, blast) in current.blasts.iter().enumerate() {
             let (x, y) = (f64::from(blast.x) * RAW_TO_WORLD, f64::from(blast.y) * RAW_TO_WORLD);
@@ -294,6 +311,12 @@ impl Effects {
             };
             if let Some(unit) = gone.iter().find(near) {
                 blasts.push(*unit);
+                let facing = [unit.facing[0] as f32, unit.facing[1] as f32];
+                let length = facing[0].hypot(facing[1]);
+                let facing = if length > 0.0 { [facing[0] / length, facing[1] / length] } else { [0.0, 1.0] };
+                if let Err(at) = self.wreck_origins.binary_search_by_key(&wreck.id, |origin| origin.0) {
+                    self.wreck_origins.insert(at, (wreck.id, unit.blueprint, facing));
+                }
             }
         });
         for unit in blasts {
@@ -364,6 +387,10 @@ impl Effects {
                 let size = (radius * 0.7) as f32;
                 let puff = Puff { shape: Shape::Wake, at: stern, rise: 0.0, born: time, life: 2.8, size, growth: 2.2, height_share: 0.08, color: FOAM, fade_to: FOAM_OLD };
                 lay(self, unit.id, stern, radius * 2.0 * WAKE_SPACING, puff);
+                // And spray thrown up at the bow, brief and small, kept apart from the wake.
+                let bow = [center[0] + dx / length * radius * 0.85, center[1] + dy / length * radius * 0.85, water + 0.6];
+                let spray = Puff { shape: Shape::Wake, at: bow, rise: 1.5, born: time, life: 0.7, size: size * 0.45, growth: 1.6, height_share: 0.3, color: FOAM, fade_to: FOAM };
+                lay(self, SimId(unit.id.0 ^ BOW_SPRAY_ID), bow, radius * BOW_SPRAY_SPACING, spray);
             });
         }
         self.trail_ends = next_ends;
@@ -621,6 +648,28 @@ mod tests {
         let mut effects = Effects::new();
         effects.note_events(&before, &after, 0.0, &|_, _| 0.0, None);
         assert_eq!(count(&mut effects, 0.01, Shape::Fireball), 1);
+    }
+
+    /// A wreck seen being made remembers the unit it was and which way it faced, until the
+    /// wreck is gone; one that only appears is not known.
+    #[test]
+    fn a_wreck_remembers_what_it_was_until_it_is_gone() {
+        let mut before = snapshot(1);
+        before.units = vec![unit(1)];
+        before.units[0].blueprint = 7;
+        before.units[0].facing = [4096, 0];
+        let wreck = WreckView { id: SimId(9), x: 4096 * 50, y: 4096 * 50, z: 0, radius: 4096 * 3, mass: 1, energy: 0, kind: WreckKind::Debris };
+        let stranger = WreckView { id: SimId(10), x: 4096 * 900, ..wreck };
+        let mut after = snapshot(2);
+        after.wrecks = vec![wreck, stranger];
+        let mut effects = Effects::new();
+        effects.note_events(&before, &after, 0.0, &|_, _| 0.0, None);
+        assert_eq!(effects.wreck_origin(SimId(9)), Some((7, [1.0, 0.0])));
+        assert_eq!(effects.wreck_origin(SimId(10)), None, "no unit died there");
+        let mut later = snapshot(3);
+        later.wrecks = vec![stranger];
+        effects.note_events(&after, &later, 1.0, &|_, _| 0.0, None);
+        assert_eq!(effects.wreck_origin(SimId(9)), None, "reclaimed");
     }
 
     fn scars(effects: &mut Effects, time: f64) -> Vec<UnitInstanceRaw> {

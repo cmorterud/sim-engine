@@ -686,6 +686,22 @@ pub fn wreck_instance(center: [f64; 3], radius: f64, eye: [f64; 3]) -> UnitInsta
     instance(center, [width, width, width * 0.5], NORTH, WRECK, PROJECTILE_ICON_PX, eye)
 }
 
+/// A wreck drawn as the burnt-out shell of the unit it was, `look`, facing as it fell: its own
+/// models, charred, squashed down, and sunk a little into the ground, with nothing lit.
+pub fn wreck_model_instances(center: [f64; 3], radius: f64, look: &UnitLook, facing: [f32; 2], eye: [f64; 3], out: &mut InstanceBatches) {
+    let size = if look.size > 0.0 { look.size } else { (radius * 2.0) as f32 };
+    let height = size * look.height_share.min(1.0) * WRECK_SQUASH;
+    let ground = center[2] - radius * 0.5;
+    let at = [center[0], center[1], ground + f64::from(height) * 0.35];
+    let (char_dark, char_light) = (WRECK, WRECK.map(|channel| channel * 1.35));
+    for shape in look.base.into_iter().chain([look.shape]) {
+        out.push(shape, painted(at, [size, size, height], facing, char_dark, char_light, char_dark, PROJECTILE_ICON_PX, eye));
+    }
+}
+
+/// How far a wreck is squashed down from the height of what it was.
+const WRECK_SQUASH: f32 = 0.55;
+
 /// A tree or rock, standing on the ground under `center`, which is where wrecks are reported:
 /// half their radius up. They keep their true size at every zoom, like the terrain.
 pub fn scenery_instance(kind: WreckKind, center: [f64; 3], radius: f64, eye: [f64; 3]) -> (Shape, UnitInstanceRaw) {
@@ -951,6 +967,23 @@ mod tests {
                     assert!(hull[2] > hull[0] + 0.05 && hull[1] > hull[0], "{} shoots at aircraft, but its hull is not cyan: {hull:?}", unit.key);
                 }
             }
+        }
+    }
+
+    /// A wreck whose unit is known is drawn with that unit's models, charred, lower than it
+    /// stood, and in no team's colors.
+    #[test]
+    fn a_wreck_is_the_charred_shell_of_what_it_was() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let tank = &looks[usize::from(db.id("t1_medium_tank").0)];
+        let mut out = InstanceBatches::default();
+        wreck_model_instances([0.0, 0.0, 4.5], 9.0, tank, [1.0, 0.0], [0.0, 0.0, 500.0], &mut out);
+        let (hull, turret) = (out.shape(Shape::TankHull), out.shape(Shape::Tank));
+        assert_eq!((hull.len(), turret.len()), (1, 1), "the tank's hull and turret");
+        for part in [hull[0], turret[0]] {
+            assert!(part.color[..3].iter().all(|channel| *channel < 0.4), "charred, not team-colored: {:?}", part.color);
+            assert!(part.model_matrix[2][2] < tank.size * tank.height_share * 0.6, "squashed down");
         }
     }
 

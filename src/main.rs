@@ -1902,6 +1902,8 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                             if wreck.kind.is_scenery() {
                                 let (shape, instance) = instances::scenery_instance(wreck.kind, center, raw_to_world(wreck.radius), eye);
                                 scene_instances.push(shape, instance);
+                            } else if let Some((blueprint, facing)) = effects.wreck_origin(wreck.id).filter(|(blueprint, _)| usize::from(*blueprint) < looks.len()) {
+                                instances::wreck_model_instances(center, raw_to_world(wreck.radius), &looks[usize::from(blueprint)], facing, eye, &mut scene_instances);
                             } else {
                                 scene_instances.push(Shape::Wreck, instances::wreck_instance(center, raw_to_world(wreck.radius), eye));
                             }

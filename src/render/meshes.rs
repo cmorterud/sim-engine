@@ -296,6 +296,7 @@ impl Shape {
     pub const fn spin_rate(self) -> Option<f32> {
         match self {
             Self::Gunship => Some(2.2),
+            Self::Transport => Some(1.8),
             Self::HeavyGunship => Some(1.7),
             Self::Radar => Some(0.25),
             Self::AirFactoryT3 => Some(0.3),
@@ -1282,19 +1283,30 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Glow);
             mesh.block([-0.1, 0.0, 0.34], [0.1, 0.012, 0.38]);
         }
+        // A tiltrotor: a team-colored cargo body with a glazed cockpit and a ramp at the back,
+        // stub wings, and a ducted rotor at each wingtip, its blades turning.
         Shape::Transport => {
-            mesh.body(0.0, &[[-0.48, 0.06, 0.07, 0.04], [-0.2, 0.13, 0.12, 0.04], [0.3, 0.13, 0.12, 0.04], [0.48, 0.06, 0.07, 0.06]], 8);
+            mesh.body(0.0, &[[-0.46, 0.07, 0.06, 0.02], [-0.3, 0.12, 0.11, 0.02], [0.22, 0.13, 0.12, 0.02], [0.38, 0.1, 0.09, 0.0], [0.48, 0.04, 0.04, -0.02]], 8);
+            mesh.paint(Material::Glass);
+            mesh.body(0.0, &[[0.3, 0.05, 0.03, 0.1], [0.4, 0.07, 0.045, 0.08], [0.46, 0.025, 0.02, 0.04]], 6);
+            mesh.paint(Material::Panel);
+            mesh.block([-0.08, -0.47, -0.07], [0.08, -0.42, 0.06]);
             mesh.paint(Material::Hull);
-            mesh.bevel([-0.11, -0.3, -0.16], [0.11, 0.3, -0.04], 0.03);
-            mesh.paint(Material::Metal);
-            for x in [-0.36_f32, 0.36] {
-                mesh.beam([x * 0.35, 0.0, 0.04], [x, 0.0, 0.04], 0.03, 0.02);
-                mesh.frustum([x, 0.0], [-0.02, 0.1], [0.14, 0.14], 12);
+            mesh.wings(0.1, 0.24, [-0.08, 0.12], [-0.06, 0.08], [0.022, 0.012], 0.05);
+            mesh.fin(0.0, [-0.46, -0.32], 0.1, [-0.46, -0.38], 0.28, 0.015);
+            for x in [-0.34_f32, 0.34] {
+                mesh.paint(Material::Metal);
+                mesh.frustum([x, 0.0], [0.0, 0.1], [0.15, 0.15], 12);
+                mesh.paint(Material::Panel);
+                mesh.frustum([x, 0.0], [0.1, 0.104], [0.125, 0.125], 12);
+                mesh.paint(Material::Trim);
+                mesh.moving(motion::SPIN, [x, 0.0, 0.0], |mesh| {
+                    mesh.block([x - 0.12, -0.018, 0.104], [x + 0.12, 0.018, 0.118]);
+                    mesh.block([x - 0.018, -0.12, 0.104], [x + 0.018, 0.12, 0.118]);
+                });
             }
             mesh.paint(Material::Glow);
-            mesh.block([-0.05, 0.42, 0.06], [0.05, 0.44, 0.1]);
-            mesh.paint(Material::Hull);
-            mesh.fin(0.0, [-0.48, -0.36], 0.1, [-0.46, -0.4], 0.26, 0.015);
+            mesh.block([-0.05, 0.43, 0.04], [0.05, 0.45, 0.07]);
         }
         Shape::FieldWorkshop => {
             mesh.paint(Material::Hull);
@@ -1609,8 +1621,9 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             for x in [-0.11_f32, 0.11] {
                 mesh.fin(x, [-0.42, -0.24], 0.04, [-0.46, -0.36], 0.26, 0.01);
             }
-            mesh.paint(Material::Metal);
+            mesh.paint(Material::Glass);
             mesh.body(0.0, &[[0.14, 0.02, 0.012, 0.065], [0.24, 0.045, 0.03, 0.07], [0.36, 0.03, 0.02, 0.05], [0.41, 0.006, 0.005, 0.04]], 6);
+            mesh.paint(Material::Metal);
         }
         // A bomber: a thick team-colored body, straight wings with engines under them, and a glazed nose.
         Shape::Bomber => {
@@ -1626,8 +1639,9 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.paint(Material::Glow);
                 mesh.body(x, &[[-0.17, 0.036, 0.03, -0.03], [-0.12, 0.045, 0.04, -0.03]], 6);
             }
-            mesh.paint(Material::Metal);
+            mesh.paint(Material::Glass);
             mesh.body(0.0, &[[0.28, 0.05, 0.025, 0.09], [0.37, 0.065, 0.04, 0.08], [0.45, 0.03, 0.02, 0.04]], 6);
+            mesh.paint(Material::Metal);
         }
         // A gunship: a rounded body tapering into a tail boom, stub wings with rocket pods, a
         // canopy at the nose, and a rotor of four slim team-colored blades.
@@ -1645,7 +1659,9 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             for x in [-0.31_f32, 0.31] {
                 mesh.body(x, &[[-0.06, 0.028, 0.028, -0.19], [0.17, 0.034, 0.034, -0.19], [0.22, 0.016, 0.016, -0.19]], 6);
             }
+            mesh.paint(Material::Glass);
             mesh.body(0.0, &[[0.26, 0.06, 0.03, -0.03], [0.36, 0.085, 0.05, -0.07], [0.46, 0.035, 0.025, -0.13]], 6);
+            mesh.paint(Material::Metal);
             mesh.moving(motion::SPIN, [0.0; 3], |mesh| {
                 mesh.paint(Material::Metal);
                 mesh.frustum([0.0, 0.0], [0.03, 0.17], [0.05, 0.04], 6);
@@ -1669,7 +1685,9 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             for x in [-0.32_f32, 0.32] {
                 mesh.body(x, &[[-0.14, 0.03, 0.03, -0.2], [0.1, 0.036, 0.036, -0.2], [0.15, 0.018, 0.018, -0.2]], 6);
             }
+            mesh.paint(Material::Glass);
             mesh.body(0.0, &[[0.28, 0.06, 0.03, -0.06], [0.37, 0.08, 0.045, -0.09], [0.46, 0.035, 0.025, -0.15]], 6);
+            mesh.paint(Material::Metal);
             // A rotor at each end, on a mast.
             for y in [-0.26_f32, 0.24] {
                 mesh.moving(motion::SPIN, [0.0, y, 0.0], |mesh| {
@@ -1694,8 +1712,9 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.paint(Material::Glow);
                 mesh.body(x, &[[-0.35, 0.04, 0.026, 0.035], [-0.3, 0.05, 0.032, 0.035]], 6);
             }
-            mesh.paint(Material::Metal);
+            mesh.paint(Material::Glass);
             mesh.body(0.0, &[[0.18, 0.03, 0.015, 0.07], [0.26, 0.05, 0.03, 0.07], [0.36, 0.02, 0.012, 0.055]], 6);
+            mesh.paint(Material::Metal);
         }
         Shape::FlakGun => {
             mesh.block([-0.28, -0.28, -0.1], [0.28, 0.2, 0.2]);
@@ -1788,9 +1807,9 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.block([-0.07, -0.03, 0.32], [0.07, -0.01, 0.34]);
             // A big raked funnel behind the tower: a fast ship, low and lean.
             mesh.paint(Material::Hull);
-            mesh.beam([0.0, -0.17, -0.06], [0.0, -0.23, 0.14], 0.035, 0.05);
+            mesh.beam([0.0, -0.16, -0.06], [0.0, -0.24, 0.18], 0.048, 0.065);
             mesh.paint(Material::Metal);
-            mesh.beam([0.0, -0.225, 0.13], [0.0, -0.232, 0.15], 0.03, 0.045);
+            mesh.beam([0.0, -0.235, 0.17], [0.0, -0.243, 0.19], 0.042, 0.058);
             // Torpedo tubes either side, behind the tower.
             for x in [-0.075_f32, 0.075] {
                 mesh.beam([x, -0.28, -0.17], [x, -0.18, -0.17], 0.015, 0.015);
@@ -1822,7 +1841,9 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Metal);
             for x in [-0.085_f32, 0.085] {
                 mesh.frustum([x, -0.02], [-0.2, 0.06], [0.02, 0.02], 6);
-                mesh.ball([x, -0.02, 0.1], 0.05, 10, 6);
+                mesh.paint(Material::Trim);
+                mesh.ball([x, -0.02, 0.11], 0.068, 10, 6);
+                mesh.paint(Material::Metal);
             }
             mesh.frustum([0.0, -0.12], [0.0, 0.4], [0.016, 0.011], 6);
             mesh.paint(Material::Hull);
@@ -1851,9 +1872,9 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                     mesh.block([x - 0.018, y - 0.022, -0.2], [x + 0.018, y + 0.022, -0.16]);
                 }
             }
-            mesh.turret([0.0, 0.3], [-0.16, -0.08], 0.08, 2, 0.06, false);
-            mesh.turret([0.0, 0.12], [-0.14, -0.04], 0.08, 2, 0.06, false);
-            mesh.turret([0.0, -0.34], [-0.2, -0.12], 0.08, 2, 0.04, true);
+            mesh.turret([0.0, 0.3], [-0.16, -0.07], 0.095, 2, 0.06, false);
+            mesh.turret([0.0, 0.11], [-0.14, -0.03], 0.095, 2, 0.06, false);
+            mesh.turret([0.0, -0.34], [-0.2, -0.11], 0.095, 2, 0.04, true);
         }
         Shape::Battlecruiser => {
             mesh.hull(0.12, 0.06, 0.0);
