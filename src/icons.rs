@@ -52,9 +52,9 @@ pub const ICON_ALTITUDE: f64 = 1_200.0;
 /// The area round a unit's icon where a click picks it, in points from its center: half its
 /// width, and how far it reaches above and below, the tech tab being beneath. Enough to take in
 /// every icon, its frame and tech tab, whatever its kind (a test checks).
-pub const HIT_HALF_WIDTH_PT: f64 = 20.0;
-pub const HIT_ABOVE_PT: f64 = 20.0;
-pub const HIT_BELOW_PT: f64 = 30.0;
+pub const HIT_HALF_WIDTH_PT: f64 = 15.0;
+pub const HIT_ABOVE_PT: f64 = 15.0;
+pub const HIT_BELOW_PT: f64 = 22.5;
 
 /// One look on the map: units sharing it share frame and mark, and differ by tech level.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -511,12 +511,13 @@ pub fn bar_shapes(rect: Rect, icon: Icon) -> Vec<Shape> {
 }
 
 /// Half the height, in points, of an icon on the map: large enough that its mark reads without
-/// squinting, and the command rigs larger still. A quarter larger than until 2026-11-20.
+/// squinting, and the command rigs larger still. Made a quarter larger on 2026-11-20, then a
+/// quarter smaller than that, which left them a little under their first size.
 pub const fn map_half(icon: Icon) -> f32 {
     match icon.frame() {
-        Frame::Commander => 13.1,
-        Frame::Factory | Frame::Structure => 11.9,
-        _ => 11.25,
+        Frame::Commander => 9.8,
+        Frame::Factory | Frame::Structure => 8.9,
+        _ => 8.45,
     }
 }
 
