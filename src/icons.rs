@@ -13,7 +13,7 @@ pub enum Frame {
     Commander,
     /// A building with a pitched roof: every factory.
     Factory,
-    /// A square: every other structure.
+    /// An octagon, a square with its corners cut: every other structure.
     Structure,
     /// A wide rectangle: tanks, artillery, anti-air, mobile shields, scouts, and engineers.
     Vehicle,
@@ -394,7 +394,7 @@ fn outline(frame: Frame) -> Vec<(f32, f32)> {
     match frame {
         Frame::Commander => vec![(-1.15, -0.2), (1.15, -0.2), (0.85, 1.0), (-0.85, 1.0)],
         Frame::Factory => vec![(-1.15, -0.35), (0.0, -1.1), (1.15, -0.35), (1.15, 1.0), (-1.15, 1.0)],
-        Frame::Structure => vec![(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)],
+        Frame::Structure => vec![(-0.7, -1.0), (0.7, -1.0), (1.0, -0.7), (1.0, 0.7), (0.7, 1.0), (-0.7, 1.0), (-1.0, 0.7), (-1.0, -0.7)],
         Frame::Vehicle => vec![(-1.45, -1.0), (1.45, -1.0), (1.45, 1.0), (-1.45, 1.0)],
         Frame::Bot => {
             let mut points = arc(0.55, 0.0, 1.0, -90.0, 90.0, 10);
@@ -858,6 +858,62 @@ mod tests {
         let apex = outline(Frame::Fighter).into_iter().fold(f32::MAX, |top, (_, y)| top.min(y));
         assert!(apex < 0.0, "the fighter's point is at the top");
         assert_eq!(symbol_place(Frame::Fighter), (-symbol_place(Frame::Bomber).0, symbol_place(Frame::Bomber).1));
+    }
+
+    /// Every frame's outline is told from every other's by what the eye goes by at a glance:
+    /// how many corners it has (curves have none), which end is wider, top or bottom, or how
+    /// wide it is for its height, by more than half its height. A structure's square and a
+    /// vehicle's wider rectangle, alike in all three, read as one shape on the map until
+    /// structures were given cut corners.
+    #[test]
+    fn every_frame_has_an_outline_of_its_own() {
+        let frames = [
+            Frame::Commander, Frame::Factory, Frame::Structure, Frame::Vehicle, Frame::Bot, Frame::Ship, Frame::Submarine, Frame::Fighter, Frame::Bomber, Frame::Gunship,
+        ];
+        // The width of the outline along the line at height `y`.
+        let width_at = |points: &[(f32, f32)], y: f32| {
+            let crossings: Vec<f32> = (0..points.len())
+                .filter_map(|edge| {
+                    let (p, q) = (points[edge], points[(edge + 1) % points.len()]);
+                    ((p.1 - y) * (q.1 - y) <= 0.0 && (q.1 - p.1).abs() > 1e-6).then(|| p.0 + (q.0 - p.0) * (y - p.1) / (q.1 - p.1))
+                })
+                .collect();
+            crossings.iter().copied().fold(f32::MIN, f32::max) - crossings.iter().copied().fold(f32::MAX, f32::min)
+        };
+        let look = |frame: Frame| {
+            let mut points = outline(frame);
+            points.dedup_by(|a, b| (a.0 - b.0).hypot(a.1 - b.1) < 1e-4);
+            if points.len() > 1 && (points[0].0 - points[points.len() - 1].0).hypot(points[0].1 - points[points.len() - 1].1) < 1e-4 {
+                points.pop();
+            }
+            let count = points.len();
+            let corners = (0..count)
+                .filter(|&index| {
+                    let (before, at, after) = (points[(index + count - 1) % count], points[index], points[(index + 1) % count]);
+                    let turn = (after.1 - at.1).atan2(after.0 - at.0) - (at.1 - before.1).atan2(at.0 - before.0);
+                    let turn = (turn + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+                    turn.abs() > 25_f32.to_radians()
+                })
+                .count();
+            let (top, bottom) = (points.iter().map(|p| p.1).fold(f32::MAX, f32::min), points.iter().map(|p| p.1).fold(f32::MIN, f32::max));
+            let (left, right) = (points.iter().map(|p| p.0).fold(f32::MAX, f32::min), points.iter().map(|p| p.0).fold(f32::MIN, f32::max));
+            let height = bottom - top;
+            let (upper, lower) = (width_at(&points, top + height * 0.15), width_at(&points, bottom - height * 0.15));
+            let wider = if upper > lower * 1.2 { "top" } else if lower > upper * 1.2 { "bottom" } else { "neither" };
+            (corners, wider, (right - left) / height)
+        };
+        for (index, &first) in frames.iter().enumerate() {
+            for &second in &frames[index + 1..] {
+                let (a, b) = (look(first), look(second));
+                let alike = a.0 == b.0 && a.1 == b.1 && (a.2 - b.2).abs() <= 0.5;
+                assert!(!alike, "{first:?} {a:?} and {second:?} {b:?} are too alike in shape");
+            }
+        }
+        // The square structures had, against the vehicle's rectangle, is what this guards.
+        let square = |corners: usize| (corners, "neither", 1.0_f32);
+        let vehicle = look(Frame::Vehicle);
+        assert!(vehicle.0 == square(4).0 && vehicle.1 == square(4).1 && (vehicle.2 - square(4).2).abs() <= 0.5, "a square would read as a vehicle");
+        assert_eq!(look(Frame::Structure).0, 8, "a structure has its corners cut");
     }
 
     #[test]
