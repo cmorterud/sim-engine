@@ -315,6 +315,21 @@ impl Shape {
     ];
     pub const COUNT: usize = Self::ALL.len();
 
+    /// A fixed-wing aircraft's main wing. From above, sweep tells the role: fighters' wings
+    /// sweep well back, bombers' are nearly straight, and the fighter-bomber's are between.
+    pub fn main_wing(self) -> Option<Wing> {
+        let wing = |root_x, tip_x, root_chord, tip_chord, half_thickness, z| Some(Wing { root_x, tip_x, root_chord, tip_chord, half_thickness, z });
+        match self {
+            Self::Aircraft => wing(0.07, 0.5, [-0.42, 0.18], [-0.42, -0.3], [0.025, 0.006], -0.01),
+            Self::AirSuperiority => wing(0.06, 0.36, [-0.46, 0.1], [-0.46, -0.38], [0.022, 0.006], 0.0),
+            Self::FighterBomber => wing(0.08, 0.47, [-0.3, 0.14], [-0.2, -0.07], [0.022, 0.006], -0.01),
+            Self::Bomber => wing(0.12, 0.5, [-0.06, 0.2], [0.0, 0.14], [0.03, 0.008], 0.02),
+            Self::TorpedoBomber => wing(0.05, 0.5, [-0.06, 0.12], [-0.03, 0.07], [0.025, 0.008], 0.03),
+            Self::StrategicBomber => wing(0.08, 0.5, [-0.12, 0.13], [-0.04, 0.07], [0.03, 0.008], 0.0),
+            _ => None,
+        }
+    }
+
     /// Whether the shape throws a shadow on the ground. Markers, see-through domes, and shells
     /// too small to see do not.
     pub const fn casts_shadow(self) -> bool {
@@ -380,6 +395,25 @@ pub enum Material {
     Panel = 4,
     /// Cockpit canopies, bridge windows, and vision slits: dark, tinted, and shiny.
     Glass = 5,
+}
+
+/// A pair of wings, as `MeshBuilder::wings` draws them: from `root_x` out to `tip_x` either
+/// side, each chord `[trailing edge, leading edge]` along Y.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Wing {
+    pub root_x: f32,
+    pub tip_x: f32,
+    pub root_chord: [f32; 2],
+    pub tip_chord: [f32; 2],
+    pub half_thickness: [f32; 2],
+    pub z: f32,
+}
+
+impl Wing {
+    /// How far back the leading edge sweeps from straight across, in degrees.
+    pub fn sweep_degrees(&self) -> f32 {
+        (self.root_chord[1] - self.tip_chord[1]).atan2(self.tip_x - self.root_x).to_degrees()
+    }
 }
 
 impl Material {
@@ -680,6 +714,19 @@ impl MeshBuilder {
     /// The outer `share` of a pair of `wings` drawn with the same arguments, in the current
     /// material, a little thicker so that it wraps the wing under it: team-colored wingtips,
     /// which show from above.
+    /// The shape's main wing (`Shape::main_wing`), and its tips in the given paint over the
+    /// outer share of it, if any.
+    fn main_wing(&mut self, shape: Shape, tips: Option<(Material, f32)>) {
+        let Wing { root_x, tip_x, root_chord, tip_chord, half_thickness, z } = shape.main_wing().expect("a fixed-wing aircraft");
+        self.wings(root_x, tip_x, root_chord, tip_chord, half_thickness, z);
+        if let Some((material, share)) = tips {
+            let before = self.material;
+            self.paint(material);
+            self.wing_tips(root_x, tip_x, root_chord, tip_chord, half_thickness, z, share);
+            self.paint(before);
+        }
+    }
+
     // The same arguments as `wings`, to be called with them, and the share.
     #[allow(clippy::too_many_arguments)]
     fn wing_tips(&mut self, root_x: f32, tip_x: f32, root_chord: [f32; 2], tip_chord: [f32; 2], half_thickness: [f32; 2], z: f32, share: f32) {
@@ -1573,7 +1620,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Glow);
             mesh.body(0.0, &[[-0.5, 0.05, 0.04, 0.0], [-0.46, 0.062, 0.048, 0.0]], 6);
             mesh.paint(Material::Hull);
-            mesh.wings(0.07, 0.5, [-0.42, 0.18], [-0.42, -0.3], [0.025, 0.006], -0.01);
+            mesh.main_wing(shape, None);
             mesh.wings(0.05, 0.2, [-0.46, -0.32], [-0.47, -0.42], [0.01, 0.004], 0.0);
             mesh.paint(Material::Trim);
             mesh.fin(0.0, [-0.44, -0.22], 0.05, [-0.47, -0.37], 0.28, 0.012);
@@ -1600,11 +1647,11 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         Shape::FighterBomber => {
             mesh.paint(Material::Hull);
             mesh.body(0.0, &[[-0.44, 0.07, 0.05, 0.0], [-0.1, 0.09, 0.07, 0.0], [0.2, 0.07, 0.06, 0.0], [0.4, 0.035, 0.035, -0.01], [0.5, 0.006, 0.006, -0.015]], 6);
-            // Wings swept well back from the middle, and a swept tailplane.
-            mesh.wings(0.08, 0.47, [-0.3, 0.14], [-0.44, -0.33], [0.022, 0.006], -0.01);
+            // Half a fighter and half a bomber: wings swept back half as far as a fighter's,
+            // broad at the root and tapering to the tips, and a swept tailplane.
+            mesh.main_wing(shape, Some((Material::Trim, 0.4)));
             mesh.wings(0.06, 0.22, [-0.5, -0.36], [-0.5, -0.45], [0.01, 0.004], 0.0);
             mesh.paint(Material::Trim);
-            mesh.wing_tips(0.08, 0.47, [-0.3, 0.14], [-0.44, -0.33], [0.022, 0.006], -0.01, 0.4);
             for x in [-0.075_f32, 0.075] {
                 mesh.fin(x, [-0.48, -0.3], 0.04, [-0.5, -0.42], 0.22, 0.01);
             }
@@ -1635,7 +1682,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.fin(x, [-0.5, -0.4], 0.04, [-0.5, -0.44], 0.17, 0.01);
             }
             mesh.paint(Material::Hull);
-            mesh.wings(0.05, 0.5, [-0.06, 0.12], [-0.03, 0.07], [0.025, 0.008], 0.03);
+            mesh.main_wing(shape, None);
             mesh.paint(Material::Trim);
             mesh.wing_tips(0.05, 0.5, [-0.06, 0.12], [-0.03, 0.07], [0.025, 0.008], 0.03, 0.3);
             mesh.block([-0.19, -0.5, 0.025], [0.19, -0.42, 0.04]);
@@ -1719,10 +1766,9 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.body(x, &[[-0.5, 0.036, 0.032, 0.0], [-0.46, 0.045, 0.04, 0.0]], 6);
             }
             mesh.paint(Material::Hull);
-            mesh.wings(0.06, 0.36, [-0.46, 0.1], [-0.46, -0.38], [0.022, 0.006], 0.0);
+            mesh.main_wing(shape, Some((Material::Trim, 0.3)));
             mesh.wings(0.04, 0.15, [0.17, 0.3], [0.19, 0.24], [0.01, 0.004], 0.01);
             mesh.paint(Material::Trim);
-            mesh.wing_tips(0.06, 0.36, [-0.46, 0.1], [-0.46, -0.38], [0.022, 0.006], 0.0, 0.3);
             for x in [-0.07_f32, 0.07] {
                 mesh.fin(x, [-0.46, -0.3], 0.04, [-0.48, -0.4], 0.2, 0.01);
             }
@@ -1733,7 +1779,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         Shape::Bomber => {
             mesh.body(0.0, &[[-0.5, 0.03, 0.03, 0.04], [-0.3, 0.09, 0.09, 0.01], [0.1, 0.14, 0.13, 0.0], [0.35, 0.11, 0.1, -0.01], [0.48, 0.04, 0.04, -0.02]], 6);
             mesh.paint(Material::Hull);
-            mesh.wings(0.12, 0.5, [-0.06, 0.2], [0.0, 0.14], [0.03, 0.008], 0.02);
+            mesh.main_wing(shape, None);
             mesh.wings(0.02, 0.24, [-0.5, -0.38], [-0.48, -0.42], [0.012, 0.004], 0.04);
             mesh.paint(Material::Trim);
             mesh.fin(0.0, [-0.48, -0.3], 0.07, [-0.5, -0.42], 0.3, 0.014);
@@ -1806,18 +1852,25 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 });
             }
         }
+        // The largest aircraft with wings: a long body, a long, straight team-colored wing
+        // with four engines slung under it, and a tailplane with twin fins. Where the bomber's
+        // body is team-colored and its wing armor, this is the other way round.
         Shape::StrategicBomber => {
-            mesh.wings(0.12, 0.5, [-0.36, 0.3], [-0.42, -0.26], [0.05, 0.012], 0.0);
+            mesh.main_wing(shape, None);
             mesh.paint(Material::Hull);
-            mesh.body(0.0, &[[-0.4, 0.1, 0.04, 0.0], [-0.1, 0.15, 0.08, 0.01], [0.2, 0.13, 0.075, 0.0], [0.4, 0.07, 0.05, -0.005], [0.5, 0.008, 0.008, -0.01]], 6);
-            for x in [-0.2_f32, 0.2] {
+            mesh.body(0.0, &[[-0.5, 0.03, 0.03, 0.04], [-0.3, 0.065, 0.065, 0.02], [0.0, 0.08, 0.08, 0.0], [0.3, 0.07, 0.065, -0.01], [0.45, 0.04, 0.035, -0.02], [0.5, 0.01, 0.01, -0.025]], 6);
+            mesh.wings(0.03, 0.21, [-0.5, -0.37], [-0.49, -0.43], [0.012, 0.004], 0.04);
+            for x in [-0.19_f32, 0.19] {
+                mesh.fin(x, [-0.5, -0.4], 0.045, [-0.5, -0.45], 0.2, 0.01);
+            }
+            for x in [-0.34_f32, -0.18, 0.18, 0.34] {
                 mesh.paint(Material::Metal);
-                mesh.body(x, &[[-0.3, 0.05, 0.032, 0.035], [-0.05, 0.055, 0.04, 0.045], [0.12, 0.03, 0.02, 0.03]], 6);
+                mesh.body(x, &[[-0.08, 0.034, 0.03, -0.035], [0.1, 0.04, 0.036, -0.035], [0.22, 0.028, 0.026, -0.035]], 6);
                 mesh.paint(Material::Glow);
-                mesh.body(x, &[[-0.35, 0.04, 0.026, 0.035], [-0.3, 0.05, 0.032, 0.035]], 6);
+                mesh.body(x, &[[-0.12, 0.026, 0.024, -0.035], [-0.08, 0.034, 0.03, -0.035]], 6);
             }
             mesh.paint(Material::Glass);
-            mesh.body(0.0, &[[0.18, 0.03, 0.015, 0.07], [0.26, 0.05, 0.03, 0.07], [0.36, 0.02, 0.012, 0.055]], 6);
+            mesh.body(0.0, &[[0.32, 0.03, 0.015, 0.05], [0.39, 0.04, 0.025, 0.045], [0.45, 0.02, 0.01, 0.025]], 6);
             mesh.paint(Material::Metal);
         }
         Shape::FlakGun => {

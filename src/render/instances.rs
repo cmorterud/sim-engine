@@ -402,7 +402,8 @@ pub fn unit_look(key: &str) -> UnitLook {
         "t3_heavy_gunship" => look(Shape::HeavyGunship, Some([0.20, 0.20, 0.25]), 0.6),
         "t3_spy_plane" => look(Shape::Scout, Some([0.30, 0.30, 0.35]), 0.5),
         "t3_air_superiority" => UnitLook { length: 28.0, ..look(Shape::AirSuperiority, Some([0.95, 0.95, 1.00]), 0.5) },
-        "t3_strategic_bomber" => look(Shape::StrategicBomber, None, 0.5),
+        // The largest aircraft with wings, longer and wider than even the heavy transport.
+        "t3_strategic_bomber" => UnitLook { length: 44.0, ..look(Shape::StrategicBomber, None, 0.5) },
         "t2_fighter_bomber" => look(Shape::FighterBomber, Some([0.85, 0.70, 0.55]), 0.55),
         "t2_flak" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::FlakGun, Some([0.35, 0.75, 0.95]), 1.0) },
         "t2_mobile_flak" => UnitLook { base: Some(Shape::TankHull), length: 21.0, ..look(Shape::FlakTurret, Some([0.22, 0.70, 0.98]), 1.0) },
@@ -1073,8 +1074,56 @@ mod tests {
         let looks = unit_looks(&db);
         let set = super::super::meshes::MeshSet::build();
         let of = |key: &str| footprint(&set, &looks[usize::from(db.id(key).0)]);
-        for (first, second) in [("t1_interceptor", "t3_air_superiority"), ("t1_bomber", "t2_torpedo_bomber")] {
+        for (first, second) in [("t1_interceptor", "t3_air_superiority"), ("t1_bomber", "t2_torpedo_bomber"), ("t1_bomber", "t3_strategic_bomber")] {
             assert!(footprints_apart(of(first), of(second)), "{first} and {second} look alike from above");
+        }
+    }
+
+    /// From above, a fixed-wing aircraft's role shows in its wing: fighters' sweep back 40
+    /// degrees or more, bombers' 15 or less, and the fighter-bomber's in between. Every aircraft
+    /// with a main wing has its role here, so that a new one is placed too.
+    #[test]
+    fn fighters_sweep_their_wings_back_and_bombers_keep_them_straight() {
+        let db = BlueprintDb::standard();
+        let roles = [
+            ("t1_interceptor", 40.0..=90.0),
+            ("t3_air_superiority", 40.0..=90.0),
+            ("t2_fighter_bomber", 20.0..=35.0),
+            ("t1_bomber", 0.0..=15.0),
+            ("t2_torpedo_bomber", 0.0..=15.0),
+            ("t3_strategic_bomber", 0.0..=15.0),
+        ];
+        for unit in db.iter().filter(|unit| unit.is_air()) {
+            let Some(wing) = unit_look(&unit.key).shape.main_wing() else { continue };
+            let (_, sweep_range) = roles.iter().find(|(key, _)| *key == unit.key).unwrap_or_else(|| panic!("{} has a main wing but no role here", unit.key));
+            let sweep = wing.sweep_degrees();
+            assert!(sweep_range.contains(&sweep), "{}'s wing sweeps {sweep:.0} degrees, not {sweep_range:?}", unit.key);
+        }
+    }
+
+    /// The strategic bomber is the largest aircraft with wings, from tip to tip and nose to
+    /// tail, as drawn: larger than the heavy transport and the heavy gunship.
+    #[test]
+    fn the_strategic_bomber_is_the_largest_winged_aircraft() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let set = super::super::meshes::MeshSet::build();
+        let extent = |look: &UnitLook| {
+            let (mut span, mut ends) = (0.0_f32, [f32::MAX, f32::MIN]);
+            for shape in look.base.into_iter().chain([look.shape]) {
+                let range = set.ranges[shape as usize].clone();
+                for &index in &set.indices[range.start as usize..range.end as usize] {
+                    let [x, y, _] = set.vertices[index as usize].position;
+                    span = span.max(x.abs() * 2.0);
+                    ends = [ends[0].min(y), ends[1].max(y)];
+                }
+            }
+            (span * look.size, (ends[1] - ends[0]) * look.size)
+        };
+        let bomber = extent(&looks[usize::from(db.id("t3_strategic_bomber").0)]);
+        for unit in db.iter().filter(|unit| unit.is_air() && unit.key != "t3_strategic_bomber") {
+            let other = extent(&looks[usize::from(unit.id.0)]);
+            assert!(bomber.0 > other.0 && bomber.1 > other.1, "{} is {other:?} across and long, the strategic bomber only {bomber:?}", unit.key);
         }
     }
 
