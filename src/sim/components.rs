@@ -370,6 +370,27 @@ pub struct Artillery {
     pub energy_per_shot: super::blueprints::Res,
 }
 
+/// Artillery that sets up before it fires (`WeaponDef::setup_ticks`). It is packed up when
+/// built, and any movement of its own packs it up again.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Setup {
+    pub ticks: u32,
+    /// Ticks still to stand still before it can fire.
+    pub remaining: u32,
+}
+
+impl Setup {
+    pub fn packed(ticks: u32) -> Self {
+        Self { ticks, remaining: ticks }
+    }
+
+    /// One tick, moving or not: returns whether it is set up and may fire.
+    pub fn tick(&mut self, moving: bool) -> bool {
+        self.remaining = if moving { self.ticks } else { self.remaining.saturating_sub(1) };
+        self.remaining == 0
+    }
+}
+
 /// A main weapon, other than artillery's, whose shots land up to this far from where they are
 /// aimed: FAF's FiringRandomness, at 20 units to its one. Artillery keeps its spread in
 /// `Artillery`. Fixed from the blueprint, so not hashed.

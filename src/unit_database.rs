@@ -277,6 +277,9 @@ fn weapon_stats(weapon: &WeaponDef) -> Vec<(&'static str, String)> {
     if weapon.min_range > Fp::ZERO {
         add("Least range", number(fp(weapon.min_range), 0));
     }
+    if weapon.setup_ticks > 0 {
+        add("Sets up", format!("{} standing still before it fires", seconds(weapon.setup_ticks)));
+    }
     if weapon.splash_radius > Fp::ZERO {
         add("Blast radius", number(fp(weapon.splash_radius), 0));
     }

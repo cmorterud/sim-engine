@@ -768,7 +768,7 @@ pub fn derive_t1_report() {
             unit.mass, unit.energy, unit.build_time, unit.health, unit.speed, unit.radius, unit.vision
         );
         println!(
-            "             weapon = {{ range = {}, reload_ticks = {}, projectile_speed = {}, damage = {}, splash_radius = {}, spread = {}{} }}",
+            "             weapon = {{ range = {}, reload_ticks = {}, projectile_speed = {}, damage = {}, splash_radius = {}, spread = {}{}{} }}",
             weapon.range,
             weapon.reload_ticks,
             weapon.projectile_speed,
@@ -776,6 +776,7 @@ pub fn derive_t1_report() {
             weapon.splash_radius,
             weapon.spread,
             if weapon.artillery { format!(", artillery = true, min_range = {}", weapon.min_range) } else { String::new() },
+            if weapon.setup_ticks > 0 { format!(", setup_ticks = {}", weapon.setup_ticks) } else { String::new() },
         );
     }
     let side = |key: &str, tactics| {
@@ -814,7 +815,7 @@ fn print_derived(db: &BlueprintDb, role: &Role, strength: f64) {
     );
     if let Some(weapon) = unit.weapon {
         println!(
-            "             weapon = {{ range = {}, reload_ticks = {}, projectile_speed = {}, damage = {}, splash_radius = {}, spread = {}{} }}",
+            "             weapon = {{ range = {}, reload_ticks = {}, projectile_speed = {}, damage = {}, splash_radius = {}, spread = {}{}{} }}",
             weapon.range,
             weapon.reload_ticks,
             weapon.projectile_speed,
@@ -822,6 +823,7 @@ fn print_derived(db: &BlueprintDb, role: &Role, strength: f64) {
             weapon.splash_radius,
             weapon.spread,
             if weapon.artillery { format!(", artillery = true, min_range = {}", weapon.min_range) } else { String::new() },
+            if weapon.setup_ticks > 0 { format!(", setup_ticks = {}", weapon.setup_ticks) } else { String::new() },
         );
     }
 }

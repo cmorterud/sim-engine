@@ -1036,8 +1036,10 @@ weapon = { range = 16500, reload_ticks = 133, projectile_speed = 150, damage = 7
 
 # Artillery: it outranges the T3 heavy point defense by a fifth, so that it shells defenses
 # without reply, bursts over about one formation spacing, and cannot hit what is inside a quarter
-# of its reach. Priced to beat line units that attack-move into it, as at T1. Derived from the
-# balance targets (reports/balance/2026-11-21-t3-land.md).
+# of its reach. Priced to beat line units that attack-move into it, as at T1. It sets up for a
+# second before it fires, and any move packs it up, so it shells positions, its own defended or
+# the enemy's, rather than chasing armies. Derived from the balance targets
+# (reports/balance/2026-11-21-t3-land.md).
 [[unit]]
 id = "t3_mobile_artillery"
 name = "Mobile Heavy Artillery"
@@ -1046,13 +1048,13 @@ tier = 3
 mass = 600
 energy = 3000
 build_time = 3600
-health = 3098
+health = 3038
 speed = "4.3"
 turn_rate = 75
 turn_radius = 20
 radius = 12
 vision = 1010
-weapon = { range = 1680, reload_ticks = 60, projectile_speed = 56, damage = "1154.4", splash_radius = "22.75", turn_rate = 30, artillery = true, min_range = 420, spread = 25 }
+weapon = { range = 1680, reload_ticks = 60, projectile_speed = 56, damage = "1132.3", splash_radius = "22.75", turn_rate = 30, artillery = true, min_range = 420, spread = 25, setup_ticks = 10 }
 
 # FAF's fighter-bomber: a carpet of twenty napalm bombs of 80, burning included, as one bomb of 1,600, and
 # two railguns of 75 a second at aircraft, as one.

@@ -2216,16 +2216,23 @@ impl SimWorld {
             Option<&super::components::Adjacency>,
             Option<&mut super::components::ExtraWeapons>,
             Option<&super::components::Torpedo>,
-            (Option<&super::components::TractorBeam>, Option<&super::components::StunWeapon>, &Order, Option<&Builder>, Option<&super::components::Scatter>),
+            (Option<&super::components::TractorBeam>, Option<&super::components::StunWeapon>, &Order, Option<&Builder>, Option<&super::components::Scatter>, (Option<&mut super::components::Setup>, &Velocity)),
         )>();
         let mut view = query.view();
         let disabled = &self.disabled;
         let grabs = &mut self.pending_grabs;
         grabs.clear();
         for (index, &(id, entity)) in units.iter().enumerate() {
-            let (stats, combat, turret, turning, mut discharge, discharge_order, mut launcher, anti_air, bomb_bay, flight, artillery, adjacency, extras, torpedo, (tractor, stun_weapon, order, builder, scatter)) =
+            let (stats, combat, turret, turning, mut discharge, discharge_order, mut launcher, anti_air, bomb_bay, flight, artillery, adjacency, extras, torpedo, (tractor, stun_weapon, order, builder, scatter, (setup, velocity))) =
                 view.get_mut(entity).expect("unit list only holds live units");
             combat.ticks_until_ready = combat.ticks_until_ready.saturating_sub(1);
+            // Artillery that sets up counts down only while it stands still. Its velocity is its
+            // own steering, eased, so a unit coming to a stop is moving until it is below an
+            // eighth of its speed, and a push from a neighbour does not pack it up.
+            let set_up = setup.is_none_or(|setup| {
+                let speed = i128::from(velocity.0.x.to_bits()).pow(2) + i128::from(velocity.0.y.to_bits()).pow(2);
+                setup.tick(speed * 64 > i128::from(stats.max_speed.to_bits()).pow(2))
+            });
             if let Some(weapon) = discharge.as_mut() {
                 weapon.ticks_until_ready = weapon.ticks_until_ready.saturating_sub(1);
             }
@@ -2490,7 +2497,7 @@ impl SimWorld {
                 _ => combat.reload_ticks,
             };
             let spread = artillery.map_or_else(|| scatter.map_or(Fp::ZERO, |scatter| scatter.0), |artillery| artillery.spread);
-            if combat.ticks_until_ready == 0 && aimed && gun_free && loaded && charged && can_fire {
+            if combat.ticks_until_ready == 0 && aimed && gun_free && loaded && charged && can_fire && set_up {
                 if let Some(target) = combat.target {
                     let entry = locate(target).expect("target was just validated or found");
                     let (from, to) = (raw(gun.0, gun.1, muzzle), raw(entry.x, entry.y, entry.z));
@@ -2576,7 +2583,7 @@ impl SimWorld {
                         combat.closing = None;
                     }
                 }
-                if combat.ticks_until_ready == 0 && aimed && loaded && in_reach && charged && can_fire && !combat.line_blocked {
+                if combat.ticks_until_ready == 0 && aimed && loaded && in_reach && charged && can_fire && set_up && !combat.line_blocked {
                     shots.push(PendingShot {
                         source: id,
                         team: stats.team,

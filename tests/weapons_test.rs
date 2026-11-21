@@ -408,7 +408,8 @@ fn every_unit_deals_its_damage_a_second_to_each_kind_of_target() {
                     settings.push(Setting { what: "standing still, at a target standing still", map: BIG_MAP, shooter: (600, 10_000), target: (600 + distance, 10_000), speed: None });
                 } else {
                     settings.push(Setting { what: "standing still, at a target standing still", map: MAP, shooter: LAND, target: (LAND.0 + distance, LAND.1), speed: None });
-                    if !def.is_structure() {
+                    // Artillery that sets up never fires on the move (artillery_test.rs).
+                    if !def.is_structure() && def.weapon.is_none_or(|weapon| weapon.setup_ticks == 0) {
                         settings.push(Setting { what: "moving, beside a target moving alongside", map: MAP, shooter: (LAND.0, 1_000), target: (LAND.0 + distance, 1_000), speed: Some(moving_speed) });
                     }
                 }

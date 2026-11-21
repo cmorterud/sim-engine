@@ -304,6 +304,9 @@ pub struct WeaponDef {
     pub mount: [Fp; 2],
     /// Its turret faces the stern while it has nothing to aim at.
     pub aft: bool,
+    /// Artillery that must set up before it fires: it stands still this long first, and moving
+    /// at all packs it up again. Zero fires on the move.
+    pub setup_ticks: u32,
 }
 
 /// A storm a unit leaves where it is destroyed (GAME_SPECIFICATION.md §12), that roams on its
@@ -570,6 +573,8 @@ struct RawWeapon {
     /// Its turret rests facing the stern.
     #[serde(default)]
     aft: bool,
+    /// Artillery only: ticks it stands still before it can fire.
+    setup_ticks: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -936,6 +941,9 @@ impl BlueprintDb {
                 if (weapon.mount.is_some() || weapon.aft) && weapon.turn_rate.is_none() {
                     return Err(context("only a weapon with a turn_rate has a turret to mount".into()));
                 }
+                if weapon.setup_ticks.is_some() && !weapon.artillery {
+                    return Err(context("only artillery sets up before it fires".into()));
+                }
                 let mount = match &weapon.mount {
                     None => [Fp::ZERO; 2],
                     Some([right, forward]) => [right.fp().map_err(context)?, forward.fp().map_err(context)?],
@@ -976,6 +984,7 @@ impl BlueprintDb {
                     crush_ticks: weapon.crush_seconds.unwrap_or(0) * TICKS_PER_SECOND as u32,
                     mount,
                     aft: weapon.aft,
+                    setup_ticks: weapon.setup_ticks.unwrap_or(0),
                 })
             };
             let weapon = unit.weapon.as_ref().map(parse_weapon).transpose()?;

@@ -98,7 +98,12 @@ out close and why: evidence about the process, not a target.
   materiel; the Siege Walker is about even with it; the artillery outranges the T3 heavy point
   defense by a fifth, breaks a shielded position of it in 27 seconds without loss (`[siege]`),
   beats the Heavy Walker attack-moving, and loses to it with micro, and to what closes in. Left
-  for later passes: the Field Rig and the T3 Engineer (economy). Next: air, against land frozen.
+  for later passes: the Field Rig and the T3 Engineer (economy).
+* 2026-11-21: T3 artillery sets up for a second before it fires, and moving packs it up, so that
+  it shells positions rather than armies in the field. Re-priced against the same targets, it
+  came out 2% weaker, within a shot-to-kill step: 3,038 health and 1,132 a shell. It breaks the
+  shielded position in 23 seconds without loss; against Medium Tanks that close on it, its
+  strength per materiel fell from 0.64 to 0.27. Next: air, against land frozen.
 
 ## Order of work
 

@@ -304,3 +304,64 @@ fn a_mobile_missile_launcher_fires_on_its_own_but_not_up_close() {
     });
     assert!(gone);
 }
+
+/// Every artillery unit that sets up before it fires (`setup_ticks`), with its blueprint key.
+fn setting_up(world: &SimWorld) -> Vec<(String, u32)> {
+    let units: Vec<(String, u32)> = world
+        .blueprints
+        .iter()
+        .filter_map(|def| def.weapon.filter(|weapon| weapon.setup_ticks > 0).map(|weapon| (def.key.clone(), weapon.setup_ticks)))
+        .collect();
+    assert!(units.iter().any(|(key, _)| key == "t3_mobile_artillery"), "the T3 artillery sets up before it fires");
+    units
+}
+
+/// Spawns `key` for Blue facing a tank that does not shoot back, at three quarters of its range,
+/// and returns both. With `setup` false, the unit fires without setting up.
+fn artillery_facing_a_tank(key: &str, setup: bool) -> (SimWorld, SimId, SimId) {
+    let mut world = world(5_120);
+    let unit = world.spawn_mobile(world.blueprints.id(key), Team::Blue, point(1_000, 1_000));
+    let range = world.blueprints.get(world.blueprints.id(key)).weapon.expect("artillery has a gun").range.to_num::<i32>();
+    let tank = passing_tank(&mut world, point(1_000, 1_000 + range * 3 / 4), point(1_000, 1_000 + range * 3 / 4));
+    if !setup {
+        world.ecs.remove_one::<sim_engine::sim::components::Setup>(world.unit_entity(unit).unwrap()).unwrap();
+    }
+    (world, unit, tank)
+}
+
+/// From a standing start, setting up costs nothing it would not have spent anyway: it sets up
+/// while it finds and aims at its target (GAME_SPECIFICATION.md §7).
+#[test]
+fn artillery_that_sets_up_loses_nothing_from_a_standing_start() {
+    for (key, ticks) in setting_up(&world(5_120)) {
+        let (mut free, free_unit, _) = artillery_facing_a_tank(&key, false);
+        let unpacked = first_shot(&mut free, free_unit, 200).unwrap_or_else(|| panic!("{key} fires without setting up"));
+        let (mut world, unit, _) = artillery_facing_a_tank(&key, true);
+        let shot = first_shot(&mut world, unit, 200).unwrap_or_else(|| panic!("{key} fires once set up"));
+        assert!(shot + 1 >= ticks, "{key} fired on tick {shot}, before its {ticks}-tick setup");
+        assert!(shot <= unpacked.max(ticks), "{key} fired on tick {shot}, later than setup ({ticks}) or aiming ({unpacked}) needed");
+    }
+}
+
+/// Moving packs it up: on a move past a target in range it never fires, though the same unit
+/// without a setup fires on the move. Once it stops, already aimed and loaded, it fires after its
+/// setup: not before, and not much after, while it comes to a stop.
+#[test]
+fn artillery_that_sets_up_never_fires_on_the_move() {
+    let db = world(5_120);
+    for (key, ticks) in setting_up(&db) {
+        for setup in [false, true] {
+            let (mut world, unit, _) = artillery_facing_a_tank(&key, setup);
+            world.advance_tick(&[SimCommand::Move { units: vec![unit], goal: point(1_600, 1_000) }]);
+            let moving = count_shots(&mut world, unit, 100);
+            if setup {
+                assert_eq!(moving, 0, "{key} fired {moving} shells on the move");
+                world.advance_tick(&[SimCommand::Stop { units: vec![unit] }]);
+                let shot = first_shot(&mut world, unit, 200).unwrap_or_else(|| panic!("{key} fires once it has stopped and set up"));
+                assert!((ticks..=ticks + 6).contains(&(shot + 1)), "{key} fired {} ticks after stopping, for a {ticks}-tick setup", shot + 1);
+            } else {
+                assert!(moving > 0, "{key} without a setup fires on the move, so the test means something");
+            }
+        }
+    }
+}

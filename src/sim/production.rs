@@ -481,6 +481,9 @@ impl SimWorld {
         if let Some(weapon) = unit.weapon.filter(|weapon| weapon.artillery) {
             let artillery = super::components::Artillery { min_range: weapon.min_range, spread: weapon.spread, energy_per_shot: weapon.energy_per_shot };
             self.ecs.insert_one(entity, artillery).expect("entity was just spawned");
+            if weapon.setup_ticks > 0 {
+                self.ecs.insert_one(entity, super::components::Setup::packed(weapon.setup_ticks)).expect("entity was just spawned");
+            }
         }
         if let Some(weapon) = unit.weapon.filter(|weapon| weapon.stun_ticks > 0) {
             self.ecs.insert_one(entity, super::components::StunWeapon(weapon.stun_ticks)).expect("entity was just spawned");
@@ -2527,6 +2530,10 @@ impl SimWorld {
             hasher.write(&artillery.min_range.to_bits().to_le_bytes());
             hasher.write(&artillery.spread.to_bits().to_le_bytes());
             hasher.write(&artillery.energy_per_shot.to_bits().to_le_bytes());
+        }
+        if let Ok(setup) = self.ecs.get::<&super::components::Setup>(entity) {
+            hasher.write(&[65]);
+            hasher.write(&setup.remaining.to_le_bytes());
         }
         if let Ok(upgrading) = self.ecs.get::<&Upgrading>(entity) {
             hasher.write(&[18]);
