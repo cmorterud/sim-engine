@@ -4,6 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>sim-engine</title>
+  <!-- The commit this page was built from, and when it was made: the web build
+       (.github/workflows/pages.yml) writes them in. Left as they are, as in a local build,
+       the landing page says nothing of a commit. -->
+  <meta name="deployed-commit" content="__DEPLOYED_COMMIT__">
+  <meta name="deployed-commit-date" content="__DEPLOYED_COMMIT_DATE__">
   <!-- trunk builds the game for the browser and wires it in here. It loads while the player
        picks a map, and starts only when the address has options (see parse_options). -->
   <link data-trunk rel="rust" data-bin="sim-engine" data-wasm-opt="3" />
@@ -202,6 +207,7 @@
         <dt>Letter keys</dt><dd>The key in the corner of each button. Hover over a button for what it does</dd>
       </dl>
       <p class="note">Plays best with a mouse and keyboard, in a browser with WebGL2. The browser's back button returns here. <a href="https://github.com/cmorterud/sim-engine">Source on GitHub</a>.</p>
+      <p class="note" id="deployed" hidden>This is the game as of commit <a id="deployed-link"><code id="deployed-commit"></code></a><span id="deployed-date"></span>.</p>
     </div>
   </div>
 
@@ -216,6 +222,19 @@
     // The unit database is written by the game, from the numbers it plays with, once it loads.
     if (new URLSearchParams(location.search).has('units')) {
       document.querySelector('#status p').firstChild.textContent = 'Loading the unit database\u2026';
+    }
+    // Which commit this is, once the web build has written it in.
+    const commit = document.querySelector('meta[name="deployed-commit"]').content;
+    if (/^[0-9a-f]{40}$/.test(commit)) {
+      const link = document.getElementById('deployed-link');
+      link.href = `https://github.com/cmorterud/sim-engine/commit/${commit}`;
+      link.title = commit;
+      document.getElementById('deployed-commit').textContent = commit.slice(0, 7);
+      const date = new Date(document.querySelector('meta[name="deployed-commit-date"]').content);
+      if (!Number.isNaN(date.getTime())) {
+        document.getElementById('deployed-date').textContent = `, made ${date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}`;
+      }
+      document.getElementById('deployed').hidden = false;
     }
     // Leave out empty fields, so that a blank seed means the default one.
     document.getElementById('setup').addEventListener('submit', (event) => {

@@ -81,6 +81,15 @@ jobs:
       - name: Build
         run: trunk build --release --locked --public-url /sim-engine/
 
+      # The landing page names the commit it was built from, and links to it: the one checked
+      # out above, so what it names is what was built.
+      - name: Stamp the commit
+        run: |
+          commit=$(git rev-parse HEAD)
+          date=$(git log -1 --format=%cI HEAD)
+          sed -i "s|__DEPLOYED_COMMIT__|$commit|; s|__DEPLOYED_COMMIT_DATE__|$date|" dist/index.html
+          grep -q "content=\"$commit\"" dist/index.html
+
       - uses: actions/configure-pages@v6
 
       - uses: actions/upload-pages-artifact@v5
