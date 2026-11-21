@@ -13,3 +13,4 @@ pub mod render;
 pub mod sim;
 pub mod soak;
 pub mod ui;
+pub mod unit_database;

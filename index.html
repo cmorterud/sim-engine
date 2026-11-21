@@ -8,6 +8,8 @@
        picks a map, and starts only when the address has options (see parse_options). -->
   <link data-trunk rel="rust" data-bin="sim-engine" data-wasm-opt="3" />
   <link data-trunk rel="copy-dir" href="assets/web/maps" />
+  <!-- The units' portraits, for the unit database (?units), which the game writes itself. -->
+  <link data-trunk rel="copy-file" href="assets/portraits.png" />
   <style>
     :root {
       --bg: #05060a;
@@ -153,6 +155,7 @@
           <button class="play" type="submit">Play</button>
           <a href="?battle">Or watch a 5,000-unit battle</a>
           <a href="?map=playtest">Or try out every unit in the playtest sandbox</a>
+          <a href="?units">Or look up every unit's numbers in the unit database</a>
         </div>
       </form>
 
@@ -210,6 +213,10 @@
     // With options in the address the game starts; without, this page asks for them.
     const playing = location.search.length > 1;
     document.getElementById(playing ? 'status' : 'landing').hidden = false;
+    // The unit database is written by the game, from the numbers it plays with, once it loads.
+    if (new URLSearchParams(location.search).has('units')) {
+      document.querySelector('#status p').firstChild.textContent = 'Loading the unit database\u2026';
+    }
     // Leave out empty fields, so that a blank seed means the default one.
     document.getElementById('setup').addEventListener('submit', (event) => {
       for (const field of event.target.elements) {

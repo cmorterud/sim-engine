@@ -242,6 +242,28 @@ fn parse_options() -> Result<Option<Options>, String> {
     Ok(Some(options))
 }
 
+/// In the browser, `?units` shows the unit database instead of a game: the page of every unit's
+/// numbers, which the game writes from the blueprints built into it, the ones it plays with, so
+/// that what the page says is what the game does. Whether it did.
+#[cfg(target_arch = "wasm32")]
+fn show_unit_database() -> bool {
+    use wasm_bindgen::JsCast;
+    let Some(window) = web_sys::window() else {
+        return false;
+    };
+    let search = window.location().search().unwrap_or_default();
+    let wanted = web_sys::UrlSearchParams::new_with_str(&search).is_ok_and(|params| params.has("units"));
+    let Some(document) = window.document().and_then(|document| document.dyn_into::<web_sys::HtmlDocument>().ok()).filter(|_| wanted) else {
+        return false;
+    };
+    let html = sim_engine::unit_database::page(&BlueprintDb::standard());
+    if document.open().is_err() || document.write_1(&html).is_err() {
+        log::error!("the unit database could not be written");
+    }
+    let _ = document.close();
+    true
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn parse_options() -> Result<Option<Options>, String> {
     let mut options = Options::default();
@@ -279,6 +301,9 @@ fn main() {
     {
         console_error_panic_hook::set_once();
         let _ = console_log::init_with_level(log::Level::Warn);
+        if show_unit_database() {
+            return;
+        }
     }
     #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
