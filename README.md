@@ -97,6 +97,8 @@ Every push to `main` also runs the soak on GitHub's runners (`.github/workflows/
 
 Any soak match can be watched: the simulation and the AIs are deterministic, so the map and seed alone replay it. `cargo run --release -- --watch --map highland --seed 223` shows everything, with both teams' economies; `--view blue` or `--view red` starts in one side's sight instead. In the match, V steps between everything, Blue, and Red, - and = change the speed up to 16x, and A tap of Space pauses; held, with the mouse, it turns the camera. In the browser, use the page's Watch section, or `?watch&map=highland&seed=223&view=all`.
 
+**Coverage.** Every push to `main` also measures how much of the code the tests run (`.github/workflows/coverage.yml`), with [cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov): the release test suite, instrumented. The run's summary page has line coverage by area (simulation, AI, balance and soak, rendering and interface, everything else) and by file, and its `coverage-report` artifact is the whole report as HTML, line by line, with what ran and what did not. It measures only: it fails no build, and the website does not wait for it. Locally, after `cargo install cargo-llvm-cov` and `rustup component add llvm-tools-preview`, `cargo llvm-cov --release --open` runs the tests and opens the report.
+
 The stored checksums in `tests/golden/` change whenever simulation behavior changes on purpose. Update them with `UPDATE_GOLDEN=1 cargo test --release --test determinism_test`, then confirm that the x86-64 run still matches.
 
 ## License and credits

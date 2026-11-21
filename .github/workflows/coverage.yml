@@ -1,0 +1,113 @@
+name: Coverage
+
+# How much of the code the tests run (README, Validate): line coverage by area and by file, in
+# the run's summary, and the full report, browsable line by line, as an artifact. It measures and
+# never fails a build, and the website does not wait for it.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Only the newest commit's coverage is worth having, so a newer push cancels an older run.
+concurrency:
+  group: coverage-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Kept in step with CI.
+  RUST_VERSION: "1.99.1"
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_RELEASE_DEBUG: line-tables-only
+
+jobs:
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      # As in CI: the runner's unused toolchains, removed, free room for instrumented builds.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Install audio headers
+        run: |
+          for attempt in 1 2 3; do
+            sudo apt-get -o Acquire::Retries=5 update && sudo apt-get -o Acquire::Retries=5 install -y libasound2-dev && exit 0
+            echo "Install attempt $attempt failed; trying again in 20 seconds."
+            sleep 20
+          done
+          exit 1
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal --component llvm-tools-preview
+          rustup default "$RUST_VERSION"
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ env.RUST_VERSION }}-coverage-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ env.RUST_VERSION }}-coverage-
+
+      # Release, as some tests run only there, such as the full-length determinism checks. The
+      # tests, examples, and benchmarks themselves are not counted, only what they exercise.
+      - name: Run the tests, measuring
+        run: cargo llvm-cov --locked --release --no-report
+
+      - name: Report
+        run: |
+          ignore='(tests|examples|benches)/'
+          cargo llvm-cov report --release --ignore-filename-regex "$ignore" --json --summary-only --output-path coverage.json
+          cargo llvm-cov report --release --ignore-filename-regex "$ignore" --html --output-dir coverage-html
+          cargo llvm-cov report --release --ignore-filename-regex "$ignore" --summary-only > coverage.txt
+          {
+            echo "## Line coverage"
+            echo
+            echo "| Area | Lines run | Lines | Share |"
+            echo "|---|---:|---:|---:|"
+            jq -r '
+              def area: if test("/src/sim/") then "Simulation (src/sim)"
+                elif test("/src/ai\\.rs$") then "AI (src/ai.rs)"
+                elif test("/src/(balance|soak)\\.rs$") then "Balance and soak"
+                elif test("/src/(render|input)/") or test("/src/(ui|hud|minimap|icons|audio|main)\\.rs$") then "Rendering, input, and interface"
+                else "Everything else" end;
+              [.data[0].files[] | {area: (.filename | area), covered: .summary.lines.covered, count: .summary.lines.count}]
+              | group_by(.area)
+              | map({area: .[0].area, covered: (map(.covered) | add), count: (map(.count) | add)})
+              | (.[] | "| \(.area) | \(.covered) | \(.count) | \((.covered * 1000 / .count | floor) / 10)% |"),
+                ("| **All** | **\(map(.covered) | add)** | **\(map(.count) | add)** | **\(((map(.covered) | add) * 1000 / (map(.count) | add) | floor) / 10)%** |")
+            ' coverage.json
+            echo
+            echo "The whole report, line by line, is the coverage-report artifact below."
+            echo
+            echo "<details><summary>By file</summary>"
+            echo
+            echo '```'
+            cat coverage.txt
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report
+          path: |
+            coverage-html
+            coverage.json
+          retention-days: 30
