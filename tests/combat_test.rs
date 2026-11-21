@@ -381,16 +381,19 @@ fn discharge_spends_only_what_destroys_its_target_and_at_least_its_least() {
 
 #[test]
 fn discharge_does_what_the_store_can_pay_for_against_something_tough() {
-    // 7,200 health: with 9,000 in store, 90% of it pays for 1,350 damage, all of which it spends.
+    // Tougher than 1,350: with 9,000 in store, 90% of it pays for 1,350 damage, all of which it spends.
     let (mut world, commander, target) = commander_facing("t3_siege_walker", 9_000);
+    let health = world.blueprints.get(world.blueprints.id("t3_siege_walker")).health.to_num::<f64>();
+    let per_damage = f64::from(world.blueprints.get(world.blueprints.id("command_rig")).discharge.expect("the commander has a Discharge").energy_per_damage);
+    assert!(health > 1_350.0, "the siege walker outlasts what 9,000 energy pays for");
     let (drop, dealt) = discharge_once(&mut world, commander, target);
     assert!((dealt.to_num::<f64>() - 1_350.0).abs() < 2.0, "it does 1,350, not {dealt}");
     assert!((drop - 8_100.0).abs() < 20.0, "and spends 8,100, not {drop}");
-    // With plenty in store, it spends what destroys it: 7,200 damage, for 43,200.
+    // With plenty in store, it spends what destroys it: its health in damage.
     let (mut world, commander, target) = commander_facing("t3_siege_walker", 100_000);
     let (drop, _) = discharge_once(&mut world, commander, target);
     assert!(world.unit_entity(target).is_none(), "destroyed");
-    assert!((drop - 43_200.0).abs() < 50.0, "for 43,200 energy, not {drop}");
+    assert!((drop - health * per_damage).abs() < 50.0, "for {} energy, not {drop}", health * per_damage);
 }
 
 #[test]

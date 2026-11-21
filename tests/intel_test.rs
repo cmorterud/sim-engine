@@ -242,8 +242,11 @@ fn units_fire_at_enemies_on_radar_beyond_their_sight() {
         if radar {
             structure(&mut world, "radar", Team::Blue, 52, 120);
         }
-        // 1,400 away: well within its 1,800 reach, far beyond its sight.
-        let enemy = passive(&mut world, "t1_engineer", Team::Red, point(2_400, 2_500));
+        // At four fifths of its reach, far beyond its sight.
+        let unit = world.blueprints.get(world.blueprints.id("t3_mobile_artillery"));
+        let (reach, sight) = (unit.weapon.expect("artillery has a gun").range.to_num::<i32>() * 4 / 5, unit.vision.to_num::<i32>());
+        assert!(reach > sight + 100, "it reaches well past its sight");
+        let enemy = passive(&mut world, "t1_engineer", Team::Red, point(1_000 + reach, 2_500));
         world.ecs.get::<&mut sim_engine::sim::components::Health>(world.unit_entity(enemy).unwrap()).unwrap().max = fp_int(100_000);
         world.ecs.get::<&mut sim_engine::sim::components::Health>(world.unit_entity(enemy).unwrap()).unwrap().current = fp_int(100_000);
         run(&mut world, 400);

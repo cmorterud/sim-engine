@@ -518,6 +518,78 @@ pub fn t2_land_roles() -> Vec<Role> {
 /// tanks, 10 grenadiers, 6 hovercraft, 8 missile launchers.
 const T2_PRICING_MATERIEL: f64 = 1_440.0;
 
+/// T3 land, against T1 and T2 land frozen (BALANCE.md, step 3). As at T2, the tier's line unit
+/// costs three of the last tier's and is priced to the tier efficiency against it; the heavy unit
+/// and the artillery are priced against the line unit, as at T1.
+pub fn t3_land_roles() -> Vec<Role> {
+    let line = Role {
+        unit: "t3_heavy_walker",
+        role: "line",
+        cost: 360.0,
+        // Fights longer again a tier up ([pace] fight_seconds_t3).
+        time_to_kill: 1.3,
+        range: 1.5,
+        speed: 0.85,
+        sight_over_range: 1.1,
+        flight_seconds: 0.55,
+        // A gatling: many small shots, so that no one shot decides a kill.
+        reload_seconds: 0.3,
+        splash: 0.0,
+        radius: 13.0,
+        min_range: None,
+        spread: 0.0,
+        target: Target::Efficiency("t2_heavy_tank", 1.07),
+        strength: 1.07,
+    };
+    vec![
+        line.clone(),
+        // Heavy: slow and very tough, with one big cannon that reaches a little past the line
+        // unit's gun. About even with the line unit for its materiel.
+        Role {
+            unit: "t3_siege_walker",
+            role: "heavy",
+            cost: 720.0,
+            time_to_kill: 2.2,
+            range: 1.5 * 1.1,
+            speed: 0.6,
+            sight_over_range: 0.9,
+            flight_seconds: 0.6,
+            reload_seconds: 4.0,
+            splash: 12.0,
+            radius: 15.0,
+            target: Target::Score("t3_heavy_walker", 0.0),
+            ..line.clone()
+        },
+        // Artillery, as at T1: it outranges everything on land, punishes clumps, and cannot hit
+        // what is inside half its range. It beats line units that attack-move into it, keeping
+        // about half, and loses to micro and to what closes on it.
+        Role {
+            unit: "t3_mobile_artillery",
+            role: "artillery",
+            cost: 600.0,
+            time_to_kill: 1.15,
+            // As at T1, its least range, half its reach, falls inside the line unit's range, so
+            // that line units fire from where it can hit them.
+            range: 1.5 * 1.8,
+            speed: 0.6,
+            sight_over_range: 0.6,
+            flight_seconds: 2.5,
+            reload_seconds: 6.0,
+            // About one formation spacing of a T3 target, radius 13 ([splash]).
+            splash: 1.75 * 13.0,
+            radius: 12.0,
+            min_range: Some(0.5),
+            spread: 25.0,
+            target: Target::Score("t3_heavy_walker", 0.5),
+            ..line
+        },
+    ]
+}
+
+/// Equal materiel for every T3 cost above: 10 heavy walkers, 5 siege walkers, 6 artillery, and
+/// 30 heavy tanks or 90 anchors.
+const T3_PRICING_MATERIEL: f64 = 3_600.0;
+
 /// The unit data with a role's numbers at this strength.
 pub fn apply(db: &BlueprintDb, anchor: &Anchor, role: &Role, strength: f64) -> BlueprintDb {
     let id = db.id(role.unit);
@@ -670,25 +742,40 @@ fn print_derived(db: &BlueprintDb, role: &Role, strength: f64) {
     }
 }
 
-/// T2 land's numbers from the targets, priced against T1 land as the unit data has it (frozen),
-/// and the unit data with them.
-pub fn derive_t2(base: &BlueprintDb) -> (BlueprintDb, Vec<(Role, f64)>) {
+/// A tier's numbers from the targets, its roles priced in order at about `materiel` a side
+/// against the tiers below as the unit data has them (frozen), and the unit data with them.
+pub fn derive(base: &BlueprintDb, roles: Vec<Role>, materiel: f64) -> (BlueprintDb, Vec<(Role, f64)>) {
     let anchor = Anchor::from_targets();
     let mut db = base.clone();
     let mut priced = Vec::new();
-    for role in t2_land_roles() {
-        let strength = price(&db, &anchor, &role, T2_PRICING_MATERIEL);
+    for role in roles {
+        let strength = price(&db, &anchor, &role, materiel);
         db = apply(&db, &anchor, &role, strength);
         priced.push((role, strength));
     }
     (db, priced)
 }
 
-/// The `--balance-derive` report: T2 land's numbers from the targets, priced against T1 land
+/// Each priced unit's strength per materiel against each of `enemies`: above 1, the unit is the
+/// better buy.
+fn efficiency_table(db: &Arc<BlueprintDb>, priced: &[(Role, f64)], enemies: &[&str], materiel: f64) {
+    for (role, _) in priced {
+        let cells: Vec<String> = enemies
+            .iter()
+            .map(|&enemy| {
+                let even = break_even(db, db.id(role.unit), db.id(enemy), materiel, Tactics::AttackMove);
+                format!("{} {}{:.2}", db.get(db.id(enemy)).name, if even.at_limit { "~" } else { "" }, even.efficiency)
+            })
+            .collect();
+        println!("  {:<24} {}", db.get(db.id(role.unit)).name, cells.join(", "));
+    }
+}
+
+/// The `--balance-derive t2` report: T2 land's numbers from the targets, priced against T1 land
 /// frozen, with the cells of the counter matrix they should meet, and every T2 unit's strength
 /// per materiel against every T1 fighter.
-pub fn derive_report() {
-    let (db, priced) = derive_t2(&BlueprintDb::standard());
+pub fn derive_t2_report() {
+    let (db, priced) = derive(&BlueprintDb::standard(), t2_land_roles(), T2_PRICING_MATERIEL);
     let db = Arc::new(db);
     println!("T2 land from data/balance_targets.toml, against T1 land frozen:");
     for (role, strength) in &priced {
@@ -734,14 +821,51 @@ pub fn derive_report() {
     println!("  ten T2 line against ten:            {:.1} s (targets: 30-50 s)", ten.seconds);
     println!();
     println!("Strength per materiel against T1 land (above 1, the T2 unit is the better buy):");
-    for (role, _) in &priced {
-        let cells: Vec<String> = ["t1_medium_tank", "t1_light_walker", "t1_light_artillery"]
-            .iter()
-            .map(|&enemy| {
-                let even = break_even(&db, db.id(role.unit), db.id(enemy), T2_PRICING_MATERIEL, Tactics::AttackMove);
-                format!("{} {}{:.2}", db.get(db.id(enemy)).name, if even.at_limit { "~" } else { "" }, even.efficiency)
-            })
-            .collect();
-        println!("  {:<24} {}", db.get(db.id(role.unit)).name, cells.join(", "));
+    efficiency_table(&db, &priced, &["t1_medium_tank", "t1_light_walker", "t1_light_artillery"], T2_PRICING_MATERIEL);
+}
+
+/// The `--balance-derive t3` report: T3 land's numbers from the targets, priced against T1 and
+/// T2 land frozen, with the cells of the counter matrix they should meet, and every T3 unit's
+/// strength per materiel against the tiers below.
+pub fn derive_t3_report() {
+    let (db, priced) = derive(&BlueprintDb::standard(), t3_land_roles(), T3_PRICING_MATERIEL);
+    let db = Arc::new(db);
+    println!("T3 land from data/balance_targets.toml, against T1 and T2 land frozen:");
+    for (role, strength) in &priced {
+        print_derived(&db, role, *strength);
     }
+    let side = |key: &str, tactics| {
+        let id = db.id(key);
+        Side { unit: id, count: (T3_PRICING_MATERIEL / db.get(id).mass.to_num::<f64>()).round().max(1.0) as u32, tactics }
+    };
+    let cell = |a: &str, a_tactics, b: &str| mirrored(&db, side(a, a_tactics), side(b, Tactics::AttackMove), 1.0).score;
+    println!();
+    println!("Counter-matrix cells, equal materiel ({T3_PRICING_MATERIEL}), mirrored, score for the first:");
+    let tier = break_even(&db, db.id("t3_heavy_walker"), db.id("t2_heavy_tank"), T3_PRICING_MATERIEL, Tactics::AttackMove);
+    println!("  T3 line against T2 line, efficiency: {:.2} (targets: 1.0-1.15)", tier.efficiency);
+    println!("  T3 line against T2 line, score:      {:+.2}", cell("t3_heavy_walker", Tactics::AttackMove, "t2_heavy_tank"));
+    println!("  heavy against line:                 {:+.2} (even, within 0.15)", cell("t3_siege_walker", Tactics::AttackMove, "t3_heavy_walker"));
+    println!("  line against artillery, attack-move: {:+.2} (artillery keeps 0.4-0.7)", cell("t3_heavy_walker", Tactics::AttackMove, "t3_mobile_artillery"));
+    println!("  line against artillery, with micro:  {:+.2} (line keeps at least 0.3)", cell("t3_heavy_walker", Tactics::Micro, "t3_mobile_artillery"));
+    println!("  heavy against artillery, attack-move: {:+.2} (artillery keeps at least 0.3)", cell("t3_siege_walker", Tactics::AttackMove, "t3_mobile_artillery"));
+    println!("  heavy against artillery, with micro:  {:+.2} (heavy keeps at least 0.3)", cell("t3_siege_walker", Tactics::Micro, "t3_mobile_artillery"));
+    println!("  T2 assault against T3 artillery:     {:+.2} (fast units that close in win)", cell("t2_assault_hovercraft", Tactics::AttackMove, "t3_mobile_artillery"));
+    let raid = mirrored(
+        &db,
+        Side { unit: db.id("t1_light_walker"), count: 25, tactics: Tactics::AttackMove },
+        Side { unit: db.id("t3_mobile_artillery"), count: 1, tactics: Tactics::AttackMove },
+        1.0,
+    );
+    println!("  a raid, 25 T1 raiders against 1 artillery: {:+.2} (raiders win)", raid.score);
+    let line = side("t3_heavy_walker", Tactics::AttackMove);
+    let ten = mirrored(&db, Side { count: 10, ..line }, Side { count: 10, ..line }, 1.0);
+    println!("  ten T3 line against ten:            {:.1} s (targets: 35-60 s)", ten.seconds);
+    println!();
+    println!("Strength per materiel against T2 and T1 land (above 1, the T3 unit is the better buy):");
+    efficiency_table(
+        &db,
+        &priced,
+        &["t2_heavy_tank", "t2_grenadier_walker", "t2_assault_hovercraft", "t2_mobile_missile_launcher", "t1_medium_tank", "t1_light_artillery"],
+        T3_PRICING_MATERIEL,
+    );
 }

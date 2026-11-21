@@ -77,14 +77,17 @@ fn count_shots(world: &mut SimWorld, source: SimId, ticks: u32) -> usize {
 fn artillery_leads_a_target_moving_steadily() {
     let mut world = world(5_120);
     let artillery = world.spawn_mobile(world.blueprints.id("t3_mobile_artillery"), Team::Blue, point(1_000, 1_000));
+    let gun = world.blueprints.get(world.blueprints.id("t3_mobile_artillery")).weapon.expect("artillery has a gun");
     // No scatter, so that only the aim is measured.
     world.ecs.get::<&mut Artillery>(world.unit_entity(artillery).unwrap()).unwrap().spread = Fp::ZERO;
-    let tank = passing_tank(&mut world, point(200, 2_100), point(3_000, 2_100));
+    // Driving past at three quarters of its reach, beyond its least range.
+    let across = 1_000 + gun.range.to_num::<i32>() * 3 / 4;
+    let tank = passing_tank(&mut world, point(200, across), point(3_000, across));
     let fired = count_shots(&mut world, artillery, 300);
     for _ in 0..60 {
         world.advance_tick(&[]);
     }
-    let hits = ((fp_int(100_000) - world.unit_health(tank).unwrap()) / fp_int(750)).to_num::<usize>();
+    let hits = ((fp_int(100_000) - world.unit_health(tank).unwrap()) / gun.damage).to_num::<usize>();
     assert!(fired >= 2, "it should have fired a few times, not {fired}");
     assert!(hits * 2 >= fired, "most shells should land on a tank driving steadily: {hits} of {fired}");
 }
@@ -205,10 +208,14 @@ fn a_t2_generator_beside_an_installation_cheapens_and_speeds_its_shots() {
 
 #[test]
 fn artillery_shells_scatter_around_their_aim_the_same_way_every_time() {
+    let weapon = sim_engine::sim::blueprints::BlueprintDb::standard();
+    let weapon = weapon.get(weapon.id("t3_mobile_artillery")).weapon.expect("artillery has a gun");
+    // At four fifths of its reach, beyond its least range.
+    let distance = weapon.range.to_num::<i64>() * 4 / 5;
     let volleys = || {
         let mut world = world(5_120);
         let gun = world.spawn_mobile(world.blueprints.id("t3_mobile_artillery"), Team::Blue, point(1_000, 2_500));
-        world.advance_tick(&[SimCommand::AttackGround { units: vec![gun], point: point(2_200, 2_500) }]);
+        world.advance_tick(&[SimCommand::AttackGround { units: vec![gun], point: point(1_000 + distance as i32, 2_500) }]);
         let mut seen: Vec<Vec3Fp> = Vec::new();
         for _ in 0..500 {
             world.advance_tick(&[]);
@@ -222,10 +229,12 @@ fn artillery_shells_scatter_around_their_aim_the_same_way_every_time() {
     };
     let first = volleys();
     assert!(first.len() >= 4, "it should fire again and again: {}", first.len());
-    // Aimed at one spot, the shells go different ways, but not far: within 25 over the 1,200.
+    // Aimed at one spot, the shells go different ways, but not far: within its spread, over the
+    // distance, in thousandths.
     let directions: Vec<i64> = first.iter().map(|velocity| i64::from(velocity.y.to_bits()) * 1_000 / i64::from(velocity.x.to_bits())).collect();
+    let most = weapon.spread.to_num::<i64>() * 1_000 / distance + 1;
     assert!(directions.windows(2).any(|pair| pair[0] != pair[1]), "they should scatter: {directions:?}");
-    assert!(directions.iter().all(|slope| slope.abs() <= 25), "but only a little: {directions:?}");
+    assert!(directions.iter().all(|slope| slope.abs() <= most), "but only a little, within {most}: {directions:?}");
     let again: Vec<(i32, i32)> = volleys().iter().map(|velocity| (velocity.x.to_bits(), velocity.y.to_bits())).collect();
     assert_eq!(first.iter().map(|velocity| (velocity.x.to_bits(), velocity.y.to_bits())).collect::<Vec<_>>(), again, "and the same in every replay");
 }

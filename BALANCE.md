@@ -89,7 +89,13 @@ out close and why: evidence about the process, not a target.
   materiel; the grenadier beats it attack-moving and loses to it with micro; the hovercraft is
   about even with it; the missile launcher beats artillery firing in place and loses to what keeps
   moving. Left for later passes: the Mobile Flak (air), the Mobile Shield (mixed armies), and the
-  T2 engineers (economy). Next: T3 land, against T1 and T2 land frozen.
+  T2 engineers (economy).
+* 2026-11-21: T3 land (the Heavy Walker, Siege Walker, and Mobile Heavy Artillery) derived
+  against T1 and T2 land frozen, priced, and in the unit data
+  (`reports/balance/2026-11-21-t3-land.md`). The Heavy Walker is 1.07 times the Heavy Tank per
+  materiel; the Siege Walker is about even with it; the artillery beats it attack-moving and loses
+  to it with micro, and to what closes in. Left for later passes: the Field Rig and the T3
+  Engineer (economy). Next: air, against land frozen.
 
 ## Order of work
 

@@ -1034,21 +1034,24 @@ adjacency_size = 16
 vision = 560
 weapon = { range = 16500, reload_ticks = 133, projectile_speed = 150, damage = 7840, splash_radius = 120, turn_rate = 3, artillery = true, min_range = 3000, spread = "9.3", energy_per_shot = 16000 }
 
+# Artillery, as at T1: it outranges everything on land, bursts over about one formation spacing,
+# and cannot hit what is inside half its reach. Derived from the balance targets
+# (reports/balance/2026-11-21-t3-land.md).
 [[unit]]
 id = "t3_mobile_artillery"
 name = "Mobile Heavy Artillery"
 class = "artillery"
 tier = 3
-mass = 800
-energy = 8000
-build_time = 4300
-health = 950
-speed = "4.4"
+mass = 600
+energy = 3000
+build_time = 3600
+health = 3842
+speed = "4.3"
 turn_rate = 75
 turn_radius = 20
 radius = 12
-vision = 520
-weapon = { range = 1800, reload_ticks = 100, projectile_speed = 48, damage = 750, splash_radius = 80, turn_rate = 30, artillery = true, min_range = 500, spread = 25 }
+vision = 565
+weapon = { range = 945, reload_ticks = 60, projectile_speed = 38, damage = "1431.7", splash_radius = "22.75", turn_rate = 30, artillery = true, min_range = 473, spread = 25 }
 
 # FAF's fighter-bomber: a carpet of twenty napalm bombs of 80, burning included, as one bomb of 1,600, and
 # two railguns of 75 a second at aircraft, as one.
@@ -1803,37 +1806,42 @@ build_range = 120
 weapon = { range = 360, reload_ticks = 5, projectile_speed = 120, damage = 15, turn_rate = 180 }
 builds = ["land_factory_t1", "air_factory", "naval_factory", "t1_point_defense", "t2_point_defense", "t1_aa_turret", "t2_flak", "shield_generator", "tactical_missile_defense", "t1_torpedo_launcher", "t2_torpedo_launcher", "t2_artillery", "tactical_missile_launcher", "radar", "radar_t2", "t1_sonar", "t2_sonar", "stealth_field_generator", "wall"]
 
+# The T3 line unit: three Heavy Tanks' cost, half again the anchor's range, and longer fights,
+# about as strong per materiel as the Heavy Tank. Derived from the balance targets
+# (reports/balance/2026-11-21-t3-land.md); its personal shield is counted in the duels that price it.
 [[unit]]
 id = "t3_heavy_walker"
 name = "Heavy Walker"
 class = "bot"
 tier = 3
-mass = 480
-energy = 5250
-build_time = 2400
-health = 2400
-speed = "7.6"
+mass = 360
+energy = 1800
+build_time = 2160
+health = 4292
+speed = "6.1"
 turn_rate = 120
 radius = 13
-vision = 440
+vision = 580
 # A personal shield that takes the first hits.
 shield = { radius = 25, health = 700, regen = 20, recharge_seconds = 12, upkeep = 25 }
-weapon = { range = 480, reload_ticks = 3, projectile_speed = 70, damage = 45, turn_rate = 120 }
+weapon = { range = 525, reload_ticks = 3, projectile_speed = 95, damage = "70.7", turn_rate = 120 }
 
+# Heavy: slow and very tough, one big cannon reaching a tenth past the Heavy Walker's gun, about
+# even with it for its materiel. Derived from the balance targets (reports/balance/2026-11-21-t3-land.md).
 [[unit]]
 id = "t3_siege_walker"
 name = "Siege Walker"
 class = "bot"
 tier = 3
-mass = 1280
-energy = 14000
-build_time = 4800
-health = 7200
-speed = "4.4"
+mass = 720
+energy = 3600
+build_time = 4320
+health = 11010
+speed = "4.3"
 turn_rate = 70
 radius = 15
 vision = 520
-weapon = { range = 680, reload_ticks = 43, projectile_speed = 72, damage = 1450, turn_rate = 60 }
+weapon = { range = 578, reload_ticks = 40, projectile_speed = 96, damage = "1429.9", turn_rate = 60, splash_radius = 12 }
 
 [[unit]]
 id = "t2_torpedo_boat"
