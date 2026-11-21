@@ -66,3 +66,24 @@ fn micro_is_worth_a_great_deal_against_massed_artillery() {
     let gain = micro.efficiency / plain.efficiency - 1.0;
     assert!(gain > 0.3, "spreading out and charging should be worth a lot against artillery, not {:.0}%", gain * 100.0);
 }
+
+/// BALANCE.md, T2 land: the tier's line unit is about as strong per materiel as T1's
+/// (`[tiers] efficiency_multiplier`), so lower tiers stay useful.
+#[test]
+fn the_t2_line_unit_is_about_as_strong_per_materiel_as_the_t1_line_unit() {
+    let db = db();
+    let even = break_even(&db, db.id("t2_heavy_tank"), db.id("t1_medium_tank"), 1_440.0, Tactics::AttackMove);
+    assert!((1.0..=1.15).contains(&even.efficiency), "the heavy tank is {:.2} times the medium tank per materiel", even.efficiency);
+}
+
+/// BALANCE.md, T2 land: the skirmisher beats the line unit attack-moving into it, keeping
+/// about half, and loses to it spread out and charging: a micro cell, as artillery is at T1.
+#[test]
+fn the_t2_skirmisher_beats_the_line_unit_unless_it_spreads_out_and_charges() {
+    let db = db();
+    let side = |key: &str, count: u32, tactics: Tactics| Side { unit: db.id(key), count, tactics };
+    let plain = mirrored(&db, side("t2_grenadier_walker", 10, Tactics::AttackMove), side("t2_heavy_tank", 12, Tactics::AttackMove), 1.0);
+    assert!((0.4..=0.7).contains(&plain.score), "the grenadiers keep {:.2} more than the tanks", plain.score);
+    let micro = mirrored(&db, side("t2_heavy_tank", 12, Tactics::Micro), side("t2_grenadier_walker", 10, Tactics::AttackMove), 1.0);
+    assert!(micro.score >= 0.3, "spread out and charging, the tanks keep {:.2} more", micro.score);
+}

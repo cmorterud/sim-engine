@@ -63,15 +63,17 @@ fn a_dome_stops_enemy_shells_from_outside_and_takes_their_damage() {
     let full = world.unit_health(sheltered).unwrap();
     // 400 from its target, and well outside the 180-unit dome.
     spawn(&mut world, "t2_heavy_tank", Team::Blue, point(1_020, 1_480), true);
-    // Healing at 50 a second nearly keeps up with one heavy tank, so it is off here, to count hits.
+    // Healing would hide hits, so it is off here, to count them.
     world.ecs.get::<&mut Shield>(world.unit_entity(generator).unwrap()).unwrap().regen_per_tick = Fp::ZERO;
     run(&mut world, 120);
     assert_eq!(world.unit_health(sheltered), Some(full), "nothing should get through the dome");
     let now = shield(&world, generator);
     assert!(now.is_up());
-    // A shell every 12 ticks, each doing all of its 70 damage to the dome.
-    let lost = (now.max_health - now.health).to_num::<i32>();
-    assert!(lost % 70 == 0 && lost >= 7 * 70, "the dome took {lost}");
+    // A shell every reload, each doing all of its damage to the dome.
+    let shell = world.blueprints.get(world.blueprints.id("t2_heavy_tank")).weapon.expect("the tank has a gun").damage;
+    let lost = now.max_health - now.health;
+    let shells = (lost / shell).round();
+    assert!(shells >= fp_int(7) && (lost - shells * shell).abs() < Fp::from_num(0.01), "the dome took {lost:?}, not whole shells of {shell:?}");
 }
 
 #[test]

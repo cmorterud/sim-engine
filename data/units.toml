@@ -96,21 +96,24 @@ radius = 9
 vision = 385
 weapon = { range = 595, reload_ticks = 50, projectile_speed = 28, damage = 140, splash_radius = 16, turn_rate = 90, artillery = true, min_range = 298, spread = 20 }
 
+# The T2 line unit: three anchors' cost, a quarter more range, and fights a little longer, about
+# as strong per materiel as the anchor. Derived from the balance targets
+# (reports/balance/2026-11-20-t2-land.md).
 [[unit]]
 id = "t2_heavy_tank"
 name = "Heavy Tank"
 class = "tank"
 tier = 2
-mass = 198
-energy = 990
-build_time = 880
-health = 1500
+mass = 120
+energy = 600
+build_time = 720
+health = 1381
 speed = "6.2"
 turn_rate = 90
 turn_radius = 40
 radius = 11
-vision = 400
-weapon = { range = 440, reload_ticks = 12, projectile_speed = 60, damage = 70, turn_rate = 60 }
+vision = 480
+weapon = { range = 438, reload_ticks = 12, projectile_speed = 80, damage = "102.9", turn_rate = 60 }
 
 [[unit]]
 id = "land_factory_t1"
@@ -1394,26 +1397,26 @@ vision = 400
 sonar = 720
 weapon = { range = 1200, reload_ticks = 40, projectile_speed = 30, damage = 720, targets = "naval" }
 
-# A landing-craft gunboat: it hovers over land and water alike, slower than the Heavy Tank, with a
-# gun that outranges it and a little splash. It pays about a third over the Heavy Tank's health
-# and firepower per materiel for crossing water and for its range, so it flanks shore bases rather
-# than winning straight fights on land. This game's own numbers, not another game's.
+# Assault: tough, fast, and amphibious, it hovers over land and water alike at the anchor's speed,
+# with the Heavy Tank's range and twice its time to kill. About even with the Heavy Tank for its
+# materiel, a little under, for crossing water; fast enough to close on artillery and grenadiers.
+# Derived from the balance targets (reports/balance/2026-11-20-t2-land.md).
 [[unit]]
 id = "t2_assault_hovercraft"
 name = "Assault Hovercraft"
 class = "tank"
 tier = 2
-mass = 400
-energy = 2000
-build_time = 1600
-health = 2600
-speed = "5.6"
+mass = 240
+energy = 1200
+build_time = 1440
+health = 3129
+speed = "7.2"
 turn_rate = 60
 turn_radius = 40
 radius = 13
-vision = 480
+vision = 415
 movement = "hover"
-weapon = { range = 560, reload_ticks = 15, projectile_speed = 60, damage = 135, splash_radius = 20, turn_rate = 90, spread = 4 }
+weapon = { range = 438, reload_ticks = 16, projectile_speed = 80, damage = "178.8", splash_radius = 10, turn_rate = 90, spread = 4 }
 
 # A fleet escort: a small dome that moves with it, over the ships around it, and an anti-torpedo
 # charge, one torpedo within 600 every 6 seconds. Sturdier and cheaper than a dome boat alone would
@@ -1462,23 +1465,25 @@ max_stock = 3
 weapon = { range = 8200, reload_ticks = 100, projectile_speed = 25, damage = 500, splash_radius = 800, inner_damage = 70000, inner_radius = 600, kind = "strategic_missile", cruise_height = 500 }
 extra_weapons = [{ kind = "tactical_missile", automatic = true, range = 5120, reload_ticks = 100, projectile_speed = 32, damage = 2000, splash_radius = 60, cruise_height = 60 }]
 
-# FAF's numbers: it fires cruise missiles on its own at what is in range, as artillery does,
-# and cannot hit what is closer than 240. Two of 300 a volley, as one every 5 seconds.
+# Siege: it fires cruise missiles on its own at what is in range, as artillery does, from far
+# beyond every gun, and cannot hit what is closer than a fifth of its range. The missiles neither
+# lead nor follow, so it beats what stands still, such as artillery firing in place, and loses to
+# what keeps moving. Derived from the balance targets (reports/balance/2026-11-20-t2-land.md).
 [[unit]]
 id = "t2_mobile_missile_launcher"
 name = "Mobile Missile Launcher"
 class = "artillery"
 tier = 2
 mass = 180
-energy = 1350
-build_time = 800
-health = 825
+energy = 900
+build_time = 1080
+health = 1680
 speed = "5.8"
 turn_rate = 90
 turn_radius = 20
 radius = 11
-vision = 360
-weapon = { kind = "tactical_missile", automatic = true, artillery = true, min_range = 240, range = 1300, reload_ticks = 50, projectile_speed = 40, damage = 300, splash_radius = 20, cruise_height = 40 }
+vision = 650
+weapon = { kind = "tactical_missile", automatic = true, artillery = true, min_range = 259, range = 1295, reload_ticks = 50, projectile_speed = 40, damage = "521.6", splash_radius = 10, cruise_height = 40 }
 
 # Field enhancements (GAME_SPECIFICATION.md §2.1), with FAF's numbers for its
 # commander. A commander has three bays, and one enhancement in each: a new one replaces what is
@@ -1747,17 +1752,18 @@ id = "t2_grenadier_walker"
 name = "Grenadier Walker"
 class = "bot"
 tier = 2
-mass = 200
-energy = 1000
-build_time = 1000
-health = 800
-speed = "5.8"
+mass = 144
+energy = 720
+build_time = 864
+health = 1131
+speed = "6.2"
 turn_rate = 80
 radius = 10
-vision = 520
-# One automatic grenade launcher, lobbing a grenade a second out to 600 that bursts over 50: less
-# against one target than a gun of its cost, much more against a clump. This game's own numbers.
-weapon = { range = 600, reload_ticks = 10, projectile_speed = 30, damage = 45, splash_radius = 50, turn_rate = 120, spread = 25 }
+vision = 555
+# A skirmisher: one grenade launcher lobbing a grenade every 2 seconds a fifth farther than the
+# Heavy Tank's gun, bursting over about one formation spacing. Derived from the balance targets
+# (reports/balance/2026-11-20-t2-land.md).
+weapon = { range = 529, reload_ticks = 20, projectile_speed = 44, damage = "161.6", splash_radius = "19.25", turn_rate = 120, spread = 10 }
 
 [[unit]]
 id = "t2_mobile_shield"

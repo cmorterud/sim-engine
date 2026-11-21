@@ -363,11 +363,14 @@ fn discharge_once(world: &mut SimWorld, commander: SimId, target: SimId) -> (f64
 
 #[test]
 fn discharge_spends_only_what_destroys_its_target_and_at_least_its_least() {
-    // A heavy tank has 1,500 health, so a shot spends 1,500 damage, or 9,000 energy.
+    // A shot spends the heavy tank's health in damage, at the Discharge's energy a point.
     let (mut world, commander, target) = commander_facing("t2_heavy_tank", 100_000);
+    let health = world.blueprints.get(world.blueprints.id("t2_heavy_tank")).health.to_num::<f64>();
+    let per_damage = world.blueprints.get(world.blueprints.id("command_rig")).discharge.expect("the commander has a Discharge").energy_per_damage;
+    let cost = health * f64::from(per_damage);
     let (drop, _) = discharge_once(&mut world, commander, target);
     assert!(world.unit_entity(target).is_none(), "one shot should destroy a heavy tank");
-    assert!((8_900.0..=9_000.0).contains(&drop), "it spends what destroys it, 9,000 energy, not {drop}");
+    assert!((cost - 100.0..=cost).contains(&drop), "it spends what destroys it, {cost} energy, not {drop}");
     // A medium tank has 300 health, under the least a shot does, 1,250, which costs 7,500.
     let (mut world, commander, target) = commander_facing("t1_medium_tank", 100_000);
     let (drop, _) = discharge_once(&mut world, commander, target);
@@ -631,14 +634,15 @@ fn a_ground_attack_destroys_debris_and_the_mass_in_it() {
     let debris = debris_at(&mut world, "t2_heavy_tank", point(1_300, 1_000));
     let tank = spawn_gunner(&mut world, "t2_heavy_tank");
     let start = wreck(&world, debris).unwrap();
-    // FAF's wreck of a T2 unit on land: 90% of a heavy tank's 1,500 health, and 90% of its mass
-    // less a fifth for its tech level, 72% in all.
-    assert_eq!(start.health, fp_int(1_350));
-    assert_eq!(start.mass, Res::from_num(198) * 900 / 1000 * 800 / 1000);
+    // The wreck of a T2 unit on land: 90% of the heavy tank's health, and 90% of its mass less a
+    // fifth for its tech level, 72% in all.
+    let heavy = world.blueprints.get(world.blueprints.id("t2_heavy_tank")).clone();
+    assert_eq!(start.health, Fp::from_num(Res::from_num(heavy.health) * 900 / 1000));
+    assert_eq!(start.mass, heavy.mass * 900 / 1000 * 800 / 1000);
     let mass_before = world.economies[0].mass;
     world.advance_tick(&[SimCommand::AttackGround { units: vec![tank], point: start.position }]);
 
-    // Each 70-damage shell takes away the same share of the mass as of the health.
+    // Each shell takes away the same share of the mass as of the health.
     let mut first_hit = None;
     let mut gone_at = None;
     for tick in 0..400 {
@@ -653,12 +657,14 @@ fn a_ground_attack_destroys_debris_and_the_mass_in_it() {
         }
     }
     let hit = first_hit.expect("a shell should land on the debris");
-    assert_eq!(hit.health, fp_int(1_280));
-    let expected = start.mass * 1_280 / 1_350;
+    let gun = heavy.weapon.expect("the tank has a gun");
+    assert_eq!(hit.health, start.health - gun.damage);
+    let expected = start.mass * Res::from_num(hit.health) / Res::from_num(start.health);
     assert!((hit.mass - expected).abs() < Res::from_num(0.001), "{} left, not {expected}", hit.mass);
-    // Twenty shells at a reload of 12 ticks, after the first has flown.
+    // As many shells as its health takes, one a reload, after the first has flown.
+    let shells = (start.health / gun.damage).ceil().to_num::<u32>();
     let gone_at = gone_at.expect("the debris should be destroyed");
-    assert!(gone_at < 20 * 12 + 30, "it took {gone_at} ticks");
+    assert!(gone_at < shells * gun.reload_ticks + 30, "it took {gone_at} ticks");
     assert_eq!(world.economies[0].mass_reclaimed, Res::ZERO);
     assert!(world.economies[0].mass <= mass_before + Res::from_num(1), "nobody got the materiel");
 
@@ -866,8 +872,10 @@ fn a_target_that_outruns_an_attack_move_is_chased_by_route_until_it_is_caught() 
     let bot_entity = world.unit_entity(bot).unwrap();
     world.ecs.get::<&mut sim_engine::sim::components::UnitStats>(bot_entity).unwrap().max_speed = fp_int(9);
     world.ecs.get::<&mut Combat>(bot_entity).unwrap().range = Fp::ZERO;
-    // And tough enough to live until then.
-    *world.ecs.get::<&mut Health>(bot_entity).unwrap() = Health { current: fp_int(1_500), max: fp_int(1_500) };
+    // And tough enough to live until then: half a minute of the tank's fire.
+    let gun = world.blueprints.get(world.blueprints.id("t2_heavy_tank")).weapon.expect("the tank has a gun");
+    let tough = Fp::from_num(gun.damage.to_num::<f64>() * 10.0 / f64::from(gun.reload_ticks) * 30.0);
+    *world.ecs.get::<&mut Health>(bot_entity).unwrap() = Health { current: tough, max: tough };
     let goal = point(4_000, 1_000);
     world.advance_tick(&[SimCommand::AttackMove { units: vec![tank], goal }, SimCommand::Move { units: vec![bot], goal: point(1_300, 4_000) }]);
     let mut routed = false;

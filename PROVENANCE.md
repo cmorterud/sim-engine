@@ -65,7 +65,8 @@ replaced.
 
 Re-derived from this game's own targets and duels on 2026-11-15 (BALANCE.md,
 `reports/balance/2026-11-15-t1-land.md`), no longer FAF's: the Medium Tank, Light Walker, Light
-Artillery, and Land Scout.
+Artillery, and Land Scout. And on 2026-11-20 (`reports/balance/2026-11-20-t2-land.md`): the Heavy
+Tank, Grenadier Walker, Assault Hovercraft, and Mobile Missile Launcher.
 
 ## Balance targets
 

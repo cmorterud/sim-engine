@@ -82,7 +82,14 @@ out close and why: evidence about the process, not a target.
 
 * 2026-11-15: T1 land (the Medium Tank, Light Walker, Light Artillery, and Land Scout) derived and
   priced, and in the unit data (`reports/balance/2026-11-15-t1-land.md`). Every counter-matrix
-  cell among them meets its target. Next: T2 land, against T1 land frozen.
+  cell among them meets its target.
+* 2026-11-20: T2 land (the Heavy Tank, Grenadier Walker, Assault Hovercraft, and Mobile Missile
+  Launcher) derived against T1 land frozen, priced, and in the unit data
+  (`reports/balance/2026-11-20-t2-land.md`). The Heavy Tank is 1.07 times the anchor per
+  materiel; the grenadier beats it attack-moving and loses to it with micro; the hovercraft is
+  about even with it; the missile launcher beats artillery firing in place and loses to what keeps
+  moving. Left for later passes: the Mobile Flak (air), the Mobile Shield (mixed armies), and the
+  T2 engineers (economy). Next: T3 land, against T1 and T2 land frozen.
 
 ## Order of work
 

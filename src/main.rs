@@ -98,7 +98,8 @@ Usage: sim-engine [options]
   --soak <matches>     Play and replay AI-vs-AI matches, and report on the exit criteria
   --threads <n>        Threads for --soak (default 6)
   --balance            Measure the unit data with the balance harness's duels (BALANCE.md)
-  --balance-derive     Derive T1 land's numbers from data/balance_targets.toml, and price them
+  --balance-derive-t1  Derive T1 land's numbers from data/balance_targets.toml, as first done
+  --balance-derive     Derive T2 land's numbers from data/balance_targets.toml, and price them
   --no-tick-gate       With --soak, report tick times without failing on them, for
                        shared machines such as CI runners
   --seed <number>      Scenario seed
@@ -187,6 +188,7 @@ struct Options {
     balance: bool,
     /// Print T1 land's first-pass numbers, derived from the balance targets.
     balance_derive: bool,
+    balance_derive_t1: bool,
     threads: Option<usize>,
     no_tick_gate: bool,
     seed: Option<u64>,
@@ -280,6 +282,7 @@ fn parse_options() -> Result<Option<Options>, String> {
             "--soak" => options.soak = Some(number("--soak", value("--soak")?)?),
             "--balance" => options.balance = true,
             "--balance-derive" => options.balance_derive = true,
+            "--balance-derive-t1" => options.balance_derive_t1 = true,
             "--threads" => options.threads = Some(number("--threads", value("--threads")?)? as usize),
             "--no-tick-gate" => options.no_tick_gate = true,
             "--seed" => options.seed = Some(number("--seed", value("--seed")?)?),
@@ -334,6 +337,10 @@ fn main() {
     };
     if options.sound_check {
         sound_check();
+        return;
+    }
+    if options.balance_derive_t1 {
+        sim_engine::balance::derive_t1_report();
         return;
     }
     if options.balance_derive {
