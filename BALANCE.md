@@ -51,7 +51,9 @@ The idea is to have few free numbers and to solve for them, not to search for th
    whole unit counts make results jump. Fitting that matrix gives each unit an overall strength
    and its matchups against the counter matrix (beats, loses to, depends on micro); a cell off the
    matrix is a bug. Blueprints are overridden in memory, so tuning never touches the committed
-   data or the goldens until a result is kept.
+   data or the goldens until a result is kept. Artillery is also checked in a siege, attack-moving
+   onto a defended position of finished, powered structures (`[siege]`): what a field duel cannot
+   measure, since a position it outranges cannot fight back.
 4. **Solving.** Prices first: multiply each unit's cost by exp(−α · strength) and measure again,
    which settles in a few rounds, since outcomes are near-linear in log price. Then counters, by
    the stat that makes them (flak damage against aircraft, artillery's least range), not price.
@@ -93,9 +95,10 @@ out close and why: evidence about the process, not a target.
 * 2026-11-21: T3 land (the Heavy Walker, Siege Walker, and Mobile Heavy Artillery) derived
   against T1 and T2 land frozen, priced, and in the unit data
   (`reports/balance/2026-11-21-t3-land.md`). The Heavy Walker is 1.07 times the Heavy Tank per
-  materiel; the Siege Walker is about even with it; the artillery beats it attack-moving and loses
-  to it with micro, and to what closes in. Left for later passes: the Field Rig and the T3
-  Engineer (economy). Next: air, against land frozen.
+  materiel; the Siege Walker is about even with it; the artillery outranges the T3 heavy point
+  defense by a fifth, breaks a shielded position of it in 27 seconds without loss (`[siege]`),
+  beats the Heavy Walker attack-moving, and loses to it with micro, and to what closes in. Left
+  for later passes: the Field Rig and the T3 Engineer (economy). Next: air, against land frozen.
 
 ## Order of work
 

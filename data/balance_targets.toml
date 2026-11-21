@@ -115,6 +115,17 @@ skirmisher_speed_share_min = 0.90
 # force over plain attack-moving: worth it in a pinch, never decisive on its own.
 micro_gain = [0.10, 0.25]
 
+[siege]
+# What artillery is for, past the field: breaking defended positions. It outranges the point
+# defenses of its tier by at least this share, so that it can shell them without reply, and an
+# equal materiel of it breaks a position of them under a dome of its tier within this many
+# seconds, losing nothing. Its price comes from the field, as at T1: a position it outranges
+# cannot fight back, so any strength breaks it in time, and pricing to a siege time made it too
+# weak to hold the field (2026-11-21). Pricing T3 artillery by a field duel alone, before, cut its
+# reach below the T2 point defense's.
+outrange_defense_min = 0.15
+seconds_max = 60
+
 [splash]
 # Formations keep units 2.5 radii apart, center to center (FORMATION_SPACING_RADII).
 # Line weapons splash no wider than their target's radius, so it is incidental.

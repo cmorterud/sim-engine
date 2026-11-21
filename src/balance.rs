@@ -9,6 +9,7 @@ use std::sync::Arc;
 use crate::math::fp::{fp_int, Fp, Vec2Fp};
 use crate::sim::blueprints::{Blueprint, BlueprintDb, BlueprintId};
 use crate::sim::commands::SimCommand;
+use crate::sim::blueprints::Res;
 use crate::sim::components::{Blueprinted, Health, SimId, Team};
 use crate::sim::config::{SimConfig, TerrainStyle};
 use crate::sim::world::SimWorld;
@@ -177,6 +178,66 @@ fn spawn_group(world: &mut SimWorld, side: Side, team: Team, x: i32, back: i32, 
             world.spawn_mobile(side.unit, team, Vec2Fp::new(fp_int(depth), fp_int(along)))
         })
         .collect()
+}
+
+/// How a siege ended.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct SiegeResult {
+    /// From the first damage to the last structure's fall, or to the time limit, in seconds.
+    pub seconds: f64,
+    /// Whether every structure fell.
+    pub broken: bool,
+    /// The share of the attackers' materiel lost, weighted by health.
+    pub losses: f64,
+}
+
+/// A defended position: Red's structures, finished and powered, by blueprint key and the cell of
+/// their south-west corner. The T3 one is a heavy shield over three heavy point defenses.
+pub type Position = &'static [(&'static str, u32, u32)];
+pub const T3_POSITION: Position = &[("t3_heavy_shield", 127, 127), ("t3_heavy_point_defense", 124, 128), ("t3_heavy_point_defense", 132, 128), ("t3_heavy_point_defense", 128, 124)];
+
+/// The materiel a position costs.
+pub fn position_materiel(db: &BlueprintDb, position: Position) -> f64 {
+    position.iter().map(|&(key, _, _)| db.get(db.id(key)).mass.to_num::<f64>()).sum()
+}
+
+/// A siege: `count` of `unit` for Blue start west of `position`, beyond its reach, and
+/// attack-move onto it. Red has the energy to keep its shields up throughout.
+pub fn siege(db: &Arc<BlueprintDb>, unit: BlueprintId, count: u32, position: Position) -> SiegeResult {
+    let config = SimConfig { map_units: MAP_UNITS, terrain: TerrainStyle::Flat, fog_of_war: false, ..SimConfig::default() };
+    let mut world = SimWorld::new(config, 1);
+    world.blueprints = Arc::clone(db);
+    let red = &mut world.economies[Team::Red.index()];
+    for value in [&mut red.base_energy_capacity, &mut red.energy_capacity, &mut red.energy] {
+        *value = Res::from_num(100_000_000);
+    }
+    let structures: Vec<SimId> = position
+        .iter()
+        .map(|&(key, x, y)| world.spawn_finished_structure(db.id(key), Team::Red, x, y).expect("the position fits on the duel ground"))
+        .collect();
+    let middle = MAP_UNITS / 2;
+    let reach = position.iter().filter_map(|&(key, _, _)| db.get(db.id(key)).weapon).map(|weapon| weapon.range.to_num::<i32>()).max().unwrap_or(0);
+    let start = middle - reach.max(db.get(unit).weapon.map_or(0, |weapon| weapon.range.to_num::<i32>())) - 400;
+    let attackers = spawn_group(&mut world, Side { unit, count, tactics: Tactics::AttackMove }, Team::Blue, start, -1, 0);
+    world.advance_tick(&[SimCommand::AttackMove { units: attackers.clone(), goal: Vec2Fp::new(fp_int(middle), fp_int(middle)) }]);
+    let worth_of = |world: &SimWorld, ids: &[SimId]| ids.iter().map(|&id| worth(world, id)).sum::<f64>();
+    let full = worth_of(&world, &attackers);
+    let standing = |world: &SimWorld| structures.iter().filter(|&&id| world.unit_entity(id).is_some()).count();
+    let shield_health = |world: &SimWorld| world.snapshot().shields.iter().map(|shield| i64::from(shield.health_permille)).sum::<i64>();
+    let (mut first_damage, mut broken) = (None, false);
+    let (count_before, shields_before) = (standing(&world), shield_health(&world));
+    while world.current_tick < MAX_TICKS {
+        world.advance_tick(&[]);
+        if first_damage.is_none() && world.current_tick.is_multiple_of(10) && (standing(&world) < count_before || shield_health(&world) < shields_before) {
+            first_damage = Some(world.current_tick);
+        }
+        if standing(&world) == 0 {
+            broken = true;
+            break;
+        }
+    }
+    let seconds = f64::from(world.current_tick - first_damage.unwrap_or(world.current_tick)) / 10.0;
+    SiegeResult { seconds, broken, losses: 1.0 - worth_of(&world, &attackers) / full.max(f64::MIN_POSITIVE) }
 }
 
 /// A duel played both ways round, Blue as `a` and then as `b`, so that neither side's start
@@ -378,6 +439,8 @@ pub enum Target {
     Score(&'static str, f64),
     /// Strength per materiel against this unit, by break-even: a tier's efficiency.
     Efficiency(&'static str, f64),
+    /// Seconds for an equal materiel of it to break this position (`[siege] seconds`).
+    Siege(Position, f64),
 }
 
 /// T1 land, first pass. Costs set how many a materiel buys; strengths are solved by duels.
@@ -560,25 +623,26 @@ pub fn t3_land_roles() -> Vec<Role> {
             target: Target::Score("t3_heavy_walker", 0.0),
             ..line.clone()
         },
-        // Artillery, as at T1: it outranges everything on land, punishes clumps, and cannot hit
-        // what is inside half its range. It beats line units that attack-move into it, keeping
-        // about half, and loses to micro and to what closes on it.
+        // Artillery: it outranges the T3 heavy point defense by a fifth ([siege]), so that it
+        // shells defenses without reply, and bursts over about one formation spacing of a T3
+        // target. Priced as at T1, to beat line units that attack-move into it; a position it
+        // outranges cannot fight back, so how fast it breaks one is checked, not priced. Its least
+        // range is a quarter of its reach, inside the line unit's range, so that what closes on
+        // it can fight it.
         Role {
             unit: "t3_mobile_artillery",
             role: "artillery",
             cost: 600.0,
             time_to_kill: 1.15,
-            // As at T1, its least range, half its reach, falls inside the line unit's range, so
-            // that line units fire from where it can hit them.
-            range: 1.5 * 1.8,
+            range: 1_400.0 * 1.2 / 350.0,
             speed: 0.6,
             sight_over_range: 0.6,
-            flight_seconds: 2.5,
+            flight_seconds: 3.0,
             reload_seconds: 6.0,
             // About one formation spacing of a T3 target, radius 13 ([splash]).
             splash: 1.75 * 13.0,
             radius: 12.0,
-            min_range: Some(0.5),
+            min_range: Some(0.25),
             spread: 25.0,
             target: Target::Score("t3_heavy_walker", 0.5),
             ..line
@@ -642,6 +706,26 @@ pub fn price(db: &BlueprintDb, anchor: &Anchor, role: &Role, materiel: f64) -> f
                     nearest = ((score - target).abs(), middle.exp2());
                 }
                 if score > target {
+                    high = middle;
+                } else {
+                    low = middle;
+                }
+            }
+            nearest.1
+        }
+        Target::Siege(position, target) => {
+            // A siege shortens as the attackers' damage grows: bisection, keeping the nearest.
+            let (mut low, mut high) = (-3.0f64, 3.0f64);
+            let mut nearest = (f64::INFINITY, role.strength);
+            for _ in 0..12 {
+                let middle = (low + high) / 2.0;
+                let trial = Arc::new(apply(db, anchor, role, middle.exp2()));
+                let count = (position_materiel(&trial, position) / role.cost).round().max(1.0) as u32;
+                let seconds = siege(&trial, trial.id(role.unit), count, position).seconds;
+                if (seconds - target).abs() < nearest.0 {
+                    nearest = ((seconds - target).abs(), middle.exp2());
+                }
+                if seconds < target {
                     high = middle;
                 } else {
                     low = middle;
@@ -845,11 +929,23 @@ pub fn derive_t3_report() {
     println!("  T3 line against T2 line, efficiency: {:.2} (targets: 1.0-1.15)", tier.efficiency);
     println!("  T3 line against T2 line, score:      {:+.2}", cell("t3_heavy_walker", Tactics::AttackMove, "t2_heavy_tank"));
     println!("  heavy against line:                 {:+.2} (even, within 0.15)", cell("t3_siege_walker", Tactics::AttackMove, "t3_heavy_walker"));
-    println!("  line against artillery, attack-move: {:+.2} (artillery keeps 0.4-0.7)", cell("t3_heavy_walker", Tactics::AttackMove, "t3_mobile_artillery"));
-    println!("  line against artillery, with micro:  {:+.2} (line keeps at least 0.3)", cell("t3_heavy_walker", Tactics::Micro, "t3_mobile_artillery"));
-    println!("  heavy against artillery, attack-move: {:+.2} (artillery keeps at least 0.3)", cell("t3_siege_walker", Tactics::AttackMove, "t3_mobile_artillery"));
-    println!("  heavy against artillery, with micro:  {:+.2} (heavy keeps at least 0.3)", cell("t3_siege_walker", Tactics::Micro, "t3_mobile_artillery"));
-    println!("  T2 assault against T3 artillery:     {:+.2} (fast units that close in win)", cell("t2_assault_hovercraft", Tactics::AttackMove, "t3_mobile_artillery"));
+    let artillery = db.get(db.id("t3_mobile_artillery"));
+    let defense = db.get(db.id("t3_heavy_point_defense")).weapon.expect("point defense has a gun").range.to_num::<f64>();
+    println!("  artillery's reach over the heavy point defense's: {:.2} (at least 1.15)", artillery.weapon.expect("artillery has a gun").range.to_num::<f64>() / defense);
+    let count = (position_materiel(&db, T3_POSITION) / artillery.mass.to_num::<f64>()).round() as u32;
+    let broke = siege(&db, db.id("t3_mobile_artillery"), count, T3_POSITION);
+    println!(
+        "  {count} artillery against a heavy shield over three heavy point defenses ({} materiel): {} in {:.0} s, losing {:.0}% (targets: within 60 s, nothing lost)",
+        position_materiel(&db, T3_POSITION),
+        if broke.broken { "broken" } else { "holding" },
+        broke.seconds,
+        broke.losses * 100.0
+    );
+    let walkers = mirrored(&db, side("t3_heavy_walker", Tactics::AttackMove), side("t3_mobile_artillery", Tactics::AttackMove), 1.0);
+    println!("  line against artillery, attack-move: {:+.2} (artillery wins)", walkers.score);
+    println!("  line against artillery, with micro:  {:+.2} (line wins)", cell("t3_heavy_walker", Tactics::Micro, "t3_mobile_artillery"));
+    println!("  heavy against artillery, attack-move: {:+.2}", cell("t3_siege_walker", Tactics::AttackMove, "t3_mobile_artillery"));
+    println!("  T2 assault against T3 artillery:     {:+.2}", cell("t2_assault_hovercraft", Tactics::AttackMove, "t3_mobile_artillery"));
     let raid = mirrored(
         &db,
         Side { unit: db.id("t1_light_walker"), count: 25, tactics: Tactics::AttackMove },

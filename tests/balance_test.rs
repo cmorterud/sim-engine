@@ -107,3 +107,19 @@ fn t3_artillery_beats_the_line_unit_unless_it_spreads_out_and_charges() {
     let micro = mirrored(&db, side("t3_heavy_walker", 10, Tactics::Micro), side("t3_mobile_artillery", 6, Tactics::AttackMove), 1.0);
     assert!(micro.score >= 0.3, "spread out and charging, the walkers keep {:.2} more", micro.score);
 }
+
+/// BALANCE.md, [siege]: T3 artillery outranges the T3 heavy point defense by at least 15%, and an
+/// equal materiel of it breaks a heavy shield over three heavy point defenses within a minute,
+/// losing nothing, since nothing there can reach it.
+#[test]
+fn t3_artillery_outranges_t3_point_defense_and_breaks_a_shielded_position() {
+    use sim_engine::balance::{position_materiel, siege, T3_POSITION};
+    let db = db();
+    let reach = |key: &str| db.get(db.id(key)).weapon.expect("it has a gun").range.to_num::<f64>();
+    let edge = reach("t3_mobile_artillery") / reach("t3_heavy_point_defense");
+    assert!(edge >= 1.15, "the artillery reaches only {edge:.2} times as far as the heavy point defense");
+    let count = (position_materiel(&db, T3_POSITION) / db.get(db.id("t3_mobile_artillery")).mass.to_num::<f64>()).round() as u32;
+    let result = siege(&db, db.id("t3_mobile_artillery"), count, T3_POSITION);
+    assert!(result.broken && result.seconds <= 60.0, "{count} artillery broke the position: {}, in {:.0} s", result.broken, result.seconds);
+    assert!(result.losses < 0.01, "and lost {:.0}%", result.losses * 100.0);
+}
