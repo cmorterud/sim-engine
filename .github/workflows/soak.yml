@@ -21,10 +21,12 @@ on:
 permissions:
   contents: read
 
-# A newer push makes an older soak moot, so stop it and save the minutes.
+# Every pushed commit gets its whole soak: a newer push waits in line behind the soak running,
+# up to 100 deep, rather than cancelling it. The repository is public, so the runners cost
+# nothing, and no commit goes unsoaked.
 concurrency:
   group: soak-${{ github.ref }}
-  cancel-in-progress: true
+  queue: max
 
 env:
   # Kept in step with CI, so that this workflow reuses the release build cache CI saves.

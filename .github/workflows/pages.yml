@@ -17,10 +17,12 @@ permissions:
   contents: read
   actions: read
 
-# Only the newest commit is worth publishing.
+# Builds wait in line, up to 100 deep, rather than cancelling one another, so that a deploy is
+# never cut off partway. Only the newest commit is worth publishing, and the gates job lets
+# only main's newest through, so a build left behind by a newer commit stops there.
 concurrency:
   group: pages
-  cancel-in-progress: true
+  queue: max
 
 env:
   RUST_VERSION: "1.99.1"
