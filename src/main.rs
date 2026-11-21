@@ -19,7 +19,9 @@ use sim_engine::input::selection::{group_center, ControlGroups, Selection};
 use sim_engine::math::fp::{Fp, Vec2Fp};
 use sim_engine::render::camera::{Camera, HeightField};
 use sim_engine::render::effects::Effects;
+use sim_engine::icons::ICON_ALTITUDE;
 use sim_engine::render::instances::{self, InstanceBatches, Motion};
+use sim_engine::render::links;
 use sim_engine::render::meshes::Shape;
 use sim_engine::render::pipeline::{FrameScene, Renderer, UiFrame};
 use sim_engine::sim::blueprints::{BlueprintDb, BlueprintId};
@@ -1594,7 +1596,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                         if is_match && orders_view_strength > 0.0 {
                             trails.extend(ui::other_units_trails(&session.previous, &snapshot, alpha, &selected, orders_view_strength));
                         }
-                        let beams = if is_match { ui::work_beams(&session.previous, &snapshot, alpha) } else { Vec::new() };
+                        let beams = if is_match { links::work_beams(&session.previous, &snapshot, alpha) } else { Vec::new() };
                         let beam_time = clock.elapsed().as_secs_f64();
                         let pending = match &order_drag {
                             Some((handle, _)) => pending_without(pending_builds(&snapshot), handle),
@@ -1639,7 +1641,6 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                             ui::deposit_highlights(ctx, &camera, &open_deposits, snapped_deposit, pixels_per_point);
                             ui::pending_build_outlines(ctx, &camera, &pending, pixels_per_point);
                             ui::distant_selection_markers(ctx, &camera, &snapshot, &selected, pixels_per_point);
-                            ui::draw_work_beams(ctx, &camera, &beams, beam_time, pixels_per_point);
                             ui::draw_interceptions(ctx, &camera, &snapshot.interceptions, pixels_per_point);
                             ui::draw_teleports(ctx, &camera, &map.heights, &snapshot.teleports, pixels_per_point);
                             ui::draw_exotic(ctx, &camera, &map.heights, &snapshot, pixels_per_point);
@@ -1658,7 +1659,6 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                     ui::draw_placement_ranges(ctx, &camera, &map.heights, [center[0], center[1]], &ranges, pixels_per_point);
                                 }
                             }
-                            ui::draw_adjacency(ctx, &camera, &snapshot.adjacency, pixels_per_point);
                             // What the selection reaches, while nothing is being placed.
                             if placing.is_none() {
                                 let ranges = ui::selection_ranges(&snapshot, &selected, &map.blueprints);
@@ -1881,6 +1881,12 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                         effects.note_events(previous, current, motion.time, &|x, y| map.heights.height_at(x, y), (map.water_level > -1.0e5).then_some(f64::from(map.water_level)));
                         effects.trail(previous, current, alpha, &looks, Some(f64::from(map.water_level)), motion.time);
                         effects.build(motion.time, eye, &mut scene_instances);
+                        // Builders' beams and adjacency wiring are in the world, and only up close:
+                        // zoomed out to icons, they would be clutter.
+                        if camera.altitude() < ICON_ALTITUDE {
+                            links::build_work_beam_instances(&beams, beam_time, eye, &mut scene_instances);
+                            links::build_wiring_instances(&snapshot.adjacency, &snapshot.units, beam_time, eye, &mut scene_instances);
+                        }
                         let cell = f64::from(TERRAIN_CELL_UNITS);
                         for &(min, top) in &map.wall_cells {
                             let max = [min[0] + cell, min[1] + cell];

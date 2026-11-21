@@ -56,19 +56,10 @@ const UPGRADE_PULSE_RATE: f64 = 4.0;
 /// How close to an order's icon a Shift-press grabs it, in points.
 const HANDLE_GRAB_POINTS: f64 = 18.0;
 const HANDLE_RADIUS_POINTS: f32 = 10.0;
-/// Warm, so that beams stand out against both blue structures and the terrain.
-const BEAM_BUILD: Color32 = Color32::from_rgb(255, 215, 110);
-const BEAM_RECLAIM: Color32 = Color32::from_rgb(150, 255, 170);
 /// Matches how double-clicking a unit works.
 const QUICK_DOUBLE_CLICK_SECONDS: f64 = 0.4;
 /// How many units a factory queues at once with Shift held.
 const SHIFT_QUEUE_COUNT: u32 = 5;
-/// How many pulses are on a work beam at once.
-const BEAM_PULSES: usize = 5;
-/// How long a pulse takes to travel along a beam, in seconds.
-const BEAM_PULSE_SECONDS: f64 = 1.1;
-/// A beam shorter than this on screen is only clutter.
-const MIN_BEAM_POINTS: f32 = 6.0;
 
 /// An order waiting for the player to click where it should go.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -3016,79 +3007,6 @@ pub fn order_trails(ctx: &egui::Context, camera: &Camera, legs: &[TrailLeg], pix
 const RIBBON_POINTS: f32 = 12.0;
 const RIBBON_OPACITY: f32 = 0.22;
 
-/// A beam between a builder and what it is working on, in world coordinates.
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub struct WorkBeam {
-    pub builder: SimId,
-    pub from: [f64; 3],
-    pub to: [f64; 3],
-    pub reclaim: bool,
-}
-
-/// Works out the beams for all work being done. Each starts at the front of the builder,
-/// drawn where the builder appears between ticks.
-pub fn work_beams(previous: &SimSnapshot, current: &SimSnapshot, alpha: f64) -> Vec<WorkBeam> {
-    let raw = |value: i32| f64::from(value) / 4096.0;
-    current
-        .work_links
-        .iter()
-        .filter_map(|link| {
-            let unit = find_unit(current, link.builder)?;
-            let now = [raw(unit.x), raw(unit.y), raw(unit.z)];
-            let before = find_unit(previous, link.builder).map_or(now, |unit| [raw(unit.x), raw(unit.y), raw(unit.z)]);
-            let center: [f64; 3] = std::array::from_fn(|axis| before[axis] + (now[axis] - before[axis]) * alpha);
-            let to = link.target.map(raw);
-            let (dx, dy) = (to[0] - center[0], to[1] - center[1]);
-            let distance = dx.hypot(dy);
-            let reach = raw(unit.radius).min(distance);
-            let (forward_x, forward_y) = if distance > 0.0 { (dx / distance * reach, dy / distance * reach) } else { (0.0, 0.0) };
-            Some(WorkBeam { builder: link.builder, from: [center[0] + forward_x, center[1] + forward_y, center[2]], to, reclaim: link.reclaim })
-        })
-        .collect()
-}
-
-/// How far along its beam each pulse is, from 0 at the builder to 1 at the work. Pulses
-/// flow towards the work, or back to the builder when reclaiming. Builders are out of
-/// step with each other, so that a group reads as separate beams.
-pub fn beam_pulse_shares(time: f64, builder: SimId, reclaim: bool) -> [f32; BEAM_PULSES] {
-    let offset = (f64::from(builder.0) * 0.37).fract();
-    std::array::from_fn(|index| {
-        let share = (time / BEAM_PULSE_SECONDS + offset + index as f64 / BEAM_PULSES as f64).fract();
-        (if reclaim { 1.0 - share } else { share }) as f32
-    })
-}
-
-/// Draws work beams: a faint line, pulses travelling along it, and a ring at the work.
-pub fn draw_work_beams(ctx: &egui::Context, camera: &Camera, beams: &[WorkBeam], time: f64, pixels_per_point: f32) {
-    let painter = ctx.layer_painter(egui::LayerId::background());
-    let to_points = |world: [f64; 3]| {
-        camera.world_to_screen(world).map(|pixels| Pos2::new(pixels[0] as f32 / pixels_per_point, pixels[1] as f32 / pixels_per_point))
-    };
-    let bounds = ctx.screen_rect().expand(16.0);
-    for beam in beams {
-        let (Some(from), Some(to)) = (to_points(beam.from), to_points(beam.to)) else {
-            continue;
-        };
-        if from.distance(to) < MIN_BEAM_POINTS || clip_segment(from, to, bounds).is_none() {
-            continue;
-        }
-        let color = if beam.reclaim { BEAM_RECLAIM } else { BEAM_BUILD };
-        // A soft glow under a bright core.
-        painter.line_segment([from, to], Stroke::new(5.0_f32, color.gamma_multiply(0.18)));
-        painter.line_segment([from, to], Stroke::new(1.5_f32, color.gamma_multiply(0.75)));
-        for share in beam_pulse_shares(time, beam.builder, beam.reclaim) {
-            // Pulses fade in and out at the ends, so that they do not pop.
-            let brightness = (share * std::f32::consts::PI).sin();
-            painter.circle_filled(from + (to - from) * share, 1.5 + 2.5 * brightness, color.gamma_multiply(0.3 + 0.7 * brightness));
-        }
-        if bounds.contains(to) {
-            let breath = ((time * 5.0 + f64::from(beam.builder.0)).sin() * 0.5 + 0.5) as f32;
-            painter.circle_stroke(to, 5.0 + 6.0 * breath, Stroke::new(2.0_f32, color.gamma_multiply(1.0 - 0.6 * breath)));
-            painter.circle_filled(to, 2.5, color);
-        }
-    }
-}
-
 /// The outer edge of where any of these circles reach, as short straight pieces: each circle's
 /// rim, less what lies inside another circle. Circles are `(center, radius)` in world units.
 pub fn coverage_outline(circles: &[([f64; 2], f64)]) -> Vec<[[f64; 2]; 2]> {
@@ -3476,34 +3394,6 @@ pub fn draw_map_frame(ctx: &egui::Context, camera: &Camera, heights: &crate::ren
             if let [Some(from), Some(to)] = pair {
                 painter.line_segment([*from, *to], Stroke::new(width, color));
             }
-        }
-    }
-}
-
-/// Adjacency bonuses, as cables laid on the ground between the structures sharing them, with
-/// pulses running from the giver to the receiver. Only up close: zoomed out to icons, they would
-/// be clutter.
-pub fn draw_adjacency(ctx: &egui::Context, camera: &Camera, links: &[([i32; 3], [i32; 3])], pixels_per_point: f32) {
-    if links.is_empty() || camera.altitude() >= ICON_ALTITUDE {
-        return;
-    }
-    const CABLE: Color32 = Color32::from_rgb(120, 230, 255);
-    let painter = ctx.layer_painter(egui::LayerId::background());
-    let raw = |value: i32| f64::from(value) / 4096.0;
-    let to_points = |point: [f64; 3]| camera.world_to_screen(point).map(|pixels| Pos2::new(pixels[0] as f32 / pixels_per_point, pixels[1] as f32 / pixels_per_point));
-    let time = ctx.input(|input| input.time);
-    for &(giver, receiver) in links {
-        let (from, to) = ([raw(giver[0]), raw(giver[1]), raw(giver[2]) + 1.0], [raw(receiver[0]), raw(receiver[1]), raw(receiver[2]) + 1.0]);
-        let (Some(start), Some(end)) = (to_points(from), to_points(to)) else {
-            continue;
-        };
-        painter.line_segment([start, end], Stroke::new(4.0_f32, Color32::from_black_alpha(140)));
-        painter.line_segment([start, end], Stroke::new(1.6_f32, CABLE.gamma_multiply(0.75)));
-        // Two pulses a second, running down the cable.
-        let phase = ((time * 0.8).fract()) as f32;
-        for offset in [0.0_f32, 0.5] {
-            let along = (phase + offset).fract();
-            painter.circle_filled(start + (end - start) * along, 2.4, CABLE);
         }
     }
 }
@@ -3924,7 +3814,7 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sim::world::{BuildQueueView, FactoryView, OrderStopView, PlanStep, UnitPlanView, UnitSpendingView, WorkLinkView};
+    use crate::sim::world::{BuildQueueView, FactoryView, OrderStopView, PlanStep, UnitPlanView, UnitSpendingView};
 
     fn raw(value: f64) -> i32 {
         (value * 4096.0) as i32
@@ -4157,55 +4047,6 @@ mod tests {
         assert_eq!(construction_note(1, 1).unwrap(), "Under construction: the queue starts once built.");
         assert_eq!(construction_note(2, 2).unwrap(), "Under construction: the queue starts once built.");
         assert_eq!(construction_note(1, 3).unwrap(), "1 of 3 under construction: their queues start once built.");
-    }
-
-    #[test]
-    fn a_work_beam_runs_from_the_front_of_the_builder_to_the_work() {
-        let raw = |value: f64| (value * 4096.0) as i32;
-        let mut builder = unit(1, 100.0);
-        builder.radius = raw(5.0);
-        let mut current = snapshot(vec![builder], vec![]);
-        current.work_links = vec![
-            WorkLinkView { builder: SimId(1), target: [raw(150.0), 0, raw(7.0)], reclaim: false },
-            // A builder that cannot be seen has no beam.
-            WorkLinkView { builder: SimId(2), target: [raw(150.0), 0, 0], reclaim: false },
-        ];
-        let beams = work_beams(&current, &current, 1.0);
-        assert_eq!(beams.len(), 1);
-        assert_eq!(beams[0].from[0], 105.0, "the beam starts at the front of the builder");
-        assert_eq!(beams[0].to, [150.0, 0.0, 7.0]);
-
-        // Between ticks, the beam stays attached to where the builder is drawn.
-        let mut earlier = builder;
-        earlier.x = raw(90.0);
-        let before = snapshot(vec![earlier], vec![]);
-        assert_eq!(work_beams(&before, &current, 0.5)[0].from[0], 100.0);
-    }
-
-    #[test]
-    fn a_builder_standing_on_its_work_still_gets_a_valid_beam() {
-        let mut current = snapshot(vec![unit(1, 100.0)], vec![]);
-        current.work_links = vec![WorkLinkView { builder: SimId(1), target: [100 * 4096, 0, 0], reclaim: false }];
-        let beam = work_beams(&current, &current, 1.0)[0];
-        assert!(beam.from.iter().all(|value| value.is_finite()));
-    }
-
-    #[test]
-    fn beam_pulses_flow_to_the_work_and_back_when_reclaiming() {
-        let later = 0.05;
-        let (build_before, build_after) = (beam_pulse_shares(1.0, SimId(1), false), beam_pulse_shares(1.0 + later, SimId(1), false));
-        let (reclaim_before, reclaim_after) = (beam_pulse_shares(1.0, SimId(1), true), beam_pulse_shares(1.0 + later, SimId(1), true));
-        for index in 0..BEAM_PULSES {
-            for share in [build_before[index], reclaim_before[index]] {
-                assert!((0.0..=1.0).contains(&share));
-            }
-            let moved = build_after[index] - build_before[index];
-            // A pulse that just wrapped has jumped back to the start.
-            assert!(moved > 0.0 || moved < -0.5, "building should flow outwards: {moved}");
-            let moved = reclaim_after[index] - reclaim_before[index];
-            assert!(moved < 0.0 || moved > 0.5, "reclaiming should flow back: {moved}");
-        }
-        assert_ne!(beam_pulse_shares(1.0, SimId(1), false), beam_pulse_shares(1.0, SimId(2), false), "builders should be out of step");
     }
 
     fn commander_and_engineer(db: &BlueprintDb) -> SimSnapshot {

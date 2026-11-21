@@ -5,5 +5,6 @@
 pub mod camera;
 pub mod effects;
 pub mod instances;
+pub mod links;
 pub mod meshes;
 pub mod pipeline;

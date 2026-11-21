@@ -33,8 +33,8 @@ const PROJECTILE_ICON_PX: f32 = 1.0;
 /// Geometry with this icon size never collapses to a dot.
 const NO_ICON: f32 = 0.0;
 
-const BLUE: [f32; 3] = [0.20, 0.50, 1.00];
-const RED: [f32; 3] = [1.00, 0.27, 0.22];
+pub(super) const BLUE: [f32; 3] = [0.20, 0.50, 1.00];
+pub(super) const RED: [f32; 3] = [1.00, 0.27, 0.22];
 const SELECTED: [f32; 3] = [0.25, 1.00, 0.35];
 const SHELL: [f32; 3] = [1.00, 0.85, 0.35];
 const DISCHARGE_SHELL: [f32; 3] = [0.75, 0.95, 1.00];
@@ -49,7 +49,9 @@ const DEPOSIT: [f32; 3] = [0.10, 0.75, 0.62];
 const VENT: [f32; 3] = [0.75, 0.55, 0.20];
 const GHOST_VALID: [f32; 3] = [0.35, 0.95, 0.45];
 const GHOST_INVALID: [f32; 3] = [0.95, 0.25, 0.20];
-/// How much wider a structure's foundation is than the structure, and how thick it is, in
+/// How much of its footprint a structure covers, either way. Walls cover all of theirs.
+pub(super) const STRUCTURE_SHARE: f32 = 0.9;
+/// How much wider a structure's foundation is than its footprint, and how thick it is, in
 /// world units, half of it below the ground so that it sits flush on a slope.
 const APRON_WIDTH: f32 = 1.1;
 const APRON_HEIGHT: f32 = 2.4;
@@ -586,11 +588,16 @@ pub fn build_unit_instances(
             out.push(marker, instance(foot, [width, width, SELECTION_THICKNESS], NORTH, SELECTED, NO_ICON, eye));
         }
         if unit.is_structure {
+            // Drawn a little inside its footprint, on a foundation as wide as all of it, so that
+            // a strip of floor shows between neighbors, where adjacency wiring runs. Walls fill
+            // theirs, to join up.
+            let footprint = size;
+            let size = if shape == Shape::Wall { footprint } else { footprint * STRUCTURE_SHARE };
             // A structure rises from the ground as it is built, and looks unfinished until then.
             let built = f32::from(unit.built_permille) / 1000.0;
             let height_share = look.map_or(0.6, |look| look.height_share);
             let height = size * height_share * (0.25 + 0.75 * built);
-            center[2] += f64::from(height - size) * 0.5;
+            center[2] += f64::from(height - footprint) * 0.5;
             let shade = 0.55 + 0.45 * built;
             let (trim, hull) = (color.map(|channel| channel * shade), hull.map(|channel| channel * shade));
             // Nothing glows until it is finished.
@@ -604,7 +611,7 @@ pub fn build_unit_instances(
             // The foundation it stands on, laid before it rises, a little wider than it.
             if look.is_some_and(|look| look.apron) {
                 let ground = center[2] - f64::from(height) * 0.5;
-                out.push(Shape::Apron, painted([center[0], center[1], ground], [size * APRON_WIDTH, size * APRON_WIDTH, APRON_HEIGHT], NORTH, color, hull, hull, NO_ICON, eye));
+                out.push(Shape::Apron, painted([center[0], center[1], ground], [footprint * APRON_WIDTH, footprint * APRON_WIDTH, APRON_HEIGHT], NORTH, color, hull, hull, NO_ICON, eye));
             }
             // Scaffolding stands around the whole of what it will be until it is finished.
             if unit.built_permille < 1000 {
@@ -1410,6 +1417,29 @@ mod tests {
         assert_ne!(finished.glow, finished.hull, "a finished generator glows");
         assert_eq!(building.glow, building.hull, "a generator being built does not glow yet");
         assert!(building.hull[0] < finished.hull[0], "a site looks unfinished");
+    }
+
+    /// A structure stands a little inside its footprint, on a foundation wider than all of it,
+    /// so that a strip of floor shows between neighbors for the wiring between them. Walls fill
+    /// their footprints, to join up.
+    #[test]
+    fn structures_leave_a_strip_of_floor_between_neighbors_but_walls_join_up() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let footprint = 20.0;
+        let mut generator = unit(1, 0);
+        (generator.blueprint, generator.is_structure, generator.radius) = (db.id("power_generator").0, true, (footprint * 0.5 * 4096.0) as i32);
+        let wall = UnitView { id: SimId(2), blueprint: db.id("wall").0, ..generator };
+        let mut out = InstanceBatches::default();
+        build_unit_instances(&[], &[generator, wall], 1.0, [0.0; 3], &[], &looks, &[], &mut Motion::new(), &mut out);
+        let width = |instance: &UnitInstanceRaw| instance.model_matrix[0][0].hypot(instance.model_matrix[0][1]);
+        assert!((width(&out.shape(Shape::Generator)[0]) - footprint * STRUCTURE_SHARE).abs() < 1e-3, "the generator stands inside its footprint");
+        assert!(width(&out.shape(Shape::Apron)[0]) > footprint, "on a foundation wider than all of it");
+        assert!((width(&out.shape(Shape::Wall)[0]) - footprint).abs() < 1e-3, "a wall fills its footprint");
+        let generator = &out.shape(Shape::Generator)[0];
+        let bottom = generator.model_matrix[3][2] - generator.model_matrix[2][2] * 0.5;
+        // The middle it is given is half its footprint above the ground, as before it shrank.
+        assert!((bottom + footprint * 0.5).abs() < 1e-3, "and stands on the ground: {bottom}");
     }
 
     #[test]

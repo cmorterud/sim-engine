@@ -207,10 +207,17 @@ pub enum Shape {
     /// A battleship's twin-gun turret, drawn on its own so that it turns to its gun's aim: its
     /// drum stands on the middle of its box, which is the hull's, where it sits on the deck.
     NavalTurret,
+    /// A builder's beam to its work: a glowing rod along X, stretched from end to end.
+    Beam,
+    /// Wiring sunk in the floor between structures sharing adjacency: a dark cable along X with
+    /// a glowing strip down its top, stretched from end to end.
+    Cable,
+    /// Where adjacency wiring meets a structure: a small box with a light on top.
+    JunctionBox,
 }
 
 impl Shape {
-    pub const ALL: [Self; 101] = [
+    pub const ALL: [Self; 104] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -312,6 +319,9 @@ impl Shape {
         Self::TruckAntiAir,
         Self::FlakTurret,
         Self::NavalTurret,
+        Self::Beam,
+        Self::Cable,
+        Self::JunctionBox,
     ];
     pub const COUNT: usize = Self::ALL.len();
 
@@ -333,7 +343,7 @@ impl Shape {
     /// Whether the shape throws a shadow on the ground. Markers, see-through domes, and shells
     /// too small to see do not.
     pub const fn casts_shadow(self) -> bool {
-        !matches!(self, Self::Dome | Self::SelectionRing | Self::SelectionBox | Self::Shell | Self::Fireball | Self::Smoke | Self::Wake | Self::Scar | Self::Apron)
+        !matches!(self, Self::Dome | Self::SelectionRing | Self::SelectionBox | Self::Shell | Self::Fireball | Self::Smoke | Self::Wake | Self::Scar | Self::Apron | Self::Beam | Self::Cable)
     }
 
     /// How many turns a second the shape's spinning parts make, if it has any.
@@ -2694,6 +2704,25 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.flash([0.0, 0.46, 0.2], 0.07);
         }
         Shape::NavalTurret => mesh.turret([0.0, 0.0], [0.0, 0.09], 0.095, 2, 0.06, false),
+        Shape::Beam => {
+            mesh.paint(Material::Glow);
+            mesh.beam([-0.5, 0.0, 0.0], [0.5, 0.0, 0.0], 0.5, 0.5);
+        }
+        Shape::Cable => {
+            mesh.paint(Material::Hull);
+            mesh.block([-0.5, -0.5, -0.5], [0.5, 0.5, 0.2]);
+            mesh.paint(Material::Glow);
+            mesh.block([-0.5, -0.2, 0.2], [0.5, 0.2, 0.5]);
+        }
+        Shape::JunctionBox => {
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.46, -0.5, -0.5], [0.46, 0.5, 0.2], 0.12);
+            // A team-colored band where the cable plugs in, either side.
+            mesh.paint(Material::Trim);
+            mesh.block([-0.5, -0.2, -0.3], [0.5, 0.2, 0.0]);
+            mesh.paint(Material::Glow);
+            mesh.frustum([0.0, 0.0], [0.2, 0.5], [0.22, 0.16], 8);
+        }
         Shape::SelectionRing => {
             const SEGMENTS: usize = 24;
             const INNER: f32 = 0.42;
@@ -2723,7 +2752,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
 /// not shaded so; aircraft fly and ships float, clear of the ground at the bottom of their box.
 const fn occlusion_ground(shape: Shape) -> Option<bool> {
     match shape {
-        Shape::Cube | Shape::Shell | Shape::Missile | Shape::Fireball | Shape::Smoke | Shape::Wake | Shape::Scar | Shape::Dome | Shape::SelectionRing | Shape::SelectionBox => None,
+        Shape::Cube | Shape::Shell | Shape::Missile | Shape::Fireball | Shape::Smoke | Shape::Wake | Shape::Scar | Shape::Dome | Shape::SelectionRing | Shape::SelectionBox | Shape::Beam | Shape::Cable => None,
         Shape::Aircraft
         | Shape::Bomber
         | Shape::Gunship

@@ -12,6 +12,7 @@ use sim_engine::math::fp::{fp_int, Fp, Vec2Fp};
 use sim_engine::render::camera::{Camera, HeightField};
 use sim_engine::render::effects::Effects;
 use sim_engine::render::instances::{build_unit_instances, unit_looks, InstanceBatches, Motion};
+use sim_engine::render::links;
 use sim_engine::render::pipeline::{FrameScene, Renderer};
 use sim_engine::sim::blueprints::UnitClass;
 use sim_engine::sim::components::{MoveClass, Team};
@@ -169,8 +170,18 @@ fn main() {
         cell_x += size + 3;
         tallest = tallest.max(size);
     }
+    // A factory with generators touching it, wired to it for their adjacency bonus, and an
+    // engineer building another generator beside them.
+    let factory = world.spawn_finished_structure(blueprints.id("land_factory_t1"), Team::Blue, 150, 122).expect("room for the factory");
+    let generators: Vec<_> = [(154, 122), (154, 124), (149, 123), (151, 126)]
+        .into_iter()
+        .map(|(x, y)| world.spawn_finished_structure(blueprints.id("power_generator"), Team::Blue, x, y).expect("room for a generator"))
+        .collect();
+    let site = world.spawn_finished_structure(blueprints.id("power_generator"), Team::Blue, 158, 125).expect("room for the site");
+    let engineer = world.spawn_mobile(blueprints.id("t1_engineer"), Team::Blue, Vec2Fp::new(fp_int(3_230), fp_int(2_440)));
     let cell = TERRAIN_CELL_UNITS;
     let middle_y = (row_start + cell_y + tallest) as i32 / 2 * cell;
+    rows.push(("adjacency".to_string(), [3_080.0, 2_480.0], 260.0, 0.0));
     rows.push(("structures".to_string(), [f64::from(80 * cell), f64::from(middle_y)], f64::from(55 * cell), 0.0));
     rows.push(("structures_close".to_string(), [f64::from(55 * cell), f64::from(row_start as i32 * cell + 120)], f64::from(20 * cell), 0.0));
     rows.push(("land_close".to_string(), [800.0, 1_035.0], 260.0, 0.0));
@@ -184,6 +195,18 @@ fn main() {
     rows.push(("smoke".to_string(), [SCARS[0], SCARS[1] + 40.0], 260.0, 0.0));
 
     let mut snapshot = world.snapshot();
+    // Adjacency is reported at ground height under each structure's middle, as the simulation does.
+    let center = |id| {
+        let unit = snapshot.units.iter().find(|unit| unit.id == id).expect("spawned");
+        let ground = world.terrain.height_at(Vec2Fp::new(Fp::from_bits(unit.x), Fp::from_bits(unit.y)));
+        [unit.x, unit.y, ground.to_bits()]
+    };
+    snapshot.adjacency = generators.iter().map(|&generator| (center(generator), center(factory))).collect();
+    let [x, y, z] = center(site);
+    snapshot.work_links.push(sim_engine::sim::world::WorkLinkView { builder: engineer, target: [x, y, z + 5 * 4096], reclaim: false });
+    if let Some(unit) = snapshot.units.iter_mut().find(|unit| unit.id == site) {
+        unit.built_permille = 400;
+    }
     // Each factory shows the first thing it builds in its bay, two thirds done, and gets a close-up.
     for unit in &mut snapshot.units {
         let made = blueprints.get(sim_engine::sim::blueprints::BlueprintId(unit.blueprint));
@@ -238,6 +261,8 @@ fn main() {
         }
         let mut instances = InstanceBatches::default();
         build_unit_instances(&snapshot.units, &snapshot.units, 1.0, camera.eye(), &[], &looks, &[], &mut Motion::new(), &mut instances);
+        links::build_wiring_instances(&snapshot.adjacency, &snapshot.units, 0.3, camera.eye(), &mut instances);
+        links::build_work_beam_instances(&links::work_beams(&snapshot, &snapshot, 1.0), 0.3, camera.eye(), &mut instances);
         // The battle a moment after it ended, smoke still rising, or a minute after, only marks left.
         // Drawing forgets what has burned out, so the smoke view has a battle of its own.
         if name == "smoke" {
