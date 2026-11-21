@@ -3942,7 +3942,7 @@ mod tests {
             health_permille: 1000,
             built_permille: 1000,
             is_structure: false,
-            facing: [0, 0], aim: [0, 0],
+            facing: [0, 0], aim: [0, 0], extra_aims: [[0; 2]; 3],
             working: false,
             assembling: None,
             upgrade: None,

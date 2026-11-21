@@ -468,7 +468,7 @@ impl SimWorld {
                     torpedo: weapon.targets == Targets::Naval,
                     missile_height: (weapon.kind == WeaponKind::TacticalMissile).then_some(weapon.cruise_height),
                     target: None,
-                    turret: weapon.turn_rate.map(|rate| Turret::new(facing, rate)),
+                    turret: weapon.turn_rate.map(|rate| Turret::mounted(facing, rate, weapon.mount, weapon.aft)),
                     spread: weapon.spread,
                     stun_ticks: weapon.stun_ticks,
                 })
@@ -490,8 +490,8 @@ impl SimWorld {
             self.ecs.insert_one(entity, beam).expect("entity was just spawned");
             self.tractors.push((id, entity));
         }
-        if let Some(rate) = unit.weapon.and_then(|weapon| weapon.turn_rate) {
-            self.ecs.insert_one(entity, Turret::new(facing, rate)).expect("entity was just spawned");
+        if let Some((weapon, rate)) = unit.weapon.and_then(|weapon| Some((weapon, weapon.turn_rate?))) {
+            self.ecs.insert_one(entity, Turret::mounted(facing, rate, weapon.mount, weapon.aft)).expect("entity was just spawned");
         }
         if let Some(weapon) = unit.weapon.filter(|weapon| matches!(weapon.kind, WeaponKind::TacticalMissile | WeaponKind::StrategicMissile)) {
             let launcher = Launcher {

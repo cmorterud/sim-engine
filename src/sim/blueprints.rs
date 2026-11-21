@@ -299,6 +299,11 @@ pub struct WeaponDef {
     pub stun_ticks: u32,
     /// For a tractor beam: how long it holds a unit before crushing it.
     pub crush_ticks: u32,
+    /// Where its turret sits, from the unit's middle, as `[right, forward]` in units: its shots
+    /// leave from there. Zero for the middle.
+    pub mount: [Fp; 2],
+    /// Its turret faces the stern while it has nothing to aim at.
+    pub aft: bool,
 }
 
 /// A storm a unit leaves where it is destroyed (GAME_SPECIFICATION.md §12), that roams on its
@@ -560,6 +565,11 @@ struct RawWeapon {
     homing: bool,
     stun_seconds: Option<u32>,
     crush_seconds: Option<u32>,
+    /// Where its turret sits, as `[right, forward]` in units from the unit's middle.
+    mount: Option<[Number; 2]>,
+    /// Its turret rests facing the stern.
+    #[serde(default)]
+    aft: bool,
 }
 
 #[derive(Deserialize)]
@@ -923,6 +933,13 @@ impl BlueprintDb {
                 return Err(context("build_time must be positive".into()));
             }
             let parse_weapon = |weapon: &RawWeapon| -> Result<WeaponDef, String> {
+                if (weapon.mount.is_some() || weapon.aft) && weapon.turn_rate.is_none() {
+                    return Err(context("only a weapon with a turn_rate has a turret to mount".into()));
+                }
+                let mount = match &weapon.mount {
+                    None => [Fp::ZERO; 2],
+                    Some([right, forward]) => [right.fp().map_err(context)?, forward.fp().map_err(context)?],
+                };
                 Ok(WeaponDef {
                     range: weapon.range.fp().map_err(context)?,
                     reload_ticks: weapon.reload_ticks,
@@ -957,6 +974,8 @@ impl BlueprintDb {
                     homing: weapon.homing,
                     stun_ticks: weapon.stun_seconds.unwrap_or(0) * TICKS_PER_SECOND as u32,
                     crush_ticks: weapon.crush_seconds.unwrap_or(0) * TICKS_PER_SECOND as u32,
+                    mount,
+                    aft: weapon.aft,
                 })
             };
             let weapon = unit.weapon.as_ref().map(parse_weapon).transpose()?;

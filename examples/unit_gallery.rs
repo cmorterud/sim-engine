@@ -74,7 +74,7 @@ fn battlefield() -> Effects {
     for index in 0..40 {
         let [x, y] = spot(index, 130.0);
         let kind = if index % 13 == 0 { ProjectileKind::TacticalMissile } else { ProjectileKind::Shell };
-        before.projectiles.push(ProjectileView { id: SimId(1_000 + index), team: Team::Red, x: raw(x), y: raw(y), z: raw(ground_height(x, y) + 1.0), kind, source: SimId(1), splash: 0 });
+        before.projectiles.push(ProjectileView { id: SimId(1_000 + index), team: Team::Red, x: raw(x), y: raw(y), z: raw(ground_height(x, y) + 1.0), kind, source: SimId(1), from: None, splash: 0 });
     }
     for index in 0..6 {
         let [x, y] = spot(index * 7 + 3, 110.0);
@@ -91,7 +91,7 @@ fn battlefield() -> Effects {
             built_permille: 1000,
             is_structure: false,
             facing: [0, 0],
-            aim: [0, 0],
+            aim: [0, 0], extra_aims: [[0; 2]; 3],
             working: false,
             assembling: None,
             upgrade: None,

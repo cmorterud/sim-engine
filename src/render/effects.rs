@@ -503,7 +503,7 @@ mod tests {
     }
 
     fn shell(id: u32, kind: ProjectileKind) -> ProjectileView {
-        ProjectileView { id: SimId(id), team: Team::Blue, x: 4096 * 100, y: 0, z: 4096 * 5, kind, source: SimId(1), splash: 0 }
+        ProjectileView { id: SimId(id), team: Team::Blue, x: 4096 * 100, y: 0, z: 4096 * 5, kind, source: SimId(1), from: None, splash: 0 }
     }
 
     fn unit(id: u32) -> UnitView {
@@ -519,7 +519,7 @@ mod tests {
             built_permille: 1000,
             is_structure: false,
             facing: [0, 0],
-            aim: [0, 0],
+            aim: [0, 0], extra_aims: [[0; 2]; 3],
             working: false,
             assembling: None,
             upgrade: None,

@@ -437,6 +437,11 @@ pub struct Turret {
     pub facing: Vec2Fp,
     /// The most it can turn in a tick, in radians.
     pub max_turn: Fp,
+    /// Where it sits on the hull, from the unit's middle, as `[right, forward]`: it aims and
+    /// fires from there. Fixed from the blueprint, so not hashed.
+    pub mount: [Fp; 2],
+    /// It faces the stern while it has nothing to aim at, as a ship's aft guns do.
+    pub aft: bool,
 }
 
 /// About cos(6 degrees): a turret pointing this close to its target can fire.
@@ -446,7 +451,32 @@ impl Turret {
     /// From a turn rate in degrees per second.
     pub fn new(facing: Vec2Fp, degrees_per_second: u32) -> Self {
         let max_turn = radians_from_tenths_of_degree(degrees_per_second.min(900));
-        Self { facing, max_turn: Fp::from_bits((max_turn.to_bits() >> 12) as i32) }
+        Self { facing, max_turn: Fp::from_bits((max_turn.to_bits() >> 12) as i32), mount: [Fp::ZERO; 2], aft: false }
+    }
+
+    /// A turret as a blueprint's weapon has it, on a unit facing `facing`: where it sits, and
+    /// facing the way it rests.
+    pub fn mounted(facing: Vec2Fp, degrees_per_second: u32, mount: [Fp; 2], aft: bool) -> Self {
+        let rest = if aft { Vec2Fp::new(-facing.x, -facing.y) } else { facing };
+        Self { mount, aft, ..Self::new(rest, degrees_per_second) }
+    }
+
+    /// Where it sits on a unit at `(x, y)` facing `front`, as raw `Fp` bits.
+    pub fn position(&self, (x, y): (i32, i32), front: Vec2Fp) -> (i32, i32) {
+        let [right, forward] = self.mount;
+        if right == Fp::ZERO && forward == Fp::ZERO {
+            return (x, y);
+        }
+        // To the right of a unit facing (fx, fy) is (fy, -fx).
+        let dx = mul_toward_zero(right, front.y) + mul_toward_zero(forward, front.x);
+        let dy = mul_toward_zero(forward, front.y) - mul_toward_zero(right, front.x);
+        (x.saturating_add(dx.to_bits()), y.saturating_add(dy.to_bits()))
+    }
+
+    /// Swivels back to where it rests on a unit facing `front`, the bow or the stern.
+    pub fn stand_down(&mut self, front: Vec2Fp) {
+        let rest = if self.aft { Vec2Fp::new(-front.x, -front.y) } else { front };
+        self.aim(rest);
     }
 
     /// Swivels towards a direction, given as a unit vector, and returns whether it now points close enough to fire.

@@ -576,3 +576,42 @@ fn a_missile_sub_builds_nuclear_missiles_only_on_order_and_fires_cruise_missiles
     run_ticks(&mut world, 6_500);
     assert_eq!(stock(&world, sub), 3, "up to three");
 }
+
+/// Each ship's gun on a turret of its own fires from that turret, not from the ship's middle,
+/// and rests facing the bow, or the stern for a turret aft: for every ship with mounted guns.
+#[test]
+fn every_mounted_gun_fires_from_its_own_turret() {
+    use sim_engine::sim::components::MoveClass;
+    let db = sim_engine::sim::blueprints::BlueprintDb::standard();
+    let ships: Vec<_> = db.iter().filter(|unit| unit.movement == MoveClass::Naval && unit.weapon.iter().chain(&unit.extra_weapons).any(|weapon| weapon.mount != [Fp::ZERO; 2])).collect();
+    assert!(!ships.is_empty(), "the battleship's turrets are mounted");
+    for ship in ships {
+        let mut world = lake_world();
+        let id = spawn(&mut world, &ship.key, Team::Blue, point(1_700, 4_000));
+        let weapons: Vec<_> = ship.weapon.iter().chain(&ship.extra_weapons).copied().collect();
+        let aim_of = |view: &sim_engine::sim::world::UnitView, index: usize| if index == 0 { view.aim } else { view.extra_aims.get(index - 1).copied().unwrap_or([0, 0]) };
+        let view = world.snapshot().units.into_iter().find(|unit| unit.id == id).unwrap();
+        for (index, weapon) in weapons.iter().enumerate().filter(|(index, weapon)| weapon.turn_rate.is_some() && *index <= 3) {
+            let rest = if weapon.aft { view.facing.map(|axis| -axis) } else { view.facing };
+            assert_eq!(aim_of(&view, index), rest, "{}'s weapon {index} rests facing {}", ship.key, if weapon.aft { "aft" } else { "forward" });
+        }
+        // Something to shoot at, off to one side, so that every turret has to turn to it.
+        spawn(&mut world, "t2_destroyer", Team::Red, point(3_500, 4_000));
+        let mut fired = Vec::new();
+        for _ in 0..300 {
+            world.advance_tick(&[]);
+            let snapshot = world.snapshot();
+            let me = snapshot.units.iter().find(|unit| unit.id == id).unwrap();
+            fired.extend(snapshot.projectiles.iter().filter(|shot| shot.source == id).filter_map(|shot| shot.from.map(|from| (from, me.x, me.y, me.facing))));
+        }
+        for (index, weapon) in weapons.iter().enumerate().filter(|(_, weapon)| weapon.mount != [Fp::ZERO; 2]) {
+            let [right, forward] = weapon.mount.map(|axis| axis.to_num::<f64>());
+            let from_turret = fired.iter().any(|&(from, x, y, facing)| {
+                let [fx, fy] = facing.map(|axis| f64::from(axis) / 4096.0);
+                let expected = [f64::from(x) / 4096.0 + right * fy + forward * fx, f64::from(y) / 4096.0 - right * fx + forward * fy];
+                (f64::from(from[0]) / 4096.0 - expected[0]).hypot(f64::from(from[1]) / 4096.0 - expected[1]) < 1.0
+            });
+            assert!(from_turret, "{}'s weapon {index} fires from its turret at {right}, {forward}: shots left from {:?}", ship.key, fired.iter().map(|shot| shot.0).collect::<Vec<_>>());
+        }
+    }
+}

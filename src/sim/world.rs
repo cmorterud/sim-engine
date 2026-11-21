@@ -143,6 +143,8 @@ pub struct UnitView {
     pub facing: [i32; 2],
     /// Which way the weapon points, as a raw unit vector. Zero for weapons that do not swivel.
     pub aim: [i32; 2],
+    /// Which way its first extra weapons point, as `aim` does: a battleship's other turrets.
+    pub extra_aims: [[i32; 2]; 3],
     /// A factory making something, or a builder at work, with the power to do it. For drawing.
     pub working: bool,
     /// What a factory is building, as a raw blueprint id, and how far along it is in
@@ -302,6 +304,9 @@ pub struct ProjectileView {
     pub kind: ProjectileKind,
     /// The unit that fired it, so that a new shell shows that unit firing.
     pub source: SimId,
+    /// Where it was fired from, as raw `Fp` bits, on the tick it was fired only: by then it has
+    /// flown a tick, so it is drawn leaving its gun from here.
+    pub from: Option<[i32; 3]>,
     /// How far its blast reaches when it lands, as raw `Fp` bits: zero for a direct hit. For
     /// drawing an explosion of the right size.
     pub splash: i32,
@@ -712,6 +717,9 @@ pub struct SimWorld {
     landed: Vec<ProjectileView>,
     /// Units' blasts as they were destroyed this tick, for drawing. Not part of the game state.
     blasts: Vec<BlastView>,
+    /// Projectiles fired this tick, by id, and where from as raw `Fp` bits: for drawing a new
+    /// shell leaving its gun, not where its first tick took it. Not part of the game state.
+    launched: Vec<(SimId, [i32; 3])>,
 }
 
 /// How a projectile looks to the renderer, at its position.
@@ -725,7 +733,7 @@ fn projectile_view(id: SimId, position: &Position, projectile: &Projectile, disc
     };
     // A Discharge shell's blast is worked out when it lands, by its own reach.
     let splash = discharged.map_or(projectile.splash_radius, |discharged| discharged.def.splash_radius);
-    ProjectileView { id, team: projectile.source_team, x, y, z, kind, source: projectile.source, splash: splash.to_bits() }
+    ProjectileView { id, team: projectile.source_team, x, y, z, kind, source: projectile.source, from: None, splash: splash.to_bits() }
 }
 
 impl SimWorld {
@@ -825,6 +833,7 @@ impl SimWorld {
             dead_projectiles: Vec::new(),
             landed: Vec::new(),
             blasts: Vec::new(),
+            launched: Vec::new(),
         }
     }
 
@@ -912,6 +921,7 @@ impl SimWorld {
         let id = self.next_id();
         let entity = self.ecs.spawn((id, Position(position), projectile));
         self.projectiles.push((id, entity));
+        self.launched.push((id, [position.x.to_bits(), position.y.to_bits(), position.z.to_bits()]));
         id
     }
 
@@ -2175,6 +2185,7 @@ impl SimWorld {
     }
 
     pub fn step_combat(&mut self) {
+        self.launched.clear();
         let tick = self.current_tick;
         let units = &self.units;
         let grid = &self.spatial_grid;
@@ -2393,19 +2404,25 @@ impl SimWorld {
                 None => aim_at.and_then(locate).map(|entry| (entry.x, entry.y)),
             };
 
-            // A turret swivels to its target, or back to the front without one, and only fires once it points there.
+            // A gun on a turret aims and fires from where the turret sits on the hull.
+            let front = turning.map(|turning| turning.facing);
+            let gun = match (turret.as_deref(), front) {
+                (Some(turret), Some(front)) => turret.position((me.x, me.y), front),
+                _ => (me.x, me.y),
+            };
+            // A turret swivels to its target, or back to where it rests without one, and only fires once it points there.
             let aimed = match turret {
                 None => true,
                 Some(turret) => {
                     let toward = |(x, y): (i32, i32)| {
-                        let away = Vec2Fp::new(Fp::from_bits(x - me.x), Fp::from_bits(y - me.y));
+                        let away = Vec2Fp::new(Fp::from_bits(x - gun.0), Fp::from_bits(y - gun.1));
                         (away != Vec2Fp::ZERO).then(|| away.normalized())
                     };
                     match aim_point {
                         Some(point) => toward(point).is_none_or(|toward| turret.aim(toward)),
                         None => {
-                            if let Some(front) = turning.map(|turning| turning.facing) {
-                                turret.aim(front);
+                            if let Some(front) = front {
+                                turret.stand_down(front);
                             }
                             false
                         }
@@ -2422,7 +2439,7 @@ impl SimWorld {
                         shots.push(PendingShot {
                             source: id,
                             team: stats.team,
-                            from: raw(me.x, me.y, muzzle),
+                            from: raw(gun.0, gun.1, muzzle),
                             to: raw(entry.x, entry.y, entry.z),
                             speed: combat.projectile_speed,
                             damage: weapon.def.max_damage,
@@ -2476,7 +2493,7 @@ impl SimWorld {
             if combat.ticks_until_ready == 0 && aimed && gun_free && loaded && charged && can_fire {
                 if let Some(target) = combat.target {
                     let entry = locate(target).expect("target was just validated or found");
-                    let (from, to) = (raw(me.x, me.y, muzzle), raw(entry.x, entry.y, entry.z));
+                    let (from, to) = (raw(gun.0, gun.1, muzzle), raw(entry.x, entry.y, entry.z));
                     // Missiles at aircraft steer themselves to them; guns' and flak's shells fly
                     // straight to where the aircraft will be.
                     let fused = entry.is_air && !guided && !torpedo;
@@ -2547,7 +2564,7 @@ impl SimWorld {
                 if !in_reach {
                     (combat.line_blocked, combat.closing) = (false, None);
                 }
-                let from = Vec3Fp::new(Fp::from_bits(me.x), Fp::from_bits(me.y), Fp::from_bits(muzzle));
+                let from = raw(gun.0, gun.1, muzzle);
                 let to = Vec3Fp::new(spot.x, spot.y, terrain.height_at(spot) - GROUND_AIM_DEPTH);
                 // A shell that would come down on a rise in between, or short on a slope, is not
                 // fired: the unit walks closer. Bombs, missiles and artillery go over.
@@ -2649,16 +2666,20 @@ impl SimWorld {
                         Some(spot) => Some((spot.x.to_bits(), spot.y.to_bits())),
                         None => target.map(|entry| (entry.x, entry.y)),
                     };
+                    let gun = match (weapon.turret.as_ref(), front) {
+                        (Some(turret), Some(front)) => turret.position((me.x, me.y), front),
+                        _ => (me.x, me.y),
+                    };
                     let aimed = match weapon.turret.as_mut() {
                         None => true,
                         Some(turret) => match aim_at {
                             Some((x, y)) => {
-                                let away = Vec2Fp::new(Fp::from_bits(x - me.x), Fp::from_bits(y - me.y));
+                                let away = Vec2Fp::new(Fp::from_bits(x - gun.0), Fp::from_bits(y - gun.1));
                                 away == Vec2Fp::ZERO || turret.aim(away.normalized())
                             }
                             None => {
-                                if let Some(front) = turning.map(|turning| turning.facing) {
-                                    turret.aim(front);
+                                if let Some(front) = front {
+                                    turret.stand_down(front);
                                 }
                                 false
                             }
@@ -2667,7 +2688,7 @@ impl SimWorld {
                     if weapon.ticks_until_ready > 0 || !aimed || (me.is_sub && !weapon.torpedo && weapon.missile_height.is_none()) {
                         continue;
                     }
-                    let from = raw(me.x, me.y, muzzle);
+                    let from = raw(gun.0, gun.1, muzzle);
                     let (to, homing) = match (spot, target) {
                         (Some(spot), _) => (Vec3Fp::new(spot.x, spot.y, terrain.height_at(spot) - GROUND_AIM_DEPTH), None),
                         (None, Some(entry)) => (raw(entry.x, entry.y, entry.z), ((entry.is_air && weapon.homing) || weapon.torpedo).then_some(entry.id)),
@@ -3920,13 +3941,13 @@ impl SimWorld {
             .map(|link| link.builder)
             .collect();
         builders.sort_unstable();
-        let mut unit_query = self.ecs.query::<(&Position, &UnitStats, &Health, Option<&Blueprinted>, Option<&Construction>, Option<&Turning>, Option<&Turret>, Option<&Factory>, Option<&Paused>)>();
+        let mut unit_query = self.ecs.query::<(&Position, &UnitStats, &Health, Option<&Blueprinted>, Option<&Construction>, Option<&Turning>, Option<&Turret>, Option<&Factory>, Option<&Paused>, Option<&super::components::ExtraWeapons>)>();
         let unit_view = unit_query.view();
         let units: Vec<UnitView> = self
             .units
             .iter()
             .filter_map(|&(id, entity)| {
-                let (position, stats, health, blueprint, construction, turning, turret, factory, paused) = unit_view.get(entity).expect("unit list only holds live units");
+                let (position, stats, health, blueprint, construction, turning, turret, factory, paused, extras) = unit_view.get(entity).expect("unit list only holds live units");
                 let powered = self.economies[stats.team.index()].satisfaction > Res::ZERO;
                 let producing = factory.is_some_and(|factory| !factory.queue.is_empty()) && paused.is_none() && powered;
                 let (x, y, z) = (position.0.x.to_bits(), position.0.y.to_bits(), position.0.z.to_bits());
@@ -3946,6 +3967,10 @@ impl SimWorld {
                     is_structure: stats.is_structure,
                     facing: turning.map_or([0, 0], |turning| [turning.facing.x.to_bits(), turning.facing.y.to_bits()]),
                     aim: turret.map_or([0, 0], |turret| [turret.facing.x.to_bits(), turret.facing.y.to_bits()]),
+                    extra_aims: std::array::from_fn(|index| {
+                        let turret = extras.and_then(|extras| extras.0.get(index)).and_then(|weapon| weapon.turret);
+                        turret.map_or([0, 0], |turret| [turret.facing.x.to_bits(), turret.facing.y.to_bits()])
+                    }),
                     working: producing || builders.binary_search(&id).is_ok(),
                     assembling: factory.and_then(|factory| {
                         let item = *factory.queue.first()?;
@@ -3972,7 +3997,9 @@ impl SimWorld {
             .iter()
             .filter_map(|&(id, entity)| {
                 let (position, projectile, discharged, missile) = projectile_view.get(entity).expect("projectile list only holds live projectiles");
-                let view = self::projectile_view(id, position, projectile, discharged, missile);
+                let mut view = self::projectile_view(id, position, projectile, discharged, missile);
+                // Ids only grow, so this tick's launches are in id order.
+                view.from = self.launched.binary_search_by_key(&id, |launch| launch.0).ok().map(|index| self.launched[index].1);
                 seen(projectile.source_team, view.x, view.y).then_some(view)
             })
             .collect();

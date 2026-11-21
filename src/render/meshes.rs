@@ -204,10 +204,13 @@ pub enum Shape {
     TruckAntiAir,
     /// A mobile flak gun's square team-colored turret with four barrels.
     FlakTurret,
+    /// A battleship's twin-gun turret, drawn on its own so that it turns to its gun's aim: its
+    /// drum stands on the middle of its box, which is the hull's, where it sits on the deck.
+    NavalTurret,
 }
 
 impl Shape {
-    pub const ALL: [Self; 100] = [
+    pub const ALL: [Self; 101] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -308,6 +311,7 @@ impl Shape {
         Self::CombatEngineerHull,
         Self::TruckAntiAir,
         Self::FlakTurret,
+        Self::NavalTurret,
     ];
     pub const COUNT: usize = Self::ALL.len();
 
@@ -1982,9 +1986,10 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                     mesh.block([x - 0.018, y - 0.022, -0.2], [x + 0.018, y + 0.022, -0.16]);
                 }
             }
-            mesh.turret([0.0, 0.3], [-0.16, -0.07], 0.095, 2, 0.06, false);
-            mesh.turret([0.0, 0.11], [-0.14, -0.03], 0.095, 2, 0.06, false);
-            mesh.turret([0.0, -0.34], [-0.2, -0.11], 0.095, 2, 0.04, true);
+            // Its three turrets are `Shape::NavalTurret`s of their own, which turn to aim. The
+            // middle one stands on a barbette, to fire over the front one.
+            mesh.paint(Material::Metal);
+            mesh.frustum([0.0, 0.109], [-0.16, -0.11], [0.085, 0.085], 8);
         }
         Shape::Battlecruiser => {
             // Long and narrow, its guns all forward.
@@ -2635,6 +2640,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             }
             mesh.flash([0.0, 0.46, 0.2], 0.07);
         }
+        Shape::NavalTurret => mesh.turret([0.0, 0.0], [0.0, 0.09], 0.095, 2, 0.06, false),
         Shape::SelectionRing => {
             const SEGMENTS: usize = 24;
             const INNER: f32 = 0.42;
@@ -2683,7 +2689,8 @@ const fn occlusion_ground(shape: Shape) -> Option<bool> {
         | Shape::Submarine
         | Shape::MissileSubmarine
         | Shape::EscortCorvette
-        | Shape::TorpedoBoat => Some(false),
+        | Shape::TorpedoBoat
+        | Shape::NavalTurret => Some(false),
         _ => Some(true),
     }
 }
@@ -2884,14 +2891,15 @@ pub(super) mod tests {
     /// A shape drawn as the camera sees it, looking north and tilted down by `pitch` degrees
     /// (90 is straight down), without perspective: each pixel holds the material nearest the
     /// eye there, if any. `parts` are drawn together, as a unit's base and the part on it are,
-    /// each turned by its angle in radians about the vertical. The view spans -0.8 to 0.8 of
-    /// the shape's box either way, so that nothing tilted leaves it.
-    pub fn view(set: &MeshSet, parts: &[(Shape, f32)], pitch: f32) -> Vec<Option<Material>> {
+    /// each turned by its angle in radians about the vertical, then moved by its offset in
+    /// shares of the box. The view spans -0.8 to 0.8 of the shape's box either way, so that
+    /// nothing tilted leaves it.
+    pub fn view(set: &MeshSet, parts: &[(Shape, f32, [f32; 3])], pitch: f32) -> Vec<Option<Material>> {
         let (sin, cos) = pitch.to_radians().sin_cos();
         let mut depth = vec![f32::MAX; VIEW_SIDE * VIEW_SIDE];
         let mut seen = vec![None; VIEW_SIDE * VIEW_SIDE];
         let span = 0.8_f32;
-        for &(shape, turn) in parts {
+        for &(shape, turn, [dx, dy, dz]) in parts {
             let (turn_sin, turn_cos) = turn.sin_cos();
             let range = set.ranges[shape as usize].clone();
             for triangle in set.indices[range.start as usize..range.end as usize].chunks(3) {
@@ -2899,7 +2907,8 @@ pub(super) mod tests {
                     .iter()
                     .map(|&index| {
                         let [x, y, z] = set.vertices[index as usize].position;
-                        let (x, y) = (x * turn_cos - y * turn_sin, x * turn_sin + y * turn_cos);
+                        let (x, y) = (x * turn_cos - y * turn_sin + dx, x * turn_sin + y * turn_cos + dy);
+                        let z = z + dz;
                         // Screen right is +X, screen up is north and up tilted, depth runs away from the eye.
                         let (up, away) = (y * sin + z * cos, y * cos - z * sin);
                         (((x + span) / (2.0 * span)) * VIEW_SIDE as f32, ((span - up) / (2.0 * span)) * VIEW_SIDE as f32, away)

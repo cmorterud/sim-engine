@@ -1253,10 +1253,11 @@ vision = 1000
 radar = 960
 sonar = 400
 movement = "naval"
-weapon = { range = 3000, reload_ticks = 200, projectile_speed = 60, damage = 3000, splash_radius = 40, turn_rate = 30, spread = 6 }
+# Three turrets, two forward and one aft, each firing from where it sits.
+weapon = { range = 3000, reload_ticks = 200, projectile_speed = 60, damage = 3000, splash_radius = 40, turn_rate = 30, spread = 6, mount = [0, 28] }
 extra_weapons = [
-    { range = 3000, reload_ticks = 200, projectile_speed = 60, damage = 3000, splash_radius = 40, turn_rate = 30, spread = 6 },
-    { range = 3000, reload_ticks = 200, projectile_speed = 60, damage = 3000, splash_radius = 40, turn_rate = 30, spread = 6 },
+    { range = 3000, reload_ticks = 200, projectile_speed = 60, damage = 3000, splash_radius = 40, turn_rate = 30, spread = 6, mount = [0, 10] },
+    { range = 3000, reload_ticks = 200, projectile_speed = 60, damage = 3000, splash_radius = 40, turn_rate = 30, spread = 6, mount = [0, -31], aft = true },
     { range = 1200, reload_ticks = 17, projectile_speed = 180, damage = 96, targets = "air", turn_rate = 180 },
 ]
 missile_defense = { kind = "tactical", range = 620, reload_ticks = 10 }
