@@ -284,9 +284,9 @@ pub struct UnitLook {
     /// How wide a mobile unit is drawn, in world units, for drawing it in a factory's bay
     /// before it exists. Zero from `unit_look`, which knows only the key; `unit_looks` sets it.
     pub size: f32,
-    /// How long a ship is drawn, in world units, where that is not its footprint: zero for its
-    /// footprint. Ships are told apart by their outline and length from above, so no two are
-    /// drawn the same length, though some share a footprint in the simulation.
+    /// How long a ship, vehicle, or aircraft is drawn, in world units, where that is not its
+    /// footprint: zero for its footprint. From above, units are told apart by their outline and
+    /// length, so these keep apart some that share a footprint in the simulation.
     pub length: f32,
     /// Its tech level, which darkens its armor. Zero from `unit_look`; `unit_looks` sets it.
     pub tier: u8,
@@ -310,11 +310,11 @@ pub fn unit_look(key: &str) -> UnitLook {
         "land_factory_t3" => look(Shape::FactoryT3, Some([0.10, 0.10, 0.20]), 0.85),
         "t1_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([1.00, 0.70, 0.12]), 1.0) },
         "t1_light_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::Bot, None, 1.0) },
-        "t1_land_scout" => look(Shape::LandScout, Some([0.75, 0.95, 1.00]), 1.0),
+        "t1_land_scout" => UnitLook { length: 14.0, ..look(Shape::LandScout, Some([0.75, 0.95, 1.00]), 1.0) },
         "t1_medium_tank" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::Tank, Some([0.80, 0.85, 0.70]), 1.0) },
         "t2_grenadier_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::GrenadierWalker, None, 1.0) },
-        "t2_mobile_shield" => UnitLook { base: Some(Shape::WheeledHull), ..look(Shape::ShieldEmitter, Some([0.55, 0.85, 1.00]), 1.0) },
-        "t2_combat_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([0.95, 0.32, 0.22]), 1.0) },
+        "t2_mobile_shield" => UnitLook { base: Some(Shape::ShieldCarrier), length: 15.0, ..look(Shape::ShieldEmitter, Some([0.55, 0.85, 1.00]), 1.0) },
+        "t2_combat_engineer" => UnitLook { base: Some(Shape::CombatEngineerHull), length: 19.0, ..look(Shape::Engineer, Some([0.95, 0.32, 0.22]), 1.0) },
         "t3_heavy_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::HeavyWalker, None, 1.0) },
         "t3_siege_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::SiegeWalker, Some([0.70, 0.70, 0.75]), 1.0) },
         "t2_torpedo_boat" => UnitLook { length: 24.0, ..look(Shape::TorpedoBoat, Some([0.90, 0.78, 0.30]), 0.5) },
@@ -326,8 +326,8 @@ pub fn unit_look(key: &str) -> UnitLook {
         "t2_transport" => look(Shape::Transport, Some([0.70, 0.75, 0.80]), 1.0),
         "t3_heavy_transport" => look(Shape::Transport, Some([0.55, 0.60, 0.75]), 1.0),
         "field_workshop_t3" => look(Shape::FieldWorkshop, Some([0.95, 0.55, 0.20]), 0.95),
-        "t1_light_artillery" => UnitLook { base: Some(Shape::ArtilleryHull), ..look(Shape::Artillery, None, 1.0) },
-        "t2_heavy_tank" => UnitLook { base: Some(Shape::HeavyTankHull), ..look(Shape::HeavyTank, None, 1.0) },
+        "t1_light_artillery" => UnitLook { base: Some(Shape::ArtilleryHull), length: 22.0, ..look(Shape::Artillery, None, 1.0) },
+        "t2_heavy_tank" => UnitLook { base: Some(Shape::HeavyTankHull), length: 24.0, ..look(Shape::HeavyTank, None, 1.0) },
         "t2_assault_hovercraft" => UnitLook { base: Some(Shape::HoverHull), ..look(Shape::Tank, Some([0.45, 0.65, 0.75]), 1.0) },
         "land_factory_t1" => look(Shape::Factory, Some([0.35, 0.35, 0.45]), 0.55),
         "land_factory_t2" => look(Shape::FactoryT2, Some([0.20, 0.20, 0.30]), 0.7),
@@ -339,7 +339,7 @@ pub fn unit_look(key: &str) -> UnitLook {
         "energy_storage" => look(Shape::EnergyStorage, Some([1.00, 0.90, 0.40]), 0.65),
         "t2_artillery" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::ArtilleryGun, Some([0.80, 0.55, 0.30]), 1.0) },
         "t3_artillery" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::ArtilleryGun, Some([0.50, 0.30, 0.20]), 0.6) },
-        "t3_mobile_artillery" => UnitLook { base: Some(Shape::HeavyTankHull), ..look(Shape::HeavyArtillery, Some([0.55, 0.45, 0.35]), 1.0) },
+        "t3_mobile_artillery" => UnitLook { base: Some(Shape::CasemateHull), length: 30.0, ..look(Shape::HeavyArtillery, Some([0.55, 0.45, 0.35]), 1.0) },
         "radar" => look(Shape::Radar, Some([0.40, 0.90, 0.55]), 1.3),
         "deep_scan_array" => look(Shape::DeepScan, Some([0.75, 0.55, 1.00]), 1.2),
         "stealth_field_generator" => look(Shape::StealthGenerator, Some([0.30, 0.30, 0.35]), 1.2),
@@ -355,8 +355,8 @@ pub fn unit_look(key: &str) -> UnitLook {
         "t1_attack_sub" => look(Shape::Submarine, Some([0.10, 0.20, 0.30]), 0.3),
         "t2_escort_corvette" => UnitLook { length: 30.0, ..look(Shape::EscortCorvette, Some([0.55, 0.85, 1.00]), 0.5) },
         "t3_missile_sub" => UnitLook { length: 48.0, ..look(Shape::MissileSubmarine, Some([0.05, 0.10, 0.20]), 0.35) },
-        "t2_mobile_missile_launcher" => UnitLook { base: Some(Shape::ArtilleryHull), ..look(Shape::MissileRack, Some([0.80, 0.80, 0.70]), 1.0) },
-        "t2_torpedo_bomber" => look(Shape::TorpedoBomber, Some([0.40, 0.55, 0.70]), 0.55),
+        "t2_mobile_missile_launcher" => UnitLook { base: Some(Shape::MissileTruck), length: 26.0, ..look(Shape::MissileRack, Some([0.80, 0.80, 0.70]), 1.0) },
+        "t2_torpedo_bomber" => UnitLook { length: 26.0, ..look(Shape::TorpedoBomber, Some([0.40, 0.55, 0.70]), 0.55) },
         "t1_sonar" => look(Shape::Sonar, Some([0.30, 0.60, 0.90]), 1.0),
         "t2_sonar" => look(Shape::Sonar, Some([0.20, 0.45, 0.85]), 1.2),
         "t1_torpedo_launcher" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::SamLauncher, Some([0.20, 0.68, 0.56]), 0.7) },
@@ -382,17 +382,17 @@ pub fn unit_look(key: &str) -> UnitLook {
         "t2_gunship" => look(Shape::Gunship, None, 0.6),
         "t3_heavy_gunship" => look(Shape::HeavyGunship, Some([0.20, 0.20, 0.25]), 0.6),
         "t3_spy_plane" => look(Shape::Scout, Some([0.30, 0.30, 0.35]), 0.5),
-        "t3_air_superiority" => look(Shape::AirSuperiority, Some([0.95, 0.95, 1.00]), 0.5),
+        "t3_air_superiority" => UnitLook { length: 28.0, ..look(Shape::AirSuperiority, Some([0.95, 0.95, 1.00]), 0.5) },
         "t3_strategic_bomber" => look(Shape::StrategicBomber, None, 0.5),
         "t2_fighter_bomber" => look(Shape::FighterBomber, Some([0.85, 0.70, 0.55]), 0.55),
         "t2_flak" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::FlakGun, Some([0.35, 0.75, 0.95]), 1.0) },
-        "t2_mobile_flak" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::FlakGun, Some([0.22, 0.70, 0.98]), 1.0) },
+        "t2_mobile_flak" => UnitLook { base: Some(Shape::TankHull), length: 21.0, ..look(Shape::FlakTurret, Some([0.22, 0.70, 0.98]), 1.0) },
         "t3_sam" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::SamLauncher, Some([0.15, 0.72, 1.00]), 1.1) },
         "t1_air_scout" => look(Shape::Scout, Some([0.85, 0.90, 0.95]), 0.5),
         "t1_interceptor" => look(Shape::Aircraft, None, 0.5),
         "t1_bomber" => look(Shape::Bomber, None, 0.6),
         "t1_aa_turret" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::AntiAirGun, Some([0.35, 0.75, 0.95]), 0.9) },
-        "t1_mobile_aa" => UnitLook { base: Some(Shape::WheeledHull), ..look(Shape::AntiAirGun, Some([0.30, 0.78, 0.98]), 1.0) },
+        "t1_mobile_aa" => UnitLook { base: Some(Shape::WheeledHull), length: 19.0, ..look(Shape::TruckAntiAir, Some([0.30, 0.78, 0.98]), 1.0) },
         "t1_point_defense" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::PointDefense, Some([0.75, 0.25, 0.85]), 0.9) },
         _ => look(Shape::Cube, None, 0.6),
     }
@@ -617,7 +617,7 @@ pub fn build_unit_instances(
                     (heading, heading)
                 }
             };
-            // A ship may be drawn longer or shorter than its footprint.
+            // A ship, vehicle, or aircraft may be drawn longer or shorter than its footprint.
             let drawn = look.map(|look| look.length).filter(|&length| length > 0.0).unwrap_or(size);
             if let Some(base) = look.and_then(|look| look.base) {
                 let stride = if base.walks() { byte(motion.stride(unit.id, center, drawn)) } else { 0 };
@@ -931,6 +931,28 @@ mod tests {
         }
     }
 
+    /// A unit's length as drawn, and how long it is for its width, from above: its base and
+    /// what turns on it, facing the same way.
+    fn footprint(set: &super::super::meshes::MeshSet, look: &UnitLook) -> (f32, f32) {
+        let (mut half_width, mut ends) = (0.0_f32, [f32::MAX, f32::MIN]);
+        for shape in look.base.into_iter().chain([look.shape]) {
+            let range = set.ranges[shape as usize].clone();
+            for &index in &set.indices[range.start as usize..range.end as usize] {
+                let [x, y, _] = set.vertices[index as usize].position;
+                half_width = half_width.max(x.abs());
+                ends = [ends[0].min(y), ends[1].max(y)];
+            }
+        }
+        let length = (ends[1] - ends[0]) * look.size;
+        (length, length / (half_width * 2.0 * look.size))
+    }
+
+    /// Whether two footprints differ by a tenth or more in length or in length for width.
+    fn footprints_apart((length_a, slender_a): (f32, f32), (length_b, slender_b): (f32, f32)) -> bool {
+        let apart = |a: f32, b: f32| (a - b).abs() >= 0.1 * a.max(b);
+        apart(length_a, length_b) || apart(slender_a, slender_b)
+    }
+
     /// From above, which is how the camera sees the sea, a ship is its outline and its length.
     /// So no two surface ships are drawn the same length, and each differs from every other by a
     /// tenth or more in its length or in how long it is for its width.
@@ -940,34 +962,77 @@ mod tests {
         let db = BlueprintDb::standard();
         let looks = unit_looks(&db);
         let set = super::super::meshes::MeshSet::build();
-        // A shape's length and its length for its width, drawn `size` long.
-        let footprint = |shape: Shape, size: f32| {
-            let range = set.ranges[shape as usize].clone();
-            let (mut half_width, mut ends) = (0.0_f32, [f32::MAX, f32::MIN]);
-            for &index in &set.indices[range.start as usize..range.end as usize] {
-                let [x, y, _] = set.vertices[index as usize].position;
-                half_width = half_width.max(x.abs());
-                ends = [ends[0].min(y), ends[1].max(y)];
-            }
-            let length = (ends[1] - ends[0]) * size;
-            (length, length / (half_width * 2.0 * size))
-        };
-        let ships: Vec<(&str, (f32, f32))> = db
-            .iter()
-            .filter(|unit| unit.movement == MoveClass::Naval && !unit.is_structure())
-            .map(|unit| {
-                let look = &looks[usize::from(unit.id.0)];
-                (unit.key.as_str(), footprint(look.shape, look.size))
-            })
-            .collect();
+        let ships: Vec<(&str, (f32, f32))> =
+            db.iter().filter(|unit| unit.movement == MoveClass::Naval && !unit.is_structure()).map(|unit| (unit.key.as_str(), footprint(&set, &looks[usize::from(unit.id.0)]))).collect();
         assert!(ships.len() >= 7, "the fleet is there");
-        let apart = |a: f32, b: f32| (a - b).abs() >= 0.1 * a.max(b);
-        for (index, (first, (length_a, slender_a))) in ships.iter().enumerate() {
-            for (second, (length_b, slender_b)) in &ships[index + 1..] {
-                let alike = format!("{first}, {length_a:.0} long and {slender_a:.1} to 1, and {second}, {length_b:.0} long and {slender_b:.1} to 1");
-                assert!((length_a - length_b).abs() >= 1.0, "{alike}, are drawn the same length");
-                assert!(apart(*length_a, *length_b) || apart(*slender_a, *slender_b), "{alike}, look alike from above");
+        for (index, (first, a)) in ships.iter().enumerate() {
+            for (second, b) in &ships[index + 1..] {
+                let alike = format!("{first}, {:.0} long and {:.1} to 1, and {second}, {:.0} long and {:.1} to 1", a.0, a.1, b.0, b.1);
+                assert!((a.0 - b.0).abs() >= 1.0, "{alike}, are drawn the same length");
+                assert!(footprints_apart(*a, *b), "{alike}, look alike from above");
             }
+        }
+    }
+
+    /// Land vehicles are told apart from above the same way: no two of different models within a
+    /// tenth of each other in both length and length for width (until 2026-11-20 every one was
+    /// about as long as it was wide). Upgrades of one model, the engineers, differ by size.
+    /// Walkers and the command rigs stand on legs, which set them apart.
+    #[test]
+    fn every_land_vehicle_has_a_footprint_of_its_own() {
+        use crate::sim::components::MoveClass;
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let set = super::super::meshes::MeshSet::build();
+        let vehicles: Vec<(&str, &UnitLook)> = db
+            .iter()
+            .filter(|unit| !unit.is_structure() && !unit.is_air() && unit.class != crate::sim::blueprints::UnitClass::Ammo && !matches!(unit.movement, MoveClass::Naval | MoveClass::Submarine))
+            .map(|unit| (unit.key.as_str(), &looks[usize::from(unit.id.0)]))
+            .filter(|(_, look)| !look.base.is_some_and(Shape::walks))
+            .collect();
+        assert!(vehicles.len() >= 12, "the vehicles are there");
+        for (index, (first, a)) in vehicles.iter().enumerate() {
+            for (second, b) in &vehicles[index + 1..] {
+                if (a.shape, a.base) == (b.shape, b.base) {
+                    continue;
+                }
+                let (fa, fb) = (footprint(&set, a), footprint(&set, b));
+                assert!(footprints_apart(fa, fb), "{first}, {:.0} long and {:.2} to 1, and {second}, {:.0} long and {:.2} to 1, look alike from above", fa.0, fa.1, fb.0, fb.1);
+            }
+        }
+    }
+
+    /// The two pairs of aircraft that once looked alike from above stay apart: the air
+    /// superiority fighter is a long canard delta beside the interceptor's plain one, and the
+    /// torpedo bomber has twin booms where the attack bomber has one body.
+    #[test]
+    fn look_alike_aircraft_have_footprints_apart() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let set = super::super::meshes::MeshSet::build();
+        let of = |key: &str| footprint(&set, &looks[usize::from(db.id(key).0)]);
+        for (first, second) in [("t1_interceptor", "t3_air_superiority"), ("t1_bomber", "t2_torpedo_bomber")] {
+            assert!(footprints_apart(of(first), of(second)), "{first} and {second} look alike from above");
+        }
+    }
+
+    /// A land unit's team color is one mark, not a lid: from straight above it covers no more
+    /// than two fifths of the unit, so that its shape shows (the mobile anti-air was 61% team
+    /// color until 2026-11-20). Aircraft are left out, their color being mostly wingtips and
+    /// the transports' cargo bodies.
+    #[test]
+    fn no_land_unit_is_mostly_team_color_from_above() {
+        use super::super::meshes::tests::view;
+        use crate::sim::components::MoveClass;
+        let db = BlueprintDb::standard();
+        let set = super::super::meshes::MeshSet::build();
+        for unit in db.iter().filter(|unit| !unit.is_structure() && !unit.is_air() && unit.class != crate::sim::blueprints::UnitClass::Ammo && !matches!(unit.movement, MoveClass::Naval | MoveClass::Submarine)) {
+            let look = unit_look(&unit.key);
+            let parts: Vec<(Shape, f32)> = look.base.into_iter().chain([look.shape]).map(|shape| (shape, 0.0)).collect();
+            let seen = view(&set, &parts, 90.0);
+            let covered = seen.iter().filter(|material| material.is_some()).count().max(1) as f32;
+            let trim = seen.iter().filter(|material| matches!(material, Some(super::super::meshes::Material::Trim))).count() as f32 / covered;
+            assert!(trim <= 0.4, "{} is {:.0}% team color from above", unit.key, trim * 100.0);
         }
     }
 

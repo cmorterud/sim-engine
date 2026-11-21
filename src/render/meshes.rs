@@ -127,7 +127,8 @@ pub enum Shape {
     Wake,
     /// A flat square laid on the ground, for craters and scorch marks, which the shader cuts round.
     Scar,
-    /// A heavy fighter with two engines and two tail fins, pointing along +Y.
+    /// A heavy fighter, pointing along +Y: a canard delta with a long nose, its wing set far
+    /// back, two engines, and two tail fins.
     AirSuperiority,
     /// A long gunship with two rotors, pointing along +Y.
     HeavyGunship,
@@ -159,8 +160,8 @@ pub enum Shape {
     /// A strike fighter, pointing along +Y: wings swept back, two tail fins, two engines, and
     /// bomb canisters under its wings.
     FighterBomber,
-    /// A torpedo bomber, pointing along +Y: a stout body on straight wings with an engine on
-    /// each, twin tail fins, and a long torpedo slung under its belly.
+    /// A torpedo bomber, pointing along +Y: twin booms joined by a tailplane, either side of a
+    /// short pod on straight wings, with a long torpedo slung under the pod.
     TorpedoBomber,
     /// A shield's dome: an open half-sphere, drawn see-through.
     Dome,
@@ -173,13 +174,15 @@ pub enum Shape {
     HeavyTankHull,
     /// A heavy tank's big turret, with a long gun, a cupola, and a bustle rack.
     HeavyTank,
-    /// A hovercraft's hull: a rubber skirt, a deck, and two big fan ducts at the stern.
+    /// A hovercraft's hull: a rounded oval on a rubber skirt, with two big team-colored fan
+    /// ducts at the stern. The only vehicle without corners.
     HoverHull,
-    /// A light six-wheeled truck, with a cab in front and a pedestal on its bed.
+    /// A long, light six-wheeled truck, with a cab in front and a pedestal on its bed.
     WheeledHull,
-    /// A self-propelled heavy gun: an armored casemate and a long barrel raised high.
+    /// A self-propelled heavy gun: a sloped casemate with a team-colored roof and a very long
+    /// barrel.
     HeavyArtillery,
-    /// A launcher box of missile tubes, raised on a pedestal.
+    /// A long, low team-colored box of missile tubes along a truck's bed.
     MissileRack,
     /// A bank of energy cells with glowing caps, on a slab.
     EnergyStorage,
@@ -189,10 +192,22 @@ pub enum Shape {
     DeepScan,
     /// The concrete foundation a structure on land stands on, with the team's corner marks.
     Apron,
+    /// A long, narrow eight-wheeled truck with a cab in front, under a missile launcher's box.
+    MissileTruck,
+    /// A short, wide four-wheeled carrier with a cab in front, under a mobile shield's dome.
+    ShieldCarrier,
+    /// A long, narrow tracked hull under a self-propelled gun's casemate.
+    CasemateHull,
+    /// An engineer's tracked hull, longer, with a team-colored gun turret over its right track.
+    CombatEngineerHull,
+    /// A team-colored twin anti-aircraft gun on a truck's bed.
+    TruckAntiAir,
+    /// A mobile flak gun's square team-colored turret with four barrels.
+    FlakTurret,
 }
 
 impl Shape {
-    pub const ALL: [Self; 94] = [
+    pub const ALL: [Self; 100] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -287,6 +302,12 @@ impl Shape {
         Self::Sonar,
         Self::DeepScan,
         Self::Apron,
+        Self::MissileTruck,
+        Self::ShieldCarrier,
+        Self::CasemateHull,
+        Self::CombatEngineerHull,
+        Self::TruckAntiAir,
+        Self::FlakTurret,
     ];
     pub const COUNT: usize = Self::ALL.len();
 
@@ -329,7 +350,7 @@ impl Shape {
 
     /// Whether the shape runs on tracks, and leaves their marks on the ground behind it.
     pub const fn leaves_tracks(self) -> bool {
-        matches!(self, Self::TankHull | Self::HeavyTankHull | Self::ArtilleryHull | Self::EngineerHull)
+        matches!(self, Self::TankHull | Self::HeavyTankHull | Self::ArtilleryHull | Self::EngineerHull | Self::CasemateHull | Self::CombatEngineerHull)
     }
 
     /// Whether the shape is a pair of legs, which swing as the unit walks.
@@ -837,6 +858,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         Shape::Bot => {
             mesh.bevel([-0.22, -0.18, -0.02], [0.22, 0.18, 0.36], 0.05);
             mesh.paint(Material::Hull);
+            mesh.bevel([-0.2, -0.18, 0.36], [0.2, -0.02, 0.4], 0.02);
             mesh.bevel([-0.36, -0.14, 0.18], [-0.22, 0.12, 0.4], 0.04);
             mesh.bevel([0.22, -0.14, 0.18], [0.36, 0.12, 0.4], 0.04);
             mesh.beam([-0.3, 0.0, 0.2], [-0.3, 0.28, 0.12], 0.05, 0.05);
@@ -865,21 +887,22 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         }
         // A hull with a sloped front and an engine grille, between tracks under fenders.
         Shape::TankHull => {
+            // Narrow, so that the tank is longer than it is wide, with its gun reaching out ahead.
             mesh.paint(Material::Metal);
-            for (low, high) in [(-0.48_f32, -0.24_f32), (0.24, 0.48)] {
-                mesh.bevel([low, -0.5, -0.5], [high, 0.44, -0.24], 0.05);
+            for (low, high) in [(-0.34_f32, -0.18_f32), (0.18, 0.34)] {
+                mesh.bevel([low, -0.5, -0.5], [high, 0.3, -0.26], 0.05);
             }
             mesh.paint(Material::Hull);
-            for (low, high) in [(-0.5_f32, -0.22_f32), (0.22, 0.5)] {
-                mesh.block([low, -0.5, -0.24], [high, 0.46, -0.21]);
+            for (low, high) in [(-0.35_f32, -0.16_f32), (0.16, 0.35)] {
+                mesh.block([low, -0.5, -0.26], [high, 0.32, -0.23]);
             }
             mesh.cuboid(
-                [Vec3::new(-0.3, -0.44, -0.44), Vec3::new(0.3, -0.44, -0.44), Vec3::new(0.3, 0.44, -0.44), Vec3::new(-0.3, 0.44, -0.44)],
-                [Vec3::new(-0.3, -0.44, -0.1), Vec3::new(0.3, -0.44, -0.1), Vec3::new(0.3, 0.22, -0.1), Vec3::new(-0.3, 0.22, -0.1)],
+                [Vec3::new(-0.2, -0.46, -0.44), Vec3::new(0.2, -0.46, -0.44), Vec3::new(0.2, 0.3, -0.44), Vec3::new(-0.2, 0.3, -0.44)],
+                [Vec3::new(-0.2, -0.46, -0.1), Vec3::new(0.2, -0.46, -0.1), Vec3::new(0.2, 0.1, -0.1), Vec3::new(-0.2, 0.1, -0.1)],
             );
             mesh.paint(Material::Metal);
-            for y in [-0.39_f32, -0.32, -0.25] {
-                mesh.block([-0.18, y - 0.022, -0.1], [0.18, y + 0.022, -0.085]);
+            for y in [-0.41_f32, -0.34, -0.27] {
+                mesh.block([-0.12, y - 0.022, -0.1], [0.12, y + 0.022, -0.085]);
             }
         }
         // A team-colored turret with a sloped front, a mantlet, a long gun with a muzzle brake,
@@ -898,31 +921,33 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         }
         Shape::HeavyTankHull => {
             mesh.paint(Material::Metal);
-            for (low, high) in [(-0.5_f32, -0.27_f32), (0.27, 0.5)] {
-                mesh.bevel([low, -0.5, -0.5], [high, 0.46, -0.26], 0.05);
+            for (low, high) in [(-0.41_f32, -0.27_f32), (0.27, 0.41)] {
+                mesh.bevel([low, -0.5, -0.5], [high, 0.3, -0.26], 0.05);
             }
-            // Armored skirts over the upper run of the tracks, with the team's stripe along them.
+            // Armored skirts over the upper run of the tracks, team-colored along their length:
+            // the heavy tank's mark from above.
             mesh.paint(Material::Hull);
-            for (low, high) in [(-0.5_f32, -0.26_f32), (0.26, 0.5)] {
-                mesh.bevel([low, -0.48, -0.38], [high, 0.42, -0.2], 0.02);
+            for (low, high) in [(-0.417_f32, -0.26_f32), (0.26, 0.417)] {
+                mesh.bevel([low, -0.48, -0.38], [high, 0.28, -0.2], 0.02);
             }
             mesh.paint(Material::Trim);
-            for (low, high) in [(-0.5_f32, -0.4_f32), (0.4, 0.5)] {
-                mesh.block([low, -0.46, -0.2], [high, 0.4, -0.18]);
+            for (low, high) in [(-0.417_f32, -0.28_f32), (0.28, 0.417)] {
+                mesh.block([low, -0.46, -0.2], [high, 0.26, -0.17]);
             }
             // The body, with a long sloped front.
             mesh.paint(Material::Hull);
             mesh.cuboid(
-                [Vec3::new(-0.3, -0.46, -0.46), Vec3::new(0.3, -0.46, -0.46), Vec3::new(0.3, 0.48, -0.46), Vec3::new(-0.3, 0.48, -0.46)],
-                [Vec3::new(-0.3, -0.46, -0.06), Vec3::new(0.3, -0.46, -0.06), Vec3::new(0.3, 0.14, -0.06), Vec3::new(-0.3, 0.14, -0.06)],
+                [Vec3::new(-0.27, -0.46, -0.46), Vec3::new(0.27, -0.46, -0.46), Vec3::new(0.27, 0.32, -0.46), Vec3::new(-0.27, 0.32, -0.46)],
+                [Vec3::new(-0.27, -0.46, -0.06), Vec3::new(0.27, -0.46, -0.06), Vec3::new(0.27, 0.06, -0.06), Vec3::new(-0.27, 0.06, -0.06)],
             );
             // Engine grilles on the back deck.
             mesh.paint(Material::Panel);
             for y in [-0.4_f32, -0.32, -0.24] {
-                mesh.block([-0.2, y - 0.025, -0.06], [0.2, y + 0.025, -0.05]);
+                mesh.block([-0.18, y - 0.025, -0.06], [0.18, y + 0.025, -0.05]);
             }
         }
         Shape::HeavyTank => {
+            mesh.paint(Material::Hull);
             mesh.prism(&[[-0.26, -0.3], [0.26, -0.3], [0.3, -0.04], [0.18, 0.16], [-0.18, 0.16], [-0.3, -0.04]], [-0.06, 0.16], [1.0, 0.85]);
             mesh.paint(Material::Metal);
             mesh.block([-0.1, 0.13, -0.02], [0.1, 0.2, 0.11]);
@@ -940,99 +965,129 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.block([-0.22, -0.38, -0.02], [0.22, -0.29, 0.1]);
         }
         Shape::HoverHull => {
-            let outline = [[-0.38, -0.5], [0.38, -0.5], [0.5, -0.38], [0.5, 0.28], [0.3, 0.5], [-0.3, 0.5], [-0.5, 0.28], [-0.5, -0.38]];
+            // A rounded oval: a rectangle with deep round corners, the only vehicle without
+            // corners.
+            let (half_width, corner) = (0.346_f32, 0.2_f32);
+            let mut outline = Vec::new();
+            for (cx, cy, from) in [(half_width - corner, 0.5 - corner, 0.0_f32), (corner - half_width, 0.5 - corner, 90.0), (corner - half_width, corner - 0.5, 180.0), (half_width - corner, corner - 0.5, 270.0)] {
+                for step in 0..=4 {
+                    let angle = (from + step as f32 * 22.5).to_radians();
+                    outline.push([cx + angle.cos() * corner, cy + angle.sin() * corner]);
+                }
+            }
             mesh.paint(Material::Metal);
-            mesh.prism(&outline, [-0.5, -0.36], [0.9, 1.0]);
+            mesh.prism(&outline, [-0.5, -0.36], [0.92, 1.0]);
             mesh.paint(Material::Hull);
-            mesh.prism(&outline, [-0.36, -0.1], [0.86, 0.78]);
-            // A team-colored bow plate, and two fan ducts in the team's colors at the stern.
-            mesh.paint(Material::Trim);
-            mesh.prism(&[[-0.3, 0.16], [0.3, 0.16], [0.22, 0.36], [-0.22, 0.36]], [-0.1, -0.08], [1.0, 1.0]);
-            for x in [-0.22_f32, 0.22] {
+            mesh.prism(&outline, [-0.36, -0.1], [0.9, 0.8]);
+            // Two big fan ducts in the team's colors at the stern.
+            for x in [-0.15_f32, 0.15] {
                 mesh.paint(Material::Metal);
-                mesh.beam([x, -0.3, -0.1], [x, -0.36, 0.0], 0.02, 0.02);
+                mesh.beam([x, -0.28, -0.1], [x, -0.34, 0.0], 0.02, 0.02);
                 mesh.paint(Material::Trim);
-                mesh.body(x, &[[-0.485, 0.15, 0.15, -0.02], [-0.36, 0.15, 0.15, -0.02]], 10);
+                mesh.body(x, &[[-0.47, 0.13, 0.13, -0.02], [-0.34, 0.13, 0.13, -0.02]], 10);
                 mesh.paint(Material::Panel);
-                mesh.body(x, &[[-0.5, 0.11, 0.11, -0.02], [-0.48, 0.11, 0.11, -0.02]], 10);
+                mesh.body(x, &[[-0.485, 0.095, 0.095, -0.02], [-0.465, 0.095, 0.095, -0.02]], 10);
             }
         }
         Shape::WheeledHull => {
+            // Long and narrow, twice as long as it is wide, on six wheels.
             mesh.paint(Material::Metal);
-            for x in [-0.4_f32, 0.4] {
-                for y in [-0.32_f32, 0.0, 0.32] {
-                    mesh.bevel([x - 0.08, y - 0.11, -0.5], [x + 0.08, y + 0.11, -0.3], 0.03);
+            for x in [-0.19_f32, 0.19] {
+                for y in [-0.36_f32, -0.17, 0.32] {
+                    mesh.bevel([x - 0.045, y - 0.075, -0.5], [x + 0.045, y + 0.075, -0.32], 0.02);
                 }
             }
-            // Team-colored fenders over the wheels.
-            mesh.paint(Material::Trim);
-            for x in [-0.4_f32, 0.4] {
-                mesh.block([x - 0.1, -0.46, -0.3], [x + 0.1, 0.46, -0.26]);
+            // Fenders over the wheels.
+            mesh.paint(Material::Hull);
+            for x in [-0.19_f32, 0.19] {
+                for y in [-0.265_f32, 0.32] {
+                    let reach = if y < 0.0 { 0.19 } else { 0.09 };
+                    mesh.block([x - 0.05, y - reach, -0.32], [x + 0.05, y + reach, -0.29]);
+                }
             }
             mesh.paint(Material::Hull);
-            mesh.bevel([-0.3, -0.46, -0.44], [0.3, 0.44, -0.22], 0.03);
+            mesh.bevel([-0.15, -0.48, -0.44], [0.15, 0.48, -0.28], 0.02);
+            mesh.bevel([-0.14, -0.48, -0.28], [0.14, 0.22, -0.22], 0.02);
             // The cab in front, with its windscreen, and a pedestal on the bed for what it carries.
-            mesh.bevel([-0.27, 0.2, -0.22], [0.27, 0.44, -0.02], 0.03);
+            mesh.bevel([-0.14, 0.24, -0.28], [0.14, 0.46, -0.06], 0.03);
+            mesh.paint(Material::Trim);
+            mesh.block([-0.1, 0.27, -0.06], [0.1, 0.43, -0.045]);
             mesh.paint(Material::Glass);
-            mesh.block([-0.22, 0.44, -0.14], [0.22, 0.455, -0.05]);
+            mesh.block([-0.11, 0.46, -0.18], [0.11, 0.475, -0.1]);
             mesh.paint(Material::Metal);
-            mesh.frustum([0.0, -0.12], [-0.22, -0.1], [0.15, 0.13], 8);
+            mesh.frustum([0.0, -0.08], [-0.22, -0.16], [0.09, 0.08], 8);
         }
         Shape::HeavyArtillery => {
-            mesh.bevel([-0.24, -0.4, -0.12], [0.24, 0.06, 0.14], 0.04);
-            mesh.paint(Material::Panel);
-            mesh.block([-0.19, -0.38, 0.14], [0.19, -0.3, 0.15]);
+            // A sloped casemate in armor, with a team-colored roof, and a very long barrel.
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.17, -0.42, -0.16], [0.17, 0.1, 0.06], 0.04);
+            mesh.paint(Material::Trim);
+            mesh.block([-0.13, -0.38, 0.06], [0.13, 0.02, 0.075]);
             mesh.paint(Material::Metal);
-            mesh.frustum([0.0, -0.16], [0.1, 0.2], [0.12, 0.11], 8);
-            mesh.moving(motion::RECOIL, [0.0, -0.26, 0.06], |mesh| {
-                mesh.beam([0.0, -0.26, 0.06], [0.0, 0.42, 0.42], 0.075, 0.075);
-                for x in [-0.07_f32, 0.07] {
-                    mesh.beam([x, -0.12, 0.17], [x, 0.18, 0.33], 0.035, 0.035);
+            mesh.frustum([0.0, 0.06], [-0.08, 0.04], [0.08, 0.07], 8);
+            mesh.moving(motion::RECOIL, [0.0, 0.0, -0.02], |mesh| {
+                mesh.beam([0.0, 0.0, -0.02], [0.0, 0.48, 0.16], 0.055, 0.055);
+                for x in [-0.055_f32, 0.055] {
+                    mesh.beam([x, 0.04, 0.04], [x, 0.22, 0.1], 0.025, 0.025);
                 }
             });
-            mesh.flash([0.0, 0.42, 0.42], 0.08);
+            mesh.flash([0.0, 0.48, 0.16], 0.07);
         }
         Shape::MissileRack => {
+            // A long, low box of missile tubes along the bed, in the team's colors, tilted up a
+            // little to fire, with the tubes' caps at its front end.
             mesh.paint(Material::Metal);
-            mesh.frustum([0.0, -0.08], [-0.2, -0.02], [0.13, 0.1], 6);
-            // The launcher box, raised to fire, with the team's colors, and the tubes' caps at
-            // its front end.
+            mesh.frustum([0.0, -0.1], [-0.27, -0.22], [0.08, 0.07], 6);
             mesh.paint(Material::Trim);
-            let (back, front) = ([0.0, -0.32, -0.04], [0.0, 0.26, 0.26]);
-            mesh.beam(back, front, 0.22, 0.12);
+            let (back, front) = ([0.0, -0.4, -0.18], [0.0, 0.2, -0.08]);
+            mesh.beam(back, front, 0.09, 0.07);
             let along = (Vec3::from(front) - Vec3::from(back)).normalize();
             let up = Vec3::X.cross(along).normalize();
             mesh.paint(Material::Panel);
-            for x in [-0.1_f32, 0.1] {
-                for lift in [-0.055_f32, 0.055] {
+            for x in [-0.05_f32, 0.0, 0.05] {
+                for lift in [-0.035_f32, 0.035] {
                     let cap = Vec3::from(front) + Vec3::X * x + up * lift;
-                    mesh.beam(cap.to_array(), (cap + along * 0.025).to_array(), 0.045, 0.04);
+                    mesh.beam(cap.to_array(), (cap + along * 0.02).to_array(), 0.02, 0.025);
                 }
             }
+            mesh.paint(Material::Metal);
+            for y in [-0.3_f32, -0.15, 0.0] {
+                let at = Vec3::from(back).lerp(Vec3::from(front), (y + 0.4) / 0.6);
+                mesh.block([-0.095, at.y - 0.015, at.z + 0.06], [0.095, at.y + 0.015, at.z + 0.075]);
+            }
         }
-        // A tracked carriage with spades at the back, to brace against the recoil.
+        // A narrow tracked carriage with spades at the back, to brace against the recoil.
         Shape::ArtilleryHull => {
             mesh.paint(Material::Metal);
-            for (low, high) in [(-0.46_f32, -0.26_f32), (0.26, 0.46)] {
-                mesh.bevel([low, -0.46, -0.5], [high, 0.32, -0.26], 0.04);
+            for (low, high) in [(-0.21_f32, -0.13_f32), (0.13, 0.21)] {
+                mesh.bevel([low, -0.3, -0.5], [high, 0.12, -0.3], 0.03);
             }
             mesh.paint(Material::Hull);
-            mesh.bevel([-0.28, -0.44, -0.46], [0.28, 0.34, -0.2], 0.04);
+            for (low, high) in [(-0.227_f32, -0.12_f32), (0.12, 0.227)] {
+                mesh.block([low, -0.32, -0.3], [high, 0.14, -0.27]);
+            }
+            mesh.bevel([-0.14, -0.44, -0.46], [0.14, 0.12, -0.22], 0.03);
+            // A team-colored ammunition locker on the back deck.
+            mesh.paint(Material::Trim);
+            mesh.bevel([-0.11, -0.42, -0.22], [0.11, -0.28, -0.17], 0.02);
             mesh.paint(Material::Metal);
-            for x in [-0.2_f32, 0.2] {
-                mesh.beam([x, -0.4, -0.3], [x * 1.2, -0.45, -0.44], 0.035, 0.02);
+            for x in [-0.1_f32, 0.1] {
+                mesh.beam([x, -0.4, -0.3], [x * 1.4, -0.465, -0.44], 0.03, 0.02);
             }
         }
-        // A team-colored cradle with a heavy barrel raised high, and its recoil cylinder above it.
+        // A team-colored gun shield over a cradle, and a long barrel reaching far ahead, with
+        // its recoil cylinder above it.
         Shape::Artillery => {
-            mesh.bevel([-0.18, -0.38, -0.2], [0.18, 0.02, 0.04], 0.04);
+            mesh.bevel([-0.15, -0.14, -0.22], [0.15, 0.02, 0.04], 0.03);
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.08, -0.36, -0.22], [0.08, -0.12, -0.06], 0.03);
             mesh.paint(Material::Metal);
-            mesh.frustum([0.0, -0.18], [0.04, 0.12], [0.1, 0.09], 8);
-            mesh.moving(motion::RECOIL, [0.0, -0.22, 0.0], |mesh| {
-                mesh.beam([0.0, -0.22, 0.0], [0.0, 0.42, 0.42], 0.065, 0.065);
-                mesh.beam([0.0, -0.12, 0.09], [0.0, 0.18, 0.29], 0.035, 0.035);
+            mesh.frustum([0.0, -0.18], [-0.06, 0.02], [0.06, 0.055], 8);
+            mesh.moving(motion::RECOIL, [0.0, -0.2, -0.06], |mesh| {
+                mesh.beam([0.0, -0.2, -0.06], [0.0, 0.47, 0.14], 0.04, 0.04);
+                mesh.beam([0.0, -0.1, 0.0], [0.0, 0.14, 0.07], 0.022, 0.022);
             });
-            mesh.flash([0.0, 0.42, 0.42], 0.07);
+            mesh.flash([0.0, 0.47, 0.14], 0.06);
         }
         // An open-air assembly bay: a floor open at both ends, east and west, between long walls,
         // under a gantry crane, so that what it builds can be seen and drives out either end.
@@ -1193,27 +1248,31 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.frustum([0.0, 0.0], [-0.25, -0.05], [0.3, 0.24], 8);
         }
         // A team-colored turret with a sloped front, a long gun, and a sensor with a glowing eye.
+        // A fast buggy, twice as long as it is wide, whose team color is the radar dish turning
+        // at its back and a stripe down its nose.
         Shape::LandScout => {
             mesh.paint(Material::Metal);
-            for x in [-0.33_f32, 0.33] {
-                for y in [-0.3_f32, 0.28] {
-                    mesh.bevel([x - 0.08, y - 0.12, -0.5], [x + 0.08, y + 0.12, -0.26], 0.04);
+            for x in [-0.215_f32, 0.215] {
+                for y in [-0.3_f32, 0.3] {
+                    mesh.bevel([x - 0.05, y - 0.09, -0.5], [x + 0.05, y + 0.09, -0.3], 0.03);
                 }
             }
-            mesh.paint(Material::Trim);
-            mesh.bevel([-0.26, -0.44, -0.38], [0.26, 0.42, -0.2], 0.05);
             mesh.paint(Material::Hull);
-            mesh.bevel([-0.18, -0.12, -0.2], [0.18, 0.2, -0.02], 0.04);
-            mesh.paint(Material::Glow);
-            mesh.block([-0.14, 0.2, -0.12], [0.14, 0.215, -0.06]);
+            mesh.bevel([-0.17, -0.46, -0.42], [0.17, 0.46, -0.26], 0.04);
+            mesh.bevel([-0.13, -0.1, -0.26], [0.13, 0.16, -0.12], 0.03);
+            mesh.paint(Material::Glass);
+            mesh.block([-0.11, 0.16, -0.22], [0.11, 0.175, -0.15]);
+            mesh.paint(Material::Trim);
+            mesh.block([-0.07, 0.17, -0.26], [0.07, 0.44, -0.25]);
             mesh.paint(Material::Metal);
-            mesh.body(0.0, &[[0.2, 0.025, 0.025, -0.06], [0.46, 0.02, 0.02, -0.06]], 6);
-            mesh.flash([0.0, 0.45, -0.06], 0.04);
-            mesh.frustum([0.0, -0.28], [-0.2, 0.3], [0.025, 0.02], 6);
-            mesh.moving(motion::SPIN, [0.0, -0.28, 0.0], |mesh| {
+            mesh.body(0.0, &[[0.18, 0.02, 0.02, -0.08], [0.46, 0.016, 0.016, -0.08]], 6);
+            mesh.flash([0.0, 0.45, -0.08], 0.035);
+            mesh.frustum([0.0, -0.3], [-0.26, 0.2], [0.025, 0.02], 6);
+            mesh.paint(Material::Trim);
+            mesh.moving(motion::SPIN, [0.0, -0.3, 0.0], |mesh| {
                 mesh.cuboid(
-                    [Vec3::new(-0.16, -0.3, 0.26), Vec3::new(0.16, -0.3, 0.26), Vec3::new(0.16, -0.27, 0.26), Vec3::new(-0.16, -0.27, 0.26)],
-                    [Vec3::new(-0.16, -0.26, 0.4), Vec3::new(0.16, -0.26, 0.4), Vec3::new(0.16, -0.23, 0.4), Vec3::new(-0.16, -0.23, 0.4)],
+                    [Vec3::new(-0.2, -0.32, 0.16), Vec3::new(0.2, -0.32, 0.16), Vec3::new(0.2, -0.29, 0.16), Vec3::new(-0.2, -0.29, 0.16)],
+                    [Vec3::new(-0.2, -0.28, 0.32), Vec3::new(0.2, -0.28, 0.32), Vec3::new(0.2, -0.25, 0.32), Vec3::new(-0.2, -0.25, 0.32)],
                 );
             });
         }
@@ -1238,21 +1297,23 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Glow);
             mesh.block([-0.08, 0.12, 0.38], [0.08, 0.135, 0.42]);
         }
+        // A big glowing dome on a low mount, ringed in the team's colors, over most of a carrier.
         Shape::ShieldEmitter => {
-            mesh.bevel([-0.26, -0.32, -0.2], [0.26, 0.3, 0.0], 0.04);
-            mesh.paint(Material::Metal);
-            mesh.frustum([0.0, -0.02], [0.0, 0.32], [0.06, 0.045], 8);
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.2, -0.32, -0.22], [0.2, 0.16, -0.12], 0.03);
+            mesh.paint(Material::Trim);
+            mesh.frustum([0.0, -0.08], [-0.12, -0.07], [0.31, 0.3], 16);
             mesh.paint(Material::Glow);
             mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
-                mesh.frustum([0.0, -0.02], [0.16, 0.2], [0.24, 0.24], 14);
-                mesh.ball([0.0, -0.02, 0.42], 0.07, 8, 4);
+                mesh.frustum([0.0, -0.08], [-0.07, 0.02], [0.28, 0.25], 16);
+                mesh.frustum([0.0, -0.08], [0.02, 0.1], [0.25, 0.17], 16);
+                mesh.frustum([0.0, -0.08], [0.1, 0.14], [0.17, 0.0], 16);
             });
-            mesh.paint(Material::Hull);
-            mesh.frustum([0.0, -0.02], [0.3, 0.38], [0.12, 0.05], 8);
         }
         Shape::HeavyWalker => {
             mesh.prism(&[[-0.3, -0.18], [0.3, -0.18], [0.34, 0.04], [0.22, 0.22], [-0.22, 0.22], [-0.34, 0.04]], [-0.06, 0.3], [0.8, 1.0]);
             mesh.paint(Material::Hull);
+            mesh.bevel([-0.28, -0.18, 0.3], [0.28, 0.02, 0.34], 0.02);
             for x in [-0.4_f32, 0.4] {
                 mesh.bevel([x - 0.1, -0.14, 0.04], [x + 0.1, 0.16, 0.26], 0.05);
             }
@@ -1275,6 +1336,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         Shape::SiegeWalker => {
             mesh.bevel([-0.3, -0.26, -0.04], [0.3, 0.2, 0.3], 0.06);
             mesh.paint(Material::Hull);
+            mesh.bevel([-0.26, -0.24, 0.3], [0.26, 0.02, 0.34], 0.02);
             mesh.bevel([-0.27, 0.2, -0.02], [0.27, 0.27, 0.24], 0.03);
             mesh.bevel([-0.36, -0.14, 0.18], [-0.18, 0.1, 0.34], 0.03);
             mesh.paint(Material::Metal);
@@ -1554,36 +1616,37 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.body(x, &[[-0.24, 0.008, 0.008, -0.055], [-0.18, 0.028, 0.028, -0.055], [-0.02, 0.028, 0.028, -0.055], [0.04, 0.01, 0.01, -0.055]], 6);
             }
         }
+        // Twin booms: a short central pod with the torpedo slung under it, straight wings with
+        // an engine at the front of each boom, and a team-colored tailplane joining the booms.
+        // From above the only aircraft with a hole in its outline.
         Shape::TorpedoBomber => {
             mesh.paint(Material::Hull);
-            mesh.body(0.0, &[[-0.5, 0.025, 0.025, 0.03], [-0.25, 0.07, 0.07, 0.01], [0.15, 0.1, 0.09, 0.0], [0.38, 0.08, 0.07, -0.01], [0.48, 0.03, 0.03, -0.02]], 6);
-            // Straight wings, and a tailplane with a fin at each end.
-            mesh.wings(0.09, 0.5, [-0.08, 0.14], [-0.04, 0.06], [0.025, 0.008], 0.03);
-            mesh.wings(0.02, 0.22, [-0.5, -0.4], [-0.49, -0.43], [0.01, 0.004], 0.03);
-            mesh.paint(Material::Trim);
-            mesh.wing_tips(0.09, 0.5, [-0.08, 0.14], [-0.04, 0.06], [0.025, 0.008], 0.03, 0.35);
-            mesh.wing_tips(0.02, 0.22, [-0.5, -0.4], [-0.49, -0.43], [0.01, 0.004], 0.03, 0.5);
-            for x in [-0.22_f32, 0.22] {
-                mesh.fin(x, [-0.5, -0.4], 0.03, [-0.5, -0.44], 0.17, 0.01);
-            }
-            // An engine on each wing.
-            for x in [-0.25_f32, 0.25] {
+            mesh.body(0.0, &[[-0.14, 0.03, 0.03, 0.02], [0.0, 0.075, 0.07, 0.02], [0.3, 0.075, 0.07, 0.01], [0.44, 0.04, 0.035, 0.0], [0.5, 0.012, 0.012, -0.005]], 6);
+            for x in [-0.17_f32, 0.17] {
                 mesh.paint(Material::Hull);
-                mesh.body(x, &[[-0.1, 0.035, 0.035, 0.02], [0.12, 0.045, 0.045, 0.02], [0.2, 0.03, 0.03, 0.02]], 6);
+                mesh.body(x, &[[-0.5, 0.02, 0.022, 0.03], [-0.1, 0.035, 0.035, 0.03], [0.16, 0.05, 0.05, 0.03], [0.24, 0.03, 0.03, 0.03]], 6);
                 mesh.paint(Material::Glow);
-                mesh.body(x, &[[-0.14, 0.026, 0.026, 0.02], [-0.1, 0.035, 0.035, 0.02]], 6);
+                mesh.body(x, &[[0.24, 0.03, 0.03, 0.03], [0.27, 0.02, 0.02, 0.03]], 6);
+                mesh.paint(Material::Trim);
+                mesh.fin(x, [-0.5, -0.4], 0.04, [-0.5, -0.44], 0.17, 0.01);
             }
-            mesh.paint(Material::Glass);
-            mesh.body(0.0, &[[0.3, 0.05, 0.03, 0.07], [0.4, 0.06, 0.04, 0.06], [0.46, 0.025, 0.02, 0.03]], 6);
-            mesh.paint(Material::Metal);
-            // The torpedo, long and slung under the belly, with a team-colored warhead and fins.
-            mesh.body(0.0, &[[-0.38, 0.006, 0.006, -0.14], [-0.32, 0.04, 0.04, -0.14], [0.2, 0.04, 0.04, -0.14], [0.24, 0.036, 0.036, -0.14]], 6);
+            mesh.paint(Material::Hull);
+            mesh.wings(0.05, 0.5, [-0.06, 0.12], [-0.03, 0.07], [0.025, 0.008], 0.03);
             mesh.paint(Material::Trim);
-            mesh.body(0.0, &[[0.24, 0.036, 0.036, -0.14], [0.33, 0.008, 0.008, -0.14]], 6);
-            mesh.wings(0.0, 0.07, [-0.38, -0.32], [-0.38, -0.35], [0.004, 0.003], -0.14);
+            mesh.wing_tips(0.05, 0.5, [-0.06, 0.12], [-0.03, 0.07], [0.025, 0.008], 0.03, 0.3);
+            mesh.block([-0.19, -0.5, 0.025], [0.19, -0.42, 0.04]);
+            mesh.paint(Material::Glass);
+            mesh.body(0.0, &[[0.3, 0.045, 0.03, 0.07], [0.4, 0.05, 0.035, 0.06], [0.46, 0.02, 0.016, 0.03]], 6);
             mesh.paint(Material::Metal);
-            mesh.beam([0.0, -0.1, -0.09], [0.0, -0.1, -0.03], 0.01, 0.03);
-            mesh.beam([0.0, 0.12, -0.09], [0.0, 0.12, -0.03], 0.01, 0.03);
+            // The torpedo, long, slung under the pod and reaching back between the booms, with
+            // a team-colored warhead and fins.
+            mesh.body(0.0, &[[-0.42, 0.006, 0.006, -0.1], [-0.36, 0.038, 0.038, -0.1], [0.16, 0.038, 0.038, -0.1], [0.2, 0.034, 0.034, -0.1]], 6);
+            mesh.paint(Material::Trim);
+            mesh.body(0.0, &[[0.2, 0.034, 0.034, -0.1], [0.28, 0.008, 0.008, -0.1]], 6);
+            mesh.wings(0.0, 0.065, [-0.42, -0.36], [-0.42, -0.39], [0.004, 0.003], -0.1);
+            mesh.paint(Material::Metal);
+            mesh.beam([0.0, -0.06, -0.06], [0.0, -0.06, -0.02], 0.01, 0.03);
+            mesh.beam([0.0, 0.12, -0.06], [0.0, 0.12, -0.02], 0.01, 0.03);
         }
         Shape::Scaffold => {
             mesh.paint(Material::Metal);
@@ -1640,24 +1703,27 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 }
             }
         }
+        // A canard delta: a long team-colored body with a long nose, the delta wing set far
+        // back, small canard wings near the cockpit, and two engines. From above an arrow,
+        // where the interceptor is a triangle.
         Shape::AirSuperiority => {
-            mesh.body(0.0, &[[-0.38, 0.05, 0.045, 0.02], [-0.1, 0.075, 0.07, 0.02], [0.2, 0.07, 0.065, 0.0], [0.4, 0.04, 0.04, -0.01], [0.5, 0.006, 0.006, -0.015]], 6);
-            for x in [-0.11_f32, 0.11] {
+            mesh.body(0.0, &[[-0.44, 0.05, 0.045, 0.02], [-0.18, 0.07, 0.065, 0.02], [0.1, 0.06, 0.055, 0.0], [0.36, 0.035, 0.035, -0.01], [0.5, 0.005, 0.005, -0.015]], 6);
+            for x in [-0.065_f32, 0.065] {
                 mesh.paint(Material::Hull);
-                mesh.body(x, &[[-0.44, 0.055, 0.045, 0.0], [-0.1, 0.065, 0.055, 0.0], [0.14, 0.04, 0.035, -0.01]], 6);
+                mesh.body(x, &[[-0.46, 0.045, 0.04, 0.0], [-0.16, 0.05, 0.045, 0.0], [0.02, 0.03, 0.03, -0.01]], 6);
                 mesh.paint(Material::Glow);
-                mesh.body(x, &[[-0.5, 0.045, 0.036, 0.0], [-0.44, 0.055, 0.045, 0.0]], 6);
+                mesh.body(x, &[[-0.5, 0.036, 0.032, 0.0], [-0.46, 0.045, 0.04, 0.0]], 6);
             }
             mesh.paint(Material::Hull);
-            mesh.wings(0.15, 0.5, [-0.3, 0.12], [-0.3, -0.18], [0.022, 0.006], 0.0);
-            mesh.wings(0.15, 0.33, [-0.48, -0.34], [-0.49, -0.43], [0.012, 0.004], 0.0);
+            mesh.wings(0.06, 0.36, [-0.46, 0.1], [-0.46, -0.38], [0.022, 0.006], 0.0);
+            mesh.wings(0.04, 0.15, [0.17, 0.3], [0.19, 0.24], [0.01, 0.004], 0.01);
             mesh.paint(Material::Trim);
-            for x in [-0.11_f32, 0.11] {
-                mesh.fin(x, [-0.42, -0.24], 0.04, [-0.46, -0.36], 0.26, 0.01);
+            mesh.wing_tips(0.06, 0.36, [-0.46, 0.1], [-0.46, -0.38], [0.022, 0.006], 0.0, 0.3);
+            for x in [-0.07_f32, 0.07] {
+                mesh.fin(x, [-0.46, -0.3], 0.04, [-0.48, -0.4], 0.2, 0.01);
             }
             mesh.paint(Material::Glass);
-            mesh.body(0.0, &[[0.14, 0.02, 0.012, 0.065], [0.24, 0.045, 0.03, 0.07], [0.36, 0.03, 0.02, 0.05], [0.41, 0.006, 0.005, 0.04]], 6);
-            mesh.paint(Material::Metal);
+            mesh.body(0.0, &[[0.2, 0.018, 0.012, 0.05], [0.28, 0.035, 0.026, 0.055], [0.38, 0.022, 0.016, 0.04], [0.42, 0.005, 0.004, 0.03]], 6);
         }
         // A bomber: a thick team-colored body, straight wings with engines under them, and a glazed nose.
         Shape::Bomber => {
@@ -2469,6 +2535,105 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                     }
                 }
             }
+        }
+        // Eight wheels under a long chassis, a cab in front, and a bed for the missile box.
+        Shape::MissileTruck => {
+            mesh.paint(Material::Metal);
+            for x in [-0.165_f32, 0.165] {
+                for y in [-0.38_f32, -0.22, -0.06, 0.36] {
+                    mesh.bevel([x - 0.035, y - 0.06, -0.5], [x + 0.035, y + 0.06, -0.34], 0.02);
+                }
+            }
+            mesh.paint(Material::Hull);
+            for x in [-0.165_f32, 0.165] {
+                mesh.block([x - 0.04, -0.45, -0.34], [x + 0.04, 0.01, -0.315]);
+                mesh.block([x - 0.04, 0.29, -0.34], [x + 0.04, 0.43, -0.315]);
+            }
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.125, -0.5, -0.46], [0.125, 0.48, -0.32], 0.02);
+            mesh.bevel([-0.14, -0.48, -0.32], [0.14, 0.27, -0.27], 0.02);
+            mesh.bevel([-0.14, 0.29, -0.32], [0.14, 0.47, -0.12], 0.03);
+            mesh.paint(Material::Glass);
+            mesh.block([-0.11, 0.47, -0.23], [0.11, 0.485, -0.16]);
+        }
+        // Four wheels under a short, wide body, a cab in front, and team-colored fenders.
+        Shape::ShieldCarrier => {
+            mesh.paint(Material::Metal);
+            for x in [-0.34_f32, 0.34] {
+                for y in [-0.28_f32, 0.28] {
+                    mesh.bevel([x - 0.06, y - 0.11, -0.5], [x + 0.06, y + 0.11, -0.28], 0.03);
+                }
+            }
+            mesh.paint(Material::Trim);
+            for x in [-0.34_f32, 0.34] {
+                for y in [-0.28_f32, 0.28] {
+                    mesh.block([x - 0.065, y - 0.13, -0.28], [x + 0.065, y + 0.13, -0.25]);
+                }
+            }
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.28, -0.46, -0.44], [0.28, 0.46, -0.22], 0.03);
+            mesh.bevel([-0.24, 0.26, -0.22], [0.24, 0.45, -0.06], 0.03);
+            mesh.paint(Material::Glass);
+            mesh.block([-0.2, 0.45, -0.16], [0.2, 0.465, -0.09]);
+        }
+        // Narrow tracks under fenders, either side of a long body for the casemate.
+        Shape::CasemateHull => {
+            mesh.paint(Material::Metal);
+            for (low, high) in [(-0.265_f32, -0.17_f32), (0.17, 0.265)] {
+                mesh.bevel([low, -0.46, -0.5], [high, 0.2, -0.28], 0.04);
+            }
+            mesh.paint(Material::Hull);
+            for (low, high) in [(-0.267_f32, -0.16_f32), (0.16, 0.267)] {
+                mesh.block([low, -0.48, -0.28], [high, 0.22, -0.25]);
+            }
+            mesh.cuboid(
+                [Vec3::new(-0.18, -0.44, -0.46), Vec3::new(0.18, -0.44, -0.46), Vec3::new(0.18, 0.24, -0.46), Vec3::new(-0.18, 0.24, -0.46)],
+                [Vec3::new(-0.18, -0.44, -0.16), Vec3::new(0.18, -0.44, -0.16), Vec3::new(0.18, 0.1, -0.16), Vec3::new(-0.18, 0.1, -0.16)],
+            );
+            mesh.paint(Material::Panel);
+            for y in [-0.4_f32, -0.33] {
+                mesh.block([-0.12, y - 0.02, -0.16], [0.12, y + 0.02, -0.15]);
+            }
+        }
+        // An engineer's hull, longer, with a gun turret over its right track: it fights too.
+        Shape::CombatEngineerHull => {
+            mesh.paint(Material::Metal);
+            for (low, high) in [(-0.39_f32, -0.24_f32), (0.24, 0.39)] {
+                mesh.bevel([low, -0.5, -0.5], [high, 0.36, -0.3], 0.04);
+            }
+            mesh.paint(Material::Hull);
+            for (low, high) in [(-0.395_f32, -0.22_f32), (0.22, 0.395)] {
+                mesh.block([low, -0.5, -0.3], [high, 0.36, -0.27]);
+            }
+            mesh.cuboid(
+                [Vec3::new(-0.24, -0.46, -0.46), Vec3::new(0.24, -0.46, -0.46), Vec3::new(0.24, 0.34, -0.46), Vec3::new(-0.24, 0.34, -0.46)],
+                [Vec3::new(-0.24, -0.46, -0.18), Vec3::new(0.24, -0.46, -0.18), Vec3::new(0.24, 0.14, -0.18), Vec3::new(-0.24, 0.14, -0.18)],
+            );
+            mesh.paint(Material::Trim);
+            mesh.bevel([-0.2, -0.46, -0.18], [0.2, -0.38, -0.14], 0.02);
+            mesh.frustum([0.3, 0.12], [-0.27, -0.17], [0.1, 0.085], 8);
+            mesh.paint(Material::Metal);
+            mesh.moving(motion::RECOIL, [0.3, 0.18, -0.22], |mesh| mesh.beam([0.3, 0.18, -0.22], [0.3, 0.48, -0.22], 0.022, 0.022));
+            mesh.flash([0.3, 0.47, -0.22], 0.04);
+        }
+        // A team-colored twin anti-aircraft gun on a mount, for a truck's bed.
+        Shape::TruckAntiAir => {
+            mesh.frustum([0.0, -0.08], [-0.16, -0.06], [0.12, 0.11], 8);
+            mesh.block([-0.11, -0.18, -0.06], [0.11, 0.04, 0.06]);
+            mesh.paint(Material::Metal);
+            for x in [-0.065_f32, 0.065] {
+                mesh.moving(motion::RECOIL, [x, -0.02, 0.0], |mesh| mesh.beam([x, -0.02, 0.0], [x, 0.3, 0.22], 0.028, 0.028));
+                mesh.flash([x, 0.3, 0.22], 0.04);
+            }
+        }
+        // A square team-colored turret with four barrels side by side, raised for aircraft.
+        Shape::FlakTurret => {
+            mesh.bevel([-0.17, -0.26, -0.1], [0.17, 0.06, 0.08], 0.03);
+            mesh.paint(Material::Metal);
+            for x in [-0.09_f32, -0.03, 0.03, 0.09] {
+                mesh.moving(motion::RECOIL, [x, 0.04, 0.0], |mesh| mesh.beam([x, 0.04, 0.0], [x, 0.46, 0.2], 0.018, 0.018));
+            }
+            mesh.flash([0.0, 0.46, 0.2], 0.07);
         }
         Shape::SelectionRing => {
             const SEGMENTS: usize = 24;
