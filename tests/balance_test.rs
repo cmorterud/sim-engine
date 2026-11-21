@@ -123,3 +123,33 @@ fn t3_artillery_outranges_t3_point_defense_and_breaks_a_shielded_position() {
     assert!(result.broken && result.seconds <= 60.0, "{count} artillery broke the position: {}, in {:.0} s", result.broken, result.seconds);
     assert!(result.losses < 0.01, "and lost {:.0}%", result.losses * 100.0);
 }
+
+/// BALANCE.md, [missiles]: the missile launcher is priced as T1 artillery is, at the targets'
+/// share of its strength per materiel, with no duel in it.
+#[test]
+fn the_missile_launcher_has_its_share_of_t1_artillerys_strength() {
+    use sim_engine::balance::{strength_of, target_number, Anchor};
+    let db = db();
+    let anchor = Anchor::from_targets();
+    let share = strength_of(&db, &anchor, "t2_mobile_missile_launcher") / strength_of(&db, &anchor, "t1_light_artillery");
+    let wanted = target_number("missiles", "strength_over_artillery");
+    assert!((share - wanted).abs() < 0.02, "the launcher has {share:.3} of T1 artillery's strength per materiel, for {wanted}");
+}
+
+/// BALANCE.md, [missiles]: artillery is the better unit, and what keeps moving beats launchers;
+/// but an equal materiel of them breaks a shield over T2 point defenses, losing nothing.
+#[test]
+fn missile_launchers_lose_to_artillery_and_the_line_but_break_a_t2_position() {
+    use sim_engine::balance::{position_materiel, siege, target_number, T2_POSITION};
+    let db = db();
+    let side = |key: &str| Side { unit: db.id(key), count: (1_440.0 / db.get(db.id(key)).mass.to_num::<f64>()).round() as u32, tactics: Tactics::AttackMove };
+    let artillery = mirrored(&db, side("t1_light_artillery"), side("t2_mobile_missile_launcher"), 1.0);
+    assert!(artillery.score > 0.0, "T1 artillery keeps {:.2} more than the launchers", artillery.score);
+    let line = mirrored(&db, side("t2_heavy_tank"), side("t2_mobile_missile_launcher"), 1.0);
+    assert!(line.score >= 0.3, "heavy tanks walking in keep {:.2} more than the launchers", line.score);
+    let launcher = db.id("t2_mobile_missile_launcher");
+    let count = (position_materiel(&db, T2_POSITION) / db.get(launcher).mass.to_num::<f64>()).round() as u32;
+    let result = siege(&db, launcher, count, T2_POSITION);
+    assert!(result.broken && result.seconds <= target_number("missiles", "siege_seconds_max"), "{count} launchers broke the position: {}, in {:.0} s", result.broken, result.seconds);
+    assert!(result.losses < 0.01, "and lost {:.0}%", result.losses * 100.0);
+}

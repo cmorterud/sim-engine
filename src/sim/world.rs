@@ -385,6 +385,9 @@ pub struct SensorRangeView {
 
 /// How close, in units, an enemy must come to see a cloaked unit without deep scan.
 pub const CLOAK_REVEAL_UNITS: i32 = 100;
+/// Below this speed, in raw `Fp` units a tick, a unit counts as stopped for a missile launcher
+/// choosing what to fire at: half a unit a tick.
+const MISSILE_STILL_SPEED_RAW: i64 = 1 << (FP_FRAC_BITS - 1);
 /// How often decoy blips move, in ticks.
 const DECOY_SHUFFLE_TICKS: u32 = 50;
 
@@ -588,6 +591,9 @@ struct PendingShot {
     fused: bool,
     /// Flak, which also scatters the more, the faster the aircraft and the longer the flight.
     flak: bool,
+    /// An artillery shell, lobbed in a high arc to come down on where it was aimed
+    /// (GAME_SPECIFICATION.md §7, Artillery).
+    lobbed: bool,
 }
 
 /// What a launcher gives the missile it fires.
@@ -2458,16 +2464,27 @@ impl SimWorld {
                 // Searches are spread across ticks. Rings grow outward, so units at the
                 // front of a battle stop early with the nearest enemy. Mobile units come first.
                 if combat.target.is_none() && picks_targets && can_fire && stats.phase.wrapping_add(tick).is_multiple_of(TARGET_SEARCH_INTERVAL) {
-                    let mut ring = (8i64 << FP_FRAC_BITS).max(range / 8);
+                    // A missile flies to where its target was, so a launcher picking its own looks over
+                    // its whole reach at once, for structures first, then what has stopped, and only
+                    // then what is moving, which it would miss.
+                    let mut ring = if missile.is_some() { range } else { (8i64 << FP_FRAC_BITS).max(range / 8) };
                     loop {
                         let radius = ring.min(range);
-                        let mut best: Option<(bool, i64, SimId)> = None;
+                        let mut best: Option<(u8, i64, SimId)> = None;
                         let mut consider = |other: &super::spatial::GridEntry| {
                             let distance = squared_distance(other.x, other.y);
                             let reach = radius + i64::from(other.radius);
                             let visible = sensed(other) && !hidden(other.id);
                             if distance <= reach * reach && far_enough(distance) && visible && blocked != Some(other.id) && can_hit(other) {
-                                let candidate = (other.is_structure, distance, other.id);
+                                let rank = if missile.is_none() {
+                                    u8::from(other.is_structure)
+                                } else if other.is_structure {
+                                    0
+                                } else {
+                                    let (vx, vy) = (i64::from(other.velocity[0]), i64::from(other.velocity[1]));
+                                    1 + u8::from(vx * vx + vy * vy > MISSILE_STILL_SPEED_RAW * MISSILE_STILL_SPEED_RAW)
+                                };
+                                let candidate = (rank, distance, other.id);
                                 if best.is_none_or(|current| candidate < current) {
                                     best = Some(candidate);
                                 }
@@ -2561,6 +2578,7 @@ impl SimWorld {
                             lead: Some(entry.entity),
                             fused: false,
                             flak: false,
+                            lobbed: false,
                         });
                         weapon.ticks_until_ready = weapon.def.reload_ticks;
                         finished_discharges.push(id);
@@ -2649,6 +2667,7 @@ impl SimWorld {
                             lead: (missile.is_none() && homing.is_none() && bomb.is_none()).then_some(entry.entity),
                             fused,
                             flak: fused && flak,
+                            lobbed: artillery.is_some() && missile.is_none(),
                         });
                         economies[stats.team.index()].energy -= weapon_energy;
                         combat.ticks_until_ready = reload;
@@ -2702,6 +2721,7 @@ impl SimWorld {
                         lead: None,
                         fused: false,
                         flak: false,
+                        lobbed: artillery.is_some() && missile.is_none(),
                     });
                     economies[stats.team.index()].energy -= weapon_energy;
                     combat.ticks_until_ready = reload;
@@ -2831,6 +2851,7 @@ impl SimWorld {
                         },
                         fused,
                         flak: fused && weapon.flak,
+                        lobbed: false,
                     });
                     weapon.ticks_until_ready = weapon.reload_ticks;
                 }
@@ -2980,7 +3001,14 @@ impl SimWorld {
                 self.ecs.insert_one(entity, super::components::Fused).expect("just spawned");
                 continue;
             }
-            let solution = firing_solution_within(shot.from, to, shot.speed, least_ticks);
+            // An artillery shell takes as long as a flat one would, so it leads the same, but
+            // falls under a gravity of its own that sends it up in a high arc and down on its aim.
+            let (solution, lobbed) = if shot.lobbed {
+                let (solution, gravity) = super::combat::lobbed_solution(shot.from, to, shot.speed, least_ticks);
+                (solution, Some(gravity))
+            } else {
+                (firing_solution_within(shot.from, to, shot.speed, least_ticks), None)
+            };
             let projectile = self.spawn_projectile(
                 shot.from,
                 Projectile {
@@ -2997,6 +3025,10 @@ impl SimWorld {
             if let Some(def) = shot.discharge {
                 let entity = self.projectiles.last().filter(|last| last.0 == projectile).expect("just spawned").1;
                 self.ecs.insert_one(entity, Discharged { def }).expect("just spawned");
+            }
+            if let Some(gravity) = lobbed {
+                let entity = self.projectiles.last().filter(|last| last.0 == projectile).expect("just spawned").1;
+                self.ecs.insert_one(entity, super::components::Lobbed(gravity)).expect("just spawned");
             }
             if shot.stun > 0 {
                 let entity = self.projectiles.last().filter(|last| last.0 == projectile).expect("just spawned").1;
@@ -3152,14 +3184,14 @@ impl SimWorld {
         self.pending_stuns.clear();
         let units = &self.units;
         let stuns = &mut self.pending_stuns;
-        let mut query = self.ecs.query_mut::<(&mut Position, &mut Projectile, Option<&Discharged>, Option<&Missile>, Option<&Homing>, Option<&Falling>, Option<&Stunning>, Option<&super::components::Fused>)>();
+        let mut query = self.ecs.query_mut::<(&mut Position, &mut Projectile, Option<&Discharged>, Option<&Missile>, Option<&Homing>, Option<&Falling>, Option<&Stunning>, Option<&super::components::Fused>, Option<&super::components::Lobbed>)>();
         let mut view = query.view();
         for &(id, entity) in &self.projectiles {
             if shot_down.binary_search(&id).is_ok() {
                 dead.push(id);
                 continue;
             }
-            let (position, projectile, discharged, missile, homing, falling, stunning, fused) = view.get_mut(entity).expect("projectile list only holds live projectiles");
+            let (position, projectile, discharged, missile, homing, falling, stunning, fused, lobbed) = view.get_mut(entity).expect("projectile list only holds live projectiles");
             let stun = stunning.map_or(0, |stunning| stunning.0);
             let start = position.0;
             // A shell at an aircraft that does not steer flies straight on to where it was aimed.
@@ -3253,6 +3285,8 @@ impl SimWorld {
             position.0 = end;
             if falling.is_some() {
                 projectile.velocity.z -= BOMB_GRAVITY;
+            } else if let Some(lobbed) = lobbed {
+                projectile.velocity.z -= lobbed.0;
             } else if missile.is_none() {
                 projectile.velocity.z -= GRAVITY;
             }
@@ -4026,6 +4060,10 @@ impl SimWorld {
         }
         if self.ecs.get::<&Falling>(entity).is_ok() {
             hasher.write(&[4]);
+        }
+        if let Ok(lobbed) = self.ecs.get::<&super::components::Lobbed>(entity) {
+            hasher.write(&[6]);
+            write_fp(hasher, lobbed.0);
         }
         if let Ok(stunning) = self.ecs.get::<&Stunning>(entity) {
             hasher.write(&[5]);

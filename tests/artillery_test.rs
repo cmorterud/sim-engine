@@ -182,7 +182,13 @@ fn a_t2_generator_beside_an_installation_cheapens_and_speeds_its_shots() {
         if generator {
             structure(&mut world, "power_generator_t2", Team::Blue, 101, 99);
         }
-        structure(&mut world, "mass_storage", Team::Red, 180, 100);
+        // Tough enough to take every shell, now that they come down on it, so that the gun fires again.
+        let storage = structure(&mut world, "mass_storage", Team::Red, 180, 100);
+        {
+            let mut health = world.ecs.get::<&mut Health>(world.unit_entity(storage).unwrap()).unwrap();
+            health.max = fp_int(100_000);
+            health.current = health.max;
+        }
         world.advance_tick(&[]);
         let income = world.economies[0].energy_income;
         let before = world.economies[0].energy;
@@ -363,5 +369,118 @@ fn artillery_that_sets_up_never_fires_on_the_move() {
                 assert!(moving > 0, "{key} without a setup fires on the move, so the test means something");
             }
         }
+    }
+}
+
+/// Every artillery weapon that fires shells (not missiles), with its blueprint key.
+fn shell_artillery(world: &SimWorld) -> Vec<String> {
+    let keys: Vec<String> = world
+        .blueprints
+        .iter()
+        .filter(|def| def.weapon.is_some_and(|weapon| weapon.artillery && weapon.kind == sim_engine::sim::blueprints::WeaponKind::Shell))
+        .map(|def| def.key.clone())
+        .collect();
+    for key in ["t1_light_artillery", "t3_mobile_artillery", "t3_artillery"] {
+        assert!(keys.iter().any(|have| have == key), "{key} is shell artillery");
+    }
+    keys
+}
+
+/// A tank that does not shoot back, with health enough to take a shell, standing still.
+fn standing_tank(world: &mut SimWorld, at: Vec2Fp) -> SimId {
+    let tank = passing_tank(world, at, at);
+    world.advance_tick(&[SimCommand::Stop { units: vec![tank] }]);
+    tank
+}
+
+/// All artillery lobs its shells (GAME_SPECIFICATION.md §7, Artillery): each climbs well above
+/// the line to its target, passes over a unit standing halfway, and comes down on the target,
+/// at its least reach, halfway out, and at its full reach.
+#[test]
+fn artillery_lobs_its_shells_over_what_is_between_onto_its_target() {
+    for key in shell_artillery(&world(5_120)) {
+        let probe = world(5_120);
+        let def = probe.blueprints.get(probe.blueprints.id(&key)).clone();
+        let weapon = def.weapon.expect("artillery has a gun");
+        let (least, reach) = (weapon.min_range.to_num::<i32>(), weapon.range.to_num::<i32>());
+        for distance in [least + 60, (least + reach) / 2, reach * 9 / 10] {
+            let map = ((distance * 2 + 2_000).max(5_120) + 1_279) / 1_280 * 1_280;
+            let mut world = world(map);
+            let y = map / 2;
+            let gun = if def.is_structure() {
+                structure(&mut world, &key, Team::Blue, 25, (y / 20) as u32)
+            } else {
+                world.spawn_mobile(world.blueprints.id(&key), Team::Blue, point(500, y))
+            };
+            let from = world.unit_position(gun).unwrap();
+            // No spread, so that the shell comes down on the target itself.
+            if let Ok(mut artillery) = world.ecs.get::<&mut Artillery>(world.unit_entity(gun).unwrap()) {
+                artillery.spread = Fp::ZERO;
+            }
+            let x = from.x.to_num::<i32>() + distance;
+            let target = standing_tank(&mut world, point(x, y));
+            let between = standing_tank(&mut world, point(from.x.to_num::<i32>() + distance / 2, y));
+            let Some(_) = first_shot(&mut world, gun, 400) else {
+                panic!("{key} fires at {distance}");
+            };
+            let mut peak = Fp::from_num(-1_000);
+            for _ in 0..600 {
+                let flying: Vec<Vec3Fp> = world.projectiles.iter().filter_map(|&(_, entity)| {
+                    let shell = world.ecs.get::<&Projectile>(entity).ok().filter(|shell| shell.source == gun)?;
+                    let _ = shell;
+                    world.ecs.get::<&sim_engine::sim::components::Position>(entity).ok().map(|at| at.0)
+                }).collect();
+                for at in &flying {
+                    peak = peak.max(at.z - from.z);
+                }
+                world.advance_tick(&[]);
+                if flying.is_empty() && world.unit_health(target).is_some_and(|health| health < fp_int(100_000)) {
+                    break;
+                }
+            }
+            let rise = (distance as f64 * 0.4).min(3_000.0);
+            assert!(peak.to_num::<f64>() >= rise * 0.8, "{key} at {distance}: the shell rose {peak}, for a high arc of about {rise:.0}");
+            assert!(world.unit_health(target).is_some_and(|health| health < fp_int(100_000)), "{key} at {distance}: the shell came down on its target");
+            assert_eq!(world.unit_health(between), Some(fp_int(100_000)), "{key} at {distance}: the shell passed over the unit between");
+        }
+    }
+}
+
+/// A shell comes down where it was aimed whether its target is still there or not: with the
+/// target gone from under it, it bursts on the ground there, and hits what stands there. A flat
+/// shell flew on past.
+#[test]
+fn a_shell_lands_where_it_was_aimed_with_its_target_gone() {
+    for key in shell_artillery(&world(5_120)) {
+        let probe = world(5_120);
+        let def = probe.blueprints.get(probe.blueprints.id(&key)).clone();
+        let weapon = def.weapon.expect("artillery has a gun");
+        if weapon.splash_radius <= Fp::ZERO {
+            continue;
+        }
+        let distance = (weapon.min_range.to_num::<i32>() + weapon.range.to_num::<i32>()) / 2;
+        let map = ((distance * 2 + 2_000).max(5_120) + 1_279) / 1_280 * 1_280;
+        let mut world = world(map);
+        let y = map / 2;
+        let gun = if def.is_structure() { structure(&mut world, &key, Team::Blue, 25, (y / 20) as u32) } else { world.spawn_mobile(world.blueprints.id(&key), Team::Blue, point(500, y)) };
+        if let Ok(mut artillery) = world.ecs.get::<&mut Artillery>(world.unit_entity(gun).unwrap()) {
+            artillery.spread = Fp::ZERO;
+        }
+        let x = world.unit_position(gun).unwrap().x.to_num::<i32>() + distance;
+        let target = standing_tank(&mut world, point(x, y));
+        first_shot(&mut world, gun, 400).unwrap_or_else(|| panic!("{key} fires"));
+        // With the shell in the air, the target is gone from under it, and another stands beside
+        // where it was, off the line of flight, within the blast of a shell that bursts there.
+        let entity = world.unit_entity(target).unwrap();
+        world.ecs.get::<&mut sim_engine::sim::components::Position>(entity).unwrap().0 = Vec3Fp::new(fp_int(x), fp_int(y + 1_000), fp_int(20));
+        let bystander = standing_tank(&mut world, point(x, y + weapon.splash_radius.to_num::<i32>()));
+        for _ in 0..400 {
+            world.advance_tick(&[]);
+            if shells(&world, gun).is_empty() {
+                break;
+            }
+        }
+        assert!(world.unit_health(bystander).is_some_and(|health| health < fp_int(100_000)), "{key}: the shell burst where it was aimed");
+        assert_eq!(world.unit_health(target), Some(fp_int(100_000)), "{key}: and not on the target, gone from there");
     }
 }

@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use crate::math::fp::{fp_int, Fp, Vec2Fp};
-use crate::sim::blueprints::{Blueprint, BlueprintDb, BlueprintId};
+use crate::sim::blueprints::{Blueprint, BlueprintDb, BlueprintId, TICKS_PER_SECOND};
 use crate::sim::commands::SimCommand;
 use crate::sim::blueprints::Res;
 use crate::sim::components::{Blueprinted, Health, SimId, Team};
@@ -194,6 +194,8 @@ pub struct SiegeResult {
 /// A defended position: Red's structures, finished and powered, by blueprint key and the cell of
 /// their south-west corner. The T3 one is a heavy shield over three heavy point defenses.
 pub type Position = &'static [(&'static str, u32, u32)];
+/// The T2 one: a shield generator over three T2 point defenses.
+pub const T2_POSITION: Position = &[("shield_generator", 127, 127), ("t2_point_defense", 124, 128), ("t2_point_defense", 132, 128), ("t2_point_defense", 128, 124)];
 pub const T3_POSITION: Position = &[("t3_heavy_shield", 127, 127), ("t3_heavy_point_defense", 124, 128), ("t3_heavy_point_defense", 132, 128), ("t3_heavy_point_defense", 128, 124)];
 
 /// The materiel a position costs.
@@ -441,6 +443,25 @@ pub enum Target {
     Efficiency(&'static str, f64),
     /// Seconds for an equal materiel of it to break this position (`[siege] seconds`).
     Siege(Position, f64),
+    /// This unit's strength per materiel, as the unit data has it, times this: one unit priced
+    /// as another with a premium or a discount, with no duel in it (`[missiles]`).
+    Relative(&'static str, f64),
+}
+
+/// A number in data/balance_targets.toml.
+pub fn target_number(section: &str, key: &str) -> f64 {
+    let table: toml::Table = TARGETS.parse().expect("data/balance_targets.toml is valid");
+    let value = &table[section][key];
+    value.as_float().or_else(|| value.as_integer().map(|value| value as f64)).unwrap_or_else(|| panic!("{section}.{key} is a number"))
+}
+
+/// A unit's strength per materiel, √(health × damage a second) / cost, as a multiple of the
+/// anchor's: the multiplier `apply` gives a role.
+pub fn strength_of(db: &BlueprintDb, anchor: &Anchor, key: &str) -> f64 {
+    let unit = db.get(db.id(key));
+    let weapon = unit.weapon.unwrap_or_else(|| panic!("{key} has a weapon"));
+    let dps = weapon.damage.to_num::<f64>() * TICKS_PER_SECOND as f64 / f64::from(weapon.reload_ticks.max(1));
+    (unit.health.to_num::<f64>() * dps).sqrt() / unit.mass.to_num::<f64>() / anchor.efficiency()
 }
 
 /// T1 land, first pass. Costs set how many a materiel buys; strengths are solved by duels.
@@ -556,7 +577,9 @@ pub fn t2_land_roles() -> Vec<Role> {
             ..line.clone()
         },
         // Siege: cruise missiles from far beyond every gun, at whatever stands still. They neither
-        // lead nor follow, so what keeps moving beats it; artillery firing in place does not.
+        // lead nor follow, so what keeps moving beats it, and missile defense shoots them down.
+        // Priced as T1 artillery is, with a premium for both (`[missiles]`), rather than by a duel
+        // against it, which had every change to T1 artillery move its price.
         Role {
             unit: "t2_mobile_missile_launcher",
             role: "artillery",
@@ -571,7 +594,7 @@ pub fn t2_land_roles() -> Vec<Role> {
             radius: 11.0,
             min_range: Some(0.2),
             spread: 0.0,
-            target: Target::Score("t1_light_artillery", 0.55),
+            target: Target::Relative("t1_light_artillery", target_number("missiles", "strength_over_artillery")),
             ..line
         },
     ]
@@ -693,6 +716,7 @@ pub fn price(db: &BlueprintDb, anchor: &Anchor, role: &Role, materiel: f64) -> f
     let count = |unit: &Blueprint| (materiel / unit.mass.to_num::<f64>()).round().max(1.0) as u32;
     match role.target {
         Target::Fixed => role.strength,
+        Target::Relative(of, factor) => strength_of(db, anchor, of) * factor,
         Target::Score(against, target) => {
             let (mut low, mut high) = (-3.0f64, 3.0f64);
             let mut nearest = (f64::INFINITY, role.strength);
@@ -793,14 +817,14 @@ pub fn derive_t1_report() {
     println!("  line against artillery, with micro:  {:+.2} (line keeps at least 0.3)", micro.score);
     let raiders_micro = mirrored(&db, side("t1_light_walker", Tactics::Micro), side("t1_light_artillery", Tactics::AttackMove), 1.0);
     let raiders_plain = mirrored(&db, side("t1_light_walker", Tactics::AttackMove), side("t1_light_artillery", Tactics::AttackMove), 1.0);
-    println!("  massed raiders against artillery:   {:+.2} attack-moving (artillery keeps at least 0.3), {:+.2} with micro (raiders keep at least 0.3)", raiders_plain.score, raiders_micro.score);
+    println!("  massed raiders against artillery:   {:+.2} attack-moving, {:+.2} with micro (artillery beats raiders; micro helps)", raiders_plain.score, raiders_micro.score);
     let raid = mirrored(
         &db,
         Side { unit: db.id("t1_light_walker"), count: 4, tactics: Tactics::AttackMove },
         Side { unit: db.id("t1_light_artillery"), count: 2, tactics: Tactics::AttackMove },
         1.0,
     );
-    println!("  a raid, 4 raiders against 2 artillery: {:+.2} (raiders win)", raid.score);
+    println!("  4 raiders charging 2 artillery:     {:+.2} (artillery may win: raiders are no counter of it)", raid.score);
     let ten = mirrored(&db, Side { count: 10, ..anchor_side }, Side { count: 10, ..anchor_side }, 1.0);
     println!("  ten anchors against ten:            {:.1} s (targets: 25-45 s)", ten.seconds);
 }
@@ -880,7 +904,20 @@ pub fn derive_t2_report() {
     println!("  skirmisher against line:            {:+.2} (skirmisher keeps 0.4-0.7)", plain("t2_grenadier_walker", "t2_heavy_tank").score);
     println!("  assault against line:               {:+.2} (even, within 0.15)", plain("t2_assault_hovercraft", "t2_heavy_tank").score);
     println!("  assault against skirmisher:         {:+.2} (about even, assault ahead)", plain("t2_assault_hovercraft", "t2_grenadier_walker").score);
-    println!("  siege against T1 artillery:         {:+.2} (siege keeps 0.4-0.7)", plain("t2_mobile_missile_launcher", "t1_light_artillery").score);
+    let launcher = db.get(db.id("t2_mobile_missile_launcher"));
+    let premium = strength_of(&db, &Anchor::from_targets(), "t2_mobile_missile_launcher") / strength_of(&db, &Anchor::from_targets(), "t1_light_artillery");
+    println!("  siege's strength over T1 artillery's: {premium:.2} ([missiles] strength_over_artillery)");
+    let count = (position_materiel(&db, T2_POSITION) / launcher.mass.to_num::<f64>()).round() as u32;
+    let broke = siege(&db, launcher.id, count, T2_POSITION);
+    println!(
+        "  {count} siege against a shield over three T2 point defenses ({:.0} materiel): {} in {:.0} s, losing {:.0}% (targets: within {:.0} s, nothing lost)",
+        position_materiel(&db, T2_POSITION),
+        if broke.broken { "broken" } else { "not broken" },
+        broke.seconds,
+        broke.losses * 100.0,
+        target_number("missiles", "siege_seconds_max"),
+    );
+    println!("  T1 artillery against siege:         {:+.2} (artillery is the better unit)", plain("t1_light_artillery", "t2_mobile_missile_launcher").score);
     println!("  line against siege, attack-move:    {:+.2} (what keeps moving wins)", plain("t2_heavy_tank", "t2_mobile_missile_launcher").score);
     let raid = mirrored(
         &db,

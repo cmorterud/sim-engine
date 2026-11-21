@@ -1039,7 +1039,8 @@ weapon = { range = 16500, reload_ticks = 133, projectile_speed = 150, damage = 7
 # of its reach. Priced to beat line units that attack-move into it, as at T1. It sets up for a
 # second before it fires, and any move packs it up, so it shells positions, its own defended or
 # the enemy's, rather than chasing armies. Derived from the balance targets
-# (reports/balance/2026-11-21-t3-land.md).
+# (reports/balance/2026-11-21-t3-land.md), and again once shells came down where they were aimed
+# (reports/balance/2026-11-21-artillery-arcs.md).
 [[unit]]
 id = "t3_mobile_artillery"
 name = "Mobile Heavy Artillery"
@@ -1048,13 +1049,13 @@ tier = 3
 mass = 600
 energy = 3000
 build_time = 3600
-health = 3038
+health = 2305
 speed = "4.3"
 turn_rate = 75
 turn_radius = 20
 radius = 12
 vision = 1010
-weapon = { range = 1680, reload_ticks = 60, projectile_speed = 56, damage = "1132.3", splash_radius = "22.75", turn_rate = 30, artillery = true, min_range = 420, spread = 25, setup_ticks = 10 }
+weapon = { range = 1680, reload_ticks = 60, projectile_speed = 56, damage = "859.1", splash_radius = "22.75", turn_rate = 30, artillery = true, min_range = 420, spread = 25, setup_ticks = 10 }
 
 # FAF's fighter-bomber: a carpet of twenty napalm bombs of 80, burning included, as one bomb of 1,600, and
 # two railguns of 75 a second at aircraft, as one.
@@ -1471,10 +1472,10 @@ max_stock = 3
 weapon = { range = 8200, reload_ticks = 100, projectile_speed = 25, damage = 500, splash_radius = 800, inner_damage = 70000, inner_radius = 600, kind = "strategic_missile", cruise_height = 500 }
 extra_weapons = [{ kind = "tactical_missile", automatic = true, range = 5120, reload_ticks = 100, projectile_speed = 32, damage = 2000, splash_radius = 60, cruise_height = 60 }]
 
-# Siege: it fires cruise missiles on its own at what is in range, as artillery does, from far
-# beyond every gun, and cannot hit what is closer than a fifth of its range. The missiles neither
-# lead nor follow, so it beats what stands still, such as artillery firing in place, and loses to
-# what keeps moving. Derived from the balance targets (reports/balance/2026-11-20-t2-land.md).
+# Siege: it fires cruise missiles on its own at what is in range, structures first, then what has
+# stopped, from far beyond every gun, and cannot hit what is closer than a fifth of its range. The
+# missiles neither lead nor follow, so it loses to what keeps moving. Priced at 0.8 of T1
+# artillery's strength per materiel ([missiles]; reports/balance/2026-11-21-artillery-arcs.md).
 [[unit]]
 id = "t2_mobile_missile_launcher"
 name = "Mobile Missile Launcher"
@@ -1483,13 +1484,13 @@ tier = 2
 mass = 180
 energy = 900
 build_time = 1080
-health = 1680
+health = 1353
 speed = "5.8"
 turn_rate = 90
 turn_radius = 20
 radius = 11
 vision = 650
-weapon = { kind = "tactical_missile", automatic = true, artillery = true, min_range = 259, range = 1295, reload_ticks = 50, projectile_speed = 40, damage = "521.6", splash_radius = 10, cruise_height = 40 }
+weapon = { kind = "tactical_missile", automatic = true, artillery = true, min_range = 259, range = 1295, reload_ticks = 50, projectile_speed = 40, damage = "420.1", splash_radius = 10, cruise_height = 40 }
 
 # Field enhancements (GAME_SPECIFICATION.md §2.1), with FAF's numbers for its
 # commander. A commander has three bays, and one enhancement in each: a new one replaces what is

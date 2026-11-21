@@ -103,7 +103,14 @@ out close and why: evidence about the process, not a target.
   it shells positions rather than armies in the field. Re-priced against the same targets, it
   came out 2% weaker, within a shot-to-kill step: 3,038 health and 1,132 a shell. It breaks the
   shielded position in 23 seconds without loss; against Medium Tanks that close on it, its
-  strength per materiel fell from 0.64 to 0.27. Next: air, against land frozen.
+  strength per materiel fell from 0.64 to 0.27.
+* 2026-11-21: artillery lobs its shells, which come down where they were aimed
+  (`reports/balance/2026-11-21-artillery-arcs.md`). Shells that land made artillery stronger:
+  raiders charging it from the front now lose, so they are no longer one of its counters without
+  micro, nor a micro cell. T3 artillery re-priced to 2,305 health and 859 a shell. The Mobile
+  Missile Launcher is now priced at 0.8 of T1 artillery's strength per materiel (`[missiles]`)
+  rather than by a duel against it, which arcs had moved by half: 1,353 health, 420 a missile.
+  T1 came out unchanged. Next: air, against land frozen.
 
 ## Order of work
 

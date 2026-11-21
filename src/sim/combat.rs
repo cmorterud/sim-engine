@@ -42,6 +42,35 @@ pub fn firing_solution_within(from: Vec3Fp, to: Vec3Fp, horizontal_speed: Fp, le
     }
 }
 
+/// How high an artillery shell's arc rises above the line from gun to aim, as a share of the
+/// distance across: about a 58 degree launch, a high lob.
+pub const ARC_HEIGHT_SHARE: (i64, i64) = (2, 5);
+/// And no higher than this, in units, so that the longest-ranged shells stay in view.
+pub const ARC_HEIGHT_MAX_UNITS: i64 = 3_000;
+
+/// An artillery shell's flight (GAME_SPECIFICATION.md §7, Artillery): as long as a flat shell's
+/// at the same speed across the ground, so that it leads its target the same, but up in a high
+/// arc, under a gravity of its own, and down on where it was aimed. Returns the solution and that
+/// gravity, the fall a tick.
+pub fn lobbed_solution(from: Vec3Fp, to: Vec3Fp, horizontal_speed: Fp, least: u32) -> (FiringSolution, Fp) {
+    let delta = to - from;
+    let distance = sqrt_wide(delta.xy().length_squared()).to_bits() as i64;
+    let speed = i64::from(horizontal_speed.to_bits()).max(1);
+    let ticks = ((distance + speed - 1) / speed).max(i64::from(least)).max(1);
+    let max_height = ARC_HEIGHT_MAX_UNITS << crate::math::fp::FP_FRAC_BITS;
+    let height = (distance * ARC_HEIGHT_SHARE.0 / ARC_HEIGHT_SHARE.1).min(max_height);
+    // A rise of `height` at the middle of a flight of `ticks`: g t^2 / 8.
+    let gravity = (height * 8 / (ticks * ticks)).max(i64::from(GRAVITY_RAW));
+    let divide = |raw: i32| Fp::from_bits((i64::from(raw) / ticks) as i32);
+    // Moving first and then falling each tick, it drops g (t - 1) t / 2 in t ticks.
+    let rise = gravity * (ticks - 1) / 2;
+    let solution = FiringSolution {
+        velocity: Vec3Fp::new(divide(delta.x.to_bits()), divide(delta.y.to_bits()), divide(delta.z.to_bits()) + Fp::from_bits(rise as i32)),
+        flight_ticks: ticks as u32,
+    };
+    (solution, Fp::from_bits(gravity as i32))
+}
+
 /// Where to aim a shell so that it meets a target moving at `velocity` a tick (GAME_SPECIFICATION.md
 /// §7.1, Leading Shots): the first point along the target's course that the shell can reach by
 /// the time the target gets there. The shell moves first on the tick it is fired, after the

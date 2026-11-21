@@ -126,6 +126,21 @@ micro_gain = [0.10, 0.25]
 outrange_defense_min = 0.15
 seconds_max = 60
 
+[missiles]
+# Missile launchers do artillery's job, breaking positions from beyond their guns, but artillery
+# is the better unit: missiles fly to where their target was, so they miss anything that keeps
+# moving, and missile defense shoots them down. So a launcher is priced as T1 artillery is, at
+# this share of its strength per materiel, rather than by a duel against it, which had every
+# change to T1 artillery move its price (2026-11-21, when artillery took to lobbing its shells).
+# Less than one, though its drawbacks first suggested more: its reach, more than twice T1
+# artillery's, outranges point defenses, which is worth more than they cost it. At 1.2, line
+# units walking into launchers came out even; at this, they win, and T1 artillery beats them.
+# As a check, an equal materiel of launchers breaks a shield over three T2 point defenses, which
+# they outrange, within this many seconds, losing nothing. Its length cannot price them: twelve
+# launchers break it in a few volleys, so their reload sets it, at every strength tried.
+strength_over_artillery = 0.8
+siege_seconds_max = 60
+
 [splash]
 # Formations keep units 2.5 radii apart, center to center (FORMATION_SPACING_RADII).
 # Line weapons splash no wider than their target's radius, so it is incidental.
@@ -148,13 +163,13 @@ micro_margin = 0.25
 # and charging. Micro flips them: attack-moving, the artillery keeps at least this share; with
 # micro, the other side does. (As an efficiency ratio, the gain ran to thousands of percent,
 # since attack-moving into artillery is worth next to nothing.)
-micro_cells = [["line", "artillery"], ["assault", "artillery"], ["raider", "artillery"]]
+micro_cells = [["line", "artillery"], ["assault", "artillery"]]
 micro_cell_flip_min = 0.3
-# Raiders beat artillery without micro in a raid: a few of them against artillery left alone.
-raid_raiders = 4
-# Artillery always has counters that need no micro: raiders and fast units that close in, other
-# artillery, mobile shields, and bombers.
-artillery_counters_without_micro = ["raider", "artillery", "mobile_shield", "bomber"]
+# Artillery always has counters that need no micro: other artillery, mobile shields, heavy units
+# that walk through its fire, and bombers. Raiders were one, until artillery lobbed its shells
+# down on what it aims at (2026-11-21): a few small units charging it from the front now die on
+# the way, which is right, and raiders are for artillery left alone and caught close.
+artillery_counters_without_micro = ["artillery", "mobile_shield", "heavy", "bomber"]
 
 [strategy]
 # AI strategy variants (T2 rush, T1 spam, air-heavy, naval-heavy) each win within their timing

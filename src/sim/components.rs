@@ -437,6 +437,11 @@ pub struct Homing {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Falling;
 
+/// An artillery shell in its high arc, falling by this much a tick, a gravity of its own
+/// (`combat::lobbed_solution`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Lobbed(pub Fp);
+
 /// Turns a unit vector towards another by at most `turn` radians, the short way round.
 /// Exactly behind has no shorter side, so it turns the positive way.
 pub fn rotate_toward(facing: Vec2Fp, toward: Vec2Fp, turn: Fp) -> Vec2Fp {
