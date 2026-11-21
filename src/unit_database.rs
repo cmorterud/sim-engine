@@ -34,7 +34,7 @@ fn kind_of(unit: &Blueprint) -> Kind {
 }
 
 /// Text made safe to put in a page.
-fn escape(text: &str) -> String {
+pub(crate) fn escape(text: &str) -> String {
     text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
@@ -52,7 +52,7 @@ fn words(name: &str) -> String {
 }
 
 /// A number with its thousands apart, rounded to `places` decimals, without a trailing ".0".
-fn number(value: f64, places: usize) -> String {
+pub(crate) fn number(value: f64, places: usize) -> String {
     let text = format!("{value:.places$}");
     let (whole, fraction) = text.split_once('.').map_or((text.as_str(), ""), |(whole, fraction)| (whole, fraction));
     let (sign, digits) = whole.strip_prefix('-').map_or(("", whole), |digits| ("-", digits));
@@ -77,7 +77,7 @@ fn res(value: Res) -> f64 {
 
 const PER_SECOND: f64 = TICKS_PER_SECOND as f64;
 
-fn seconds(ticks: u32) -> String {
+pub(crate) fn seconds(ticks: u32) -> String {
     format!("{} s", number(f64::from(ticks) / PER_SECOND, 1))
 }
 
@@ -395,7 +395,7 @@ fn card(out: &mut String, unit: &Blueprint, db: &BlueprintDb, portraits: &Portra
     out.push_str("</article>");
 }
 
-const STYLE: &str = r#"
+pub(crate) const STYLE: &str = r#"
 :root { color-scheme: dark; --bg: #05060a; --panel: #10131b; --panel-raised: #171b26; --line: #262c3a; --text: #c8ccd4; --text-strong: #eef0f4; --muted: #8a91a0; --accent: #3c78ff; --accent-strong: #5b8eff; }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, sans-serif; }
@@ -471,6 +471,10 @@ const SCRIPT: &str = r#"
     apply();
   });
   apply();
+  // The game writes this page after the address has loaded, so a link to one unit,
+  // `?units#t1_medium_tank`, is scrolled to here.
+  const linked = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)));
+  if (linked) linked.scrollIntoView();
 })();
 "#;
 

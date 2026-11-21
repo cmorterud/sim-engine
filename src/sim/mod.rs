@@ -14,6 +14,7 @@ pub mod flowfield;
 pub mod formation;
 pub mod maps;
 pub mod playtest;
+pub mod playtest_scenarios;
 pub mod production;
 pub mod scenario;
 pub mod spatial;

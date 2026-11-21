@@ -290,13 +290,14 @@ pub fn from_map(map: &MapData, seed: u64) -> Scenario {
     Scenario { world, opening_commands: Vec::new() }
 }
 
-/// Where a match is played: the generated skirmish map, one that comes with the game, or the
-/// playtest sandbox (`playtest.rs`).
+/// Where a match is played: the generated skirmish map, one that comes with the game, the
+/// playtest sandbox (`playtest.rs`), or a playtest scenario (`playtest_scenarios.rs`).
 #[derive(Clone, Debug)]
 pub enum MapSource {
     Skirmish,
     Map(std::sync::Arc<MapData>),
     Playtest,
+    Scenario(std::sync::Arc<super::playtest_scenarios::PlaytestScenario>),
 }
 
 impl MapSource {
@@ -305,6 +306,7 @@ impl MapSource {
             Self::Skirmish => skirmish(seed),
             Self::Map(map) => from_map(map, seed),
             Self::Playtest => super::playtest::playtest(seed),
+            Self::Scenario(scenario) => scenario.build(seed, true),
         }
     }
 }

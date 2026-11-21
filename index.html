@@ -161,6 +161,7 @@
           <a href="?battle">Or watch a 5,000-unit battle</a>
           <a href="?map=playtest">Or try out every unit in the playtest sandbox</a>
           <a href="?units">Or look up every unit's numbers in the unit database</a>
+          <a href="?scenarios">Or play the balance fights yourself in the playtest scenarios</a>
         </div>
       </form>
 
@@ -222,6 +223,9 @@
     // The unit database is written by the game, from the numbers it plays with, once it loads.
     if (new URLSearchParams(location.search).has('units')) {
       document.querySelector('#status p').firstChild.textContent = 'Loading the unit database\u2026';
+    }
+    if (new URLSearchParams(location.search).has('scenarios')) {
+      document.querySelector('#status p').firstChild.textContent = 'Loading the playtest scenarios\u2026';
     }
     // Which commit this is, once the web build has written it in.
     const commit = document.querySelector('meta[name="deployed-commit"]').content;

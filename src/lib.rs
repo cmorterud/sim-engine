@@ -10,6 +10,7 @@ pub mod input;
 pub mod minimap;
 pub mod math;
 pub mod render;
+pub mod scenario_page;
 pub mod sim;
 pub mod soak;
 pub mod ui;

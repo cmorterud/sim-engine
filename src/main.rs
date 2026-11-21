@@ -117,6 +117,8 @@ Usage: sim-engine [options]
                        with the mouse turns the camera
   --view <all|blue|red>  With --watch, whose sight to start with (default all)
   --fog <on|off>       Fog of war, for every team and the AI too (default on)
+  --scenario <id>      Play a playtest scenario from data/scenarios.toml: a balance fight,
+                       with Blue's units yours and Red's scripted (README, Playtest scenarios)
 
 Controls:
   Left-drag or click   Select your units. A box over fighting units and engineers or
@@ -202,6 +204,8 @@ struct Options {
     view: Option<Team>,
     /// Play with fog of war turned off, for every team. It is on unless asked otherwise.
     no_fog: bool,
+    /// Play a playtest scenario from data/scenarios.toml instead of a match.
+    scenario: Option<String>,
 }
 
 /// On or off, for --fog and ?fog=.
@@ -241,6 +245,7 @@ fn parse_options() -> Result<Option<Options>, String> {
     options.watch = params.has("watch");
     options.view = params.get("view").and_then(|name| parse_view(&name)).flatten();
     options.no_fog = params.get("fog").and_then(|name| parse_switch(&name)) == Some(false);
+    options.scenario = params.get("scenario");
     Ok(Some(options))
 }
 
@@ -261,6 +266,27 @@ fn show_unit_database() -> bool {
     let html = sim_engine::unit_database::page(&BlueprintDb::standard());
     if document.open().is_err() || document.write_1(&html).is_err() {
         log::error!("the unit database could not be written");
+    }
+    let _ = document.close();
+    true
+}
+
+/// In the browser, `?scenarios` shows the playtest scenarios page instead of a game, written
+/// from the scenarios and blueprints built into the game, the ones it plays. Whether it did.
+#[cfg(target_arch = "wasm32")]
+fn show_scenario_page() -> bool {
+    use wasm_bindgen::JsCast;
+    let Some(window) = web_sys::window() else {
+        return false;
+    };
+    let search = window.location().search().unwrap_or_default();
+    let wanted = web_sys::UrlSearchParams::new_with_str(&search).is_ok_and(|params| params.has("scenarios"));
+    let Some(document) = window.document().and_then(|document| document.dyn_into::<web_sys::HtmlDocument>().ok()).filter(|_| wanted) else {
+        return false;
+    };
+    let html = sim_engine::scenario_page::page(&sim_engine::sim::playtest_scenarios::all(), &BlueprintDb::standard());
+    if document.open().is_err() || document.write_1(&html).is_err() {
+        log::error!("the playtest scenarios page could not be written");
     }
     let _ = document.close();
     true
@@ -291,6 +317,7 @@ fn parse_options() -> Result<Option<Options>, String> {
             "--watch" => options.watch = true,
             "--view" => options.view = parse_view(&value("--view")?).ok_or("--view needs all, blue, or red")?,
             "--fog" => options.no_fog = !parse_switch(&value("--fog")?).ok_or("--fog needs on or off")?,
+            "--scenario" => options.scenario = Some(value("--scenario")?),
             "--help" | "-h" => return Err(USAGE.to_string()),
             other => return Err(format!("unknown option {other}\n\n{USAGE}")),
         }
@@ -303,7 +330,7 @@ fn main() {
     {
         console_error_panic_hook::set_once();
         let _ = console_log::init_with_level(log::Level::Warn);
-        if show_unit_database() {
+        if show_unit_database() || show_scenario_page() {
             return;
         }
     }
@@ -320,7 +347,15 @@ fn main() {
     };
     let seed = options.seed.unwrap_or(DEFAULT_SEED);
     let bundled = options.map.as_ref().and_then(|name| name.to_str()).and_then(sim_engine::sim::maps::bundled);
+    let scenario = options.scenario.as_deref().map(|id| {
+        sim_engine::sim::playtest_scenarios::find(id).unwrap_or_else(|| {
+            let ids: Vec<String> = sim_engine::sim::playtest_scenarios::all().into_iter().map(|scenario| scenario.id).collect();
+            println!("unknown scenario {id}: the scenarios are {}", ids.join(", "));
+            std::process::exit(1);
+        })
+    });
     let map_source = match &options.map {
+        _ if scenario.is_some() => MapSource::Scenario(Arc::new(scenario.expect("just checked"))),
         None => MapSource::Skirmish,
         Some(name) if name.to_str() == Some("playtest") => MapSource::Playtest,
         Some(_) if bundled.is_some() => {
@@ -888,6 +923,16 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
         MapSource::Skirmish => "Skirmish".to_string(),
         MapSource::Map(map) => display_name(&map.name),
         MapSource::Playtest => "Playtest".to_string(),
+        MapSource::Scenario(scenario) => scenario.title.clone(),
+    };
+    // A playtest scenario's materiel on each side at the start, for its score.
+    let scenario_start = match &map_source {
+        MapSource::Scenario(scenario) => {
+            let db = BlueprintDb::standard();
+            let worth = |groups: &[sim_engine::sim::playtest_scenarios::Group]| groups.iter().map(|group| db.get(db.id(&group.unit)).mass.to_num::<f64>() * f64::from(group.count)).sum::<f64>();
+            Some([worth(&scenario.blue), worth(&scenario.red)])
+        }
+        _ => None,
     };
     let fog = !options.no_fog;
     let scenario = make_scenario(seed, battle, &map_source, fog);
@@ -906,6 +951,8 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
         (Some(seconds), false) => CommandSource::AiVsAi { seed, ticks: fast_forward + seconds * 10 },
         (None, true) => CommandSource::Player,
         (None, false) if watching => watch_source(seed),
+        // In a playtest scenario Red only follows its opening orders.
+        (None, false) if scenario_start.is_some() => CommandSource::Player,
         (None, false) => CommandSource::PlayerVsAi { seed, difficulty },
     };
     let viewer = if watching { watch_view } else { is_match.then_some(PLAYER_TEAM) };
@@ -1753,6 +1800,9 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                 ui::resource_bar(ctx, &snapshot, &map.blueprints, &map_name, sound_label.as_deref(), game_paused, &mut range_toggles, &mut actions);
                                 minimap.show(ctx, &camera, &map.heights, f64::from(map.water_level), &snapshot, map.fog_side, &mut actions);
                                 ui::commander_alert(ctx, attack_alarm.alert_strength());
+                                if let Some(start) = scenario_start {
+                                    ui::scenario_score(ctx, &snapshot, &map.blueprints, start, fog);
+                                }
                                 ui::control_group_bar(ctx, &group_rows, &snapshot, PLAYER_TEAM, &map.blueprints, &selected, &mut actions);
                                 ui::quick_select_bar(ctx, &snapshot, PLAYER_TEAM, &map.blueprints, &selected, camera.focus(), &mut quick_select, &mut actions);
                                 ui::command_panel(ctx, &snapshot, &selected, &map.blueprints, armed, &mut actions);

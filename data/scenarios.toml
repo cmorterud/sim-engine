@@ -1,0 +1,107 @@
+# Playtest scenarios (README, Playtest scenarios): the balance harness's fights, to play by hand.
+# The game builds each one from this file (`?scenario=<id>` in the browser, `--scenario <id>` on
+# the desktop), and writes the page that lists them from it too (`?scenarios`), with each side's
+# units, materiel, reach, and sight worked out from data/units.toml. So the text here names no
+# unit's numbers, which would go stale: the page shows them.
+#
+# Each is on flat open ground, the duel ground's size. You play Blue, in the west, with no
+# commander, no factories, and no income: only the units listed. Red's units attack-move at your
+# first group from the start ("attack"), or stand where they are and fire at whatever comes in
+# range ("hold", the default); structures hold. Both sides have the energy to keep shields up and
+# shoot artillery. Positions are in world units, where a terrain cell is 20 across; structures are
+# placed by the cell of their south-west corner. A group of units is a block `columns` wide (5 if
+# not given), three radii apart, its first row at `at` and the rest behind it, away from the enemy.
+
+[[scenario]]
+id = "t3_siege"
+title = "Siege: T3 artillery against a T3 position"
+shows = "What T3 artillery is for: breaking a defended position. It outranges the heavy point defenses, so it can shell them without reply, and an equal materiel of it breaks this position without loss."
+try = "Attack-move at the position and watch the artillery set up and shell it. With fog of war on, its sight is well short of its reach: send the scout ahead to spot the position first. Then walk the artillery inside the point defenses' reach."
+blue = [
+    { unit = "t3_mobile_artillery", count = 16, at = [700, 2_560] },
+    { unit = "t1_land_scout", count = 1, at = [900, 2_560] },
+]
+red = [
+    { unit = "t3_heavy_shield", cell = [127, 127] },
+    { unit = "t3_heavy_point_defense", cell = [124, 128] },
+    { unit = "t3_heavy_point_defense", cell = [132, 128] },
+    { unit = "t3_heavy_point_defense", cell = [128, 124] },
+]
+
+[[scenario]]
+id = "t3_artillery_defends"
+title = "Defending: set-up T3 artillery against massed T1"
+shows = "T3 artillery standing still, set up, as an equal materiel of T1 tanks walks into it. A shell kills a tank and its neighbours in formation. Alone, with nothing in front of it, it kills most of them before they get inside its least range."
+try = "Hold still and let them come. Then play it again and keep moving, to see what setting up costs it."
+blue = [{ unit = "t3_mobile_artillery", count = 6, at = [1_000, 2_560], columns = 3 }]
+red = [{ unit = "t1_medium_tank", count = 90, at = [3_400, 2_560], columns = 10, order = "attack" }]
+
+[[scenario]]
+id = "t3_combined_arms"
+title = "Combined arms: Heavy Walkers screening T3 artillery"
+shows = "A T3 line with artillery behind it, against massed T1 of about equal materiel. The walkers hold the tanks at range, and the artillery shells them while they are bunched."
+try = "Keep the walkers in front, and the artillery behind them, set up. Then fight with the walkers alone, leaving the artillery out of it, and compare."
+blue = [
+    { unit = "t3_heavy_walker", count = 7, at = [1_400, 2_560], columns = 7 },
+    { unit = "t3_mobile_artillery", count = 2, at = [1_000, 2_560], columns = 2 },
+]
+red = [{ unit = "t1_medium_tank", count = 90, at = [3_600, 2_560], columns = 10, order = "attack" }]
+
+[[scenario]]
+id = "t3_artillery_rushed"
+title = "Caught out: T3 artillery against a raider rush"
+shows = "T3 artillery's counter: an equal materiel of Light Walkers, fast and small, that close inside its least range. In the harness the walkers win easily."
+try = "See whether pulling back as they close does better. Moving packs the artillery up, so it stops firing."
+blue = [{ unit = "t3_mobile_artillery", count = 6, at = [1_000, 2_560], columns = 3 }]
+red = [{ unit = "t1_light_walker", count = 150, at = [3_400, 2_560], columns = 10, order = "attack" }]
+
+[[scenario]]
+id = "t1_line_against_artillery"
+title = "Micro: Medium Tanks against massed Light Artillery"
+shows = "A matchup that turns on micro: tanks against an equal materiel of Light Artillery holding its ground. Attack-moving in, the tanks lose. Spread out and charging, they win."
+try = "Attack-move in once. Then spread the tanks out and charge straight in without stopping to fire, pulling back any that are badly hurt."
+blue = [{ unit = "t1_medium_tank", count = 30, at = [1_000, 2_560], columns = 10 }]
+red = [{ unit = "t1_light_artillery", count = 25, at = [2_200, 2_560], columns = 5 }]
+
+[[scenario]]
+id = "t1_raid"
+title = "A raid: Light Walkers against artillery left alone"
+shows = "Artillery's counter that needs no micro: a few raiders against artillery with nothing to guard it. The raiders win, but only just: a lucky shell or two can turn it."
+try = "Run straight in. Then come at them from the side."
+blue = [{ unit = "t1_light_walker", count = 4, at = [1_000, 2_560], columns = 4 }]
+red = [{ unit = "t1_light_artillery", count = 2, at = [2_000, 2_560], columns = 2 }]
+
+[[scenario]]
+id = "t1_line_mirror"
+title = "Mirror: ten Medium Tanks against ten"
+shows = "The anchor every other number in the game is measured against: the T1 line against itself. The balance targets have ten against ten taking 25 to 45 seconds."
+try = "Fight it straight. Then try focus fire and pulling back damaged tanks: it should help in a pinch, but not decide the fight."
+blue = [{ unit = "t1_medium_tank", count = 10, at = [1_600, 2_560] }]
+red = [{ unit = "t1_medium_tank", count = 10, at = [3_200, 2_560], order = "attack" }]
+
+[[scenario]]
+id = "t2_skirmisher"
+title = "Skirmisher: Grenadier Walkers against Heavy Tanks"
+shows = "The T2 skirmisher, which outranges the T2 line, against an equal materiel of Heavy Tanks. Attack-moving, the grenadiers win, keeping about half their army."
+try = "Attack-move once. Then kite: fire, back off as the tanks close, and fire again."
+blue = [{ unit = "t2_grenadier_walker", count = 10, at = [1_400, 2_560] }]
+red = [{ unit = "t2_heavy_tank", count = 12, at = [3_200, 2_560], order = "attack" }]
+
+[[scenario]]
+id = "air_bombers_unescorted"
+title = "Air, before its pass: bombers against a line with no anti-air"
+shows = "Attack Bombers on their current numbers, before air is balanced, against about an equal materiel of tanks that cannot shoot back."
+try = "Bomb the tanks and see how fast they go. The air pass aims for bombers to take about a T1 fight's time, 25 to 45 seconds, to destroy an army with no anti-air."
+blue = [{ unit = "t1_bomber", count = 10, at = [600, 2_560] }]
+red = [{ unit = "t1_medium_tank", count = 22, at = [3_000, 2_560], columns = 11 }]
+
+[[scenario]]
+id = "air_bombers_against_anti_air"
+title = "Air, before its pass: bombers against a line with anti-air"
+shows = "The same bombers against about an equal materiel of tanks with a fifth of it in Mobile Anti-Air. The air pass aims for a fifth in anti-air to come out about even."
+try = "Bomb the tanks, then go for the anti-air first, and compare."
+blue = [{ unit = "t1_bomber", count = 10, at = [600, 2_560] }]
+red = [
+    { unit = "t1_medium_tank", count = 18, at = [3_000, 2_560], columns = 9 },
+    { unit = "t1_mobile_aa", count = 4, at = [3_080, 2_560], columns = 4 },
+]

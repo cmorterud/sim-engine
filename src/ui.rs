@@ -1720,6 +1720,35 @@ pub fn commander_alert(ctx: &egui::Context, strength: f32) {
         });
 }
 
+/// Materiel a team has standing, weighted by health, as the balance harness scores a duel.
+pub fn materiel_standing(snapshot: &SimSnapshot, blueprints: &BlueprintDb, team: Team) -> f64 {
+    snapshot
+        .units
+        .iter()
+        .filter(|unit| unit.team == team)
+        .map(|unit| blueprints.get(BlueprintId(unit.blueprint)).mass.to_num::<f64>() * f64::from(unit.health_permille) / 1000.0)
+        .sum()
+}
+
+/// A playtest scenario's score: each side's share of its materiel still standing, weighted by
+/// health, and the harness's score for Blue, the difference. Red's hides in the fog of war, as
+/// what the player cannot see cannot be counted.
+pub fn scenario_score(ctx: &egui::Context, snapshot: &SimSnapshot, blueprints: &BlueprintDb, start: [f64; 2], fog: bool) {
+    let share = |team: Team| materiel_standing(snapshot, blueprints, team) / start[team.index()].max(1.0);
+    let blue = share(Team::Blue);
+    let text = if fog {
+        format!("Blue keeps {:.0}% of its materiel  ·  Red's is hidden by the fog of war", blue * 100.0)
+    } else {
+        let red = share(Team::Red);
+        format!("Blue keeps {:.0}%  ·  Red keeps {:.0}%  ·  score {:+.2}", blue * 100.0, red * 100.0, blue - red)
+    };
+    egui::Area::new(egui::Id::new("scenario score")).anchor(Align2::CENTER_TOP, Vec2::new(0.0, 48.0)).interactable(false).show(ctx, |ui| {
+        egui::Frame::popup(ui.style()).show(ui, |ui| {
+            one_line_label(ui, egui::RichText::new(text).size(15.0));
+        });
+    });
+}
+
 /// Nothing in the game takes typing. Without this, Tab would give a button keyboard focus,
 /// and it would then swallow every key, so that hotkeys seem to stop working.
 pub fn release_keyboard_focus(ctx: &egui::Context) {
