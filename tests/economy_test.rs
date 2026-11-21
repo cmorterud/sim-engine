@@ -894,6 +894,9 @@ fn reading_plans_does_not_change_the_checksum() {
 fn commanders_killed_together_is_a_draw() {
     let mut world = test_world();
     let rig = id(&world, "command_rig");
+    let def = world.blueprints.get(rig);
+    let blast = def.death_explosion.expect("a commander's reactor blows up").damage;
+    assert!(blast >= def.health, "a commander's blast of {blast} takes another commander, of {}", def.health);
     let blue = world.spawn_mobile(rig, Team::Blue, point(1_000, 1_000));
     let red = world.spawn_mobile(rig, Team::Red, point(1_200, 1_000));
     world.ecs.get::<&mut Health>(entity(&world, blue)).unwrap().current = Fp::ONE;

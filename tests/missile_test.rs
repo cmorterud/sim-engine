@@ -5,7 +5,7 @@ use sim_engine::math::fp::{fp_int, Fp, Vec2Fp};
 use sim_engine::math::rect::RectFp;
 use sim_engine::sim::blueprints::Res;
 use sim_engine::sim::commands::SimCommand;
-use sim_engine::sim::components::{Combat, Factory, Launcher, MissileDefense, Shield, SimId, Team};
+use sim_engine::sim::components::{Combat, Factory, Health, Launcher, MissileDefense, Shield, SimId, Team};
 use sim_engine::sim::config::{SimConfig, TerrainStyle};
 use sim_engine::sim::world::SimWorld;
 
@@ -98,8 +98,14 @@ fn a_tactical_launcher_fires_only_on_order_and_only_missiles_it_has_built() {
 fn a_launcher_keeps_firing_at_its_target_while_it_has_missiles() {
     let mut world = open_world();
     let launcher = loaded(&mut world, "tactical_missile_launcher", Team::Blue, 20, 20, 3);
-    // A land factory takes three missiles.
+    // A land factory made tough enough to take three missiles.
     let target = structure(&mut world, "land_factory_t1", Team::Red, 100, 20);
+    let missile = world.blueprints.get(world.blueprints.id("tactical_missile_launcher")).weapon.expect("it fires missiles").damage;
+    {
+        let mut health = world.ecs.get::<&mut Health>(world.unit_entity(target).unwrap()).unwrap();
+        health.max = missile * 3 - Fp::ONE;
+        health.current = health.max;
+    }
     world.advance_tick(&[SimCommand::Attack { units: vec![launcher], target }]);
     assert!(run_until(&mut world, 600, |world| !alive(world, target)).is_some(), "three missiles should destroy it");
     assert_eq!(world.ecs.get::<&Launcher>(world.unit_entity(launcher).unwrap()).unwrap().stock, 0);
@@ -146,13 +152,19 @@ fn a_shield_stops_a_tactical_missile() {
     let launcher = loaded(&mut world, "tactical_missile_launcher", Team::Blue, 20, 20, 1);
     let target = structure(&mut world, "power_generator", Team::Red, 100, 20);
     let generator = structure(&mut world, "shield_generator", Team::Red, 101, 22);
-    // No healing, so that the dome's loss is exactly what hit it.
-    world.ecs.get::<&mut Shield>(world.unit_entity(generator).unwrap()).unwrap().regen_per_tick = Fp::ZERO;
+    // No healing, so that the dome's loss is exactly what hit it, and strong enough to take it.
+    let missile = world.blueprints.get(world.blueprints.id("tactical_missile_launcher")).weapon.expect("it fires missiles").damage;
+    {
+        let mut shield = world.ecs.get::<&mut Shield>(world.unit_entity(generator).unwrap()).unwrap();
+        shield.regen_per_tick = Fp::ZERO;
+        shield.max_health = missile * 2;
+        shield.health = shield.max_health;
+    }
     world.advance_tick(&[SimCommand::Attack { units: vec![launcher], target }]);
     run_until(&mut world, 140, |_| false);
     assert!(alive(&world, target));
     let shield = *world.ecs.get::<&Shield>(world.unit_entity(generator).unwrap()).unwrap();
-    assert_eq!(shield.max_health - shield.health, fp_int(1_500), "the dome took the whole missile");
+    assert_eq!(shield.max_health - shield.health, missile, "the dome took the whole missile");
 }
 
 #[test]

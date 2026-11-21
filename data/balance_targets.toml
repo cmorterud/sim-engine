@@ -142,14 +142,47 @@ strength_over_artillery = 0.8
 siege_seconds_max = 60
 
 [splash]
-# Formations keep units 2.5 radii apart, center to center (FORMATION_SPACING_RADII).
+# Formations keep units 2.5 radii apart, center to center (FORMATION_SPACING_RADII). A blast's
+# reach is its splash plus its target's radius, measured here in those spacings against the line
+# unit of the weapon's own tier (radius 9 at T1, 11 at T2, 13 at T3), so it says how many units
+# in a tight formation one hit catches: within one spacing, a unit and its four neighbours; within
+# about one and a half, the three by three block round it; within about three, the 29 inside.
 # Line weapons splash no wider than their target's radius, so it is incidental.
 line_splash_over_target_radius_max = 1.0
-# Splash roles (artillery, grenadiers, the commander's Discharge) reach, splash plus the target's
-# radius, about one spacing, so that a shell on a clump hits a unit and its four neighbours, five
-# times what it does to a spread formation. Twice the spacing, as first written, hit a three by
-# three block of small units with every shell.
+# Three sizes, by what the weapon is for (2026-11-21, to play as the inspiration does: its heavy
+# artillery and strategic bombers are known for wrecking whole clumps). Narrow, about 5 units: T1
+# artillery, grenadiers, the commander's Discharge. One size for every splash weapon, as first
+# written, had narrowed the heavy ones until they barely felt heavy.
 splash_reach_over_spacing = [1.0, 1.2]
+narrow = ["t1_light_artillery", "t2_grenadier_walker"]
+# Medium, about 9: tactical bombers, whose runs drop a spread of bombs.
+medium_reach_over_spacing = [1.45, 1.95]
+medium = ["t1_bomber", "t2_fighter_bomber"]
+# Wide, about 29: heavy artillery and strategic bombers, devastating against a clump and a base,
+# much less so against units spread out, which is the answer to them.
+wide_reach_over_spacing = [2.85, 3.15]
+wide = ["t2_artillery", "t3_artillery", "t3_mobile_artillery", "t3_strategic_bomber"]
+
+[kills]
+# Hits to destroy a unit at its base health, with no veterancy or enhancements: exact counts, so
+# that a unit is neither tougher nor weaker against these weapons than designed (2026-11-21).
+# A personal shield counts with the health it guards. These set damage and health where the duels
+# cannot: the strategic bomber is the T3 snipe weapon, fast, with one great bomb a pass, countered
+# by T3 fighters and SAMs; the tactical missile launcher snipes too, countered by missile defense.
+# The commander, tough against everything else, falls only to these.
+t3_strategic_bomber = { t3_heavy_walker = 1, t3_siege_walker = 3, t3_mobile_artillery = 1, t2_artillery = 2, command_rig = 4 }
+tactical_missile_launcher = { field_rig = 2, command_rig = 2 }
+# Mobile Heavy Artillery is a glass cannon: it survives one shell from another of its kind, but not
+# two, and one shell kills a Medium Tank. Its shell keeps the damage the arcs pass gave it, 859, and
+# its spread, 60, makes it inaccurate, as heavy artillery is in the inspiration, so that it is for
+# clumps and positions rather than picking off single units. Priced by the walk-in duel, with its
+# blast wide, it wiped out Heavy Walkers at the lowest strength the search allows.
+t3_mobile_artillery = { t3_mobile_artillery = 2, t1_medium_tank = 1 }
+# The T3 Artillery Installation destroys any T3 land unit with a direct hit, but its spread is
+# wide, so it is for base-sized targets; the T2 one, with a moderate spread, for small bases.
+t3_artillery_kills_every_t3_land_unit = true
+t3_artillery_spread = [150, 200]
+t2_artillery_spread = [40, 60]
 
 [counters]
 # In an equal-materiel fight, the share of its army a designed winner keeps.

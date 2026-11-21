@@ -72,16 +72,17 @@ fn a_new_enhancement_in_a_full_slot_removes_the_old_one_at_once() {
     let rig = commander(&mut world, Team::Blue, point(1_000, 1_000));
     install(&mut world, rig, "signature_suppression");
     let entity = world.unit_entity(rig).unwrap();
-    assert_eq!(world.unit_health(rig), Some(fp_int(14_000)));
+    let base = world.blueprints.get(world.blueprints.id("command_rig")).health;
+    assert_eq!(world.unit_health(rig), Some(base + fp_int(2_000)));
 
     // Damage control is a systems enhancement too: signature suppression comes off when it starts.
     enhance(&mut world, rig, "damage_control");
     assert_eq!(slots(&world, rig)[2], None, "the old one is gone");
-    assert_eq!(world.unit_health(rig), Some(fp_int(12_000)), "and what it gave");
+    assert_eq!(world.unit_health(rig), Some(base), "and what it gave");
     // 800 build time at 10 build power.
     run(&mut world, 805);
     assert_eq!(slots(&world, rig)[2].as_deref(), Some("damage_control"));
-    assert_eq!(world.unit_health(rig), Some(fp_int(13_500)), "its 1,500 more health comes with it");
+    assert_eq!(world.unit_health(rig), Some(base + fp_int(1_500)), "its 1,500 more health comes with it");
 
     // It heals 40 a second.
     world.ecs.get::<&mut sim_engine::sim::components::Health>(entity).unwrap().current = fp_int(5_000);
@@ -107,7 +108,8 @@ fn an_enhancement_that_builds_on_another_needs_it_first() {
     run(&mut world, 2_005);
     assert_eq!(slots(&world, rig)[1].as_deref(), Some("t3_fabrication"));
     assert_eq!(world.ecs.get::<&Builder>(entity).unwrap().power, fp_int(100));
-    assert_eq!(world.unit_health(rig), Some(fp_int(15_000)), "3,000 over its own, not on top of the T2 suite's");
+    let base = world.blueprints.get(world.blueprints.id("command_rig")).health;
+    assert_eq!(world.unit_health(rig), Some(base + fp_int(3_000)), "3,000 over its own, not on top of the T2 suite's");
 
     // The T3 suite includes the T2 one, so the T2 one cannot be taken again, which would be a step back.
     enhance(&mut world, rig, "t2_fabrication");

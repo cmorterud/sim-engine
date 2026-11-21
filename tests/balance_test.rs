@@ -96,16 +96,20 @@ fn the_t3_line_unit_is_about_as_strong_per_materiel_as_the_t2_line_unit() {
     assert!((1.0..=1.15).contains(&even.efficiency), "the heavy walker is {:.2} times the heavy tank per materiel", even.efficiency);
 }
 
-/// BALANCE.md, T3 land: artillery beats line units that attack-move into it, keeping about half,
-/// and loses to them spread out and charging, as at T1.
+/// BALANCE.md, T3 land and [kills]: Mobile Heavy Artillery is a glass cannon with a wide blast.
+/// It wrecks line units that attack-move into it bunched up; spread out and charging, they win,
+/// and so do raiders, which its inaccuracy misses and its least range lets in.
 #[test]
-fn t3_artillery_beats_the_line_unit_unless_it_spreads_out_and_charges() {
+fn t3_artillery_wrecks_clumps_and_loses_to_spread_units_and_raiders() {
     let db = db();
-    let side = |key: &str, count: u32, tactics: Tactics| Side { unit: db.id(key), count, tactics };
-    let plain = mirrored(&db, side("t3_mobile_artillery", 6, Tactics::AttackMove), side("t3_heavy_walker", 10, Tactics::AttackMove), 1.0);
-    assert!((0.4..=0.7).contains(&plain.score), "the artillery keeps {:.2} more than the walkers", plain.score);
-    let micro = mirrored(&db, side("t3_heavy_walker", 10, Tactics::Micro), side("t3_mobile_artillery", 6, Tactics::AttackMove), 1.0);
-    assert!(micro.score >= 0.3, "spread out and charging, the walkers keep {:.2} more", micro.score);
+    let side = |key: &str, tactics: Tactics| Side { unit: db.id(key), count: (3_600.0 / db.get(db.id(key)).mass.to_num::<f64>()).round() as u32, tactics };
+    let artillery = side("t3_mobile_artillery", Tactics::AttackMove);
+    let plain = mirrored(&db, artillery, side("t1_medium_tank", Tactics::AttackMove), 1.0);
+    assert!(plain.score >= 0.4, "against Medium Tanks attack-moving, the artillery keeps {:.2} more", plain.score);
+    let spread = mirrored(&db, side("t1_medium_tank", Tactics::Micro), artillery, 1.0);
+    assert!(spread.score >= 0.3, "spread out and charging, the tanks keep {:.2} more", spread.score);
+    let raid = mirrored(&db, side("t1_light_walker", Tactics::AttackMove), artillery, 1.0);
+    assert!(raid.score >= 0.3, "raiders keep {:.2} more", raid.score);
 }
 
 /// BALANCE.md, [siege]: T3 artillery outranges the T3 heavy point defense by at least 15%, and an

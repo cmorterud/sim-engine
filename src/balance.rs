@@ -646,30 +646,10 @@ pub fn t3_land_roles() -> Vec<Role> {
             target: Target::Score("t3_heavy_walker", 0.0),
             ..line.clone()
         },
-        // Artillery: it outranges the T3 heavy point defense by a fifth ([siege]), so that it
-        // shells defenses without reply, and bursts over about one formation spacing of a T3
-        // target. Priced as at T1, to beat line units that attack-move into it; a position it
-        // outranges cannot fight back, so how fast it breaks one is checked, not priced. Its least
-        // range is a quarter of its reach, inside the line unit's range, so that what closes on
-        // it can fight it.
-        Role {
-            unit: "t3_mobile_artillery",
-            role: "artillery",
-            cost: 600.0,
-            time_to_kill: 1.15,
-            range: 1_400.0 * 1.2 / 350.0,
-            speed: 0.6,
-            sight_over_range: 0.6,
-            flight_seconds: 3.0,
-            reload_seconds: 6.0,
-            // About one formation spacing of a T3 target, radius 13 ([splash]).
-            splash: 1.75 * 13.0,
-            radius: 12.0,
-            min_range: Some(0.25),
-            spread: 25.0,
-            target: Target::Score("t3_heavy_walker", 0.5),
-            ..line
-        },
+        // No artillery role: since its blast went wide (2026-11-21), Mobile Heavy Artillery is set
+        // by the hits it takes and deals ([kills] in data/balance_targets.toml), a glass cannon,
+        // as the strategic bomber is. Priced by the walk-in duel, with a wide blast, it wiped out
+        // Heavy Walkers at the lowest strength the search allows, so the duel could not price it.
     ]
 }
 

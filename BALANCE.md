@@ -110,7 +110,13 @@ out close and why: evidence about the process, not a target.
   micro, nor a micro cell. T3 artillery re-priced to 2,305 health and 859 a shell. The Mobile
   Missile Launcher is now priced at 0.8 of T1 artillery's strength per materiel (`[missiles]`)
   rather than by a duel against it, which arcs had moved by half: 1,353 health, 420 a missile.
-  T1 came out unchanged. Next: air, against land frozen.
+  T1 came out unchanged.
+* 2026-11-21: snipes and heavy splash, to play as the inspiration does
+  (`reports/balance/2026-11-21-snipes-and-splash.md`). Splash in three sizes, narrow, medium, and
+  wide (`[splash]`); the snipe weapons set by exact hits to kill (`[kills]`), with the commander
+  up to 18,000 health. Mobile Heavy Artillery, wide and a glass cannon, is set by hits, not by the
+  walk-in duel, which a wide blast broke: 1,300 health, 859 a shell, a spread of 60.
+  Next: air, against land frozen.
 
 ## Order of work
 
