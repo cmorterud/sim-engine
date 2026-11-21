@@ -68,6 +68,12 @@ heavy = [1.6, 2.2]
 artillery = [1.0, 1.3]
 
 [economy]
+# What energy is worth in materiel, for pricing units that spend more energy for their mass than
+# land units do, aircraft above all: by what each costs to produce, one materiel of income costs
+# about what five energy does (an extractor against a generator). Land units spend exactly this
+# much energy for each materiel, so it changes no land unit's price. Air keeps its heavy energy
+# costs, as in the inspiration, where going air means building power; this only counts them.
+energy_per_materiel = 5
 # One T1 extractor's income buys an anchor every this many seconds: cheaper units for their
 # income than the inspiration's, for bigger armies.
 t1_extractor_seconds_per_anchor = [17, 21]

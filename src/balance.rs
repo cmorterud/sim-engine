@@ -110,6 +110,7 @@ fn duel_in(db: &Arc<BlueprintDb>, blue: Side, red: Side, health: [f64; 2], layou
                 if side.tactics == Tactics::Micro {
                     micro(&world, ids, enemies, home, &mut orders);
                 }
+                reengage_aircraft(&world, ids, enemies, &mut orders);
             }
         }
         world.advance_tick(&orders);
@@ -125,6 +126,33 @@ fn duel_in(db: &Arc<BlueprintDb>, blue: Side, red: Side, health: [f64; 2], layou
     let score = full(&world, &blue_ids) / blue_full.max(f64::MIN_POSITIVE) - full(&world, &red_ids) / red_full.max(f64::MIN_POSITIVE);
     let seconds = f64::from(world.current_tick - first_damage.unwrap_or(world.current_tick)) / 10.0;
     DuelResult { score, seconds, finished }
+}
+
+/// Aircraft with nothing to do are sent at what is left of the enemy, as a player would: an
+/// attack-move ends at its goal, and aircraft that flew past each other there sat out of range,
+/// so that air fights never finished. Ground units, which meet on the way, are left alone.
+fn reengage_aircraft(world: &SimWorld, ids: &[SimId], enemies: &[SimId], orders: &mut Vec<SimCommand>) {
+    let positions: Vec<Vec2Fp> = enemies.iter().filter_map(|&id| world.unit_position(id)).map(|at| at.xy()).collect();
+    if positions.is_empty() {
+        return;
+    }
+    let idle: Vec<SimId> = ids
+        .iter()
+        .copied()
+        .filter(|&id| {
+            world.unit_entity(id).is_some_and(|entity| {
+                world.ecs.get::<&crate::sim::components::Flight>(entity).is_ok()
+                    && world.ecs.get::<&crate::sim::components::Order>(entity).is_ok_and(|order| order.kind == crate::sim::components::OrderKind::Idle)
+            })
+        })
+        .collect();
+    if idle.is_empty() {
+        return;
+    }
+    let count = positions.len() as i32;
+    let x = positions.iter().map(|at| at.x.to_num::<i32>()).sum::<i32>() / count;
+    let y = positions.iter().map(|at| at.y.to_num::<i32>()).sum::<i32>() / count;
+    orders.push(SimCommand::AttackMove { units: idle, goal: Vec2Fp::new(fp_int(x), fp_int(y)) });
 }
 
 /// This second's orders for a micro side (`Tactics::Micro`).
@@ -154,12 +182,27 @@ fn micro(world: &SimWorld, ids: &[SimId], enemies: &[SimId], home: i32, orders: 
     }
 }
 
-/// A unit's materiel, times its share of health left; nothing once destroyed.
+/// What a unit costs, in the materiel of a land unit of the same price: its mass and energy
+/// together, energy at the targets' rate (`[economy] energy_per_materiel`), measured so that a land
+/// unit, which spends the anchor's energy for each materiel, costs exactly its mass. Aircraft and
+/// many structures spend far more energy for their mass, which counts.
+pub fn cost(unit: &Blueprint) -> f64 {
+    // Read once: duels price every unit on every tick.
+    static RATES: std::sync::OnceLock<(f64, f64)> = std::sync::OnceLock::new();
+    let &(rate, land_share) = RATES.get_or_init(|| {
+        let rate = target_number("economy", "energy_per_materiel");
+        let anchor = Anchor::from_targets();
+        (rate, 1.0 + anchor.energy / anchor.materiel / rate)
+    });
+    (unit.mass.to_num::<f64>() + unit.energy.to_num::<f64>() / rate) / land_share
+}
+
+/// A unit's cost, times its share of health left; nothing once destroyed.
 fn worth(world: &SimWorld, id: SimId) -> f64 {
     let Some(entity) = world.unit_entity(id) else { return 0.0 };
     let (Ok(health), Ok(unit)) = (world.ecs.get::<&Health>(entity), world.ecs.get::<&Blueprinted>(entity)) else { return 0.0 };
-    let mass = world.blueprints.get(unit.0).mass.to_num::<f64>();
-    mass * (health.current.to_num::<f64>() / health.max.to_num::<f64>().max(f64::MIN_POSITIVE)).clamp(0.0, 1.0)
+    let price = cost(world.blueprints.get(unit.0));
+    price * (health.current.to_num::<f64>() / health.max.to_num::<f64>().max(f64::MIN_POSITIVE)).clamp(0.0, 1.0)
 }
 
 /// Spawns a group in a block of up to five abreast, facing the other group, centered on `x`.
@@ -200,7 +243,7 @@ pub const T3_POSITION: Position = &[("t3_heavy_shield", 127, 127), ("t3_heavy_po
 
 /// The materiel a position costs.
 pub fn position_materiel(db: &BlueprintDb, position: Position) -> f64 {
-    position.iter().map(|&(key, _, _)| db.get(db.id(key)).mass.to_num::<f64>()).sum()
+    position.iter().map(|&(key, _, _)| cost(db.get(db.id(key)))).sum()
 }
 
 /// A siege: `count` of `unit` for Blue start west of `position`, beyond its reach, and
@@ -278,10 +321,10 @@ pub struct BreakEven {
 /// The break-even between `a` and `b` with about `materiel` on each side.
 /// `a`'s side is handled with `tactics`, `b`'s by attack-move.
 pub fn break_even(db: &Arc<BlueprintDb>, a: BlueprintId, b: BlueprintId, materiel: f64, tactics: Tactics) -> BreakEven {
-    let count = |unit: BlueprintId| (materiel / db.get(unit).mass.to_num::<f64>()).round().max(1.0) as u32;
+    let count = |unit: BlueprintId| (materiel / cost(db.get(unit))).round().max(1.0) as u32;
     let side_a = Side { unit: a, count: count(a), tactics };
     let side_b = Side { unit: b, count: count(b), tactics: Tactics::AttackMove };
-    let materiel_of = |side: Side| f64::from(side.count) * db.get(side.unit).mass.to_num::<f64>();
+    let materiel_of = |side: Side| f64::from(side.count) * cost(db.get(side.unit));
     let (mut low, mut high) = (-4.0f64, 4.0f64);
     let mut seconds = 0.0;
     for _ in 0..BREAK_EVEN_STEPS {
@@ -313,7 +356,7 @@ pub fn describe(blueprint: &Blueprint) -> String {
     format!(
         "{}: {} materiel, {:.0} health, {:.1} damage a second, range {:.0}, speed {:.1}, sight {:.0}; time to kill a copy {:.1} s",
         blueprint.name,
-        blueprint.mass.to_num::<f64>(),
+        cost(blueprint).round(),
         health,
         dps,
         range,
@@ -461,7 +504,7 @@ pub fn strength_of(db: &BlueprintDb, anchor: &Anchor, key: &str) -> f64 {
     let unit = db.get(db.id(key));
     let weapon = unit.weapon.unwrap_or_else(|| panic!("{key} has a weapon"));
     let dps = weapon.damage.to_num::<f64>() * TICKS_PER_SECOND as f64 / f64::from(weapon.reload_ticks.max(1));
-    (unit.health.to_num::<f64>() * dps).sqrt() / unit.mass.to_num::<f64>() / anchor.efficiency()
+    (unit.health.to_num::<f64>() * dps).sqrt() / cost(unit) / anchor.efficiency()
 }
 
 /// T1 land, first pass. Costs set how many a materiel buys; strengths are solved by duels.
@@ -693,7 +736,7 @@ pub fn apply(db: &BlueprintDb, anchor: &Anchor, role: &Role, strength: f64) -> B
 /// whose measured score came nearest the target, not the middle of the last step. Strength per
 /// materiel goes with the multiplier, nearly in proportion, so a few corrections settle it.
 pub fn price(db: &BlueprintDb, anchor: &Anchor, role: &Role, materiel: f64) -> f64 {
-    let count = |unit: &Blueprint| (materiel / unit.mass.to_num::<f64>()).round().max(1.0) as u32;
+    let count = |unit: &Blueprint| (materiel / cost(unit)).round().max(1.0) as u32;
     match role.target {
         Target::Fixed => role.strength,
         Target::Relative(of, factor) => strength_of(db, anchor, of) * factor,
@@ -873,7 +916,7 @@ pub fn derive_t2_report() {
     }
     let side = |key: &str, tactics| {
         let id = db.id(key);
-        Side { unit: id, count: (T2_PRICING_MATERIEL / db.get(id).mass.to_num::<f64>()).round().max(1.0) as u32, tactics }
+        Side { unit: id, count: (T2_PRICING_MATERIEL / cost(db.get(id))).round().max(1.0) as u32, tactics }
     };
     let plain = |a: &str, b: &str| mirrored(&db, side(a, Tactics::AttackMove), side(b, Tactics::AttackMove), 1.0);
     println!();
@@ -887,7 +930,7 @@ pub fn derive_t2_report() {
     let launcher = db.get(db.id("t2_mobile_missile_launcher"));
     let premium = strength_of(&db, &Anchor::from_targets(), "t2_mobile_missile_launcher") / strength_of(&db, &Anchor::from_targets(), "t1_light_artillery");
     println!("  siege's strength over T1 artillery's: {premium:.2} ([missiles] strength_over_artillery)");
-    let count = (position_materiel(&db, T2_POSITION) / launcher.mass.to_num::<f64>()).round() as u32;
+    let count = (position_materiel(&db, T2_POSITION) / cost(launcher)).round() as u32;
     let broke = siege(&db, launcher.id, count, T2_POSITION);
     println!(
         "  {count} siege against a shield over three T2 point defenses ({:.0} materiel): {} in {:.0} s, losing {:.0}% (targets: within {:.0} s, nothing lost)",
@@ -939,7 +982,7 @@ pub fn derive_t3_report() {
     }
     let side = |key: &str, tactics| {
         let id = db.id(key);
-        Side { unit: id, count: (T3_PRICING_MATERIEL / db.get(id).mass.to_num::<f64>()).round().max(1.0) as u32, tactics }
+        Side { unit: id, count: (T3_PRICING_MATERIEL / cost(db.get(id))).round().max(1.0) as u32, tactics }
     };
     let cell = |a: &str, a_tactics, b: &str| mirrored(&db, side(a, a_tactics), side(b, Tactics::AttackMove), 1.0).score;
     println!();
@@ -951,7 +994,7 @@ pub fn derive_t3_report() {
     let artillery = db.get(db.id("t3_mobile_artillery"));
     let defense = db.get(db.id("t3_heavy_point_defense")).weapon.expect("point defense has a gun").range.to_num::<f64>();
     println!("  artillery's reach over the heavy point defense's: {:.2} (at least 1.15)", artillery.weapon.expect("artillery has a gun").range.to_num::<f64>() / defense);
-    let count = (position_materiel(&db, T3_POSITION) / artillery.mass.to_num::<f64>()).round() as u32;
+    let count = (position_materiel(&db, T3_POSITION) / cost(artillery)).round() as u32;
     let broke = siege(&db, db.id("t3_mobile_artillery"), count, T3_POSITION);
     println!(
         "  {count} artillery against a heavy shield over three heavy point defenses ({} materiel): {} in {:.0} s, losing {:.0}% (targets: within 60 s, nothing lost)",
