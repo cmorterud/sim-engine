@@ -154,6 +154,9 @@ pub struct UnitView {
     /// thousandths, so that it shows changing as it goes. A factory's upgrade is the head of its
     /// queue. Anyone who can see it sees it.
     pub upgrade: Option<(u16, u16)>,
+    /// An enemy structure out of sight, as the viewer last saw it (`KnownStructure`): drawn
+    /// faded, with the health it had then. It may be gone.
+    pub remembered: bool,
 }
 
 /// A factory's production state, for the build menu. Only for the viewer's team.
@@ -276,6 +279,29 @@ pub struct EconomyView {
     pub energy_reclaim: i64,
     pub mass_reclaimed: i64,
     pub energy_reclaimed: i64,
+}
+
+/// An enemy structure a team has seen, or had on radar (GAME_SPECIFICATION.md §9, Remembered
+/// Structures). Structures do not move, so once found one stays on the team's map, as it was
+/// when last seen, and can be fired at, until the team sees that it is gone. Values are raw
+/// `Fp` bits.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct KnownStructure {
+    pub id: SimId,
+    /// What it is, as a raw blueprint id: `None` while it has only been on radar.
+    pub blueprint: Option<u16>,
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+    pub radius: i32,
+    /// Its health, building, and facing when last seen.
+    pub health_permille: u16,
+    pub built_permille: u16,
+    pub facing: [i32; 2],
+    pub aim: [i32; 2],
+    /// Destroyed or captured since. The team does not know until it sees the spot, so it is
+    /// still drawn; but nothing fires at it of its own accord, as there is nothing there.
+    pub gone: bool,
 }
 
 /// An enemy contact on radar that the viewer cannot see. Values are raw `Fp` bits. A decoy has
@@ -668,6 +694,8 @@ pub struct SimWorld {
     /// By team: the enemy units it has on radar, deep scan, or, under the water, sonar, that no
     /// stealth hides, in `SimId` order. They can be fired at as if seen.
     detected: [Vec<SimId>; 2],
+    /// By team: the enemy structures it has found, in `SimId` order (`KnownStructure`). Hashed.
+    pub known_structures: [Vec<KnownStructure>; 2],
     /// Missiles shot down this tick, from where to where. Only for drawing, so not in the checksum.
     interceptions: Vec<[[i32; 3]; 2]>,
     /// Groups on a formation move, by the route they share.
@@ -808,6 +836,7 @@ impl SimWorld {
             captured_this_tick: Vec::new(),
             concealed: [Vec::new(), Vec::new()],
             detected: [Vec::new(), Vec::new()],
+            known_structures: [Vec::new(), Vec::new()],
             interceptions: Vec::new(),
             formations: BTreeMap::new(),
             commanders: [None, None],
@@ -1301,6 +1330,16 @@ impl SimWorld {
 
     fn command_attack(&mut self, units: &[SimId], target: SimId) {
         let Some(position) = self.unit_position(target) else {
+            // A structure the team remembers, gone since without its knowing: its units fire at
+            // where it was, and find nothing.
+            let team = units.iter().find_map(|&id| self.find_unit(id).and_then(|(_, entity)| self.ecs.get::<&UnitStats>(entity).ok().map(|stats| stats.team)));
+            let remembered = team.and_then(|team| {
+                let known = &self.known_structures[team.index()];
+                known.binary_search_by_key(&target, |record| record.id).ok().map(|index| known[index])
+            });
+            if let Some(record) = remembered {
+                self.command_attack_ground(units, Vec2Fp::new(Fp::from_bits(record.x), Fp::from_bits(record.y)));
+            }
             return;
         };
         let armed = self.armed_against(units, target);
@@ -2114,6 +2153,63 @@ impl SimWorld {
         // Submarines must be hidden even from a team with no sensors at all.
         if !self.intel.is_empty() || !self.submarines.is_empty() || !self.seabed_walkers.is_empty() {
             self.step_sensors(tick);
+        } else if self.detected.iter().chain(&self.concealed).any(|list| !list.is_empty()) {
+            // The last sensor is gone: what it had on radar is no longer on it. Left as it was, a
+            // dead scout's contacts stayed on the map, and could be fired at, all match.
+            self.detected = [Vec::new(), Vec::new()];
+            self.concealed = [Vec::new(), Vec::new()];
+        }
+        self.step_structure_memory();
+    }
+
+    /// Each team notes the enemy structures it sees, as they are now, and those it first finds on
+    /// radar, as unknown structures where they stand; and forgets those it sees are gone.
+    fn step_structure_memory(&mut self) {
+        let mut query = self.ecs.query::<(&Position, &UnitStats, &Health, Option<&Blueprinted>, Option<&Construction>, Option<&Turning>, Option<&Turret>)>();
+        let view = query.view();
+        let permille = |done: i64, of: i64| (done * 1000 / of.max(1)).clamp(0, 1000) as u16;
+        for viewer in [Team::Blue, Team::Red] {
+            let enemy = viewer.enemy();
+            let (concealed, detected) = (&self.concealed[viewer.index()], &self.detected[viewer.index()]);
+            let known = &mut self.known_structures[viewer.index()];
+            let mut standing: Vec<SimId> = Vec::new();
+            for &(id, entity) in &self.units {
+                let (position, stats, health, blueprint, construction, turning, turret) = view.get(entity).expect("unit list only holds live units");
+                if !stats.is_structure || stats.team != enemy {
+                    continue;
+                }
+                standing.push(id);
+                let (x, y, z) = (position.0.x.to_bits(), position.0.y.to_bits(), position.0.z.to_bits());
+                let hidden = concealed.binary_search(&id).is_ok();
+                let seen = !hidden && self.visibility.is_visible(viewer, x, y);
+                let on_radar = !hidden && detected.binary_search(&id).is_ok();
+                let found = known.binary_search_by_key(&id, |record| record.id);
+                if !seen && (found.is_ok() || !on_radar) {
+                    continue;
+                }
+                let record = KnownStructure {
+                    id,
+                    blueprint: seen.then(|| blueprint.map_or(u16::MAX, |blueprint| blueprint.0 .0)),
+                    x,
+                    y,
+                    z,
+                    radius: stats.radius.to_bits(),
+                    health_permille: if seen { permille(i64::from(health.current.to_bits()), i64::from(health.max.to_bits())) } else { 1000 },
+                    built_permille: if seen { construction.map_or(1000, |construction| permille(construction.progress.to_bits(), Res::ONE.to_bits())) } else { 1000 },
+                    facing: turning.filter(|_| seen).map_or([0, 0], |turning| [turning.facing.x.to_bits(), turning.facing.y.to_bits()]),
+                    aim: turret.filter(|_| seen).map_or([0, 0], |turret| [turret.facing.x.to_bits(), turret.facing.y.to_bits()]),
+                    gone: false,
+                };
+                match found {
+                    Ok(index) => known[index] = record,
+                    Err(index) => known.insert(index, record),
+                }
+            }
+            for record in known.iter_mut() {
+                record.gone = standing.binary_search(&record.id).is_err();
+            }
+            let visibility = &self.visibility;
+            known.retain(|record| !(record.gone && visibility.is_visible(viewer, record.x, record.y)));
         }
     }
 
@@ -2193,6 +2289,7 @@ impl SimWorld {
         let visibility = &self.visibility;
         let concealed = &self.concealed;
         let detected = &self.detected;
+        let known = &self.known_structures;
         let fog = self.config.fog_of_war;
         let shots = &mut self.pending_shots;
         let economies = &mut self.economies;
@@ -2286,6 +2383,9 @@ impl SimWorld {
             // its target, beyond its own sight, so it needs this most.
             let sensed = |entry: &super::spatial::GridEntry| {
                 !fog || visibility.is_visible(stats.team, entry.x, entry.y) || detected[stats.team.index()].binary_search(&entry.id).is_ok()
+                    // Structures it has found stay where they were, so they can be fired at
+                    // unseen. Only standing ones are in the grid to be picked.
+                    || (entry.is_structure && known[stats.team.index()].binary_search_by_key(&entry.id, |record| record.id).is_ok())
             };
             let can_engage = |entry: &super::spatial::GridEntry| {
                 let reach = range + i64::from(entry.radius);
@@ -3774,6 +3874,23 @@ impl SimWorld {
         if self.config.fog_of_war {
             self.visibility.hash_state(&mut hasher);
         }
+        // Only once a team remembers anything, so that checksums from before remembering hold.
+        if self.known_structures.iter().any(|known| !known.is_empty()) {
+            hasher.write(&[8]);
+            for known in &self.known_structures {
+                hasher.write(&(known.len() as u64).to_le_bytes());
+                for record in known {
+                    hasher.write(&record.id.0.to_le_bytes());
+                    hasher.write(&record.blueprint.map_or(u32::MAX, u32::from).to_le_bytes());
+                    for value in [record.x, record.y, record.z, record.radius, record.facing[0], record.facing[1], record.aim[0], record.aim[1]] {
+                        hasher.write(&value.to_le_bytes());
+                    }
+                    hasher.write(&record.health_permille.to_le_bytes());
+                    hasher.write(&record.built_permille.to_le_bytes());
+                    hasher.write(&[u8::from(record.gone)]);
+                }
+            }
+        }
 
         hasher.write(&(self.units.len() as u64).to_le_bytes());
         for &(id, entity) in &self.units {
@@ -3994,9 +4111,44 @@ impl SimWorld {
                         });
                         from_queue.or_else(|| self.ecs.get::<&Upgrading>(entity).ok().map(|upgrading| (upgrading.into.0, share(upgrading.progress))))
                     },
+                    remembered: false,
                 })
             })
             .collect();
+        // The enemy structures the viewer has found and identified, out of its sight now, as it
+        // last saw them. Those only on radar are contacts.
+        let mut units = units;
+        if let Some(viewer) = viewer.filter(|_| self.config.fog_of_war) {
+            let shown: Vec<SimId> = units.iter().map(|unit| unit.id).collect();
+            for record in &self.known_structures[viewer.index()] {
+                let Some(blueprint) = record.blueprint else {
+                    continue;
+                };
+                if shown.binary_search(&record.id).is_ok() {
+                    continue;
+                }
+                units.push(UnitView {
+                    id: record.id,
+                    team: viewer.enemy(),
+                    x: record.x,
+                    y: record.y,
+                    z: record.z,
+                    radius: record.radius,
+                    blueprint,
+                    health_permille: record.health_permille,
+                    built_permille: record.built_permille,
+                    is_structure: true,
+                    facing: record.facing,
+                    aim: record.aim,
+                    extra_aims: [[0, 0]; 3],
+                    working: false,
+                    assembling: None,
+                    upgrade: None,
+                    remembered: true,
+                });
+            }
+            units.sort_by_key(|unit| unit.id);
+        }
         let mut projectile_query = self.ecs.query::<(&Position, &Projectile, Option<&Discharged>, Option<&Missile>)>();
         let projectile_view = projectile_query.view();
         let projectiles = self
@@ -4340,8 +4492,23 @@ impl SimWorld {
             if entry.id != id || visibility.is_visible(viewer, entry.x, entry.y) {
                 continue;
             }
+            // A structure the viewer has identified shows as it was last seen, not as a blip.
+            let known = &self.known_structures[viewer.index()];
+            if entry.is_structure && known.binary_search_by_key(&id, |record| record.id).is_ok_and(|index| known[index].blueprint.is_some()) {
+                continue;
+            }
             let _ = entity;
             contacts.push(ContactView { unit: Some(id), x: entry.x, y: entry.y, z: entry.z, is_air: entry.is_air, is_naval: entry.is_naval, is_sub: entry.is_sub, is_structure: entry.is_structure });
+        }
+        // Structures found only on radar stay where they were found, unidentified, once off it.
+        // One gone since names no unit, as a decoy does: an attack on it finds nothing.
+        for record in &self.known_structures[viewer.index()] {
+            let on_radar_now = contacts.iter().any(|contact| contact.unit == Some(record.id));
+            if record.blueprint.is_some() || on_radar_now || visibility.is_visible(viewer, record.x, record.y) {
+                continue;
+            }
+            let unit = (!record.gone).then_some(record.id);
+            contacts.push(ContactView { unit, x: record.x, y: record.y, z: record.z, is_air: false, is_naval: false, is_sub: false, is_structure: true });
         }
         // Decoys from the enemy's working jammers.
         let enemy = viewer.enemy();

@@ -34,6 +34,15 @@ const PROJECTILE_ICON_PX: f32 = 1.0;
 const NO_ICON: f32 = 0.0;
 
 pub(super) const BLUE: [f32; 3] = [0.20, 0.50, 1.00];
+/// How dark a remembered structure, out of sight, is drawn, and how much of its color goes grey.
+const REMEMBERED_SHADE: f32 = 0.6;
+const REMEMBERED_GREY: f32 = 0.5;
+
+/// A color as a remembered structure shows it (`UnitView::remembered`): darker and greyer.
+fn remembered_color(color: [f32; 3]) -> [f32; 3] {
+    let grey = color[0] * 0.3 + color[1] * 0.59 + color[2] * 0.11;
+    color.map(|channel| (channel + (grey - channel) * REMEMBERED_GREY) * REMEMBERED_SHADE)
+}
 pub(super) const RED: [f32; 3] = [1.00, 0.27, 0.22];
 const SELECTED: [f32; 3] = [0.25, 1.00, 0.35];
 const SHELL: [f32; 3] = [1.00, 0.85, 0.35];
@@ -600,8 +609,12 @@ pub fn build_unit_instances(
             center[2] += f64::from(height - footprint) * 0.5;
             let shade = 0.55 + 0.45 * built;
             let (trim, hull) = (color.map(|channel| channel * shade), hull.map(|channel| channel * shade));
+            // One remembered out of sight is faded: darker, its team color half grey, and unlit.
+            let (trim, hull) = if unit.remembered { (remembered_color(trim), remembered_color(hull)) } else { (trim, hull) };
+            // Its foundation and scaffolding too.
+            let color = if unit.remembered { remembered_color(color) } else { color };
             // Nothing glows until it is finished.
-            let glow = if unit.built_permille >= 1000 { glow } else { hull };
+            let glow = if unit.built_permille >= 1000 && !unit.remembered { glow } else { hull };
             // A structure's base stays put, and its gun, if any, turns to aim.
             if let Some(base) = look.and_then(|look| look.base) {
                 out.push(base, animated(painted(center, [size, size, height], NORTH, trim, hull, glow, UNIT_ICON_PX * 1.6, eye), 0));
@@ -850,6 +863,7 @@ mod tests {
             working: false,
             assembling: None,
             upgrade: None,
+            remembered: false,
         }
     }
 

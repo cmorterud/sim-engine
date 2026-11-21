@@ -2119,13 +2119,17 @@ fn cell_center(cell: (u32, u32)) -> Vec2Fp {
     Vec2Fp::new(center(cell.0), center(cell.1))
 }
 
-/// The enemies a team can see, and nothing else. All the AI's knowledge of enemies comes from here.
+/// The enemies a team can see, and the enemy structures it has seen before, which stay where
+/// they were (GAME_SPECIFICATION.md §9, Remembered Structures), and nothing else. All the AI's
+/// knowledge of enemies comes from here.
 fn visible_enemies(world: &SimWorld, team: Team) -> Vec<Sighting> {
+    let known = &world.known_structures[team.index()];
+    let remembered = |id: SimId| known.binary_search_by_key(&id, |record| record.id).is_ok_and(|index| known[index].blueprint.is_some());
     world
         .spatial_grid
         .entries()
         .iter()
-        .filter(|entry| entry.team != team && world.visibility.is_visible(team, entry.x, entry.y))
+        .filter(|entry| entry.team != team && (world.visibility.is_visible(team, entry.x, entry.y) || (entry.is_structure && remembered(entry.id))))
         // A unit may have died since the grid was built.
         .filter(|entry| world.unit_entity(entry.id).is_some())
         .map(|entry| Sighting {

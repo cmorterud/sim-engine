@@ -276,10 +276,11 @@ impl Effects {
                 self.scar(spot, radius, !strategic, time, u64::from(projectile.id.0));
             }
         });
-        // A unit that dies leaves a wreck where it stood. One that only goes out of sight does not.
+        // A unit that dies leaves a wreck where it stood. One that only goes out of sight does not,
+        // nor a remembered structure found gone: it died out of sight, long since.
         let mut gone: Vec<UnitView> = Vec::new();
         merge_by_id(&current.units, &previous.units, |unit| unit.id, |still_there, unit| {
-            if still_there.is_none() {
+            if still_there.is_none() && !unit.remembered {
                 gone.push(*unit);
             }
         });
@@ -523,6 +524,7 @@ mod tests {
             working: false,
             assembling: None,
             upgrade: None,
+            remembered: false,
         }
     }
 

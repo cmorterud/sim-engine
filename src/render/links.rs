@@ -242,6 +242,7 @@ mod tests {
             working: false,
             assembling: None,
             upgrade: None,
+            remembered: false,
         }
     }
 

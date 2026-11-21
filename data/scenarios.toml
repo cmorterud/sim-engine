@@ -16,7 +16,7 @@
 id = "t3_siege"
 title = "Siege: T3 artillery against a T3 position"
 shows = "What T3 artillery is for: breaking a defended position. It outranges the heavy point defenses, so it can shell them without reply, and an equal materiel of it breaks this position without loss."
-try = "Attack-move at the position and watch the artillery set up and shell it. With fog of war on, its sight is well short of its reach: send the scout ahead to spot the position first. Then walk the artillery inside the point defenses' reach."
+try = "Attack-move at the position and watch the artillery set up and shell it. With fog of war on, its sight is well short of its reach: send the scout ahead to spot the position once, and pull it back. Structures stay on the map once seen, so the artillery can shell them unwatched. Then walk the artillery inside the point defenses' reach."
 blue = [
     { unit = "t3_mobile_artillery", count = 16, at = [700, 2_560] },
     { unit = "t1_land_scout", count = 1, at = [900, 2_560] },

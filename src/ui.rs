@@ -3752,7 +3752,9 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
         let icon_top = icon_half * icons::frame_reach(icon.frame()).0;
         let icon_bottom = icons::reach_below(icon, icon_half, blueprint.tier);
         if show_icons {
-            draw_icon(&painter, center, &blueprint.key, blueprint.tier, team_color(unit.team), is_selected);
+            // A structure remembered out of sight shows dimmer, as it may be gone.
+            let color = if unit.remembered { team_color(unit.team).gamma_multiply(0.55) } else { team_color(unit.team) };
+            draw_icon(&painter, center, &blueprint.key, blueprint.tier, color, is_selected);
         }
         // Commanders carry their side's name, underlined in its color, so they can be found.
         if blueprint.is_commander() {
@@ -3865,6 +3867,7 @@ mod tests {
             working: false,
             assembling: None,
             upgrade: None,
+            remembered: false,
         }
     }
 

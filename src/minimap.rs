@@ -97,6 +97,9 @@ pub fn view_corners(camera: &Camera, heights: &HeightField) -> Vec<[f64; 2]> {
     corners
 }
 
+/// How bright a remembered enemy structure's square is, against one in sight.
+const REMEMBERED_DIM: f32 = 0.55;
+
 /// The minimap's pictures, made once for the land and again as the fog changes.
 #[derive(Default)]
 pub struct Minimap {
@@ -157,6 +160,8 @@ impl Minimap {
                         Team::Blue => Color32::from_rgb(90, 160, 255),
                         Team::Red => Color32::from_rgb(255, 95, 80),
                     };
+                    // A structure remembered out of sight is dimmer, as it may be gone.
+                    let color = if unit.remembered { color.gamma_multiply(REMEMBERED_DIM) } else { color };
                     if unit.is_structure {
                         // A dark rim, so that structures stand apart from units.
                         dots.add_colored_rect(Rect::from_center_size(at, Vec2::splat(4.6)), Color32::from_black_alpha(200));
