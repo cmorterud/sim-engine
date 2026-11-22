@@ -37,6 +37,11 @@ impl PlayerId {
     }
 }
 
+/// How many enemy units a unit has destroyed: those it made the final hit on. Shown on its
+/// nameplate, and nothing else: it changes nothing in play, so it is not hashed.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub struct Kills(pub u32);
+
 /// Selects a cost grid. The PoC only spawns `Land` units.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum MoveClass {

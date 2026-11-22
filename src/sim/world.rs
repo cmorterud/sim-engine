@@ -488,6 +488,9 @@ pub struct SimSnapshot {
     pub paused: Vec<SimId>,
     /// The rank of each veteran the viewer can see, sorted by `SimId`.
     pub veterans: Vec<(SimId, u8)>,
+    /// How many enemies each unit the viewer can see has destroyed, for those that have any,
+    /// sorted by `SimId`.
+    pub kills: Vec<(SimId, u32)>,
     pub economy: EconomyView,
     /// Both teams' economies, Blue's then Red's, for a watcher who sees everything: only in
     /// snapshots for no one side.
@@ -3630,6 +3633,11 @@ impl SimWorld {
                     }
                     if dies {
                         self.dead_units.push(id);
+                        // The enemy that made the final hit has destroyed one more.
+                        if let Some((_, killer)) = attacker.and_then(|killer| self.find_unit(killer)) {
+                            let before = self.ecs.get::<&super::components::Kills>(killer).map_or(0, |kills| kills.0);
+                            self.ecs.insert_one(killer, super::components::Kills(before + 1)).expect("the killer is live");
+                        }
                         if let Some(blueprint) = blueprint {
                             // Those who destroyed it share its mass, or as much as had been built,
                             // each by its share of the damage enemies did it.
@@ -4532,6 +4540,17 @@ impl SimWorld {
                     seen(team, position.x.to_bits(), position.y.to_bits()).then_some((id, rank))
                 })
                 .collect(),
+            kills: {
+                let mut kills: Vec<(SimId, u32)> = self
+                    .ecs
+                    .query::<(&SimId, &super::components::Kills, &UnitStats, &Position)>()
+                    .iter()
+                    .filter(|(_, (_, _, stats, position))| seen(stats.team, position.0.x.to_bits(), position.0.y.to_bits()))
+                    .map(|(_, (id, kills, _, _))| (*id, kills.0))
+                    .collect();
+                kills.sort_unstable();
+                kills
+            },
             economy,
             team_economies,
             fog,

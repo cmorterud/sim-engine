@@ -1014,6 +1014,25 @@ pub fn hotkey_action(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintD
 }
 
 /// A unit's veteran rank, or 0.
+/// How many enemies a unit has destroyed, made the final hit on.
+pub fn kills_of(snapshot: &SimSnapshot, id: SimId) -> u32 {
+    snapshot.kills.binary_search_by_key(&id, |kills| kills.0).map_or(0, |index| snapshot.kills[index].1)
+}
+
+/// A small mark at the bottom left of a nameplate's portrait: a cross and how many enemies the
+/// selection has destroyed.
+fn kills_badge(painter: &egui::Painter, portrait: Rect, kills: u32) {
+    let font = FontId::proportional(10.0);
+    let text = painter.layout_no_wrap(kills.to_string(), font, Color32::WHITE);
+    let badge = Rect::from_min_size(Pos2::new(portrait.left() + 1.0, portrait.bottom() - 14.0), Vec2::new(text.size().x + 17.0, 13.0));
+    painter.rect_filled(badge, 3.0, Color32::from_rgba_unmultiplied(10, 14, 20, 220));
+    let mark = Rect::from_center_size(Pos2::new(badge.left() + 7.0, badge.center().y), Vec2::splat(7.0));
+    let stroke = egui::Stroke::new(1.6_f32, Color32::from_rgb(235, 90, 70));
+    painter.line_segment([mark.left_top(), mark.right_bottom()], stroke);
+    painter.line_segment([mark.right_top(), mark.left_bottom()], stroke);
+    painter.galley(Pos2::new(badge.left() + 13.0, badge.center().y - text.size().y / 2.0), text, Color32::WHITE);
+}
+
 pub fn rank_of(snapshot: &SimSnapshot, id: SimId) -> u8 {
     snapshot.veterans.binary_search_by_key(&id, |veteran| veteran.0).map_or(0, |index| snapshot.veterans[index].1)
 }
@@ -2105,6 +2124,11 @@ fn selection_info(ui: &mut egui::Ui, snapshot: &SimSnapshot, selected: &[SimId],
             ui.painter().add(shape);
         }
         unit_art(ui.painter(), portrait.shrink(1.0), &unit.key);
+        // How many enemies it has destroyed, or the selection all together.
+        let kills: u32 = units.iter().map(|unit| kills_of(snapshot, unit.id)).sum();
+        kills_badge(ui.painter(), portrait, kills);
+        ui.interact(portrait, ui.id().with("kills"), egui::Sense::hover())
+            .on_hover_text(if units.len() == 1 { format!("Destroyed {kills} enemy units") } else { format!("Destroyed {kills} enemy units between them") });
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
             let width = ui.available_width() - if menu.is_some_and(|menu| !menu.queue.is_empty()) { 52.0 } else { 0.0 };

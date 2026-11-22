@@ -1057,3 +1057,26 @@ fn a_commanders_queued_attack_waits_for_its_move() {
     }
     assert_eq!(forced(&world), Some(target), "then it attacks");
 }
+
+/// A unit that makes the final hit on an enemy has destroyed it, which its nameplate counts.
+/// The others that hurt it do not, however much they did.
+#[test]
+fn the_unit_that_makes_the_final_hit_counts_the_kill() {
+    let mut world = flat_world(false);
+    let tank = world.blueprints.id("t1_medium_tank");
+    let first = world.spawn_mobile(tank, Team::Blue, point(1_000, 1_000));
+    let second = world.spawn_mobile(tank, Team::Blue, point(1_000, 1_100));
+    let enemy = world.spawn_mobile(world.blueprints.id("t1_land_scout"), Team::Red, point(1_250, 1_050));
+    for _ in 0..300 {
+        world.advance_tick(&[]);
+        if world.unit_position(enemy).is_none() {
+            break;
+        }
+    }
+    assert!(world.unit_position(enemy).is_none(), "the scout is destroyed");
+    let kills = |unit: SimId| world.unit_entity(unit).and_then(|entity| world.ecs.get::<&sim_engine::sim::components::Kills>(entity).ok().map(|kills| kills.0)).unwrap_or(0);
+    assert_eq!(kills(first) + kills(second), 1, "one of the two made the final hit, and only it counts");
+    let snapshot = world.snapshot_for(Some(Team::Blue));
+    let killer = if kills(first) == 1 { first } else { second };
+    assert_eq!(snapshot.kills, vec![(killer, 1)], "the viewer sees its count");
+}
