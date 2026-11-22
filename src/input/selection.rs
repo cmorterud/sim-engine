@@ -320,12 +320,38 @@ pub fn nearest_unit_within(units: &[UnitView], camera: &Camera, team: Team, poin
             let apparent = edge.map_or(0.0, |edge| (edge[0] - p[0]).hypot(edge[1] - p[1]));
             let reach = reach_px.max(apparent);
             let on_icon = icons && (point[0] - p[0]).abs() <= half_width && (-above..=below).contains(&(point[1] - p[1]));
-            if (on_icon || distance <= reach * reach) && best.is_none_or(|(closest, _)| distance < closest) {
+            // A structure's ground is square, out to its corners, which a circle of its radius
+            // misses: zoomed in, a factory's corners were not clickable.
+            let on_footprint = unit.is_structure && inside_footprint(unit, camera, point);
+            if (on_icon || on_footprint || distance <= reach * reach) && best.is_none_or(|(closest, _)| distance < closest) {
                 best = Some((distance, unit.id));
             }
         }
     }
     best.map(|(_, id)| id)
+}
+
+/// Whether a screen point is on a structure's square footprint, as the camera shows it: its
+/// four corners at its foot, projected, with the point inside them.
+fn inside_footprint(unit: &UnitView, camera: &Camera, point: [f64; 2]) -> bool {
+    let (x, y, radius) = (raw_to_world(unit.x), raw_to_world(unit.y), raw_to_world(unit.radius));
+    // Structures stand with their middle a radius above the ground.
+    let ground = raw_to_world(unit.z) - radius;
+    let corners: Option<Vec<[f64; 2]>> = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
+        .iter()
+        .map(|&(dx, dy)| camera.world_to_screen([x + dx * radius, y + dy * radius, ground]))
+        .collect();
+    let Some(corners) = corners else {
+        return false;
+    };
+    // Inside a convex outline: on the same side of every edge.
+    let sides: Vec<f64> = (0..4)
+        .map(|index| {
+            let (a, b) = (corners[index], corners[(index + 1) % 4]);
+            (b[0] - a[0]) * (point[1] - a[1]) - (b[1] - a[1]) * (point[0] - a[0])
+        })
+        .collect();
+    sides.iter().all(|&side| side >= 0.0) || sides.iter().all(|&side| side <= 0.0)
 }
 
 /// Builds the order for a right-click. This is the one place a float becomes simulation
@@ -554,6 +580,33 @@ mod tests {
                 assert_eq!(pick(dx, dy), None, "at ({dx}, {dy}) points, scale {scale}");
             }
         }
+    }
+
+    /// A structure is clickable out to the corners of its square footprint, which lie outside
+    /// a circle of its radius, zoomed in close.
+    #[test]
+    fn a_structure_is_clickable_at_its_corners() {
+        let mut camera = Camera::new(81_920.0, [1000.0, 800.0]);
+        camera.look_at(40_000.0, 40_000.0, 0.0);
+        camera.set_altitude(200.0);
+        let raw = |value: f64| (value * 4096.0) as i32;
+        let factory = UnitView { radius: raw(40.0), z: raw(40.0), is_structure: true, ..unit(1, Team::Blue, 40_000.0, 40_000.0) };
+        // Its corners, some of them past the circle the picking would otherwise use: its radius
+        // as drawn around its middle, which stands a radius up.
+        let middle = camera.world_to_screen([40_000.0, 40_000.0, 40.0]).expect("on screen");
+        let edge = camera.world_to_screen([40_000.0 + 40.0, 40_000.0, 40.0]).expect("on screen");
+        let circle = (edge[0] - middle[0]).hypot(edge[1] - middle[1]).max(CLICK_RADIUS_PX);
+        let corners: Vec<[f64; 2]> = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
+            .iter()
+            .map(|&(dx, dy)| camera.world_to_screen([40_000.0 + 38.0 * dx, 40_000.0 + 38.0 * dy, 0.0]).expect("on screen"))
+            .collect();
+        assert!(corners.iter().any(|corner| (corner[0] - middle[0]).hypot(corner[1] - middle[1]) > circle), "some corner is outside the circle");
+        for corner in corners {
+            assert_eq!(nearest_unit(&[factory], &camera, Team::Blue, corner), Some(SimId(1)), "a click at {corner:?}");
+        }
+        // But not past its corner.
+        let outside = camera.world_to_screen([40_000.0 + 60.0, 40_000.0 + 60.0, 0.0]).expect("on screen");
+        assert_eq!(nearest_unit(&[factory], &camera, Team::Blue, outside), None);
     }
 
     #[test]
