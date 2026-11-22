@@ -73,7 +73,7 @@ jobs:
 
       - name: Install Rust
         run: |
-          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup toolchain install "$RUST_VERSION" --profile minimal --component clippy
           rustup default "$RUST_VERSION"
 
       - uses: actions/cache@v6
@@ -92,6 +92,12 @@ jobs:
       - name: Test
         run: cargo test --locked ${{ matrix.flags }}
 
+      # Every target, the tests, examples, and benchmarks too, with warnings as errors. Once, in
+      # the release job, which has the release build cached already.
+      - name: Lint
+        if: matrix.profile == 'release'
+        run: cargo clippy --locked --release --all-targets -- -D warnings
+
       # So that a failure from a full disk says so.
       - name: Disk space left
         if: always()
@@ -101,6 +107,42 @@ jobs:
       - name: Check that benchmarks compile
         if: matrix.profile == 'release'
         run: cargo bench --no-run --locked
+
+  # The simulation must give the same bits on every machine: the release tests check the golden
+  # checksums on x86_64, and this checks them on 64-bit ARM, as Apple silicon is.
+  determinism-arm:
+    name: Determinism on ARM
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install audio headers
+        run: |
+          for attempt in 1 2 3; do
+            sudo apt-get -o Acquire::Retries=5 update && sudo apt-get -o Acquire::Retries=5 install -y libasound2-dev && exit 0
+            echo "Install attempt $attempt failed; trying again in 20 seconds."
+            sleep 20
+          done
+          exit 1
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-arm-${{ env.RUST_VERSION }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-arm-${{ env.RUST_VERSION }}-
+
+      - name: Golden checksums
+        run: cargo test --locked --release --test determinism_test
 
   # The browser build is published only once every gate passes, so it must be one of them.
   browser-build:

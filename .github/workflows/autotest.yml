@@ -1,0 +1,88 @@
+name: Autotest
+
+# The game run in a window, as the local gates do: a full AI match fast-forwarded to tick 10,000
+# and then watched for a minute, and the 5,000-unit battle for half a minute, each printing its
+# frame times and final checksum. The runner has no graphics card, so it draws in software,
+# under a virtual display: frame times here say nothing about speed, only that the game starts,
+# draws, plays, and exits cleanly. Kept apart from CI, so that the website does not wait for it.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Only the newest commit's run is worth having.
+concurrency:
+  group: autotest-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Kept in step with CI.
+  RUST_VERSION: "1.99.1"
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  autotest:
+    name: Autotest
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      # Sound headers to build; a virtual display and software Vulkan to draw.
+      - name: Install headers and a software display
+        run: |
+          for attempt in 1 2 3; do
+            sudo apt-get -o Acquire::Retries=5 update && sudo apt-get -o Acquire::Retries=5 install -y libasound2-dev xvfb mesa-vulkan-drivers libvulkan1 libxkbcommon-x11-0 && exit 0
+            echo "Install attempt $attempt failed; trying again in 20 seconds."
+            sleep 20
+          done
+          exit 1
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ env.RUST_VERSION }}-autotest-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ env.RUST_VERSION }}-release-
+
+      - name: Build
+        run: cargo build --locked --release
+
+      # Each must reach its last line, the checksum, and exit cleanly.
+      - name: A full match, fast-forwarded
+        run: |
+          xvfb-run -a -s "-screen 0 1280x800x24" ./target/release/sim-engine --autotest 60 --fast-forward 10000 | tee match.txt
+          grep -q "^autotest: tick" match.txt
+
+      - name: The 5,000-unit battle
+        run: |
+          xvfb-run -a -s "-screen 0 1280x800x24" ./target/release/sim-engine --battle --autotest 30 | tee battle.txt
+          grep -q "^autotest: tick" battle.txt
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Autotest"
+            echo
+            echo '```'
+            tail -3 match.txt 2>/dev/null || echo "no match output"
+            tail -3 battle.txt 2>/dev/null || echo "no battle output"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
