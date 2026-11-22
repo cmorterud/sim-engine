@@ -54,7 +54,8 @@ fn blue_can_afford_a_strategic_launcher_and_nuclear_missiles() {
 fn the_turtle_builds_up_and_never_sets_out() {
     let scenario = playtest(1);
     let mut world = scenario.world;
-    let mut red = AiBrain::with_difficulty(Team::Red, 1, world.starts, Difficulty::Turtle);
+    let turtle = sim_engine::ai_strategy::Strategy::named("turtle").expect("data/ai_strategies.toml has turtle");
+    let mut red = AiBrain::with_plan(Team::Red, 1, world.starts, Difficulty::Normal, turtle);
     let structures = |world: &sim_engine::sim::world::SimWorld| world.units.iter().filter(|&&(_, entity)| {
         let stats = world.ecs.get::<&UnitStats>(entity).unwrap();
         stats.team == Team::Red && stats.is_structure

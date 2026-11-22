@@ -136,6 +136,19 @@
             </select>
           </div>
           <div class="field">
+            <label for="strategy">Strategy</label>
+            <select id="strategy" name="strategy" aria-describedby="strategy-hint">
+              <option value="balanced" selected>Balanced</option>
+              <option value="rush">Rush</option>
+              <option value="tech">Tech</option>
+              <option value="air">Air</option>
+              <option value="naval">Naval</option>
+              <option value="turtle">Turtle</option>
+              <option value="random">Random</option>
+            </select>
+            <span class="hint" id="strategy-hint">What the AI plays. Turtle never attacks; Naval needs a map with water.</span>
+          </div>
+          <div class="field">
             <label for="fog">Fog of war</label>
             <select id="fog" name="fog" aria-describedby="fog-hint">
               <option value="on" selected>On</option>

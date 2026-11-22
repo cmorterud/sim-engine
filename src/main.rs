@@ -8,6 +8,7 @@ use std::time::Duration;
 use web_time::Instant;
 
 use sim_engine::ai::{advance_ai_vs_ai, AiBrain, Difficulty};
+use sim_engine::ai_strategy::Strategy;
 use sim_engine::driver::{CommandSource, DriverOptions, DriverResult, SimDriver, TICK_DURATION};
 use sim_engine::audio::{self, AttackAlarm, SoundEngine, SoundSettings};
 use sim_engine::input::feedback::{MarkerKind, OrderFeedback};
@@ -64,6 +65,26 @@ const SKIRMISH_MIN_ALTITUDE: f64 = 130.0;
 const WATCH_ALTITUDE_FRACTION: f64 = 0.55;
 
 /// The soak's match for a seed, played out to the soak's time limit.
+/// `--ai`'s value: a difficulty, and "turtle" for Normal playing the Turtle strategy, as it was
+/// once a difficulty of its own.
+fn parse_opponent(name: &str) -> Option<(Difficulty, Option<String>)> {
+    match name {
+        "turtle" => Some((Difficulty::Normal, Some("turtle".to_string()))),
+        _ => Difficulty::from_name(name).map(|difficulty| (difficulty, None)),
+    }
+}
+
+/// Whether `--strategy` may be this: a strategy's id, or "random".
+fn is_strategy(name: &str) -> bool {
+    name == "random" || Strategy::named(name).is_some()
+}
+
+/// The strategies' ids, for messages.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+fn strategy_names() -> String {
+    Strategy::all().iter().map(|strategy| strategy.id.as_str()).collect::<Vec<_>>().join(", ")
+}
+
 const fn watch_source(seed: u64) -> CommandSource {
     CommandSource::AiVsAi { seed, ticks: sim_engine::soak::MATCH_TICK_LIMIT }
 }
@@ -110,8 +131,11 @@ Usage: sim-engine [options]
                        for any of the modes above, or playtest: a sandbox with 5 of every
                        unit and no commander, against two coastal bases that a turtling
                        AI holds
-  --ai <easy|normal|turtle>  How the AI opponent plays (default easy; turtle in the
-                       playtest): turtle builds up and defends, and never attacks
+  --ai <easy|normal>   How well the AI opponent plays (default easy; normal in the
+                       playtest). --ai turtle is normal with --strategy turtle
+  --strategy <name>    What the AI opponent plays (data/ai_strategies.toml): balanced
+                       (the default; turtle in the playtest), rush, tech, air, naval,
+                       turtle, which builds up and defends and never attacks, or random
   --watch              Watch the AI-vs-AI match the soak plays for --map and --seed,
                        seeing everything. V switches to Blue's or Red's sight, - and =
                        change the speed, a tap of Space pauses, and Space held
@@ -199,6 +223,8 @@ struct Options {
     map: Option<PathBuf>,
     /// How hard the AI opponent plays: easy unless asked otherwise.
     difficulty: Option<Difficulty>,
+    /// What it plays, by its id in data/ai_strategies.toml, or "random": balanced unless asked.
+    strategy: Option<String>,
     /// Watch the soak's AI-vs-AI match for the map and seed instead of playing.
     watch: bool,
     /// Whose sight a watched match starts in: `None` for everything.
@@ -242,7 +268,10 @@ fn parse_options() -> Result<Option<Options>, String> {
     options.map = params.get("map").filter(|name| name != "skirmish").map(PathBuf::from);
     options.seed = params.get("seed").and_then(|seed| seed.parse().ok());
     options.battle = params.has("battle");
-    options.difficulty = params.get("ai").and_then(|name| Difficulty::from_name(&name));
+    if let Some(name) = params.get("ai") {
+        (options.difficulty, options.strategy) = parse_opponent(&name).map_or((None, None), |(difficulty, strategy)| (Some(difficulty), strategy));
+    }
+    options.strategy = params.get("strategy").filter(|name| is_strategy(name)).or(options.strategy);
     options.watch = params.has("watch");
     options.view = params.get("view").and_then(|name| parse_view(&name)).flatten();
     options.no_fog = params.get("fog").and_then(|name| parse_switch(&name)) == Some(false);
@@ -314,7 +343,18 @@ fn parse_options() -> Result<Option<Options>, String> {
             "--seed" => options.seed = Some(number("--seed", value("--seed")?)?),
             "--sound-check" => options.sound_check = true,
             "--map" => options.map = Some(PathBuf::from(value("--map")?)),
-            "--ai" => options.difficulty = Some(Difficulty::from_name(&value("--ai")?).ok_or("--ai needs easy, normal, or turtle")?),
+            "--ai" => {
+                let (difficulty, strategy) = parse_opponent(&value("--ai")?).ok_or("--ai needs easy or normal, or turtle")?;
+                options.difficulty = Some(difficulty);
+                options.strategy = strategy.or(options.strategy.take());
+            }
+            "--strategy" => {
+                let name = value("--strategy")?;
+                if !is_strategy(&name) {
+                    return Err(format!("--strategy needs one of {}, or random", strategy_names()));
+                }
+                options.strategy = Some(name);
+            }
             "--watch" => options.watch = true,
             "--view" => options.view = parse_view(&value("--view")?).ok_or("--view needs all, blue, or red")?,
             "--fog" => options.no_fog = !parse_switch(&value("--fog")?).ok_or("--fog needs on or off")?,
@@ -947,7 +987,14 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     let autotest_seconds = options.autotest_seconds;
     let fast_forward = options.fast_forward;
     // The playtest sandbox is played against a turtle unless asked otherwise.
-    let difficulty = options.difficulty.unwrap_or(if matches!(map_source, MapSource::Playtest) { Difficulty::Turtle } else { Difficulty::Easy });
+    let playtest = matches!(map_source, MapSource::Playtest);
+    let difficulty = options.difficulty.unwrap_or(if playtest { Difficulty::Normal } else { Difficulty::Easy });
+    let strategy = match options.strategy.as_deref() {
+        Some("random") => Strategy::random(seed, 1),
+        Some(name) => Strategy::named(name).expect("checked when read"),
+        None if playtest => Strategy::named("turtle").expect("data/ai_strategies.toml has turtle"),
+        None => Strategy::balanced(),
+    };
 
     let mut autotest = autotest_seconds.map(|seconds| Autotest::new(seconds, options.capture_dir.clone()));
     let source = match (autotest_seconds, battle) {
@@ -957,7 +1004,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
         (None, false) if watching => watch_source(seed),
         // In a playtest scenario Red only follows its opening orders.
         (None, false) if scenario_start.is_some() => CommandSource::Player,
-        (None, false) => CommandSource::PlayerVsAi { seed, difficulty },
+        (None, false) => CommandSource::PlayerVsAi { seed, difficulty, strategy },
     };
     let viewer = if watching { watch_view } else { is_match.then_some(PLAYER_TEAM) };
     let mut driver_options = DriverOptions { viewer, fast_forward_ticks: fast_forward, start_paused: false, linger: watching && autotest_seconds.is_none() };
@@ -1940,7 +1987,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                     attack_alarm = AttackAlarm::default();
                                     control_groups = ControlGroups::default();
                                     order_drag = None;
-                                    let source = if watching { watch_source(seed) } else { CommandSource::PlayerVsAi { seed, difficulty } };
+                                    let source = if watching { watch_source(seed) } else { CommandSource::PlayerVsAi { seed, difficulty, strategy } };
                                     session = Session::start(map_source.scenario(seed).with_fog_of_war(fog), source, driver_options);
                                     selection.clear();
                                     placing = None;

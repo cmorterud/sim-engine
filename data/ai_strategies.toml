@@ -1,0 +1,83 @@
+# Kinds of AI (GAME_SPECIFICATION.md §17.1): what an AI plays, apart from its difficulty, which
+# is how well. A strategy scales its difficulty's own numbers, so Rush on Easy is still Easy,
+# shaped as a rush. Anything a strategy leaves out is Balanced's, and Balanced is today's AI:
+#
+#   land_t1, land_t2, land_t3  what its land factories build at each tier, in turn, by unit key.
+#                              Against aircraft every fourth is anti-air, whatever the list.
+#   tech_income                times the income at which it upgrades factories of every kind
+#                              and extractors: under 1 climbs the tech tree sooner, over 1 later.
+#   air_income, naval_income   times the income at which it builds air and naval factories.
+#   land_factories,
+#   air_factories              times how many it builds at most.
+#   waves, air_waves           times the size of its first and largest attack waves.
+#   point_defenses             times how many it builds at most.
+#   first_attack_minute        it defends from the start, and sets out no sooner than this, or
+#                              its difficulty's own wait, whichever is later.
+#   favours                    which factories it builds before taking more deposits:
+#                              "economy" (none), "air", or "naval".
+#   upgrade_alone              whether a factory may upgrade with no other making units.
+#   first_upgrade_minute       no factory upgrades before this minute.
+#   attacks, missiles,
+#   transports, commander_joins  whether it ever sets out; fires missiles; drops by transport;
+#                              and sends its commander with a full wave.
+#   random                     whether "random" may pick it.
+#
+# The balance rule is [strategy] in data/balance_targets.toml: each wins inside its timing
+# window and loses outside it, and none wins more than 55% over every opponent and map.
+
+[[strategy]]
+id = "balanced"
+name = "Balanced"
+plays = "A bit of everything, by what it sees."
+land_t1 = ["t1_light_artillery", "t1_light_walker", "t1_medium_tank", "t1_light_walker"]
+land_t2 = ["t2_heavy_tank", "t2_grenadier_walker", "t2_heavy_tank", "t2_assault_hovercraft", "t2_mobile_shield", "t2_mobile_missile_launcher"]
+land_t3 = ["t3_heavy_walker", "t3_mobile_artillery", "t3_siege_walker", "t2_heavy_tank", "t2_mobile_shield", "t3_heavy_walker"]
+
+[[strategy]]
+id = "rush"
+name = "Rush"
+plays = "T1 in numbers from many factories, and small early waves; late to tech."
+land_t1 = ["t1_light_walker", "t1_medium_tank", "t1_light_walker", "t1_medium_tank", "t1_light_walker", "t1_light_artillery"]
+tech_income = 2.0
+air_income = 2.0
+naval_income = 2.0
+land_factories = 2.0
+waves = 0.6
+first_upgrade_minute = 12
+
+[[strategy]]
+id = "tech"
+name = "Tech"
+plays = "Economy and the tech tree first; big waves, and none before ten minutes."
+tech_income = 0.5
+upgrade_alone = true
+waves = 1.25
+first_attack_minute = 10
+
+[[strategy]]
+id = "air"
+name = "Air"
+plays = "Power and air factories early, then bombers and fighters; a small land army."
+air_income = 0.35
+air_factories = 2.0
+favours = "air"
+land_factories = 0.5
+
+[[strategy]]
+id = "naval"
+name = "Naval"
+plays = "Naval factories early on maps with water, and a small land army."
+naval_income = 0.4
+land_factories = 0.5
+favours = "naval"
+
+[[strategy]]
+id = "turtle"
+name = "Turtle"
+plays = "Builds up and defends, with three times the point defenses, and never sets out."
+point_defenses = 3.0
+attacks = false
+missiles = false
+transports = false
+commander_joins = false
+random = false

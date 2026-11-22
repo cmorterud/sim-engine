@@ -18,7 +18,7 @@ const VIEW: Option<Team> = Some(Team::Blue);
 
 fn start_session() -> SimDriver {
     let options = DriverOptions { viewer: VIEW, ..DriverOptions::default() };
-    SimDriver::start_with(scenario::skirmish(SEED), CommandSource::PlayerVsAi { seed: SEED, difficulty: Difficulty::Normal }, false, options)
+    SimDriver::start_with(scenario::skirmish(SEED), CommandSource::PlayerVsAi { seed: SEED, difficulty: Difficulty::Normal, strategy: sim_engine::ai_strategy::Strategy::balanced() }, false, options)
 }
 
 /// Waits until a condition holds on a new snapshot, or the tick limit passes.

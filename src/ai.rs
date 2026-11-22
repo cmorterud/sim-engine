@@ -4,6 +4,7 @@
 #![deny(clippy::float_arithmetic)]
 
 use crate::math::fp::{fp_int, wide_mul, Fp, FpWide, Vec2Fp};
+use crate::ai_strategy::Strategy;
 use crate::math::rng::SimRng;
 use crate::sim::blueprints::{BlueprintId, FactoryKind, Res, UnitClass};
 use crate::sim::commands::SimCommand;
@@ -141,11 +142,8 @@ struct Roster {
     /// Engineers by tier, T1 first.
     engineers: [BlueprintId; 3],
     bot: BlueprintId,
-    artillery: BlueprintId,
+    /// What stands in for a mobile shield it cannot run, at T2.
     tank: BlueprintId,
-    amphibious: BlueprintId,
-    missile_launcher: BlueprintId,
-    heavy_artillery: BlueprintId,
     factory_t1: BlueprintId,
     /// Support factories, at T2 and T3.
     support_factories: [BlueprintId; 2],
@@ -178,11 +176,8 @@ struct Roster {
     battlecruiser: BlueprintId,
     energy_storage: BlueprintId,
     torpedo_boat: BlueprintId,
-    medium_tank: BlueprintId,
-    grenadier_walker: BlueprintId,
     mobile_shield: BlueprintId,
     heavy_walker: BlueprintId,
-    siege_walker: BlueprintId,
     /// Radars by tier: the radar and the T2 radar.
     radars: [BlueprintId; 2],
     shield: BlueprintId,
@@ -199,19 +194,19 @@ struct Roster {
     t2_suite: crate::sim::blueprints::EnhancementId,
     heavy_cannon: crate::sim::blueprints::EnhancementId,
     t3_suite: crate::sim::blueprints::EnhancementId,
+    /// What land factories build at each tier, in turn: the strategy's lists.
+    land_mix: [Vec<BlueprintId>; 3],
 }
 
 impl Roster {
-    fn new(world: &SimWorld) -> Self {
+    fn new(world: &SimWorld, strategy: &Strategy) -> Self {
         let id = |key: &str| world.blueprints.id(key);
+        let mix = |keys: &[String]| keys.iter().map(|key| id(key)).collect::<Vec<BlueprintId>>();
         Self {
+            land_mix: [mix(&strategy.land_t1), mix(&strategy.land_t2), mix(&strategy.land_t3)],
             engineers: [id("t1_engineer"), id("t2_engineer"), id("t3_engineer")],
             bot: id("t1_light_walker"),
-            artillery: id("t1_light_artillery"),
             tank: id("t2_heavy_tank"),
-            amphibious: id("t2_assault_hovercraft"),
-            missile_launcher: id("t2_mobile_missile_launcher"),
-            heavy_artillery: id("t3_mobile_artillery"),
             factory_t1: id("land_factory_t1"),
             support_factories: [id("land_factory_t2_support"), id("land_factory_t3_support")],
             extractor: id("mass_extractor"),
@@ -239,11 +234,8 @@ impl Roster {
             battlecruiser: id("t3_battlecruiser"),
             torpedo_boat: id("t2_torpedo_boat"),
             energy_storage: id("energy_storage"),
-            medium_tank: id("t1_medium_tank"),
-            grenadier_walker: id("t2_grenadier_walker"),
             mobile_shield: id("t2_mobile_shield"),
             heavy_walker: id("t3_heavy_walker"),
-            siege_walker: id("t3_siege_walker"),
             radars: [id("radar"), id("radar_t2")],
             shield: id("shield_generator"),
             tactical_launcher: id("tactical_missile_launcher"),
@@ -425,10 +417,6 @@ pub enum Difficulty {
     Easy,
     /// Everything it knows.
     Normal,
-    /// Builds up and defends, and never sets out: no waves, no fleet or bombers sent at the
-    /// enemy, no drops or missiles. More point defenses. For playtesting against a base that
-    /// holds.
-    Turtle,
 }
 
 impl Difficulty {
@@ -437,7 +425,6 @@ impl Difficulty {
         match name {
             "easy" => Some(Self::Easy),
             "normal" => Some(Self::Normal),
-            "turtle" => Some(Self::Turtle),
             _ => None,
         }
     }
@@ -464,6 +451,16 @@ impl Difficulty {
                 enhancements: false,
                 transports: false,
                 attacks: true,
+                tech_percent: 100,
+                air_percent: 100,
+                naval_percent: 100,
+                max_air_factories: 2,
+                first_air_wave: FIRST_AIR_WAVE,
+                largest_air_wave: LARGEST_AIR_WAVE,
+                land_percent: 100,
+                favours: Favours::Economy,
+                upgrade_alone: false,
+                first_upgrade_tick: 0,
             },
             Self::Normal => Skill {
                 think_interval: THINK_INTERVAL,
@@ -484,15 +481,16 @@ impl Difficulty {
                 enhancements: true,
                 transports: true,
                 attacks: true,
-            },
-            Self::Turtle => Skill {
-                max_point_defenses: MAX_POINT_DEFENSES * 3,
-                first_attack_tick: u32::MAX,
-                commander_push_ticks: u32::MAX,
-                missiles: false,
-                transports: false,
-                attacks: false,
-                ..Self::Normal.skill()
+                tech_percent: 100,
+                air_percent: 100,
+                naval_percent: 100,
+                max_air_factories: 2,
+                first_air_wave: FIRST_AIR_WAVE,
+                largest_air_wave: LARGEST_AIR_WAVE,
+                land_percent: 100,
+                favours: Favours::Economy,
+                upgrade_alone: false,
+                first_upgrade_tick: 0,
             },
         }
     }
@@ -530,11 +528,72 @@ struct Skill {
     /// Whether it ever sends its army, fleet, or bombers at the enemy, beyond meeting what comes
     /// near home.
     attacks: bool,
+    /// Percentages of the incomes at which it climbs the tech tree (upgrading factories of every
+    /// kind, and extractors), and builds air and naval factories.
+    tech_percent: i64,
+    air_percent: i64,
+    naval_percent: i64,
+    max_air_factories: usize,
+    first_air_wave: usize,
+    largest_air_wave: usize,
+    /// The percentage of the land factories it wants for its income.
+    land_percent: i64,
+    /// Which factories it builds before taking more deposits.
+    favours: Favours,
+    /// Whether a factory may upgrade with no other factory still making units.
+    upgrade_alone: bool,
+    /// No factory upgrades before this tick.
+    first_upgrade_tick: u32,
+}
+
+/// Which factories a strategy builds before taking more deposits (`Strategy::favours`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum Favours {
+    /// None: deposits first, then land, air, and naval factories, in that order.
+    Economy,
+    Air,
+    Naval,
+}
+
+impl Skill {
+    /// A difficulty's skill, shaped by a strategy: the strategy scales the difficulty's own
+    /// numbers, so that a strategy on Easy is still Easy.
+    fn with_strategy(self, strategy: &Strategy) -> Self {
+        let scale = |value: usize, by: f64| (((value as i64) * Strategy::percent(by) + 50) / 100).max(1) as usize;
+        let minute = strategy.first_attack_ticks();
+        Self {
+            max_factories: scale(self.max_factories, strategy.land_factories),
+            max_air_factories: scale(self.max_air_factories, strategy.air_factories),
+            max_point_defenses: scale(self.max_point_defenses, strategy.point_defenses),
+            first_wave: scale(self.first_wave, strategy.waves),
+            largest_wave: scale(self.largest_wave, strategy.waves),
+            first_air_wave: scale(self.first_air_wave, strategy.air_waves),
+            largest_air_wave: scale(self.largest_air_wave, strategy.air_waves),
+            first_attack_tick: self.first_attack_tick.max(minute),
+            commander_push_ticks: if strategy.commander_joins { self.commander_push_ticks } else { u32::MAX },
+            missiles: self.missiles && strategy.missiles,
+            transports: self.transports && strategy.transports,
+            attacks: self.attacks && strategy.attacks,
+            tech_percent: self.tech_percent * Strategy::percent(strategy.tech_income) / 100,
+            air_percent: self.air_percent * Strategy::percent(strategy.air_income) / 100,
+            naval_percent: self.naval_percent * Strategy::percent(strategy.naval_income) / 100,
+            land_percent: self.land_percent * Strategy::percent(strategy.land_factories) / 100,
+            favours: match strategy.favours.as_str() {
+                "air" => Favours::Air,
+                "naval" => Favours::Naval,
+                _ => Favours::Economy,
+            },
+            upgrade_alone: strategy.upgrade_alone,
+            first_upgrade_tick: self.first_upgrade_tick.max(strategy.first_upgrade_ticks()),
+            ..self
+        }
+    }
 }
 
 pub struct AiBrain {
     team: Team,
     skill: Skill,
+    strategy: &'static Strategy,
     home: Vec2Fp,
     enemy_home: Vec2Fp,
     /// +1 for Blue, -1 for Red, whose plan is Blue's turned about the map's center.
@@ -574,10 +633,16 @@ impl AiBrain {
     }
 
     pub fn with_difficulty(team: Team, seed: u64, starts: [Vec2Fp; 2], difficulty: Difficulty) -> Self {
-        let skill = difficulty.skill();
+        Self::with_plan(team, seed, starts, difficulty, Strategy::balanced())
+    }
+
+    /// A brain for one team, playing a strategy at a difficulty.
+    pub fn with_plan(team: Team, seed: u64, starts: [Vec2Fp; 2], difficulty: Difficulty, strategy: &'static Strategy) -> Self {
+        let skill = difficulty.skill().with_strategy(strategy);
         Self {
             team,
             skill,
+            strategy,
             home: starts[team.index()],
             enemy_home: starts[team.enemy().index()],
             side: if team == Team::Blue { 1 } else { -1 },
@@ -590,7 +655,7 @@ impl AiBrain {
             rally_set_on: Vec::new(),
             unit_counter: 0,
             air_counter: 0,
-            air_wave_size: FIRST_AIR_WAVE,
+            air_wave_size: skill.first_air_wave,
             enemy_air_seen: None,
             fleet_size: FIRST_FLEET,
             naval_plan: None,
@@ -604,13 +669,32 @@ impl AiBrain {
         self.team
     }
 
+    pub const fn strategy(&self) -> &'static Strategy {
+        self.strategy
+    }
+
+    /// An income threshold for climbing the tech tree, by its strategy.
+    const fn tech(&self, income: i64) -> i64 {
+        income * self.skill.tech_percent / 100
+    }
+
+    /// An income threshold for air factories, by its strategy.
+    const fn air(&self, income: i64) -> i64 {
+        income * self.skill.air_percent / 100
+    }
+
+    /// An income threshold for naval factories, by its strategy.
+    const fn naval(&self, income: i64) -> i64 {
+        income * self.skill.naval_percent / 100
+    }
+
     /// Decides this tick's orders. Returns nothing on ticks when it is not this team's turn.
     pub fn think(&mut self, world: &SimWorld) -> Vec<SimCommand> {
         if !world.current_tick.is_multiple_of(self.skill.think_interval) || world.match_result.is_some() {
             return Vec::new();
         }
         if self.roster.is_none() {
-            self.roster = Some(Roster::new(world));
+            self.roster = Some(Roster::new(world, self.strategy));
             self.naval_plan = Some(self.plan_naval(world));
         }
         let mut forces = self.survey(world);
@@ -967,11 +1051,73 @@ impl AiBrain {
                 return Some((generator, cell));
             }
         }
+        // Air comes once the land side has its T2 headquarters, or the income for it.
+        let air_choice = || -> Option<(BlueprintId, (u32, u32))> {
+            let air_factory = (0..2)
+                .rev()
+                .map(|tier| roster.air_support_factories[tier])
+                .find(|&blueprint| world.can_build(builder, blueprint) && world.support_allowed(self.team, blueprint))
+                .unwrap_or(roster.air_factory);
+            let air_planned = count_planned(roster.air_factory) + roster.air_support_factories.iter().map(|&blueprint| count_planned(blueprint)).sum::<usize>();
+            let air_wanted = if mass_income >= self.air(SECOND_AIR_FACTORY_INCOME) {
+                self.skill.max_air_factories
+            } else {
+                usize::from(forces.headquarters_tier >= 2 || mass_income >= self.air(AIR_FACTORY_INCOME)).min(self.skill.max_air_factories)
+            };
+            // The first needs no mass in store: it is cheap, and the AI spends all it makes. Nor
+            // do any for a strategy that favours air, which would otherwise never get a second.
+            let air_total = forces.air_factories.len() + air_planned;
+            let affordable = air_total == 0 || self.skill.favours == Favours::Air || economy.mass > Res::from_num(150);
+            if air_total < air_wanted && world.can_build(builder, air_factory) && affordable {
+                if let Some(cell) = self.site_near_home(world, air_factory, 1, planned) {
+                    return Some((air_factory, cell));
+                }
+            }
+            None
+        };
+
+        // On a map with water, a naval factory once the land side has its T2 headquarters, or the income.
+        let naval_choice = || -> Option<(BlueprintId, (u32, u32))> {
+            let naval_factory = (0..2)
+                .rev()
+                .map(|tier| roster.naval_support_factories[tier])
+                .find(|&blueprint| world.can_build(builder, blueprint) && world.support_allowed(self.team, blueprint))
+                .unwrap_or(roster.naval_factory);
+            let naval_planned = count_planned(roster.naval_factory) + roster.naval_support_factories.iter().map(|&blueprint| count_planned(blueprint)).sum::<usize>();
+            let naval_wanted = if mass_income >= self.naval(SECOND_NAVAL_FACTORY_INCOME) {
+                2
+            } else {
+                usize::from(forces.headquarters_tier >= 2 || mass_income >= self.naval(NAVAL_FACTORY_INCOME))
+            };
+            let naval_total = forces.naval_factories.len() + naval_planned;
+            let affordable = naval_total == 0 || self.skill.favours == Favours::Naval || economy.mass > Res::from_num(150);
+            if naval_total < naval_wanted && world.can_build(builder, naval_factory) && affordable {
+                if let Some(cell) = self.naval_site(world, naval_factory, planned) {
+                    return Some((naval_factory, cell));
+                }
+            }
+            None
+        };
+        // A strategy that favours air or naval factories builds them before more extractors.
+        match self.skill.favours {
+            Favours::Air => {
+                if let Some(choice) = air_choice() {
+                    return Some(choice);
+                }
+            }
+            Favours::Naval => {
+                if let Some(choice) = naval_choice() {
+                    return Some(choice);
+                }
+            }
+            Favours::Economy => {}
+        }
         if let Some(cell) = self.nearest_deposit(world, forces, position, is_commander, planned) {
             return Some((roster.extractor, cell));
         }
 
-        let factories_wanted = (1 + mass_income as usize / 10).min(self.skill.max_factories);
+        let factories_wanted = (((1 + mass_income / 10) * self.skill.land_percent + 50) / 100).max(1) as usize;
+        let factories_wanted = factories_wanted.min(self.skill.max_factories);
         // A second factory goes up even in a stall, so that an upgrade never stops all production.
         if factories_total < factories_wanted && (economy.mass > Res::from_num(150) || factories_total < 2) {
             if let Some(cell) = self.site_near_home(world, factory, 1, planned) {
@@ -979,42 +1125,14 @@ impl AiBrain {
             }
         }
 
-        // Air comes once the land side has its T2 headquarters, or the income for it.
-        let air_factory = (0..2)
-            .rev()
-            .map(|tier| roster.air_support_factories[tier])
-            .find(|&blueprint| world.can_build(builder, blueprint) && world.support_allowed(self.team, blueprint))
-            .unwrap_or(roster.air_factory);
-        let air_planned = count_planned(roster.air_factory) + roster.air_support_factories.iter().map(|&blueprint| count_planned(blueprint)).sum::<usize>();
-        let air_wanted = if mass_income >= SECOND_AIR_FACTORY_INCOME {
-            2
-        } else {
-            usize::from(forces.headquarters_tier >= 2 || mass_income >= AIR_FACTORY_INCOME)
-        };
-        // The first needs no mass in store: it is cheap, and the AI spends all it makes.
-        let air_total = forces.air_factories.len() + air_planned;
-        if air_total < air_wanted && world.can_build(builder, air_factory) && (air_total == 0 || economy.mass > Res::from_num(150)) {
-            if let Some(cell) = self.site_near_home(world, air_factory, 1, planned) {
-                return Some((air_factory, cell));
+        if self.skill.favours != Favours::Air {
+            if let Some(choice) = air_choice() {
+                return Some(choice);
             }
         }
-
-        // On a map with water, a naval factory once the land side has its T2 headquarters, or the income.
-        let naval_factory = (0..2)
-            .rev()
-            .map(|tier| roster.naval_support_factories[tier])
-            .find(|&blueprint| world.can_build(builder, blueprint) && world.support_allowed(self.team, blueprint))
-            .unwrap_or(roster.naval_factory);
-        let naval_planned = count_planned(roster.naval_factory) + roster.naval_support_factories.iter().map(|&blueprint| count_planned(blueprint)).sum::<usize>();
-        let naval_wanted = if mass_income >= SECOND_NAVAL_FACTORY_INCOME {
-            2
-        } else {
-            usize::from(forces.headquarters_tier >= 2 || mass_income >= NAVAL_FACTORY_INCOME)
-        };
-        let naval_total = forces.naval_factories.len() + naval_planned;
-        if naval_total < naval_wanted && world.can_build(builder, naval_factory) && (naval_total == 0 || economy.mass > Res::from_num(150)) {
-            if let Some(cell) = self.naval_site(world, naval_factory, planned) {
-                return Some((naval_factory, cell));
+        if self.skill.favours != Favours::Naval {
+            if let Some(choice) = naval_choice() {
+                return Some(choice);
             }
         }
 
@@ -1327,14 +1445,14 @@ impl AiBrain {
             // One upgrade at a time: the first T1 factory to T2, that one to T3, then the rest.
             // A factory upgrades only while another goes on making units: by FAF's costs, an
             // upgrade to T3 takes minutes, and the only factory upgrading left the AI no army.
-            let others_producing = forces.factories.iter().any(|other| other.id != factory.id && other.finished && !other.upgrading);
-            let upgrade_wanted = others_producing && upgrade.is_some_and(|into| {
+            let others_producing = self.skill.upgrade_alone || forces.factories.iter().any(|other| other.id != factory.id && other.finished && !other.upgrading);
+            let upgrade_wanted = others_producing && world.current_tick >= self.skill.first_upgrade_tick && upgrade.is_some_and(|into| {
                 let into = world.blueprints.get(into);
                 let allowed = world.support_allowed(self.team, into.id) && (!into.support || headquarters >= into.tier);
                 let income = match (into.tier, factory.tier < headquarters || factory.support) {
-                    (2, false) => T2_INCOME,
-                    (2, true) => SECOND_T2_INCOME,
-                    _ => T3_INCOME,
+                    (2, false) => self.tech(T2_INCOME),
+                    (2, true) => self.tech(SECOND_T2_INCOME),
+                    _ => self.tech(T3_INCOME),
                 };
                 // An upgrade draws a great deal of energy, so it waits for an economy that can feed it.
                 // Started into a stall, a factory upgrade drags out everything else for minutes.
@@ -1369,7 +1487,6 @@ impl AiBrain {
                 self.unit_counter += 1;
                 let air_threat = self.air_threat(world);
                 let roster = self.roster();
-                let turn = self.unit_counter % 6;
                 // Against aircraft, every fourth unit is anti-air.
                 if drop_squad > 0 {
                     drop_squad -= 1;
@@ -1377,16 +1494,9 @@ impl AiBrain {
                 } else if air_threat && self.unit_counter.is_multiple_of(4) {
                     roster.mobile_anti_air[usize::from(tier >= 2)]
                 } else {
-                match tier {
-                    1 => match self.unit_counter % 4 {
-                        0 => roster.artillery,
-                        2 => roster.medium_tank,
-                        _ => roster.bot,
-                    },
-                    // A mobile shield goes with every six units, to cover the rest, up to two.
-                    2 => [roster.tank, roster.grenadier_walker, roster.tank, roster.amphibious, roster.mobile_shield, roster.missile_launcher][turn as usize],
-                    _ => [roster.heavy_walker, roster.heavy_artillery, roster.siege_walker, roster.tank, roster.mobile_shield, roster.heavy_walker][turn as usize],
-                }
+                // Its strategy's list for the tier, in turn. Mobile shields in it are kept to two.
+                let mix = &roster.land_mix[usize::from(tier.clamp(1, 3)) - 1];
+                mix[self.unit_counter as usize % mix.len()]
                 }
             };
             let item = if item == mobile_shield {
@@ -1476,7 +1586,7 @@ impl AiBrain {
             let upgrade = world.blueprints.get(factory.blueprint).upgrades_to.filter(|&into| {
                 let into = world.blueprints.get(into);
                 // A fleet first: a factory that only upgrades puts nothing on the water.
-                let (income, fleet) = if into.tier == 2 { (NAVAL_T2_INCOME, 3) } else { (NAVAL_T3_INCOME, 6) };
+                let (income, fleet) = if into.tier == 2 { (self.tech(NAVAL_T2_INCOME), 3) } else { (self.tech(NAVAL_T3_INCOME), 6) };
                 world.support_allowed(self.team, into.id) && energy_income >= mass_income * 12 && mass_income >= income && forces.naval_units >= fleet
             });
             let item = match upgrade.filter(|_| !upgrade_under_way) {
@@ -1606,7 +1716,7 @@ impl AiBrain {
             let tier = if factory.support { factory.tier.min(headquarters) } else { factory.tier };
             let upgrade = world.blueprints.get(factory.blueprint).upgrades_to.filter(|&into| {
                 let into = world.blueprints.get(into);
-                let income = if into.tier == 2 { AIR_T2_INCOME } else { AIR_T3_INCOME };
+                let income = if into.tier == 2 { self.tech(AIR_T2_INCOME) } else { self.tech(AIR_T3_INCOME) };
                 // By now mass always runs short, as the AI spends all it makes, so only energy is checked.
                 world.support_allowed(self.team, into.id) && energy_income >= mass_income * 20 && mass_income >= income
             });
@@ -1661,7 +1771,7 @@ impl AiBrain {
         };
         commands.push(SimCommand::AttackMove { units: forces.idle_strike.clone(), goal });
         commands.push(SimCommand::QueueMove { units: forces.idle_strike.clone(), goal: self.home, attack: false });
-        self.air_wave_size = (self.air_wave_size + 2).min(LARGEST_AIR_WAVE);
+        self.air_wave_size = (self.air_wave_size + 2).min(self.skill.largest_air_wave);
     }
 
     /// Extractors near home upgrade first, a few at a time as income grows, unless energy is short.
@@ -1670,7 +1780,7 @@ impl AiBrain {
         let mass_income = self.planned_income((economy.mass_income * 10).to_num::<i64>());
         // Upgrades pay for themselves, so they go ahead while factories spend all the mass, but
         // not into a stall, which would slow everything.
-        if mass_income < EXTRACTOR_T2_INCOME || economy.satisfaction < Res::ONE * 9 / 10 {
+        if mass_income < self.tech(EXTRACTOR_T2_INCOME) || economy.satisfaction < Res::ONE * 9 / 10 {
             return;
         }
         let energy_is_low = economy.energy < economy.energy_capacity * 2 / 5 && economy.energy_demand > economy.energy_income;
@@ -1688,7 +1798,7 @@ impl AiBrain {
         if under_way > mass_income as usize / 25 {
             return;
         }
-        let top = if mass_income >= EXTRACTOR_T3_INCOME { 2 } else { 1 };
+        let top = if mass_income >= self.tech(EXTRACTOR_T3_INCOME) { 2 } else { 1 };
         let next = forces
             .extractor_sites
             .iter()
@@ -2190,9 +2300,14 @@ pub fn play_match(seed: u64, max_ticks: u32, observe: impl FnMut(&SimWorld)) -> 
 }
 
 /// Plays a full AI-vs-AI match on a map, calling `observe` after each tick.
-pub fn play_match_on(map: &MapSource, seed: u64, max_ticks: u32, mut observe: impl FnMut(&SimWorld)) -> MatchRecord {
+pub fn play_match_on(map: &MapSource, seed: u64, max_ticks: u32, observe: impl FnMut(&SimWorld)) -> MatchRecord {
+    play_match_with(map, seed, max_ticks, [Strategy::balanced(); 2], observe)
+}
+
+/// `play_match_on`, with Blue and Red each playing a strategy, both at Normal.
+pub fn play_match_with(map: &MapSource, seed: u64, max_ticks: u32, strategies: [&'static Strategy; 2], mut observe: impl FnMut(&SimWorld)) -> MatchRecord {
     let mut world = map.scenario(seed).world;
-    let mut brains = [AiBrain::new(Team::Blue, seed, world.starts), AiBrain::new(Team::Red, seed, world.starts)];
+    let mut brains = [Team::Blue, Team::Red].map(|team| AiBrain::with_plan(team, seed, world.starts, Difficulty::Normal, strategies[team.index()]));
     let mut record = MatchRecord { seed, ticks: 0, result: None, checksums: Vec::new(), log: Vec::new(), units_built_peak: 0 };
     while world.current_tick < max_ticks && world.match_result.is_none() {
         let commands = advance_ai_vs_ai(&mut world, &mut brains);

@@ -17,6 +17,7 @@ use std::{
 use web_time::Instant;
 
 use crate::ai::{advance_ai_vs_ai, AiBrain, Difficulty};
+use crate::ai_strategy::Strategy;
 use crate::sim::commands::SimCommand;
 use crate::sim::components::Team;
 use crate::sim::scenario::{advance_scripted, Scenario};
@@ -59,8 +60,8 @@ pub enum CommandSource {
     /// `scenario::advance_scripted`, stopping after a fixed number of ticks.
     Script { seed: u64, ticks: u32 },
     /// The player commands Blue through `SimDriver::send`, against a scripted Red that plays
-    /// at `difficulty`.
-    PlayerVsAi { seed: u64, difficulty: Difficulty },
+    /// `strategy` at `difficulty`.
+    PlayerVsAi { seed: u64, difficulty: Difficulty, strategy: &'static Strategy },
     /// Two scripted opponents, stopping after a fixed number of ticks or at the end of the match.
     /// The same match the soak plays for the seed, so watching one replays it.
     AiVsAi { seed: u64, ticks: u32 },
@@ -294,12 +295,12 @@ fn step(world: &mut SimWorld, source: CommandSource, opening: &[SimCommand], com
 
 /// The two AI opponents, for sources that have them.
 fn brains_for(world: &SimWorld, source: CommandSource) -> [AiBrain; 2] {
-    let (seed, difficulty) = match source {
-        CommandSource::PlayerVsAi { seed, difficulty } => (seed, difficulty),
-        CommandSource::AiVsAi { seed, .. } => (seed, Difficulty::Normal),
-        CommandSource::Player | CommandSource::Script { .. } => (0, Difficulty::Normal),
+    let (seed, difficulty, strategy) = match source {
+        CommandSource::PlayerVsAi { seed, difficulty, strategy } => (seed, difficulty, strategy),
+        CommandSource::AiVsAi { seed, .. } => (seed, Difficulty::Normal, Strategy::balanced()),
+        CommandSource::Player | CommandSource::Script { .. } => (0, Difficulty::Normal, Strategy::balanced()),
     };
-    [AiBrain::with_difficulty(Team::Blue, seed, world.starts, difficulty), AiBrain::with_difficulty(Team::Red, seed, world.starts, difficulty)]
+    [Team::Blue, Team::Red].map(|team| AiBrain::with_plan(team, seed, world.starts, difficulty, strategy))
 }
 
 /// Whether a source with a set length has run its course.
