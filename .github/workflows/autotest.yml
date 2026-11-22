@@ -64,15 +64,19 @@ jobs:
       - name: Build
         run: cargo build --locked --release
 
-      # Each must reach its last line, the checksum, and exit cleanly.
+      # Each must draw frames, reach its checksum, and exit cleanly. Software drawing manages a
+      # few frames a second for the match, and far fewer for 5,000 units, so the battle gets
+      # longer and a smaller screen: given half a minute at full size, it drew none.
       - name: A full match, fast-forwarded
         run: |
           xvfb-run -a -s "-screen 0 1280x800x24" ./target/release/sim-engine --autotest 60 --fast-forward 10000 | tee match.txt
+          grep -q "^autotest: [0-9]* frames" match.txt
           grep -q "^autotest: tick" match.txt
 
       - name: The 5,000-unit battle
         run: |
-          xvfb-run -a -s "-screen 0 1280x800x24" ./target/release/sim-engine --battle --autotest 30 | tee battle.txt
+          xvfb-run -a -s "-screen 0 800x500x24" ./target/release/sim-engine --battle --autotest 120 | tee battle.txt
+          grep -q "^autotest: [0-9]* frames" battle.txt
           grep -q "^autotest: tick" battle.txt
 
       - name: Summary

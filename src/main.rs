@@ -479,8 +479,10 @@ impl Autotest {
     fn report(&mut self, result: DriverResult) {
         let mut times = self.frame_times.clone();
         times.sort_unstable();
+        // The checksum says the match played, whether or not a frame was drawn in time.
         if times.is_empty() {
             println!("autotest: no frames recorded");
+            println!("autotest: tick {} checksum {:016x}", result.tick, result.checksum);
             return;
         }
         let at = |percent: usize| times[(times.len() * percent / 100).min(times.len() - 1)].as_secs_f64() * 1000.0;
