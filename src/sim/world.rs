@@ -83,6 +83,11 @@ const BOMB_LIFETIME_TICKS: u32 = 100;
 /// eighth of how far the aircraft flies while the shell is in the air. A strategic bomber at 40
 /// a tick, 25 ticks off, gets 125 more; a gunship hovering over its target, none.
 const FLAK_LEAD_ERROR: i32 = 8;
+/// The same for an anti-air gun's shells, which have no blast to make up for it: a fifth of how far
+/// the aircraft flies while they are in the air. T1 Mobile Anti-Air hits a T1 bomber nearly every
+/// time, a T1 interceptor most times, an air scout more often than not, and a spy plane, the
+/// fastest and highest, next to never. Homing missiles, a SAM's, always hit.
+const GUN_LEAD_ERROR: i32 = 5;
 /// How far off its aim an anti-air gun's burst of rounds still hits an aircraft, beyond the
 /// aircraft's own radius: an aircraft that turns on some ticks and not others is only roughly
 /// where a gun aiming along its turn expects.
@@ -2319,14 +2324,14 @@ impl SimWorld {
             Option<&super::components::Adjacency>,
             Option<&mut super::components::ExtraWeapons>,
             Option<&super::components::Torpedo>,
-            (Option<&super::components::TractorBeam>, Option<&super::components::StunWeapon>, &Order, Option<&Builder>, Option<&super::components::Scatter>, (Option<&mut super::components::Setup>, &Velocity)),
+            (Option<&super::components::TractorBeam>, Option<&super::components::StunWeapon>, &Order, Option<&Builder>, Option<&super::components::Scatter>, (Option<&mut super::components::Setup>, &Velocity, Option<&super::components::NoseGun>)),
         )>();
         let mut view = query.view();
         let disabled = &self.disabled;
         let grabs = &mut self.pending_grabs;
         grabs.clear();
         for (index, &(id, entity)) in units.iter().enumerate() {
-            let (stats, combat, turret, turning, mut discharge, discharge_order, mut launcher, anti_air, bomb_bay, flight, artillery, adjacency, extras, torpedo, (tractor, stun_weapon, order, builder, scatter, (setup, velocity))) =
+            let (stats, combat, turret, turning, mut discharge, discharge_order, mut launcher, anti_air, bomb_bay, flight, artillery, adjacency, extras, torpedo, (tractor, stun_weapon, order, builder, scatter, (setup, velocity, nose_gun))) =
                 view.get_mut(entity).expect("unit list only holds live units");
             combat.ticks_until_ready = combat.ticks_until_ready.saturating_sub(1);
             // Artillery that sets up counts down only while it stands still. Its velocity is its
@@ -2356,6 +2361,12 @@ impl SimWorld {
             // Guns sit on top of a unit, not in its middle, which lets a ship fire over a bank and
             // a tank over a low rise.
             let muzzle = me.z.saturating_add(me.radius);
+            // How far off a target is for its weapons' reach: across the ground, and for an
+            // aircraft in flight, up to it as well, so that what flies higher is out of reach sooner.
+            let reach_distance = |entry: &super::spatial::GridEntry| {
+                let up = if entry.is_air { i64::from(entry.z.saturating_sub(muzzle)) } else { 0 };
+                squared_distance(entry.x, entry.y) + up * up
+            };
             // Range reaches the edge of a target, so that large structures can be hit from their range.
             // A cloaked enemy it cannot see is no target, even in plain sight.
             let hidden = |id: SimId| concealed[stats.team.index()].binary_search(&id).is_ok();
@@ -2395,7 +2406,7 @@ impl SimWorld {
             };
             let can_engage = |entry: &super::spatial::GridEntry| {
                 let reach = range + i64::from(entry.radius);
-                squared_distance(entry.x, entry.y) <= reach * reach
+                reach_distance(entry) <= reach * reach
                     && far_enough(squared_distance(entry.x, entry.y))
                     && can_hit(entry)
                     && sensed(entry)
@@ -2472,7 +2483,7 @@ impl SimWorld {
                         let radius = ring.min(range);
                         let mut best: Option<(u8, i64, SimId)> = None;
                         let mut consider = |other: &super::spatial::GridEntry| {
-                            let distance = squared_distance(other.x, other.y);
+                            let distance = reach_distance(other);
                             let reach = radius + i64::from(other.radius);
                             let visible = sensed(other) && !hidden(other.id);
                             if distance <= reach * reach && far_enough(distance) && visible && blocked != Some(other.id) && can_hit(other) {
@@ -2536,7 +2547,16 @@ impl SimWorld {
             };
             // A turret swivels to its target, or back to where it rests without one, and only fires once it points there.
             let aimed = match turret {
-                None => true,
+                // A gun fixed to the nose fires only at what is within its arc of straight ahead.
+                None => nose_gun.zip(front).is_none_or(|(arc, front)| {
+                    aim_point.is_some_and(|(x, y)| {
+                        let away = Vec2Fp::new(Fp::from_bits(x - gun.0), Fp::from_bits(y - gun.1));
+                        away != Vec2Fp::ZERO && {
+                            let away = away.normalized();
+                            front.x * away.x + front.y * away.y >= arc.0
+                        }
+                    })
+                }),
                 Some(turret) => {
                     let toward = |(x, y): (i32, i32)| {
                         let away = Vec2Fp::new(Fp::from_bits(x - gun.0), Fp::from_bits(y - gun.1));
@@ -2593,8 +2613,9 @@ impl SimWorld {
                 let step = turning.facing.scaled(speed);
                 Vec3Fp::new(step.x, step.y, Fp::ZERO)
             });
-            // It bombs only from its flying height, not while taking off or landing.
-            let at_height = flight.is_none_or(|flight| flight.altitude >= flight.elevation);
+            // It bombs only from the height it is flying at, half its elevation out of fuel, not
+            // while taking off or landing.
+            let at_height = flight.is_none_or(|flight| flight.altitude >= flight.cruising_height());
             let raw = |x: i32, y: i32, z: i32| Vec3Fp::new(Fp::from_bits(x), Fp::from_bits(y), Fp::from_bits(z));
             // A bomber lets go only when its bomb would land on the target.
             let splash = combat.projectile_splash;
@@ -2749,7 +2770,7 @@ impl SimWorld {
                         } else {
                             weapon.hits_ground || (weapon.torpedo && entry.is_naval)
                         };
-                        squared_distance(entry.x, entry.y) <= within * within
+                        reach_distance(entry) <= within * within
                             && hit
                             && sensed(entry)
                             && !hidden(entry.id)
@@ -2960,12 +2981,13 @@ impl SimWorld {
                 }
                 (None, None) => shot.to,
             };
-            // Flak scatters the more, the faster the aircraft and the longer the shell is in the
-            // air: the guess at where it will be is only as good as its course is steady.
+            // Flak and anti-air guns scatter the more, the faster the aircraft and the longer the
+            // shell is in the air: the guess at where it will be is only as good as its course is
+            // steady.
             let spread = match (flak_ticks, target_velocity) {
-                (Some(ticks), Some(velocity)) if shot.flak => {
+                (Some(ticks), Some(velocity)) => {
                     let speed = sqrt_wide(velocity.xy().length_squared());
-                    shot.spread + speed * i32::try_from(ticks).unwrap_or(i32::MAX) / FLAK_LEAD_ERROR
+                    shot.spread + speed * i32::try_from(ticks).unwrap_or(i32::MAX) / if shot.flak { FLAK_LEAD_ERROR } else { GUN_LEAD_ERROR }
                 }
                 _ => shot.spread,
             };

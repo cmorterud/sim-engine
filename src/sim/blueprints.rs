@@ -307,6 +307,10 @@ pub struct WeaponDef {
     /// Artillery that must set up before it fires: it stands still this long first, and moving
     /// at all packs it up again. Zero fires on the move.
     pub setup_ticks: u32,
+    /// A gun fixed to the nose, as a fighter's: it fires only at what is within this of straight
+    /// ahead, as the cosine of the half-angle (`arc` in the unit data, in degrees). None for one
+    /// that fires in any direction.
+    pub arc: Option<Fp>,
 }
 
 /// A storm a unit leaves where it is destroyed (GAME_SPECIFICATION.md §12), that roams on its
@@ -575,6 +579,8 @@ struct RawWeapon {
     aft: bool,
     /// Artillery only: ticks it stands still before it can fire.
     setup_ticks: Option<u32>,
+    /// Degrees either side of the nose a fixed gun fires within.
+    arc: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -944,6 +950,12 @@ impl BlueprintDb {
                 if weapon.setup_ticks.is_some() && !weapon.artillery {
                     return Err(context("only artillery sets up before it fires".into()));
                 }
+                if weapon.arc.is_some() && weapon.turn_rate.is_some() {
+                    return Err(context("a gun with a turn_rate swivels, so it has no fixed arc".into()));
+                }
+                if weapon.arc.is_some_and(|degrees| !(1..=90).contains(&degrees)) {
+                    return Err(context("a fixed gun's arc is from 1 to 90 degrees either side of the nose".into()));
+                }
                 let mount = match &weapon.mount {
                     None => [Fp::ZERO; 2],
                     Some([right, forward]) => [right.fp().map_err(context)?, forward.fp().map_err(context)?],
@@ -985,6 +997,7 @@ impl BlueprintDb {
                     mount,
                     aft: weapon.aft,
                     setup_ticks: weapon.setup_ticks.unwrap_or(0),
+                    arc: weapon.arc.map(|degrees| crate::math::fp::cos_sin_tenths_of_degree(degrees * 10).0),
                 })
             };
             let weapon = unit.weapon.as_ref().map(parse_weapon).transpose()?;

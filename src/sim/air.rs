@@ -14,6 +14,9 @@ use crate::math::fp::{fp_int, wide_mul, Fp, Vec2Fp, Vec3Fp};
 /// what shells use here.
 pub const BOMB_GRAVITY: Fp = Fp::from_bits(GRAVITY_RAW * 10);
 
+/// Pi, in raw `Fp` bits.
+const PI_RAW: i32 = 12_868;
+
 /// Ticks of straight flight a bomber leaves itself, after turning round, to settle on the line
 /// to its target before it must let go.
 const BOMB_RUN_UP_TICKS: i32 = 10;
@@ -280,7 +283,20 @@ impl SimWorld {
             let (cell_x, cell_y) = terrain.cell_of(here);
             let over_structure = idle && occupancy.contains_key(&((cell_y * terrain.cells_per_side() + cell_x) as u32));
             // Out of fuel, it flies at half its height and speed.
-            let (top_speed, height) = if flight.out_of_fuel() { (stats.max_speed / 2, flight.elevation / 2) } else { (stats.max_speed, flight.elevation) };
+            let (top_speed, height) = (if flight.out_of_fuel() { stats.max_speed / 2 } else { stats.max_speed }, flight.cruising_height());
+            // A fighter in range behind an aircraft it attacks eases off to the speed its target
+            // flies away from it, to stay on its tail rather than overshoot and loop round; never
+            // below half its own, and it still turns no faster than it can.
+            let tailing = chasing.filter(|_| bomb_bay.is_none() && !flight.hovers).and_then(locate).filter(|entry| entry.is_air).and_then(|entry| {
+                let offset = Vec2Fp::new(Fp::from_bits(entry.x), Fp::from_bits(entry.y)) - here;
+                let facing = turning.facing;
+                let reach = combat.range * 3 / 4;
+                let behind = facing.x * offset.x + facing.y * offset.y > Fp::ZERO && offset.length_squared() <= wide_mul(reach, reach);
+                behind.then(|| {
+                    let away = facing.x * Fp::from_bits(entry.velocity[0]) + facing.y * Fp::from_bits(entry.velocity[1]);
+                    away.clamp(top_speed / 2, top_speed)
+                })
+            });
             let down = |value: Fp, full: Fp, floor: Fp| (value - full / LANDING_TICKS).max(floor);
             let up = |value: Fp, full: Fp, ceiling: Fp| if value > ceiling { down(value, full, ceiling) } else { (value + full / LANDING_TICKS).min(ceiling) };
             if landing {
@@ -290,7 +306,7 @@ impl SimWorld {
                 flight.speed = down(flight.speed, stats.max_speed, Fp::ZERO);
                 flight.altitude = up(flight.altitude, flight.elevation, height);
             } else {
-                flight.speed = up(flight.speed, stats.max_speed, top_speed);
+                flight.speed = up(flight.speed, stats.max_speed, tailing.unwrap_or(top_speed));
                 flight.altitude = up(flight.altitude, flight.elevation, height);
             }
             // Flying burns fuel, and on the ground it slowly comes back.
@@ -304,12 +320,25 @@ impl SimWorld {
             // A bomber lets go well short of its target, its bomb's throw ahead, so it flies on
             // far enough past to turn round and line up for that again: twice round its turn,
             // then the throw, then a run-up to settle on the line.
-            let break_off = if bomb_bay.is_some() {
-                let throw = bomb_throw(flight.elevation, stats.max_speed);
-                flight.break_off.max(throw + radius.saturating_mul(fp_int(2)) + stats.max_speed.saturating_mul(fp_int(BOMB_RUN_UP_TICKS)))
-            } else {
-                flight.break_off
+            let throw = bomb_bay.map(|_| bomb_throw(flight.elevation, stats.max_speed));
+            let break_off = match throw {
+                Some(throw) => {
+                    // Room to line up again, however tight its turn: a target moving across its
+                    // path needs a straight run at it.
+                    let run_up = stats.max_speed.saturating_mul(fp_int(BOMB_RUN_UP_TICKS));
+                    flight.break_off.max(throw + radius.saturating_mul(fp_int(2)).max(run_up) + run_up)
+                }
+                None => flight.break_off,
             };
+            // And further still while it would be back where it lets go before its bomb is ready,
+            // round half its turn and back less the throw, rather than pass over unready and go
+            // round again: a bomber that turns quicker than it reloads wastes no passes.
+            let unready_reach = throw.and_then(|throw| {
+                let half_turn = Fp::from_bits(PI_RAW).saturating_div(turning.max_turn).to_num::<i32>();
+                // With a run-up to spare, as when lining up: it is ready before it gets there.
+                let spare = i32::try_from(combat.ticks_until_ready).unwrap_or(i32::MAX).saturating_add(BOMB_RUN_UP_TICKS).saturating_sub(half_turn);
+                (spare > 0).then(|| throw.saturating_add(stats.max_speed.saturating_mul(fp_int(spare))))
+            });
             let facing = turning.facing;
             turning.facing = match heading_for {
                 Some(point) => {
@@ -318,7 +347,8 @@ impl SimWorld {
                     if !attacking || flight.hovers {
                         flight.breaking_off = false;
                     } else if flight.breaking_off {
-                        flight.breaking_off = distance_squared < wide_mul(break_off, break_off);
+                        let out = unready_reach.map_or(break_off, |reach| reach.max(break_off));
+                        flight.breaking_off = distance_squared < wide_mul(out, out);
                     } else {
                         // Once over the target and past it, fly on for a run-up to the next pass.
                         let behind = facing.x * offset.x + facing.y * offset.y <= Fp::ZERO;

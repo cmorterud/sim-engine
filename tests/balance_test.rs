@@ -157,3 +157,52 @@ fn missile_launchers_lose_to_artillery_and_the_line_but_break_a_t2_position() {
     assert!(result.broken && result.seconds <= target_number("missiles", "siege_seconds_max"), "{count} launchers broke the position: {}, in {:.0} s", result.broken, result.seconds);
     assert!(result.losses < 0.01, "and lost {:.0}%", result.losses * 100.0);
 }
+
+/// T1 air is what its rules derive ([air] and [kills]): the derivation, run on the unit data,
+/// changes nothing.
+#[test]
+fn t1_air_is_what_its_rules_derive() {
+    let standard = BlueprintDb::standard();
+    let derived = sim_engine::balance::derive_t1_air(&standard);
+    for key in ["t1_bomber", "t1_interceptor", "t1_mobile_aa"] {
+        let (now, rule) = (standard.get(standard.id(key)), derived.get(derived.id(key)));
+        assert_eq!((now.mass, now.energy, now.build_time, now.health), (rule.mass, rule.energy, rule.build_time, rule.health), "{key}");
+        assert_eq!(now.weapon.map(|weapon| weapon.damage), rule.weapon.map(|weapon| weapon.damage), "{key}'s damage");
+    }
+}
+
+/// The T1 air rules' fights: five bombers on a commander holding its ground, an interceptor on a
+/// bomber's tail, an army a fifth anti-air against bombers, and anti-air alone against them.
+#[test]
+fn t1_air_meets_its_rules_in_the_duels() {
+    use sim_engine::balance::{bought, escorted_army, mirrored_armies, one, strike_seconds, target_number, target_number_range};
+    let db = db();
+    let raid = mirrored(&db, Side { count: 5, ..one(&db, "t1_bomber") }, Side { tactics: Tactics::Hold, ..one(&db, "command_rig") }, 1.0);
+    let (low, high) = target_number_range("air", "commander_seconds_five_bombers_t1");
+    assert!(raid.finished && (low..=high).contains(&raid.seconds), "five bombers take {} s on a commander", raid.seconds);
+    let caught = strike_seconds(&db, one(&db, "t1_interceptor"), one(&db, "t1_bomber"));
+    let wanted = target_number("air", "interceptor_seconds_per_bomber_t1");
+    assert!((caught - wanted).abs() <= wanted * 0.2, "an interceptor takes {caught} s on a bomber");
+    let materiel = target_number("air", "check_materiel");
+    let escorted = mirrored_armies(&db, &escorted_army(&db, materiel, target_number("air", "anti_air_escort_share")), &[bought(&db, "t1_bomber", materiel)], 1.0);
+    assert!(escorted.score.abs() <= target_number("counters", "even_margin"), "an escorted army scores {} against bombers", escorted.score);
+    let pure = mirrored(&db, bought(&db, "t1_mobile_aa", materiel), bought(&db, "t1_bomber", materiel), 1.0);
+    assert!(pure.score >= target_number("air", "anti_air_keeps_min"), "anti-air alone scores {} against bombers", pure.score);
+}
+
+/// Mobile Anti-Air is no cheaper a shield than the anchor, and fighters out-turn the T1 bomber.
+#[test]
+fn anti_air_is_no_better_a_shield_and_fighters_out_turn_bombers() {
+    use sim_engine::balance::target_number;
+    let db = db();
+    let per_mass = |key: &str| db.get(db.id(key)).health.to_num::<f64>() / db.get(db.id(key)).mass.to_num::<f64>();
+    assert!(per_mass("t1_mobile_aa") <= per_mass("t1_medium_tank") * 1.01, "anti-air has {} health a mass", per_mass("t1_mobile_aa"));
+    let targets: toml::Table = include_str!("../data/balance_targets.toml").parse().expect("valid targets");
+    let turn = |key: &str| f64::from(db.get(db.id(key)).flight.unwrap_or_else(|| panic!("{key} flies")).turn_rate);
+    let fighters = targets["air"]["fighters"].as_array().expect("a list of fighters");
+    assert!(fighters.len() >= 3);
+    for fighter in fighters {
+        let key = fighter.as_str().expect("a unit key");
+        assert!(turn(key) >= turn("t1_bomber") * target_number("air", "fighter_turn_over_t1_bomber"), "{key} turns at {}", turn(key));
+    }
+}

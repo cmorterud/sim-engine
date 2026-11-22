@@ -98,9 +98,10 @@ Usage: sim-engine [options]
   --soak <matches>     Play and replay AI-vs-AI matches, and report on the exit criteria
   --threads <n>        Threads for --soak (default 6)
   --balance            Measure the unit data with the balance harness's duels (BALANCE.md)
-  --balance-derive <t1|t2|t3>
-                       Derive a tier of land units' numbers from data/balance_targets.toml,
-                       priced by duels against the tiers below as the unit data has them
+  --balance-derive <t1|t2|t3|t1-air>
+                       Derive a tier of land units' numbers, or T1 air's, from
+                       data/balance_targets.toml, priced by duels against the tiers below as
+                       the unit data has them
   --no-tick-gate       With --soak, report tick times without failing on them, for
                        shared machines such as CI runners
   --seed <number>      Scenario seed
@@ -378,7 +379,8 @@ fn main() {
             "t1" => sim_engine::balance::derive_t1_report(),
             "t2" => sim_engine::balance::derive_t2_report(),
             "t3" => sim_engine::balance::derive_t3_report(),
-            other => println!("--balance-derive takes t1, t2, or t3, not {other}"),
+            "t1-air" => sim_engine::balance::derive_t1_air_report(),
+            other => println!("--balance-derive takes t1, t2, t3, or t1-air, not {other}"),
         }
         return;
     }

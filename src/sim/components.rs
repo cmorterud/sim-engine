@@ -328,6 +328,11 @@ impl Flight {
     pub fn out_of_fuel(&self) -> bool {
         self.fuel == 0
     }
+
+    /// The height it flies at above the ground: its elevation, or half that out of fuel.
+    pub fn cruising_height(&self) -> Fp {
+        if self.out_of_fuel() { self.elevation / 2 } else { self.elevation }
+    }
 }
 
 /// A unit's weapons beyond its main one, such as a battleship's other guns or a bomber's anti-air
@@ -369,6 +374,11 @@ pub struct Artillery {
     pub spread: Fp,
     pub energy_per_shot: super::blueprints::Res,
 }
+
+/// A gun fixed to the nose, a fighter's (`WeaponDef::arc`): it fires only at what is within its
+/// arc of straight ahead, the cosine of the arc's half-angle, so the aircraft must face its target.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct NoseGun(pub Fp);
 
 /// Artillery that sets up before it fires (`WeaponDef::setup_ticks`). It is packed up when
 /// built, and any movement of its own packs it up again.

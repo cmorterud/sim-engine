@@ -36,6 +36,11 @@ fn run(world: &mut SimWorld, ticks: u32) {
     }
 }
 
+/// The air scout's flying height, as the unit data has it.
+fn scout_height(world: &SimWorld) -> Fp {
+    world.blueprints.get(world.blueprints.id("t1_air_scout")).flight.expect("the scout flies").elevation
+}
+
 fn distance(world: &SimWorld, id: SimId, to: Vec2Fp) -> i64 {
     let at = world.unit_position(id).unwrap().xy();
     let (dx, dy) = (i64::from((at.x - to.x).to_num::<i32>()), i64::from((at.y - to.y).to_num::<i32>()));
@@ -55,7 +60,7 @@ fn aircraft_fly_over_walls_at_their_height_and_land_where_they_were_sent() {
         world.advance_tick(&[]);
         let at = world.unit_position(scout).unwrap();
         let idle = world.unit_order(scout).unwrap().kind == OrderKind::Idle;
-        assert!(idle || at.z == world.terrain.height_at(at.xy()) + fp_int(320), "it flies at its own height");
+        assert!(idle || at.z == world.terrain.height_at(at.xy()) + scout_height(&world), "it flies at its own height");
         idle
     });
     assert!(arrived.is_some(), "it should get there");
@@ -71,7 +76,7 @@ fn aircraft_fly_over_walls_at_their_height_and_land_where_they_were_sent() {
     world.advance_tick(&[SimCommand::Move { units: vec![scout], goal: point(1_000, 2_500) }]);
     run(&mut world, 40);
     let at = world.unit_position(scout).unwrap();
-    assert_eq!(at.z, world.terrain.height_at(at.xy()) + fp_int(320), "back at its height");
+    assert_eq!(at.z, world.terrain.height_at(at.xy()) + scout_height(&world), "back at its height");
 }
 
 #[test]
@@ -90,7 +95,7 @@ fn aircraft_with_nowhere_to_land_circle() {
     }
     assert!(moved > 200 * 30, "it never stops: {moved}");
     let at = world.unit_position(scout).unwrap();
-    assert_eq!(at.z, world.terrain.height_at(at.xy()) + fp_int(320));
+    assert_eq!(at.z, world.terrain.height_at(at.xy()) + scout_height(&world));
 }
 
 #[test]
@@ -137,8 +142,9 @@ fn interceptors_shoot_down_aircraft() {
     let interceptor = spawn(&mut world, "t1_interceptor", Team::Blue, point(2_200, 2_300));
     // Kept in the air by an order. A landed aircraft is safe from interceptors.
     world.advance_tick(&[SimCommand::Follow { units: vec![bomber], target: interceptor }]);
-    // 215 health at 50 a second: about five seconds once in range.
-    run(&mut world, 150);
+    // 215 health at 50 a second is about five seconds of fire, once its nose is round on the
+    // bomber, which circles after it: its guns are fixed to face forward.
+    run(&mut world, 250);
     assert!(world.unit_health(bomber).is_none(), "the bomber should be shot down");
     assert!(world.unit_health(interceptor).is_some());
 }
@@ -157,10 +163,31 @@ fn anti_air_on_the_ground_shoots_down_aircraft() {
     let mobile = spawn(&mut world, "t1_mobile_aa", Team::Blue, point(2_000, 2_500));
     let interceptor = spawn(&mut world, "t1_interceptor", Team::Red, point(2_300, 2_500));
     world.advance_tick(&[SimCommand::Follow { units: vec![interceptor], target: mobile }]);
-    // 295 health at 26 a second.
-    run(&mut world, 200);
+    // Its shells miss an interceptor about as often as not, so twice its steady fire's time, and
+    // a few seconds to get it in range.
+    let gun = world.blueprints.get(world.blueprints.id("t1_mobile_aa")).weapon.expect("anti-air has a gun");
+    let health = world.unit_health(interceptor).expect("alive").to_num::<f64>();
+    let seconds = health / (gun.damage.to_num::<f64>() * 10.0 / f64::from(gun.reload_ticks));
+    run(&mut world, ((seconds * 2.0 + 5.0) * 10.0) as u32);
     assert!(world.unit_health(interceptor).is_none(), "mobile anti-air should shoot the interceptor down");
     assert!(world.unit_health(mobile).is_some());
+}
+
+/// Out of fuel, a bomber flies low and slow, and still bombs from there.
+#[test]
+fn a_bomber_out_of_fuel_still_bombs() {
+    let mut world = world();
+    let generator = world.spawn_finished_structure(world.blueprints.id("power_generator"), Team::Red, 150, 125).unwrap();
+    let bomber = spawn(&mut world, "t1_bomber", Team::Blue, point(1_000, 1_000));
+    world.advance_tick(&[SimCommand::Attack { units: vec![bomber], target: generator }]);
+    set_fuel(&mut world, bomber, 1);
+    let health = world.blueprints.get(world.blueprints.id("power_generator")).health;
+    let hit = (0..600).find(|_| {
+        world.advance_tick(&[]);
+        world.unit_health(generator).is_none_or(|now| now < health)
+    });
+    assert!(flight(&world, bomber).out_of_fuel());
+    assert!(hit.is_some(), "a bomb should land within a minute");
 }
 
 #[test]
@@ -270,7 +297,7 @@ fn aircraft_burn_fuel_in_the_air_and_fly_low_and_slow_without_it() {
     run(&mut world, 40);
     let at = world.unit_position(scout).unwrap();
     assert!(flight(&world, scout).out_of_fuel());
-    assert_eq!(at.z, world.terrain.height_at(at.xy()) + fp_int(160), "half its height");
+    assert_eq!(at.z, world.terrain.height_at(at.xy()) + scout_height(&world) / 2, "half its height");
     assert_eq!(flight(&world, scout).speed, fp_int(19), "half its speed");
     // Landed, the tank slowly fills again.
     world.advance_tick(&[SimCommand::Stop { units: vec![scout] }]);
@@ -560,4 +587,51 @@ fn aircraft_in_flight_keep_apart() {
     }
     let radius = world.blueprints.get(world.blueprints.id("t1_interceptor")).radius.to_num::<i64>();
     assert!(closest >= radius * 2, "they stay at least their width apart, not {closest}");
+}
+
+/// A fighter chasing a slower aircraft eases off to its speed once in range behind it, and stays
+/// on its tail, firing, until it is down, rather than flying past it and looping round.
+#[test]
+fn a_fighter_stays_on_a_slower_aircrafts_tail_until_it_is_down() {
+    let mut world = world();
+    // Tough enough for a long chase, so that flying past would show, and short enough to end
+    // before the bomber reaches the end of its move and lands.
+    let id = world.blueprints.id("t1_bomber");
+    world.blueprints = std::sync::Arc::new(world.blueprints.with_unit(id, |unit| unit.health = fp_int(800)));
+    let bomber = spawn(&mut world, "t1_bomber", Team::Red, point(500, 2_500));
+    let interceptor = spawn(&mut world, "t1_interceptor", Team::Blue, point(100, 2_500));
+    world.advance_tick(&[SimCommand::Move { units: vec![bomber], goal: point(5_000, 2_500) }]);
+    world.advance_tick(&[SimCommand::Attack { units: vec![interceptor], target: bomber }]);
+    let reach = world.blueprints.get(world.blueprints.id("t1_interceptor")).weapon.expect("interceptors have a gun").range.to_num::<i64>();
+    let gap = |world: &SimWorld| (world.unit_position(bomber).unwrap().x - world.unit_position(interceptor).unwrap().x).to_num::<i64>();
+    let down = (0..400).find(|&tick| {
+        world.advance_tick(&[]);
+        if world.unit_health(bomber).is_none() {
+            return true;
+        }
+        let behind = gap(&world);
+        assert!(behind > 0, "the fighter flew past the bomber at tick {tick}");
+        assert!(tick < 30 || behind <= reach, "the fighter fell out of range at tick {tick}, {behind} behind");
+        false
+    });
+    assert!(down.is_some(), "the bomber went down");
+}
+
+/// Each aircraft flies at its share of the T3 spy plane's height ([air.heights] in
+/// data/balance_targets.toml), and the spy plane flies highest of all.
+#[test]
+fn aircraft_fly_at_their_shares_of_the_spy_planes_height() {
+    let targets: toml::Table = include_str!("../data/balance_targets.toml").parse().expect("valid targets");
+    let db = sim_engine::sim::blueprints::BlueprintDb::standard();
+    let height = |key: &str| db.get(db.id(key)).flight.unwrap_or_else(|| panic!("{key} flies")).elevation.to_num::<f64>();
+    let top = height("t3_spy_plane");
+    let shares = targets["air"]["heights"].as_table().expect("[air.heights]");
+    assert!(shares.len() >= 10, "only {} heights", shares.len());
+    for (key, share) in shares {
+        let share = share.as_float().expect("a share");
+        assert!((height(key) - top * share).abs() <= 1.0, "{key} flies at {}, not {share} of {top}", height(key));
+    }
+    for unit in db.iter().filter(|unit| unit.flight.is_some() && unit.key != "t3_spy_plane") {
+        assert!(height(&unit.key) < top, "{} flies as high as the spy plane", unit.key);
+    }
 }

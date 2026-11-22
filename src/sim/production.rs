@@ -485,6 +485,9 @@ impl SimWorld {
                 self.ecs.insert_one(entity, super::components::Setup::packed(weapon.setup_ticks)).expect("entity was just spawned");
             }
         }
+        if let Some(arc) = unit.weapon.and_then(|weapon| weapon.arc) {
+            self.ecs.insert_one(entity, super::components::NoseGun(arc)).expect("entity was just spawned");
+        }
         if let Some(weapon) = unit.weapon.filter(|weapon| weapon.stun_ticks > 0) {
             self.ecs.insert_one(entity, super::components::StunWeapon(weapon.stun_ticks)).expect("entity was just spawned");
         }

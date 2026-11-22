@@ -176,6 +176,7 @@ wide = ["t2_artillery", "t3_artillery", "t3_mobile_artillery", "t3_strategic_bom
 # cannot: the strategic bomber is the T3 snipe weapon, fast, with one great bomb a pass, countered
 # by T3 fighters and SAMs; the tactical missile launcher snipes too, countered by missile defense.
 # The commander, tough against everything else, falls only to these.
+t1_bomber = { t1_medium_tank = 2, t1_mobile_aa = 2 }
 t3_strategic_bomber = { t3_heavy_walker = 1, t3_siege_walker = 3, t3_mobile_artillery = 1, t2_artillery = 2, command_rig = 4 }
 tactical_missile_launcher = { field_rig = 2, command_rig = 2 }
 # Mobile Heavy Artillery is a glass cannon: it survives one shell from another of its kind, but not
@@ -189,6 +190,53 @@ t3_mobile_artillery = { t3_mobile_artillery = 2, t1_medium_tank = 1 }
 t3_artillery_kills_every_t3_land_unit = true
 t3_artillery_spread = [150, 200]
 t2_artillery_spread = [40, 60]
+
+[air]
+# Air against land (2026-11-21). T1 air is set by these rules and [kills], one number each, not by
+# a strength solved for: anti-air is a hard counter, and bombers punish what has none.
+# A T1 tank takes two bombs ([kills]), one bomber's two passes or two bombers' one, and five T1
+# bombers destroy a lone commander, holding its ground, in about a minute (79 s accepted,
+# 2026-11-22: bombers keep a straight run at their target, however tight their turn, so that
+# none skips a pass). The commander's health is set by the
+# snipe rules ([kills]), so the bomb is as big as the tank's two allows: the tank has this many
+# bombs' worth of health, just over one.
+line_health_over_bomb = 1.025
+commander_seconds_five_bombers_t1 = [55, 85]
+# Mobile Anti-Air takes two bombs ([kills]): this many bombs' worth of health, in the middle of
+# that. It has the anchor's health per mass, so that it is no cheaper a shield than a tank.
+anti_air_health_over_bomb = 1.5
+# One interceptor on a bomber's tail destroys it in about this long: what sets a bomber's health.
+interceptor_seconds_per_bomber_t1 = 10
+# A land army this share anti-air, by materiel, comes out about even with an equal materiel of
+# bombers ([counters] even_margin): what sets Mobile Anti-Air's gun.
+anti_air_escort_share = 0.2
+# Checks. Bombers destroy an equal materiel with no anti-air within a tier fight's time ([pace]),
+# at a tier fight's size, ten anchors a side: bigger groups of bombers take longer, as more of
+# their bombs fall on the same targets. Pure anti-air keeps at least this share against an equal materiel of bombers.
+strike_seconds_t1 = [25, 45]
+anti_air_keeps_min = 0.7
+# The materiel a side for these fights, enough that a fifth of it is several anti-air.
+check_materiel = 3000
+
+# Fighters out-turn what they hunt, by at least this multiple of the T1 bomber's turn rate, so that
+# a bomber cannot shake one off its tail (2026-11-22).
+fighter_turn_over_t1_bomber = 1.5
+fighters = ["t1_interceptor", "t2_fighter_bomber", "t3_air_superiority"]
+
+# Flying heights, as shares of the T3 spy plane's, the highest (2026-11-22): the spy plane far up,
+# fighters and the heavy bombers below it, light aircraft lower, and what hovers lowest.
+[air.heights]
+t3_air_superiority = 0.8
+t2_fighter_bomber = 0.8
+t3_strategic_bomber = 0.8
+t2_gunship = 0.45
+t3_heavy_gunship = 0.45
+t1_light_transport = 0.45
+t2_transport = 0.45
+t3_heavy_transport = 0.45
+t1_air_scout = 0.7
+t1_bomber = 0.6
+t1_interceptor = 0.6
 
 [counters]
 # In an equal-materiel fight, the share of its army a designed winner keeps.

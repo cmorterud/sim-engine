@@ -43,6 +43,8 @@ pub enum Tactics {
     /// spacing; close in on the enemy without stopping to fire, firing on the way; and pull back
     /// any unit under 30% health.
     Micro,
+    /// No orders: it stays where it is and fights what comes, as a commander caught in its base.
+    Hold,
 }
 
 /// How far off the straight line a micro unit weaves as it closes, as the tangent of the angle.
@@ -69,19 +71,22 @@ pub struct DuelResult {
 /// Each side's units have `health[team]` times their health, so that a break-even can be found
 /// smoothly; whole unit counts would make it jump.
 pub fn duel(db: &Arc<BlueprintDb>, blue: Side, red: Side, health: [f64; 2]) -> DuelResult {
-    duel_in(db, blue, red, health, LAYOUTS[0])
+    duel_in(db, &[blue], &[red], health, LAYOUTS[0])
 }
 
-/// A duel in one starting layout: `(extra gap, Red's sideways offset)`.
-fn duel_in(db: &Arc<BlueprintDb>, blue: Side, red: Side, health: [f64; 2], layout: (i32, i32)) -> DuelResult {
+/// A duel in one starting layout: `(extra gap, Red's sideways offset)`. Each team may be several
+/// groups, an army with its escort, each in its own block behind the one before.
+fn duel_in(db: &Arc<BlueprintDb>, blue: &[Side], red: &[Side], health: [f64; 2], layout: (i32, i32)) -> DuelResult {
     let config = SimConfig { map_units: MAP_UNITS, terrain: TerrainStyle::Flat, fog_of_war: false, ..SimConfig::default() };
     let mut world = SimWorld::new(config, 1);
     world.blueprints = Arc::clone(db);
     let middle = MAP_UNITS / 2;
     let gap = START_GAP + layout.0;
     let (west, east) = (middle - gap / 2, middle + gap / 2);
-    let blue_ids = spawn_group(&mut world, blue, Team::Blue, west, -1, 0);
-    let red_ids = spawn_group(&mut world, red, Team::Red, east, 1, layout.1);
+    let blue_groups = spawn_team(&mut world, blue, Team::Blue, west, -1, 0);
+    let red_groups = spawn_team(&mut world, red, Team::Red, east, 1, layout.1);
+    let all = |groups: &[(Side, Vec<SimId>)]| groups.iter().flat_map(|(_, ids)| ids.iter().copied()).collect::<Vec<SimId>>();
+    let (blue_ids, red_ids) = (all(&blue_groups), all(&red_groups));
     let homes = [west - gap / 2, east + gap / 2];
     for (ids, scale) in [(&blue_ids, health[0]), (&red_ids, health[1])] {
         if scale == 1.0 {
@@ -95,9 +100,10 @@ fn duel_in(db: &Arc<BlueprintDb>, blue: Side, red: Side, health: [f64; 2], layou
         }
     }
     let goal = |x: i32| Vec2Fp::new(fp_int(x), fp_int(middle));
+    let moving = |groups: &[(Side, Vec<SimId>)]| groups.iter().filter(|(side, _)| side.tactics != Tactics::Hold).flat_map(|(_, ids)| ids.iter().copied()).collect::<Vec<SimId>>();
     world.advance_tick(&[
-        SimCommand::AttackMove { units: blue_ids.clone(), goal: goal(east + gap / 2) },
-        SimCommand::AttackMove { units: red_ids.clone(), goal: goal(west - gap / 2) },
+        SimCommand::AttackMove { units: moving(&blue_groups), goal: goal(east + gap / 2) },
+        SimCommand::AttackMove { units: moving(&red_groups), goal: goal(west - gap / 2) },
     ]);
     let full = |world: &SimWorld, ids: &[SimId]| ids.iter().map(|&id| worth(world, id)).sum::<f64>();
     let (blue_full, red_full) = (full(&world, &blue_ids), full(&world, &red_ids));
@@ -106,11 +112,13 @@ fn duel_in(db: &Arc<BlueprintDb>, blue: Side, red: Side, health: [f64; 2], layou
     while world.current_tick < MAX_TICKS {
         let mut orders = Vec::new();
         if world.current_tick.is_multiple_of(10) {
-            for (side, ids, enemies, home) in [(blue, &blue_ids, &red_ids, homes[0]), (red, &red_ids, &blue_ids, homes[1])] {
-                if side.tactics == Tactics::Micro {
-                    micro(&world, ids, enemies, home, &mut orders);
+            for (groups, enemies, home) in [(&blue_groups, &red_ids, homes[0]), (&red_groups, &blue_ids, homes[1])] {
+                for (side, ids) in groups {
+                    if side.tactics == Tactics::Micro {
+                        micro(&world, ids, enemies, home, &mut orders);
+                    }
+                    reengage_aircraft(&world, ids, enemies, &mut orders);
                 }
-                reengage_aircraft(&world, ids, enemies, &mut orders);
             }
         }
         world.advance_tick(&orders);
@@ -205,11 +213,34 @@ fn worth(world: &SimWorld, id: SimId) -> f64 {
     price * (health.current.to_num::<f64>() / health.max.to_num::<f64>().max(f64::MIN_POSITIVE)).clamp(0.0, 1.0)
 }
 
+/// Spawns a team's groups, the first centered on `x` and each later one in a block behind it.
+fn spawn_team(world: &mut SimWorld, sides: &[Side], team: Team, x: i32, back: i32, offset: i32) -> Vec<(Side, Vec<SimId>)> {
+    let mut groups = Vec::new();
+    let mut center = x;
+    for (index, &side) in sides.iter().enumerate() {
+        if index > 0 {
+            let (before, _) = group_shape(world, sides[index - 1]);
+            let (now, spacing) = group_shape(world, side);
+            center += back * ((before + now) / 2 + spacing);
+        }
+        groups.push((side, spawn_group(world, side, team, center, back, offset)));
+    }
+    groups
+}
+
+/// A group's depth from its first row to its last, and the spacing between its units.
+fn group_shape(world: &SimWorld, side: Side) -> (i32, i32) {
+    let radius = world.blueprints.get(side.unit).radius.to_num::<i32>().max(4);
+    let spacing = radius * if side.tactics == Tactics::Micro { 6 } else { 3 };
+    let columns = side.count.clamp(1, 5) as i32;
+    let rows = (side.count as i32 + columns - 1) / columns;
+    ((rows - 1) * spacing, spacing)
+}
+
 /// Spawns a group in a block of up to five abreast, facing the other group, centered on `x`.
 /// `back` is the side away from the enemy, -1 for the west.
 fn spawn_group(world: &mut SimWorld, side: Side, team: Team, x: i32, back: i32, offset: i32) -> Vec<SimId> {
-    let radius = world.blueprints.get(side.unit).radius.to_num::<i32>().max(4);
-    let spacing = radius * if side.tactics == Tactics::Micro { 6 } else { 3 };
+    let (_, spacing) = group_shape(world, side);
     let columns = side.count.clamp(1, 5) as i32;
     let rows = (side.count as i32 + columns - 1) / columns;
     let middle = MAP_UNITS / 2 + offset;
@@ -290,6 +321,11 @@ pub fn siege(db: &Arc<BlueprintDb>, unit: BlueprintId, count: u32, position: Pos
 /// sides alike makes a break-even's answer the same whichever unit is `a`, even where splash
 /// makes the fight stray from the square law.
 pub fn mirrored(db: &Arc<BlueprintDb>, a: Side, b: Side, h: f64) -> DuelResult {
+    mirrored_armies(db, &[a], &[b], h)
+}
+
+/// `mirrored`, between armies of several groups each.
+pub fn mirrored_armies(db: &Arc<BlueprintDb>, a: &[Side], b: &[Side], h: f64) -> DuelResult {
     let (mut score, mut seconds, mut finished) = (0.0, 0.0, true);
     for layout in LAYOUTS {
         let first = duel_in(db, a, b, [h, 1.0 / h], layout);
@@ -730,6 +766,28 @@ pub fn apply(db: &BlueprintDb, anchor: &Anchor, role: &Role, strength: f64) -> B
     })
 }
 
+/// The strength multiplier from 1/8 to 8 whose measurement came nearest `target`, by bisection:
+/// `measure` rises with strength if `rising`, and falls otherwise. It rises or falls in steps,
+/// where a shot just becomes enough to kill in one fewer hit, so this keeps the nearest measured,
+/// not the middle of the last step.
+fn nearest_strength(target: f64, rising: bool, mut measure: impl FnMut(f64) -> f64) -> f64 {
+    let (mut low, mut high) = (-3.0f64, 3.0f64);
+    let mut nearest = (f64::INFINITY, 1.0);
+    for _ in 0..12 {
+        let middle = (low + high) / 2.0;
+        let measured = measure(middle.exp2());
+        if (measured - target).abs() < nearest.0 {
+            nearest = ((measured - target).abs(), middle.exp2());
+        }
+        if (measured > target) == rising {
+            high = middle;
+        } else {
+            low = middle;
+        }
+    }
+    nearest.1
+}
+
 /// Solves a role's strength multiplier for its target, at about `materiel` a side. A duel score
 /// rises with strength, so bisection over multipliers from 1/8 to 8 finds it; but it rises in
 /// steps, where a shot just becomes enough to kill in one fewer hit, so it keeps the strength
@@ -740,46 +798,17 @@ pub fn price(db: &BlueprintDb, anchor: &Anchor, role: &Role, materiel: f64) -> f
     match role.target {
         Target::Fixed => role.strength,
         Target::Relative(of, factor) => strength_of(db, anchor, of) * factor,
-        Target::Score(against, target) => {
-            let (mut low, mut high) = (-3.0f64, 3.0f64);
-            let mut nearest = (f64::INFINITY, role.strength);
-            for _ in 0..12 {
-                let middle = (low + high) / 2.0;
-                let trial = Arc::new(apply(db, anchor, role, middle.exp2()));
-                let (unit, other) = (trial.id(role.unit), trial.id(against));
-                let side = |id: BlueprintId| Side { unit: id, count: count(trial.get(id)), tactics: Tactics::AttackMove };
-                let score = mirrored(&trial, side(unit), side(other), 1.0).score;
-                if (score - target).abs() < nearest.0 {
-                    nearest = ((score - target).abs(), middle.exp2());
-                }
-                if score > target {
-                    high = middle;
-                } else {
-                    low = middle;
-                }
-            }
-            nearest.1
-        }
-        Target::Siege(position, target) => {
-            // A siege shortens as the attackers' damage grows: bisection, keeping the nearest.
-            let (mut low, mut high) = (-3.0f64, 3.0f64);
-            let mut nearest = (f64::INFINITY, role.strength);
-            for _ in 0..12 {
-                let middle = (low + high) / 2.0;
-                let trial = Arc::new(apply(db, anchor, role, middle.exp2()));
-                let count = (position_materiel(&trial, position) / role.cost).round().max(1.0) as u32;
-                let seconds = siege(&trial, trial.id(role.unit), count, position).seconds;
-                if (seconds - target).abs() < nearest.0 {
-                    nearest = ((seconds - target).abs(), middle.exp2());
-                }
-                if seconds < target {
-                    high = middle;
-                } else {
-                    low = middle;
-                }
-            }
-            nearest.1
-        }
+        Target::Score(against, target) => nearest_strength(target, true, |strength| {
+            let trial = Arc::new(apply(db, anchor, role, strength));
+            let side = |id: BlueprintId| Side { unit: id, count: count(trial.get(id)), tactics: Tactics::AttackMove };
+            mirrored(&trial, side(trial.id(role.unit)), side(trial.id(against)), 1.0).score
+        }),
+        // A siege shortens as the attackers' damage grows.
+        Target::Siege(position, target) => nearest_strength(target, false, |strength| {
+            let trial = Arc::new(apply(db, anchor, role, strength));
+            let count = (position_materiel(&trial, position) / role.cost).round().max(1.0) as u32;
+            siege(&trial, trial.id(role.unit), count, position).seconds
+        }),
         Target::Efficiency(against, target) => {
             let mut strength = role.strength;
             for _ in 0..4 {
@@ -1026,4 +1055,121 @@ pub fn derive_t3_report() {
         &["t2_heavy_tank", "t2_grenadier_walker", "t2_assault_hovercraft", "t2_mobile_missile_launcher", "t1_medium_tank", "t1_light_artillery"],
         T3_PRICING_MATERIEL,
     );
+}
+
+
+/// Seconds for `blue` to destroy `red`, which cannot shoot back, or the time limit.
+pub fn strike_seconds(db: &Arc<BlueprintDb>, blue: Side, red: Side) -> f64 {
+    mirrored(db, blue, red, 1.0).seconds
+}
+
+/// A `[low, high]` range in data/balance_targets.toml.
+pub fn target_number_range(section: &str, key: &str) -> (f64, f64) {
+    let table: toml::Table = TARGETS.parse().expect("data/balance_targets.toml is valid");
+    let range = table[section][key].as_array().unwrap_or_else(|| panic!("{section}.{key} is a range"));
+    let number = |value: &toml::Value| value.as_float().or_else(|| value.as_integer().map(|value| value as f64)).expect("a number");
+    (number(&range[0]), number(&range[1]))
+}
+
+/// A side of so many of `key` as `materiel` buys, attack-moving.
+pub fn bought(db: &BlueprintDb, key: &str, materiel: f64) -> Side {
+    let id = db.id(key);
+    Side { unit: id, count: (materiel / cost(db.get(id))).round().max(1.0) as u32, tactics: Tactics::AttackMove }
+}
+
+/// The materiel of a tier fight at T1, ten anchors ([pace]): a bombing strike's size.
+pub fn strike_fight_materiel() -> f64 {
+    10.0 * Anchor::from_targets().materiel
+}
+
+/// One of `key`, attack-moving.
+pub fn one(db: &BlueprintDb, key: &str) -> Side {
+    Side { unit: db.id(key), count: 1, tactics: Tactics::AttackMove }
+}
+
+/// An army with `share` of `materiel` in Mobile Anti-Air and the rest in anchors.
+pub fn escorted_army(db: &BlueprintDb, materiel: f64, share: f64) -> [Side; 2] {
+    [bought(db, "t1_medium_tank", materiel * (1.0 - share)), bought(db, "t1_mobile_aa", materiel * share)]
+}
+
+/// T1 air from its rules (`[air]` and `[kills]`), against T1 land frozen. No strength is solved
+/// for: each rule sets one number, in order. The bomb is the biggest that destroys a T1 tank in two; Mobile
+/// Anti-Air takes two bombs, at the anchor's health per mass; a
+/// bomber lasts the rule's time under one interceptor's gun; and Mobile Anti-Air's gun is what
+/// brings an army a fifth anti-air even with an equal materiel of bombers.
+pub fn derive_t1_air(base: &BlueprintDb) -> BlueprintDb {
+    let anchor = Anchor::from_targets();
+    let bomber = base.id("t1_bomber");
+    let anti_air = base.id("t1_mobile_aa");
+    let bomb_with = |db: &BlueprintDb, damage: f64| db.with_unit(bomber, |unit| unit.weapon.as_mut().expect("bombers carry bombs").damage = Fp::from_num(damage.round()));
+    // The bomb: as big as lets a T1 tank take two.
+    let bomb = (anchor.health / target_number("air", "line_health_over_bomb")).round();
+    let mut db = bomb_with(base, bomb);
+    // Mobile Anti-Air: two bombs' worth of health, the anchor's health per mass, the anchor's
+    // energy per mass, and its build time per mass as it is.
+    let health = (bomb * target_number("air", "anti_air_health_over_bomb")).round();
+    let mass = (health / (anchor.health / anchor.materiel)).round();
+    db = db.with_unit(anti_air, |unit| {
+        let build_per_mass = unit.build_time.to_num::<f64>() / unit.mass.to_num::<f64>();
+        unit.health = Fp::from_num(health);
+        unit.mass = Res::from_num(mass);
+        unit.energy = Res::from_num(mass * anchor.energy / anchor.materiel);
+        unit.build_time = Res::from_num((mass * build_per_mass).round());
+    });
+    // The bomber: so many seconds of one interceptor's gun.
+    let interceptor = db.get(db.id("t1_interceptor")).weapon.expect("interceptors have a gun");
+    let interceptor_dps = interceptor.damage.to_num::<f64>() * TICKS_PER_SECOND as f64 / f64::from(interceptor.reload_ticks.max(1));
+    let bomber_health = (interceptor_dps * target_number("air", "interceptor_seconds_per_bomber_t1")).round();
+    db = db.with_unit(bomber, |unit| unit.health = Fp::from_num(bomber_health));
+    // Mobile Anti-Air's gun: an escorted army's score against bombers rises with it.
+    let gun = db.get(anti_air).weapon.expect("anti-air has a gun").damage.to_num::<f64>();
+    let materiel = target_number("air", "check_materiel");
+    let share = target_number("air", "anti_air_escort_share");
+    let gun_with = |db: &BlueprintDb, damage: f64| db.with_unit(anti_air, |unit| unit.weapon.as_mut().expect("anti-air has a gun").damage = Fp::from_num((damage * 10.0).round() / 10.0));
+    let multiple = nearest_strength(0.0, true, |multiple| {
+        let trial = Arc::new(gun_with(&db, gun * multiple));
+        mirrored_armies(&trial, &escorted_army(&trial, materiel, share), &[bought(&trial, "t1_bomber", materiel)], 1.0).score
+    });
+    gun_with(&db, gun * multiple)
+}
+
+/// The `--balance-derive t1-air` report: T1 air's numbers from its rules, against T1 land frozen,
+/// with the checks they should meet.
+pub fn derive_t1_air_report() {
+    let db = Arc::new(derive_t1_air(&BlueprintDb::standard()));
+    println!("T1 air from data/balance_targets.toml ([air], [kills]), against T1 land frozen:");
+    for key in ["t1_bomber", "t1_interceptor", "t1_mobile_aa"] {
+        let unit = db.get(db.id(key));
+        let weapon = unit.weapon.expect("T1 air units have a weapon");
+        println!("  {}", describe(unit));
+        println!("             mass = {}, energy = {}, build_time = {}, health = {}, damage = {}", unit.mass, unit.energy, unit.build_time, unit.health, weapon.damage);
+    }
+    println!();
+    print_t1_air_checks(&db);
+}
+
+/// The T1 air rules' checks, measured on `db`.
+pub fn print_t1_air_checks(db: &Arc<BlueprintDb>) {
+    let materiel = target_number("air", "check_materiel");
+    let share = target_number("air", "anti_air_escort_share");
+    println!("Checks, mirrored, score for the first:");
+    let raid = mirrored(db, Side { count: 5, ..one(db, "t1_bomber") }, Side { tactics: Tactics::Hold, ..one(db, "command_rig") }, 1.0);
+    let wanted = target_number_range("air", "commander_seconds_five_bombers_t1");
+    println!("  five bombers against a commander alone: {:.0} s{} (targets: {:.0}-{:.0} s)", raid.seconds, if raid.finished { "" } else { ", not destroyed" }, wanted.0, wanted.1);
+    let walking = mirrored(db, Side { count: 5, ..one(db, "t1_bomber") }, one(db, "command_rig"), 1.0);
+    println!("  the same, the commander walking at them: {:.0} s", walking.seconds);
+    let caught = strike_seconds(db, one(db, "t1_interceptor"), one(db, "t1_bomber"));
+    println!("  one interceptor against one bomber:   {caught:.1} s (target: about {:.0} s)", target_number("air", "interceptor_seconds_per_bomber_t1"));
+    let fight = strike_fight_materiel();
+    let strike = mirrored(db, bought(db, "t1_bomber", fight), bought(db, "t1_medium_tank", fight), 1.0);
+    println!("  bombers against ten anchors, no anti-air: {:+.2} in {:.1} s (targets: 25-45 s)", strike.score, strike.seconds);
+    let big = mirrored(db, bought(db, "t1_bomber", materiel), bought(db, "t1_medium_tank", materiel), 1.0);
+    println!("  the same at {materiel:.0} materiel a side:   {:+.2} in {:.1} s (more bombers bomb the same targets)", big.score, big.seconds);
+    let escorted = mirrored_armies(db, &escorted_army(db, materiel, share), &[bought(db, "t1_bomber", materiel)], 1.0);
+    println!("  an army {:.0}% anti-air against bombers: {:+.2} in {:.1} s (about even, within 0.15)", share * 100.0, escorted.score, escorted.seconds);
+    let pure = mirrored(db, bought(db, "t1_mobile_aa", materiel), bought(db, "t1_bomber", materiel), 1.0);
+    println!("  Mobile Anti-Air against bombers:      {:+.2} (anti-air keeps at least {:.1})", pure.score, target_number("air", "anti_air_keeps_min"));
+    let caught_all = mirrored(db, bought(db, "t1_interceptor", materiel), bought(db, "t1_bomber", materiel), 1.0);
+    println!("  interceptors against bombers:         {:+.2} in {:.1} s", caught_all.score, caught_all.seconds);
+    println!("  interceptors against interceptors:    {:+.2} (even)", mirrored(db, bought(db, "t1_interceptor", materiel), bought(db, "t1_interceptor", materiel), 1.0).score);
 }

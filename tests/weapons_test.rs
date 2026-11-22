@@ -213,7 +213,8 @@ fn every_bomber_bombs_on_every_pass_and_hits() {
                 let distance = (here - there).length_squared().to_num::<f64>().sqrt();
                 if closing && distance > last_distance && last_distance < throw {
                     passes += 1;
-                    // Every pass after the first two, by which it is flying and reloaded, drops.
+                    // Every pass after the first two, by which it is flying and reloaded, drops:
+                    // a bomber that turns quicker than it reloads flies further out first.
                     if passes > 2 && bombs == bombs_at_last_pass {
                         skipped += 1;
                     }
@@ -539,8 +540,9 @@ fn endless_fuel(world: &mut SimWorld, id: SimId) {
 
 /// Aircraft that make passes fire whenever a weapon is reloaded and its target in reach: over a
 /// long stretch of passes at a target moving in a straight line, each weapon does its damage for
-/// every reload's worth of time its target was within its range. Interceptors and air superiority
-/// fighters at an aircraft, bombers' own guns at one, and torpedo bombers at a ship.
+/// every shot it had, the first tick each time it was reloaded with its target in range and, for
+/// a gun fixed to the nose, before it. Interceptors and air superiority fighters at an aircraft,
+/// bombers' own guns at one, and torpedo bombers at a ship.
 #[test]
 fn every_aircraft_that_makes_passes_fires_whenever_its_target_is_in_reach() {
     let mut failures = Vec::new();
@@ -578,25 +580,37 @@ fn every_aircraft_that_makes_passes_fires_whenever_its_target_is_in_reach() {
             world.advance_tick(&first);
             let target_radius = world.ecs.get::<&UnitStats>(target_entity).unwrap().radius.to_num::<f64>();
             let mut in_reach = vec![0u32; counted.len()];
+            let mut timers = vec![0u32; counted.len()];
             let ticks = 1_500;
             for tick in 0..ticks {
                 world.advance_tick(&if tick % 10 == 0 { ahead(&world) } else { Vec::new() });
                 let (Some(here), Some(there)) = (world.unit_position(shooter), world.unit_position(target)) else { break };
-                let apart = (here.xy() - there.xy()).length_squared().to_num::<f64>().sqrt();
-                for (count, weapon) in in_reach.iter_mut().zip(&counted) {
-                    if apart <= weapon.range.to_num::<f64>() + target_radius {
+                // An aircraft's reach counts how far up it is too.
+                let up = if kind == Kind::Air { (there.z - here.z).to_num::<f64>() } else { 0.0 };
+                let apart = ((here.xy() - there.xy()).length_squared().to_num::<f64>() + up * up).sqrt();
+                // A gun fixed to the nose fires only within its arc of straight ahead.
+                let facing = world.ecs.get::<&sim_engine::sim::components::Turning>(world.unit_entity(shooter).unwrap()).unwrap().facing;
+                let toward = there.xy() - here.xy();
+                let ahead = if toward == Vec2Fp::ZERO { Fp::ONE } else { let toward = toward.normalized(); facing.x * toward.x + facing.y * toward.y };
+                // Each weapon fires on the first tick it is reloaded with its target in reach, so
+                // replaying its reload over those ticks counts the shots it has: a fighter circling
+                // has its target before its guns for a few ticks at a time, and fires on each.
+                for ((count, timer), weapon) in in_reach.iter_mut().zip(timers.iter_mut()).zip(&counted) {
+                    *timer = timer.saturating_sub(1);
+                    if apart <= weapon.range.to_num::<f64>() + target_radius && weapon.arc.is_none_or(|arc| ahead >= arc) && *timer == 0 {
                         *count += 1;
+                        *timer = weapon.reload_ticks.max(1);
                     }
                 }
             }
-            let expected: f64 = counted.iter().zip(&in_reach).map(|(weapon, &count)| weapon.damage.to_num::<f64>() * f64::from(count) / f64::from(weapon.reload_ticks.max(1))).sum();
+            let expected: f64 = counted.iter().zip(&in_reach).map(|(weapon, &shots)| weapon.damage.to_num::<f64>() * f64::from(shots)).sum();
             let done = f64::from(damage(&world, target));
             if expected < 1.0 {
                 failures.push(format!("{name}: its target was never in reach"));
             // A pass's first and last ticks in reach may or may not give a shot, so a little over
             // or under is in order.
             } else if done < expected * 0.8 || done > expected * 1.3 {
-                failures.push(format!("{name}: {done:.0} damage, expected {expected:.0} from {in_reach:?} ticks in reach"));
+                failures.push(format!("{name}: {done:.0} damage, expected {expected:.0} from {in_reach:?} shots in reach"));
             }
         }
     }
