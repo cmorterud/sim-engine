@@ -35,8 +35,8 @@ env:
 
 jobs:
   # Splits the matches into shards of seeds, one runner each. A push plays the 200 skirmish
-  # matches of the exit criteria and 120 on each bundled map: enough matches that a side
-  # winning 60% of them stands out from chance.
+  # matches of the exit criteria and 120 on each bundled map (Highland, Twin Passes, and
+  # Saddleback): enough matches that a side winning 60% of them stands out from chance.
   plan:
     name: Plan the shards
     runs-on: ubuntu-latest
@@ -55,7 +55,8 @@ jobs:
           shards = []
           for map_name, matches in [("skirmish", int(os.environ["SKIRMISH"])),
                                     ("highland", int(os.environ["BUNDLED"])),
-                                    ("twin_passes", int(os.environ["BUNDLED"]))]:
+                                    ("twin_passes", int(os.environ["BUNDLED"])),
+                                    ("saddleback", int(os.environ["BUNDLED"]))]:
               for first in range(1, matches + 1, shard):
                   count = min(shard, matches + 1 - first)
                   map_arg = "" if map_name == "skirmish" else f"--map {map_name} "

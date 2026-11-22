@@ -35,6 +35,7 @@ fn test_map() -> MapData {
         deposits,
         vents: vec![(200, 300), (311, 211)],
         starts: [point(2_800, 2_400), point(7_440, 7_840)],
+        layouts: Vec::new(),
         scenery,
     }
 }

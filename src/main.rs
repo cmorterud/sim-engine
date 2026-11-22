@@ -419,7 +419,7 @@ fn main() {
             MapSource::Map(Arc::new(map))
         }
         Some(name) => {
-            println!("unknown map {}: the maps are highland and twin_passes, and the playtest sandbox", name.display());
+            println!("unknown map {}: the maps are {}, and the playtest sandbox", name.display(), sim_engine::sim::maps::BUNDLED.join(", "));
             std::process::exit(1);
         }
     };

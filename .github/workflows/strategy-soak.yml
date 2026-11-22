@@ -52,7 +52,7 @@ jobs:
           each_way = max(1, int(os.environ["MATCHES"]) // 2)
           shard = max(1, int(os.environ["SHARD"]))
           shards = []
-          for map_name in ["skirmish", "highland", "twin_passes"]:
+          for map_name in ["skirmish", "highland", "twin_passes", "saddleback"]:
               map_arg = "" if map_name == "skirmish" else f"--map {map_name} "
               for a, b in itertools.combinations(strategies, 2):
                   for blue, red in [(a, b), (b, a)]:

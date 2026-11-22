@@ -35,6 +35,7 @@ fn skirmish_map(seed: u64) -> MapData {
         deposits: world.deposits.clone(),
         vents: Vec::new(),
         starts: world.starts,
+        layouts: Vec::new(),
         scenery: Vec::new(),
     }
 }
@@ -72,6 +73,11 @@ fn main() {
     for (index, s) in map.starts.iter().enumerate() {
         let (sx, sy) = (s.x.to_num::<i32>() / TERRAIN_CELL_UNITS, s.y.to_num::<i32>() / TERRAIN_CELL_UNITS);
         for dy in -6..=6 { for dx in -6..=6 { let (px, py) = (sx + dx, sy + dy); if (0..cells as i32).contains(&px) && (0..cells as i32).contains(&py) { pixels[py as usize * cells + px as usize] = if index == 0 { [60, 120, 255] } else { [255, 70, 60] }; } } }
+    }
+    // Team starts, where the map has them, in yellow.
+    for s in map.layouts.iter().flatten() {
+        let (sx, sy) = (s.x.to_num::<i32>() / TERRAIN_CELL_UNITS, s.y.to_num::<i32>() / TERRAIN_CELL_UNITS);
+        for dy in -4..=4 { for dx in -4..=4 { let (px, py) = (sx + dx, sy + dy); if (0..cells as i32).contains(&px) && (0..cells as i32).contains(&py) { pixels[py as usize * cells + px as usize] = [250, 220, 40]; } } }
     }
     let mut data = format!("P6 {cells} {cells} 255\n").into_bytes();
     for p in pixels { data.extend_from_slice(&p); }

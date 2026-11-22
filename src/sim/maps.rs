@@ -16,15 +16,53 @@ use crate::math::fp::{fp_int, Fp, Vec2Fp};
 use crate::math::rng::SimRng;
 
 /// The maps that come with the game, by the name `--map` takes.
-pub const BUNDLED: [&str; 2] = ["highland", "twin_passes"];
+pub const BUNDLED: [&str; 3] = ["highland", "twin_passes", "saddleback"];
 
 /// A bundled map by name.
 pub fn bundled(name: &str) -> Option<MapData> {
     match name {
         "highland" => Some(highland()),
         "twin_passes" => Some(twin_passes()),
+        "saddleback" => Some(saddleback()),
         _ => None,
     }
+}
+
+/// A named map's settings, as its file in data/maps gives them (GAME_SPECIFICATION.md §17.3):
+/// a kind of map, and what it is generated from.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MapSettings {
+    pub id: String,
+    pub name: String,
+    /// "passes", for now; "central_lake" and "islands" to come.
+    pub kind: String,
+    pub size_km: u32,
+    /// The most players it holds.
+    pub players: u32,
+    pub seed: u64,
+    /// "sparse", "normal", or "rich": deposits and vents.
+    pub resources: String,
+    /// "none", "some", or "lots": rock fields and woods.
+    pub reclaim: String,
+    /// "flat", "hilly", or "rugged": the land away from the map's features.
+    pub terrain: String,
+    /// Passes: how many valleys cross the range, an odd number.
+    #[serde(default)]
+    pub valleys: u32,
+}
+
+/// The named maps' settings files, by id.
+const NAMED: [(&str, &str); 1] = [("saddleback", include_str!("../../data/maps/saddleback.toml"))];
+
+/// A named map's settings, by id.
+pub fn settings(id: &str) -> Option<MapSettings> {
+    NAMED.iter().find(|(name, _)| *name == id).map(|(_, text)| toml::from_str(text).unwrap_or_else(|error| panic!("data/maps/{id}.toml: {error}")))
+}
+
+/// Saddleback, 10 km: a mountain range across the middle, crossed by three valleys.
+pub fn saddleback() -> MapData {
+    passes(&settings("saddleback").expect("data/maps/saddleback.toml"))
 }
 
 /// A cell whose corners differ by more than this, in sixteenths of a unit, is too steep for land
@@ -148,6 +186,39 @@ fn isqrt(value: i32) -> i32 {
     crate::math::fp::sqrt_wide(crate::math::fp::FpWide::from_num(value.max(0))).to_num::<i32>()
 }
 
+impl Draft {
+    /// A sample and its images in both mirrors: across the map's middle column, its middle row,
+    /// and both. A map with them all is fair for four players, two each side, and turns into
+    /// itself about its center as well, for two.
+    fn images(&self, sample: (i32, i32)) -> [(i32, i32); 4] {
+        let last = self.cells as i32;
+        [sample, (last - sample.0, sample.1), (sample.0, last - sample.1), (last - sample.0, last - sample.1)]
+    }
+
+    /// Makes the heights their own images in both mirrors, by averaging each with its images.
+    fn symmetrize_four(&mut self) {
+        let half = self.cells as i32 / 2;
+        for y in 0..=half {
+            for x in 0..=half {
+                let images = self.images((x, y));
+                let index = |(x, y): (i32, i32)| y as usize * self.samples + x as usize;
+                let total: i32 = images.iter().map(|&image| i32::from(self.heights[index(image)])).sum();
+                for image in images {
+                    let at = index(image);
+                    self.heights[at] = (total / 4) as i16;
+                }
+            }
+        }
+    }
+
+    /// A disc and its images in both mirrors.
+    fn disc_four(&mut self, center: (i32, i32), radius: i32, edge: i32, amount: i32) {
+        for image in self.images(center) {
+            self.disc(image, radius, edge, amount);
+        }
+    }
+}
+
 /// Deposits, starts, and scenery placed on the high-row half and turned onto the other.
 struct Layout<'a> {
     cells: i32,
@@ -248,6 +319,62 @@ fn place_vents(layout: &mut Layout<'_>, rng: &mut SimRng, start: (i32, i32), nea
     }
 }
 
+impl Layout<'_> {
+    /// A cell and its images in both mirrors.
+    fn images(&self, cell: (i32, i32)) -> [(i32, i32); 4] {
+        let last = self.cells - 1;
+        [cell, (last - cell.0, cell.1), (cell.0, last - cell.1), (last - cell.0, last - cell.1)]
+    }
+
+    /// A deposit and its images in both mirrors, if all are on open, level ground.
+    fn deposit_four(&mut self, cell: (i32, i32)) -> bool {
+        let images = self.images(cell);
+        if images.iter().any(|&image| !self.open(image, 1) || self.deposits.contains(&(image.0 as u32, image.1 as u32))) {
+            return false;
+        }
+        self.deposits.extend(images.iter().map(|&(x, y)| (x as u32, y as u32)));
+        true
+    }
+
+    /// A geothermal vent and its images in both mirrors, if a plant fits over each, away from
+    /// deposits and other vents.
+    fn vent_four(&mut self, cell: (i32, i32)) -> bool {
+        let images = self.images(cell);
+        let crowded = |layout: &Self, at: (i32, i32)| layout.near_deposit(at, 3) || layout.vents.iter().any(|&(x, y)| chebyshev((x as i32, y as i32), at) < 12);
+        if images.iter().any(|&image| !self.open(image, 2) || crowded(self, image)) {
+            return false;
+        }
+        self.vents.extend(images.iter().map(|&(x, y)| (x as u32, y as u32)));
+        true
+    }
+
+    /// A clump of scenery around a point, each piece with its images in both mirrors, kept off
+    /// blocked ground, away from `avoid`, and clear of deposits.
+    fn clump_four(&mut self, rng: &mut SimRng, kind: WreckKind, center: Vec2Fp, count: usize, spread: i32, avoid: &dyn Fn((i32, i32)) -> bool) {
+        let map = fp_int(self.cells * TERRAIN_CELL_UNITS);
+        let mut placed = 0;
+        for _ in 0..count * 4 {
+            if placed == count {
+                break;
+            }
+            let offset = |rng: &mut SimRng| rng.range_fp(fp_int(-spread), fp_int(spread));
+            let (dx, dy) = (offset(rng), offset(rng));
+            let point = Vec2Fp::new(center.x + dx, center.y + dy);
+            if point.x <= Fp::ZERO || point.y <= Fp::ZERO || point.x >= map || point.y >= map {
+                continue;
+            }
+            let cell = ((point.x.to_num::<i32>()) / TERRAIN_CELL_UNITS, (point.y.to_num::<i32>()) / TERRAIN_CELL_UNITS);
+            if self.images(cell).iter().any(|&image| !self.open(image, 0) || avoid(image) || self.near_deposit(image, 2)) {
+                continue;
+            }
+            for image in [point, Vec2Fp::new(map - point.x, point.y), Vec2Fp::new(point.x, map - point.y), Vec2Fp::new(map - point.x, map - point.y)] {
+                self.scenery.push((kind, image));
+            }
+            placed += 1;
+        }
+    }
+}
+
 fn cell_point(cell: (i32, i32)) -> Vec2Fp {
     Vec2Fp::new(fp_int(cell.0 * TERRAIN_CELL_UNITS + TERRAIN_CELL_UNITS / 2), fp_int(cell.1 * TERRAIN_CELL_UNITS + TERRAIN_CELL_UNITS / 2))
 }
@@ -328,7 +455,7 @@ pub fn highland() -> MapData {
     }
     let starts = [cell_point(start), cell_point((last - start.0, last - start.1))];
     let (deposits, vents, scenery) = (layout.deposits, layout.vents, layout.scenery);
-    MapData { name: "highland".into(), map_units: map, heights: draft.heights, blocked, water_level: fp_int(-1000), deposits, vents, starts, scenery }
+    MapData { name: "highland".into(), map_units: map, heights: draft.heights, blocked, water_level: fp_int(-1000), deposits, vents, starts, layouts: Vec::new(), scenery }
 }
 
 /// Twin Passes, 20 km: a sea down the middle, crossed by two land bridges, forests on the shores.
@@ -417,7 +544,177 @@ pub fn twin_passes() -> MapData {
     }
     let starts = [cell_point(start), cell_point((last - start.0, last - start.1))];
     let (deposits, vents, scenery) = (layout.deposits, layout.vents, layout.scenery);
-    MapData { name: "twin_passes".into(), map_units: map, heights: draft.heights, blocked, water_level: fp_int(WATER_UNITS), deposits, vents, starts, scenery }
+    MapData { name: "twin_passes".into(), map_units: map, heights: draft.heights, blocked, water_level: fp_int(WATER_UNITS), deposits, vents, starts, layouts: Vec::new(), scenery }
+}
+
+/// A Passes map (GAME_SPECIFICATION.md §17.3) from its settings: a mountain range across the
+/// middle, impassable to land units, crossed by valleys, a wide one in the center and narrower
+/// ones toward the flanks, whose floors rise gently to a saddle. Each half behind it is open
+/// land. It is its own image in both mirrors, so that its four team starts, two each side, are
+/// all alike, and it turns into itself about its center, for its 1v1 starts, which face the
+/// center valley. The richest deposits are in the valleys.
+pub fn passes(settings: &MapSettings) -> MapData {
+    assert_eq!(settings.kind, "passes", "{} is not a Passes map", settings.id);
+    assert!(settings.valleys % 2 == 1, "{}: valleys must be odd, one in the center", settings.id);
+    let cells = (settings.size_km as i32 * 1024 / TERRAIN_CELL_UNITS) as usize;
+    let mut draft = Draft::new(cells, settings.seed, 300);
+    let (broad, middling, fine) = match settings.terrain.as_str() {
+        "flat" => (20, 6, 2),
+        "rugged" => (110, 30, 8),
+        _ => (60, 18, 5),
+    };
+    draft.hills(80, broad);
+    draft.hills(24, middling);
+    draft.hills(8, fine);
+    let last = cells as i32;
+    let middle = last / 2;
+    // Sizes are for 10 km, and scale with the map.
+    let scale = |value: i32| value * last / 512;
+    // The range: a band across the middle row, rising steeply on both sides. Its valleys: the
+    // center one wide, the rest narrower, spread evenly out to the flanks.
+    let (band, edge, rise, saddle) = (scale(36), 5, 220, 40);
+    let flanks = settings.valleys as i32 / 2;
+    let mut valleys = vec![(middle, scale(20))];
+    for step in 1..=flanks {
+        let offset = scale(150) * step / flanks.max(1);
+        valleys.push((middle - offset, scale(9)));
+        valleys.push((middle + offset, scale(9)));
+    }
+    let gap = |x: i32| {
+        valleys
+            .iter()
+            .map(|&(center, width)| {
+                let off = (x - center).abs();
+                if off <= width { 256 } else if off < width + edge { 256 * (width + edge - off) / edge } else { 0 }
+            })
+            .max()
+            .unwrap_or(0)
+    };
+    // Its edges wander in and out along the map, smoothly, the same on both sides of the middle
+    // column and of the middle row, so that it stays fair while looking natural.
+    let wander = smooth_line(&mut draft.rng, middle + 1, 40, scale(10));
+    let reach = |x: i32| band + wander[x.min(last - x) as usize];
+    let across = |x: i32, y: i32| {
+        let (off, band) = ((y - middle).abs(), reach(x));
+        if off <= band { 256 } else if off < band + edge { 256 * (band + edge - off) / edge } else { 0 }
+    };
+    let ridge = |x: i32, y: i32| rise * across(x, y) * (256 - gap(x)) / 65_536;
+    for y in 0..=last {
+        for x in 0..=last {
+            // A valley's floor rises gently toward the middle row, to a saddle.
+            let toward = (band + edge - (y - middle).abs()).max(0);
+            let up = (ridge(x, y) << HEIGHT_FRAC_BITS) + ((saddle * gap(x) * toward / (256 * (band + edge))) << HEIGHT_FRAC_BITS);
+            let height = &mut draft.heights[y as usize * draft.samples + x as usize];
+            *height = (i32::from(*height) + up).clamp(0, i32::from(i16::MAX)) as i16;
+        }
+    }
+    // Peaks along the range, clear of the valleys.
+    let mut peaks = 0;
+    for _ in 0..400 {
+        if peaks == scale(24) {
+            break;
+        }
+        let at = (6 + draft.rng.below((middle - 6) as u32) as i32, middle + draft.rng.below(band as u32) as i32);
+        if gap(at.0 - 10).max(gap(at.0 + 10)) > 0 {
+            continue;
+        }
+        let (radius, height) = (3 + draft.rng.below(6) as i32, 30 + draft.rng.below(60) as i32);
+        draft.disc_four(at, radius, 3, height);
+        peaks += 1;
+    }
+    // The starts: in 1v1 one each side on the middle column, facing the center valley; in 2v2
+    // two each side, each nearest a flank valley.
+    let duel = (middle, middle + scale(150));
+    let team = (middle - scale(150), middle + scale(144));
+    for start in [duel, team] {
+        for image in draft.images(start) {
+            draft.flatten(image, scale(30));
+        }
+    }
+    draft.symmetrize_four();
+
+    let mut blocked = draft.blocked(i32::MIN);
+    // The range is impassable outright, its top too, which no land unit could reach anyway.
+    for y in 0..cells {
+        for x in 0..cells {
+            let corners = [(x, y), (x + 1, y), (x, y + 1), (x + 1, y + 1)];
+            if corners.iter().any(|&(cx, cy)| ridge(cx as i32, cy as i32) > 0) {
+                blocked[y * cells + x] = true;
+            }
+        }
+    }
+    let mut layout = Layout { cells: last, blocked: &blocked, deposits: Vec::new(), vents: Vec::new(), scenery: Vec::new() };
+    // Each 1v1 base has four deposits, and each team base four.
+    for offset in [(-6, -4), (-5, 7)] {
+        layout.deposit_four((duel.0 + offset.0, duel.1 + offset.1));
+    }
+    for offset in [(-6, -4), (5, -6), (-4, 7), (7, 5)] {
+        layout.deposit_four((team.0 + offset.0, team.1 + offset.1));
+    }
+    // The valleys hold the richest: eight in the center one, two in each of the others.
+    for at in [(middle - 8, middle + 14), (middle - 4, middle + 28)] {
+        layout.deposit_four(at);
+    }
+    for step in 1..=flanks {
+        layout.deposit_four((middle - scale(150) * step / flanks.max(1) - 3, middle + 18));
+    }
+    // A vent a short walk from every base.
+    for start in [duel, team] {
+        let _ = (0..6).find(|step| layout.vent_four((start.0 + 14 + step * 2, start.1 - 14)));
+    }
+    // Expansions out toward the flanks, more or fewer by the map's resources.
+    let wanted = match settings.resources.as_str() {
+        "sparse" => 6,
+        "rich" => 14,
+        _ => 9,
+    };
+    let start_cells: Vec<(i32, i32)> = [duel, team].iter().flat_map(|&start| layout.images(start)).collect();
+    let near_start = |cell: (i32, i32), cells: i32| start_cells.iter().any(|&start| chebyshev(cell, start) <= cells);
+    let widest = band + scale(10) + edge;
+    let lowland = (middle + widest + 12, last - 16);
+    let mut expansions = 0;
+    for _ in 0..4_000 {
+        if expansions == wanted {
+            break;
+        }
+        let cell = (16 + draft.rng.below((middle - 28) as u32) as i32, lowland.0 + draft.rng.below((lowland.1 - lowland.0) as u32) as i32);
+        if near_start(cell, 22) || layout.near_deposit(cell, 14) {
+            continue;
+        }
+        if layout.deposit_four(cell) {
+            expansions += 1;
+            if draft.rng.below(2) == 0 {
+                layout.deposit_four((cell.0 + 2, cell.1 + 1));
+            }
+        }
+    }
+    // Rock fields along the foot of the range, and woods out on the land.
+    let amount = match settings.reclaim.as_str() {
+        "none" => 0,
+        "lots" => 2,
+        _ => 1,
+    };
+    let map = draft.map_units();
+    let away = |cell: (i32, i32)| near_start(cell, 26);
+    let foot = (middle + widest + 4) * TERRAIN_CELL_UNITS;
+    for _ in 0..scale(10) * amount {
+        let center = Vec2Fp::new(draft.rng.range_fp(fp_int(300), fp_int(map / 2 - 200)), draft.rng.range_fp(fp_int(foot), fp_int(foot + 300)));
+        layout.clump_four(&mut draft.rng, WreckKind::Rock, center, 14, 120, &away);
+    }
+    for _ in 0..scale(8) * amount {
+        let center = Vec2Fp::new(draft.rng.range_fp(fp_int(300), fp_int(map / 2 - 200)), draft.rng.range_fp(fp_int(foot + 600), fp_int(map - 300)));
+        layout.clump_four(&mut draft.rng, WreckKind::Tree, center, 16, 110, &away);
+    }
+    let point = |(x, y): (i32, i32)| Vec2Fp::new(fp_int(x * TERRAIN_CELL_UNITS), fp_int(y * TERRAIN_CELL_UNITS));
+    let full = fp_int(map);
+    let mirror = |at: Vec2Fp| [at, Vec2Fp::new(full - at.x, at.y), Vec2Fp::new(at.x, full - at.y), Vec2Fp::new(full - at.x, full - at.y)];
+    let duel_at = point(duel);
+    let starts = [duel_at, Vec2Fp::new(full - duel_at.x, full - duel_at.y)];
+    // Two each side: the first team's in the north, the second's in the south.
+    let [north_west, north_east, south_west, south_east] = mirror(point(team));
+    let layouts = vec![vec![north_west, north_east, south_west, south_east]];
+    let (deposits, vents, scenery) = (layout.deposits, layout.vents, layout.scenery);
+    MapData { name: settings.id.clone(), map_units: map, heights: draft.heights, blocked, water_level: fp_int(-1000), deposits, vents, starts, layouts, scenery }
 }
 
 #[cfg(test)]
@@ -490,6 +787,86 @@ mod tests {
         assert!((1_000..40_000).contains(&steep), "outcrops and ridges block some ground: {steep} cells");
         let rocks = map.scenery.iter().filter(|(kind, _)| *kind == WreckKind::Rock).count();
         assert!(rocks > 800, "{rocks} rocks");
+    }
+
+    /// Deposits and vents within reach of a start, by kind.
+    fn near(map: &MapData, start: Vec2Fp, reach: i32) -> (usize, usize) {
+        let within = |&&(x, y): &&(u32, u32)| {
+            let at = cell_point((x as i32, y as i32));
+            let (dx, dy) = ((at.x - start.x).to_num::<i64>(), (at.y - start.y).to_num::<i64>());
+            dx * dx + dy * dy <= i64::from(reach).pow(2)
+        };
+        (map.deposits.iter().filter(within).count(), map.vents.iter().filter(within).count())
+    }
+
+    #[test]
+    fn saddleback_is_fair_for_one_on_one_and_two_on_two() {
+        let map = saddleback();
+        check(&map);
+        assert_eq!(map, saddleback(), "the same every time");
+        let cells = (map.map_units / TERRAIN_CELL_UNITS) as usize;
+        let (samples, last) = (cells + 1, cells);
+        // Its own image in both mirrors, across the middle column and the middle row.
+        for y in 0..samples {
+            for x in 0..samples {
+                let height = map.heights[y * samples + x];
+                assert_eq!(height, map.heights[y * samples + (last - x)], "heights mirror across the middle column");
+                assert_eq!(height, map.heights[(last - y) * samples + x], "heights mirror across the middle row");
+            }
+        }
+        for y in 0..cells {
+            for x in 0..cells {
+                assert_eq!(map.blocked[y * cells + x], map.blocked[y * cells + (cells - 1 - x)], "blocked cells mirror");
+            }
+        }
+        for &(x, y) in map.deposits.iter().chain(&map.vents) {
+            let mirror = (cells as u32 - 1 - x, y);
+            assert!(map.deposits.contains(&mirror) || map.vents.contains(&mirror), "{x}, {y} has no mirror image");
+        }
+        // Four team starts, two a side, each the others' image, and every start reaches every other.
+        assert_eq!(map.layouts.len(), 1);
+        let team = &map.layouts[0];
+        assert_eq!(team.len(), 4);
+        let full = fp_int(map.map_units);
+        assert_eq!(team[1], Vec2Fp::new(full - team[0].x, team[0].y));
+        assert_eq!(team[2], Vec2Fp::new(team[0].x, full - team[0].y));
+        assert!(team[0].y > full / 2 && team[2].y < full / 2, "the first team is in the north, the second in the south");
+        let every: Vec<Vec2Fp> = map.starts.iter().chain(team).copied().collect();
+        for &from in &every {
+            for &to in &every {
+                assert!(connected(&map, cell_of(&map, from), cell_of(&map, to)), "{from:?} cannot reach {to:?}");
+            }
+        }
+        // Each start in a set has the same deposits and vents within reach.
+        for set in [map.starts.to_vec(), team.clone()] {
+            let first = near(&map, set[0], 1_500);
+            assert!(first.0 >= 4, "{} deposits near a start", first.0);
+            for &start in &set {
+                assert_eq!(near(&map, start, 1_500), first, "a start has a different share");
+            }
+        }
+        // The middle row is crossed only through the valleys: three gaps, the center one widest.
+        let middle = cells / 2;
+        let mut gaps: Vec<usize> = Vec::new();
+        let mut run = 0;
+        for x in 0..cells {
+            if map.blocked[middle * cells + x] {
+                if run > 0 {
+                    gaps.push(run);
+                }
+                run = 0;
+            } else {
+                run += 1;
+            }
+        }
+        if run > 0 {
+            gaps.push(run);
+        }
+        assert_eq!(gaps.len(), 3, "valleys across the middle row: {gaps:?}");
+        assert!(gaps[1] > gaps[0] && gaps[1] > gaps[2], "the center valley is the widest: {gaps:?}");
+        // The valleys hold more deposits than their share of the ground.
+        let in_range = |&&(_, y): &&(u32, u32)| (y as usize).abs_diff(middle) < 40;
+        assert!(map.deposits.iter().filter(in_range).count() >= 12, "deposits in the valleys");
     }
 
     #[test]

@@ -1,0 +1,22 @@
+# Saddleback (GAME_SPECIFICATION.md §17.3): a named map, a type with its settings fixed, from
+# which src/sim/maps.rs generates it, the same on every machine.
+#
+# A mountain range across the middle, impassable to land units, with three valleys through it,
+# a wide one in the center and a narrow one on each flank, whose floors rise to a saddle. Each
+# half behind it is open, gentle land. In 1v1 each base faces the center valley; in 2v2
+# teammates sit side by side on one side of the range, each nearest a flank valley. The richest
+# deposits are in the valleys.
+id = "saddleback"
+name = "Saddleback"
+kind = "passes"
+size_km = 10
+players = 4
+seed = 1396786242
+# sparse, normal, or rich: deposits and vents.
+resources = "normal"
+# none, some, or lots: rock fields and woods.
+reclaim = "some"
+# flat, hilly, or rugged: the land either side of the range.
+terrain = "hilly"
+# How many valleys cross the range: an odd number, one in the center.
+valleys = 3

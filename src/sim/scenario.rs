@@ -264,8 +264,12 @@ pub struct MapData {
     pub deposits: Vec<(u32, u32)>,
     /// Geothermal vents, by cell.
     pub vents: Vec<(u32, u32)>,
-    /// Blue's start, then Red's.
+    /// Blue's start, then Red's: a 1v1's.
     pub starts: [Vec2Fp; 2],
+    /// Starts for team matches, one list for each count of players the map holds beyond two:
+    /// each lists a start a player, the first half one team's and the second half the other's.
+    /// Empty for a map of two players.
+    pub layouts: Vec<Vec<Vec2Fp>>,
     pub scenery: Vec<(WreckKind, Vec2Fp)>,
 }
 
