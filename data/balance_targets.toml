@@ -69,11 +69,16 @@ artillery = [1.0, 1.3]
 
 [economy]
 # What energy is worth in materiel, for pricing units that spend more energy for their mass than
-# land units do, aircraft above all: by what each costs to produce, one materiel of income costs
-# about what five energy does (an extractor against a generator). Land units spend exactly this
-# much energy for each materiel, so it changes no land unit's price. Air keeps its heavy energy
-# costs, as in the inspiration, where going air means building power; this only counts them.
-energy_per_materiel = 5
+# land units do, aircraft above all, by the tier a fight is at. At T1, by what each costs to
+# produce, one materiel of income costs about what five energy does (an extractor against a
+# generator). From T2, fabricators turn about 100 energy into a materiel, and generators make
+# energy ever cheaper, while extractors are held to their deposits: energy is worth about a
+# hundredth of a materiel (2026-11-22). Valued at T1's rate in a T3 fight, a T3 fighter cost 21
+# interceptors rather than 13, and interceptors spammed against it looked the better buy. Land
+# units spend five energy for each materiel at every tier, and their prices are scaled to stay
+# their mass, so this changes no land unit's price. Air keeps its heavy energy costs, as in the
+# inspiration, where going air means building power; this only counts them.
+energy_per_materiel = [5, 100, 100]
 # One T1 extractor's income buys an anchor every this many seconds: cheaper units for their
 # income than the inspiration's, for bigger armies.
 t1_extractor_seconds_per_anchor = [17, 21]
@@ -222,6 +227,17 @@ check_materiel = 3000
 # a bomber cannot shake one off its tail (2026-11-22).
 fighter_turn_over_t1_bomber = 1.5
 fighters = ["t1_interceptor", "t2_fighter_bomber", "t3_air_superiority"]
+
+# The T3 fighter against the T1 interceptor (2026-11-22), so that teching up is worth it: about
+# this many times its damage a second; a shot that destroys one; a little more range and speed;
+# and a turn this many times as quick. Its guns, unlike the interceptor's, fire off its nose, so
+# that it can take on a swarm. In a fight at T3 prices ([economy]), it beats an equal materiel of
+# interceptors by at least this score.
+[air.t3_fighter]
+dps_over_interceptor = [9, 11]
+range_over_interceptor = [1.05, 1.25]
+turn_over_interceptor = 1.25
+beats_interceptors_by = 0.2
 
 # Flying heights, as shares of the T3 spy plane's, the highest (2026-11-22): the spy plane far up,
 # fighters and the heavy bombers below it, light aircraft lower, and what hovers lowest.

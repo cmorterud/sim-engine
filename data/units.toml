@@ -753,7 +753,7 @@ health = 4500
 speed = 50
 radius = 12
 vision = 640
-flight = { elevation = 352, turn_rate = 270, break_off = 300, fuel = 1000 }
+flight = { elevation = 352, turn_rate = 340, break_off = 300, fuel = 1000 }
 weapon = { range = 600, reload_ticks = 10, projectile_speed = 180, damage = 500, targets = "air" }
 
 # One great bomb a pass, and anti-air guns: the T3 snipe weapon, its bomb set by the hits it takes

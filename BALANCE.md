@@ -122,7 +122,14 @@ out close and why: evidence about the process, not a target.
   fifth anti-air comes out even with bombers; five bombers destroy a commander in 79 seconds.
   Anti-air is a hard counter. Fighters turn half again as fast as bombers, interceptors fire only
   ahead and tail what they chase, flying heights differ, and anti-air guns miss fast, high
-  aircraft. Next: T2 and T3 air, starting with T3 fighters against T1 interceptors.
+  aircraft.
+* 2026-11-22: energy is valued by the tier a fight is at (`[economy] energy_per_materiel`): 5 to
+  a materiel at T1, and 100 from T2, the fabricators' rate. At T1's rate everywhere, the T3
+  fighter, whose cost is mostly energy, counted as 21 interceptors rather than 13, and spamming
+  interceptors against it looked the better buy, which the inspiration's players never found. At
+  T3 prices six T3 fighters beat as much in interceptors by +0.22 (`[air.t3_fighter]`); its turn
+  went to 340 degrees a second, a quarter quicker than the interceptor's. Land units and T1 air
+  come out the same. Next: the rest of T2 and T3 air.
 
 ## Order of work
 

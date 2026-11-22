@@ -190,18 +190,33 @@ fn micro(world: &SimWorld, ids: &[SimId], enemies: &[SimId], home: i32, orders: 
     }
 }
 
-/// What a unit costs, in the materiel of a land unit of the same price: its mass and energy
-/// together, energy at the targets' rate (`[economy] energy_per_materiel`), measured so that a land
-/// unit, which spends the anchor's energy for each materiel, costs exactly its mass. Aircraft and
-/// many structures spend far more energy for their mass, which counts.
+/// What a unit costs in a fight at T1, in the materiel of a land unit of the same price
+/// (`cost_at`).
 pub fn cost(unit: &Blueprint) -> f64 {
+    cost_at(unit, 1)
+}
+
+/// What a unit costs in a fight at this tier, in the materiel of a land unit of the same price:
+/// its mass and energy together, energy at the tier's rate (`[economy] energy_per_materiel`),
+/// measured so that a land unit, which spends the anchor's energy for each materiel, costs
+/// exactly its mass at every tier. Aircraft and many structures spend far more energy for their
+/// mass, which counts, for much more at T1 than later, when energy is cheap.
+pub fn cost_at(unit: &Blueprint, tier: u8) -> f64 {
     // Read once: duels price every unit on every tick.
-    static RATES: std::sync::OnceLock<(f64, f64)> = std::sync::OnceLock::new();
-    let &(rate, land_share) = RATES.get_or_init(|| {
-        let rate = target_number("economy", "energy_per_materiel");
+    static RATES: std::sync::OnceLock<Vec<(f64, f64)>> = std::sync::OnceLock::new();
+    let rates = RATES.get_or_init(|| {
+        let table: toml::Table = TARGETS.parse().expect("data/balance_targets.toml is valid");
         let anchor = Anchor::from_targets();
-        (rate, 1.0 + anchor.energy / anchor.materiel / rate)
+        let by_tier = table["economy"]["energy_per_materiel"].as_array().expect("[economy] energy_per_materiel is a rate for each tier");
+        by_tier
+            .iter()
+            .map(|rate| {
+                let rate = rate.as_float().or_else(|| rate.as_integer().map(|rate| rate as f64)).expect("a rate");
+                (rate, 1.0 + anchor.energy / anchor.materiel / rate)
+            })
+            .collect()
     });
+    let (rate, land_share) = rates[usize::from(tier.clamp(1, 3)) - 1];
     (unit.mass.to_num::<f64>() + unit.energy.to_num::<f64>() / rate) / land_share
 }
 
@@ -1071,10 +1086,15 @@ pub fn target_number_range(section: &str, key: &str) -> (f64, f64) {
     (number(&range[0]), number(&range[1]))
 }
 
-/// A side of so many of `key` as `materiel` buys, attack-moving.
+/// A side of so many of `key` as `materiel` buys in a fight at T1, attack-moving.
 pub fn bought(db: &BlueprintDb, key: &str, materiel: f64) -> Side {
+    bought_at(db, key, materiel, 1)
+}
+
+/// A side of so many of `key` as `materiel` buys in a fight at this tier, attack-moving.
+pub fn bought_at(db: &BlueprintDb, key: &str, materiel: f64, tier: u8) -> Side {
     let id = db.id(key);
-    Side { unit: id, count: (materiel / cost(db.get(id))).round().max(1.0) as u32, tactics: Tactics::AttackMove }
+    Side { unit: id, count: (materiel / cost_at(db.get(id), tier)).round().max(1.0) as u32, tactics: Tactics::AttackMove }
 }
 
 /// The materiel of a tier fight at T1, ten anchors ([pace]): a bombing strike's size.

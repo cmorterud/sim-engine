@@ -206,3 +206,36 @@ fn anti_air_is_no_better_a_shield_and_fighters_out_turn_bombers() {
         assert!(turn(key) >= turn("t1_bomber") * target_number("air", "fighter_turn_over_t1_bomber"), "{key} turns at {}", turn(key));
     }
 }
+
+/// The T3 fighter against the T1 interceptor ([air.t3_fighter]): ten times the damage a second,
+/// one shot to destroy one, more range and speed, a quicker turn, and the better buy in a fight
+/// at T3 prices, so that spamming interceptors against it loses.
+#[test]
+fn the_t3_fighter_outclasses_the_t1_interceptor() {
+    use sim_engine::balance::{bought_at, cost_at};
+    let targets: toml::Table = include_str!("../data/balance_targets.toml").parse().expect("valid targets");
+    let rules = targets["air"]["t3_fighter"].as_table().expect("[air.t3_fighter]");
+    let number = |key: &str| rules[key].as_float().unwrap_or_else(|| panic!("{key} is a number"));
+    let range = |key: &str| {
+        let bounds = rules[key].as_array().unwrap_or_else(|| panic!("{key} is a range"));
+        let value = |at: usize| bounds[at].as_float().or_else(|| bounds[at].as_integer().map(|value| value as f64)).expect("a number");
+        (value(0), value(1))
+    };
+    let db = db();
+    let (fighter, interceptor) = (db.get(db.id("t3_air_superiority")), db.get(db.id("t1_interceptor")));
+    let (gun, small) = (fighter.weapon.expect("a gun"), interceptor.weapon.expect("a gun"));
+    let dps = |weapon: sim_engine::sim::blueprints::WeaponDef| weapon.damage.to_num::<f64>() * 10.0 / f64::from(weapon.reload_ticks.max(1));
+    let (low, high) = range("dps_over_interceptor");
+    assert!((low..=high).contains(&(dps(gun) / dps(small))), "{} times the damage a second", dps(gun) / dps(small));
+    assert!(gun.damage >= interceptor.health, "a shot of {} against {} health", gun.damage, interceptor.health);
+    let (low, high) = range("range_over_interceptor");
+    let reach = gun.range.to_num::<f64>() / small.range.to_num::<f64>();
+    assert!((low..=high).contains(&reach), "{reach} times the range");
+    assert!(fighter.speed > interceptor.speed, "faster");
+    let turn = |unit: &sim_engine::sim::blueprints::Blueprint| f64::from(unit.flight.expect("flies").turn_rate);
+    assert!(turn(fighter) >= turn(interceptor) * number("turn_over_interceptor"), "turns at {}", turn(fighter));
+    assert!(gun.arc.is_none(), "its guns fire off its nose");
+    let materiel = 6.0 * cost_at(fighter, 3);
+    let fight = mirrored(&db, bought_at(&db, "t3_air_superiority", materiel, 3), bought_at(&db, "t1_interceptor", materiel, 3), 1.0);
+    assert!(fight.score >= number("beats_interceptors_by"), "six fighters score {} against as much in interceptors", fight.score);
+}
