@@ -213,11 +213,36 @@ pub struct Motion {
     headings: Headings,
     strides: BTreeMap<SimId, Stride>,
     shots: BTreeMap<SimId, Shot>,
+    /// The ground, for standing structures level on a slope. Without it, a structure stands at
+    /// the height of the ground at its middle.
+    ground: Option<crate::render::camera::HeightField>,
 }
 
 impl Motion {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Gives it the map's ground, for standing structures level on slopes.
+    pub fn set_ground(&mut self, ground: crate::render::camera::HeightField) {
+        self.ground = Some(ground);
+    }
+
+    /// The lowest and highest ground under a square `half` either way of a point, at every
+    /// terrain corner in it and at its own corners.
+    fn ground_under(&self, x: f64, y: f64, half: f64) -> Option<(f64, f64)> {
+        let ground = self.ground.as_ref()?;
+        let step = ground.cell_units().max(1.0);
+        let count = ((half * 2.0) / step).ceil() as i32;
+        let (mut low, mut high) = (f64::MAX, f64::MIN);
+        for row in 0..=count {
+            for column in 0..=count {
+                let at = |index: i32| (-half + f64::from(index) * step).min(half);
+                let height = ground.height_at(x + at(column), y + at(row));
+                (low, high) = (low.min(height), high.max(height));
+            }
+        }
+        Some((low, high))
     }
 
     /// Forgets units for which `keep` is false.
@@ -601,6 +626,14 @@ pub fn build_unit_instances(
             // a strip of floor shows between neighbors, where adjacency wiring runs. Walls fill
             // theirs, to join up.
             let footprint = size;
+            // On a slope it stands level, on top of its foundation, which reaches from the highest
+            // ground under it down below the lowest, rather than sinking into the hill on one side.
+            let half = f64::from(footprint) * 0.5 * f64::from(APRON_WIDTH);
+            let slab = motion.ground_under(center[0], center[1], half);
+            if let Some((_, high)) = slab {
+                let foot = center[2] - f64::from(unit.radius) * RAW_TO_WORLD;
+                center[2] += (high - foot).max(0.0);
+            }
             let size = if shape == Shape::Wall { footprint } else { footprint * STRUCTURE_SHARE };
             // A structure rises from the ground as it is built, and looks unfinished until then.
             let built = f32::from(unit.built_permille) / 1000.0;
@@ -621,10 +654,13 @@ pub fn build_unit_instances(
             }
             let aim = unit_vector(unit.aim).unwrap_or(NORTH);
             out.push(shape, animated(painted(center, [size, size, height], aim, trim, hull, glow, UNIT_ICON_PX * 1.6, eye), spin));
-            // The foundation it stands on, laid before it rises, a little wider than it.
+            // The foundation it stands on, laid before it rises, a little wider than it: a level
+            // slab from the highest ground under it to below the lowest.
             if look.is_some_and(|look| look.apron) {
                 let ground = center[2] - f64::from(height) * 0.5;
-                out.push(Shape::Apron, painted([center[0], center[1], ground], [footprint * APRON_WIDTH, footprint * APRON_WIDTH, APRON_HEIGHT], NORTH, color, hull, hull, NO_ICON, eye));
+                let (bottom, top) = slab.map_or((ground - f64::from(APRON_HEIGHT) * 0.5, ground + f64::from(APRON_HEIGHT) * 0.5), |(low, _)| (low - f64::from(APRON_HEIGHT) * 0.5, ground + f64::from(APRON_HEIGHT) * 0.5));
+                let thick = (top - bottom) as f32;
+                out.push(Shape::Apron, painted([center[0], center[1], (top + bottom) * 0.5], [footprint * APRON_WIDTH, footprint * APRON_WIDTH, thick], NORTH, color, hull, hull, NO_ICON, eye));
             }
             // Scaffolding stands around the whole of what it will be until it is finished.
             if unit.built_permille < 1000 {
@@ -1454,6 +1490,36 @@ mod tests {
         let bottom = generator.model_matrix[3][2] - generator.model_matrix[2][2] * 0.5;
         // The middle it is given is half its footprint above the ground, as before it shrank.
         assert!((bottom + footprint * 0.5).abs() < 1e-3, "and stands on the ground: {bottom}");
+    }
+
+    /// On a slope a structure stands level at the highest ground under it, on a foundation that
+    /// reaches below the lowest, rather than sinking into the hill on one side.
+    #[test]
+    fn a_structure_on_a_slope_stands_level_on_a_slab_down_to_the_ground() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        // Ground rising one unit for each unit east.
+        let samples = 101;
+        let heights: Vec<i16> = (0..samples * samples).map(|index| ((index % samples) * 16 * 20) as i16).collect();
+        let mut motion = Motion::new();
+        motion.set_ground(crate::render::camera::HeightField::new(samples, heights, 20.0, 1.0 / 16.0));
+        let (footprint, x, y) = (40.0_f64, 1_000.0_f64, 1_000.0_f64);
+        let raw = |value: f64| (value * 4096.0) as i32;
+        let mut generator = unit(1, 0);
+        // Its middle half its footprint above the ground at its middle, as the simulation has it.
+        (generator.blueprint, generator.is_structure, generator.radius) = (db.id("power_generator").0, true, raw(footprint * 0.5));
+        (generator.x, generator.y, generator.z) = (raw(x), raw(y), raw(x + footprint * 0.5));
+        let mut out = InstanceBatches::default();
+        build_unit_instances(&[], &[generator], 1.0, [0.0; 3], &[], &looks, &[], &mut motion, &mut out);
+        let half = footprint * 0.5 * f64::from(APRON_WIDTH);
+        let (low, high) = (x - half, x + half);
+        let body = &out.shape(Shape::Generator)[0];
+        let foot = f64::from(body.model_matrix[3][2] - body.model_matrix[2][2] * 0.5);
+        assert!((foot - high).abs() < 0.05, "it stands at the highest ground under it, {high}, not {foot}");
+        let slab = &out.shape(Shape::Apron)[0];
+        let (slab_bottom, slab_top) = (f64::from(slab.model_matrix[3][2] - slab.model_matrix[2][2] * 0.5), f64::from(slab.model_matrix[3][2] + slab.model_matrix[2][2] * 0.5));
+        assert!(slab_bottom < low, "its slab reaches below the lowest ground, {low}: {slab_bottom}");
+        assert!(slab_top >= foot, "and up to where it stands: {slab_top} against {foot}");
     }
 
     #[test]

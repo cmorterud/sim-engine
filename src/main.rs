@@ -1116,6 +1116,8 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     });
     let mut scene_instances = InstanceBatches::default();
     let mut motion = Motion::new();
+    // Structures stand level on slopes, on a slab down to the ground.
+    motion.set_ground(HeightField::new(map.heights.samples(), map.heights.heights().to_vec(), map.heights.cell_units(), map.heights.units_per_step()));
     let mut effects = Effects::new();
     let mut title_timer = Instant::now();
     let mut title_frames = 0u32;
