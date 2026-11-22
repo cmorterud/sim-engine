@@ -6,7 +6,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::ai::{play_match_on, replay_match_on, CHECKSUM_INTERVAL};
+use crate::ai::{play_match_with, replay_match_on, CHECKSUM_INTERVAL};
+use crate::ai_strategy::Strategy;
 use crate::sim::scenario::MapSource;
 use crate::sim::components::Team;
 use crate::sim::world::MatchResult;
@@ -28,8 +29,9 @@ pub struct SoakReport {
     pub tick_times: Vec<Duration>,
 }
 
-/// Plays and replays one match per seed, on several threads. A panic in any match is a failure.
-pub fn run_soak(first_seed: u64, count: u64, threads: usize, map: &MapSource) -> SoakReport {
+/// Plays and replays one match per seed, on several threads, Blue and Red playing these
+/// strategies. A panic in any match is a failure.
+pub fn run_soak(first_seed: u64, count: u64, threads: usize, map: &MapSource, strategies: [&'static Strategy; 2]) -> SoakReport {
     let next = Arc::new(AtomicU64::new(0));
     let summaries = Arc::new(Mutex::new(Vec::new()));
     let times = Arc::new(Mutex::new(Vec::new()));
@@ -44,7 +46,7 @@ pub fn run_soak(first_seed: u64, count: u64, threads: usize, map: &MapSource) ->
                 let seed = first_seed + index;
                 let mut local_times = Vec::with_capacity(20_000);
                 let mut last = Instant::now();
-                let record = play_match_on(&map, seed, MATCH_TICK_LIMIT, |world| {
+                let record = play_match_with(&map, seed, MATCH_TICK_LIMIT, strategies, |world| {
                     let now = Instant::now();
                     // Ticks that also compute a checksum would inflate the 99th percentile.
                     if !world.current_tick.is_multiple_of(CHECKSUM_INTERVAL) {

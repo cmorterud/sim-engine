@@ -118,6 +118,9 @@ Usage: sim-engine [options]
   --capture <dir>      With --autotest, save screenshots at several zoom levels
   --soak <matches>     Play and replay AI-vs-AI matches, and report on the exit criteria
   --threads <n>        Threads for --soak (default 6)
+  --strategies <blue>,<red>
+                       With --soak, the strategies Blue and Red play (default
+                       balanced,balanced)
   --balance            Measure the unit data with the balance harness's duels (BALANCE.md)
   --balance-derive <t1|t2|t3|t1-air>
                        Derive a tier of land units' numbers, or T1 air's, from
@@ -225,6 +228,8 @@ struct Options {
     difficulty: Option<Difficulty>,
     /// What it plays, by its id in data/ai_strategies.toml, or "random": balanced unless asked.
     strategy: Option<String>,
+    /// What Blue and Red play in a soak.
+    soak_strategies: Option<[&'static Strategy; 2]>,
     /// Watch the soak's AI-vs-AI match for the map and seed instead of playing.
     watch: bool,
     /// Whose sight a watched match starts in: `None` for everything.
@@ -348,6 +353,14 @@ fn parse_options() -> Result<Option<Options>, String> {
                 options.difficulty = Some(difficulty);
                 options.strategy = strategy.or(options.strategy.take());
             }
+            "--strategies" => {
+                let names = value("--strategies")?;
+                let pair: Vec<Option<&'static Strategy>> = names.split(',').map(Strategy::named).collect();
+                match pair.as_slice() {
+                    [Some(blue), Some(red)] => options.soak_strategies = Some([blue, red]),
+                    _ => return Err(format!("--strategies needs two of {}, with a comma between", strategy_names())),
+                }
+            }
             "--strategy" => {
                 let name = value("--strategy")?;
                 if !is_strategy(&name) {
@@ -429,7 +442,9 @@ fn main() {
         return;
     }
     if let Some(matches) = options.soak {
-        let mut report = run_soak(options.seed.unwrap_or(1), matches, options.threads.unwrap_or(6), &map_source);
+        let strategies = options.soak_strategies.unwrap_or([Strategy::balanced(); 2]);
+        println!("strategies: blue {}, red {}", strategies[0].id, strategies[1].id);
+        let mut report = run_soak(options.seed.unwrap_or(1), matches, options.threads.unwrap_or(6), &map_source, strategies);
         if !report.print(!options.no_tick_gate) {
             std::process::exit(1);
         }

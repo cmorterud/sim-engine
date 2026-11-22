@@ -1,0 +1,219 @@
+name: Strategy soak
+
+# Every AI strategy against every other (GAME_SPECIFICATION.md §17.1, data/ai_strategies.toml),
+# on every map, to check [strategy]'s balance rule in data/balance_targets.toml: a single matchup
+# may be lopsided, but none wins more than 55% over every opponent and map. Naval is judged only
+# on maps with water. Each pair plays half its matches with each strategy as Blue, on the same
+# seeds, so that neither side's start counts. Turtle, which never attacks, is left out.
+#
+# Heavy, so it runs only when started by hand: from the Actions tab, or
+# `gh workflow run strategy-soak.yml`, optionally with `-f matches_per_pair=20`.
+on:
+  workflow_dispatch:
+    inputs:
+      matches_per_pair:
+        description: Matches per pair of strategies on each map, half each way round
+        default: "50"
+      strategies:
+        description: The strategies to play, by id
+        default: "balanced,rush,tech,air,naval"
+      shard_size:
+        description: Matches per runner
+        default: "25"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: strategy-soak-${{ github.ref }}
+  queue: max
+
+env:
+  # Kept in step with CI, so that this workflow reuses the release build cache CI saves.
+  RUST_VERSION: "1.99.1"
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  plan:
+    name: Plan the shards
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+    steps:
+      - id: plan
+        env:
+          MATCHES: ${{ inputs.matches_per_pair }}
+          STRATEGIES: ${{ inputs.strategies }}
+          SHARD: ${{ inputs.shard_size }}
+        run: |
+          python3 - <<'EOF' >> "$GITHUB_OUTPUT"
+          import itertools, json, os
+          strategies = [name.strip() for name in os.environ["STRATEGIES"].split(",") if name.strip()]
+          each_way = max(1, int(os.environ["MATCHES"]) // 2)
+          shard = max(1, int(os.environ["SHARD"]))
+          shards = []
+          for map_name in ["skirmish", "highland", "twin_passes"]:
+              map_arg = "" if map_name == "skirmish" else f"--map {map_name} "
+              for a, b in itertools.combinations(strategies, 2):
+                  for blue, red in [(a, b), (b, a)]:
+                      for first in range(1, each_way + 1, shard):
+                          count = min(shard, each_way + 1 - first)
+                          shards.append({"name": f"{map_name} {blue}-{red} {first}-{first + count - 1}",
+                                         "args": f"{map_arg}--soak {count} --seed {first} --strategies {blue},{red}"})
+          print("shards=" + json.dumps(shards))
+          EOF
+
+  build:
+    name: Build the release binary
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install audio headers
+        run: |
+          for attempt in 1 2 3; do
+            sudo apt-get -o Acquire::Retries=5 update && sudo apt-get -o Acquire::Retries=5 install -y libasound2-dev && exit 0
+            echo "Install attempt $attempt failed; trying again in 20 seconds."
+            sleep 20
+          done
+          exit 1
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ env.RUST_VERSION }}-release-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ env.RUST_VERSION }}-release-
+
+      - name: Build
+        run: cargo build --locked --release --bin sim-engine
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sim-engine
+          path: target/release/sim-engine
+          retention-days: 3
+
+  soak:
+    name: Soak (${{ matrix.name }})
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 40
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.shards) }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: sim-engine
+
+      - name: Install the sound library if missing
+        run: |
+          chmod +x sim-engine
+          if ldd sim-engine | grep -q "not found"; then
+            sudo apt-get update && sudo apt-get install -y libasound2t64
+          fi
+          ldd sim-engine | grep "not found" && exit 1 || true
+
+      # A strategy that stalls a match past the time limit fails its shard; the results are
+      # still summarized.
+      - name: Soak
+        run: |
+          set -o pipefail
+          ./sim-engine ${{ matrix.args }} --threads "$(nproc)" --no-tick-gate | tee soak.txt
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: strategy-soak-${{ strategy.job-index }}
+          path: soak.txt
+          retention-days: 14
+
+  summary:
+    name: Summary
+    needs: soak
+    if: always() && needs.soak.result != 'skipped'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: strategy-soak-*
+
+      # Each matchup on each map, both ways round added up, and each strategy's share of the
+      # matches it decided over every opponent and map, against the 55% limit.
+      - name: Summarize
+        run: |
+          python3 - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import glob, re
+          from math import comb
+          def p_value(a, b):
+              n = a + b
+              if n == 0:
+                  return 1.0
+              k = min(a, b)
+              return min(1.0, 2 * sum(comb(n, i) for i in range(k + 1)) / 2 ** n)
+          WATER = {"twin_passes"}
+          pairs, overall, problems = {}, {}, []
+          for path in sorted(glob.glob("strategy-soak-*/soak.txt")):
+              text = open(path).read()
+              mapname = re.search(r"^map (\S+):", text, re.M)
+              where = mapname.group(1) if mapname else "skirmish"
+              sides = re.search(r"^strategies: blue (\S+), red (\S+)", text, re.M)
+              wins = re.search(r"Blue wins (\d+), Red wins (\d+), draws (\d+), unfinished (\d+)", text)
+              mismatches = re.search(r"replay mismatches (\d+)", text)
+              if not (sides and wins):
+                  problems.append(f"{path}: no result")
+                  continue
+              blue, red = sides.group(1), sides.group(2)
+              blue_wins, red_wins, draws, unfinished = (int(wins.group(i)) for i in range(1, 5))
+              if mismatches and int(mismatches.group(1)):
+                  problems.append(f"{where} {blue} as Blue against {red}: {mismatches.group(1)} replay mismatches")
+              a, b = sorted([blue, red])
+              row = pairs.setdefault((where, a, b), {a: 0, b: 0, "draws": 0, "unfinished": 0})
+              row[blue] += blue_wins
+              row[red] += red_wins
+              row["draws"] += draws
+              row["unfinished"] += unfinished
+              for strategy, won, lost in [(blue, blue_wins, red_wins), (red, red_wins, blue_wins)]:
+                  if strategy == "naval" and where not in WATER:
+                      continue
+                  total = overall.setdefault(strategy, [0, 0])
+                  total[0] += won
+                  total[1] += lost
+          print("## Each strategy over every opponent and map")
+          print()
+          print("Naval counts only on maps with water. The rule: none wins more than 55% of the matches it decides.")
+          print()
+          print("| Strategy | Won | Lost | Share | Within 55% |")
+          print("| :-- | --: | --: | --: | :-- |")
+          for strategy, (won, lost) in sorted(overall.items(), key=lambda item: -item[1][0] / max(1, sum(item[1]))):
+              share = won / max(1, won + lost)
+              print(f"| {strategy} | {won} | {lost} | {100 * share:.1f}% | {'yes' if share <= 0.55 else '**no**'} |")
+          print()
+          print("## Each matchup")
+          print()
+          print("| Map | First | Second | First wins | Second wins | First's share | p (even) | Draws | Unfinished |")
+          print("| :-- | :-- | :-- | --: | --: | --: | --: | --: | --: |")
+          for (where, a, b), row in sorted(pairs.items()):
+              decided = row[a] + row[b]
+              share = f"{100 * row[a] / decided:.1f}%" if decided else "-"
+              print(f"| {where} | {a} | {b} | {row[a]} | {row[b]} | {share} | {p_value(row[a], row[b]):.3f} | {row['draws']} | {row['unfinished']} |")
+          if problems:
+              print()
+              print("## Problems")
+              print()
+              for problem in problems:
+                  print(f"- {problem}")
+          EOF
+          cat "$GITHUB_STEP_SUMMARY"
