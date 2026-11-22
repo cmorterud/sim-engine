@@ -163,6 +163,26 @@ pub fn selection_reaches(click: &RightClick<'_>, kind: TargetKind) -> bool {
     })
 }
 
+/// The selected structures with guns, which fire at what they choose rather than on order, that
+/// reach `target` and can hit its kind.
+fn defenses_in_reach(click: &RightClick<'_>, target: &UnitView, kind: TargetKind) -> Vec<SimId> {
+    let raw = |value: i32| f64::from(value) / 4096.0;
+    click
+        .selected
+        .iter()
+        .filter_map(|id| click.units.binary_search_by_key(id, |unit| unit.id).ok().map(|index| &click.units[index]))
+        .filter(|unit| unit.blueprint != u16::MAX)
+        .filter(|unit| {
+            let def = click.blueprints.get(BlueprintId(unit.blueprint));
+            let guns = def.weapon.is_some_and(|weapon| matches!(weapon.kind, WeaponKind::Shell | WeaponKind::Flak));
+            let reach = def.weapon.map_or(0.0, |weapon| weapon.range.to_num::<f64>()) + raw(target.radius);
+            let apart = (raw(unit.x) - raw(target.x)).hypot(raw(unit.y) - raw(target.y));
+            def.is_structure() && !def.is_factory() && guns && weapons_reach(def, kind) && apart <= reach
+        })
+        .map(|unit| unit.id)
+        .collect()
+}
+
 /// Works out the orders for a right-click: attack what is under the cursor, help with
 /// friendly work, reclaim debris, or otherwise move there.
 pub fn right_click_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
@@ -193,8 +213,16 @@ pub fn right_click_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
     if let Some(target) = enemy {
         let unarmed: Vec<SimId> = parts.builders.iter().copied().filter(|id| !parts.armed.contains(id)).collect();
         let index = click.units.binary_search_by_key(&target, |unit| unit.id).expect("found in this list");
-        if !parts.armed.is_empty() {
-            commands.push(SimCommand::Attack { units: parts.armed.clone(), target });
+        // Defenses with guns, which pick their own targets, focus on this one when it is in their
+        // reach and their guns can hit it; told to attack what they cannot reach, they would wait
+        // on it and let what comes close go by.
+        let kind = unit_target_kind(&click.units[index], click.blueprints, click.surfaced);
+        let mut armed = parts.armed.clone();
+        armed.extend(defenses_in_reach(click, &click.units[index], kind));
+        armed.sort_unstable();
+        armed.dedup();
+        if !armed.is_empty() {
+            commands.push(SimCommand::Attack { units: armed, target });
         }
         if !unarmed.is_empty() && capturable(&click.units[index], click.blueprints) {
             commands.push(SimCommand::Capture { units: unarmed, target });
@@ -1058,16 +1086,21 @@ mod tests {
     }
 
     #[test]
-    fn right_clicking_an_enemy_orders_missile_launchers_to_fire_but_not_point_defenses() {
+    fn right_clicking_an_enemy_orders_missile_launchers_to_fire_and_point_defenses_in_reach() {
         let db = db();
+        let reach = db.get(db.id("t1_point_defense")).weapon.expect("a gun").range.to_num::<f64>();
         let units = [
             view(1, Team::Blue, db.id("tactical_missile_launcher"), &db, 1_000.0, 1_000.0),
             view(2, Team::Blue, db.id("strategic_missile_launcher"), &db, 1_100.0, 1_000.0),
+            // One point defense out of reach of the target, and one in it.
             view(3, Team::Blue, db.id("t1_point_defense"), &db, 1_200.0, 1_000.0),
+            view(5, Team::Blue, db.id("t1_point_defense"), &db, 2_000.0, 2_000.0 - reach + 20.0),
             view(4, Team::Red, db.id("power_generator"), &db, 2_000.0, 2_000.0),
         ];
-        let orders = click_at(&[SimId(1), SimId(2), SimId(3)], &units, &[], &db, &camera(), [2_000.0, 2_000.0]);
-        assert_eq!(orders, [SimCommand::Attack { units: vec![SimId(1), SimId(2)], target: SimId(4) }]);
+        let mut units = units;
+        units.sort_by_key(|unit| unit.id);
+        let orders = click_at(&[SimId(1), SimId(2), SimId(3), SimId(5)], &units, &[], &db, &camera(), [2_000.0, 2_000.0]);
+        assert_eq!(orders, [SimCommand::Attack { units: vec![SimId(1), SimId(2), SimId(5)], target: SimId(4) }], "the far point defense keeps to its own targets");
     }
 
     #[test]
