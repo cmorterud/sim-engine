@@ -339,12 +339,12 @@ impl SimWorld {
 
     /// Pays each charging teleport's energy for this tick, after shields and intel, aborting any
     /// that cannot be paid, and jumps those that are done. Returns what each team has paid.
-    pub(super) fn step_teleports(&mut self, mut paid: [Res; 2]) -> [Res; 2] {
+    pub(super) fn step_teleports(&mut self, mut paid: Vec<Res>) -> Vec<Res> {
         let mut aborted = Vec::new();
         let mut arrived = Vec::new();
         let mut paid_by = Vec::new();
         for &(id, entity) in &self.teleporting {
-            let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team.index();
+            let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").owner.index();
             let mut charge = self.ecs.get::<&mut Teleporting>(entity).expect("teleport list only holds teleports");
             let economy = &self.economies[team];
             if economy.energy + economy.energy_income - paid[team] < charge.energy_per_tick {

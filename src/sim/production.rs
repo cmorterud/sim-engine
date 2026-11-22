@@ -6,7 +6,7 @@ use std::hash::Hasher;
 
 use super::blueprints::{BlueprintId, Res, Targets, UnitClass, WeaponKind, ADJACENCY_SCALE, TICKS_PER_SECOND};
 use super::commands::SimCommand;
-use super::components::{
+use super::components::{PlayerId, 
     Adjacency, AntiAir, BeingCaptured, BombBay, Flight, Blueprinted, BuildTask, Builder, Intel, Launcher, Upgrading, MissileDefense, DischargeOrder, DischargeWeapon, Paused, Shield, Turning, Turret, Veterancy, Combat, Construction, Factory, Footprint, Health, Order, OrderKind, OrderQueue, Patrol,
     Position, SimId, Team, UnitStats, Wreck, WreckKind,
 };
@@ -134,7 +134,9 @@ struct WorkItem {
     target: SimId,
     entity: hecs::Entity,
     kind: WorkKind,
-    team: Team,
+    /// The player who pays for it: whose site, factory, or commander it is, or for a capture,
+    /// the capturing side's first player.
+    owner: PlayerId,
     /// The share of the job finished per tick at full speed.
     step: Res,
     mass: Res,
@@ -173,12 +175,19 @@ impl SimWorld {
         cell_y * self.terrain.cells_per_side() as u32 + cell_x
     }
 
+    /// What spawning a blueprint for a team's first player makes.
     pub fn blueprint_spawn(&self, blueprint: BlueprintId, team: Team, position: Vec2Fp) -> UnitSpawn {
+        self.blueprint_spawn_for(blueprint, self.first_player(team), position)
+    }
+
+    /// What spawning a blueprint for a player makes.
+    pub fn blueprint_spawn_for(&self, blueprint: BlueprintId, owner: PlayerId, position: Vec2Fp) -> UnitSpawn {
         let unit = self.blueprints.get(blueprint);
         let weapon = unit.weapon;
         UnitSpawn {
             position,
-            team,
+            team: self.players[owner.index()],
+            owner,
             max_speed: unit.speed,
             radius: unit.radius,
             health: unit.health,
@@ -192,14 +201,24 @@ impl SimWorld {
         }
     }
 
-    /// Spawns a finished mobile unit.
+    /// The player a unit belongs to.
+    pub(super) fn owner_of(&self, entity: hecs::Entity) -> PlayerId {
+        self.ecs.get::<&UnitStats>(entity).expect("units have stats").owner
+    }
+
+    /// Spawns a finished mobile unit, for its team's first player.
     pub fn spawn_mobile(&mut self, blueprint: BlueprintId, team: Team, position: Vec2Fp) -> SimId {
-        self.spawn_mobile_inner(blueprint, team, position, false)
+        self.spawn_mobile_for(blueprint, self.first_player(team), position)
+    }
+
+    /// Spawns a finished mobile unit for a player.
+    pub fn spawn_mobile_for(&mut self, blueprint: BlueprintId, owner: PlayerId, position: Vec2Fp) -> SimId {
+        self.spawn_mobile_inner(blueprint, owner, position, false)
     }
 
     /// `in_bay`: spawned in a factory's bay, where it could not otherwise be, to drive out.
-    fn spawn_mobile_inner(&mut self, blueprint: BlueprintId, team: Team, position: Vec2Fp, in_bay: bool) -> SimId {
-        let spawn = self.blueprint_spawn(blueprint, team, position);
+    fn spawn_mobile_inner(&mut self, blueprint: BlueprintId, owner: PlayerId, position: Vec2Fp, in_bay: bool) -> SimId {
+        let spawn = self.blueprint_spawn_for(blueprint, owner, position);
         let move_class = self.blueprints.get(blueprint).move_class();
         let id = if in_bay { self.spawn_unit_anywhere(spawn, move_class) } else { self.spawn_unit_as(spawn, move_class) };
         let entity = self.find_unit(id).expect("just spawned").1;
@@ -210,7 +229,7 @@ impl SimWorld {
         }
         self.attach_blueprint_parts(id, entity, blueprint);
         if self.blueprints.get(blueprint).is_commander() {
-            self.commanders[team.index()] = Some(id);
+            self.commanders[owner.index()] = Some(id);
         }
         self.economy_dirty = true;
         id
@@ -273,7 +292,7 @@ impl SimWorld {
 
     /// Trees and rocks on a new structure's ground are cleared, and the team gets what they
     /// held, as though its builder had reclaimed them first. Debris stays where it is.
-    fn clear_scenery(&mut self, team: Team, cell_x: u32, cell_y: u32, size: u32) {
+    fn clear_scenery(&mut self, owner: PlayerId, cell_x: u32, cell_y: u32, size: u32) {
         let low = cell_center(cell_x, cell_y, 1) - Vec2Fp::new(fp_int(TERRAIN_CELL_UNITS / 2), fp_int(TERRAIN_CELL_UNITS / 2));
         let high = low + Vec2Fp::new(fp_int(TERRAIN_CELL_UNITS * size as i32), fp_int(TERRAIN_CELL_UNITS * size as i32));
         let mut cleared = Vec::new();
@@ -284,7 +303,7 @@ impl SimWorld {
                 cleared.push((id, entity, wreck));
             }
         }
-        let economy = &mut self.economies[team.index()];
+        let economy = &mut self.economies[owner.index()];
         for &(_, _, wreck) in &cleared {
             economy.mass = (economy.mass + wreck.mass).min(economy.mass_capacity);
             economy.energy = (economy.energy + wreck.energy).min(economy.energy_capacity);
@@ -297,22 +316,27 @@ impl SimWorld {
 
     /// Starts a structure at a cell. It occupies the ground right away.
     pub fn spawn_site(&mut self, blueprint: BlueprintId, team: Team, cell_x: u32, cell_y: u32) -> Option<SimId> {
-        self.place_structure(blueprint, team, cell_x, cell_y, false)
+        self.place_structure(blueprint, self.first_player(team), cell_x, cell_y, false)
+    }
+
+    /// Starts a structure at a cell for a player.
+    pub fn spawn_site_for(&mut self, blueprint: BlueprintId, owner: PlayerId, cell_x: u32, cell_y: u32) -> Option<SimId> {
+        self.place_structure(blueprint, owner, cell_x, cell_y, false)
     }
 
     /// Places a finished structure, for scenarios and tests.
     pub fn spawn_finished_structure(&mut self, blueprint: BlueprintId, team: Team, cell_x: u32, cell_y: u32) -> Option<SimId> {
-        self.place_structure(blueprint, team, cell_x, cell_y, true)
+        self.place_structure(blueprint, self.first_player(team), cell_x, cell_y, true)
     }
 
-    fn place_structure(&mut self, blueprint: BlueprintId, team: Team, cell_x: u32, cell_y: u32, finished: bool) -> Option<SimId> {
+    fn place_structure(&mut self, blueprint: BlueprintId, owner: PlayerId, cell_x: u32, cell_y: u32, finished: bool) -> Option<SimId> {
         if !self.can_place(blueprint, cell_x, cell_y) {
             return None;
         }
         let size = u32::from(self.blueprints.get(blueprint).footprint);
-        self.clear_scenery(team, cell_x, cell_y, size);
+        self.clear_scenery(owner, cell_x, cell_y, size);
         let center = cell_center(cell_x, cell_y, size);
-        let spawn = self.blueprint_spawn(blueprint, team, center);
+        let spawn = self.blueprint_spawn_for(blueprint, owner, center);
         // A structure on the water floats on it, as ships do.
         let class = if self.blueprints.get(blueprint).on_water { super::components::MoveClass::Naval } else { super::components::MoveClass::Land };
         let id = self.spawn_unit_as(spawn, class);
@@ -1109,10 +1133,10 @@ impl SimWorld {
                 items.push(item);
             }
         }
-        let mut demand = [(Res::ZERO, Res::ZERO); 2];
+        let mut demand = vec![(Res::ZERO, Res::ZERO); self.players.len()];
         for item in &items {
-            demand[item.team.index()].0 += item.mass;
-            demand[item.team.index()].1 += item.energy;
+            demand[item.owner.index()].0 += item.mass;
+            demand[item.owner.index()].1 += item.energy;
         }
 
         // When demand exceeds supply, everything slows by the same share. A team is
@@ -1120,7 +1144,7 @@ impl SimWorld {
         // slows by the same share as building: paid for first, as it used to be, a team whose
         // generators had been raided spent all its energy on its extractors, had none to build
         // generators with, and stood still for the rest of the match.
-        let mut satisfaction = [Res::ONE; 2];
+        let mut satisfaction = vec![Res::ONE; self.players.len()];
         for (team_index, economy) in self.economies.iter_mut().enumerate() {
             let (mass_demand, energy_demand) = demand[team_index];
             let share = |supply: Res, wanted: Res| {
@@ -1142,9 +1166,9 @@ impl SimWorld {
             economy.satisfaction = satisfaction[team_index];
         }
 
-        let mut spent = [(Res::ZERO, Res::ZERO); 2];
+        let mut spent = vec![(Res::ZERO, Res::ZERO); self.players.len()];
         for item in &items {
-            let team = item.team.index();
+            let team = item.owner.index();
             let share = satisfaction[team];
             // The last bit of work costs only its part: a step rounds down, so a whole number of
             // them falls a hair short, and the one more that was needed was charged in full, a tank
@@ -1173,15 +1197,15 @@ impl SimWorld {
     /// Counts down collapsed domes, and for those that are up, takes their upkeep and lets them
     /// heal. A team that cannot pay for a dome loses it, so its shields fail one by one, in
     /// `SimId` order, as its energy runs out. Paused generators and sites neither pay nor heal.
-    /// Returns what each team paid this tick.
-    fn step_shields(&mut self) -> [Res; 2] {
-        let mut paid = [Res::ZERO; 2];
+    /// Returns what each player paid this tick.
+    fn step_shields(&mut self) -> Vec<Res> {
+        let mut paid = vec![Res::ZERO; self.players.len()];
         let mut paid_by = Vec::new();
         for &(id, entity) in &self.shields {
             if self.ecs.get::<&Construction>(entity).is_ok() || self.ecs.get::<&Paused>(entity).is_ok() {
                 continue;
             }
-            let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team.index();
+            let team = self.owner_of(entity).index();
             let discount = self.ecs.get::<&Adjacency>(entity).map_or(0, |adjacency| adjacency.upkeep_discount);
             let mut shield = self.ecs.get::<&mut Shield>(entity).expect("shield list only holds shields");
             if !shield.is_up() {
@@ -1207,15 +1231,15 @@ impl SimWorld {
 
     /// Pays for intel, in `SimId` order, after shields: a structure's sensors, field, and
     /// jamming run while paid for, and a cloak that cannot be paid for switches off. Paused and
-    /// unfinished structures neither pay nor run. Returns what each team has paid, shields included.
-    fn step_intel_upkeep(&mut self, mut paid: [Res; 2]) -> [Res; 2] {
+    /// unfinished structures neither pay nor run. Returns what each player has paid, shields included.
+    fn step_intel_upkeep(&mut self, mut paid: Vec<Res>) -> Vec<Res> {
         let mut paid_by = Vec::new();
         for &(id, entity) in &self.intel {
             let blueprint = self.blueprints.get(self.ecs.get::<&Blueprinted>(entity).expect("intel units have blueprints").0);
             let (upkeep, cloak_upkeep) = (blueprint.upkeep, self.cloak_upkeep(entity).unwrap_or(Res::ZERO));
             let effects = if self.enhanced.is_empty() { None } else { Some(self.enhancement_effects(entity)) };
             let (stealth_upkeep, jammer_upkeep) = effects.map_or((None, None), |effects| (effects.stealth_upkeep, effects.jammer.and(effects.jammer_upkeep.or(Some(Res::ZERO)))));
-            let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team.index();
+            let team = self.owner_of(entity).index();
             let switched_off = self.ecs.get::<&Construction>(entity).is_ok() || self.ecs.get::<&Paused>(entity).is_ok();
             let discount = self.ecs.get::<&Adjacency>(entity).map_or(0, |adjacency| adjacency.upkeep_discount);
             let mut intel = self.ecs.get::<&mut Intel>(entity).expect("intel list only holds intel units");
@@ -1313,7 +1337,8 @@ impl SimWorld {
                 wreck.energy -= energy;
                 let finished = wreck.mass <= Res::ZERO && wreck.energy <= Res::ZERO;
                 drop(wreck);
-                let economy = &mut self.economies[team.index()];
+                let owner = self.owner_of(entity);
+                let economy = &mut self.economies[owner.index()];
                 economy.mass_reclaimed += mass;
                 economy.energy_reclaimed += energy;
                 economy.mass_reclaimed_total += mass;
@@ -1373,7 +1398,7 @@ impl SimWorld {
                     }
                     // A support factory whose headquarters is gone by now is not started.
                     None if !self.support_allowed(team, blueprint) => None,
-                    None => self.spawn_site(blueprint, team, cell_x, cell_y),
+                    None => self.spawn_site_for(blueprint, self.owner_of(entity), cell_x, cell_y),
                 };
                 let Some(found) = found else {
                     return TaskStep::Done;
@@ -1470,12 +1495,12 @@ impl SimWorld {
         if kind == WorkKind::Capture {
             let unit = self.blueprints.get(self.ecs.get::<&Blueprinted>(entity).ok()?.0);
             let step = fp_to_res(power) * 2 / (unit.build_time * TICKS_PER_SECOND);
-            return Some(WorkItem { target, entity, kind, team: team.enemy(), step, mass: Res::ZERO, energy: unit.energy * step });
+            return Some(WorkItem { target, entity, kind, owner: self.first_player(team.enemy()), step, mass: Res::ZERO, energy: unit.energy * step });
         }
         if kind == WorkKind::Enhance {
             let enhancement = self.blueprints.enhancement(self.ecs.get::<&super::components::Enhancing>(entity).ok()?.enhancement);
             let step = fp_to_res(power) / (enhancement.build_time * TICKS_PER_SECOND);
-            return Some(WorkItem { target, entity, kind, team, step, mass: enhancement.mass * step, energy: enhancement.energy * step });
+            return Some(WorkItem { target, entity, kind, owner: self.owner_of(entity), step, mass: enhancement.mass * step, energy: enhancement.energy * step });
         }
         let blueprint = match kind {
             WorkKind::Enhance | WorkKind::Capture => unreachable!("worked out above"),
@@ -1504,7 +1529,7 @@ impl SimWorld {
         };
         let mass = Adjacency::less(unit.mass * step, mass_discount);
         let energy = Adjacency::less(unit.energy * step, energy_discount);
-        Some(WorkItem { target, entity, kind, team, step, mass, energy })
+        Some(WorkItem { target, entity, kind, owner: self.owner_of(entity), step, mass, energy })
     }
 
     /// How much of a piece of work is left to do, if it has a progress bar: repairs are limited by
@@ -1545,7 +1570,7 @@ impl SimWorld {
             WorkKind::Capture => {
                 let progress = self.ecs.get::<&BeingCaptured>(item.entity).map_or(Res::ZERO, |capture| capture.progress) + amount;
                 if progress >= Res::ONE {
-                    self.capture_unit(item.target, item.entity, item.team);
+                    self.capture_unit(item.target, item.entity, item.owner);
                 } else {
                     self.ecs.insert_one(item.entity, BeingCaptured { progress }).expect("work item checked the unit");
                     if let Err(at) = self.being_captured.binary_search_by_key(&item.target, |unit| unit.0) {
@@ -1593,7 +1618,7 @@ impl SimWorld {
                 // A factory helping another sends what it makes to that one's rally point, if it
                 // has none of its own.
                 let rally = rally.or_else(|| helped.and_then(|helped| self.factory_entity(helped)).and_then(|entity| self.ecs.get::<&Factory>(entity).ok().and_then(|factory| factory.rally)));
-                self.finish_factory_item(item.entity, item.team, finished, rally);
+                self.finish_factory_item(item.entity, finished, rally);
             }
         }
     }
@@ -1628,7 +1653,8 @@ impl SimWorld {
     }
 
     /// Hands a unit to the team that captured it, as it is, with nothing to do.
-    fn capture_unit(&mut self, id: SimId, entity: hecs::Entity, team: Team) {
+    fn capture_unit(&mut self, id: SimId, entity: hecs::Entity, owner: PlayerId) {
+        let team = self.players[owner.index()];
         self.clear_unit_plans(&[id]);
         self.set_order(id, Order::IDLE);
         let _ = self.ecs.remove_one::<BeingCaptured>(entity);
@@ -1643,7 +1669,10 @@ impl SimWorld {
             factory.progress = Res::ZERO;
             factory.rally = None;
         }
-        self.ecs.get::<&mut UnitStats>(entity).expect("units have stats").team = team;
+        {
+            let mut stats = self.ecs.get::<&mut UnitStats>(entity).expect("units have stats");
+            (stats.team, stats.owner) = (team, owner);
+        }
         // Nobody keeps shooting at it: its new side would be shooting its own.
         for &(_, other) in &self.units {
             if let Ok(mut combat) = self.ecs.get::<&mut Combat>(other) {
@@ -1668,7 +1697,7 @@ impl SimWorld {
         limit > 0 && stock >= limit
     }
 
-    fn finish_factory_item(&mut self, entity: hecs::Entity, team: Team, finished: BlueprintId, rally: Option<Vec2Fp>) {
+    fn finish_factory_item(&mut self, entity: hecs::Entity, finished: BlueprintId, rally: Option<Vec2Fp>) {
         let unit = self.blueprints.get(finished);
         // A silo keeps the missiles it builds, until it fires them.
         if unit.class == UnitClass::Ammo {
@@ -1711,7 +1740,7 @@ impl SimWorld {
         // It is built in the bay, so it starts there. An aircraft lifts off and flies; anything
         // else drives out of the open end first (`LeavingFactory`), then heads for the rally.
         let flies = unit.move_class() == super::components::MoveClass::Air;
-        let id = self.spawn_mobile_inner(finished, team, center, true);
+        let id = self.spawn_mobile_inner(finished, self.owner_of(entity), center, true);
         if flies {
             // With no rally point, it clears the pad for the next.
             self.assign_route(&[id], OrderKind::Move, rally.unwrap_or(exit), None);
@@ -1740,14 +1769,14 @@ impl SimWorld {
             }
             let blueprint = self.ecs.get::<&Blueprinted>(entity).expect("structures have blueprints").0;
             let footprint = *self.ecs.get::<&Footprint>(entity).expect("structures have footprints");
-            let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team;
-            let bonus = self.adjacency_of(id, blueprint, footprint, team, &mut links);
+            let owner = self.owner_of(entity);
+            let bonus = self.adjacency_of(id, blueprint, footprint, owner, &mut links);
             adjacency_updates.push((entity, bonus));
             let unit = self.blueprints.get(blueprint);
             // An extractor makes mass for energy, and a paused one makes nothing and needs nothing.
             let extractor = unit.mass_income > Res::ZERO && unit.upkeep > Res::ZERO;
             let paused = extractor && self.ecs.get::<&Paused>(entity).is_ok();
-            let economy = &mut self.economies[team.index()];
+            let economy = &mut self.economies[owner.index()];
             economy.mass_capacity += unit.mass_storage;
             economy.energy_capacity += unit.energy_storage;
             if paused {
@@ -1778,7 +1807,7 @@ impl SimWorld {
                 continue;
             }
             let effects = self.enhancement_effects(entity);
-            let economy = &mut self.economies[stats.team.index()];
+            let economy = &mut self.economies[stats.owner.index()];
             economy.mass_capacity += unit.mass_storage;
             economy.energy_capacity += unit.energy_storage;
             economy.mass_income += unit.mass_income + effects.mass_income;
@@ -1793,7 +1822,7 @@ impl SimWorld {
     /// Finds the finished, friendly structures touching a footprint's edges.
     /// Also adds to `links` each neighbor that gives this structure a bonus it uses, as (giver,
     /// receiver), for drawing.
-    fn adjacency_of(&self, id: SimId, blueprint: BlueprintId, footprint: Footprint, team: Team, links: &mut Vec<(SimId, SimId)>) -> Adjacency {
+    fn adjacency_of(&self, id: SimId, blueprint: BlueprintId, footprint: Footprint, owner: PlayerId, links: &mut Vec<(SimId, SimId)>) -> Adjacency {
         let unit = self.blueprints.get(blueprint);
         let Footprint { cell_x, cell_y, size } = footprint;
         let mut neighbors: Vec<SimId> = Vec::new();
@@ -1816,7 +1845,7 @@ impl SimWorld {
                 }
             }
         }
-        // Each finished neighbor of the team gives its bonuses for this structure's size, and they add up.
+        // Each finished neighbor of the same player gives its bonuses for this structure's size, and they add up.
         let size = unit.adjacency_size;
         let artillery = unit.weapon.is_some_and(|weapon| weapon.artillery);
         let mut adjacency = Adjacency::default();
@@ -1824,8 +1853,8 @@ impl SimWorld {
             let Some((_, entity)) = self.find_unit(neighbor) else {
                 continue;
             };
-            let same_team = self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team == team);
-            if !same_team || self.ecs.get::<&Construction>(entity).is_ok() {
+            let same_owner = self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.owner == owner);
+            if !same_owner || self.ecs.get::<&Construction>(entity).is_ok() {
                 continue;
             }
             let other = self.blueprints.get(self.ecs.get::<&Blueprinted>(entity).expect("structures have blueprints").0);
@@ -2308,8 +2337,9 @@ impl SimWorld {
             .iter()
             .filter_map(|link| {
                 let (_, builder) = self.find_unit(link.builder)?;
-                let team = self.ecs.get::<&UnitStats>(builder).ok()?.team;
-                if !link.reclaim && self.economies[team.index()].satisfaction == Res::ZERO {
+                let stats = *self.ecs.get::<&UnitStats>(builder).ok()?;
+                let (owner, team) = (stats.owner, stats.team);
+                if !link.reclaim && self.economies[owner.index()].satisfaction == Res::ZERO {
                     return None;
                 }
                 let (place, radius) = if link.reclaim {

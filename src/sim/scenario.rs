@@ -16,6 +16,8 @@ pub fn standard_unit(team: Team, position: Vec2Fp) -> UnitSpawn {
     UnitSpawn {
         position,
         team,
+        // The team's own player, as in a 1v1.
+        owner: super::components::PlayerId(team as u8),
         max_speed: fp_int(1),
         radius: fp_int(1),
         health: fp_int(100),

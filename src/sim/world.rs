@@ -9,7 +9,7 @@ use super::combat::{entry_hit, firing_solution_within, missile_velocity, probe_t
 use super::commands::SimCommand;
 use super::components::{BuildTask, AntiAir, Artillery, BombBay, Falling, Flight, Homing,
     Blueprinted, Builder, Combat, Construction, Factory, Footprint, Health, MoveClass, Order, OrderKind, OrderQueue, Patrol,
-    Intel, Launcher, Missile, Stunning, MissileDefense, Upgrading, Discharged, DischargeOrder, DischargeWeapon, Paused, Position, Projectile, Shield, SimId, Team, Turning, Turret, UnitStats, Velocity, Veterancy,
+    Intel, Launcher, Missile, Stunning, MissileDefense, Upgrading, Discharged, DischargeOrder, DischargeWeapon, Paused, PlayerId, Position, Projectile, Shield, SimId, Team, Turning, Turret, UnitStats, Velocity, Veterancy,
     Wreck, WreckKind, rotate_toward, LeavingFactory, Transport,
 };
 use super::config::{SimConfig, TARGET_SEARCH_INTERVAL, TERRAIN_CELL_UNITS, WRECK_HEALTH_PERMILLE, WRECK_MASS_PERMILLE, WRECK_SUNK_PERMILLE, WRECK_TECH_PERMILLE};
@@ -100,6 +100,8 @@ const FLAK_MAX_TICKS: u32 = 60;
 pub struct UnitSpawn {
     pub position: Vec2Fp,
     pub team: Team,
+    /// The player it belongs to, on `team`.
+    pub owner: PlayerId,
     pub max_speed: Fp,
     pub radius: Fp,
     pub health: Fp,
@@ -637,7 +639,11 @@ pub struct SimWorld {
     pub obstacles: Vec<RectFp>,
     pub blueprints: Arc<BlueprintDb>,
     pub visibility: Visibility,
-    pub economies: [Economy; 2],
+    /// Each player's team, by player: two players, Blue's and Red's, unless `set_players` says
+    /// otherwise.
+    pub players: Vec<Team>,
+    /// By player.
+    pub economies: Vec<Economy>,
     pub deposits: Vec<(u32, u32)>,
     /// Geothermal vents, by cell (GAME_SPECIFICATION.md §3.4). A plant is built with one at the
     /// middle of its footprint.
@@ -711,11 +717,16 @@ pub struct SimWorld {
     interceptions: Vec<[[i32; 3]; 2]>,
     /// Groups on a formation move, by the route they share.
     pub formations: BTreeMap<u32, Travel>,
-    pub commanders: [Option<SimId>; 2],
+    /// By player.
+    pub commanders: Vec<Option<SimId>>,
+    /// By player: whose commander has died, which puts them out of the match.
+    pub eliminated: Vec<bool>,
     pub match_result: Option<MatchResult>,
     /// Where each team's commander started, for the AI's plans and the camera. Fixed for the
     /// match, and set from the map, so it is not hashed: the map's terrain is.
     pub starts: [Vec2Fp; 2],
+    /// Where each player's commander started, by player. In a 1v1 the same as `starts`.
+    pub player_starts: Vec<Vec2Fp>,
     pub(super) economy_dirty: bool,
     /// Who worked on what this tick. Rebuilt every tick and only used for drawing,
     /// so it is not part of the checksum.
@@ -809,7 +820,8 @@ impl SimWorld {
             obstacles: Vec::new(),
             blueprints: Arc::new(BlueprintDb::standard()),
             visibility,
-            economies: [Economy::default(), Economy::default()],
+            players: vec![Team::Blue, Team::Red],
+            economies: vec![Economy::default(), Economy::default()],
             deposits: Vec::new(),
             vents: Vec::new(),
             occupancy: BTreeMap::new(),
@@ -850,8 +862,10 @@ impl SimWorld {
             known_structures: [Vec::new(), Vec::new()],
             interceptions: Vec::new(),
             formations: BTreeMap::new(),
-            commanders: [None, None],
+            commanders: vec![None, None],
+            eliminated: vec![false, false],
             starts: [Vec2Fp::ZERO; 2],
+            player_starts: vec![Vec2Fp::ZERO; 2],
             match_result: None,
             economy_dirty: false,
             work_links: Vec::new(),
@@ -895,6 +909,28 @@ impl SimWorld {
         id
     }
 
+    /// Sets who plays, each player's team by player, before anything is spawned: the first
+    /// player of each team is the one its team's units go to unless a player is named.
+    pub fn set_players(&mut self, teams: &[Team]) {
+        assert!(self.units.is_empty(), "players are set before anything is spawned");
+        assert!(teams.contains(&Team::Blue) && teams.contains(&Team::Red), "both teams have players");
+        self.players = teams.to_vec();
+        self.economies = vec![Economy::default(); teams.len()];
+        self.commanders = vec![None; teams.len()];
+        self.eliminated = vec![false; teams.len()];
+        self.player_starts = vec![Vec2Fp::ZERO; teams.len()];
+    }
+
+    /// A team's first player, who owns its units unless a player is named.
+    pub fn first_player(&self, team: Team) -> PlayerId {
+        PlayerId(self.players.iter().position(|&of| of == team).expect("both teams have players") as u8)
+    }
+
+    /// A team's players, in order.
+    pub fn players_of(&self, team: Team) -> impl Iterator<Item = PlayerId> + '_ {
+        self.players.iter().enumerate().filter(move |&(_, &of)| of == team).map(|(index, _)| PlayerId(index as u8))
+    }
+
     pub fn spawn_unit(&mut self, spawn: UnitSpawn) -> SimId {
         self.spawn_unit_as(spawn, MoveClass::Land)
     }
@@ -926,6 +962,7 @@ impl SimWorld {
                 max_speed: spawn.max_speed,
                 radius: spawn.radius,
                 team: spawn.team,
+                owner: spawn.owner,
                 move_class,
                 is_structure: spawn.is_structure,
                 vision: spawn.vision,
@@ -2575,7 +2612,7 @@ impl SimWorld {
             };
             // Discharge fires in range, once aimed and reloaded, if the team has the energy stored.
             if let (Some(target), Some(weapon), true) = (discharge_target, discharge.as_mut(), can_fire) {
-                let economy = &mut economies[stats.team.index()];
+                let economy = &mut economies[stats.owner.index()];
                 if let Some(entry) = locate(target).filter(|entry| can_engage(entry)) {
                     // By FAF's rule, nothing is spent until the shell lands.
                     if aimed && weapon.ticks_until_ready == 0 && economy.energy >= weapon.def.energy_required {
@@ -2627,7 +2664,7 @@ impl SimWorld {
             let weapon_energy = artillery.map_or(Res::ZERO, |artillery| {
                 super::components::Adjacency::less(artillery.energy_per_shot, adjacency.map_or(0, |adjacency| adjacency.weapon_energy_discount))
             });
-            let charged = economies[stats.team.index()].energy >= weapon_energy;
+            let charged = economies[stats.owner.index()].energy >= weapon_energy;
             let reload = match (artillery, adjacency) {
                 (Some(_), Some(adjacency)) => {
                     let ticks = i64::from(combat.reload_ticks) * (super::blueprints::ADJACENCY_SCALE - i64::from(adjacency.reload_discount)) / super::blueprints::ADJACENCY_SCALE;
@@ -2690,7 +2727,7 @@ impl SimWorld {
                             flak: fused && flak,
                             lobbed: artillery.is_some() && missile.is_none(),
                         });
-                        economies[stats.team.index()].energy -= weapon_energy;
+                        economies[stats.owner.index()].energy -= weapon_energy;
                         combat.ticks_until_ready = reload;
                         if let Some(launcher) = launcher.as_mut() {
                             launcher.stock = launcher.stock.saturating_sub(1);
@@ -2707,7 +2744,7 @@ impl SimWorld {
                 let spot_point = Vec3Fp::new(spot.x, spot.y, terrain.height_at(spot));
                 let distance = squared_distance(spot.x.to_bits(), spot.y.to_bits());
                 let in_reach = if bomb.is_some() { bomb_on(spot_point, 0, [0, 0]) } else { distance <= range * range && far_enough(distance) };
-                let charged = economies[stats.team.index()].energy >= weapon_energy;
+                let charged = economies[stats.owner.index()].energy >= weapon_energy;
                 if !in_reach {
                     (combat.line_blocked, combat.closing) = (false, None);
                 }
@@ -2744,7 +2781,7 @@ impl SimWorld {
                         flak: false,
                         lobbed: artillery.is_some() && missile.is_none(),
                     });
-                    economies[stats.team.index()].energy -= weapon_energy;
+                    economies[stats.owner.index()].energy -= weapon_energy;
                     combat.ticks_until_ready = reload;
                     if let Some(launcher) = launcher.as_mut() {
                         launcher.stock = launcher.stock.saturating_sub(1);
@@ -3450,6 +3487,8 @@ impl SimWorld {
         for impact in std::mem::take(&mut self.pending_discharges) {
             let def = impact.def;
             let team = impact.team;
+            // The firing player pays, or if it is gone by now, its team's first.
+            let owner = self.find_unit(impact.source).map_or_else(|| self.first_player(team), |(_, entity)| self.ecs.get::<&UnitStats>(entity).map_or_else(|_| self.first_player(team), |stats| stats.owner));
             let in_flight = 1 + self
                 .projectiles
                 .iter()
@@ -3459,7 +3498,7 @@ impl SimWorld {
                         && self.ecs.get::<&Projectile>(entity).is_ok_and(|projectile| projectile.source_team == team)
                 })
                 .count() as i64;
-            let stored = self.economies[team.index()].energy.max(Res::ZERO);
+            let stored = self.economies[owner.index()].energy.max(Res::ZERO);
             let affordable = stored * i64::from(def.energy_share_permille) / 1000 / in_flight / i64::from(def.energy_per_damage);
             let affordable = Fp::from_num(affordable.min(Res::from_num(def.max_damage)));
             let (x, y) = impact.point;
@@ -3474,7 +3513,7 @@ impl SimWorld {
                 }
                 None => {
                     let reach = i64::from(def.search_radius.to_bits());
-                    let commanders = self.commanders;
+                    let commanders = &self.commanders;
                     let ecs = &self.ecs;
                     let mut consider = |other: &super::spatial::GridEntry| {
                         let (dx, dy) = (i64::from(other.x - x), i64::from(other.y - y));
@@ -3494,14 +3533,14 @@ impl SimWorld {
             }
             let damage = if stored < def.energy_required { affordable } else { affordable.min(ideal).max(def.min_damage) };
             let drain = (Res::from_num(damage) * i64::from(def.energy_per_damage)).min(stored);
-            self.economies[team.index()].energy -= drain;
+            self.economies[owner.index()].energy -= drain;
             if let Some(owner) = impact.dome {
                 let structure = self.find_unit(owner).is_some_and(|(_, owner)| self.ecs.get::<&UnitStats>(owner).is_ok_and(|stats| stats.is_structure));
                 self.pending_shield_hits.push((owner, if structure { damage.min(def.structure_damage) } else { damage }));
                 continue;
             }
             let reach = i64::from(def.splash_radius.to_bits());
-            let (commanders, hits) = (self.commanders, &mut self.pending_hits);
+            let (commanders, hits) = (self.commanders.clone(), &mut self.pending_hits);
             let mut consider = |other: &super::spatial::GridEntry| {
                 let (dx, dy) = (i64::from(other.x - x), i64::from(other.y - y));
                 let within = reach + i64::from(other.radius);
@@ -3575,7 +3614,7 @@ impl SimWorld {
                     let counted = damage.min(health.max).max(Fp::ZERO);
                     health.current = health.current.saturating_sub(damage);
                     let dies = was_alive && health.current <= Fp::ZERO;
-                    let (id, x, y, blueprint, team) = (*id, position.0.x.to_bits(), position.0.y.to_bits(), blueprint.map(|b| b.0), stats.team);
+                    let (id, x, y, blueprint, team, owner) = (*id, position.0.x.to_bits(), position.0.y.to_bits(), blueprint.map(|b| b.0), stats.team, stats.owner);
                     let built = construction.map_or(Res::ONE, |construction| construction.progress);
                     let finished = construction.is_none();
                     if let Some(attacker) = attacker.filter(|_| was_alive && counted > Fp::ZERO) {
@@ -3607,7 +3646,7 @@ impl SimWorld {
                                 // A fabricator only blows up if it was running.
                                 let running = finished
                                     && self.ecs.get::<&Paused>(target).is_err()
-                                    && self.economies[team.index()].extractor_efficiency > Res::ZERO;
+                                    && self.economies[owner.index()].extractor_efficiency > Res::ZERO;
                                 if !blast.only_while_running || running {
                                     self.pending_explosions.push(Explosion { x, y, radius: blast.radius, damage: blast.damage, source: None, stun: 0 });
                                     self.blasts.push(BlastView { team, x, y, radius: blast.radius.to_bits() });
@@ -3770,31 +3809,36 @@ impl SimWorld {
         self.wrecks.retain(|wreck| destroyed.binary_search(&wreck.0).is_err());
     }
 
-    /// A team whose commander died is eliminated, and everything it owns goes with it.
+    /// A player whose commander died is out, and everything they own goes with it (GAME_SPECIFICATION.md
+    /// §16). A team is out once all its players are, and the match ends: a draw if both went out
+    /// on the same tick.
     fn resolve_match_end(&mut self) {
         if self.match_result.is_some() || self.dead_units.is_empty() {
             return;
         }
-        let lost = |team: Team| self.commanders[team.index()].is_some_and(|commander| self.dead_units.contains(&commander));
-        let (blue_lost, red_lost) = (lost(Team::Blue), lost(Team::Red));
-        self.match_result = match (blue_lost, red_lost) {
+        let newly_out: Vec<usize> = (0..self.players.len())
+            .filter(|&player| !self.eliminated[player] && self.commanders[player].is_some_and(|commander| self.dead_units.contains(&commander)))
+            .collect();
+        if newly_out.is_empty() {
+            return;
+        }
+        for &player in &newly_out {
+            self.eliminated[player] = true;
+            for index in 0..self.units.len() {
+                let (id, entity) = self.units[index];
+                let owned = self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.owner.index() == player);
+                if owned && !self.dead_units.contains(&id) {
+                    self.dead_units.push(id);
+                }
+            }
+        }
+        let out = |team: Team| self.players_of(team).all(|player| self.eliminated[player.index()]);
+        self.match_result = match (out(Team::Blue), out(Team::Red)) {
             (true, true) => Some(MatchResult::Draw),
             (true, false) => Some(MatchResult::Winner(Team::Red)),
             (false, true) => Some(MatchResult::Winner(Team::Blue)),
             (false, false) => None,
         };
-        for (team, eliminated) in [(Team::Blue, blue_lost), (Team::Red, red_lost)] {
-            if !eliminated {
-                continue;
-            }
-            for index in 0..self.units.len() {
-                let (id, entity) = self.units[index];
-                let on_team = self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team == team);
-                if on_team && !self.dead_units.contains(&id) {
-                    self.dead_units.push(id);
-                }
-            }
-        }
     }
 
     /// Despawns a dead unit, leaving a wreck if it had any mass in it.
@@ -3922,6 +3966,14 @@ impl SimWorld {
         for commander in &self.commanders {
             hasher.write(&commander.map_or(u32::MAX, |id| id.0).to_le_bytes());
         }
+        // Players, and who is out, only with more than two, so that 1v1 checksums from before
+        // there were players hold.
+        if self.players.len() > 2 {
+            hasher.write(&[9]);
+            for (team, out) in self.players.iter().zip(&self.eliminated) {
+                hasher.write(&[*team as u8, u8::from(*out)]);
+            }
+        }
         hasher.write(&[match self.match_result {
             None => 0,
             Some(MatchResult::Draw) => 1,
@@ -4010,6 +4062,11 @@ impl SimWorld {
         write_fp(hasher, stats.max_speed);
         write_fp(hasher, stats.radius);
         hasher.write(&[stats.team as u8, stats.move_class as u8, u8::from(stats.is_structure)]);
+        // Its owner, only when it is not its team's own player, as every unit is in a 1v1, so
+        // that checksums from before there were players hold.
+        if stats.owner.index() != stats.team.index() {
+            hasher.write(&[0xA7, stats.owner.0]);
+        }
         write_fp(hasher, stats.vision);
         hasher.write(&stats.phase.to_le_bytes());
         write_fp(hasher, health.current);
@@ -4121,7 +4178,7 @@ impl SimWorld {
         let mut builders: Vec<SimId> = self
             .work_links
             .iter()
-            .filter(|link| link.reclaim || self.find_unit(link.builder).and_then(|(_, entity)| self.ecs.get::<&UnitStats>(entity).ok().map(|stats| self.economies[stats.team.index()].satisfaction > Res::ZERO)).unwrap_or(false))
+            .filter(|link| link.reclaim || self.find_unit(link.builder).and_then(|(_, entity)| self.ecs.get::<&UnitStats>(entity).ok().map(|stats| self.economies[stats.owner.index()].satisfaction > Res::ZERO)).unwrap_or(false))
             .map(|link| link.builder)
             .collect();
         builders.sort_unstable();
@@ -4132,7 +4189,7 @@ impl SimWorld {
             .iter()
             .filter_map(|&(id, entity)| {
                 let (position, stats, health, blueprint, construction, turning, turret, factory, paused, extras) = unit_view.get(entity).expect("unit list only holds live units");
-                let powered = self.economies[stats.team.index()].satisfaction > Res::ZERO;
+                let powered = self.economies[stats.owner.index()].satisfaction > Res::ZERO;
                 let producing = factory.is_some_and(|factory| !factory.queue.is_empty()) && paused.is_none() && powered;
                 let (x, y, z) = (position.0.x.to_bits(), position.0.y.to_bits(), position.0.z.to_bits());
                 let cloaked_away = viewer.is_some_and(|viewer| self.concealed[viewer.index()].binary_search(&id).is_ok());
@@ -4410,8 +4467,9 @@ impl SimWorld {
         let rates = viewer.map_or_else(Vec::new, |viewer| self.rates_for(viewer));
         let spending = viewer.map_or_else(Vec::new, |viewer| self.spending_for(viewer));
         let idle_factories = viewer.map_or_else(Vec::new, |viewer| self.idle_factories(viewer));
-        let economy = viewer.map_or_else(EconomyView::default, |viewer| self.economies[viewer.index()].view());
-        let team_economies = viewer.is_none().then(|| [self.economies[0].view(), self.economies[1].view()]);
+        // The viewer's own economy: its team's first player's, the one a person plays.
+        let economy = viewer.map_or_else(EconomyView::default, |viewer| self.economies[self.first_player(viewer).index()].view());
+        let team_economies = viewer.is_none().then(|| [Team::Blue, Team::Red].map(|team| self.economies[self.first_player(team).index()].view()));
         let fog = match viewer {
             Some(viewer) if self.config.fog_of_war => Some(Arc::new(self.visibility.fog_bytes(viewer))),
             _ => None,

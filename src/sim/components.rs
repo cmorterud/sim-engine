@@ -25,6 +25,18 @@ impl Team {
     }
 }
 
+/// A player (GAME_SPECIFICATION.md §17.2): one commander, one economy, and the units they own,
+/// on a team. A team is allies, who share sight and fight together; what a player builds is
+/// theirs alone. In a 1v1 player 0 is Blue and player 1 Red, so the index of each is its team's.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PlayerId(pub u8);
+
+impl PlayerId {
+    pub const fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
 /// Selects a cost grid. The PoC only spawns `Land` units.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum MoveClass {
@@ -48,6 +60,8 @@ pub struct UnitStats {
     pub max_speed: Fp,
     pub radius: Fp,
     pub team: Team,
+    /// The player it belongs to, on `team`: whose economy it draws on and adds to.
+    pub owner: PlayerId,
     pub move_class: MoveClass,
     pub is_structure: bool,
     /// Sight radius, when fog of war is on.

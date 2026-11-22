@@ -213,7 +213,7 @@ impl SimWorld {
             if let (Some(index), true) = (staging, flight.docked) {
                 let spot = &stagings[index];
                 flight.fuel = (flight.fuel + DOCKED_REFUEL_PER_TICK).min(flight.max_fuel);
-                let economy = &mut economies[stats.team.index()];
+                let economy = &mut economies[stats.owner.index()];
                 if health.current < health.max && economy.energy >= spot.energy {
                     economy.energy -= spot.energy;
                     health.current = (health.current + spot.repair).min(health.max);
