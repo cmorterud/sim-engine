@@ -352,14 +352,55 @@ One to three T4 units, designed from roles the roster needs and from the setting
 3. **Supremacy:** A player is eliminated if they lose both their commander and all Field Rigs or all factories.
 4. **Shared Armies & Reclaim Permissions:** Teammates can dynamically transfer units, economic income percentages, or full army control to allies.
 
+**With teams (specified 2026-11-22, §17.2):** under Assassination, a player is out when their commander is destroyed, and everything they own self-destructs; it does not pass to an ally. Their team plays on, and loses when all its players are out. If the last players of both teams go out on the same tick, the match is a draw, as two commanders destroyed together are today.
+
 ---
 
 ## 17. Opponents & Multiplayer
+
+### 17.1 Opponents
 
 * **First Playable:** One human against a scripted AI. The AI issues commands through the same `SimCommand` interface as a player and sees only what its team's intel allows.
 * **Difficulty:** The player's opponent is Easy unless they ask for Normal (`--ai normal`, or `?ai=normal` in the browser). Easy keeps a small economy and army, at most 3 engineers of any tier (Normal keeps 3 T2 and 2 T3 engineers on top of its others, and Easy none, so its replacements come at its factories' tier), 2 land factories, 16 land combat units, 4 aircraft, 3 ships, and 1 point defense, counting what its factories are already making, decides every 3 seconds instead of every second, and plans as if it had half its income, so it climbs the tech tree late. It defends from the start but attacks only after 12 minutes, in waves of 6 growing to 12, and never fires missiles or discharge or sends its commander. Planning on half its income alone made it stronger, not weaker: it stopped spending on its economy and tech and put everything into early units, and beat Normal in all six test matches. With the caps, Normal fields at least half as many units again by 20 minutes. AI-vs-AI matches, and so the soak, always play Normal.
 * **Automated Matches:** AI-vs-AI matches run headlessly, serving as full-match regression tests and as the first tool for balance tuning.
 * **Multiplayer (Later):** Lockstep over the network, exchanging only commands and comparing checksums to detect desyncs. Matchmaking, lobbies, and transports are not yet specified.
+* **Kinds of AI (specified 2026-11-22, not built):** an AI has a difficulty, how well it plays, and a strategy, what it plays, set apart for each AI in a match. Difficulties stay Easy and Normal, with Hard later. Strategies:
+
+| Strategy | Plays |
+| :--- | :--- |
+| Balanced | Today's Normal: a bit of everything, by what it sees |
+| Rush | T1 in numbers, and an early attack |
+| Tech | Economy first, then T2 and T3 quickly |
+| Air | Power, then bombers and fighters |
+| Naval | Ships, on maps with water |
+| Turtle | Defends and never sets out (today's Turtle difficulty, which becomes a strategy) |
+
+  "Random" picks one from the match's seed, so a match replays the same. A strategy is data, an entry in `data/ai_strategies.toml` (its unit mix, its tech timings, when it first attacks), not code of its own, so new ones are written and tuned without changing the AI. The balance rule is `[strategy]`'s: each strategy wins inside its timing window and loses outside it, and none wins more than 55% over every opponent and map. A single matchup may be far from even, as Rush catching Tech mid-build should be, so long as it is paid back elsewhere. Naval is judged only on maps with water. A soak plays every strategy against every other to check it. AIs on a team share what they see, come to an ally under attack, and time their attacks together. On a map without a land route (§17.3, Scattered Isles) the AI reaches the enemy by sea and air, and later by transport.
+
+### 17.2 Teams (specified 2026-11-22, not built)
+
+* **Players and teams:** up to 8 players on 2 teams; no free-for-all. A player has their own commander, economy, factories, and color, and is a human or an AI with its own difficulty and strategy. A team is allies: they share sight and radar, never fire at each other, and win or lose together. They do not share an economy, as in the inspiration; gifting units and resources (§16.4) comes later. Elimination is §16's.
+* **Matches:** one human with any mix of AI allies and enemies, such as 2v2 or 4v4, or AI against AI for the soak. Networked play stays as above, later.
+* **Engine:** Player is split from Team: what a side owns now (an economy, a commander, the AI's state, colors, and everything held two to a match) becomes one per player, and sight one per team. Allies' units are told apart by color on the units and the minimap. The golden checksums and the soak cover team matches, and a 4v4 on a 20 km map keeps to the soak's tick-time bound.
+
+### 17.3 Maps (specified 2026-11-22, not built)
+
+* **Types and settings:** a map is a type and a few settings, from which its terrain is generated with whole-number math, the same on every machine. The types, beside Highland's open hills and Twin Passes' divided sea:
+
+| Type | Shape | What it rewards |
+| :--- | :--- | :--- |
+| Passes | A mountain range across the middle, impassable to land units, with valleys through it | Holding chokepoints, artillery behind ridges, shields over a valley, raids through the pass not watched |
+| Central Lake | A lake in the middle, with land around it | Mixed play: land armies go the long way round, ships and hovercraft cut across |
+| Islands | Each team on its own island, with no land route between them | Navy and air; land armies defend home and cross by hovercraft, the sea floor, and later transports |
+
+  Settings: size, from 5 to 20 km for now; players, up to 2 at 5 km, 4 at 10 km, and 8 at 20 km, which also sets the symmetry, so that every start is as good as every other; resources (sparse, normal, rich: deposits and geothermal vents); reclaim (none, some, lots: rock fields and forests); terrain (flat, hilly, rugged); water (none, some, lots, within what the type allows); and the seed. The same settings and seed always make the same map.
+* **Named maps and the generator:** both. Named maps are a curated list, each a type with its settings fixed, its size among them, and kept fair by the soak. Each has starts for its most players, and lists which starts are used for each count of players, so that a 1v1 on a four-player map uses two starts that face each other, not neighbors; unused starts stay empty, their deposits there for the taking. Named maps are tested for 1v1 and 2v2, and 4v4 where they hold 8; uneven teams are allowed but not promised fair. At match setup, "Generate a map" takes a type and the settings instead.
+* **The first named maps** (working names):
+  * **Saddleback (Passes), 10 km, up to 4 players:** a range across the middle with three valleys, a wide one in the center and a narrow one on each flank. Each half behind it is open, gentle land. In 1v1 each base faces the center valley; in 2v2 teammates sit side by side on one side of the range, each nearest a flank valley. Each base has a safe set of deposits, more lie out toward the flanks, and the richest are in the valleys, so that the passes are fought for, not only through. Aircraft ignore the range, so anti-air at home matters.
+  * **Stillwater (Central Lake), 10 km, up to 4 players:** a lake filling about the middle 40% of the map, inside a ring of land wider in places. Starts are in the four corners: diagonal in 1v1, and in 2v2 each team holds one shore, with the lake between the teams. Land armies go round it either way; hovercraft and ships cross it. Deposits are on the ring, and a few on small islands in the lake that only ships or hovercraft can take and hold.
+  * **Scattered Isles (Islands), 20 km, up to 8 players:** each team on a large home island, about a quarter of the map at each end, with a sea between them dotted with small islands. Starts are four to an island: in 1v1 one at the far end of each, in 2v2 and 4v4 filling each team's island. There is no land route: only ships, aircraft, hovercraft, and seabed walkers cross, and transports once they work. Home islands are rich, and the small ones hold the contested deposits.
+* **Fairness:** every map turns into itself for its count of players. A test checks each start has the same deposits and vents within reach, and that the starts reach one another, by land where the type has a land route. The soak finds no start or team winning more than chance allows (p at least 0.05), as it does for the bundled maps today.
+* **Order of work:** AI strategies first, which play in 1v1 on the maps there are; then players and teams in the engine, first tested 2v2 on Saddleback; then the generator, Stillwater, Scattered Isles, and 4v4. Scattered Isles needs the AI to cross water, and transports to be worth playing in full.
 
 ---
 
