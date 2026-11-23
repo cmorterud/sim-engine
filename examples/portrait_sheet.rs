@@ -2,14 +2,16 @@
 //! into `assets/portraits.png`, with their keys, tile by tile, in `assets/portraits.txt`.
 //!
 //! `cargo run --release --example portrait_sheet [-- --review <folder>] [--team red|blue] [--out <sheet.png>]
-//!  [--only <key>,<key>...] [--uniform] [--tile <pixels>]`
+//!  [--only <key>,<key>...] [--uniform [--frame <pixels>]] [--tile <pixels>]`
 //!
 //! With `--out`, the sheet is written there, with its index beside it (`<sheet>.txt`), and the
 //! game's own portraits are left alone, which is how to compare looks, or see the other team's
 //! colors, without changing the game. `--only` draws just those units, in that order. Each
 //! portrait is framed to fill its tile, which hides how big units are beside one another; with
 //! `--uniform`, every unit is seen from the same distance, the largest's, and framed the same,
-//! so that their proportions can be judged. `--tile` sets a tile's side, 96 pixels by default.
+//! so that their proportions can be judged; it prints how wide the frame was, and `--frame` sets
+//! it, so that a sheet drawn after a change is at the same scale as one drawn before. `--tile`
+//! sets a tile's side, 96 pixels by default.
 //!
 //! Run it again after changing a unit's model. Each unit is drawn alone, close up, from the
 //! interface's usual angle, then the same view is drawn without it: what differs is the unit,
@@ -322,7 +324,8 @@ fn main() {
 
     // Seen from one distance, every unit is framed alike too, by the largest of them.
     if uniform {
-        let side = cut_outs.iter().filter_map(|cut| cut.extent.map(framed_side)).fold(8.0, f32::max);
+        let side = option("--frame").and_then(|value| value.parse().ok()).unwrap_or_else(|| cut_outs.iter().filter_map(|cut| cut.extent.map(framed_side)).fold(8.0, f32::max));
+        println!("framed {side} pixels across: pass --frame {side} to draw another sheet at this scale");
         tiles = cut_outs.iter().map(|cut| cut.extent.map_or_else(|| vec![0; tile_side * tile_side * 4], |extent| tile_from(&cut.pixels, cut.width, extent, side, tile_side))).collect();
     }
     let rows = tiles.len().div_ceil(COLUMNS);
