@@ -368,7 +368,7 @@ pub fn unit_look(key: &str) -> UnitLook {
         "rig_yard" => look(Shape::RigYard, Some([0.55, 0.60, 1.00]), 0.6),
         "geothermal_plant" => look(Shape::GeothermalPlant, Some([0.85, 0.60, 0.25]), 0.7),
         "mass_fabricator" => look(Shape::Fabricator, Some([0.40, 0.95, 0.85]), 1.0),
-        "mass_fabricator_t3" => look(Shape::Fabricator, Some([0.70, 0.45, 1.00]), 0.8),
+        "mass_fabricator_t3" => look(Shape::FabricatorT3, Some([0.70, 0.45, 1.00]), 0.8),
         "t2_engineer" => UnitLook { base: Some(Shape::EngineerHull), length: 19.0, tier_shaded: false, ..look(Shape::EngineerT2, Some(ENGINEER_YELLOW), 1.0) },
         "t3_engineer" => UnitLook { base: Some(Shape::EngineerHull), length: 23.0, tier_shaded: false, ..look(Shape::EngineerT3, Some(ENGINEER_YELLOW), 1.0) },
         "land_factory_t3" => look(Shape::FactoryT3, Some([0.10, 0.10, 0.20]), 0.85),
@@ -383,13 +383,13 @@ pub fn unit_look(key: &str) -> UnitLook {
         "t3_siege_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::SiegeWalker, Some([0.70, 0.70, 0.75]), 1.0) },
         "t2_torpedo_boat" => UnitLook { length: 24.0, ..look(Shape::TorpedoBoat, Some([0.90, 0.78, 0.30]), 0.5) },
         "t3_heavy_point_defense" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::HeavyPointDefense, Some([0.95, 0.35, 0.30]), 1.0) },
-        "t3_heavy_shield" => look(Shape::ShieldGenerator, Some([0.45, 0.70, 1.00]), 0.9),
+        "t3_heavy_shield" => look(Shape::ShieldGeneratorT3, Some([0.45, 0.70, 1.00]), 0.9),
         "wall" => look(Shape::Wall, Some([0.70, 0.70, 0.70]), 0.9),
         "field_workshop" => look(Shape::FieldWorkshop, Some([0.95, 0.75, 0.30]), 0.8),
         "t1_light_transport" => look(Shape::Transport, Some([0.85, 0.80, 0.60]), 1.0),
         "t2_transport" => look(Shape::TransportT2, Some([0.70, 0.75, 0.80]), 1.0),
         "t3_heavy_transport" => look(Shape::TransportT3, Some([0.55, 0.60, 0.75]), 1.0),
-        "field_workshop_t3" => look(Shape::FieldWorkshop, Some([0.95, 0.55, 0.20]), 0.95),
+        "field_workshop_t3" => look(Shape::FieldWorkshopT3, Some([0.95, 0.55, 0.20]), 0.95),
         "t1_light_artillery" => UnitLook { base: Some(Shape::ArtilleryHull), length: 22.0, ..look(Shape::Artillery, Some([0.74, 0.66, 0.52]), 1.0) },
         "t2_heavy_tank" => UnitLook { base: Some(Shape::HeavyTankHull), length: 24.0, ..look(Shape::HeavyTank, Some([0.62, 0.52, 0.48]), 1.0) },
         "t2_assault_hovercraft" => UnitLook { base: Some(Shape::HoverHull), ..look(Shape::Tank, Some([0.45, 0.65, 0.75]), 1.0) },
@@ -402,7 +402,7 @@ pub fn unit_look(key: &str) -> UnitLook {
         "mass_storage" => look(Shape::Storage, Some([0.60, 0.90, 0.60]), 0.65),
         "energy_storage" => look(Shape::EnergyStorage, Some([1.00, 0.90, 0.40]), 0.65),
         "t2_artillery" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::ArtilleryGun, Some([0.70, 0.62, 0.50]), 1.0) },
-        "t3_artillery" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::ArtilleryGun, Some([0.46, 0.40, 0.34]), 0.6) },
+        "t3_artillery" => UnitLook { base: Some(Shape::ArtilleryEmplacement), ..look(Shape::ArtilleryGunT3, Some([0.46, 0.40, 0.34]), 0.6) },
         "t3_mobile_artillery" => UnitLook { base: Some(Shape::CasemateHull), length: 30.0, ..look(Shape::HeavyArtillery, Some([0.55, 0.45, 0.35]), 1.0) },
         "radar" => look(Shape::Radar, Some([0.40, 0.90, 0.55]), 1.3),
         "deep_scan_array" => look(Shape::DeepScan, Some([0.75, 0.55, 1.00]), 1.2),
@@ -422,7 +422,7 @@ pub fn unit_look(key: &str) -> UnitLook {
         "t2_mobile_missile_launcher" => UnitLook { base: Some(Shape::MissileTruck), length: 26.0, ..look(Shape::MissileRack, Some([0.80, 0.80, 0.70]), 1.0) },
         "t2_torpedo_bomber" => UnitLook { length: 26.0, ..look(Shape::TorpedoBomber, Some([0.40, 0.55, 0.70]), 0.55) },
         "t1_sonar" => look(Shape::Sonar, Some([0.30, 0.60, 0.90]), 1.0),
-        "t2_sonar" => look(Shape::Sonar, Some([0.20, 0.45, 0.85]), 1.2),
+        "t2_sonar" => look(Shape::SonarT2, Some([0.20, 0.45, 0.85]), 1.2),
         "t1_torpedo_launcher" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::TorpedoLauncher, Some([0.20, 0.68, 0.56]), 0.7) },
         "t2_torpedo_launcher" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::TorpedoLauncherT2, Some([0.14, 0.55, 0.44]), 0.8) },
         "t2_destroyer" => UnitLook { length: 46.0, ..look(Shape::Destroyer, Some([0.12, 0.30, 0.62]), 0.5) },
@@ -443,8 +443,8 @@ pub fn unit_look(key: &str) -> UnitLook {
         "air_factory_t3_support" => look(Shape::AirFactoryT3Support, Some([0.52, 0.46, 0.34]), 0.72),
         "power_generator_t2" => look(Shape::GeneratorT2, Some([1.00, 0.88, 0.62]), 1.0),
         "power_generator_t3" => look(Shape::GeneratorT3, Some([1.00, 0.80, 0.50]), 0.9),
-        "radar_t2" => look(Shape::Radar, Some([0.50, 0.95, 0.75]), 1.45),
-        "t2_point_defense" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::PointDefense, Some([0.85, 0.30, 0.65]), 1.0) },
+        "radar_t2" => look(Shape::RadarT2, Some([0.50, 0.95, 0.75]), 1.45),
+        "t2_point_defense" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::PointDefenseT2, Some([0.85, 0.30, 0.65]), 1.0) },
         "air_factory_t2" => look(Shape::AirFactoryT2, Some([0.30, 0.45, 0.65]), 0.65),
         "air_factory_t3" => look(Shape::AirFactoryT3, Some([0.15, 0.25, 0.45]), 0.8),
         "t2_gunship" => look(Shape::Gunship, Some([0.52, 0.66, 0.46]), 0.6),
@@ -986,25 +986,21 @@ mod tests {
         }
         // Units listed here may share a shape with another: higher tiers of some structures and the
         // radar's deep scan upgrade share the shape they come from, and the anti-air turret has the
-        // mobile anti-air's guns. Everything else is unique. Units that still share a whole model,
-        // base and all, are listed in `STILL_SHARING_A_MODEL`, to be given their own.
+        // mobile anti-air's guns. Everything else is unique. No two units share a whole model, base
+        // and all (`every_unit_has_a_model_of_its_own`).
         let shared = [
             "land_factory_t2",
             "land_factory_t3",
             "deep_scan_array",
             "mass_extractor_t2",
             "mass_extractor_t3",
-            "mass_fabricator_t3",
             "air_factory",
             "t1_aa_turret",
             "air_factory_t2",
             "air_factory_t3",
             "power_generator_t2",
             "power_generator_t3",
-            "radar_t2",
-            "t2_point_defense",
             "energy_storage",
-            "t3_artillery",
             "t3_mobile_artillery",
             "t2_destroyer",
             "t1_attack_sub",
@@ -1013,7 +1009,6 @@ mod tests {
             "t3_missile_sub",
             "t2_mobile_missile_launcher",
             "t1_sonar",
-            "t2_sonar",
             "t2_cruiser",
             "t3_battleship",
             "t3_battlecruiser",
@@ -1022,8 +1017,6 @@ mod tests {
             "t2_flak",
             "t1_medium_tank",
             "t2_combat_engineer",
-            "t3_heavy_shield",
-            "field_workshop_t3",
         ];
         let shapes: Vec<Shape> = drawn().filter(|unit| !shared.contains(&unit.key.as_str())).map(|unit| unit_look(&unit.key).shape).collect();
         for (index, shape) in shapes.iter().enumerate() {
@@ -1202,64 +1195,18 @@ mod tests {
         }
     }
 
-    /// Units drawn with the same model tell apart by their hulls: a higher tier is darker, as
-    /// a heavier version of the same thing, and different units are colored apart.
+    /// Every unit has a model of its own, base and all: tiers and variants differ by shape, not
+    /// only by color (2026-11-23, when the last units sharing a model were given their own).
     #[test]
-    fn units_sharing_a_model_differ_by_tier_or_hull_color() {
+    fn every_unit_has_a_model_of_its_own() {
         let db = BlueprintDb::standard();
         let looks = unit_looks(&db);
         let units: Vec<_> = db.iter().filter(|unit| unit.class != crate::sim::blueprints::UnitClass::Ammo).collect();
-        let brightness = |color: [f32; 3]| color[0] * 0.3 + color[1] * 0.59 + color[2] * 0.11;
-        for team in [BLUE, RED] {
-            for (index, first) in units.iter().enumerate() {
-                for second in &units[index + 1..] {
-                    let (a, b) = (&looks[usize::from(first.id.0)], &looks[usize::from(second.id.0)]);
-                    if (a.shape, a.base) != (b.shape, b.base) {
-                        continue;
-                    }
-                    let (hull_a, hull_b) = (hull_of(team, a), hull_of(team, b));
-                    let distance = (0..3).map(|channel| (hull_a[channel] - hull_b[channel]).powi(2)).sum::<f32>().sqrt();
-                    let darker_by_tier = first.tier != second.tier && {
-                        let (lower, higher) = if first.tier < second.tier { (hull_a, hull_b) } else { (hull_b, hull_a) };
-                        brightness(higher) < brightness(lower) - 0.02
-                    };
-                    assert!(darker_by_tier || distance > 0.05, "{} and {} share a model, and their hulls are too alike: {hull_a:?} and {hull_b:?}", first.key, second.key);
-                }
-            }
-        }
-    }
-
-    /// Units that still share a model, until each is given a shape of its own: tiers and variants
-    /// are to differ by shape, not only by color (2026-11-23). This list may only shrink: a pair
-    /// that shares a model must be on it, and a pair that no longer does must come off it.
-    const STILL_SHARING_A_MODEL: &[(&str, &str)] = &[
-        ("mass_fabricator", "mass_fabricator_t3"),
-        ("shield_generator", "t3_heavy_shield"),
-        ("field_workshop", "field_workshop_t3"),
-        ("t2_artillery", "t3_artillery"),
-        ("radar", "radar_t2"),
-        ("t1_sonar", "t2_sonar"),
-        ("t1_point_defense", "t2_point_defense"),
-    ];
-
-    #[test]
-    fn units_share_a_model_only_while_on_the_list_of_those_still_to_be_given_their_own() {
-        let db = BlueprintDb::standard();
-        let looks = unit_looks(&db);
-        let units: Vec<_> = db.iter().filter(|unit| unit.class != crate::sim::blueprints::UnitClass::Ammo).collect();
-        let listed = |first: &str, second: &str| STILL_SHARING_A_MODEL.iter().any(|&(a, b)| (a, b) == (first, second) || (b, a) == (first, second));
-        let mut sharing = Vec::new();
         for (index, first) in units.iter().enumerate() {
             for second in &units[index + 1..] {
                 let (a, b) = (&looks[usize::from(first.id.0)], &looks[usize::from(second.id.0)]);
-                if (a.shape, a.base) == (b.shape, b.base) {
-                    assert!(listed(&first.key, &second.key), "{} and {} share a model: give one a shape of its own", first.key, second.key);
-                    sharing.push((first.key.as_str(), second.key.as_str()));
-                }
+                assert_ne!((a.shape, a.base), (b.shape, b.base), "{} and {} share a model: give one a shape of its own", first.key, second.key);
             }
-        }
-        for &(a, b) in STILL_SHARING_A_MODEL {
-            assert!(sharing.iter().any(|&pair| pair == (a, b) || pair == (b, a)), "{a} and {b} no longer share a model: take them off the list");
         }
     }
 

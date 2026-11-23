@@ -637,15 +637,15 @@ mod tests {
     }
 
     #[test]
-    fn the_likeness_measure_finds_one_model_in_two_tiers_more_alike_than_two_units() {
+    fn the_likeness_measure_finds_two_variants_of_one_build_more_alike_than_two_units() {
         let glances: BTreeMap<&str, Glance> = portrait_glances().into_iter().map(|glance| (glance.key, glance)).collect();
         for by in [Likeness::Picture, Likeness::Outline] {
             let distance = |first: &str, second: &str| glances[first].distance(&glances[second], by);
             assert_eq!(distance("t1_medium_tank", "t1_medium_tank"), 0.0);
-            // Two that still share a model (`render::instances`' list of them).
-            let same_model = distance("t1_sonar", "t2_sonar");
+            // Two built on the same piers, under different booms.
+            let same_model = distance("naval_factory_t2_support", "naval_factory_t3_support");
             let different = distance("t1_medium_tank", "t3_heavy_walker");
-            assert!(same_model * 2.0 < different, "by {by:?}, a sonar in two tiers ({same_model:.4}) is far more alike than a tank and a walker ({different:.4})");
+            assert!(same_model * 2.0 < different, "by {by:?}, two support docks ({same_model:.4}) are far more alike than a tank and a walker ({different:.4})");
             assert!(different < 1.0);
         }
     }

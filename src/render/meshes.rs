@@ -254,10 +254,28 @@ pub enum Shape {
     /// The field rig's legs: a pelvis and two legs with their knees bent back, each on a
     /// three-toed foot pointing the way it walks.
     FieldRigLegs,
+    /// The T2 radar: two huts, a taller mast, and two antennas crossing, turning together.
+    RadarT2,
+    /// The T2 sonar: a float with three outrigger pontoons on booms, and a taller mast.
+    SonarT2,
+    /// The T2 point defense's turret: wider, with armored cheeks and two barrels.
+    PointDefenseT2,
+    /// The T3 artillery's gun, on its emplacement's turntable: a sloped casemate between braces,
+    /// and a long barrel laid low, with recoil cylinders and a muzzle brake.
+    ArtilleryGunT3,
+    /// The T3 shield generator: the T2's column, ringed by four emitter pylons with lit tips.
+    ShieldGeneratorT3,
+    /// The T3 mass fabricator: a core on a slab, between four cooling fins in an X.
+    FabricatorT3,
+    /// The T3 field workshop: a pad with two masts, their drones' booms crossing over it.
+    FieldWorkshopT3,
+    /// The T3 artillery's emplacement, filling its four by four footprint: a slab ringed by
+    /// sloped revetments, bunkers at its corners, ammunition rails, and a turntable for the gun.
+    ArtilleryEmplacement,
 }
 
 impl Shape {
-    pub const ALL: [Self; 119] = [
+    pub const ALL: [Self; 127] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -377,6 +395,14 @@ impl Shape {
         Self::SpyPlane,
         Self::FieldRig,
         Self::FieldRigLegs,
+        Self::RadarT2,
+        Self::SonarT2,
+        Self::PointDefenseT2,
+        Self::ArtilleryGunT3,
+        Self::ShieldGeneratorT3,
+        Self::FabricatorT3,
+        Self::FieldWorkshopT3,
+        Self::ArtilleryEmplacement,
     ];
     pub const COUNT: usize = Self::ALL.len();
 
@@ -408,7 +434,7 @@ impl Shape {
             Self::Transport | Self::TransportT2 => Some(1.8),
             Self::TransportT3 => Some(1.5),
             Self::HeavyGunship => Some(1.7),
-            Self::Radar => Some(0.25),
+            Self::Radar | Self::RadarT2 => Some(0.25),
             Self::AirFactoryT3 => Some(0.3),
             Self::LandScout => Some(0.6),
             // The extractor's pump nods as it works.
@@ -1053,6 +1079,40 @@ impl MeshBuilder {
         if arms > 1 {
             self.block([-half - 0.03, 0.33, 0.27], [half + 0.03, 0.39, 0.33]);
         }
+    }
+
+    /// A field workshop's pad, with the team's edging round it.
+    fn workshop_pad(&mut self) {
+        self.paint(Material::Hull);
+        self.bevel([-0.5, -0.5, -0.5], [0.5, 0.5, -0.38], 0.03);
+        self.paint(Material::Trim);
+        for (min, max) in [([-0.47, -0.47], [0.47, -0.41]), ([-0.47, 0.41], [0.47, 0.47]), ([-0.47, -0.41], [-0.41, 0.41]), ([0.41, -0.41], [0.47, 0.41])] {
+            self.block([min[0], min[1], -0.39], [max[0], max[1], -0.37]);
+        }
+    }
+
+    /// A field workshop's mast standing at `foot`, its boom at `height` reaching out to a drone
+    /// hovering over `drone`, lit while it works.
+    fn workshop_mast(&mut self, foot: [f32; 2], drone: [f32; 2], height: f32) {
+        self.paint(Material::Trim);
+        self.frustum(foot, [-0.38, 0.12], [0.16, 0.12], 8);
+        self.paint(Material::Metal);
+        self.frustum(foot, [0.12, height - 0.04], [0.04, 0.03], 6);
+        self.beam([foot[0], foot[1], height - 0.06], [drone[0] - 0.01, drone[1] - 0.01, height], 0.025, 0.025);
+        self.paint(Material::Hull);
+        self.bevel([drone[0] - 0.11, drone[1] - 0.11, height - 0.1], [drone[0] + 0.11, drone[1] + 0.11, height - 0.02], 0.02);
+        self.paint(Material::Glow);
+        self.moving(motion::PULSE, [0.0; 3], |mesh| mesh.ball([drone[0], drone[1], height - 0.13], 0.04, 6, 3));
+    }
+
+    /// Lights at the corners of a field workshop's pad, lit while it works.
+    fn workshop_lights(&mut self) {
+        self.paint(Material::Glow);
+        self.moving(motion::PULSE, [0.0; 3], |mesh| {
+            for (x, y) in [(-0.4_f32, -0.4_f32), (0.4, -0.4), (-0.4, 0.4), (0.4, 0.4)] {
+                mesh.block([x - 0.02, y - 0.02, -0.38], [x + 0.02, y + 0.02, -0.36]);
+            }
+        });
     }
 
     /// A transport's ducted rotor at `at`, of `radius`: a duct, a team-colored ring over it if
@@ -1720,27 +1780,9 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.block([-0.05, 0.43, 0.04], [0.05, 0.45, 0.07]);
         }
         Shape::FieldWorkshop => {
-            mesh.paint(Material::Hull);
-            mesh.bevel([-0.5, -0.5, -0.5], [0.5, 0.5, -0.38], 0.03);
-            mesh.paint(Material::Trim);
-            // The team's edging round the pad.
-            for (min, max) in [([-0.47, -0.47], [0.47, -0.41]), ([-0.47, 0.41], [0.47, 0.47]), ([-0.47, -0.41], [-0.41, 0.41]), ([0.41, -0.41], [0.47, 0.41])] {
-                mesh.block([min[0], min[1], -0.39], [max[0], max[1], -0.37]);
-            }
-            mesh.frustum([-0.18, -0.18], [-0.38, 0.12], [0.16, 0.12], 8);
-            mesh.paint(Material::Metal);
-            mesh.frustum([-0.18, -0.18], [0.12, 0.3], [0.04, 0.03], 6);
-            mesh.beam([-0.18, -0.18, 0.28], [0.22, 0.18, 0.34], 0.025, 0.025);
-            // The drone, over the pad, lit while it works.
-            mesh.paint(Material::Hull);
-            mesh.bevel([0.12, 0.08, 0.24], [0.34, 0.3, 0.32], 0.02);
-            mesh.paint(Material::Glow);
-            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
-                mesh.ball([0.23, 0.19, 0.21], 0.04, 6, 3);
-                for (x, y) in [(-0.4_f32, -0.4_f32), (0.4, -0.4), (-0.4, 0.4), (0.4, 0.4)] {
-                    mesh.block([x - 0.02, y - 0.02, -0.38], [x + 0.02, y + 0.02, -0.36]);
-                }
-            });
+            mesh.workshop_pad();
+            mesh.workshop_mast([-0.18, -0.18], [0.23, 0.19], 0.34);
+            mesh.workshop_lights();
         }
         Shape::Wall => {
             mesh.paint(Material::Hull);
@@ -2779,6 +2821,174 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                     mesh.beam([x, 0.02, -0.47], [x, -0.1, -0.47], 0.018, 0.025);
                 });
             }
+        }
+        Shape::RadarT2 => {
+            mesh.paint(Material::Hull);
+            mesh.frustum([0.0, 0.0], [-0.5, -0.4], [0.44, 0.38], 6);
+            mesh.paint(Material::Trim);
+            mesh.bevel([-0.34, -0.32, -0.4], [-0.08, -0.06, -0.2], 0.02);
+            mesh.bevel([0.08, 0.06, -0.4], [0.34, 0.32, -0.2], 0.02);
+            mesh.paint(Material::Metal);
+            for (x, y) in [(-1.0_f32, -1.0_f32), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+                mesh.beam([x * 0.15, y * 0.15, -0.4], [x * 0.04, y * 0.04, 0.26], 0.014, 0.014);
+            }
+            for z in [-0.22_f32, -0.02, 0.16] {
+                let half = 0.15 - (z + 0.4) / 0.66 * 0.11;
+                mesh.block([-half, -half, z], [half, half, z + 0.02]);
+            }
+            // Two antennas crossing, which turn together.
+            mesh.paint(Material::Trim);
+            mesh.moving(motion::SPIN, [0.0; 3], |mesh| {
+                mesh.cuboid(
+                    [Vec3::new(-0.4, -0.06, 0.26), Vec3::new(0.4, -0.06, 0.26), Vec3::new(0.4, 0.03, 0.26), Vec3::new(-0.4, 0.03, 0.26)],
+                    [Vec3::new(-0.4, 0.05, 0.5), Vec3::new(0.4, 0.05, 0.5), Vec3::new(0.4, 0.14, 0.5), Vec3::new(-0.4, 0.14, 0.5)],
+                );
+                mesh.cuboid(
+                    [Vec3::new(-0.06, -0.4, 0.26), Vec3::new(0.03, -0.4, 0.26), Vec3::new(0.03, 0.4, 0.26), Vec3::new(-0.06, 0.4, 0.26)],
+                    [Vec3::new(0.05, -0.4, 0.5), Vec3::new(0.14, -0.4, 0.5), Vec3::new(0.14, 0.4, 0.5), Vec3::new(0.05, 0.4, 0.5)],
+                );
+            });
+        }
+        Shape::SonarT2 => {
+            let float = [[-0.15, -0.27], [0.15, -0.27], [0.3, 0.0], [0.15, 0.27], [-0.15, 0.27], [-0.3, 0.0]];
+            mesh.paint(Material::Hull);
+            mesh.prism(&float, [-0.5, -0.3], [0.85, 1.0]);
+            mesh.paint(Material::Trim);
+            mesh.prism(&float, [-0.3, -0.26], [0.98, 0.9]);
+            // Three outrigger pontoons on booms, each with a team-colored cap.
+            for index in 0..3 {
+                let angle = 0.52 + index as f32 / 3.0 * std::f32::consts::TAU;
+                let (x, y) = (angle.cos() * 0.36, angle.sin() * 0.36);
+                mesh.paint(Material::Metal);
+                mesh.beam([angle.cos() * 0.2, angle.sin() * 0.2, -0.36], [x, y, -0.36], 0.025, 0.02);
+                mesh.paint(Material::Hull);
+                mesh.frustum([x, y], [-0.5, -0.32], [0.12, 0.1], 8);
+                mesh.paint(Material::Trim);
+                mesh.frustum([x, y], [-0.32, -0.29], [0.1, 0.09], 8);
+            }
+            mesh.paint(Material::Metal);
+            mesh.frustum([0.0, 0.0], [-0.26, 0.36], [0.05, 0.035], 6);
+            mesh.paint(Material::Glow);
+            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
+                for z in [-0.06_f32, 0.08, 0.22] {
+                    mesh.frustum([0.0, 0.0], [z, z + 0.04], [0.15, 0.15], 10);
+                }
+            });
+            mesh.paint(Material::Trim);
+            mesh.ball([0.0, 0.0, 0.41], 0.08, 8, 4);
+        }
+        Shape::PointDefenseT2 => {
+            mesh.prism(&[[-0.26, -0.26], [0.26, -0.26], [0.3, -0.02], [0.2, 0.18], [-0.2, 0.18], [-0.3, -0.02]], [-0.05, 0.26], [1.0, 0.85]);
+            // Armored cheeks either side.
+            mesh.paint(Material::Hull);
+            for x in [-0.3_f32, 0.3] {
+                mesh.bevel([x - 0.045, -0.22, -0.04], [x + 0.045, 0.12, 0.2], 0.02);
+            }
+            mesh.paint(Material::Metal);
+            for x in [-0.09_f32, 0.09] {
+                mesh.moving(motion::RECOIL, [x, 0.12, 0.12], |mesh| mesh.body(x, &[[0.12, 0.042, 0.042, 0.12], [0.48, 0.035, 0.035, 0.12]], 6));
+                mesh.flash([x, 0.47, 0.12], 0.05);
+            }
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.08, -0.2, 0.26], [0.08, 0.0, 0.38], 0.03);
+            mesh.paint(Material::Glow);
+            mesh.block([-0.06, 0.0, 0.3], [0.06, 0.012, 0.34]);
+        }
+        // On its emplacement's turntable: a sloped casemate between trunnion braces, an
+        // ammunition hoist behind, and a long barrel laid low, with recoil cylinders and a muzzle
+        // brake, all kicking back.
+        Shape::ArtilleryGunT3 => {
+            mesh.cuboid(
+                [Vec3::new(-0.24, -0.3, -0.4), Vec3::new(0.24, -0.3, -0.4), Vec3::new(0.24, 0.14, -0.4), Vec3::new(-0.24, 0.14, -0.4)],
+                [Vec3::new(-0.17, -0.24, -0.12), Vec3::new(0.17, -0.24, -0.12), Vec3::new(0.17, 0.06, -0.12), Vec3::new(-0.17, 0.06, -0.12)],
+            );
+            mesh.paint(Material::Hull);
+            for x in [-0.27_f32, 0.27] {
+                mesh.bevel([x - 0.04, -0.1, -0.4], [x + 0.04, 0.1, -0.06], 0.02);
+            }
+            mesh.bevel([-0.1, -0.38, -0.4], [0.1, -0.3, -0.18], 0.02);
+            mesh.paint(Material::Metal);
+            mesh.moving(motion::RECOIL, [0.0, -0.12, -0.2], |mesh| {
+                mesh.beam([0.0, -0.12, -0.2], [0.0, 0.47, -0.04], 0.065, 0.065);
+                mesh.beam([0.0, 0.41, -0.056], [0.0, 0.475, -0.038], 0.095, 0.065);
+                for x in [-0.06_f32, 0.06] {
+                    mesh.beam([x, -0.06, -0.13], [x, 0.2, -0.06], 0.02, 0.02);
+                }
+            });
+            mesh.flash([0.0, 0.48, -0.03], 0.07);
+        }
+        Shape::ArtilleryEmplacement => {
+            mesh.paint(Material::Hull);
+            mesh.block([-0.5, -0.5, -0.5], [0.5, 0.5, -0.46]);
+            // Revetments round the edge, sloping in.
+            let wall = |mesh: &mut MeshBuilder, bottom: [[f32; 2]; 4], top: [[f32; 2]; 4]| {
+                mesh.cuboid(bottom.map(|[x, y]| Vec3::new(x, y, -0.46)), top.map(|[x, y]| Vec3::new(x, y, -0.36)));
+            };
+            for side in [-1.0_f32, 1.0] {
+                let (outer, inner, top_outer, top_inner) = (0.5 * side, 0.4 * side, 0.47 * side, 0.42 * side);
+                wall(&mut *mesh, [[-0.5, outer], [0.5, outer], [0.5, inner], [-0.5, inner]], [[-0.47, top_outer], [0.47, top_outer], [0.47, top_inner], [-0.47, top_inner]]);
+                wall(&mut *mesh, [[outer, -0.4], [inner, -0.4], [inner, 0.4], [outer, 0.4]], [[top_outer, -0.4], [top_inner, -0.4], [top_inner, 0.4], [top_outer, 0.4]]);
+            }
+            // Bunkers at the corners, with team-colored roofs and a light each.
+            for (x, y) in [(-0.39_f32, -0.39_f32), (0.39, -0.39), (-0.39, 0.39), (0.39, 0.39)] {
+                mesh.paint(Material::Hull);
+                mesh.bevel([x - 0.08, y - 0.08, -0.46], [x + 0.08, y + 0.08, -0.33], 0.02);
+                mesh.paint(Material::Trim);
+                mesh.block([x - 0.07, y - 0.07, -0.33], [x + 0.07, y + 0.07, -0.31]);
+                mesh.paint(Material::Glow);
+                mesh.block([x - x.signum() * 0.09, y - 0.015, -0.4], [x - x.signum() * 0.08, y + 0.015, -0.37]);
+            }
+            // The turntable, in team colors, and rails bringing shells to it from the back.
+            mesh.paint(Material::Trim);
+            mesh.frustum([0.0, 0.0], [-0.46, -0.41], [0.32, 0.31], 16);
+            mesh.paint(Material::Metal);
+            mesh.frustum([0.0, 0.0], [-0.41, -0.4], [0.27, 0.27], 16);
+            for x in [-0.05_f32, 0.05] {
+                mesh.block([x - 0.012, -0.4, -0.46], [x + 0.012, -0.3, -0.445]);
+            }
+        }
+        Shape::ShieldGeneratorT3 => {
+            mesh.paint(Material::Hull);
+            mesh.frustum([0.0, 0.0], [-0.5, -0.3], [0.5, 0.42], 8);
+            mesh.paint(Material::Trim);
+            mesh.frustum([0.0, 0.0], [-0.3, -0.24], [0.34, 0.3], 8);
+            mesh.paint(Material::Metal);
+            mesh.frustum([0.0, 0.0], [-0.3, 0.2], [0.16, 0.12], 6);
+            mesh.paint(Material::Trim);
+            mesh.frustum([0.0, 0.0], [0.2, 0.35], [0.12, 0.3], 8);
+            mesh.paint(Material::Glow);
+            mesh.frustum([0.0, 0.0], [0.35, 0.5], [0.3, 0.1], 8);
+            // Four emitter pylons round the column, with lit tips.
+            for (x, y) in [(-0.27_f32, -0.27_f32), (0.27, -0.27), (-0.27, 0.27), (0.27, 0.27)] {
+                mesh.paint(Material::Hull);
+                mesh.frustum([x, y], [-0.3, 0.08], [0.06, 0.045], 6);
+                mesh.paint(Material::Glow);
+                mesh.ball([x, y, 0.12], 0.05, 6, 3);
+            }
+        }
+        Shape::FabricatorT3 => {
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.48, -0.48, -0.5], [0.48, 0.48, -0.4], 0.03);
+            // Four cooling fins in an X.
+            mesh.paint(Material::Metal);
+            for (x, y) in [(-1.0_f32, -1.0_f32), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+                mesh.beam([x * 0.16, y * 0.16, -0.12], [x * 0.42, y * 0.42, -0.12], 0.03, 0.28);
+            }
+            // The core in team colors, ringed with light, under a team-colored dome.
+            mesh.paint(Material::Trim);
+            mesh.frustum([0.0, 0.0], [-0.4, 0.3], [0.26, 0.24], 12);
+            mesh.paint(Material::Glow);
+            for z in [-0.26_f32, 0.0, 0.24] {
+                mesh.frustum([0.0, 0.0], [z, z + 0.06], [0.3, 0.3], 12);
+            }
+            mesh.paint(Material::Trim);
+            mesh.frustum([0.0, 0.0], [0.3, 0.45], [0.24, 0.1], 12);
+        }
+        Shape::FieldWorkshopT3 => {
+            mesh.workshop_pad();
+            mesh.workshop_mast([-0.22, -0.22], [0.22, -0.02], 0.34);
+            mesh.workshop_mast([0.22, 0.22], [-0.22, 0.02], 0.42);
+            mesh.workshop_lights();
         }
         Shape::Airfield => {
             mesh.paint(Material::Hull);
