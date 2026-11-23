@@ -356,13 +356,13 @@ pub fn unit_look(key: &str) -> UnitLook {
     let turret = |weapon, at, aft| Some(TurretMount { weapon, at, aft });
     match key {
         "command_rig" => UnitLook { base: Some(Shape::CommanderLegs), ..look(Shape::Commander, Some([1.00, 1.00, 1.00]), 1.0) },
-        "field_rig" => UnitLook { base: Some(Shape::CommanderLegs), ..look(Shape::Commander, Some([0.70, 0.75, 0.85]), 1.0) },
+        "field_rig" => UnitLook { base: Some(Shape::CommanderLegs), ..look(Shape::FieldRig, Some([0.70, 0.75, 0.85]), 1.0) },
         "rig_yard" => look(Shape::RigYard, Some([0.55, 0.60, 1.00]), 0.6),
         "geothermal_plant" => look(Shape::GeothermalPlant, Some([0.85, 0.60, 0.25]), 0.7),
         "mass_fabricator" => look(Shape::Fabricator, Some([0.40, 0.95, 0.85]), 1.0),
         "mass_fabricator_t3" => look(Shape::Fabricator, Some([0.70, 0.45, 1.00]), 0.8),
-        "t2_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([1.00, 0.56, 0.10]), 1.0) },
-        "t3_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([0.98, 0.44, 0.10]), 1.0) },
+        "t2_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::EngineerT2, Some([1.00, 0.56, 0.10]), 1.0) },
+        "t3_engineer" => UnitLook { base: Some(Shape::EngineerHullT3), ..look(Shape::EngineerT3, Some([0.98, 0.44, 0.10]), 1.0) },
         "land_factory_t3" => look(Shape::FactoryT3, Some([0.10, 0.10, 0.20]), 0.85),
         "t1_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([1.00, 0.70, 0.12]), 1.0) },
         "t1_light_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::Bot, Some([0.78, 0.70, 0.50]), 1.0) },
@@ -379,8 +379,8 @@ pub fn unit_look(key: &str) -> UnitLook {
         "wall" => look(Shape::Wall, Some([0.70, 0.70, 0.70]), 0.9),
         "field_workshop" => look(Shape::FieldWorkshop, Some([0.95, 0.75, 0.30]), 0.8),
         "t1_light_transport" => look(Shape::Transport, Some([0.85, 0.80, 0.60]), 1.0),
-        "t2_transport" => look(Shape::Transport, Some([0.70, 0.75, 0.80]), 1.0),
-        "t3_heavy_transport" => look(Shape::Transport, Some([0.55, 0.60, 0.75]), 1.0),
+        "t2_transport" => look(Shape::TransportT2, Some([0.70, 0.75, 0.80]), 1.0),
+        "t3_heavy_transport" => look(Shape::TransportT3, Some([0.55, 0.60, 0.75]), 1.0),
         "field_workshop_t3" => look(Shape::FieldWorkshop, Some([0.95, 0.55, 0.20]), 0.95),
         "t1_light_artillery" => UnitLook { base: Some(Shape::ArtilleryHull), length: 22.0, ..look(Shape::Artillery, Some([0.74, 0.66, 0.52]), 1.0) },
         "t2_heavy_tank" => UnitLook { base: Some(Shape::HeavyTankHull), length: 24.0, ..look(Shape::HeavyTank, Some([0.62, 0.52, 0.48]), 1.0) },
@@ -441,7 +441,7 @@ pub fn unit_look(key: &str) -> UnitLook {
         "air_factory_t3" => look(Shape::AirFactoryT3, Some([0.15, 0.25, 0.45]), 0.8),
         "t2_gunship" => look(Shape::Gunship, Some([0.52, 0.66, 0.46]), 0.6),
         "t3_heavy_gunship" => look(Shape::HeavyGunship, Some([0.20, 0.20, 0.25]), 0.6),
-        "t3_spy_plane" => look(Shape::Scout, Some([0.30, 0.30, 0.35]), 0.5),
+        "t3_spy_plane" => look(Shape::SpyPlane, Some([0.30, 0.30, 0.35]), 0.5),
         "t3_air_superiority" => UnitLook { length: 28.0, ..look(Shape::AirSuperiority, Some([0.95, 0.95, 1.00]), 0.5) },
         // The largest aircraft with wings, longer and wider than even the heavy transport.
         "t3_strategic_bomber" => UnitLook { length: 44.0, ..look(Shape::StrategicBomber, Some([0.50, 0.52, 0.38]), 0.5) },
@@ -976,17 +976,14 @@ mod tests {
         for unit in drawn() {
             assert_ne!(unit_look(&unit.key).shape, Shape::Cube, "{} has no shape of its own", unit.key);
         }
-        // Higher tiers of the factory and the engineer, the radar's deep scan upgrade, and the support
-        // commander share the shape they come from, the air factory is a factory, the spy plane is
-        // the air scout's T3, and the anti-air turret has the mobile anti-air's guns. Everything
-        // else is unique.
+        // Units listed here may share a shape with another: higher tiers of some structures and the
+        // radar's deep scan upgrade share the shape they come from, and the anti-air turret has the
+        // mobile anti-air's guns. Everything else is unique. Units that still share a whole model,
+        // base and all, are listed in `STILL_SHARING_A_MODEL`, to be given their own.
         let shared = [
             "land_factory_t2",
             "land_factory_t3",
-            "t2_engineer",
-            "t3_engineer",
             "deep_scan_array",
-            "field_rig",
             "mass_extractor_t2",
             "mass_extractor_t3",
             "mass_fabricator_t3",
@@ -994,10 +991,6 @@ mod tests {
             "t1_aa_turret",
             "air_factory_t2",
             "air_factory_t3",
-            "land_factory_t2_support",
-            "land_factory_t3_support",
-            "air_factory_t2_support",
-            "air_factory_t3_support",
             "power_generator_t2",
             "power_generator_t3",
             "radar_t2",
@@ -1013,25 +1006,16 @@ mod tests {
             "t2_mobile_missile_launcher",
             "t1_sonar",
             "t2_sonar",
-            "t1_torpedo_launcher",
-            "t2_torpedo_launcher",
             "t2_cruiser",
             "t3_battleship",
             "t3_battlecruiser",
-            "naval_factory_t2",
-            "naval_factory_t3",
-            "naval_factory_t2_support",
-            "naval_factory_t3_support",
             "t3_heavy_gunship",
-            "t3_spy_plane",
             "t3_air_superiority",
             "t2_flak",
             "t1_medium_tank",
             "t2_combat_engineer",
             "t3_heavy_shield",
             "field_workshop_t3",
-            "t2_transport",
-            "t3_heavy_transport",
         ];
         let shapes: Vec<Shape> = drawn().filter(|unit| !shared.contains(&unit.key.as_str())).map(|unit| unit_look(&unit.key).shape).collect();
         for (index, shape) in shapes.iter().enumerate() {
@@ -1241,14 +1225,6 @@ mod tests {
     /// are to differ by shape, not only by color (2026-11-23). This list may only shrink: a pair
     /// that shares a model must be on it, and a pair that no longer does must come off it.
     const STILL_SHARING_A_MODEL: &[(&str, &str)] = &[
-        ("command_rig", "field_rig"),
-        ("t1_engineer", "t2_engineer"),
-        ("t1_engineer", "t3_engineer"),
-        ("t2_engineer", "t3_engineer"),
-        ("t1_light_transport", "t2_transport"),
-        ("t1_light_transport", "t3_heavy_transport"),
-        ("t2_transport", "t3_heavy_transport"),
-        ("t1_air_scout", "t3_spy_plane"),
         ("mass_fabricator", "mass_fabricator_t3"),
         ("shield_generator", "t3_heavy_shield"),
         ("field_workshop", "field_workshop_t3"),

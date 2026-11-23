@@ -615,11 +615,12 @@ mod tests {
 
     /// The least `Glance::distance` allowed between two portraits that could share a build bar,
     /// by picture and by outline, a little under the most alike pairs on 2026-11-23: the T2 and
-    /// T3 support docks by picture (0.0203), and the T2 and T3 transports by outline (0.0042).
+    /// T3 support docks by picture (0.0203), and the T1 and T2 support air factories by outline
+    /// (0.0075), once the transports and engineers were given shapes of their own.
     /// Raise them as the most alike pairs, which `cargo run --release --example
     /// portrait_likeness` lists, are given shapes of their own.
     const PICTURE_LIKENESS_FLOOR: f32 = 0.018;
-    const OUTLINE_LIKENESS_FLOOR: f32 = 0.0035;
+    const OUTLINE_LIKENESS_FLOOR: f32 = 0.0065;
 
     #[test]
     fn no_two_portraits_that_share_a_build_bar_are_nearly_the_same_picture() {
@@ -641,9 +642,10 @@ mod tests {
         for by in [Likeness::Picture, Likeness::Outline] {
             let distance = |first: &str, second: &str| glances[first].distance(&glances[second], by);
             assert_eq!(distance("t1_medium_tank", "t1_medium_tank"), 0.0);
-            let same_model = distance("t1_light_transport", "t2_transport");
+            // Two that still share a model (`render::instances`' list of them).
+            let same_model = distance("t1_sonar", "t2_sonar");
             let different = distance("t1_medium_tank", "t3_heavy_walker");
-            assert!(same_model * 2.0 < different, "by {by:?}, a transport in two tiers ({same_model:.4}) is far more alike than a tank and a walker ({different:.4})");
+            assert!(same_model * 2.0 < different, "by {by:?}, a sonar in two tiers ({same_model:.4}) is far more alike than a tank and a walker ({different:.4})");
             assert!(different < 1.0);
         }
     }
