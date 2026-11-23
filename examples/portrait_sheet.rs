@@ -1,7 +1,10 @@
 //! Renders a portrait of every unit and structure, for the interface's buttons, and packs them
 //! into `assets/portraits.png`, with their keys, tile by tile, in `assets/portraits.txt`.
 //!
-//! `cargo run --release --example portrait_sheet [-- --review <folder>]`
+//! `cargo run --release --example portrait_sheet [-- --review <folder>] [--team red|blue] [--out <sheet.png>]`
+//!
+//! With `--out`, the sheet is written there and the game's own portraits are left alone, which
+//! is how to compare looks, or see the other team's colors, without changing the game.
 //!
 //! Run it again after changing a unit's model. Each unit is drawn alone, close up, from the
 //! interface's usual angle, then the same view is drawn without it: what differs is the unit,
@@ -157,6 +160,9 @@ fn portrait(with: &[u8], without: &[u8], width: usize, height: usize) -> Vec<u8>
 }
 
 fn main() {
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    let option = |name: &str| arguments.iter().position(|argument| argument == name).and_then(|at| arguments.get(at + 1)).cloned();
+    let team = if option("--team").as_deref() == Some("red") { Team::Red } else { Team::Blue };
     let mut world = world();
     let blueprints = Arc::clone(&world.blueprints);
     let drawn: Vec<_> = blueprints.iter().filter(|unit| unit.class != UnitClass::Ammo).collect();
@@ -169,7 +175,7 @@ fn main() {
         if unit.is_structure() {
             let size = u32::from(unit.footprint);
             if unit.on_water {
-                world.spawn_finished_structure(unit.id, Team::Blue, sea_cell_x, 100);
+                world.spawn_finished_structure(unit.id, team, sea_cell_x, 100);
                 sea_cell_x += size + 10;
             } else {
                 if cell_x + size > 300 {
@@ -183,16 +189,16 @@ fn main() {
                 if unit.requires_vent {
                     world.vents.push((cell_x + size / 2, cell_y + size / 2));
                 }
-                if world.spawn_finished_structure(unit.id, Team::Blue, cell_x, cell_y).is_none() {
+                if world.spawn_finished_structure(unit.id, team, cell_x, cell_y).is_none() {
                     eprintln!("{} could not be built", unit.key);
                 }
                 cell_x += size + 10;
             }
         } else if matches!(unit.movement, MoveClass::Naval | MoveClass::Submarine) {
-            world.spawn_mobile(unit.id, Team::Blue, Vec2Fp::new(fp_int(sea_x), fp_int(1_900)));
+            world.spawn_mobile(unit.id, team, Vec2Fp::new(fp_int(sea_x), fp_int(1_900)));
             sea_x += 260;
         } else {
-            world.spawn_mobile(unit.id, Team::Blue, Vec2Fp::new(fp_int(land_x), fp_int(land_y)));
+            world.spawn_mobile(unit.id, team, Vec2Fp::new(fp_int(land_x), fp_int(land_y)));
             land_x += 260;
             if land_x > MAP - 300 {
                 land_x = 300;
@@ -280,14 +286,17 @@ fn main() {
         }
     }
     let assets = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
-    let file = std::fs::File::create(assets.join("portraits.png")).expect("sheet can be written");
+    let sheet_path = option("--out").map_or_else(|| assets.join("portraits.png"), std::path::PathBuf::from);
+    let file = std::fs::File::create(&sheet_path).expect("sheet can be written");
     let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), sheet_width as u32, sheet_height as u32);
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
     encoder.set_compression(png::Compression::Best);
     encoder.write_header().expect("header writes").write_image_data(&sheet).expect("sheet writes");
     let index = format!("{TILE} {COLUMNS}\n{}\n", keys.join("\n"));
-    std::fs::write(assets.join("portraits.txt"), index).expect("index writes");
+    if option("--out").is_none() {
+        std::fs::write(assets.join("portraits.txt"), index).expect("index writes");
+    }
     println!("{} portraits", keys.len());
     let mut args = std::env::args().skip(1);
     if args.next().as_deref() == Some("--review") {

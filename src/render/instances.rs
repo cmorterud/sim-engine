@@ -72,8 +72,8 @@ const APRON_HEIGHT: f32 = 2.4;
 /// Bare armor, before it takes on a little of the team's and the blueprint's color.
 const ARMOR: [f32; 3] = [0.50, 0.52, 0.55];
 /// How much of the blueprint's tint, then the team's color, the armor takes on.
-const ARMOR_TINT: f32 = 0.4;
-const ARMOR_TEAM: f32 = 0.15;
+const ARMOR_TINT: f32 = 0.85;
+const ARMOR_TEAM: f32 = 0.06;
 /// How far glowing parts are lifted towards white.
 const GLOW_WHITEN: f32 = 0.25;
 /// How far a unit must have moved in a tick, in raw squared units, to count as heading somewhere.
@@ -365,13 +365,13 @@ pub fn unit_look(key: &str) -> UnitLook {
         "t3_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([0.98, 0.44, 0.10]), 1.0) },
         "land_factory_t3" => look(Shape::FactoryT3, Some([0.10, 0.10, 0.20]), 0.85),
         "t1_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([1.00, 0.70, 0.12]), 1.0) },
-        "t1_light_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::Bot, None, 1.0) },
+        "t1_light_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::Bot, Some([0.78, 0.70, 0.50]), 1.0) },
         "t1_land_scout" => UnitLook { length: 14.0, ..look(Shape::LandScout, Some([0.75, 0.95, 1.00]), 1.0) },
         "t1_medium_tank" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::Tank, Some([0.80, 0.85, 0.70]), 1.0) },
-        "t2_grenadier_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::GrenadierWalker, None, 1.0) },
+        "t2_grenadier_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::GrenadierWalker, Some([0.72, 0.58, 0.40]), 1.0) },
         "t2_mobile_shield" => UnitLook { base: Some(Shape::ShieldCarrier), length: 15.0, ..look(Shape::ShieldEmitter, Some([0.55, 0.85, 1.00]), 1.0) },
         "t2_combat_engineer" => UnitLook { base: Some(Shape::CombatEngineerHull), length: 19.0, ..look(Shape::Engineer, Some([0.95, 0.32, 0.22]), 1.0) },
-        "t3_heavy_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::HeavyWalker, None, 1.0) },
+        "t3_heavy_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::HeavyWalker, Some([0.58, 0.46, 0.36]), 1.0) },
         "t3_siege_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::SiegeWalker, Some([0.70, 0.70, 0.75]), 1.0) },
         "t2_torpedo_boat" => UnitLook { length: 24.0, ..look(Shape::TorpedoBoat, Some([0.90, 0.78, 0.30]), 0.5) },
         "t3_heavy_point_defense" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::HeavyPointDefense, Some([0.95, 0.35, 0.30]), 1.0) },
@@ -382,8 +382,8 @@ pub fn unit_look(key: &str) -> UnitLook {
         "t2_transport" => look(Shape::Transport, Some([0.70, 0.75, 0.80]), 1.0),
         "t3_heavy_transport" => look(Shape::Transport, Some([0.55, 0.60, 0.75]), 1.0),
         "field_workshop_t3" => look(Shape::FieldWorkshop, Some([0.95, 0.55, 0.20]), 0.95),
-        "t1_light_artillery" => UnitLook { base: Some(Shape::ArtilleryHull), length: 22.0, ..look(Shape::Artillery, None, 1.0) },
-        "t2_heavy_tank" => UnitLook { base: Some(Shape::HeavyTankHull), length: 24.0, ..look(Shape::HeavyTank, None, 1.0) },
+        "t1_light_artillery" => UnitLook { base: Some(Shape::ArtilleryHull), length: 22.0, ..look(Shape::Artillery, Some([0.74, 0.66, 0.52]), 1.0) },
+        "t2_heavy_tank" => UnitLook { base: Some(Shape::HeavyTankHull), length: 24.0, ..look(Shape::HeavyTank, Some([0.62, 0.52, 0.48]), 1.0) },
         "t2_assault_hovercraft" => UnitLook { base: Some(Shape::HoverHull), ..look(Shape::Tank, Some([0.45, 0.65, 0.75]), 1.0) },
         "land_factory_t1" => look(Shape::Factory, Some([0.35, 0.35, 0.45]), 0.55),
         "land_factory_t2" => look(Shape::FactoryT2, Some([0.20, 0.20, 0.30]), 0.7),
@@ -393,8 +393,8 @@ pub fn unit_look(key: &str) -> UnitLook {
         "power_generator" => look(Shape::Generator, Some([1.00, 0.95, 0.75]), 1.2),
         "mass_storage" => look(Shape::Storage, Some([0.60, 0.90, 0.60]), 0.65),
         "energy_storage" => look(Shape::EnergyStorage, Some([1.00, 0.90, 0.40]), 0.65),
-        "t2_artillery" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::ArtilleryGun, Some([0.80, 0.55, 0.30]), 1.0) },
-        "t3_artillery" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::ArtilleryGun, Some([0.50, 0.30, 0.20]), 0.6) },
+        "t2_artillery" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::ArtilleryGun, Some([0.70, 0.62, 0.50]), 1.0) },
+        "t3_artillery" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::ArtilleryGun, Some([0.46, 0.40, 0.34]), 0.6) },
         "t3_mobile_artillery" => UnitLook { base: Some(Shape::CasemateHull), length: 30.0, ..look(Shape::HeavyArtillery, Some([0.55, 0.45, 0.35]), 1.0) },
         "radar" => look(Shape::Radar, Some([0.40, 0.90, 0.55]), 1.3),
         "deep_scan_array" => look(Shape::DeepScan, Some([0.75, 0.55, 1.00]), 1.2),
@@ -424,7 +424,7 @@ pub fn unit_look(key: &str) -> UnitLook {
             turrets: [turret(0, [0.0, 0.304, -0.16], false), turret(1, [0.0, 0.109, -0.11], false), turret(2, [0.0, -0.337, -0.2], true)],
             ..look(Shape::Battleship, Some([0.04, 0.04, 0.07]), 0.6)
         },
-        "t3_battlecruiser" => UnitLook { length: 86.0, ..look(Shape::Battlecruiser, Some([0.78, 0.30, 0.12]), 0.55) },
+        "t3_battlecruiser" => UnitLook { length: 86.0, ..look(Shape::Battlecruiser, Some([0.62, 0.56, 0.48]), 0.55) },
         "naval_factory_t2" => look(Shape::NavalFactoryT2, Some([0.25, 0.35, 0.45]), 0.6),
         "naval_factory_t3" => look(Shape::NavalFactoryT3, Some([0.15, 0.22, 0.32]), 0.7),
         "naval_factory_t2_support" => look(Shape::NavalFactoryT2, Some([0.64, 0.58, 0.44]), 0.55),
@@ -439,19 +439,19 @@ pub fn unit_look(key: &str) -> UnitLook {
         "t2_point_defense" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::PointDefense, Some([0.85, 0.30, 0.65]), 1.0) },
         "air_factory_t2" => look(Shape::AirFactoryT2, Some([0.30, 0.45, 0.65]), 0.65),
         "air_factory_t3" => look(Shape::AirFactoryT3, Some([0.15, 0.25, 0.45]), 0.8),
-        "t2_gunship" => look(Shape::Gunship, None, 0.6),
+        "t2_gunship" => look(Shape::Gunship, Some([0.52, 0.66, 0.46]), 0.6),
         "t3_heavy_gunship" => look(Shape::HeavyGunship, Some([0.20, 0.20, 0.25]), 0.6),
         "t3_spy_plane" => look(Shape::Scout, Some([0.30, 0.30, 0.35]), 0.5),
         "t3_air_superiority" => UnitLook { length: 28.0, ..look(Shape::AirSuperiority, Some([0.95, 0.95, 1.00]), 0.5) },
         // The largest aircraft with wings, longer and wider than even the heavy transport.
-        "t3_strategic_bomber" => UnitLook { length: 44.0, ..look(Shape::StrategicBomber, None, 0.5) },
+        "t3_strategic_bomber" => UnitLook { length: 44.0, ..look(Shape::StrategicBomber, Some([0.50, 0.52, 0.38]), 0.5) },
         "t2_fighter_bomber" => look(Shape::FighterBomber, Some([0.85, 0.70, 0.55]), 0.55),
         "t2_flak" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::FlakGun, Some([0.35, 0.75, 0.95]), 1.0) },
         "t2_mobile_flak" => UnitLook { base: Some(Shape::TankHull), length: 21.0, ..look(Shape::FlakTurret, Some([0.22, 0.70, 0.98]), 1.0) },
         "t3_sam" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::SamLauncher, Some([0.15, 0.72, 1.00]), 1.1) },
         "t1_air_scout" => look(Shape::Scout, Some([0.85, 0.90, 0.95]), 0.5),
-        "t1_interceptor" => look(Shape::Aircraft, None, 0.5),
-        "t1_bomber" => look(Shape::Bomber, None, 0.6),
+        "t1_interceptor" => look(Shape::Aircraft, Some([0.86, 0.88, 0.78]), 0.5),
+        "t1_bomber" => look(Shape::Bomber, Some([0.82, 0.72, 0.52]), 0.6),
         "t1_aa_turret" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::AntiAirGun, Some([0.35, 0.75, 0.95]), 0.9) },
         "t1_mobile_aa" => UnitLook { base: Some(Shape::WheeledHull), length: 19.0, ..look(Shape::TruckAntiAir, Some([0.30, 0.78, 0.98]), 1.0) },
         "t1_point_defense" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::PointDefense, Some([0.75, 0.25, 0.85]), 0.9) },
