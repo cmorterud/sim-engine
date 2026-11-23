@@ -611,7 +611,7 @@ mod tests {
             assert!(!card.contains("portrait none"), "{} shows its portrait", unit.key);
             let ground = Ground::of(unit);
             assert!(card.contains(&format!("class=\"backdrop {}\"", ground_class(ground))), "{} sits on its {ground:?} backdrop", unit.key);
-            assert!(card.contains(&format!("<dd>{}</dd>", ground.name())) || unit.is_structure(), "{} says where it can go", unit.key);
+            assert!(card.contains(&format!("<td>{}</td>", ground.name())) || unit.is_structure(), "{} says where it can go", unit.key);
         }
         for (key, class) in [("t1_medium_tank", "g-land"), ("t1_interceptor", "g-air"), ("t1_frigate", "g-ocean"), ("t1_attack_sub", "g-deep"), ("t2_assault_hovercraft", "g-coast")] {
             let start = html.find(&format!("id=\"{key}\"")).expect("listed");
