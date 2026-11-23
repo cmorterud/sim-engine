@@ -296,6 +296,37 @@ pub fn from_map(map: &MapData, seed: u64) -> Scenario {
     Scenario { world, opening_commands: Vec::new() }
 }
 
+/// A team match on a map from a file (GAME_SPECIFICATION.md §17.2): `per_team` players a side,
+/// at the map's starts for that many, the first half Blue's and the rest Red's, each with a
+/// commander and an economy of their own. One a side is `from_map`'s 1v1. None if the map has
+/// no starts for that many.
+pub fn from_map_teams(map: &MapData, seed: u64, per_team: usize) -> Option<Scenario> {
+    if per_team == 1 {
+        return Some(from_map(map, seed));
+    }
+    let layout = map.layouts.iter().find(|layout| layout.len() == per_team * 2)?;
+    let config = SimConfig { map_units: map.map_units, friendly_fire: true, fog_of_war: true, ..SimConfig::default() };
+    let terrain = super::terrain::Terrain::from_heights(map.map_units, map.heights.clone(), &map.blocked, map.water_level);
+    let mut world = SimWorld::with_terrain(config, seed, terrain);
+    let teams: Vec<Team> = (0..per_team * 2).map(|index| if index < per_team { Team::Blue } else { Team::Red }).collect();
+    world.set_players(&teams);
+    world.deposits.clone_from(&map.deposits);
+    world.vents.clone_from(&map.vents);
+    for &(kind, position) in &map.scenery {
+        let radius = world.rng.range_fp(fp_int(5), fp_int(10));
+        world.spawn_scenery(kind, position, radius);
+    }
+    let commander = world.blueprints.id("command_rig");
+    world.starts = [layout[0], layout[per_team]];
+    for (index, &start) in layout.iter().enumerate() {
+        world.player_starts[index] = start;
+        world.spawn_mobile_for(commander, super::components::PlayerId(index as u8), start);
+    }
+    world.start_economy(SKIRMISH_START_MASS, SKIRMISH_START_ENERGY);
+    world.prepare_map();
+    Some(Scenario { world, opening_commands: Vec::new() })
+}
+
 /// Where a match is played: the generated skirmish map, one that comes with the game, the
 /// playtest sandbox (`playtest.rs`), or a playtest scenario (`playtest_scenarios.rs`).
 #[derive(Clone, Debug)]
@@ -307,6 +338,16 @@ pub enum MapSource {
 }
 
 impl MapSource {
+    /// A match with `per_team` players a side, if the map has starts for that many: only maps
+    /// from files have team starts, and one a side is the ordinary 1v1.
+    pub fn scenario_teams(&self, seed: u64, per_team: usize) -> Option<Scenario> {
+        match (self, per_team) {
+            (_, 1) => Some(self.scenario(seed)),
+            (Self::Map(map), _) => from_map_teams(map, seed, per_team),
+            _ => None,
+        }
+    }
+
     pub fn scenario(&self, seed: u64) -> Scenario {
         match self {
             Self::Skirmish => skirmish(seed),

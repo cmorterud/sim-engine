@@ -85,3 +85,31 @@ fn the_last_players_of_both_teams_going_out_together_is_a_draw() {
     self_destruct(&mut world, &[commanders[1], commanders[3]]);
     assert_eq!(world.match_result, Some(MatchResult::Draw));
 }
+
+/// A 2v2 on Saddleback, four AIs: each player builds a base of their own from their own
+/// economy, the match ends with a team out, and it replays from its orders alone.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn a_two_on_two_of_ais_plays_out_and_replays() {
+    use std::sync::Arc;
+    use sim_engine::ai::{play_team_match, replay_team_match};
+    use sim_engine::sim::maps::saddleback;
+    use sim_engine::sim::scenario::MapSource;
+    let map = MapSource::Map(Arc::new(saddleback()));
+    let mut factories = [false; 4];
+    let record = play_team_match(&map, 2, 2, 40_000, |world| {
+        if world.current_tick % 600 != 0 {
+            return;
+        }
+        for &(_, entity) in &world.units {
+            let (Ok(stats), Ok(unit)) = (world.ecs.get::<&UnitStats>(entity), world.ecs.get::<&sim_engine::sim::components::Blueprinted>(entity)) else { continue };
+            if world.blueprints.get(unit.0).key.starts_with("land_factory") {
+                factories[stats.owner.index()] = true;
+            }
+        }
+    })
+    .expect("Saddleback holds four players");
+    assert!(factories.iter().all(|&built| built), "every player builds a factory of their own: {factories:?}");
+    assert!(matches!(record.result, Some(MatchResult::Winner(_))), "a team wins: {:?} at tick {}", record.result, record.ticks);
+    assert_eq!(replay_team_match(&map, 2, 2, &record.log).expect("again"), record.checksums, "it replays from its orders");
+}

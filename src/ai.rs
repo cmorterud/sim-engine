@@ -8,7 +8,7 @@ use crate::ai_strategy::Strategy;
 use crate::math::rng::SimRng;
 use crate::sim::blueprints::{BlueprintId, FactoryKind, Res, UnitClass};
 use crate::sim::commands::SimCommand;
-use crate::sim::components::{Blueprinted, BuildTask, Builder, Combat, Construction, Factory, Launcher, MoveClass, Order, OrderKind, Position, SimId, Team, UnitStats, Upgrading};
+use crate::sim::components::{PlayerId, Blueprinted, BuildTask, Builder, Combat, Construction, Factory, Launcher, MoveClass, Order, OrderKind, Position, SimId, Team, UnitStats, Upgrading};
 use crate::sim::config::TERRAIN_CELL_UNITS;
 use crate::sim::scenario::MapSource;
 use crate::sim::world::{MatchResult, SimWorld};
@@ -592,6 +592,10 @@ impl Skill {
 
 pub struct AiBrain {
     team: Team,
+    /// The player it plays: whose units, economy, and commander are its own.
+    player: PlayerId,
+    /// Where its allies started, whose bases it defends as well as its own.
+    allies: Vec<Vec2Fp>,
     skill: Skill,
     strategy: &'static Strategy,
     home: Vec2Fp,
@@ -641,6 +645,8 @@ impl AiBrain {
         let skill = difficulty.skill().with_strategy(strategy);
         Self {
             team,
+            player: PlayerId(team as u8),
+            allies: Vec::new(),
             skill,
             strategy,
             home: starts[team.index()],
@@ -665,8 +671,40 @@ impl AiBrain {
         }
     }
 
+    /// A brain for one player of a match, playing a strategy at a difficulty: from home, its
+    /// own start, against the nearest enemy start, and defending its allies' bases too.
+    pub fn for_player(world: &SimWorld, player: PlayerId, seed: u64, difficulty: Difficulty, strategy: &'static Strategy) -> Self {
+        let team = world.players[player.index()];
+        let mut brain = Self::with_plan(team, seed, world.starts, difficulty, strategy);
+        let home = world.start_of(player);
+        let nearest = world
+            .players_of(team.enemy())
+            .map(|enemy| world.start_of(enemy))
+            .min_by_key(|start| start.distance_squared(&home));
+        brain.player = player;
+        brain.home = home;
+        brain.enemy_home = nearest.unwrap_or(brain.enemy_home);
+        brain.allies = world.players_of(team).filter(|&ally| ally != player).map(|ally| world.start_of(ally)).collect();
+        brain
+    }
+
     pub const fn team(&self) -> Team {
         self.team
+    }
+
+    pub const fn player(&self) -> PlayerId {
+        self.player
+    }
+
+    /// The enemy commander to go for: the nearest to home of those still in the match.
+    fn enemy_commander(&self, world: &SimWorld) -> Option<SimId> {
+        world
+            .players_of(self.team.enemy())
+            .filter(|enemy| !world.eliminated[enemy.index()])
+            .filter_map(|enemy| world.commanders[enemy.index()])
+            .filter_map(|id| world.unit_position(id).map(|at| (id, at.xy())))
+            .min_by_key(|&(id, at)| (at.distance_squared(&self.home), id))
+            .map(|(id, _)| id)
     }
 
     pub const fn strategy(&self) -> &'static Strategy {
@@ -750,7 +788,7 @@ impl AiBrain {
         };
         for &(id, entity) in &world.units {
             let stats = world.ecs.get::<&UnitStats>(entity).expect("units have stats");
-            if stats.team != self.team {
+            if stats.owner != self.player {
                 continue;
             }
             let Ok(blueprint) = world.ecs.get::<&Blueprinted>(entity).map(|unit| unit.0) else {
@@ -919,7 +957,7 @@ impl AiBrain {
         }
         // Extractors pay their upkeep before anything is built. Once raids take out the
         // generators and less comes in than they cost, a generator under way never finishes.
-        let economy = &world.economies[self.team.index()];
+        let economy = &world.economies[self.player.index()];
         forces.energy_crisis = economy.energy <= economy.energy_capacity / 20 && economy.energy_income <= forces.extractor_upkeep && forces.extractor_upkeep > Res::ZERO;
         if forces.energy_crisis {
             let busy = std::mem::take(&mut forces.busy_builders);
@@ -997,7 +1035,7 @@ impl AiBrain {
         planned_blueprints: &[BlueprintId],
     ) -> Option<(BlueprintId, (u32, u32))> {
         let roster = self.roster();
-        let economy = &world.economies[self.team.index()];
+        let economy = &world.economies[self.player.index()];
         let per_second = |value: Res| self.planned_income((value * 10).to_num::<i64>());
         let (mass_income, energy_income) = (per_second(economy.mass_income), per_second(economy.energy_income));
         let count_planned = |blueprint: BlueprintId| planned_blueprints.iter().filter(|item| **item == blueprint).count();
@@ -1395,7 +1433,7 @@ impl AiBrain {
     }
 
     fn command_factories(&mut self, world: &SimWorld, forces: &Forces, commands: &mut Vec<SimCommand>) {
-        let economy = world.economies[self.team.index()];
+        let economy = world.economies[self.player.index()];
         let mass_income = self.planned_income((economy.mass_income * 10).to_num::<i64>());
         let energy_income = self.planned_income((economy.energy_income * 10).to_num::<i64>());
         let mut upgrade_under_way = forces.factories.iter().any(|factory| factory.upgrading);
@@ -1415,7 +1453,7 @@ impl AiBrain {
             .units
             .iter()
             .filter(|&&(_, entity)| {
-                world.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team == self.team)
+                world.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.owner == self.player)
                     && world.ecs.get::<&Blueprinted>(entity).is_ok_and(|unit| unit.0 == mobile_shield)
             })
             .count();
@@ -1567,7 +1605,7 @@ impl AiBrain {
 
     /// Naval factories upgrade with the economy, one at a time, and build the fleet.
     fn command_naval_factories(&mut self, world: &SimWorld, forces: &Forces, commands: &mut Vec<SimCommand>) {
-        let economy = world.economies[self.team.index()];
+        let economy = world.economies[self.player.index()];
         let mass_income = self.planned_income((economy.mass_income * 10).to_num::<i64>());
         let energy_income = self.planned_income((economy.energy_income * 10).to_num::<i64>());
         let mut upgrade_under_way = forces.naval_factories.iter().any(|factory| factory.upgrading);
@@ -1652,7 +1690,7 @@ impl AiBrain {
     /// new generators never finished, and a shield and a radar could take all of what little
     /// came in before anything was built.
     fn command_energy(&self, world: &SimWorld, forces: &Forces, commands: &mut Vec<SimCommand>) {
-        let economy = &world.economies[self.team.index()];
+        let economy = &world.economies[self.player.index()];
         let (paused, running): (Vec<&ExtractorInfo>, Vec<&ExtractorInfo>) = forces.extractor_sites.iter().partition(|extractor| extractor.paused);
         let factories = forces.factories.iter().chain(&forces.air_factories).chain(&forces.naval_factories).filter(|factory| factory.finished).map(|factory| factory.id);
         let extractors: Vec<SimId> = forces.extractor_sites.iter().map(|extractor| extractor.id).collect();
@@ -1661,7 +1699,7 @@ impl AiBrain {
             .iter()
             .filter(|&&(id, entity)| {
                 !extractors.contains(&id)
-                    && world.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team == self.team)
+                    && world.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.owner == self.player)
                     && world.ecs.get::<&Construction>(entity).is_err()
                     && world.ecs.get::<&Blueprinted>(entity).is_ok_and(|unit| {
                         let unit = world.blueprints.get(unit.0);
@@ -1689,7 +1727,7 @@ impl AiBrain {
     /// aircraft: mostly strike aircraft, unless enemy aircraft have been seen. Aircraft cost a
     /// great deal of energy, so none are started while energy is short.
     fn command_air_factories(&mut self, world: &SimWorld, forces: &Forces, commands: &mut Vec<SimCommand>) {
-        let economy = world.economies[self.team.index()];
+        let economy = world.economies[self.player.index()];
         let mass_income = self.planned_income((economy.mass_income * 10).to_num::<i64>());
         let energy_income = self.planned_income((economy.energy_income * 10).to_num::<i64>());
         let energy_is_low = economy.energy < economy.energy_capacity / 2;
@@ -1776,7 +1814,7 @@ impl AiBrain {
 
     /// Extractors near home upgrade first, a few at a time as income grows, unless energy is short.
     fn command_upgrades(&mut self, world: &SimWorld, forces: &Forces, commands: &mut Vec<SimCommand>) {
-        let economy = world.economies[self.team.index()];
+        let economy = world.economies[self.player.index()];
         let mass_income = self.planned_income((economy.mass_income * 10).to_num::<i64>());
         // Upgrades pay for themselves, so they go ahead while factories spend all the mass, but
         // not into a stall, which would slow everything.
@@ -1848,7 +1886,7 @@ impl AiBrain {
         if !idle || given_work {
             return;
         }
-        let economy = &world.economies[self.team.index()];
+        let economy = &world.economies[self.player.index()];
         let mass_income = self.planned_income((economy.mass_income * 10).to_num::<i64>());
         let energy_is_low = economy.energy < economy.energy_capacity * 2 / 5 && economy.energy_demand > economy.energy_income;
         if mass_income < COMMANDER_T2_SUITE_INCOME || economy.satisfaction < Res::ONE * 9 / 10 || energy_is_low || forces.energy_crisis {
@@ -1978,7 +2016,7 @@ impl AiBrain {
     fn command_army(&mut self, world: &SimWorld, forces: &Forces, sightings: &[Sighting], commands: &mut Vec<SimCommand>) {
         let sudden_death = world.current_tick >= SUDDEN_DEATH_TICKS.max(self.skill.commander_push_ticks);
         if sudden_death && world.current_tick.is_multiple_of(SUDDEN_DEATH_REAIM_TICKS) {
-            let goal = world.commanders[self.team.enemy().index()].and_then(|id| world.unit_position(id)).map_or(self.enemy_home, |at| at.xy());
+            let goal = self.enemy_commander(world).and_then(|id| world.unit_position(id)).map_or(self.enemy_home, |at| at.xy());
             let mut going = forces.attacking.clone();
             let commander_attacking = forces.commander.and_then(|id| world.unit_entity(id)).is_some_and(|entity| world.ecs.get::<&Order>(entity).is_ok_and(|order| order.kind == OrderKind::AttackMove));
             if commander_attacking && world.terrain.height_at(goal) >= world.terrain.water_level() {
@@ -1991,13 +2029,14 @@ impl AiBrain {
         if forces.idle_combat.is_empty() {
             return;
         }
-        // Enemies near home come first, whatever the size of the army.
+        // Enemies near home, or near an ally's, come first, whatever the size of the army.
         let defend = fp_int(DEFEND_RADIUS_UNITS);
+        let guarded = |at: &Vec2Fp| std::iter::once(&self.home).chain(&self.allies).map(|home| at.distance_squared(home)).min().expect("home is guarded");
         // The land army cannot catch aircraft, which are the anti-air's and the fighters' job.
         let threat = sightings
             .iter()
-            .filter(|enemy| !enemy.is_air && !enemy.is_submerged && enemy.position.distance_squared(&self.home) <= wide_mul(defend, defend))
-            .min_by_key(|enemy| (enemy.position.distance_squared(&self.home), enemy.id));
+            .filter(|enemy| !enemy.is_air && !enemy.is_submerged && guarded(&enemy.position) <= wide_mul(defend, defend))
+            .min_by_key(|enemy| (guarded(&enemy.position), enemy.id));
         if let Some(enemy) = threat {
             commands.push(SimCommand::AttackMove { units: forces.idle_combat.clone(), goal: enemy.position });
             return;
@@ -2030,7 +2069,7 @@ impl AiBrain {
             // else for the enemy's start, two commanders that had each lost their base kept
             // passing each other under the sea, one going home to rebuild and the other
             // hunting it, while the armies marched back and forth around the passes.
-            let enemy_commander = world.commanders[self.team.enemy().index()];
+            let enemy_commander = self.enemy_commander(world);
             let goal = enemy_commander.and_then(|id| world.unit_position(id)).map_or(self.enemy_home, |at| at.xy());
             let mut everyone = forces.idle_combat.clone();
             if !commander_enhancing(world, forces) && world.terrain.height_at(goal) >= world.terrain.water_level() {
@@ -2044,7 +2083,7 @@ impl AiBrain {
             return;
         }
         // Send a wave at what can be seen, then the enemy's base, then search their deposits.
-        let commander = world.commanders[self.team.enemy().index()];
+        let commander = self.enemy_commander(world);
         // Nothing under the water, which the army cannot hit: two commanders that followed
         // their waves onto the seabed once stalked each other there until the time ran out.
         let reachable = |enemy: &&Sighting| !enemy.is_air && !enemy.is_submerged;
@@ -2145,7 +2184,7 @@ impl AiBrain {
         let Ok(weapon) = world.ecs.get::<&crate::sim::components::DischargeWeapon>(entity).map(|weapon| *weapon) else {
             return;
         };
-        let economy = &world.economies[self.team.index()];
+        let economy = &world.economies[self.player.index()];
         if weapon.ticks_until_ready > 0 || economy.energy < weapon.def.energy_required {
             return;
         }
@@ -2158,7 +2197,7 @@ impl AiBrain {
         let Some(reach) = world.ecs.get::<&Combat>(entity).ok().map(|combat| combat.range) else {
             return;
         };
-        let enemy_commander = world.commanders[self.team.enemy().index()];
+        let enemy_commander = self.enemy_commander(world);
         let worth = |id: SimId| {
             world.unit_entity(id).and_then(|entity| world.ecs.get::<&Blueprinted>(entity).ok().map(|unit| world.blueprints.get(unit.0).mass)).unwrap_or(Res::ZERO)
         };
@@ -2275,9 +2314,13 @@ pub type CommandLog = Vec<Vec<SimCommand>>;
 
 /// Advances an AI-vs-AI world one tick and returns the commands issued. The single code
 /// path behind matches, the windowed test mode, and headless runs.
-pub fn advance_ai_vs_ai(world: &mut SimWorld, brains: &mut [AiBrain; 2]) -> Vec<SimCommand> {
-    let mut commands = brains[0].think(world);
-    commands.extend(brains[1].think(world));
+/// One tick of a match every player of which is an AI: each decides from the same world, in
+/// order, and the tick plays all their orders.
+pub fn advance_ai_vs_ai(world: &mut SimWorld, brains: &mut [AiBrain]) -> Vec<SimCommand> {
+    let mut commands = Vec::new();
+    for brain in brains.iter_mut() {
+        commands.extend(brain.think(world));
+    }
     world.advance_tick(&commands);
     commands
 }
@@ -2322,6 +2365,41 @@ pub fn play_match_with(map: &MapSource, seed: u64, max_ticks: u32, strategies: [
     record.result = world.match_result;
     record.checksums.push(world.compute_checksum());
     record
+}
+
+/// A team match, `per_team` AI players a side, all at Normal and Balanced, as the soak plays it.
+/// None if the map has no starts for that many.
+pub fn play_team_match(map: &MapSource, seed: u64, per_team: usize, max_ticks: u32, mut observe: impl FnMut(&SimWorld)) -> Option<MatchRecord> {
+    let mut world = map.scenario_teams(seed, per_team)?.world;
+    let mut brains: Vec<AiBrain> = (0..world.players.len()).map(|player| AiBrain::for_player(&world, PlayerId(player as u8), seed, Difficulty::Normal, Strategy::balanced())).collect();
+    let mut record = MatchRecord { seed, ticks: 0, result: None, checksums: Vec::new(), log: Vec::new(), units_built_peak: 0 };
+    while world.current_tick < max_ticks && world.match_result.is_none() {
+        let commands = advance_ai_vs_ai(&mut world, &mut brains);
+        record.log.push(commands);
+        record.units_built_peak = record.units_built_peak.max(world.units.len());
+        if world.current_tick.is_multiple_of(CHECKSUM_INTERVAL) {
+            record.checksums.push(world.compute_checksum());
+        }
+        observe(&world);
+    }
+    record.ticks = world.current_tick;
+    record.result = world.match_result;
+    record.checksums.push(world.compute_checksum());
+    Some(record)
+}
+
+/// Replays a recorded team match with no AI and returns its checksums.
+pub fn replay_team_match(map: &MapSource, seed: u64, per_team: usize, log: &CommandLog) -> Option<Vec<u64>> {
+    let mut world = map.scenario_teams(seed, per_team)?.world;
+    let mut checksums = Vec::new();
+    for commands in log {
+        world.advance_tick(commands);
+        if world.current_tick.is_multiple_of(CHECKSUM_INTERVAL) {
+            checksums.push(world.compute_checksum());
+        }
+    }
+    checksums.push(world.compute_checksum());
+    Some(checksums)
 }
 
 /// Replays a recorded match with no AI and returns its checksums, which must match the original's.

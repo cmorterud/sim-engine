@@ -274,7 +274,7 @@ fn run(
 
 /// Advances one tick from the command source, with the player's commands since the last tick.
 /// Everything that reaches the simulation goes through here.
-fn step(world: &mut SimWorld, source: CommandSource, opening: &[SimCommand], commands: Vec<SimCommand>, brains: &mut [AiBrain; 2]) {
+fn step(world: &mut SimWorld, source: CommandSource, opening: &[SimCommand], commands: Vec<SimCommand>, brains: &mut [AiBrain]) {
     match source {
         CommandSource::Player => {
             let mut pending = if world.current_tick == 0 { opening.to_vec() } else { Vec::new() };
@@ -284,7 +284,10 @@ fn step(world: &mut SimWorld, source: CommandSource, opening: &[SimCommand], com
         CommandSource::Script { seed, .. } => advance_scripted(world, opening, seed),
         CommandSource::PlayerVsAi { .. } => {
             let mut pending = commands;
-            pending.extend(brains[1].think(world));
+            // The player is player 0; every other player is an AI, allies and enemies alike.
+            for brain in brains.iter_mut().skip(1) {
+                pending.extend(brain.think(world));
+            }
             world.advance_tick(&pending);
         }
         CommandSource::AiVsAi { .. } => {
@@ -294,13 +297,13 @@ fn step(world: &mut SimWorld, source: CommandSource, opening: &[SimCommand], com
 }
 
 /// The two AI opponents, for sources that have them.
-fn brains_for(world: &SimWorld, source: CommandSource) -> [AiBrain; 2] {
+fn brains_for(world: &SimWorld, source: CommandSource) -> Vec<AiBrain> {
     let (seed, difficulty, strategy) = match source {
         CommandSource::PlayerVsAi { seed, difficulty, strategy } => (seed, difficulty, strategy),
         CommandSource::AiVsAi { seed, .. } => (seed, Difficulty::Normal, Strategy::balanced()),
         CommandSource::Player | CommandSource::Script { .. } => (0, Difficulty::Normal, Strategy::balanced()),
     };
-    [Team::Blue, Team::Red].map(|team| AiBrain::with_plan(team, seed, world.starts, difficulty, strategy))
+    (0..world.players.len()).map(|player| AiBrain::for_player(world, crate::sim::components::PlayerId(player as u8), seed, difficulty, strategy)).collect()
 }
 
 /// Whether a source with a set length has run its course.
@@ -323,7 +326,7 @@ struct Inline {
     world: SimWorld,
     source: CommandSource,
     opening: Vec<SimCommand>,
-    brains: [AiBrain; 2],
+    brains: Vec<AiBrain>,
     viewer: Option<Team>,
     speed: u32,
     linger: bool,

@@ -924,6 +924,11 @@ impl SimWorld {
         self.player_starts = vec![Vec2Fp::ZERO; teams.len()];
     }
 
+    /// Where a player started: their own start in a team match, or their team's in a 1v1.
+    pub fn start_of(&self, player: PlayerId) -> Vec2Fp {
+        self.player_starts.get(player.index()).copied().filter(|&at| at != Vec2Fp::ZERO).unwrap_or(self.starts[self.players[player.index()].index()])
+    }
+
     /// A team's first player, who owns its units unless a player is named.
     pub fn first_player(&self, team: Team) -> PlayerId {
         PlayerId(self.players.iter().position(|&of| of == team).expect("both teams have players") as u8)
