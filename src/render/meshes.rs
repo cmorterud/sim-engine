@@ -437,6 +437,7 @@ impl Shape {
             Self::Radar | Self::RadarT2 => Some(0.25),
             Self::AirFactoryT3 => Some(0.3),
             Self::LandScout => Some(0.6),
+            Self::FlakTurret => Some(0.5),
             // The extractor's pump nods as it works.
             Self::Extractor => Some(0.35),
             _ => None,
@@ -1316,16 +1317,19 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         // A team-colored turret with a sloped front, a mantlet, a long gun with a muzzle brake,
         // and a hatch.
         Shape::Tank => {
-            mesh.prism(&[[-0.2, -0.28], [0.2, -0.28], [0.25, -0.05], [0.14, 0.12], [-0.14, 0.12], [-0.25, -0.05]], [-0.1, 0.12], [1.0, 0.82]);
+            // A rounded cast turret in team colors: round from above, where the heavy tank's is
+            // a long wedge.
+            mesh.frustum([0.0, -0.06], [-0.1, 0.1], [0.22, 0.16], 12);
+            mesh.frustum([0.0, -0.06], [0.1, 0.13], [0.16, 0.1], 12);
             mesh.paint(Material::Metal);
-            mesh.block([-0.08, 0.1, -0.04], [0.08, 0.16, 0.08]);
-            mesh.moving(motion::RECOIL, [0.0, 0.14, 0.02], |mesh| {
-                mesh.body(0.0, &[[0.14, 0.036, 0.036, 0.02], [0.42, 0.03, 0.03, 0.02]], 6);
-                mesh.body(0.0, &[[0.42, 0.048, 0.048, 0.02], [0.49, 0.048, 0.048, 0.02]], 6);
+            mesh.block([-0.07, 0.13, -0.04], [0.07, 0.19, 0.07]);
+            mesh.moving(motion::RECOIL, [0.0, 0.16, 0.015], |mesh| {
+                mesh.body(0.0, &[[0.17, 0.034, 0.034, 0.015], [0.43, 0.03, 0.03, 0.015]], 6);
+                mesh.body(0.0, &[[0.43, 0.046, 0.046, 0.015], [0.49, 0.046, 0.046, 0.015]], 6);
             });
-            mesh.flash([0.0, 0.47, 0.02], 0.06);
+            mesh.flash([0.0, 0.47, 0.015], 0.06);
             mesh.paint(Material::Hull);
-            mesh.frustum([0.08, -0.13], [0.12, 0.17], [0.06, 0.055], 8);
+            mesh.frustum([0.08, -0.15], [0.13, 0.18], [0.05, 0.045], 8);
         }
         Shape::HeavyTankHull => {
             mesh.paint(Material::Metal);
@@ -1355,8 +1359,9 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             }
         }
         Shape::HeavyTank => {
+            // A wide wedge, sharp in front and long behind, over the gun's mantlet.
             mesh.paint(Material::Hull);
-            mesh.prism(&[[-0.26, -0.3], [0.26, -0.3], [0.3, -0.04], [0.18, 0.16], [-0.18, 0.16], [-0.3, -0.04]], [-0.06, 0.16], [1.0, 0.85]);
+            mesh.prism(&[[-0.24, -0.42], [0.24, -0.42], [0.3, -0.12], [0.3, 0.02], [0.14, 0.18], [-0.14, 0.18], [-0.3, 0.02], [-0.3, -0.12]], [-0.06, 0.16], [1.0, 0.85]);
             mesh.paint(Material::Metal);
             mesh.block([-0.1, 0.13, -0.02], [0.1, 0.2, 0.11]);
             mesh.moving(motion::RECOIL, [0.0, 0.18, 0.045], |mesh| {
@@ -1364,13 +1369,13 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.body(0.0, &[[0.43, 0.058, 0.058, 0.045], [0.5, 0.058, 0.058, 0.045]], 6);
             });
             mesh.flash([0.0, 0.46, 0.045], 0.07);
-            // A commander's cupola, a vision slit, and a stowage rack on the bustle.
+            // A commander's cupola, a vision slit, and a stowage rack at the end of the bustle.
             mesh.paint(Material::Hull);
             mesh.frustum([0.1, -0.16], [0.14, 0.22], [0.07, 0.06], 8);
             mesh.paint(Material::Glass);
             mesh.block([-0.16, 0.12, 0.07], [-0.06, 0.135, 0.1]);
             mesh.paint(Material::Panel);
-            mesh.block([-0.22, -0.38, -0.02], [0.22, -0.29, 0.1]);
+            mesh.block([-0.2, -0.47, -0.02], [0.2, -0.41, 0.1]);
         }
         Shape::HoverHull => {
             // A rounded oval: a rectangle with deep round corners, the only vehicle without
@@ -1496,6 +1501,12 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.beam([0.0, -0.1, 0.0], [0.0, 0.14, 0.07], 0.022, 0.022);
             });
             mesh.flash([0.0, 0.47, 0.14], 0.06);
+            // A wide gun shield across the barrel, leaning back.
+            mesh.paint(Material::Hull);
+            mesh.cuboid(
+                [Vec3::new(-0.25, 0.02, -0.2), Vec3::new(0.25, 0.02, -0.2), Vec3::new(0.25, 0.06, -0.2), Vec3::new(-0.25, 0.06, -0.2)],
+                [Vec3::new(-0.22, -0.01, 0.06), Vec3::new(0.22, -0.01, 0.06), Vec3::new(0.22, 0.03, 0.06), Vec3::new(-0.22, 0.03, 0.06)],
+            );
         }
         // An open-air assembly bay: a floor open at both ends, east and west, between long walls,
         // under a gantry crane, so that what it builds can be seen and drives out either end.
@@ -3122,6 +3133,13 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             for y in [-0.4_f32, -0.33] {
                 mesh.block([-0.12, y - 0.02, -0.16], [0.12, y + 0.02, -0.15]);
             }
+            // Stabilizer spades splayed out behind, dug in when it fires.
+            for x in [-1.0_f32, 1.0] {
+                mesh.paint(Material::Metal);
+                mesh.beam([x * 0.14, -0.42, -0.3], [x * 0.3, -0.45, -0.45], 0.03, 0.02);
+                mesh.paint(Material::Hull);
+                mesh.bevel([x * 0.3 - 0.07, -0.49, -0.5], [x * 0.3 + 0.07, -0.44, -0.42], 0.01);
+            }
         }
         // An engineer's hull, longer, with a gun turret over its right track: it fights too.
         Shape::CombatEngineerHull => {
@@ -3143,6 +3161,21 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Metal);
             mesh.moving(motion::RECOIL, [0.3, 0.18, -0.22], |mesh| mesh.beam([0.3, 0.18, -0.22], [0.3, 0.48, -0.22], 0.022, 0.022));
             mesh.flash([0.3, 0.47, -0.22], 0.04);
+            // A dozer blade across the front, wider than the tracks, on push arms.
+            mesh.paint(Material::Metal);
+            for x in [-0.3_f32, 0.3] {
+                mesh.beam([x, 0.2, -0.36], [x, 0.41, -0.42], 0.025, 0.025);
+            }
+            mesh.paint(Material::Hull);
+            mesh.cuboid(
+                [Vec3::new(-0.46, 0.4, -0.5), Vec3::new(0.46, 0.4, -0.5), Vec3::new(0.46, 0.46, -0.5), Vec3::new(-0.46, 0.46, -0.5)],
+                [Vec3::new(-0.46, 0.43, -0.31), Vec3::new(0.46, 0.43, -0.31), Vec3::new(0.46, 0.49, -0.31), Vec3::new(-0.46, 0.49, -0.31)],
+            );
+            mesh.paint(Material::Trim);
+            mesh.cuboid(
+                [Vec3::new(-0.46, 0.43, -0.31), Vec3::new(0.46, 0.43, -0.31), Vec3::new(0.46, 0.49, -0.31), Vec3::new(-0.46, 0.49, -0.31)],
+                [Vec3::new(-0.46, 0.432, -0.29), Vec3::new(0.46, 0.432, -0.29), Vec3::new(0.46, 0.492, -0.29), Vec3::new(-0.46, 0.492, -0.29)],
+            );
         }
         // A team-colored twin anti-aircraft gun on a mount, for a truck's bed.
         Shape::TruckAntiAir => {
@@ -3162,6 +3195,16 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.moving(motion::RECOIL, [x, 0.04, 0.0], |mesh| mesh.beam([x, 0.04, 0.0], [x, 0.46, 0.2], 0.018, 0.018));
             }
             mesh.flash([0.0, 0.46, 0.2], 0.07);
+            // A radar panel on a mast behind the guns, turning.
+            mesh.paint(Material::Metal);
+            mesh.frustum([0.0, -0.2], [0.08, 0.26], [0.016, 0.012], 6);
+            mesh.paint(Material::Trim);
+            mesh.moving(motion::SPIN, [0.0, -0.2, 0.0], |mesh| {
+                mesh.cuboid(
+                    [Vec3::new(-0.15, -0.23, 0.24), Vec3::new(0.15, -0.23, 0.24), Vec3::new(0.15, -0.2, 0.24), Vec3::new(-0.15, -0.2, 0.24)],
+                    [Vec3::new(-0.15, -0.19, 0.37), Vec3::new(0.15, -0.19, 0.37), Vec3::new(0.15, -0.16, 0.37), Vec3::new(-0.15, -0.16, 0.37)],
+                );
+            });
         }
         Shape::NavalTurret => mesh.turret([0.0, 0.0], [0.0, 0.09], 0.095, 2, 0.06, false),
         Shape::Beam => {
