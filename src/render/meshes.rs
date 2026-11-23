@@ -249,8 +249,8 @@ pub enum Shape {
     /// The spy plane: a long slender jet with a swept delta wing, two engine nacelles, and
     /// canted fins.
     SpyPlane,
-    /// The field rig's upper body: the commander's chest, with a tool arm either side in place of
-    /// its gun, and a mast with a dish over its backpack.
+    /// The field rig's upper body: the commander's chest and gun, with a tool arm on the left
+    /// in place of its fist, and a mast with a dish over its backpack.
     FieldRig,
 }
 
@@ -2306,6 +2306,8 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.block([-0.1, 0.1, -0.13], [0.1, 0.14, -0.115]);
             mesh.block([-0.09, -0.46, -0.38], [0.09, -0.41, -0.365]);
             mesh.block([-0.008, -0.47, -0.33], [0.008, -0.39, -0.21]);
+            // The deck gun, forward of the sail.
+            mesh.turret([0.0, 0.29], [-0.25, -0.2], 0.035, 1, 0.07, false);
         }
         Shape::MissileSubmarine => {
             let outline = [[-0.03, -0.5], [0.03, -0.5], [0.076, -0.38], [0.084, 0.28], [0.042, 0.46], [-0.042, 0.46], [-0.084, 0.28], [-0.076, -0.38]];
@@ -2777,16 +2779,23 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Metal);
             mesh.frustum([0.0, -0.24], [0.26, 0.42], [0.02, 0.016], 6);
             mesh.frustum([0.0, -0.24], [0.4, 0.46], [0.1, 0.13], 10);
-            // Shoulders, and a tool arm reaching forward from each.
+            mesh.paint(Material::Hull);
             for x in [-0.34_f32, 0.34] {
-                mesh.paint(Material::Hull);
                 mesh.bevel([x - 0.07, -0.1, 0.14], [x + 0.07, 0.1, 0.28], 0.05);
-                mesh.beam([x, 0.0, 0.16], [x * 1.1, 0.18, 0.06], 0.05, 0.05);
-                mesh.paint(Material::Metal);
-                mesh.beam([x * 1.1, 0.18, 0.06], [x, 0.4, 0.1], 0.04, 0.04);
-                mesh.paint(Material::Glow);
-                mesh.moving(motion::PULSE, [x, 0.42, 0.1], |mesh| mesh.frustum([x, 0.42], [0.04, 0.14], [0.05, 0.03], 6));
             }
+            // A tool arm on the left, reaching forward.
+            mesh.beam([-0.34, 0.0, 0.16], [-0.374, 0.18, 0.06], 0.05, 0.05);
+            mesh.paint(Material::Metal);
+            mesh.beam([-0.374, 0.18, 0.06], [-0.34, 0.4, 0.1], 0.04, 0.04);
+            mesh.paint(Material::Glow);
+            mesh.moving(motion::PULSE, [-0.34, 0.42, 0.1], |mesh| mesh.frustum([-0.34, 0.42], [0.04, 0.14], [0.05, 0.03], 6));
+            // The gun on the right, as the commander's.
+            mesh.paint(Material::Hull);
+            mesh.beam([0.34, 0.0, 0.16], [0.34, 0.08, 0.02], 0.06, 0.06);
+            mesh.paint(Material::Metal);
+            mesh.bevel([0.27, 0.0, -0.04], [0.41, 0.28, 0.1], 0.03);
+            mesh.moving(motion::RECOIL, [0.34, 0.0, 0.03], |mesh| mesh.body(0.34, &[[0.26, 0.04, 0.04, 0.03], [0.5, 0.032, 0.032, 0.03]], 6));
+            mesh.flash([0.34, 0.47, 0.03], 0.06);
             mesh.paint(Material::Hull);
             mesh.bevel([-0.1, -0.08, 0.28], [0.1, 0.1, 0.44], 0.04);
             mesh.paint(Material::Glow);

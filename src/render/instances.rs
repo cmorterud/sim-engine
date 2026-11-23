@@ -121,9 +121,10 @@ fn armor(team: [f32; 3], tint: Option<[f32; 3]>) -> [f32; 3] {
 /// tiers are heavier and darker, so that a tier reads on the model as the dots read on its icon.
 const TIER_SHADE: [f32; 4] = [1.0, 1.0, 0.88, 0.76];
 
-/// The color of a unit's body: its armor, darkened by its tier.
+/// The color of a unit's body: its armor, darkened by its tier unless it is one of those that
+/// keep one color whatever their tier (`UnitLook::tier_shaded`).
 fn hull_of(team: [f32; 3], look: &UnitLook) -> [f32; 3] {
-    let shade = TIER_SHADE[usize::from(look.tier.min(3))];
+    let shade = if look.tier_shaded { TIER_SHADE[usize::from(look.tier.min(3))] } else { 1.0 };
     armor(team, look.tint).map(|channel| channel * shade)
 }
 
@@ -331,6 +332,9 @@ pub struct UnitLook {
     pub length: f32,
     /// Its tech level, which darkens its armor. Zero from `unit_look`; `unit_looks` sets it.
     pub tier: u8,
+    /// Whether its armor darkens with its tech level (`TIER_SHADE`): every unit's but the
+    /// engineers', which tell their tiers apart by shape and are all one work yellow.
+    pub tier_shaded: bool,
     /// Whether it stands on a concrete foundation: structures on land, but walls. False from
     /// `unit_look`; `unit_looks` sets it.
     pub apron: bool,
@@ -350,9 +354,12 @@ pub struct TurretMount {
     pub aft: bool,
 }
 
+/// The engineers' work yellow, the same at every tier, which their shapes tell apart.
+const ENGINEER_YELLOW: [f32; 3] = [1.00, 0.70, 0.12];
+
 /// Maps a blueprint to its look. Unknown keys fall back to a plain cube.
 pub fn unit_look(key: &str) -> UnitLook {
-    let look = |shape, tint, height_share| UnitLook { shape, tint, height_share, base: None, size: 0.0, length: 0.0, tier: 0, apron: false, turrets: [None; 3] };
+    let look = |shape, tint, height_share| UnitLook { shape, tint, height_share, base: None, size: 0.0, length: 0.0, tier: 0, tier_shaded: true, apron: false, turrets: [None; 3] };
     let turret = |weapon, at, aft| Some(TurretMount { weapon, at, aft });
     match key {
         "command_rig" => UnitLook { base: Some(Shape::CommanderLegs), ..look(Shape::Commander, Some([1.00, 1.00, 1.00]), 1.0) },
@@ -361,10 +368,10 @@ pub fn unit_look(key: &str) -> UnitLook {
         "geothermal_plant" => look(Shape::GeothermalPlant, Some([0.85, 0.60, 0.25]), 0.7),
         "mass_fabricator" => look(Shape::Fabricator, Some([0.40, 0.95, 0.85]), 1.0),
         "mass_fabricator_t3" => look(Shape::Fabricator, Some([0.70, 0.45, 1.00]), 0.8),
-        "t2_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::EngineerT2, Some([1.00, 0.56, 0.10]), 1.0) },
-        "t3_engineer" => UnitLook { base: Some(Shape::EngineerHullT3), ..look(Shape::EngineerT3, Some([0.98, 0.44, 0.10]), 1.0) },
+        "t2_engineer" => UnitLook { base: Some(Shape::EngineerHull), tier_shaded: false, ..look(Shape::EngineerT2, Some(ENGINEER_YELLOW), 1.0) },
+        "t3_engineer" => UnitLook { base: Some(Shape::EngineerHullT3), tier_shaded: false, ..look(Shape::EngineerT3, Some(ENGINEER_YELLOW), 1.0) },
         "land_factory_t3" => look(Shape::FactoryT3, Some([0.10, 0.10, 0.20]), 0.85),
-        "t1_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some([1.00, 0.70, 0.12]), 1.0) },
+        "t1_engineer" => UnitLook { base: Some(Shape::EngineerHull), tier_shaded: false, ..look(Shape::Engineer, Some(ENGINEER_YELLOW), 1.0) },
         "t1_light_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::Bot, Some([0.78, 0.70, 0.50]), 1.0) },
         "t1_land_scout" => UnitLook { length: 14.0, ..look(Shape::LandScout, Some([0.75, 0.95, 1.00]), 1.0) },
         "t1_medium_tank" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::Tank, Some([0.80, 0.85, 0.70]), 1.0) },
@@ -1252,6 +1259,47 @@ mod tests {
         }
         for &(a, b) in STILL_SHARING_A_MODEL {
             assert!(sharing.iter().any(|&pair| pair == (a, b) || pair == (b, a)), "{a} and {b} no longer share a model: take them off the list");
+        }
+    }
+
+    /// Every unit on the ground or the water that fires shells at ground targets shows a gun, a
+    /// part that kicks back or flashes as it fires, wherever it is drawn: on its body, its base,
+    /// or a turret of its own. A gun is how an armed unit reads as armed (2026-11-23, when the
+    /// field rig was briefly drawn without its gun). Aircraft guns are too small to draw, and
+    /// torpedoes and anti-air missiles are not guns.
+    #[test]
+    fn every_unit_that_shells_the_ground_shows_a_gun() {
+        use crate::sim::blueprints::{Targets, WeaponKind};
+        use super::super::meshes::motion;
+        let db = BlueprintDb::standard();
+        let set = super::super::meshes::MeshSet::build();
+        let fires = |shape: Shape| {
+            let range = set.ranges[shape as usize].clone();
+            set.indices[range.start as usize..range.end as usize].iter().any(|&index| set.vertices[index as usize].material & (motion::RECOIL | motion::FLASH) != 0)
+        };
+        let mut unarmed = Vec::new();
+        for unit in db.iter().filter(|unit| unit.class != crate::sim::blueprints::UnitClass::Ammo && !unit.is_air()) {
+            if !unit.weapon.iter().chain(&unit.extra_weapons).any(|weapon| weapon.kind == WeaponKind::Shell && matches!(weapon.targets, Targets::Ground | Targets::Both)) {
+                continue;
+            }
+            let look = unit_look(&unit.key);
+            let shapes = look.base.into_iter().chain([look.shape]).chain(look.turrets.iter().flatten().map(|_| Shape::NavalTurret));
+            if !shapes.into_iter().any(fires) {
+                unarmed.push(unit.key.as_str());
+            }
+        }
+        assert!(unarmed.is_empty(), "these shell the ground but show no gun: {unarmed:?}");
+    }
+
+    /// The engineers are one work yellow at every tier, for either team: their tiers show in
+    /// their shapes, not their color.
+    #[test]
+    fn engineers_are_one_color_whatever_their_tier() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        for team in [BLUE, RED] {
+            let hulls: Vec<[f32; 3]> = ["t1_engineer", "t2_engineer", "t3_engineer"].iter().map(|key| hull_of(team, &looks[usize::from(db.id(key).0)])).collect();
+            assert!(hulls.iter().all(|hull| *hull == hulls[0]), "the engineers' hulls differ: {hulls:?}");
         }
     }
 
