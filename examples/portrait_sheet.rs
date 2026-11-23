@@ -134,6 +134,14 @@ fn cut_out(with: &[u8], without: &[u8], width: usize, height: usize) -> (Vec<[u8
     (cut, extent)
 }
 
+/// A unit cut out of its frame (`cut_out`), kept until every unit is drawn, so that all can be
+/// framed alike.
+struct CutOut {
+    pixels: Vec<[u8; 4]>,
+    extent: Option<[usize; 4]>,
+    width: usize,
+}
+
 /// The side of the square a unit of `extent` is framed in, with a margin, in frame pixels.
 fn framed_side(extent: [usize; 4]) -> f32 {
     let [left, top, right, bottom] = extent;
@@ -261,7 +269,7 @@ fn main() {
     let mut keys: Vec<String> = Vec::new();
     let mut tiles: Vec<Vec<u8>> = Vec::new();
     let mut kinds: Vec<&'static str> = Vec::new();
-    let mut cut_outs: Vec<(Vec<[u8; 4]>, Option<[usize; 4]>, usize)> = Vec::new();
+    let mut cut_outs: Vec<CutOut> = Vec::new();
     for unit in drawn {
         let Some(view) = snapshot.units.iter().find(|view| view.blueprint == unit.id.0).cloned() else {
             eprintln!("{} could not be placed", unit.key);
@@ -295,7 +303,7 @@ fn main() {
         let (_, _, without) = frame(&[]);
         if uniform {
             let (cut, extent) = cut_out(&with, &without, width as usize, height as usize);
-            cut_outs.push((cut, extent, width as usize));
+            cut_outs.push(CutOut { pixels: cut, extent, width: width as usize });
         } else {
             tiles.push(portrait(&with, &without, width as usize, height as usize, tile_side));
         }
@@ -314,8 +322,8 @@ fn main() {
 
     // Seen from one distance, every unit is framed alike too, by the largest of them.
     if uniform {
-        let side = cut_outs.iter().filter_map(|(_, extent, _)| extent.map(framed_side)).fold(8.0, f32::max);
-        tiles = cut_outs.iter().map(|(cut, extent, width)| extent.map_or_else(|| vec![0; tile_side * tile_side * 4], |extent| tile_from(cut, *width, extent, side, tile_side))).collect();
+        let side = cut_outs.iter().filter_map(|cut| cut.extent.map(framed_side)).fold(8.0, f32::max);
+        tiles = cut_outs.iter().map(|cut| cut.extent.map_or_else(|| vec![0; tile_side * tile_side * 4], |extent| tile_from(&cut.pixels, cut.width, extent, side, tile_side))).collect();
     }
     let rows = tiles.len().div_ceil(COLUMNS);
     let (sheet_width, sheet_height) = (COLUMNS * tile_side, rows * tile_side);
