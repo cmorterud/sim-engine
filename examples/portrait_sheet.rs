@@ -1,10 +1,15 @@
 //! Renders a portrait of every unit and structure, for the interface's buttons, and packs them
 //! into `assets/portraits.png`, with their keys, tile by tile, in `assets/portraits.txt`.
 //!
-//! `cargo run --release --example portrait_sheet [-- --review <folder>] [--team red|blue] [--out <sheet.png>]`
+//! `cargo run --release --example portrait_sheet [-- --review <folder>] [--team red|blue] [--out <sheet.png>]
+//!  [--only <key>,<key>...] [--uniform] [--tile <pixels>]`
 //!
-//! With `--out`, the sheet is written there and the game's own portraits are left alone, which
-//! is how to compare looks, or see the other team's colors, without changing the game.
+//! With `--out`, the sheet is written there, with its index beside it (`<sheet>.txt`), and the
+//! game's own portraits are left alone, which is how to compare looks, or see the other team's
+//! colors, without changing the game. `--only` draws just those units, in that order. Each
+//! portrait is framed to fill its tile, which hides how big units are beside one another; with
+//! `--uniform`, every unit is seen from the same distance, the largest's, and framed the same,
+//! so that their proportions can be judged. `--tile` sets a tile's side, 96 pixels by default.
 //!
 //! Run it again after changing a unit's model. Each unit is drawn alone, close up, from the
 //! interface's usual angle, then the same view is drawn without it: what differs is the unit,
@@ -84,7 +89,14 @@ fn matte(with: &[u8], without: &[u8]) -> [u8; 4] {
 }
 
 /// Cuts the unit out of a frame and shrinks it into a tile, centered, with a little room around.
-fn portrait(with: &[u8], without: &[u8], width: usize, height: usize) -> Vec<u8> {
+fn portrait(with: &[u8], without: &[u8], width: usize, height: usize, tile_side: usize) -> Vec<u8> {
+    let (cut, extent) = cut_out(with, without, width, height);
+    extent.map_or_else(|| vec![0; tile_side * tile_side * 4], |extent| tile_from(&cut, width, extent, framed_side(extent), tile_side))
+}
+
+/// The unit cut out of a frame drawn with it and without it, and its extent in the frame,
+/// `[left, top, right, bottom]`, if any of it shows.
+fn cut_out(with: &[u8], without: &[u8], width: usize, height: usize) -> (Vec<[u8; 4]>, Option<[usize; 4]>) {
     let mut cut: Vec<[u8; 4]> = with.as_chunks::<4>().0.iter().zip(without.as_chunks::<4>().0).map(|(a, b)| matte(a, b)).collect();
     // Water ripples a little differently around a hull, which leaves specks: drop whatever has
     // too few neighbors to be part of the unit.
@@ -118,16 +130,27 @@ fn portrait(with: &[u8], without: &[u8], width: usize, height: usize) -> Vec<u8>
             }
         }
     }
-    let mut tile = vec![0u8; TILE * TILE * 4];
-    if right < left {
-        return tile;
-    }
-    let side = ((right - left).max(bottom - top) as f32 * 1.12).max(8.0);
+    let extent = (right >= left).then_some([left, top, right, bottom]);
+    (cut, extent)
+}
+
+/// The side of the square a unit of `extent` is framed in, with a margin, in frame pixels.
+fn framed_side(extent: [usize; 4]) -> f32 {
+    let [left, top, right, bottom] = extent;
+    ((right - left).max(bottom - top) as f32 * 1.12).max(8.0)
+}
+
+/// A tile `tile_side` pixels square of a square `side` frame pixels across, centered on the
+/// middle of `extent` in a cut-out frame `width` pixels wide.
+fn tile_from(cut: &[[u8; 4]], width: usize, extent: [usize; 4], side: f32, tile_side: usize) -> Vec<u8> {
+    let height = cut.len() / width;
+    let [left, top, right, bottom] = extent;
+    let mut tile = vec![0u8; tile_side * tile_side * 4];
     let (middle_x, middle_y) = ((left + right) as f32 / 2.0, (top + bottom) as f32 / 2.0);
-    let step = side / TILE as f32;
+    let step = side / tile_side as f32;
     // Each tile pixel averages the frame pixels under it, weighting color by coverage.
-    for ty in 0..TILE {
-        for tx in 0..TILE {
+    for ty in 0..tile_side {
+        for tx in 0..tile_side {
             let (x0, y0) = (middle_x - side / 2.0 + tx as f32 * step, middle_y - side / 2.0 + ty as f32 * step);
             let mut sum = [0f32; 4];
             let mut count = 0f32;
@@ -147,7 +170,7 @@ fn portrait(with: &[u8], without: &[u8], width: usize, height: usize) -> Vec<u8>
                     sum[3] += alpha;
                 }
             }
-            let at = (ty * TILE + tx) * 4;
+            let at = (ty * tile_side + tx) * 4;
             if sum[3] > 0.0 {
                 for channel in 0..3 {
                     tile[at + channel] = (sum[channel] / sum[3]).round() as u8;
@@ -163,9 +186,14 @@ fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let option = |name: &str| arguments.iter().position(|argument| argument == name).and_then(|at| arguments.get(at + 1)).cloned();
     let team = if option("--team").as_deref() == Some("red") { Team::Red } else { Team::Blue };
+    let uniform = arguments.iter().any(|argument| argument == "--uniform");
+    let tile_side: usize = option("--tile").and_then(|value| value.parse().ok()).unwrap_or(TILE);
     let mut world = world();
     let blueprints = Arc::clone(&world.blueprints);
-    let drawn: Vec<_> = blueprints.iter().filter(|unit| unit.class != UnitClass::Ammo).collect();
+    let drawn: Vec<_> = match option("--only") {
+        Some(keys) => keys.split(',').map(|key| blueprints.get(blueprints.find(key).unwrap_or_else(|| panic!("no unit {key}")))).collect(),
+        None => blueprints.iter().filter(|unit| unit.class != UnitClass::Ammo).collect(),
+    };
     // Everyone apart, so that each can be drawn alone: land and air units in rows on land,
     // ships on the water, structures beyond.
     let (mut land_x, mut land_y, mut sea_x) = (300, 400, 300);
@@ -226,9 +254,14 @@ fn main() {
     let mut renderer = Renderer::new(Arc::clone(&window), &heights, None);
     renderer.set_water_level(0.0);
 
+    // How far the camera stands from each unit: from a big one further than from a small one, so
+    // that each fills its portrait, or with `--uniform`, from all as far as from the largest.
+    let stand_off = |radius: f64| radius * 6.0 + 30.0;
+    let farthest = snapshot.units.iter().map(|view| stand_off(f64::from(view.radius) / 4096.0)).fold(0.0, f64::max);
     let mut keys: Vec<String> = Vec::new();
     let mut tiles: Vec<Vec<u8>> = Vec::new();
     let mut kinds: Vec<&'static str> = Vec::new();
+    let mut cut_outs: Vec<(Vec<[u8; 4]>, Option<[usize; 4]>, usize)> = Vec::new();
     for unit in drawn {
         let Some(view) = snapshot.units.iter().find(|view| view.blueprint == unit.id.0).cloned() else {
             eprintln!("{} could not be placed", unit.key);
@@ -237,7 +270,7 @@ fn main() {
         let (x, y, z, radius) = (f64::from(view.x) / 4096.0, f64::from(view.y) / 4096.0, f64::from(view.z) / 4096.0, f64::from(view.radius) / 4096.0);
         let above = (z - ground_height(x, y)).max(0.0);
         let mut camera = Camera::new(f64::from(MAP), [f64::from(size.width), f64::from(size.height)]);
-        let altitude = above + radius * 6.0 + 30.0;
+        let altitude = above + if uniform { farthest } else { stand_off(radius) };
         camera.look_at(x, y, altitude);
         camera.update(0.0, &heights);
         // A ship is seen from lower down, more from the side, so that its profile shows.
@@ -260,7 +293,12 @@ fn main() {
         };
         let (width, height, with) = frame(std::slice::from_ref(&view));
         let (_, _, without) = frame(&[]);
-        tiles.push(portrait(&with, &without, width as usize, height as usize));
+        if uniform {
+            let (cut, extent) = cut_out(&with, &without, width as usize, height as usize);
+            cut_outs.push((cut, extent, width as usize));
+        } else {
+            tiles.push(portrait(&with, &without, width as usize, height as usize, tile_side));
+        }
         keys.push(unit.key.clone());
         kinds.push(if unit.is_structure() {
             "structures"
@@ -274,15 +312,20 @@ fn main() {
         println!("{}", unit.key);
     }
 
+    // Seen from one distance, every unit is framed alike too, by the largest of them.
+    if uniform {
+        let side = cut_outs.iter().filter_map(|(_, extent, _)| extent.map(framed_side)).fold(8.0, f32::max);
+        tiles = cut_outs.iter().map(|(cut, extent, width)| extent.map_or_else(|| vec![0; tile_side * tile_side * 4], |extent| tile_from(cut, *width, extent, side, tile_side))).collect();
+    }
     let rows = tiles.len().div_ceil(COLUMNS);
-    let (sheet_width, sheet_height) = (COLUMNS * TILE, rows * TILE);
+    let (sheet_width, sheet_height) = (COLUMNS * tile_side, rows * tile_side);
     let mut sheet = vec![0u8; sheet_width * sheet_height * 4];
     for (index, tile) in tiles.iter().enumerate() {
         let (column, row) = (index % COLUMNS, index / COLUMNS);
-        for y in 0..TILE {
-            let from = &tile[y * TILE * 4..(y + 1) * TILE * 4];
-            let at = ((row * TILE + y) * sheet_width + column * TILE) * 4;
-            sheet[at..at + TILE * 4].copy_from_slice(from);
+        for y in 0..tile_side {
+            let from = &tile[y * tile_side * 4..(y + 1) * tile_side * 4];
+            let at = ((row * tile_side + y) * sheet_width + column * tile_side) * 4;
+            sheet[at..at + tile_side * 4].copy_from_slice(from);
         }
     }
     let assets = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
@@ -293,10 +336,8 @@ fn main() {
     encoder.set_depth(png::BitDepth::Eight);
     encoder.set_compression(png::Compression::Best);
     encoder.write_header().expect("header writes").write_image_data(&sheet).expect("sheet writes");
-    let index = format!("{TILE} {COLUMNS}\n{}\n", keys.join("\n"));
-    if option("--out").is_none() {
-        std::fs::write(assets.join("portraits.txt"), index).expect("index writes");
-    }
+    let index = format!("{tile_side} {COLUMNS}\n{}\n", keys.join("\n"));
+    std::fs::write(if option("--out").is_some() { sheet_path.with_extension("txt") } else { assets.join("portraits.txt") }, index).expect("index writes");
     println!("{} portraits", keys.len());
     let mut args = std::env::args().skip(1);
     if args.next().as_deref() == Some("--review") {
@@ -305,7 +346,7 @@ fn main() {
         for kind in ["land", "air", "naval", "structures"] {
             let chosen: Vec<&Vec<u8>> = tiles.iter().zip(&kinds).filter(|(_, tile_kind)| **tile_kind == kind).map(|(tile, _)| tile).collect();
             let path = folder.join(format!("{kind}.png"));
-            write_review(&path, &chosen);
+            write_review(&path, &chosen, tile_side);
             println!("saved {}", path.display());
         }
     }
@@ -313,11 +354,11 @@ fn main() {
 
 /// Portraits of one kind of unit, twice their size on a dark ground in rows of eight, for
 /// comparing models before and after a change as the buttons would show them.
-fn write_review(path: &Path, tiles: &[&Vec<u8>]) {
+fn write_review(path: &Path, tiles: &[&Vec<u8>], tile_side: usize) {
     const PER_ROW: usize = 8;
     const SCALE: usize = 2;
     const GROUND: f32 = 34.0;
-    let side = TILE * SCALE;
+    let side = tile_side * SCALE;
     let rows = tiles.len().div_ceil(PER_ROW).max(1);
     let (width, height) = (PER_ROW * side, rows * side);
     let mut picture = vec![0u8; width * height * 4];
@@ -328,7 +369,7 @@ fn write_review(path: &Path, tiles: &[&Vec<u8>]) {
         let (left, top) = ((index % PER_ROW) * side, (index / PER_ROW) * side);
         for y in 0..side {
             for x in 0..side {
-                let from = ((y / SCALE) * TILE + x / SCALE) * 4;
+                let from = ((y / SCALE) * tile_side + x / SCALE) * 4;
                 let alpha = f32::from(tile[from + 3]) / 255.0;
                 let at = ((top + y) * width + left + x) * 4;
                 for channel in 0..3 {
