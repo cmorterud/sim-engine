@@ -717,7 +717,11 @@ pub fn passes(settings: &MapSettings) -> MapData {
         let center = Vec2Fp::new(draft.rng.range_fp(fp_int(300), fp_int(map / 2 - 200)), draft.rng.range_fp(fp_int(foot + 600), fp_int(map - 300)));
         layout.clump_four(&mut draft.rng, WreckKind::Tree, center, 16, 110, &away);
     }
-    let point = |(x, y): (i32, i32)| Vec2Fp::new(fp_int(x * TERRAIN_CELL_UNITS), fp_int(y * TERRAIN_CELL_UNITS));
+    // Starts stand in the middle of a cell, never on a line between cells: a unit on the line
+    // through the map's middle has two cells equally near the center, and took the same one for
+    // both sides, so the sides stopped being mirror images on the first tick, and Red won
+    // three matches in five.
+    let point = |(x, y): (i32, i32)| Vec2Fp::new(fp_int(x * TERRAIN_CELL_UNITS + TERRAIN_CELL_UNITS / 2), fp_int(y * TERRAIN_CELL_UNITS + TERRAIN_CELL_UNITS / 2));
     let full = fp_int(map);
     let mirror = |at: Vec2Fp| [at, Vec2Fp::new(full - at.x, at.y), Vec2Fp::new(at.x, full - at.y), Vec2Fp::new(full - at.x, full - at.y)];
     let duel_at = point(duel);

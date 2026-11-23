@@ -56,7 +56,8 @@ fn every_strategy_is_sound_data() {
     assert_eq!(picked.len(), all.iter().filter(|strategy| strategy.random).count(), "random reaches every strategy it may pick: {picked:?}");
 }
 
-/// When things first happened for Blue, by what they are, and its forces at 15 minutes.
+/// When things first happened for Blue, by what they are, and its forces at 15 minutes, or when
+/// the match ended, if sooner: Rush can win by then.
 #[derive(Default)]
 struct Milestones {
     first: BTreeMap<&'static str, u32>,
@@ -104,7 +105,8 @@ fn milestones(map: &MapSource, strategy: &'static Strategy) -> Milestones {
             seen.attacked = true;
             seen.first.entry("set out").or_insert(world.current_tick);
         }
-        if world.current_tick == 9_000 {
+        // The last count before 15 minutes stands, if the match ends first.
+        if world.current_tick <= 9_000 && world.match_result.is_none() {
             seen.at_15 = count;
         }
     });

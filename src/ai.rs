@@ -1283,12 +1283,20 @@ impl AiBrain {
             .vents
             .iter()
             .filter(|vent| vent.0 >= half && vent.1 >= half)
-            .map(|vent| (vent.0 - half, vent.1 - half))
-            .filter(|&cell| !planned.contains(&cell) && world.can_place(plant, cell.0, cell.1))
-            .map(|cell| (cell_center(cell).distance_squared(&self.home), cell))
-            .filter(|&(distance, _)| distance <= reach)
+            .map(|&vent| (vent, (vent.0 - half, vent.1 - half)))
+            .filter(|&(_, cell)| !planned.contains(&cell) && world.can_place(plant, cell.0, cell.1))
+            // How far the vent itself is, the plant's middle, not its corner cell, which lies to
+            // one side and made a side's choice between two vents nearly as near lean one way for
+            // both sides; and ties go by the vent as Blue's side sees it, so that a mirrored map
+            // gets mirrored choices.
+            .map(|(vent, cell)| {
+                let at = cell_center(vent);
+                let seen = self.plan_position(world, at);
+                (at.distance_squared(&self.home), seen.x, seen.y, cell)
+            })
+            .filter(|&(distance, ..)| distance <= reach)
             .min()
-            .map(|(_, cell)| cell)
+            .map(|(.., cell)| cell)
     }
 
     fn nearest_deposit(&self, world: &SimWorld, forces: &Forces, position: Vec2Fp, is_commander: bool, planned: &[(u32, u32)]) -> Option<(u32, u32)> {
@@ -2220,7 +2228,7 @@ impl AiBrain {
         // Outlying extractors are worth more than the base: they are far from its defenses,
         // and every one lost widens a lead that would otherwise stay even.
         let outlying = fp_int(RAID_DISTANCE_UNITS);
-        let enemy_side: Vec<(u32, u32)> = world
+        let mut enemy_side: Vec<(u32, u32)> = world
             .deposits
             .iter()
             .copied()
@@ -2230,6 +2238,13 @@ impl AiBrain {
                 from_enemy < center.distance_squared(&self.home) && from_enemy > wide_mul(outlying, outlying)
             })
             .collect();
+        // In order as Blue's side sees them, so that both sides, drawing the same numbers, pick
+        // mirrored deposits on any mirrored map: in the map's own order they did so only where
+        // deposits were listed in mirrored pairs.
+        enemy_side.sort_by_key(|&cell| {
+            let seen = self.plan_position(world, cell_center(cell));
+            (seen.x, seen.y)
+        });
         match enemy_side.len() as u32 {
             0 => self.enemy_home,
             count => cell_center(enemy_side[self.rng.below(count) as usize]),
