@@ -3083,34 +3083,71 @@ const RIBBON_OPACITY: f32 = 0.22;
 
 /// The outer edge of where any of these circles reach, as short straight pieces: each circle's
 /// rim, less what lies inside another circle. Circles are `(center, radius)` in world units.
+///
+/// Each rim is cut where other circles cross it, so that the arcs left meet exactly, then each
+/// arc into pieces about 40 units long. Until 2026-11-23 rims were cut into pieces first, each
+/// kept if its middle was outside every other circle, which left gaps where a tight group shows
+/// only slivers of each rim, shorter than a piece.
 pub fn coverage_outline(circles: &[([f64; 2], f64)]) -> Vec<[[f64; 2]; 2]> {
+    use std::f64::consts::TAU;
     let mut pieces = Vec::new();
     for (index, &(center, radius)) in circles.iter().enumerate() {
         if radius <= 0.0 {
             continue;
         }
+        // The angles of this rim inside each other circle, as spans from a start, going round.
+        let mut covered: Vec<(f64, f64)> = Vec::new();
+        let mut hidden = false;
+        for (other, &(middle, reach)) in circles.iter().enumerate() {
+            if other == index || reach <= 0.0 {
+                continue;
+            }
+            let apart = (middle[0] - center[0]).hypot(middle[1] - center[1]);
+            if apart == 0.0 && reach == radius {
+                // Of two identical circles, only the first draws the rim they share.
+                hidden |= other < index;
+                continue;
+            }
+            if apart >= radius + reach || apart + reach <= radius {
+                // Apart, or inside this one: its rim is untouched.
+                continue;
+            }
+            if apart + radius <= reach {
+                hidden = true;
+                break;
+            }
+            let toward = (middle[1] - center[1]).atan2(middle[0] - center[0]);
+            let half = ((radius * radius + apart * apart - reach * reach) / (2.0 * radius * apart)).clamp(-1.0, 1.0).acos();
+            covered.push(((toward - half).rem_euclid(TAU), 2.0 * half));
+        }
+        if hidden {
+            continue;
+        }
+        // What is left of the rim, as `(from, to)` angles, going round from the first start.
+        let mut spans: Vec<(f64, f64)> = covered.iter().flat_map(|&(start, width)| {
+            let end = start + width;
+            if end > TAU { vec![(start, TAU), (0.0, end - TAU)] } else { vec![(start, end)] }
+        }).collect();
+        spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut open = Vec::new();
+        let mut reached = 0.0;
+        for (start, end) in spans {
+            if start > reached {
+                open.push((reached, start));
+            }
+            reached = f64::max(reached, end);
+        }
+        if reached < TAU {
+            open.push((reached, TAU));
+        }
         // About 40 units a piece, which looks round from anywhere it is drawn.
-        let count = (std::f64::consts::TAU * radius / 40.0).clamp(32.0, 512.0) as usize;
+        let step = TAU / (TAU * radius / 40.0).clamp(32.0, 512.0);
         let at = |angle: f64| [center[0] + radius * angle.cos(), center[1] + radius * angle.sin()];
-        // Only a circle that overlaps this one can hide part of its rim.
-        let near: Vec<(usize, ([f64; 2], f64))> =
-            circles.iter().copied().enumerate().filter(|&(other, (middle, reach))| other != index && (center[0] - middle[0]).hypot(center[1] - middle[1]) < radius + reach).collect();
-        let inside_another = |point: [f64; 2]| {
-            near.iter().any(|&(other, (middle, reach))| {
-                if other == index {
-                    false
-                } else if middle == center && reach == radius {
-                    // Of two identical circles, only the first draws the rim they share.
-                    other < index
-                } else {
-                    (point[0] - middle[0]).hypot(point[1] - middle[1]) < reach - 1e-6
-                }
-            })
-        };
-        for piece in 0..count {
-            let (from, to) = (piece as f64 / count as f64 * std::f64::consts::TAU, (piece + 1) as f64 / count as f64 * std::f64::consts::TAU);
-            if !inside_another(at((from + to) * 0.5)) {
-                pieces.push([at(from), at(to)]);
+        for (from, to) in open {
+            let count = ((to - from) / step).ceil().max(1.0) as usize;
+            for piece in 0..count {
+                let (a, b) = (from + (to - from) * piece as f64 / count as f64, from + (to - from) * (piece + 1) as f64 / count as f64);
+                pieces.push([at(a), at(b)]);
             }
         }
     }
@@ -4386,6 +4423,31 @@ mod tests {
         for [a, b] in &pair {
             let middle = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
             assert!(middle[0].hypot(middle[1]) > 990.0 && (middle[0] - 1_000.0).hypot(middle[1]) > 990.0, "a piece inside the other circle");
+        }
+    }
+
+    /// A tight column of units with long ranges, as in a playtest on 2026-11-23, where ten
+    /// grenadier walkers' ground fire outline had a gap on its far side: each circle shows only a
+    /// sliver there, shorter than the pieces the rims were cut into, and pieces were kept only if
+    /// their middles were outside every other circle.
+    #[test]
+    fn coverage_outline_has_no_gap_beside_a_tight_column() {
+        let circles: Vec<([f64; 2], f64)> = (0..10).map(|index| ([if index % 2 == 0 { 0.0 } else { 40.0 }, (index / 2) as f64 * 45.0], 500.0)).collect();
+        let pieces = coverage_outline(&circles);
+        // Closed: every end of a piece meets the end of another.
+        let key = |point: [f64; 2]| ((point[0] * 1e4).round() as i64, (point[1] * 1e4).round() as i64);
+        let mut ends: std::collections::BTreeMap<(i64, i64), usize> = std::collections::BTreeMap::new();
+        for [a, b] in &pieces {
+            *ends.entry(key(*a)).or_default() += 1;
+            *ends.entry(key(*b)).or_default() += 1;
+        }
+        let loose = ends.values().filter(|&&count| count % 2 == 1).count();
+        assert_eq!(loose, 0, "the outline has {loose} loose ends");
+        // And it runs the whole way down the far side, from the first row to the last.
+        for step in 0..=36 {
+            let y = f64::from(step) * 5.0;
+            let found = pieces.iter().any(|[a, b]| a[0].min(b[0]) > 40.0 + 500.0 - 5.0 && a[1].min(b[1]) <= y && y <= a[1].max(b[1]));
+            assert!(found, "no outline on the far side at {y}");
         }
     }
 
