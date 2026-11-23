@@ -214,10 +214,32 @@ pub enum Shape {
     Cable,
     /// Where adjacency wiring meets a structure: a small box with a light on top.
     JunctionBox,
+    /// A support factory's bay: the T2 bay's walls, with two booms slanting across its floor in
+    /// place of the headquarters' gantries and stacks.
+    FactoryT2Support,
+    /// The T3 bay's sloped walls, with four booms meeting over it in a diamond, and no gantry,
+    /// tower, or stacks.
+    FactoryT3Support,
+    /// An air factory's deck and pad, with a low service block along its north edge and two
+    /// booms slanting over the pad, in place of a hangar and towers.
+    AirFactoryT2Support,
+    /// An air factory's deck and pad between two service blocks, with four booms meeting over
+    /// the pad.
+    AirFactoryT3Support,
+    /// A dock's piers, with two booms slanting over the slip in place of cranes and a workshop.
+    NavalFactoryT2Support,
+    /// A dock's piers and lit seawalls, with four booms meeting over the slip in a diamond.
+    NavalFactoryT3Support,
+    /// A torpedo launcher's turret, low on the water: a wide team-colored drum, and two tubes
+    /// under a hood.
+    TorpedoLauncher,
+    /// The T2 torpedo launcher's: a larger drum, with two pods of tubes either side of a cupola
+    /// with a sonar mast.
+    TorpedoLauncherT2,
 }
 
 impl Shape {
-    pub const ALL: [Self; 104] = [
+    pub const ALL: [Self; 112] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -322,6 +344,14 @@ impl Shape {
         Self::Beam,
         Self::Cable,
         Self::JunctionBox,
+        Self::FactoryT2Support,
+        Self::FactoryT3Support,
+        Self::AirFactoryT2Support,
+        Self::AirFactoryT3Support,
+        Self::NavalFactoryT2Support,
+        Self::NavalFactoryT3Support,
+        Self::TorpedoLauncher,
+        Self::TorpedoLauncherT2,
     ];
     pub const COUNT: usize = Self::ALL.len();
 
@@ -365,9 +395,9 @@ impl Shape {
     /// builds stands while it is built. A dock builds ships afloat, at its foot.
     pub const fn bay_floor(self) -> Option<f32> {
         match self {
-            Self::Factory | Self::FactoryT2 | Self::FactoryT3 => Some(0.06),
-            Self::AirFactory | Self::AirFactoryT2 | Self::AirFactoryT3 => Some(0.07),
-            Self::NavalFactory | Self::NavalFactoryT2 | Self::NavalFactoryT3 => Some(0.0),
+            Self::Factory | Self::FactoryT2 | Self::FactoryT3 | Self::FactoryT2Support | Self::FactoryT3Support => Some(0.06),
+            Self::AirFactory | Self::AirFactoryT2 | Self::AirFactoryT3 | Self::AirFactoryT2Support | Self::AirFactoryT3Support => Some(0.07),
+            Self::NavalFactory | Self::NavalFactoryT2 | Self::NavalFactoryT3 | Self::NavalFactoryT2Support | Self::NavalFactoryT3Support => Some(0.0),
             _ => None,
         }
     }
@@ -790,6 +820,186 @@ impl MeshBuilder {
         }
     }
 
+    /// The floor of a land factory's bay, ramps down from both of its open ends, east and west,
+    /// and guide lights along it, lit while it builds.
+    fn factory_floor(&mut self) {
+        self.paint(Material::Hull);
+        self.block([-0.42, -0.5, -0.5], [0.42, 0.5, -0.44]);
+        for side in [-1.0_f32, 1.0] {
+            let (inner, outer) = (0.42 * side, 0.5 * side);
+            let (low, high) = (inner.min(outer), inner.max(outer));
+            let z = |x: f32| if (x - inner).abs() < 1e-6 { -0.44 } else { -0.495 };
+            self.cuboid(
+                [Vec3::new(low, -0.34, -0.5), Vec3::new(high, -0.34, -0.5), Vec3::new(high, 0.34, -0.5), Vec3::new(low, 0.34, -0.5)],
+                [Vec3::new(low, -0.34, z(low)), Vec3::new(high, -0.34, z(high)), Vec3::new(high, 0.34, z(high)), Vec3::new(low, 0.34, z(low))],
+            );
+        }
+        // Guide lights along the floor, lit while it builds.
+        self.paint(Material::Glow);
+        self.moving(motion::PULSE, [0.0; 3], |mesh| {
+            for y in [-0.33_f32, 0.33] {
+                mesh.block([-0.4, y - 0.01, -0.44], [0.4, y + 0.01, -0.43]);
+            }
+        });
+    }
+
+    /// The T2 bay's higher walls, with buttresses, a row of windows, and the team's stripe.
+    fn bay_walls_t2(&mut self) {
+        for (y, outward) in [(-0.47_f32, -1.0_f32), (0.31, 1.0)] {
+            self.paint(Material::Hull);
+            self.bevel([-0.46, y, -0.44], [0.46, y + 0.16, 0.0], 0.03);
+            for x in [-0.3_f32, 0.0, 0.3] {
+                let face = if outward < 0.0 { y } else { y + 0.16 };
+                self.bevel([x - 0.04, face.min(face + 0.03 * outward), -0.44], [x + 0.04, face.max(face + 0.03 * outward), -0.08], 0.01);
+            }
+            self.paint(Material::Glow);
+            let inner = if outward < 0.0 { y + 0.16 } else { y };
+            self.block([-0.4, inner - 0.005, -0.2], [0.4, inner + 0.005, -0.14]);
+            self.paint(Material::Trim);
+            self.block([-0.46, y, 0.0], [0.46, y + 0.16, 0.05]);
+        }
+    }
+
+    /// The T3 bay's heavy walls, with sloped armor, inside faces lit, and the team's stripe on top.
+    fn bay_walls_t3(&mut self) {
+        for (y, outward) in [(-0.5_f32, -1.0_f32), (0.32, 1.0)] {
+            let (outer, inner) = if outward < 0.0 { (y, y + 0.18) } else { (y + 0.18, y) };
+            let top_outer = outer - 0.07 * outward;
+            self.paint(Material::Hull);
+            let (low, high) = (outer.min(inner), outer.max(inner));
+            let (top_low, top_high) = (top_outer.min(inner), top_outer.max(inner));
+            self.cuboid(
+                [Vec3::new(-0.47, low, -0.44), Vec3::new(0.47, low, -0.44), Vec3::new(0.47, high, -0.44), Vec3::new(-0.47, high, -0.44)],
+                [Vec3::new(-0.47, top_low, 0.06), Vec3::new(0.47, top_low, 0.06), Vec3::new(0.47, top_high, 0.06), Vec3::new(-0.47, top_high, 0.06)],
+            );
+            self.paint(Material::Glow);
+            self.block([-0.42, inner - 0.006, -0.3], [0.42, inner + 0.006, -0.25]);
+            self.block([-0.42, inner - 0.006, -0.1], [0.42, inner + 0.006, -0.06]);
+            self.paint(Material::Trim);
+            self.block([-0.47, top_low, 0.06], [0.47, top_high, 0.1]);
+            // And a band across the sloped armor outside.
+            let face = |z: f32| outer + (top_outer - outer) * ((z + 0.44) / 0.5);
+            let ring = |z: f32| {
+                let (inside, outside) = (face(z) - 0.002 * outward, face(z) + 0.012 * outward);
+                [Vec3::new(-0.47, inside, z), Vec3::new(0.47, inside, z), Vec3::new(0.47, outside, z), Vec3::new(-0.47, outside, z)]
+            };
+            self.cuboid(ring(-0.24), ring(-0.12));
+        }
+    }
+
+    /// An air factory's deck, with a round pad in the middle for what it builds, ringed with
+    /// lights, and lines painted across it.
+    fn air_deck(&mut self) {
+        self.paint(Material::Hull);
+        self.bevel([-0.5, -0.5, -0.5], [0.5, 0.5, -0.44], 0.02);
+        self.paint(Material::Metal);
+        self.frustum([0.0, 0.0], [-0.44, -0.43], [0.31, 0.31], 20);
+        self.paint(Material::Glow);
+        self.moving(motion::PULSE, [0.0; 3], |mesh| {
+            for step in 0..10 {
+                let angle = step as f32 / 10.0 * std::f32::consts::TAU;
+                let (x, y) = (angle.cos() * 0.33, angle.sin() * 0.33);
+                mesh.block([x - 0.015, y - 0.015, -0.44], [x + 0.015, y + 0.015, -0.42]);
+            }
+        });
+        // Painted lines across the pad.
+        self.paint(Material::Trim);
+        self.block([-0.22, -0.02, -0.43], [0.22, 0.02, -0.425]);
+    }
+
+    /// A dock's piers down the long sides, north and south, with open water between them: a slip
+    /// open at both ends, east and west, where ships are built afloat and sail out. With the
+    /// team's stripe, bollards, and buoy lights at the open ends.
+    fn piers(&mut self) {
+        self.paint(Material::Hull);
+        for y in [-0.5_f32, 0.32] {
+            self.bevel([-0.5, y, -0.5], [0.5, y + 0.18, -0.32], 0.03);
+        }
+        // The team's stripe along each pier's outer edge.
+        self.paint(Material::Trim);
+        for y in [-0.49_f32, 0.43] {
+            self.block([-0.47, y, -0.33], [0.47, y + 0.06, -0.31]);
+        }
+        // Bollards along the piers' inner edges.
+        self.paint(Material::Metal);
+        for y in [-0.33_f32, 0.33] {
+            for x in [-0.4_f32, -0.2, 0.0, 0.2, 0.4] {
+                self.frustum([x, y], [-0.32, -0.28], [0.015, 0.015], 6);
+            }
+        }
+        // Buoy lights at the open ends.
+        self.paint(Material::Glow);
+        self.moving(motion::PULSE, [0.0; 3], |mesh| {
+            for x in [-0.48_f32, 0.48] {
+                for y in [-0.3_f32, 0.3] {
+                    mesh.block([x - 0.02, y - 0.02, -0.34], [x + 0.02, y + 0.02, -0.3]);
+                }
+            }
+        });
+    }
+
+    /// Lights along the faces of a T3 dock's seawalls.
+    fn lit_seawalls(&mut self) {
+        self.paint(Material::Glow);
+        for y in [-0.325_f32, 0.325] {
+            self.block([-0.48, y - 0.006, -0.38], [0.48, y + 0.006, -0.34]);
+        }
+    }
+
+    /// A support factory's service arm: a team-colored housing standing on `foot`, and a jointed
+    /// boom reaching `reach` out from it, across and along, with a tool at its end that glows
+    /// while it builds. Support factories are built with booms slanting over the bay in place of
+    /// their headquarters' straight gantries, cranes, and towers, since from the camera's height
+    /// how parts lie across the ground shows far more than how high they stand.
+    fn service_arm(&mut self, foot: [f32; 3], reach: [f32; 2]) {
+        let [x, y, z] = foot;
+        self.paint(Material::Trim);
+        self.bevel([x - 0.075, y - 0.075, z], [x + 0.075, y + 0.075, z + 0.08], 0.02);
+        let shoulder = [x, y, z + 0.07];
+        let elbow = [x + reach[0] * 0.4, y + reach[1] * 0.4, z + 0.22];
+        let wrist = [x + reach[0], y + reach[1], z + 0.12];
+        self.paint(Material::Metal);
+        self.beam(shoulder, elbow, 0.045, 0.04);
+        self.beam(elbow, wrist, 0.038, 0.032);
+        self.paint(Material::Glow);
+        self.moving(motion::PULSE, [0.0; 3], |mesh| mesh.block([wrist[0] - 0.035, wrist[1] - 0.035, wrist[2] - 0.08], [wrist[0] + 0.035, wrist[1] + 0.035, wrist[2]]));
+    }
+
+    /// A low team-colored service block across an air deck, between the two `y`, on a plinth, for
+    /// service arms to stand on.
+    fn service_block(&mut self, y: [f32; 2]) {
+        self.paint(Material::Hull);
+        self.block([-0.45, y[0], -0.44], [0.45, y[1], -0.41]);
+        self.paint(Material::Trim);
+        self.bevel([-0.44, y[0], -0.41], [0.44, y[1], -0.27], 0.02);
+    }
+
+    /// A torpedo launcher's turret, low on the water: a wide team-colored drum of `radius`, and a
+    /// pod of two tubes under a hood at each of `pods` across it.
+    fn torpedo_turret(&mut self, radius: f32, tube: f32, pods: &[f32]) {
+        self.paint(Material::Trim);
+        self.frustum([0.0, -0.04], [-0.05, 0.06], [radius, radius * 0.88], 10);
+        for &x in pods {
+            self.torpedo_pod(x, tube);
+        }
+    }
+
+    /// Two torpedo tubes side by side about `x`, which kick back as they fire, their mouths lit,
+    /// under an armored hood.
+    fn torpedo_pod(&mut self, x: f32, tube: f32) {
+        let z = 0.04;
+        for side in [-1.0_f32, 1.0] {
+            let at = x + side * tube * 1.15;
+            self.paint(Material::Metal);
+            self.moving(motion::RECOIL, [at, 0.0, z], |mesh| mesh.body(at, &[[-0.14, tube, tube, z], [0.46, tube, tube, z]], 8));
+            self.paint(Material::Glow);
+            self.block([at - tube * 0.6, 0.46, z - tube * 0.6], [at + tube * 0.6, 0.47, z + tube * 0.6]);
+        }
+        let half = tube * 2.15 + 0.02;
+        self.paint(Material::Hull);
+        self.bevel([x - half, -0.24, z + tube], [x + half, 0.16, z + tube + 0.07], 0.02);
+    }
+
     /// A round-ish solid from one radius to another. A top radius of zero makes a cone.
     fn frustum(&mut self, center: [f32; 2], z: [f32; 2], radius: [f32; 2], sides: usize) {
         // The small offset keeps vertices off the axes, which dots rely on when zoomed out.
@@ -1153,25 +1363,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         // An open-air assembly bay: a floor open at both ends, east and west, between long walls,
         // under a gantry crane, so that what it builds can be seen and drives out either end.
         Shape::Factory => {
-            // The floor of the bay, and ramps down from both of its open ends, east and west.
-            mesh.paint(Material::Hull);
-            mesh.block([-0.42, -0.5, -0.5], [0.42, 0.5, -0.44]);
-            for side in [-1.0_f32, 1.0] {
-                let (inner, outer) = (0.42 * side, 0.5 * side);
-                let (low, high) = (inner.min(outer), inner.max(outer));
-                let z = |x: f32| if (x - inner).abs() < 1e-6 { -0.44 } else { -0.495 };
-                mesh.cuboid(
-                    [Vec3::new(low, -0.34, -0.5), Vec3::new(high, -0.34, -0.5), Vec3::new(high, 0.34, -0.5), Vec3::new(low, 0.34, -0.5)],
-                    [Vec3::new(low, -0.34, z(low)), Vec3::new(high, -0.34, z(high)), Vec3::new(high, 0.34, z(high)), Vec3::new(low, 0.34, z(low))],
-                );
-            }
-            // Guide lights along the floor, lit while it builds.
-            mesh.paint(Material::Glow);
-            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
-                for y in [-0.33_f32, 0.33] {
-                    mesh.block([-0.4, y - 0.01, -0.44], [0.4, y + 0.01, -0.43]);
-                }
-            });
+            mesh.factory_floor();
 
             // Walls down the long sides, north and south, with the team's stripe along the top.
             for y in [-0.5_f32, 0.36] {
@@ -1906,34 +2098,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         }
         // A dock: two piers with a slip of open water between them, open at both ends, under a crane.
         Shape::NavalFactory => {
-            // Piers down the long sides, north and south, with open water between them: a slip
-            // open at both ends, east and west, where ships are built afloat and sail out.
-            mesh.paint(Material::Hull);
-            for y in [-0.5_f32, 0.32] {
-                mesh.bevel([-0.5, y, -0.5], [0.5, y + 0.18, -0.32], 0.03);
-            }
-            // The team's stripe along each pier's outer edge.
-            mesh.paint(Material::Trim);
-            for y in [-0.49_f32, 0.43] {
-                mesh.block([-0.47, y, -0.33], [0.47, y + 0.06, -0.31]);
-            }
-            mesh.paint(Material::Hull);
-            // Bollards along the piers' inner edges.
-            mesh.paint(Material::Metal);
-            for y in [-0.33_f32, 0.33] {
-                for x in [-0.4_f32, -0.2, 0.0, 0.2, 0.4] {
-                    mesh.frustum([x, y], [-0.32, -0.28], [0.015, 0.015], 6);
-                }
-            }
-            // Buoy lights at the open ends.
-            mesh.paint(Material::Glow);
-            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
-                for x in [-0.48_f32, 0.48] {
-                    for y in [-0.3_f32, 0.3] {
-                        mesh.block([x - 0.02, y - 0.02, -0.34], [x + 0.02, y + 0.02, -0.3]);
-                    }
-                }
-            });
+            mesh.piers();
 
             // A crane on rails along the piers, its jib across the slip.
             mesh.paint(Material::Metal);
@@ -2144,40 +2309,9 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         }
         // The T2 bay: higher buttressed walls with windows, two cranes, and two stacks.
         Shape::FactoryT2 => {
-            // The floor of the bay, and ramps down from both of its open ends, east and west.
-            mesh.paint(Material::Hull);
-            mesh.block([-0.42, -0.5, -0.5], [0.42, 0.5, -0.44]);
-            for side in [-1.0_f32, 1.0] {
-                let (inner, outer) = (0.42 * side, 0.5 * side);
-                let (low, high) = (inner.min(outer), inner.max(outer));
-                let z = |x: f32| if (x - inner).abs() < 1e-6 { -0.44 } else { -0.495 };
-                mesh.cuboid(
-                    [Vec3::new(low, -0.34, -0.5), Vec3::new(high, -0.34, -0.5), Vec3::new(high, 0.34, -0.5), Vec3::new(low, 0.34, -0.5)],
-                    [Vec3::new(low, -0.34, z(low)), Vec3::new(high, -0.34, z(high)), Vec3::new(high, 0.34, z(high)), Vec3::new(low, 0.34, z(low))],
-                );
-            }
-            // Guide lights along the floor, lit while it builds.
-            mesh.paint(Material::Glow);
-            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
-                for y in [-0.33_f32, 0.33] {
-                    mesh.block([-0.4, y - 0.01, -0.44], [0.4, y + 0.01, -0.43]);
-                }
-            });
+            mesh.factory_floor();
 
-            // Higher walls with buttresses, a row of windows, and the team's stripe.
-            for (y, outward) in [(-0.47_f32, -1.0_f32), (0.31, 1.0)] {
-                mesh.paint(Material::Hull);
-                mesh.bevel([-0.46, y, -0.44], [0.46, y + 0.16, 0.0], 0.03);
-                for x in [-0.3_f32, 0.0, 0.3] {
-                    let face = if outward < 0.0 { y } else { y + 0.16 };
-                    mesh.bevel([x - 0.04, face.min(face + 0.03 * outward), -0.44], [x + 0.04, face.max(face + 0.03 * outward), -0.08], 0.01);
-                }
-                mesh.paint(Material::Glow);
-                let inner = if outward < 0.0 { y + 0.16 } else { y };
-                mesh.block([-0.4, inner - 0.005, -0.2], [0.4, inner + 0.005, -0.14]);
-                mesh.paint(Material::Trim);
-                mesh.block([-0.46, y, 0.0], [0.46, y + 0.16, 0.05]);
-            }
+            mesh.bay_walls_t2();
             // Two gantry cranes, with their hoists.
             for x in [-0.2_f32, 0.2] {
                 mesh.paint(Material::Metal);
@@ -2202,50 +2336,9 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         }
         // The T3 bay: sloped armored walls, a heavy double gantry with a cab, a tower, and stacks.
         Shape::FactoryT3 => {
-            // The floor of the bay, and ramps down from both of its open ends, east and west.
-            mesh.paint(Material::Hull);
-            mesh.block([-0.42, -0.5, -0.5], [0.42, 0.5, -0.44]);
-            for side in [-1.0_f32, 1.0] {
-                let (inner, outer) = (0.42 * side, 0.5 * side);
-                let (low, high) = (inner.min(outer), inner.max(outer));
-                let z = |x: f32| if (x - inner).abs() < 1e-6 { -0.44 } else { -0.495 };
-                mesh.cuboid(
-                    [Vec3::new(low, -0.34, -0.5), Vec3::new(high, -0.34, -0.5), Vec3::new(high, 0.34, -0.5), Vec3::new(low, 0.34, -0.5)],
-                    [Vec3::new(low, -0.34, z(low)), Vec3::new(high, -0.34, z(high)), Vec3::new(high, 0.34, z(high)), Vec3::new(low, 0.34, z(low))],
-                );
-            }
-            // Guide lights along the floor, lit while it builds.
-            mesh.paint(Material::Glow);
-            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
-                for y in [-0.33_f32, 0.33] {
-                    mesh.block([-0.4, y - 0.01, -0.44], [0.4, y + 0.01, -0.43]);
-                }
-            });
+            mesh.factory_floor();
 
-            // Heavy walls with sloped armor, inside faces lit, and the team's stripe on top.
-            for (y, outward) in [(-0.5_f32, -1.0_f32), (0.32, 1.0)] {
-                let (outer, inner) = if outward < 0.0 { (y, y + 0.18) } else { (y + 0.18, y) };
-                let top_outer = outer - 0.07 * outward;
-                mesh.paint(Material::Hull);
-                let (low, high) = (outer.min(inner), outer.max(inner));
-                let (top_low, top_high) = (top_outer.min(inner), top_outer.max(inner));
-                mesh.cuboid(
-                    [Vec3::new(-0.47, low, -0.44), Vec3::new(0.47, low, -0.44), Vec3::new(0.47, high, -0.44), Vec3::new(-0.47, high, -0.44)],
-                    [Vec3::new(-0.47, top_low, 0.06), Vec3::new(0.47, top_low, 0.06), Vec3::new(0.47, top_high, 0.06), Vec3::new(-0.47, top_high, 0.06)],
-                );
-                mesh.paint(Material::Glow);
-                mesh.block([-0.42, inner - 0.006, -0.3], [0.42, inner + 0.006, -0.25]);
-                mesh.block([-0.42, inner - 0.006, -0.1], [0.42, inner + 0.006, -0.06]);
-                mesh.paint(Material::Trim);
-                mesh.block([-0.47, top_low, 0.06], [0.47, top_high, 0.1]);
-                // And a band across the sloped armor outside.
-                let face = |z: f32| outer + (top_outer - outer) * ((z + 0.44) / 0.5);
-                let ring = |z: f32| {
-                    let (inside, outside) = (face(z) - 0.002 * outward, face(z) + 0.012 * outward);
-                    [Vec3::new(-0.47, inside, z), Vec3::new(0.47, inside, z), Vec3::new(0.47, outside, z), Vec3::new(-0.47, outside, z)]
-                };
-                mesh.cuboid(ring(-0.24), ring(-0.12));
-            }
+            mesh.bay_walls_t3();
             // A heavy double gantry with an operator's cab, spanning the bay.
             mesh.paint(Material::Metal);
             for x in [-0.12_f32, 0.12] {
@@ -2276,22 +2369,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         // An open deck with a lit round pad, where aircraft are built and lift off, a hangar
         // behind it, and a control tower.
         Shape::AirFactory => {
-            // A deck, with a round pad in the middle for what it builds, ringed with lights.
-            mesh.paint(Material::Hull);
-            mesh.bevel([-0.5, -0.5, -0.5], [0.5, 0.5, -0.44], 0.02);
-            mesh.paint(Material::Metal);
-            mesh.frustum([0.0, 0.0], [-0.44, -0.43], [0.31, 0.31], 20);
-            mesh.paint(Material::Glow);
-            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
-                for step in 0..10 {
-                    let angle = step as f32 / 10.0 * std::f32::consts::TAU;
-                    let (x, y) = (angle.cos() * 0.33, angle.sin() * 0.33);
-                    mesh.block([x - 0.015, y - 0.015, -0.44], [x + 0.015, y + 0.015, -0.42]);
-                }
-            });
-            // Painted lines across the pad.
-            mesh.paint(Material::Trim);
-            mesh.block([-0.22, -0.02, -0.43], [0.22, 0.02, -0.425]);
+            mesh.air_deck();
 
             // A hangar along the north edge, open towards the pad.
             mesh.paint(Material::Trim);
@@ -2306,22 +2384,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         }
         // The T2 deck: a larger hangar, and two towers joined by approach lights.
         Shape::AirFactoryT2 => {
-            // A deck, with a round pad in the middle for what it builds, ringed with lights.
-            mesh.paint(Material::Hull);
-            mesh.bevel([-0.5, -0.5, -0.5], [0.5, 0.5, -0.44], 0.02);
-            mesh.paint(Material::Metal);
-            mesh.frustum([0.0, 0.0], [-0.44, -0.43], [0.31, 0.31], 20);
-            mesh.paint(Material::Glow);
-            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
-                for step in 0..10 {
-                    let angle = step as f32 / 10.0 * std::f32::consts::TAU;
-                    let (x, y) = (angle.cos() * 0.33, angle.sin() * 0.33);
-                    mesh.block([x - 0.015, y - 0.015, -0.44], [x + 0.015, y + 0.015, -0.42]);
-                }
-            });
-            // Painted lines across the pad.
-            mesh.paint(Material::Trim);
-            mesh.block([-0.22, -0.02, -0.43], [0.22, 0.02, -0.425]);
+            mesh.air_deck();
 
             // A larger hangar, with a lit sign over its door.
             mesh.paint(Material::Trim);
@@ -2346,22 +2409,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         }
         // The T3 deck: a great hangar of two bays, a tall tower with a turning dish, and fuel tanks.
         Shape::AirFactoryT3 => {
-            // A deck, with a round pad in the middle for what it builds, ringed with lights.
-            mesh.paint(Material::Hull);
-            mesh.bevel([-0.5, -0.5, -0.5], [0.5, 0.5, -0.44], 0.02);
-            mesh.paint(Material::Metal);
-            mesh.frustum([0.0, 0.0], [-0.44, -0.43], [0.31, 0.31], 20);
-            mesh.paint(Material::Glow);
-            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
-                for step in 0..10 {
-                    let angle = step as f32 / 10.0 * std::f32::consts::TAU;
-                    let (x, y) = (angle.cos() * 0.33, angle.sin() * 0.33);
-                    mesh.block([x - 0.015, y - 0.015, -0.44], [x + 0.015, y + 0.015, -0.42]);
-                }
-            });
-            // Painted lines across the pad.
-            mesh.paint(Material::Trim);
-            mesh.block([-0.22, -0.02, -0.43], [0.22, 0.02, -0.425]);
+            mesh.air_deck();
 
             // A great hangar along the north edge, divided into two bays.
             mesh.paint(Material::Trim);
@@ -2441,34 +2489,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         }
         // The T2 dock: two cranes and a covered workshop.
         Shape::NavalFactoryT2 => {
-            // Piers down the long sides, north and south, with open water between them: a slip
-            // open at both ends, east and west, where ships are built afloat and sail out.
-            mesh.paint(Material::Hull);
-            for y in [-0.5_f32, 0.32] {
-                mesh.bevel([-0.5, y, -0.5], [0.5, y + 0.18, -0.32], 0.03);
-            }
-            // The team's stripe along each pier's outer edge.
-            mesh.paint(Material::Trim);
-            for y in [-0.49_f32, 0.43] {
-                mesh.block([-0.47, y, -0.33], [0.47, y + 0.06, -0.31]);
-            }
-            mesh.paint(Material::Hull);
-            // Bollards along the piers' inner edges.
-            mesh.paint(Material::Metal);
-            for y in [-0.33_f32, 0.33] {
-                for x in [-0.4_f32, -0.2, 0.0, 0.2, 0.4] {
-                    mesh.frustum([x, y], [-0.32, -0.28], [0.015, 0.015], 6);
-                }
-            }
-            // Buoy lights at the open ends.
-            mesh.paint(Material::Glow);
-            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
-                for x in [-0.48_f32, 0.48] {
-                    for y in [-0.3_f32, 0.3] {
-                        mesh.block([x - 0.02, y - 0.02, -0.34], [x + 0.02, y + 0.02, -0.3]);
-                    }
-                }
-            });
+            mesh.piers();
 
             // Two cranes, and a covered workshop on the north pier.
             for x in [-0.22_f32, 0.22] {
@@ -2493,34 +2514,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         }
         // The T3 dock: a heavy gantry with a cab over the whole slip, lit seawalls, and a tower.
         Shape::NavalFactoryT3 => {
-            // Piers down the long sides, north and south, with open water between them: a slip
-            // open at both ends, east and west, where ships are built afloat and sail out.
-            mesh.paint(Material::Hull);
-            for y in [-0.5_f32, 0.32] {
-                mesh.bevel([-0.5, y, -0.5], [0.5, y + 0.18, -0.32], 0.03);
-            }
-            // The team's stripe along each pier's outer edge.
-            mesh.paint(Material::Trim);
-            for y in [-0.49_f32, 0.43] {
-                mesh.block([-0.47, y, -0.33], [0.47, y + 0.06, -0.31]);
-            }
-            mesh.paint(Material::Hull);
-            // Bollards along the piers' inner edges.
-            mesh.paint(Material::Metal);
-            for y in [-0.33_f32, 0.33] {
-                for x in [-0.4_f32, -0.2, 0.0, 0.2, 0.4] {
-                    mesh.frustum([x, y], [-0.32, -0.28], [0.015, 0.015], 6);
-                }
-            }
-            // Buoy lights at the open ends.
-            mesh.paint(Material::Glow);
-            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
-                for x in [-0.48_f32, 0.48] {
-                    for y in [-0.3_f32, 0.3] {
-                        mesh.block([x - 0.02, y - 0.02, -0.34], [x + 0.02, y + 0.02, -0.3]);
-                    }
-                }
-            });
+            mesh.piers();
 
             // A heavy gantry over the whole slip, with an operator's cab, and lit seawalls.
             mesh.paint(Material::Metal);
@@ -2541,14 +2535,69 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.bevel([-0.16, -0.1, 0.2], [0.16, 0.1, 0.32], 0.02);
             mesh.paint(Material::Glow);
             mesh.block([-0.13, -0.105, 0.24], [0.13, -0.095, 0.29]);
-            for y in [-0.325_f32, 0.325] {
-                mesh.block([-0.48, y - 0.006, -0.38], [0.48, y + 0.006, -0.34]);
-            }
+            mesh.lit_seawalls();
             // A control tower on the north pier.
             mesh.paint(Material::Hull);
             mesh.frustum([-0.42, 0.42], [-0.32, 0.2], [0.06, 0.05], 6);
             mesh.paint(Material::Glow);
             mesh.frustum([-0.42, 0.42], [0.2, 0.28], [0.075, 0.07], 6);
+        }
+        // A support factory: its headquarters' floor, walls, deck, or piers, with booms slanting
+        // over it in place of straight gantries, cranes, towers, and stacks: two at T2, the same
+        // way, and four at T3, meeting in a diamond.
+        Shape::FactoryT2Support => {
+            mesh.factory_floor();
+            mesh.bay_walls_t2();
+            // Two booms slanting the same way across the bay, from opposite walls.
+            mesh.service_arm([-0.3, -0.39, 0.05], [0.26, 0.3]);
+            mesh.service_arm([0.3, 0.39, 0.05], [-0.26, -0.3]);
+        }
+        Shape::FactoryT3Support => {
+            mesh.factory_floor();
+            mesh.bay_walls_t3();
+            // Four booms from the corners, meeting over the middle in a diamond.
+            for (x, y) in [(-0.32_f32, -0.375_f32), (0.32, -0.375), (-0.32, 0.375), (0.32, 0.375)] {
+                mesh.service_arm([x, y, 0.1], [-x * 0.7, -y * 0.75]);
+            }
+        }
+        Shape::AirFactoryT2Support => {
+            mesh.air_deck();
+            mesh.service_block([0.32, 0.5]);
+            for x in [-0.34_f32, 0.06] {
+                mesh.service_arm([x, 0.42, -0.27], [0.24, -0.32]);
+            }
+        }
+        Shape::AirFactoryT3Support => {
+            mesh.air_deck();
+            for (y, inward) in [([0.36_f32, 0.5_f32], -1.0_f32), ([-0.5, -0.36], 1.0)] {
+                mesh.service_block(y);
+                for x in [-0.3_f32, 0.3] {
+                    mesh.service_arm([x, -inward * 0.42, -0.27], [-x * 0.6, inward * 0.3]);
+                }
+            }
+        }
+        Shape::NavalFactoryT2Support => {
+            mesh.piers();
+            mesh.service_arm([-0.3, -0.41, -0.32], [0.26, 0.32]);
+            mesh.service_arm([0.3, 0.41, -0.32], [-0.26, -0.32]);
+        }
+        Shape::NavalFactoryT3Support => {
+            mesh.piers();
+            mesh.lit_seawalls();
+            for (x, y) in [(-0.32_f32, -0.41_f32), (0.32, -0.41), (-0.32, 0.41), (0.32, 0.41)] {
+                mesh.service_arm([x, y, -0.32], [-x * 0.7, -y * 0.75]);
+            }
+        }
+        Shape::TorpedoLauncher => mesh.torpedo_turret(0.3, 0.06, &[0.0]),
+        // Two pods of tubes either side of a cupola with a sonar mast.
+        Shape::TorpedoLauncherT2 => {
+            mesh.torpedo_turret(0.4, 0.06, &[-0.2, 0.2]);
+            mesh.paint(Material::Hull);
+            mesh.frustum([0.0, -0.12], [0.06, 0.22], [0.1, 0.08], 8);
+            mesh.paint(Material::Metal);
+            mesh.frustum([0.0, -0.12], [0.22, 0.44], [0.022, 0.016], 6);
+            mesh.paint(Material::Glow);
+            mesh.block([-0.035, -0.155, 0.42], [0.035, -0.085, 0.47]);
         }
         Shape::Airfield => {
             mesh.paint(Material::Hull);

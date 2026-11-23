@@ -496,60 +496,100 @@ const GLANCE: usize = 24;
 /// What a portrait is laid over before it is shrunk: a plain grey, so that only the unit counts.
 const GLANCE_GROUND: f32 = 0.4;
 
-/// Every portrait shrunk to `GLANCE` pixels a side over `GLANCE_GROUND`, as colors from 0 to 1,
-/// with whose it is.
-pub fn portrait_glances() -> Vec<(&'static str, Vec<[f32; 3]>)> {
+/// How opaque a portrait's pixel must be to count as the unit in its outline: more than its
+/// shadow, which `examples/portrait_sheet.rs` keeps faint, ever is.
+const OUTLINE_ALPHA: u8 = 128;
+
+/// A portrait shrunk to `GLANCE` pixels a side, for comparing it with the others.
+pub struct Glance {
+    /// Whose it is.
+    pub key: &'static str,
+    /// Its colors over `GLANCE_GROUND`, from 0 to 1.
+    pub colors: Vec<[f32; 3]>,
+    /// How much of each pixel the unit covers, from 0 to 1, its shadow left out.
+    pub outline: Vec<f32>,
+}
+
+/// What two portraits are compared by.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Likeness {
+    /// The whole picture, colors and all.
+    Picture,
+    /// The outline alone, whatever the colors: how far apart the units are by shape.
+    Outline,
+}
+
+impl Glance {
+    /// How unlike two portraits are, from 0 for the same to 1 for opposites everywhere: by
+    /// `Picture`, the mean distance between their colors, pixel by pixel, where black against
+    /// white is 1; by `Outline`, the mean difference in how much of each pixel they cover.
+    /// Being means over the whole picture, both make little of thin parts, such as booms and
+    /// masts, which the eye picks out more readily. Structures seen from the camera's height
+    /// mostly fill their footprint, so for them the outline says little and the picture more.
+    pub fn distance(&self, other: &Self, by: Likeness) -> f32 {
+        match by {
+            Likeness::Picture => {
+                let total: f32 = self.colors.iter().zip(&other.colors).map(|(a, b)| (0..3).map(|channel| (a[channel] - b[channel]).powi(2)).sum::<f32>().sqrt()).sum();
+                total / (self.colors.len().max(1) as f32 * 3.0_f32.sqrt())
+            }
+            Likeness::Outline => {
+                let total: f32 = self.outline.iter().zip(&other.outline).map(|(a, b)| (a - b).abs()).sum();
+                total / self.outline.len().max(1) as f32
+            }
+        }
+    }
+}
+
+/// Every portrait shrunk to `GLANCE` pixels a side.
+pub fn portrait_glances() -> Vec<Glance> {
     let Some((size, pixels)) = portrait_pixels() else {
         return Vec::new();
     };
     let (tile, columns, keys) = portrait_index();
     let block = tile / GLANCE;
+    let area = (block * block) as f32;
     keys.into_iter()
         .enumerate()
         .map(|(index, key)| {
             let (left, top) = ((index % columns) * tile, (index / columns) * tile);
-            let glance = (0..GLANCE * GLANCE)
-                .map(|cell| {
-                    let (x, y) = (left + (cell % GLANCE) * block, top + (cell / GLANCE) * block);
-                    let mut sum = [0.0_f32; 3];
-                    for dy in 0..block {
-                        for dx in 0..block {
-                            let at = ((y + dy) * size[0] + x + dx) * 4;
-                            let alpha = f32::from(pixels[at + 3]) / 255.0;
-                            for channel in 0..3 {
-                                sum[channel] += f32::from(pixels[at + channel]) / 255.0 * alpha + GLANCE_GROUND * (1.0 - alpha);
-                            }
+            let (mut colors, mut outline) = (Vec::with_capacity(GLANCE * GLANCE), Vec::with_capacity(GLANCE * GLANCE));
+            for cell in 0..GLANCE * GLANCE {
+                let (x, y) = (left + (cell % GLANCE) * block, top + (cell / GLANCE) * block);
+                let (mut sum, mut covered) = ([0.0_f32; 3], 0.0_f32);
+                for dy in 0..block {
+                    for dx in 0..block {
+                        let at = ((y + dy) * size[0] + x + dx) * 4;
+                        let alpha = f32::from(pixels[at + 3]) / 255.0;
+                        for channel in 0..3 {
+                            sum[channel] += f32::from(pixels[at + channel]) / 255.0 * alpha + GLANCE_GROUND * (1.0 - alpha);
+                        }
+                        if pixels[at + 3] >= OUTLINE_ALPHA {
+                            covered += 1.0;
                         }
                     }
-                    sum.map(|total| total / (block * block) as f32)
-                })
-                .collect();
-            (key, glance)
+                }
+                colors.push(sum.map(|total| total / area));
+                outline.push(covered / area);
+            }
+            Glance { key, colors, outline }
         })
         .collect()
 }
 
-/// How unlike two shrunk portraits are: the mean distance between their colors, pixel by pixel,
-/// from 0 for the same picture to 1 for black against white everywhere.
-pub fn glance_distance(first: &[[f32; 3]], second: &[[f32; 3]]) -> f32 {
-    let total: f32 = first.iter().zip(second).map(|(a, b)| (0..3).map(|channel| (a[channel] - b[channel]).powi(2)).sum::<f32>().sqrt()).sum();
-    total / (first.len().max(1) as f32 * 3.0_f32.sqrt())
-}
-
-/// Every pair of portraits that could be side by side on a build bar, most alike first, with how
-/// unlike they are (`glance_distance`). Only units on the same backdrop are compared, since the
-/// backdrop already tells land from air from water, and structures only with structures, since
-/// engineers build those and factories the rest.
-pub fn most_alike_portraits(db: &crate::sim::blueprints::BlueprintDb) -> Vec<(f32, &'static str, &'static str)> {
+/// Every pair of portraits that could be side by side on a build bar, most alike first by `by`,
+/// with how unlike they are (`Glance::distance`). Only units on the same backdrop are compared,
+/// since the backdrop already tells land from air from water, and structures only with
+/// structures, since engineers build those and factories the rest.
+pub fn most_alike_portraits(db: &crate::sim::blueprints::BlueprintDb, by: Likeness) -> Vec<(f32, &'static str, &'static str)> {
     let glances: Vec<_> = portrait_glances()
         .into_iter()
-        .filter_map(|(key, glance)| db.find(key).map(|id| (key, (crate::icons::Ground::of(db.get(id)), db.get(id).is_structure()), glance)))
+        .filter_map(|glance| db.find(glance.key).map(|id| ((crate::icons::Ground::of(db.get(id)), db.get(id).is_structure()), glance)))
         .collect();
     let mut pairs = Vec::new();
-    for (index, (first, bar, glance)) in glances.iter().enumerate() {
-        for (second, other_bar, other) in &glances[index + 1..] {
+    for (index, (bar, glance)) in glances.iter().enumerate() {
+        for (other_bar, other) in &glances[index + 1..] {
             if bar == other_bar {
-                pairs.push((glance_distance(glance, other), *first, *second));
+                pairs.push((glance.distance(other, by), glance.key, other.key));
             }
         }
     }
@@ -573,33 +613,39 @@ mod tests {
         assert_eq!(compact(-1_250_000), "-1.2M");
     }
 
-    /// The least `glance_distance` allowed between two portraits that could share a build bar.
-    /// The most alike measured 0.0104 on 2026-11-23, the T2 naval factory and its support
-    /// factory: raise this as the most alike pairs, which `cargo run --release --example
-    /// portrait_likeness` lists, are given looks of their own.
-    const PORTRAIT_LIKENESS_FLOOR: f32 = 0.009;
+    /// The least `Glance::distance` allowed between two portraits that could share a build bar,
+    /// by picture and by outline, a little under the most alike pairs on 2026-11-23: the T2 and
+    /// T3 support docks by picture (0.0203), and the T2 and T3 transports by outline (0.0042).
+    /// Raise them as the most alike pairs, which `cargo run --release --example
+    /// portrait_likeness` lists, are given shapes of their own.
+    const PICTURE_LIKENESS_FLOOR: f32 = 0.018;
+    const OUTLINE_LIKENESS_FLOOR: f32 = 0.0035;
 
     #[test]
     fn no_two_portraits_that_share_a_build_bar_are_nearly_the_same_picture() {
         let db = crate::sim::blueprints::BlueprintDb::standard();
-        let pairs = most_alike_portraits(&db);
-        assert!(pairs.len() > 500, "most units are compared: only {} pairs", pairs.len());
-        let (distance, first, second) = pairs[0];
-        assert!(
-            distance >= PORTRAIT_LIKENESS_FLOOR,
-            "{first} and {second} have portraits too alike to tell apart on a button ({distance:.4}): give one a look of its own, then see `cargo run --release --example portrait_likeness`"
-        );
+        for (by, floor) in [(Likeness::Picture, PICTURE_LIKENESS_FLOOR), (Likeness::Outline, OUTLINE_LIKENESS_FLOOR)] {
+            let pairs = most_alike_portraits(&db, by);
+            assert!(pairs.len() > 500, "most units are compared: only {} pairs", pairs.len());
+            let (distance, first, second) = pairs[0];
+            assert!(
+                distance >= floor,
+                "{first} and {second} are too alike by {by:?} to tell apart on a button ({distance:.4}): give one a shape of its own, then see `cargo run --release --example portrait_likeness`"
+            );
+        }
     }
 
     #[test]
     fn the_likeness_measure_finds_one_model_in_two_tiers_more_alike_than_two_units() {
-        let glances: BTreeMap<&str, Vec<[f32; 3]>> = portrait_glances().into_iter().collect();
-        let distance = |first: &str, second: &str| glance_distance(&glances[first], &glances[second]);
-        assert_eq!(distance("t1_medium_tank", "t1_medium_tank"), 0.0);
-        let same_model = distance("t1_light_transport", "t2_transport");
-        let different = distance("t1_medium_tank", "t3_heavy_walker");
-        assert!(same_model * 2.0 < different, "a transport in two tiers ({same_model:.4}) is far more alike than a tank and a walker ({different:.4})");
-        assert!(different < 1.0);
+        let glances: BTreeMap<&str, Glance> = portrait_glances().into_iter().map(|glance| (glance.key, glance)).collect();
+        for by in [Likeness::Picture, Likeness::Outline] {
+            let distance = |first: &str, second: &str| glances[first].distance(&glances[second], by);
+            assert_eq!(distance("t1_medium_tank", "t1_medium_tank"), 0.0);
+            let same_model = distance("t1_light_transport", "t2_transport");
+            let different = distance("t1_medium_tank", "t3_heavy_walker");
+            assert!(same_model * 2.0 < different, "by {by:?}, a transport in two tiers ({same_model:.4}) is far more alike than a tank and a walker ({different:.4})");
+            assert!(different < 1.0);
+        }
     }
 
     #[test]
