@@ -571,8 +571,10 @@ pub fn passes(settings: &MapSettings) -> MapData {
     // Sizes are for 10 km, and scale with the map.
     let scale = |value: i32| value * last / 512;
     // The range: a band across the middle row, rising steeply on both sides. Its valleys: the
-    // center one wide, the rest narrower, spread evenly out to the flanks.
-    let (band, edge, rise, saddle) = (scale(36), 5, 220, 40);
+    // center one wide, the rest narrower, spread evenly out to the flanks. A valley's floor rises
+    // only a little to its saddle, 10 units: at 40 it hid one end of the valley from the other,
+    // so that a point defense at one end could not fire at what stood just past the middle.
+    let (band, edge, rise, saddle) = (scale(36), 5, 220, 10);
     let flanks = settings.valleys as i32 / 2;
     let mut valleys = vec![(middle, scale(20))];
     for step in 1..=flanks {
@@ -864,6 +866,16 @@ mod tests {
         }
         assert_eq!(gaps.len(), 3, "valleys across the middle row: {gaps:?}");
         assert!(gaps[1] > gaps[0] && gaps[1] > gaps[2], "the center valley is the widest: {gaps:?}");
+        // A gun at one end of the center valley fires clear over its saddle to the other: the
+        // straight line between points 12 units up at either end stays above the floor.
+        let height = |y: usize| f64::from(map.heights[y * samples + middle]) / 16.0;
+        let (from, to) = (middle + 40, middle - 40);
+        let (start, end) = (height(from) + 12.0, height(to) + 12.0);
+        for y in to..=from {
+            let along = (from - y) as f64 / (from - to) as f64;
+            let line = start + (end - start) * along;
+            assert!(height(y) < line, "the saddle at row {y}, {:.1} high, hides one end of the valley from the other ({line:.1})", height(y));
+        }
         // The valleys hold more deposits than their share of the ground.
         let in_range = |&&(_, y): &&(u32, u32)| (y as usize).abs_diff(middle) < 40;
         assert!(map.deposits.iter().filter(in_range).count() >= 12, "deposits in the valleys");
