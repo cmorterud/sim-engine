@@ -575,37 +575,44 @@ pub fn passes(settings: &MapSettings) -> MapData {
     // only a little to its saddle, 10 units: at 40 it hid one end of the valley from the other,
     // so that a point defense at one end could not fire at what stood just past the middle.
     let (band, edge, rise, saddle) = (scale(36), 5, 220, 10);
+    // Its edges wander in and out along the map, smoothly, the same on both sides of the middle
+    // column and of the middle row, so that it stays fair while looking natural.
+    let wander = smooth_line(&mut draft.rng, middle + 1, 40, scale(10));
+    let reach = |x: i32| band + wander[x.min(last - x) as usize];
+    // Each valley is an hourglass, two triangles tip to tip: widest where it opens onto either
+    // side, narrowing to its choke at the middle row, so that each mouth is a funnel to fight
+    // over and the choke is short. By center, and half its width at the mouths and at the choke.
     let flanks = settings.valleys as i32 / 2;
-    let mut valleys = vec![(middle, scale(20))];
+    let mut valleys = vec![(middle, scale(30), scale(10))];
     for step in 1..=flanks {
         let offset = scale(150) * step / flanks.max(1);
-        valleys.push((middle - offset, scale(9)));
-        valleys.push((middle + offset, scale(9)));
+        valleys.push((middle - offset, scale(15), scale(5)));
+        valleys.push((middle + offset, scale(15), scale(5)));
     }
-    let gap = |x: i32| {
+    let half_width = |center: i32, mouth: i32, choke: i32, y: i32| {
+        let band = reach(center).max(1);
+        choke + (mouth - choke) * (y - middle).abs().min(band) / band
+    };
+    let gap = |x: i32, y: i32| {
         valleys
             .iter()
-            .map(|&(center, width)| {
-                let off = (x - center).abs();
+            .map(|&(center, mouth, choke)| {
+                let (off, width) = ((x - center).abs(), half_width(center, mouth, choke, y));
                 if off <= width { 256 } else if off < width + edge { 256 * (width + edge - off) / edge } else { 0 }
             })
             .max()
             .unwrap_or(0)
     };
-    // Its edges wander in and out along the map, smoothly, the same on both sides of the middle
-    // column and of the middle row, so that it stays fair while looking natural.
-    let wander = smooth_line(&mut draft.rng, middle + 1, 40, scale(10));
-    let reach = |x: i32| band + wander[x.min(last - x) as usize];
     let across = |x: i32, y: i32| {
         let (off, band) = ((y - middle).abs(), reach(x));
         if off <= band { 256 } else if off < band + edge { 256 * (band + edge - off) / edge } else { 0 }
     };
-    let ridge = |x: i32, y: i32| rise * across(x, y) * (256 - gap(x)) / 65_536;
+    let ridge = |x: i32, y: i32| rise * across(x, y) * (256 - gap(x, y)) / 65_536;
     for y in 0..=last {
         for x in 0..=last {
             // A valley's floor rises gently toward the middle row, to a saddle.
             let toward = (band + edge - (y - middle).abs()).max(0);
-            let up = (ridge(x, y) << HEIGHT_FRAC_BITS) + ((saddle * gap(x) * toward / (256 * (band + edge))) << HEIGHT_FRAC_BITS);
+            let up = (ridge(x, y) << HEIGHT_FRAC_BITS) + ((saddle * gap(x, y) * toward / (256 * (band + edge))) << HEIGHT_FRAC_BITS);
             let height = &mut draft.heights[y as usize * draft.samples + x as usize];
             *height = (i32::from(*height) + up).clamp(0, i32::from(i16::MAX)) as i16;
         }
@@ -617,7 +624,7 @@ pub fn passes(settings: &MapSettings) -> MapData {
             break;
         }
         let at = (6 + draft.rng.below((middle - 6) as u32) as i32, middle + draft.rng.below(band as u32) as i32);
-        if gap(at.0 - 10).max(gap(at.0 + 10)) > 0 {
+        if gap(at.0 - 10, at.1).max(gap(at.0 + 10, at.1)) > 0 {
             continue;
         }
         let (radius, height) = (3 + draft.rng.below(6) as i32, 30 + draft.rng.below(60) as i32);
@@ -653,12 +660,15 @@ pub fn passes(settings: &MapSettings) -> MapData {
     for offset in [(-6, -4), (5, -6), (-4, 7), (7, 5)] {
         layout.deposit_four((team.0 + offset.0, team.1 + offset.1));
     }
-    // The valleys hold the richest: eight in the center one, two in each of the others.
-    for at in [(middle - 8, middle + 14), (middle - 4, middle + 28)] {
+    // The valleys hold the richest, out in their funnels three quarters of the way to the
+    // mouths: eight in the center one, two in each of the others.
+    let funnel = |center: i32| middle + reach(center) * 3 / 4;
+    for at in [(middle - scale(14), funnel(middle)), (middle - scale(5), funnel(middle) + 3)] {
         layout.deposit_four(at);
     }
     for step in 1..=flanks {
-        layout.deposit_four((middle - scale(150) * step / flanks.max(1) - 3, middle + 18));
+        let center = middle - scale(150) * step / flanks.max(1);
+        layout.deposit_four((center - scale(4), funnel(center)));
     }
     // A vent a short walk from every base.
     for start in [duel, team] {
@@ -875,6 +885,30 @@ mod tests {
             let along = (from - y) as f64 / (from - to) as f64;
             let line = start + (end - start) * along;
             assert!(height(y) < line, "the saddle at row {y}, {:.1} high, hides one end of the valley from the other ({line:.1})", height(y));
+        }
+        // Each valley is an hourglass: narrower at the middle row than out toward its mouths.
+        let gaps_on = |row: usize| {
+            let mut gaps = Vec::new();
+            let mut run = 0;
+            for x in 0..cells {
+                if map.blocked[row * cells + x] {
+                    if run > 0 {
+                        gaps.push(run);
+                    }
+                    run = 0;
+                } else {
+                    run += 1;
+                }
+            }
+            if run > 0 {
+                gaps.push(run);
+            }
+            gaps
+        };
+        let toward_mouth = gaps_on(middle + 20);
+        assert_eq!(toward_mouth.len(), 3, "the valleys toward their mouths: {toward_mouth:?}");
+        for (choke, wider) in gaps.iter().zip(&toward_mouth) {
+            assert!(wider > choke, "a valley {choke} cells wide at its choke and {wider} toward its mouth");
         }
         // The valleys hold more deposits than their share of the ground.
         let in_range = |&&(_, y): &&(u32, u32)| (y as usize).abs_diff(middle) < 40;
