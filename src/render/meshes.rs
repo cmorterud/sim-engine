@@ -522,6 +522,7 @@ impl MeshBuilder {
 
     /// A low-poly ball, from pole to pole in `rings` bands of `sides` faces.
     fn ball(&mut self, center: [f32; 3], radius: f32, sides: usize, rings: usize) {
+        let (sides, rings) = (round_sides(sides, radius), round_sides(rings * 2, radius) / 2);
         let middle = Vec3::from(center);
         let at = |ring: usize, side: usize| {
             let up = -std::f32::consts::FRAC_PI_2 + ring as f32 / rings as f32 * std::f32::consts::PI;
@@ -709,6 +710,7 @@ impl MeshBuilder {
     /// A rounded body along Y, such as a fuselage or an engine, through cross-sections of
     /// `sides` sides, each `[y, half width, half height, height of its middle]`, centered on `x`.
     fn body(&mut self, x: f32, stations: &[[f32; 4]], sides: usize) {
+        let sides = round_sides(sides, stations.iter().map(|station| station[1].max(station[2])).fold(0.0, f32::max));
         let ring = |station: [f32; 4]| {
             (0..sides)
                 .map(|index| {
@@ -1002,6 +1004,7 @@ impl MeshBuilder {
 
     /// A round-ish solid from one radius to another. A top radius of zero makes a cone.
     fn frustum(&mut self, center: [f32; 2], z: [f32; 2], radius: [f32; 2], sides: usize) {
+        let sides = round_sides(sides, radius[0].max(radius[1]));
         // The small offset keeps vertices off the axes, which dots rely on when zoomed out.
         let point = |index: usize, radius: f32, z: f32| {
             let angle = 0.3 + index as f32 / sides as f32 * std::f32::consts::TAU;
@@ -2826,6 +2829,52 @@ const fn occlusion_ground(shape: Shape) -> Option<bool> {
     }
 }
 
+/// Faces meeting at less than this angle, in degrees, are shaded as one smooth surface, so that
+/// round parts look round; sharper edges stay crisp: a box's corners, a bevel's 45 degrees, and
+/// the rim of a cylinder's cap. Until 2026-11-23 every face was shaded flat, which made every
+/// unit look cut from facets.
+const SMOOTH_CREASE_DEGREES: f32 = 40.0;
+/// Round parts asked for at least `ROUND_SIDES_LEAST` sides, and as wide as `ROUND_SIDES_RADIUS`
+/// or wider, in shares of the shape's box, are drawn with twice as many, up to
+/// `ROUND_SIDES_MOST`, so that their outlines look round too. Narrower parts, such as barrels and
+/// bollards, are too small for their outline to show, and smooth shading is enough. Parts of
+/// fewer sides, such as boulders, are faceted on purpose and keep theirs.
+const ROUND_SIDES_LEAST: usize = 6;
+const ROUND_SIDES_RADIUS: f32 = 0.06;
+const ROUND_SIDES_MOST: usize = 24;
+
+/// How many sides a round part of `radius` asked for with `sides` is drawn with
+/// (`ROUND_SIDES_LEAST`).
+fn round_sides(sides: usize, radius: f32) -> usize {
+    if sides < ROUND_SIDES_LEAST || radius < ROUND_SIDES_RADIUS {
+        return sides;
+    }
+    let doubled = if sides * 2 < ROUND_SIDES_MOST { sides * 2 } else { ROUND_SIDES_MOST };
+    if doubled > sides { doubled } else { sides }
+}
+
+/// Shades faces that meet at a shallow angle as one smooth surface (`SMOOTH_CREASE_DEGREES`):
+/// each vertex from `first` on takes the mean of the normals of the faces at its point that lie
+/// within the crease of its own face, among parts that move alike.
+fn smooth_normals(vertices: &mut [MeshVertex], first: usize) {
+    let crease = SMOOTH_CREASE_DEGREES.to_radians().cos();
+    let quantize = |value: f32| (value * 8192.0).round() as i32;
+    let motion_bits = |material: u32| material & !(motion::MATERIAL_MASK | (0xff << motion::OPENNESS_SHIFT));
+    let key = |vertex: &MeshVertex| (vertex.position.map(quantize), vertex.pivot.map(quantize), motion_bits(vertex.material));
+    let mut groups: std::collections::BTreeMap<_, Vec<usize>> = std::collections::BTreeMap::new();
+    for (index, vertex) in vertices.iter().enumerate().skip(first) {
+        groups.entry(key(vertex)).or_default().push(index);
+    }
+    let faces: Vec<Vec3> = vertices.iter().map(|vertex| Vec3::from(vertex.normal)).collect();
+    for members in groups.values().filter(|members| members.len() > 1) {
+        for &index in members {
+            let own = faces[index];
+            let sum: Vec3 = members.iter().map(|&other| faces[other]).filter(|normal| normal.dot(own) >= crease).sum();
+            vertices[index].normal = sum.try_normalize().unwrap_or(own).to_array();
+        }
+    }
+}
+
 /// The longest a side of a four-sided face may be, in shares of the shape's box, before the
 /// face is cut into a grid for its shading.
 const SUBDIVIDE_EDGE: f32 = 0.25;
@@ -2939,6 +2988,7 @@ impl MeshSet {
             let first_vertex = mesh.vertices.len();
             mesh.subdivide = occlusion_ground(shape).is_some();
             build_shape(shape, &mut mesh);
+            smooth_normals(&mut mesh.vertices, first_vertex);
             let end = mesh.indices.len() as u32;
             if let Some(grounded) = occlusion_ground(shape) {
                 bake_openness(&mut mesh.vertices, first_vertex, &mesh.indices[start as usize..end as usize], grounded);
@@ -3075,8 +3125,9 @@ pub(super) mod tests {
         seen
     }
 
-    /// The most triangles one shape may have, so that a crowd of units stays cheap to draw.
-    const TRIANGLE_BUDGET: u32 = 1_200;
+    /// The most triangles one shape may have, so that a crowd of units stays cheap to draw. Raised
+    /// from 1,200 on 2026-11-23, when round parts were given more sides.
+    const TRIANGLE_BUDGET: u32 = 1_600;
 
     #[test]
     fn every_shape_keeps_to_its_triangle_budget() {
