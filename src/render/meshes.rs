@@ -272,10 +272,13 @@ pub enum Shape {
     /// The T3 artillery's emplacement, filling its four by four footprint: a slab ringed by
     /// sloped revetments, bunkers at its corners, ammunition rails, and a turntable for the gun.
     ArtilleryEmplacement,
+    /// The mobile flak's hull: short, with wide-set tracks, and stabilizer legs splayed at its
+    /// corners, so that it reads as an X from above.
+    FlakHull,
 }
 
 impl Shape {
-    pub const ALL: [Self; 127] = [
+    pub const ALL: [Self; 128] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -403,6 +406,7 @@ impl Shape {
         Self::FabricatorT3,
         Self::FieldWorkshopT3,
         Self::ArtilleryEmplacement,
+        Self::FlakHull,
     ];
     pub const COUNT: usize = Self::ALL.len();
 
@@ -462,7 +466,7 @@ impl Shape {
 
     /// Whether the shape runs on tracks, and leaves their marks on the ground behind it.
     pub const fn leaves_tracks(self) -> bool {
-        matches!(self, Self::TankHull | Self::HeavyTankHull | Self::ArtilleryHull | Self::EngineerHull | Self::CasemateHull | Self::CombatEngineerHull)
+        matches!(self, Self::TankHull | Self::HeavyTankHull | Self::ArtilleryHull | Self::EngineerHull | Self::CasemateHull | Self::CombatEngineerHull | Self::FlakHull)
     }
 
     /// Whether the shape is a pair of legs, which swing as the unit walks.
@@ -1296,22 +1300,22 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         }
         // A hull with a sloped front and an engine grille, between tracks under fenders.
         Shape::TankHull => {
-            // Narrow, so that the tank is longer than it is wide, with its gun reaching out ahead.
+            // Long and lean: narrow tracks and a long hull, under a turret that overhangs it.
             mesh.paint(Material::Metal);
-            for (low, high) in [(-0.34_f32, -0.18_f32), (0.18, 0.34)] {
-                mesh.bevel([low, -0.5, -0.5], [high, 0.3, -0.26], 0.05);
+            for (low, high) in [(-0.3_f32, -0.16_f32), (0.16, 0.3)] {
+                mesh.bevel([low, -0.5, -0.5], [high, 0.34, -0.27], 0.05);
             }
             mesh.paint(Material::Hull);
-            for (low, high) in [(-0.35_f32, -0.16_f32), (0.16, 0.35)] {
-                mesh.block([low, -0.5, -0.26], [high, 0.32, -0.23]);
+            for (low, high) in [(-0.31_f32, -0.15_f32), (0.15, 0.31)] {
+                mesh.block([low, -0.5, -0.27], [high, 0.36, -0.24]);
             }
             mesh.cuboid(
-                [Vec3::new(-0.2, -0.46, -0.44), Vec3::new(0.2, -0.46, -0.44), Vec3::new(0.2, 0.3, -0.44), Vec3::new(-0.2, 0.3, -0.44)],
-                [Vec3::new(-0.2, -0.46, -0.1), Vec3::new(0.2, -0.46, -0.1), Vec3::new(0.2, 0.1, -0.1), Vec3::new(-0.2, 0.1, -0.1)],
+                [Vec3::new(-0.17, -0.47, -0.44), Vec3::new(0.17, -0.47, -0.44), Vec3::new(0.17, 0.36, -0.44), Vec3::new(-0.17, 0.36, -0.44)],
+                [Vec3::new(-0.17, -0.47, -0.1), Vec3::new(0.17, -0.47, -0.1), Vec3::new(0.17, 0.12, -0.1), Vec3::new(-0.17, 0.12, -0.1)],
             );
             mesh.paint(Material::Metal);
-            for y in [-0.41_f32, -0.34, -0.27] {
-                mesh.block([-0.12, y - 0.022, -0.1], [0.12, y + 0.022, -0.085]);
+            for y in [-0.42_f32, -0.35, -0.28] {
+                mesh.block([-0.11, y - 0.022, -0.1], [0.11, y + 0.022, -0.085]);
             }
         }
         // A team-colored turret with a sloped front, a mantlet, a long gun with a muzzle brake,
@@ -1332,30 +1336,31 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.frustum([0.08, -0.15], [0.13, 0.18], [0.05, 0.045], 8);
         }
         Shape::HeavyTankHull => {
+            // A wide slab, wider than it is long: tracks out to the edges, under skirts.
             mesh.paint(Material::Metal);
-            for (low, high) in [(-0.41_f32, -0.27_f32), (0.27, 0.41)] {
-                mesh.bevel([low, -0.5, -0.5], [high, 0.3, -0.26], 0.05);
+            for (low, high) in [(-0.47_f32, -0.31_f32), (0.31, 0.47)] {
+                mesh.bevel([low, -0.46, -0.5], [high, 0.3, -0.26], 0.05);
             }
             // Armored skirts over the upper run of the tracks, team-colored along their length:
             // the heavy tank's mark from above.
             mesh.paint(Material::Hull);
-            for (low, high) in [(-0.417_f32, -0.26_f32), (0.26, 0.417)] {
-                mesh.bevel([low, -0.48, -0.38], [high, 0.28, -0.2], 0.02);
+            for (low, high) in [(-0.49_f32, -0.29_f32), (0.29, 0.49)] {
+                mesh.bevel([low, -0.44, -0.38], [high, 0.28, -0.2], 0.02);
             }
             mesh.paint(Material::Trim);
-            for (low, high) in [(-0.417_f32, -0.28_f32), (0.28, 0.417)] {
-                mesh.block([low, -0.46, -0.2], [high, 0.26, -0.17]);
+            for (low, high) in [(-0.48_f32, -0.31_f32), (0.31, 0.48)] {
+                mesh.block([low, -0.42, -0.2], [high, 0.26, -0.17]);
             }
             // The body, with a long sloped front.
             mesh.paint(Material::Hull);
             mesh.cuboid(
-                [Vec3::new(-0.27, -0.46, -0.46), Vec3::new(0.27, -0.46, -0.46), Vec3::new(0.27, 0.32, -0.46), Vec3::new(-0.27, 0.32, -0.46)],
-                [Vec3::new(-0.27, -0.46, -0.06), Vec3::new(0.27, -0.46, -0.06), Vec3::new(0.27, 0.06, -0.06), Vec3::new(-0.27, 0.06, -0.06)],
+                [Vec3::new(-0.31, -0.44, -0.46), Vec3::new(0.31, -0.44, -0.46), Vec3::new(0.31, 0.32, -0.46), Vec3::new(-0.31, 0.32, -0.46)],
+                [Vec3::new(-0.31, -0.44, -0.06), Vec3::new(0.31, -0.44, -0.06), Vec3::new(0.31, 0.06, -0.06), Vec3::new(-0.31, 0.06, -0.06)],
             );
             // Engine grilles on the back deck.
             mesh.paint(Material::Panel);
-            for y in [-0.4_f32, -0.32, -0.24] {
-                mesh.block([-0.18, y - 0.025, -0.06], [0.18, y + 0.025, -0.05]);
+            for y in [-0.39_f32, -0.31, -0.23] {
+                mesh.block([-0.2, y - 0.025, -0.06], [0.2, y + 0.025, -0.05]);
             }
         }
         Shape::HeavyTank => {
@@ -3021,6 +3026,27 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.workshop_mast([0.22, 0.22], [-0.22, 0.02], 0.42);
             mesh.workshop_lights();
         }
+        Shape::FlakHull => {
+            mesh.paint(Material::Metal);
+            for (low, high) in [(-0.44_f32, -0.29_f32), (0.29, 0.44)] {
+                mesh.bevel([low, -0.36, -0.5], [high, 0.3, -0.28], 0.05);
+            }
+            mesh.paint(Material::Hull);
+            for (low, high) in [(-0.45_f32, -0.28_f32), (0.28, 0.45)] {
+                mesh.block([low, -0.36, -0.28], [high, 0.32, -0.25]);
+            }
+            mesh.cuboid(
+                [Vec3::new(-0.29, -0.34, -0.46), Vec3::new(0.29, -0.34, -0.46), Vec3::new(0.29, 0.3, -0.46), Vec3::new(-0.29, 0.3, -0.46)],
+                [Vec3::new(-0.26, -0.3, -0.12), Vec3::new(0.26, -0.3, -0.12), Vec3::new(0.26, 0.16, -0.12), Vec3::new(-0.26, 0.16, -0.12)],
+            );
+            // Stabilizer legs splayed out at the four corners, each on a pad.
+            mesh.paint(Material::Metal);
+            for (x, y) in [(-1.0_f32, -1.0_f32), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+                let foot = [x * 0.45, if y > 0.0 { 0.3 } else { -0.32 }, -0.46];
+                mesh.beam([x * 0.3, y * 0.2, -0.3], foot, 0.026, 0.026);
+                mesh.bevel([foot[0] - 0.04, foot[1] - 0.04, -0.5], [foot[0] + 0.04, foot[1] + 0.04, -0.46], 0.01);
+            }
+        }
         Shape::Airfield => {
             mesh.paint(Material::Hull);
             mesh.block([-0.5, -0.5, -0.5], [0.5, 0.5, -0.3]);
@@ -3192,9 +3218,9 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.bevel([-0.17, -0.26, -0.1], [0.17, 0.06, 0.08], 0.03);
             mesh.paint(Material::Metal);
             for x in [-0.09_f32, -0.03, 0.03, 0.09] {
-                mesh.moving(motion::RECOIL, [x, 0.04, 0.0], |mesh| mesh.beam([x, 0.04, 0.0], [x, 0.46, 0.2], 0.018, 0.018));
+                mesh.moving(motion::RECOIL, [x, 0.04, 0.02], |mesh| mesh.beam([x, 0.04, 0.02], [x, 0.34, 0.22], 0.018, 0.018));
             }
-            mesh.flash([0.0, 0.46, 0.2], 0.07);
+            mesh.flash([0.0, 0.34, 0.22], 0.07);
             // A radar panel on a mast behind the guns, turning.
             mesh.paint(Material::Metal);
             mesh.frustum([0.0, -0.2], [0.08, 0.26], [0.016, 0.012], 6);
@@ -3312,6 +3338,7 @@ const fn sloped_armor(shape: Shape) -> bool {
             | Shape::TruckAntiAir
             | Shape::WheeledHull
             | Shape::FlakTurret
+            | Shape::FlakHull
             | Shape::HoverHull
             | Shape::MissileRack
             | Shape::MissileTruck
