@@ -684,6 +684,7 @@ mod tests {
             assembling: None,
             upgrade: None,
             remembered: false,
+            ally: false,
         }
     }
 

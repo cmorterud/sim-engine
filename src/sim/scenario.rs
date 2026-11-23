@@ -333,6 +333,8 @@ pub fn from_map_teams(map: &MapData, seed: u64, per_team: usize) -> Option<Scena
 pub enum MapSource {
     Skirmish,
     Map(std::sync::Arc<MapData>),
+    /// A map from a file, with this many players a side, more than one (`MapSource::teams`).
+    Teams(std::sync::Arc<MapData>, usize),
     Playtest,
     Scenario(std::sync::Arc<super::playtest_scenarios::PlaytestScenario>),
 }
@@ -343,8 +345,25 @@ impl MapSource {
     pub fn scenario_teams(&self, seed: u64, per_team: usize) -> Option<Scenario> {
         match (self, per_team) {
             (_, 1) => Some(self.scenario(seed)),
-            (Self::Map(map), _) => from_map_teams(map, seed, per_team),
+            (Self::Map(map) | Self::Teams(map, _), _) => from_map_teams(map, seed, per_team),
             _ => None,
+        }
+    }
+
+    /// This map with `per_team` players a side, if it has starts for that many.
+    pub fn teams(self, per_team: usize) -> Option<Self> {
+        match (self, per_team) {
+            (source, 1) => Some(source),
+            (Self::Map(map) | Self::Teams(map, _), _) => map.layouts.iter().any(|layout| layout.len() == per_team * 2).then_some(Self::Teams(map, per_team)),
+            _ => None,
+        }
+    }
+
+    /// Players a side.
+    pub const fn per_team(&self) -> usize {
+        match self {
+            Self::Teams(_, per_team) => *per_team,
+            _ => 1,
         }
     }
 
@@ -352,6 +371,7 @@ impl MapSource {
         match self {
             Self::Skirmish => skirmish(seed),
             Self::Map(map) => from_map(map, seed),
+            Self::Teams(map, per_team) => from_map_teams(map, seed, *per_team).expect("checked by MapSource::teams"),
             Self::Playtest => super::playtest::playtest(seed),
             Self::Scenario(scenario) => scenario.build(seed, true),
         }

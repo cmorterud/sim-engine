@@ -44,6 +44,11 @@ fn remembered_color(color: [f32; 3]) -> [f32; 3] {
     color.map(|channel| (channel + (grey - channel) * REMEMBERED_GREY) * REMEMBERED_SHADE)
 }
 pub(super) const RED: [f32; 3] = [1.00, 0.27, 0.22];
+/// An ally's units, another player's on the same team, in a team match: a lighter shade of the
+/// team's color, cyan beside Blue's blue and orange beside Red's red, so that the person's own
+/// stand apart from their ally's.
+pub(super) const BLUE_ALLY: [f32; 3] = [0.25, 0.85, 0.95];
+pub(super) const RED_ALLY: [f32; 3] = [1.00, 0.62, 0.18];
 const SELECTED: [f32; 3] = [0.25, 1.00, 0.35];
 const SHELL: [f32; 3] = [1.00, 0.85, 0.35];
 const DISCHARGE_SHELL: [f32; 3] = [0.75, 0.95, 1.00];
@@ -592,9 +597,11 @@ pub fn build_unit_instances(
             next_work += 1;
         }
         let working_on = work.get(next_work).filter(|link| link.builder == unit.id);
-        let color = match unit.team {
-            Team::Blue => BLUE,
-            Team::Red => RED,
+        let color = match (unit.team, unit.ally) {
+            (Team::Blue, false) => BLUE,
+            (Team::Red, false) => RED,
+            (Team::Blue, true) => BLUE_ALLY,
+            (Team::Red, true) => RED_ALLY,
         };
         let look = looks.get(usize::from(unit.blueprint));
         let tint = look.and_then(|look| look.tint);
@@ -900,6 +907,7 @@ mod tests {
             assembling: None,
             upgrade: None,
             remembered: false,
+            ally: false,
         }
     }
 
@@ -1520,6 +1528,22 @@ mod tests {
         let (slab_bottom, slab_top) = (f64::from(slab.model_matrix[3][2] - slab.model_matrix[2][2] * 0.5), f64::from(slab.model_matrix[3][2] + slab.model_matrix[2][2] * 0.5));
         assert!(slab_bottom < low, "its slab reaches below the lowest ground, {low}: {slab_bottom}");
         assert!(slab_top >= foot, "and up to where it stands: {slab_top} against {foot}");
+    }
+
+    /// An ally's units, another player's on the same team, are drawn in a lighter shade of the
+    /// team's color, so that the person's own stand apart from theirs.
+    #[test]
+    fn an_allys_units_take_a_lighter_shade_of_the_team_color() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let mut generator = unit(1, 0);
+        (generator.blueprint, generator.is_structure) = (db.id("power_generator").0, true);
+        let allys = UnitView { id: SimId(2), ally: true, ..generator };
+        let mut out = InstanceBatches::default();
+        build_unit_instances(&[], &[generator, allys], 0.0, [0.0; 3], &[], &looks, &[], &mut Motion::new(), &mut out);
+        let [mine, theirs] = out.shape(Shape::Generator) else { panic!("two generators") };
+        assert_eq!(mine.color[..3], BLUE);
+        assert_eq!(theirs.color[..3], BLUE_ALLY, "an ally's in its own shade");
     }
 
     #[test]

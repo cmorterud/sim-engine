@@ -131,18 +131,19 @@
         <h2>Opponents</h2>
         <div class="row">
           <div class="field">
-            <label for="opponents">AI opponents</label>
-            <select id="opponents" aria-describedby="opponents-hint">
-              <option value="1" selected>1</option>
-            </select>
-            <span class="hint" id="opponents-hint">One for now: matches are one on one.</span>
-          </div>
-          <div class="field">
             <label for="ai">Difficulty</label>
             <select id="ai" name="ai">
               <option value="easy" selected>Easy</option>
               <option value="normal">Normal</option>
             </select>
+          </div>
+          <div class="field">
+            <label for="teams">Players</label>
+            <select id="teams" name="teams" aria-describedby="teams-hint">
+              <option value="1v1" selected>1v1</option>
+              <option value="2v2">2v2, with an AI ally</option>
+            </select>
+            <span class="hint" id="teams-hint">2v2 needs a map with team starts: Saddleback.</span>
           </div>
           <div class="field">
             <label for="strategy">Strategy</label>

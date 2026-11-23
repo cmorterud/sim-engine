@@ -74,6 +74,13 @@ fn parse_opponent(name: &str) -> Option<(Difficulty, Option<String>)> {
     }
 }
 
+/// `--teams`' value, as players a side: "2v2" is 2.
+fn parse_teams(name: &str) -> Option<usize> {
+    let (a, b) = name.split_once('v')?;
+    let (a, b): (usize, usize) = (a.parse().ok()?, b.parse().ok()?);
+    (a == b && (1..=4).contains(&a)).then_some(a)
+}
+
 /// Whether `--strategy` may be this: a strategy's id, or "random".
 fn is_strategy(name: &str) -> bool {
     name == "random" || Strategy::named(name).is_some()
@@ -130,7 +137,9 @@ Usage: sim-engine [options]
                        shared machines such as CI runners
   --seed <number>      Scenario seed
   --sound-check        Play each sound in turn, and exit
-  --map <name>         Play on a map that comes with the game: highland or twin_passes,
+  --teams <1v1|2v2>    Players a side (default 1v1): 2v2 puts an AI ally beside you, against
+                       two AIs, on a map with team starts, such as saddleback
+  --map <name>         Play on a map that comes with the game: highland, twin_passes, or saddleback,
                        for any of the modes above, or playtest: a sandbox with 5 of every
                        unit and no commander, against two coastal bases that a turtling
                        AI holds
@@ -230,6 +239,8 @@ struct Options {
     strategy: Option<String>,
     /// What Blue and Red play in a soak.
     soak_strategies: Option<[&'static Strategy; 2]>,
+    /// Players a side: 1, a 1v1, unless asked for a team match on a map with the starts for it.
+    per_team: usize,
     /// Watch the soak's AI-vs-AI match for the map and seed instead of playing.
     watch: bool,
     /// Whose sight a watched match starts in: `None` for everything.
@@ -277,6 +288,7 @@ fn parse_options() -> Result<Option<Options>, String> {
         (options.difficulty, options.strategy) = parse_opponent(&name).map_or((None, None), |(difficulty, strategy)| (Some(difficulty), strategy));
     }
     options.strategy = params.get("strategy").filter(|name| is_strategy(name)).or(options.strategy);
+    options.per_team = params.get("teams").and_then(|name| parse_teams(&name)).unwrap_or(1);
     options.watch = params.has("watch");
     options.view = params.get("view").and_then(|name| parse_view(&name)).flatten();
     options.no_fog = params.get("fog").and_then(|name| parse_switch(&name)) == Some(false);
@@ -353,6 +365,9 @@ fn parse_options() -> Result<Option<Options>, String> {
                 options.difficulty = Some(difficulty);
                 options.strategy = strategy.or(options.strategy.take());
             }
+            "--teams" => {
+                options.per_team = parse_teams(&value("--teams")?).ok_or("--teams needs 1v1, 2v2, 3v3, or 4v4")?;
+            }
             "--strategies" => {
                 let names = value("--strategies")?;
                 let pair: Vec<Option<&'static Strategy>> = names.split(',').map(Strategy::named).collect();
@@ -423,6 +438,18 @@ fn main() {
             std::process::exit(1);
         }
     };
+    // A team match, on a map with starts for that many a side (GAME_SPECIFICATION.md §17.2).
+    let per_team = options.per_team.max(1);
+    let map_source = match map_source.clone().teams(per_team) {
+        Some(source) => source,
+        None => {
+            println!("this map has no starts for {per_team}v{per_team}: Saddleback holds 2v2");
+            #[cfg(not(target_arch = "wasm32"))]
+            std::process::exit(1);
+            #[cfg(target_arch = "wasm32")]
+            map_source
+        }
+    };
     if options.sound_check {
         sound_check();
         return;
@@ -444,6 +471,9 @@ fn main() {
     if let Some(matches) = options.soak {
         let strategies = options.soak_strategies.unwrap_or([Strategy::balanced(); 2]);
         println!("strategies: blue {}, red {}", strategies[0].id, strategies[1].id);
+        if map_source.per_team() > 1 {
+            println!("teams: {0}v{0}", map_source.per_team());
+        }
         let mut report = run_soak(options.seed.unwrap_or(1), matches, options.threads.unwrap_or(6), &map_source, strategies);
         if !report.print(!options.no_tick_gate) {
             std::process::exit(1);
@@ -475,7 +505,7 @@ fn run_headless(seed: u64, ticks: u32, battle: bool, map: &MapSource, fog: bool)
     let scenario = make_scenario(seed, battle, map, fog);
     let opening = scenario.opening_commands;
     let mut world = scenario.world;
-    let mut brains = [AiBrain::new(Team::Blue, seed, world.starts), AiBrain::new(Team::Red, seed, world.starts)];
+    let mut brains: Vec<AiBrain> = (0..world.players.len()).map(|player| AiBrain::for_player(&world, sim_engine::sim::components::PlayerId(player as u8), seed, Difficulty::Normal, Strategy::balanced())).collect();
     let started = Instant::now();
     while world.current_tick < ticks && world.match_result.is_none() {
         if battle {
@@ -981,6 +1011,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     let map_name = match &map_source {
         MapSource::Skirmish => "Skirmish".to_string(),
         MapSource::Map(map) => display_name(&map.name),
+        MapSource::Teams(map, per_team) => format!("{} ({per_team}v{per_team})", display_name(&map.name)),
         MapSource::Playtest => "Playtest".to_string(),
         MapSource::Scenario(scenario) => scenario.title.clone(),
     };

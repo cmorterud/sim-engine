@@ -2350,7 +2350,10 @@ pub fn play_match_on(map: &MapSource, seed: u64, max_ticks: u32, observe: impl F
 /// `play_match_on`, with Blue and Red each playing a strategy, both at Normal.
 pub fn play_match_with(map: &MapSource, seed: u64, max_ticks: u32, strategies: [&'static Strategy; 2], mut observe: impl FnMut(&SimWorld)) -> MatchRecord {
     let mut world = map.scenario(seed).world;
-    let mut brains = [Team::Blue, Team::Red].map(|team| AiBrain::with_plan(team, seed, world.starts, Difficulty::Normal, strategies[team.index()]));
+    // An AI for every player, each playing its team's strategy.
+    let mut brains: Vec<AiBrain> = (0..world.players.len())
+        .map(|player| AiBrain::for_player(&world, PlayerId(player as u8), seed, Difficulty::Normal, strategies[world.players[player].index()]))
+        .collect();
     let mut record = MatchRecord { seed, ticks: 0, result: None, checksums: Vec::new(), log: Vec::new(), units_built_peak: 0 };
     while world.current_tick < max_ticks && world.match_result.is_none() {
         let commands = advance_ai_vs_ai(&mut world, &mut brains);

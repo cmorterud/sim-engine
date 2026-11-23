@@ -97,6 +97,7 @@ fn battlefield() -> Effects {
             assembling: None,
             upgrade: None,
             remembered: false,
+            ally: false,
         });
         after.wrecks.push(WreckView { id: SimId(3_000 + index), x: raw(x), y: raw(y), z: raw(z), radius: raw(radius), mass: 1, energy: 0, kind: WreckKind::Debris });
     }

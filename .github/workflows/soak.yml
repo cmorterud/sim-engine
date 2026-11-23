@@ -14,6 +14,9 @@ on:
       bundled_matches:
         description: Matches on each bundled map
         default: "120"
+      team_matches:
+        description: 2v2 matches on Saddleback
+        default: "60"
       shard_size:
         description: Matches per runner
         default: "25"
@@ -36,7 +39,8 @@ env:
 jobs:
   # Splits the matches into shards of seeds, one runner each. A push plays the 200 skirmish
   # matches of the exit criteria and 120 on each bundled map (Highland, Twin Passes, and
-  # Saddleback): enough matches that a side winning 60% of them stands out from chance.
+  # Saddleback): enough matches that a side winning 60% of them stands out from chance. And 60
+  # 2v2s on Saddleback, four AIs, which take longer each.
   plan:
     name: Plan the shards
     runs-on: ubuntu-latest
@@ -48,20 +52,24 @@ jobs:
           SKIRMISH: ${{ inputs.skirmish_matches || '200' }}
           BUNDLED: ${{ inputs.bundled_matches || '120' }}
           SHARD: ${{ inputs.shard_size || '25' }}
+          TEAMS: ${{ inputs.team_matches || '60' }}
         run: |
           python3 - <<'EOF' >> "$GITHUB_OUTPUT"
           import json, os
           shard = max(1, int(os.environ["SHARD"]))
           shards = []
-          for map_name, matches in [("skirmish", int(os.environ["SKIRMISH"])),
-                                    ("highland", int(os.environ["BUNDLED"])),
-                                    ("twin_passes", int(os.environ["BUNDLED"])),
-                                    ("saddleback", int(os.environ["BUNDLED"]))]:
+          for map_name, matches, teams in [("skirmish", int(os.environ["SKIRMISH"]), ""),
+                                           ("highland", int(os.environ["BUNDLED"]), ""),
+                                           ("twin_passes", int(os.environ["BUNDLED"]), ""),
+                                           ("saddleback", int(os.environ["BUNDLED"]), ""),
+                                           ("saddleback", int(os.environ["TEAMS"]), "2v2")]:
               for first in range(1, matches + 1, shard):
                   count = min(shard, matches + 1 - first)
                   map_arg = "" if map_name == "skirmish" else f"--map {map_name} "
-                  shards.append({"name": f"{map_name} {first}-{first + count - 1}",
-                                 "args": f"{map_arg}--soak {count} --seed {first}"})
+                  team_arg = f" --teams {teams}" if teams else ""
+                  label = f"{map_name} {teams}".strip()
+                  shards.append({"name": f"{label} {first}-{first + count - 1}",
+                                 "args": f"{map_arg}--soak {count} --seed {first}{team_arg}"})
           print("shards=" + json.dumps(shards))
           EOF
 
@@ -168,7 +176,8 @@ jobs:
           for path in sorted(glob.glob("soak-*/soak.txt")):
               text = open(path).read()
               mapname = re.search(r"^map (\S+):", text, re.M)
-              key = mapname.group(1) if mapname else "skirmish"
+              teams = re.search(r"^teams: (\S+)", text, re.M)
+              key = (mapname.group(1) if mapname else "skirmish") + (f" {teams.group(1)}" if teams else "")
               t = totals.setdefault(key, [0, 0, 0, 0, 0, [], []])
               wins = re.search(r"Blue wins (\d+), Red wins (\d+), draws (\d+), unfinished (\d+)", text)
               mismatches = re.search(r"replay mismatches (\d+)", text)

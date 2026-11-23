@@ -164,6 +164,9 @@ pub struct UnitView {
     /// An enemy structure out of sight, as the viewer last saw it (`KnownStructure`): drawn
     /// faded, with the health it had then. It may be gone.
     pub remembered: bool,
+    /// Whether it belongs to an ally: a player of its team other than the team's first, the
+    /// one a person plays. Theirs to command, not the person's, so it cannot be selected.
+    pub ally: bool,
 }
 
 /// A factory's production state, for the build menu. Only for the viewer's team.
@@ -4209,6 +4212,7 @@ impl SimWorld {
                 (seen(stats.team, x, y) && !cloaked_away).then(|| UnitView {
                     id,
                     team: stats.team,
+                    ally: stats.owner != self.first_player(stats.team),
                     x,
                     y,
                     z,
@@ -4260,6 +4264,7 @@ impl SimWorld {
                 units.push(UnitView {
                     id: record.id,
                     team: viewer.enemy(),
+                    ally: false,
                     x: record.x,
                     y: record.y,
                     z: record.z,

@@ -156,9 +156,12 @@ impl Minimap {
                 }
                 for unit in &snapshot.units {
                     let at = to_minimap(rect, map_size, [raw(unit.x), raw(unit.y)]);
-                    let color = match unit.team {
-                        Team::Blue => Color32::from_rgb(90, 160, 255),
-                        Team::Red => Color32::from_rgb(255, 95, 80),
+                    // An ally's, another player's on the same team, in a lighter shade.
+                    let color = match (unit.team, unit.ally) {
+                        (Team::Blue, false) => Color32::from_rgb(90, 160, 255),
+                        (Team::Red, false) => Color32::from_rgb(255, 95, 80),
+                        (Team::Blue, true) => Color32::from_rgb(70, 220, 240),
+                        (Team::Red, true) => Color32::from_rgb(255, 165, 50),
                     };
                     // A structure remembered out of sight is dimmer, as it may be gone.
                     let color = if unit.remembered { color.gamma_multiply(REMEMBERED_DIM) } else { color };

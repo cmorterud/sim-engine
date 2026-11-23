@@ -73,7 +73,7 @@ impl Selection {
 
     /// Selects every unit of the team, those that can fight if there are any (`prefer_fighters`).
     pub fn select_all(&mut self, units: &[UnitView], team: Team) {
-        let all = units.iter().filter(|unit| unit.team == team).map(|unit| unit.id).collect();
+        let all = units.iter().filter(|unit| own(unit, team)).map(|unit| unit.id).collect();
         let found = prefer_fighters(all, units, &self.armed);
         self.select(found);
     }
@@ -174,7 +174,7 @@ impl Selection {
         };
         let blueprint = units[index].blueprint;
         let viewport = camera.viewport();
-        let same_type = units.iter().filter(|unit| unit.team == team && unit.blueprint == blueprint).filter(|unit| {
+        let same_type = units.iter().filter(|unit| own(unit, team) && unit.blueprint == blueprint).filter(|unit| {
             screen_position(unit, camera).is_some_and(|p| p[0] >= 0.0 && p[0] <= viewport[0] && p[1] >= 0.0 && p[1] <= viewport[1])
         });
         let found = prefer_fighters(same_type.map(|unit| unit.id).collect(), units, &self.armed);
@@ -285,10 +285,15 @@ pub fn group_center(members: &[SimId], units: &[UnitView]) -> Option<[f64; 2]> {
     Some([positions.iter().map(|p| p[0]).sum::<f64>() / count, positions.iter().map(|p| p[1]).sum::<f64>() / count])
 }
 
+/// Whether a unit is the person's own, to select and command: on their team, and not an ally's.
+pub fn own(unit: &UnitView, team: Team) -> bool {
+    unit.team == team && !unit.ally
+}
+
 pub fn units_in_box(units: &[UnitView], camera: &Camera, team: Team, min: [f64; 2], max: [f64; 2]) -> Vec<SimId> {
     units
         .iter()
-        .filter(|unit| unit.team == team)
+        .filter(|unit| own(unit, team))
         .filter(|unit| {
             screen_position(unit, camera)
                 .is_some_and(|p| p[0] >= min[0] && p[0] <= max[0] && p[1] >= min[1] && p[1] <= max[1])
@@ -297,21 +302,28 @@ pub fn units_in_box(units: &[UnitView], camera: &Camera, team: Team, min: [f64; 
         .collect()
 }
 
-/// The team's unit closest to a screen point, if any is close enough.
+/// The person's own unit closest to a screen point, if any is close enough: not an ally's, which
+/// is theirs to command.
 pub fn nearest_unit(units: &[UnitView], camera: &Camera, team: Team, point: [f64; 2]) -> Option<SimId> {
-    nearest_unit_within(units, camera, team, point, CLICK_RADIUS_PX)
+    nearest_matching(units, camera, point, CLICK_RADIUS_PX, |unit| own(unit, team))
 }
 
 /// The team's unit closest to a screen point, within `reach_px` of it or anywhere on it as it is
 /// drawn, if bigger.
 pub fn nearest_unit_within(units: &[UnitView], camera: &Camera, team: Team, point: [f64; 2], reach_px: f64) -> Option<SimId> {
+    nearest_matching(units, camera, point, reach_px, |unit| unit.team == team)
+}
+
+/// The unit `keep` accepts closest to a screen point, within `reach_px` of it or anywhere on it
+/// as it is drawn, if bigger.
+fn nearest_matching(units: &[UnitView], camera: &Camera, point: [f64; 2], reach_px: f64, keep: impl Fn(&UnitView) -> bool) -> Option<SimId> {
     let mut best: Option<(f64, SimId)> = None;
     // Zoomed out, where units show as icons, a click anywhere on an icon picks its unit, its
     // edges and tech dots too.
     let icons = camera.altitude() >= crate::icons::ICON_ALTITUDE;
     let scale = camera.pixels_per_point();
     let (half_width, above, below) = (crate::icons::HIT_HALF_WIDTH_PT * scale, crate::icons::HIT_ABOVE_PT * scale, crate::icons::HIT_BELOW_PT * scale);
-    for unit in units.iter().filter(|unit| unit.team == team) {
+    for unit in units.iter().filter(|unit| keep(unit)) {
         if let Some(p) = screen_position(unit, camera) {
             let distance = (p[0] - point[0]).powi(2) + (p[1] - point[1]).powi(2);
             // Large units can be clicked anywhere on them, as they appear on screen.
@@ -394,12 +406,13 @@ mod tests {
             assembling: None,
             upgrade: None,
             remembered: false,
+            ally: false,
         }
     }
 
 
     fn plain_unit(id: u32) -> UnitView {
-        UnitView { id: SimId(id), team: Team::Blue, x: 0, y: 0, z: 0, radius: 4096, blueprint: u16::MAX, health_permille: 1000, built_permille: 1000, is_structure: false, facing: [0, 0], aim: [0, 0], extra_aims: [[0; 2]; 3], working: false, assembling: None, upgrade: None, remembered: false }
+        UnitView { id: SimId(id), team: Team::Blue, x: 0, y: 0, z: 0, radius: 4096, blueprint: u16::MAX, health_permille: 1000, built_permille: 1000, is_structure: false, facing: [0, 0], aim: [0, 0], extra_aims: [[0; 2]; 3], working: false, assembling: None, upgrade: None, remembered: false, ally: false }
     }
 
     #[test]
@@ -607,6 +620,26 @@ mod tests {
         // But not past its corner.
         let outside = camera.world_to_screen([40_000.0 + 60.0, 40_000.0 + 60.0, 0.0]).expect("on screen");
         assert_eq!(nearest_unit(&[factory], &camera, Team::Blue, outside), None);
+    }
+
+    /// An ally's units, on the person's team but another player's, cannot be selected: by click,
+    /// by box, or all at once. They can still be told apart from enemies, who stay targets.
+    #[test]
+    fn an_allys_units_cannot_be_selected() {
+        let camera = camera();
+        let mine = unit(1, Team::Blue, 40_000.0, 40_000.0);
+        let allys = UnitView { ally: true, ..unit(2, Team::Blue, 40_100.0, 40_000.0) };
+        let units = [mine, allys];
+        let at = |x: f64| camera.world_to_screen([x, 40_000.0, 1.0]).expect("on screen");
+        assert_eq!(nearest_unit(&units, &camera, Team::Blue, at(40_000.0)), Some(SimId(1)));
+        assert_eq!(nearest_unit(&units, &camera, Team::Blue, at(40_100.0)), None, "an ally's unit is not picked");
+        let (min, max) = ([0.0, 0.0], [10_000.0, 10_000.0]);
+        assert_eq!(units_in_box(&units, &camera, Team::Blue, min, max), vec![SimId(1)]);
+        let mut selection = Selection::default();
+        selection.select_all(&units, Team::Blue);
+        assert_eq!(selection.selected(), &[SimId(1)]);
+        let enemy = UnitView { ally: true, ..unit(3, Team::Red, 40_200.0, 40_000.0) };
+        assert_eq!(nearest_unit_within(&[enemy], &camera, Team::Red, at(40_200.0), 20.0), Some(SimId(3)), "an enemy's second player's units are still targets");
     }
 
     #[test]
