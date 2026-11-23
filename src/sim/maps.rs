@@ -726,7 +726,41 @@ pub fn passes(settings: &MapSettings) -> MapData {
     let [north_west, north_east, south_west, south_east] = mirror(point(team));
     let layouts = vec![vec![north_west, north_east, south_west, south_east]];
     let (deposits, vents, scenery) = (layout.deposits, layout.vents, layout.scenery);
-    MapData { name: settings.id.clone(), map_units: map, heights: draft.heights, blocked, water_level: fp_int(-1000), deposits, vents, starts, layouts, scenery }
+    // Made with the range across the map, and turned so that it runs up it: the sides face each
+    // other west and east, as the camera sees both alike, rather than one looking down at the
+    // other.
+    quarter_turn(MapData { name: settings.id.clone(), map_units: map, heights: draft.heights, blocked, water_level: fp_int(-1000), deposits, vents, starts, layouts, scenery })
+}
+
+/// A map turned a quarter turn, north to west: a point (x, y) goes to (width - y, x).
+fn quarter_turn(map: MapData) -> MapData {
+    let cells = (map.map_units / TERRAIN_CELL_UNITS) as usize;
+    let samples = cells + 1;
+    let full = fp_int(map.map_units);
+    let point = |at: Vec2Fp| Vec2Fp::new(full - at.y, at.x);
+    let cell = |&(x, y): &(u32, u32)| (cells as u32 - 1 - y, x);
+    let mut heights = vec![0; map.heights.len()];
+    for y in 0..samples {
+        for x in 0..samples {
+            heights[x * samples + (cells - y)] = map.heights[y * samples + x];
+        }
+    }
+    let mut blocked = vec![false; map.blocked.len()];
+    for y in 0..cells {
+        for x in 0..cells {
+            blocked[x * cells + (cells - 1 - y)] = map.blocked[y * cells + x];
+        }
+    }
+    MapData {
+        heights,
+        blocked,
+        deposits: map.deposits.iter().map(cell).collect(),
+        vents: map.vents.iter().map(cell).collect(),
+        starts: map.starts.map(point),
+        layouts: map.layouts.iter().map(|layout| layout.iter().copied().map(point).collect()).collect(),
+        scenery: map.scenery.iter().map(|&(kind, at)| (kind, point(at))).collect(),
+        ..map
+    }
 }
 
 #[cfg(test)]
@@ -840,9 +874,10 @@ mod tests {
         let team = &map.layouts[0];
         assert_eq!(team.len(), 4);
         let full = fp_int(map.map_units);
-        assert_eq!(team[1], Vec2Fp::new(full - team[0].x, team[0].y));
-        assert_eq!(team[2], Vec2Fp::new(team[0].x, full - team[0].y));
-        assert!(team[0].y > full / 2 && team[2].y < full / 2, "the first team is in the north, the second in the south");
+        assert_eq!(team[1], Vec2Fp::new(team[0].x, full - team[0].y));
+        assert_eq!(team[2], Vec2Fp::new(full - team[0].x, team[0].y));
+        assert!(team[0].x < full / 2 && team[2].x > full / 2, "the first team is in the west, the second in the east");
+        assert!(map.starts[0].x < full / 2 && map.starts[1].x > full / 2, "the 1v1 starts face each other west and east");
         let every: Vec<Vec2Fp> = map.starts.iter().chain(team).copied().collect();
         for &from in &every {
             for &to in &every {
@@ -857,41 +892,14 @@ mod tests {
                 assert_eq!(near(&map, start, 1_500), first, "a start has a different share");
             }
         }
-        // The middle row is crossed only through the valleys: three gaps, the center one widest.
+        // The range runs up the middle column, crossed only through the valleys: three gaps in
+        // it, the center one widest.
         let middle = cells / 2;
-        let mut gaps: Vec<usize> = Vec::new();
-        let mut run = 0;
-        for x in 0..cells {
-            if map.blocked[middle * cells + x] {
-                if run > 0 {
-                    gaps.push(run);
-                }
-                run = 0;
-            } else {
-                run += 1;
-            }
-        }
-        if run > 0 {
-            gaps.push(run);
-        }
-        assert_eq!(gaps.len(), 3, "valleys across the middle row: {gaps:?}");
-        assert!(gaps[1] > gaps[0] && gaps[1] > gaps[2], "the center valley is the widest: {gaps:?}");
-        // A gun at one end of the center valley fires clear over its saddle to the other: the
-        // straight line between points 12 units up at either end stays above the floor.
-        let height = |y: usize| f64::from(map.heights[y * samples + middle]) / 16.0;
-        let (from, to) = (middle + 40, middle - 40);
-        let (start, end) = (height(from) + 12.0, height(to) + 12.0);
-        for y in to..=from {
-            let along = (from - y) as f64 / (from - to) as f64;
-            let line = start + (end - start) * along;
-            assert!(height(y) < line, "the saddle at row {y}, {:.1} high, hides one end of the valley from the other ({line:.1})", height(y));
-        }
-        // Each valley is an hourglass: narrower at the middle row than out toward its mouths.
-        let gaps_on = |row: usize| {
+        let gaps_in = |column: usize| {
             let mut gaps = Vec::new();
             let mut run = 0;
-            for x in 0..cells {
-                if map.blocked[row * cells + x] {
+            for y in 0..cells {
+                if map.blocked[y * cells + column] {
                     if run > 0 {
                         gaps.push(run);
                     }
@@ -905,13 +913,27 @@ mod tests {
             }
             gaps
         };
-        let toward_mouth = gaps_on(middle + 20);
+        let gaps = gaps_in(middle);
+        assert_eq!(gaps.len(), 3, "valleys across the middle column: {gaps:?}");
+        assert!(gaps[1] > gaps[0] && gaps[1] > gaps[2], "the center valley is the widest: {gaps:?}");
+        // A gun at one end of the center valley fires clear over its saddle to the other: the
+        // straight line between points 12 units up at either end stays above the floor.
+        let height = |x: usize| f64::from(map.heights[middle * samples + x]) / 16.0;
+        let (from, to) = (middle + 40, middle - 40);
+        let (start, end) = (height(from) + 12.0, height(to) + 12.0);
+        for x in to..=from {
+            let along = (from - x) as f64 / (from - to) as f64;
+            let line = start + (end - start) * along;
+            assert!(height(x) < line, "the saddle at column {x}, {:.1} high, hides one end of the valley from the other ({line:.1})", height(x));
+        }
+        // Each valley is an hourglass: narrower at the middle column than out toward its mouths.
+        let toward_mouth = gaps_in(middle - 20);
         assert_eq!(toward_mouth.len(), 3, "the valleys toward their mouths: {toward_mouth:?}");
         for (choke, wider) in gaps.iter().zip(&toward_mouth) {
             assert!(wider > choke, "a valley {choke} cells wide at its choke and {wider} toward its mouth");
         }
         // The valleys hold more deposits than their share of the ground.
-        let in_range = |&&(_, y): &&(u32, u32)| (y as usize).abs_diff(middle) < 40;
+        let in_range = |&&(x, _): &&(u32, u32)| (x as usize).abs_diff(middle) < 40;
         assert!(map.deposits.iter().filter(in_range).count() >= 12, "deposits in the valleys");
     }
 

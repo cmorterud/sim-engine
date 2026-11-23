@@ -1,7 +1,8 @@
 # Saddleback (GAME_SPECIFICATION.md §17.3): a named map, a type with its settings fixed, from
 # which src/sim/maps.rs generates it, the same on every machine.
 #
-# A mountain range across the middle, impassable to land units, with three valleys through it,
+# A mountain range up the middle, north to south, so that the sides face each other west and
+# east, impassable to land units, with three valleys through it,
 # a wide one in the center and a narrow one on each flank, each an hourglass, widest at its
 # mouths and narrowest at its choke in the middle, whose floors rise a little to a saddle. Each
 # half behind it is open, gentle land. In 1v1 each base faces the center valley; in 2v2
