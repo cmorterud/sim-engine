@@ -354,7 +354,8 @@ pub struct TurretMount {
     pub aft: bool,
 }
 
-/// The engineers' work yellow, the same at every tier, which their shapes tell apart.
+/// The engineers' work yellow, the same at every tier: their tiers show in how many arms they
+/// carry, one to three, and in their size, drawn a little larger than their footprint at T2 and T3.
 const ENGINEER_YELLOW: [f32; 3] = [1.00, 0.70, 0.12];
 
 /// Maps a blueprint to its look. Unknown keys fall back to a plain cube.
@@ -368,8 +369,8 @@ pub fn unit_look(key: &str) -> UnitLook {
         "geothermal_plant" => look(Shape::GeothermalPlant, Some([0.85, 0.60, 0.25]), 0.7),
         "mass_fabricator" => look(Shape::Fabricator, Some([0.40, 0.95, 0.85]), 1.0),
         "mass_fabricator_t3" => look(Shape::Fabricator, Some([0.70, 0.45, 1.00]), 0.8),
-        "t2_engineer" => UnitLook { base: Some(Shape::EngineerHullT2), tier_shaded: false, ..look(Shape::EngineerT2, Some(ENGINEER_YELLOW), 1.0) },
-        "t3_engineer" => UnitLook { base: Some(Shape::EngineerHullT3), tier_shaded: false, ..look(Shape::EngineerT3, Some(ENGINEER_YELLOW), 1.0) },
+        "t2_engineer" => UnitLook { base: Some(Shape::EngineerHull), length: 19.0, tier_shaded: false, ..look(Shape::EngineerT2, Some(ENGINEER_YELLOW), 1.0) },
+        "t3_engineer" => UnitLook { base: Some(Shape::EngineerHull), length: 23.0, tier_shaded: false, ..look(Shape::EngineerT3, Some(ENGINEER_YELLOW), 1.0) },
         "land_factory_t3" => look(Shape::FactoryT3, Some([0.10, 0.10, 0.20]), 0.85),
         "t1_engineer" => UnitLook { base: Some(Shape::EngineerHull), tier_shaded: false, ..look(Shape::Engineer, Some(ENGINEER_YELLOW), 1.0) },
         "t1_light_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::Bot, Some([0.78, 0.70, 0.50]), 1.0) },

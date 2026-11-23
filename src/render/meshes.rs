@@ -236,12 +236,10 @@ pub enum Shape {
     /// The T2 torpedo launcher's: a larger drum, with two pods of tubes either side of a cupola
     /// with a sonar mast.
     TorpedoLauncherT2,
-    /// The T2 engineer's turntable, carrying two arms that splay forward in a V.
+    /// The T2 engineer's turntable, carrying two arms side by side, braced into one.
     EngineerT2,
-    /// The T3 engineer's crane: a long twin-beam boom, a cab, and a counterweight at the back.
+    /// The T3 engineer's turntable, carrying three arms side by side, braced into one.
     EngineerT3,
-    /// The T3 engineer's heavy hull, with a sloped front and stabilizer legs splayed at its corners.
-    EngineerHullT3,
     /// The T2 transport: a longer body with two pairs of stub wings and four ducted rotors.
     TransportT2,
     /// The T3 transport: a wide cargo body between two spars, with six ducted rotors.
@@ -249,20 +247,17 @@ pub enum Shape {
     /// The spy plane: a long slender jet with a swept delta wing, two engine nacelles, and
     /// canted fins.
     SpyPlane,
-    /// The field rig's upper body, round where the commander's is angular: a rounded body, ball
-    /// shoulders, and a sensor head, with a mast and dish over its back, a tool arm on its left,
-    /// and the commander's gun on its right.
+    /// The field rig's upper body, slender where the commander's is broad: a narrow body, a small
+    /// head, a mast and dish over its back, a thin tool arm on its left, and a thin gun on its
+    /// right.
     FieldRig,
-    /// The T2 engineer's hover hull: a deck on a dark skirt rounded at both ends, with two fans
-    /// turning at its back.
-    EngineerHullT2,
     /// The field rig's legs: a pelvis and two legs with their knees bent back, each on a
     /// three-toed foot pointing the way it walks.
     FieldRigLegs,
 }
 
 impl Shape {
-    pub const ALL: [Self; 121] = [
+    pub const ALL: [Self; 119] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -377,12 +372,10 @@ impl Shape {
         Self::TorpedoLauncherT2,
         Self::EngineerT2,
         Self::EngineerT3,
-        Self::EngineerHullT3,
         Self::TransportT2,
         Self::TransportT3,
         Self::SpyPlane,
         Self::FieldRig,
-        Self::EngineerHullT2,
         Self::FieldRigLegs,
     ];
     pub const COUNT: usize = Self::ALL.len();
@@ -414,7 +407,6 @@ impl Shape {
             Self::Gunship => Some(2.2),
             Self::Transport | Self::TransportT2 => Some(1.8),
             Self::TransportT3 => Some(1.5),
-            Self::EngineerHullT2 => Some(2.4),
             Self::HeavyGunship => Some(1.7),
             Self::Radar => Some(0.25),
             Self::AirFactoryT3 => Some(0.3),
@@ -443,7 +435,7 @@ impl Shape {
 
     /// Whether the shape runs on tracks, and leaves their marks on the ground behind it.
     pub const fn leaves_tracks(self) -> bool {
-        matches!(self, Self::TankHull | Self::HeavyTankHull | Self::ArtilleryHull | Self::EngineerHull | Self::EngineerHullT3 | Self::CasemateHull | Self::CombatEngineerHull)
+        matches!(self, Self::TankHull | Self::HeavyTankHull | Self::ArtilleryHull | Self::EngineerHull | Self::CasemateHull | Self::CombatEngineerHull)
     }
 
     /// Whether the shape is a pair of legs, which swing as the unit walks.
@@ -1036,6 +1028,33 @@ impl MeshBuilder {
         self.bevel([x - half, -0.24, z + tube], [x + half, 0.16, z + tube + 0.07], 0.02);
     }
 
+    /// An engineer's turntable in team colors, carrying `arms` jointed arms side by side, braced
+    /// together at the elbow and the wrist so that they move as one, each with a tool at its end
+    /// that glows at work. An engineer's tech level is the number of its arms.
+    fn engineer_arms(&mut self, arms: usize) {
+        let spacing = 0.12;
+        let xs: Vec<f32> = (0..arms).map(|index| (index as f32 - (arms as f32 - 1.0) * 0.5) * spacing).collect();
+        let half = xs.last().copied().unwrap_or(0.0);
+        self.paint(Material::Trim);
+        self.frustum([0.0, -0.12], [-0.12, 0.02], [0.24 + half * 0.4, 0.2 + half * 0.4], 8);
+        self.paint(Material::Metal);
+        self.frustum([0.0, -0.12], [0.02, 0.1], [0.08 + half * 0.8, 0.07 + half * 0.8], 6);
+        for &x in &xs {
+            self.paint(Material::Hull);
+            self.beam([x, -0.12, 0.06], [x, 0.12, 0.36], 0.05, 0.05);
+            self.beam([x, 0.12, 0.36], [x, 0.36, 0.3], 0.042, 0.04);
+            self.paint(Material::Metal);
+            self.frustum([x, 0.38], [0.3, 0.36], [0.045, 0.045], 6);
+            self.paint(Material::Glow);
+            self.moving(motion::PULSE, [x, 0.38, 0.25], |mesh| mesh.frustum([x, 0.38], [0.18, 0.3], [0.026, 0.056], 6));
+        }
+        self.paint(Material::Metal);
+        self.block([-half - 0.05, 0.08, 0.3], [half + 0.05, 0.16, 0.42]);
+        if arms > 1 {
+            self.block([-half - 0.03, 0.33, 0.27], [half + 0.03, 0.39, 0.33]);
+        }
+    }
+
     /// A transport's ducted rotor at `at`, of `radius`: a duct, a team-colored ring over it if
     /// `ring`, and two blades crossing inside, which turn.
     fn ducted_rotor(&mut self, at: [f32; 2], radius: f32, ring: bool) {
@@ -1079,16 +1098,6 @@ impl MeshBuilder {
             self.face(&ring(radius[1], z[1]), part_center);
         }
     }
-}
-
-/// A flat outline rounded at both ends, `half_width` either side of the middle, from `back` to
-/// `front` along Y, for `MeshBuilder::prism`: each end is a half circle of `steps` sides.
-fn stadium(half_width: f32, back: f32, front: f32, steps: usize) -> Vec<[f32; 2]> {
-    let half = |center: f32, from: f32| (0..=steps).map(move |step| {
-        let angle = from + step as f32 / steps as f32 * std::f32::consts::PI;
-        [angle.cos() * half_width, center + angle.sin() * half_width]
-    });
-    half(back + half_width, std::f32::consts::PI).chain(half(front - half_width, 0.0)).collect()
 }
 
 /// One side of a bow, from `start` round to its tip at the front of the box, bending toward
@@ -1177,19 +1186,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.bevel([-0.23, -0.42, -0.18], [0.23, -0.12, -0.13], 0.02);
         }
         // A team-colored turntable carrying a jointed arm, with a tool at its end that glows at work.
-        Shape::Engineer => {
-            mesh.frustum([0.0, -0.12], [-0.12, 0.02], [0.24, 0.2], 8);
-            mesh.paint(Material::Metal);
-            mesh.frustum([0.0, -0.12], [0.02, 0.1], [0.08, 0.07], 6);
-            mesh.paint(Material::Hull);
-            mesh.beam([0.0, -0.12, 0.06], [0.0, 0.12, 0.36], 0.055, 0.05);
-            mesh.beam([0.0, 0.12, 0.36], [0.0, 0.36, 0.3], 0.045, 0.04);
-            mesh.paint(Material::Metal);
-            mesh.block([-0.05, 0.08, 0.3], [0.05, 0.16, 0.42]);
-            mesh.frustum([0.0, 0.38], [0.3, 0.36], [0.05, 0.05], 6);
-            mesh.paint(Material::Glow);
-            mesh.moving(motion::PULSE, [0.0, 0.38, 0.25], |mesh| mesh.frustum([0.0, 0.38], [0.18, 0.3], [0.03, 0.07], 6));
-        }
+        Shape::Engineer => mesh.engineer_arms(1),
         // A narrow two-legged walker, with a gun in its weapons bay and its fabrication bay raised.
         Shape::Bot => {
             mesh.bevel([-0.22, -0.18, -0.02], [0.22, 0.18, 0.36], 0.05);
@@ -2666,66 +2663,8 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Glow);
             mesh.block([-0.035, -0.155, 0.42], [0.035, -0.085, 0.47]);
         }
-        Shape::EngineerT2 => {
-            mesh.frustum([0.0, -0.12], [-0.12, 0.02], [0.26, 0.22], 8);
-            mesh.paint(Material::Metal);
-            mesh.frustum([0.0, -0.12], [0.02, 0.1], [0.1, 0.09], 6);
-            for side in [-1.0_f32, 1.0] {
-                let (shoulder, elbow, wrist) = ([side * 0.06, -0.12, 0.06], [side * 0.16, 0.1, 0.34], [side * 0.24, 0.32, 0.28]);
-                mesh.paint(Material::Hull);
-                mesh.beam(shoulder, elbow, 0.045, 0.04);
-                mesh.beam(elbow, wrist, 0.038, 0.034);
-                mesh.paint(Material::Metal);
-                mesh.frustum([wrist[0], wrist[1]], [wrist[2] - 0.06, wrist[2]], [0.045, 0.045], 6);
-                mesh.paint(Material::Glow);
-                mesh.moving(motion::PULSE, [wrist[0], wrist[1], wrist[2] - 0.1], |mesh| mesh.frustum([wrist[0], wrist[1]], [wrist[2] - 0.16, wrist[2] - 0.06], [0.025, 0.055], 6));
-            }
-        }
-        Shape::EngineerT3 => {
-            mesh.frustum([0.0, -0.08], [-0.16, 0.0], [0.28, 0.25], 8);
-            // A team-colored counterweight at the back, and the operator's cab beside the boom's foot.
-            mesh.bevel([-0.17, -0.42, -0.02], [0.17, -0.22, 0.14], 0.035);
-            mesh.paint(Material::Hull);
-            mesh.bevel([0.1, -0.18, 0.0], [0.25, 0.02, 0.16], 0.025);
-            mesh.paint(Material::Glass);
-            mesh.block([0.12, 0.02, 0.07], [0.23, 0.03, 0.14]);
-            // The boom: two beams braced together, from the turntable up and forward.
-            mesh.paint(Material::Metal);
-            for side in [-1.0_f32, 1.0] {
-                mesh.beam([side * 0.055, -0.12, 0.06], [side * 0.035, 0.4, 0.42], 0.022, 0.03);
-            }
-            for t in [0.3_f32, 0.6] {
-                let (y, z) = (-0.12 + 0.52 * t, 0.06 + 0.36 * t);
-                mesh.beam([-0.05, y, z], [0.05, y, z], 0.012, 0.015);
-            }
-            mesh.frustum([0.0, 0.42], [0.3, 0.4], [0.05, 0.05], 6);
-            mesh.paint(Material::Glow);
-            mesh.moving(motion::PULSE, [0.0, 0.42, 0.2], |mesh| mesh.frustum([0.0, 0.42], [0.14, 0.3], [0.03, 0.07], 6));
-        }
-        Shape::EngineerHullT3 => {
-            mesh.paint(Material::Metal);
-            for (low, high) in [(-0.47_f32, -0.27_f32), (0.27, 0.47)] {
-                mesh.bevel([low, -0.42, -0.5], [high, 0.4, -0.3], 0.05);
-            }
-            mesh.paint(Material::Hull);
-            for (low, high) in [(-0.48_f32, -0.25_f32), (0.25, 0.48)] {
-                mesh.bevel([low, -0.42, -0.3], [high, 0.4, -0.26], 0.015);
-            }
-            // A hull sloping up from front and back to a deck.
-            mesh.cuboid(
-                [Vec3::new(-0.28, -0.42, -0.46), Vec3::new(0.28, -0.42, -0.46), Vec3::new(0.28, 0.42, -0.46), Vec3::new(-0.28, 0.42, -0.46)],
-                [Vec3::new(-0.25, -0.34, -0.16), Vec3::new(0.25, -0.34, -0.16), Vec3::new(0.25, 0.18, -0.16), Vec3::new(-0.25, 0.18, -0.16)],
-            );
-            mesh.paint(Material::Trim);
-            mesh.bevel([-0.22, -0.32, -0.16], [0.22, 0.0, -0.11], 0.02);
-            // Stabilizer legs splayed out at the four corners, each on a pad.
-            mesh.paint(Material::Metal);
-            for (x, y) in [(-1.0_f32, -1.0_f32), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
-                let foot = [x * 0.44, y * 0.43, -0.46];
-                mesh.beam([x * 0.25, y * 0.3, -0.3], foot, 0.028, 0.028);
-                mesh.bevel([foot[0] - 0.045, foot[1] - 0.045, -0.5], [foot[0] + 0.045, foot[1] + 0.045, -0.46], 0.01);
-            }
-        }
+        Shape::EngineerT2 => mesh.engineer_arms(2),
+        Shape::EngineerT3 => mesh.engineer_arms(3),
         Shape::TransportT2 => {
             mesh.body(0.0, &[[-0.48, 0.07, 0.06, 0.02], [-0.32, 0.12, 0.11, 0.02], [0.26, 0.12, 0.11, 0.02], [0.4, 0.09, 0.08, 0.0], [0.49, 0.035, 0.035, -0.02]], 8);
             mesh.paint(Material::Glass);
@@ -2789,82 +2728,55 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Glass);
             mesh.body(0.0, &[[0.24, 0.02, 0.012, 0.03], [0.32, 0.025, 0.018, 0.03], [0.38, 0.008, 0.006, 0.02]], 6);
         }
-        // Round where the commander is angular: a rounded body in team colors under a cap, ball shoulders,
-        // and a sensor head, with a mast and dish over its back, a tool arm on its left, and the
-        // commander's gun on its right.
+        // Slender where the commander is broad: a narrow body, collar, and backpack in team
+        // colors, a small head, a mast and dish over its back, a thin tool arm on its left, and a
+        // thin gun on its right.
         Shape::FieldRig => {
-            mesh.frustum([0.0, 0.0], [-0.1, 0.14], [0.22, 0.27], 12);
-            mesh.frustum([0.0, 0.0], [0.14, 0.3], [0.27, 0.17], 12);
-            mesh.paint(Material::Hull);
-            mesh.frustum([0.0, 0.0], [0.3, 0.32], [0.18, 0.15], 12);
+            mesh.frustum([0.0, 0.0], [-0.1, 0.22], [0.13, 0.17], 10);
+            mesh.frustum([0.0, 0.0], [0.22, 0.27], [0.17, 0.12], 10);
+            mesh.bevel([-0.08, -0.25, 0.0], [0.08, -0.14, 0.2], 0.03);
             mesh.paint(Material::Glow);
-            mesh.block([-0.06, 0.245, 0.03], [0.06, 0.275, 0.13]);
-            mesh.paint(Material::Hull);
-            mesh.bevel([-0.13, -0.33, -0.02], [0.13, -0.19, 0.22], 0.04);
+            mesh.block([-0.04, 0.155, 0.04], [0.04, 0.18, 0.14]);
             mesh.paint(Material::Metal);
-            mesh.frustum([0.0, -0.26], [0.22, 0.4], [0.02, 0.016], 6);
-            mesh.frustum([0.0, -0.26], [0.38, 0.44], [0.1, 0.13], 10);
+            mesh.frustum([0.0, -0.2], [0.2, 0.4], [0.018, 0.014], 6);
+            mesh.frustum([0.0, -0.2], [0.38, 0.43], [0.08, 0.11], 10);
             mesh.paint(Material::Hull);
-            for x in [-0.3_f32, 0.3] {
-                mesh.ball([x, 0.0, 0.2], 0.085, 8, 4);
+            mesh.ball([0.0, 0.03, 0.33], 0.065, 8, 4);
+            for x in [-0.22_f32, 0.22] {
+                mesh.ball([x, 0.0, 0.2], 0.05, 6, 3);
             }
-            mesh.ball([0.0, 0.05, 0.34], 0.09, 8, 4);
             mesh.paint(Material::Glow);
-            mesh.block([-0.06, 0.12, 0.33], [0.06, 0.14, 0.38]);
+            mesh.block([-0.045, 0.085, 0.32], [0.045, 0.1, 0.36]);
             // A tool arm on the left, reaching forward.
             mesh.paint(Material::Hull);
-            mesh.beam([-0.3, 0.0, 0.17], [-0.34, 0.18, 0.06], 0.045, 0.045);
+            mesh.beam([-0.22, 0.0, 0.18], [-0.26, 0.16, 0.06], 0.03, 0.03);
             mesh.paint(Material::Metal);
-            mesh.beam([-0.34, 0.18, 0.06], [-0.3, 0.4, 0.1], 0.038, 0.038);
+            mesh.beam([-0.26, 0.16, 0.06], [-0.22, 0.36, 0.1], 0.026, 0.026);
             mesh.paint(Material::Glow);
-            mesh.moving(motion::PULSE, [-0.3, 0.42, 0.1], |mesh| mesh.frustum([-0.3, 0.42], [0.04, 0.14], [0.05, 0.03], 6));
+            mesh.moving(motion::PULSE, [-0.22, 0.38, 0.1], |mesh| mesh.frustum([-0.22, 0.38], [0.04, 0.14], [0.04, 0.024], 6));
             // The gun on the right.
             mesh.paint(Material::Hull);
-            mesh.beam([0.3, 0.0, 0.17], [0.32, 0.08, 0.03], 0.055, 0.055);
+            mesh.beam([0.22, 0.0, 0.18], [0.24, 0.08, 0.04], 0.035, 0.035);
             mesh.paint(Material::Metal);
-            mesh.bevel([0.25, 0.0, -0.04], [0.39, 0.26, 0.1], 0.03);
-            mesh.moving(motion::RECOIL, [0.32, 0.0, 0.03], |mesh| mesh.body(0.32, &[[0.24, 0.04, 0.04, 0.03], [0.5, 0.032, 0.032, 0.03]], 6));
-            mesh.flash([0.32, 0.47, 0.03], 0.06);
+            mesh.bevel([0.19, 0.0, -0.02], [0.29, 0.24, 0.08], 0.02);
+            mesh.moving(motion::RECOIL, [0.24, 0.0, 0.03], |mesh| mesh.body(0.24, &[[0.22, 0.03, 0.03, 0.03], [0.5, 0.025, 0.025, 0.03]], 6));
+            mesh.flash([0.24, 0.47, 0.03], 0.05);
         }
         Shape::FieldRigLegs => {
             mesh.paint(Material::Hull);
-            mesh.bevel([-0.17, -0.1, -0.17], [0.17, 0.1, -0.07], 0.03);
-            for x in [-0.15_f32, 0.15] {
+            mesh.bevel([-0.13, -0.08, -0.17], [0.13, 0.08, -0.08], 0.025);
+            for x in [-0.11_f32, 0.11] {
                 mesh.moving(motion::SWING, [x, 0.0, -0.12], |mesh| {
                     mesh.paint(Material::Hull);
-                    mesh.beam([x, 0.0, -0.12], [x, -0.13, -0.28], 0.06, 0.055);
+                    mesh.beam([x, 0.0, -0.12], [x, -0.13, -0.28], 0.04, 0.038);
                     mesh.paint(Material::Metal);
-                    mesh.beam([x, -0.13, -0.28], [x, 0.03, -0.45], 0.045, 0.045);
-                    mesh.ball([x, -0.13, -0.28], 0.05, 6, 3);
+                    mesh.beam([x, -0.13, -0.28], [x, 0.03, -0.45], 0.032, 0.032);
+                    mesh.ball([x, -0.13, -0.28], 0.035, 6, 3);
                     mesh.paint(Material::Hull);
-                    for (toe, spread) in [(-0.05_f32, -0.03_f32), (0.0, 0.0), (0.05, 0.03)] {
-                        mesh.beam([x, 0.0, -0.47], [x + toe + spread, 0.17, -0.47], 0.025, 0.03);
+                    for (toe, spread) in [(-0.035_f32, -0.02_f32), (0.0, 0.0), (0.035, 0.02)] {
+                        mesh.beam([x, 0.0, -0.47], [x + toe + spread, 0.15, -0.47], 0.018, 0.025);
                     }
-                    mesh.beam([x, 0.02, -0.47], [x, -0.12, -0.47], 0.025, 0.03);
-                });
-            }
-        }
-        // The T2 engineer's hover hull.
-        Shape::EngineerHullT2 => {
-            mesh.paint(Material::Metal);
-            mesh.prism(&stadium(0.37, -0.47, 0.45, 6), [-0.5, -0.38], [1.0, 0.95]);
-            mesh.paint(Material::Hull);
-            mesh.prism(&stadium(0.32, -0.42, 0.4, 6), [-0.38, -0.28], [1.0, 0.93]);
-            // A housing for the turntable's foot, sloping up from the front.
-            mesh.cuboid(
-                [Vec3::new(-0.2, -0.24, -0.28), Vec3::new(0.2, -0.24, -0.28), Vec3::new(0.2, 0.28, -0.28), Vec3::new(-0.2, 0.28, -0.28)],
-                [Vec3::new(-0.18, -0.22, -0.17), Vec3::new(0.18, -0.22, -0.17), Vec3::new(0.18, 0.12, -0.17), Vec3::new(-0.18, 0.12, -0.17)],
-            );
-            mesh.paint(Material::Trim);
-            mesh.bevel([-0.18, 0.16, -0.28], [0.18, 0.3, -0.24], 0.015);
-            // Two fans in ducts at the back, turning.
-            for x in [-0.25_f32, 0.25] {
-                mesh.paint(Material::Metal);
-                mesh.frustum([x, -0.3], [-0.28, -0.2], [0.11, 0.11], 12);
-                mesh.paint(Material::Panel);
-                mesh.moving(motion::SPIN, [x, -0.3, 0.0], |mesh| {
-                    mesh.block([x - 0.09, -0.315, -0.205], [x + 0.09, -0.285, -0.195]);
-                    mesh.block([x - 0.015, -0.39, -0.205], [x + 0.015, -0.21, -0.195]);
+                    mesh.beam([x, 0.02, -0.47], [x, -0.1, -0.47], 0.018, 0.025);
                 });
             }
         }
