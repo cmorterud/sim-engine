@@ -202,7 +202,8 @@ pub enum Shape {
     CombatEngineerHull,
     /// A team-colored twin anti-aircraft gun on a truck's bed.
     TruckAntiAir,
-    /// A mobile flak gun's square team-colored turret with four barrels.
+    /// A mobile flak gun's wide round gun tub in team colors, with four barrels and a radar
+    /// panel turning at its back.
     FlakTurret,
     /// A battleship's twin-gun turret, drawn on its own so that it turns to its gun's aim: its
     /// drum stands on the middle of its box, which is the hull's, where it sits on the deck.
@@ -272,8 +273,8 @@ pub enum Shape {
     /// The T3 artillery's emplacement, filling its four by four footprint: a slab ringed by
     /// sloped revetments, bunkers at its corners, ammunition rails, and a turntable for the gun.
     ArtilleryEmplacement,
-    /// The mobile flak's hull: short, with wide-set tracks, and stabilizer legs splayed at its
-    /// corners, so that it reads as an X from above.
+    /// The mobile flak's hull, a half-track, long and narrow, with outriggers either side at
+    /// mid-length: wheels, a hood, and a cab at the front, and tracks under a bed behind.
     FlakHull,
 }
 
@@ -3026,26 +3027,39 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.workshop_mast([0.22, 0.22], [-0.22, 0.02], 0.42);
             mesh.workshop_lights();
         }
+        // A half-track, long and narrow: wheels under fenders at the front, a hood and a cab, a
+        // pedestal for the guns over the tracks, outriggers either side of it, and an ammunition
+        // locker on the bed behind.
         Shape::FlakHull => {
             mesh.paint(Material::Metal);
-            for (low, high) in [(-0.44_f32, -0.29_f32), (0.29, 0.44)] {
-                mesh.bevel([low, -0.36, -0.5], [high, 0.3, -0.28], 0.05);
+            for (low, high) in [(-0.22_f32, -0.11_f32), (0.11, 0.22)] {
+                mesh.bevel([low, -0.5, -0.5], [high, 0.12, -0.3], 0.04);
+            }
+            for x in [-0.165_f32, 0.165] {
+                mesh.bevel([x - 0.05, 0.24, -0.5], [x + 0.05, 0.44, -0.32], 0.05);
             }
             mesh.paint(Material::Hull);
-            for (low, high) in [(-0.45_f32, -0.28_f32), (0.28, 0.45)] {
-                mesh.block([low, -0.36, -0.28], [high, 0.32, -0.25]);
+            for x in [-0.165_f32, 0.165] {
+                mesh.block([x - 0.055, 0.22, -0.32], [x + 0.055, 0.46, -0.29]);
             }
+            mesh.bevel([-0.13, -0.48, -0.46], [0.13, 0.2, -0.2], 0.03);
+            // The hood, sloping down to the nose, and the cab behind it.
             mesh.cuboid(
-                [Vec3::new(-0.29, -0.34, -0.46), Vec3::new(0.29, -0.34, -0.46), Vec3::new(0.29, 0.3, -0.46), Vec3::new(-0.29, 0.3, -0.46)],
-                [Vec3::new(-0.26, -0.3, -0.12), Vec3::new(0.26, -0.3, -0.12), Vec3::new(0.26, 0.16, -0.12), Vec3::new(-0.26, 0.16, -0.12)],
+                [Vec3::new(-0.11, 0.2, -0.46), Vec3::new(0.11, 0.2, -0.46), Vec3::new(0.11, 0.5, -0.46), Vec3::new(-0.11, 0.5, -0.46)],
+                [Vec3::new(-0.11, 0.2, -0.2), Vec3::new(0.11, 0.2, -0.2), Vec3::new(0.11, 0.48, -0.3), Vec3::new(-0.11, 0.48, -0.3)],
             );
-            // Stabilizer legs splayed out at the four corners, each on a pad.
+            mesh.bevel([-0.12, 0.16, -0.2], [0.12, 0.3, -0.1], 0.03);
+            mesh.paint(Material::Glass);
+            mesh.block([-0.09, 0.3, -0.17], [0.09, 0.31, -0.12]);
             mesh.paint(Material::Metal);
-            for (x, y) in [(-1.0_f32, -1.0_f32), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
-                let foot = [x * 0.45, if y > 0.0 { 0.3 } else { -0.32 }, -0.46];
-                mesh.beam([x * 0.3, y * 0.2, -0.3], foot, 0.026, 0.026);
-                mesh.bevel([foot[0] - 0.04, foot[1] - 0.04, -0.5], [foot[0] + 0.04, foot[1] + 0.04, -0.46], 0.01);
+            mesh.frustum([0.0, 0.0], [-0.2, -0.1], [0.12, 0.11], 8);
+            // Outriggers either side at mid-length, each on a pad: with the hull, a cross from above.
+            for x in [-1.0_f32, 1.0] {
+                mesh.beam([x * 0.13, 0.0, -0.24], [x * 0.41, 0.0, -0.44], 0.035, 0.03);
+                mesh.bevel([x * 0.41 - 0.06, -0.07, -0.5], [x * 0.41 + 0.06, 0.07, -0.44], 0.015);
             }
+            mesh.paint(Material::Trim);
+            mesh.bevel([-0.11, -0.46, -0.2], [0.11, -0.3, -0.14], 0.02);
         }
         Shape::Airfield => {
             mesh.paint(Material::Hull);
@@ -3214,21 +3228,25 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             }
         }
         // A square team-colored turret with four barrels side by side, raised for aircraft.
+        // A wide round gun tub in team colors, overhanging the hull either side, with four
+        // barrels and a radar panel turning on a mast at its back.
         Shape::FlakTurret => {
-            mesh.bevel([-0.17, -0.26, -0.1], [0.17, 0.06, 0.08], 0.03);
+            mesh.frustum([0.0, 0.0], [-0.1, 0.05], [0.27, 0.25], 12);
+            mesh.paint(Material::Panel);
+            mesh.frustum([0.0, 0.0], [0.05, 0.06], [0.2, 0.2], 12);
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.1, -0.12, 0.06], [0.1, 0.08, 0.16], 0.03);
             mesh.paint(Material::Metal);
-            for x in [-0.09_f32, -0.03, 0.03, 0.09] {
-                mesh.moving(motion::RECOIL, [x, 0.04, 0.02], |mesh| mesh.beam([x, 0.04, 0.02], [x, 0.34, 0.22], 0.018, 0.018));
+            for x in [-0.075_f32, -0.025, 0.025, 0.075] {
+                mesh.moving(motion::RECOIL, [x, 0.04, 0.1], |mesh| mesh.beam([x, 0.04, 0.1], [x, 0.36, 0.26], 0.018, 0.018));
             }
-            mesh.flash([0.0, 0.34, 0.22], 0.07);
-            // A radar panel on a mast behind the guns, turning.
-            mesh.paint(Material::Metal);
-            mesh.frustum([0.0, -0.2], [0.08, 0.26], [0.016, 0.012], 6);
+            mesh.flash([0.0, 0.36, 0.26], 0.07);
+            mesh.frustum([0.0, -0.2], [0.05, 0.28], [0.016, 0.012], 6);
             mesh.paint(Material::Trim);
             mesh.moving(motion::SPIN, [0.0, -0.2, 0.0], |mesh| {
                 mesh.cuboid(
-                    [Vec3::new(-0.15, -0.23, 0.24), Vec3::new(0.15, -0.23, 0.24), Vec3::new(0.15, -0.2, 0.24), Vec3::new(-0.15, -0.2, 0.24)],
-                    [Vec3::new(-0.15, -0.19, 0.37), Vec3::new(0.15, -0.19, 0.37), Vec3::new(0.15, -0.16, 0.37), Vec3::new(-0.15, -0.16, 0.37)],
+                    [Vec3::new(-0.13, -0.23, 0.26), Vec3::new(0.13, -0.23, 0.26), Vec3::new(0.13, -0.2, 0.26), Vec3::new(-0.13, -0.2, 0.26)],
+                    [Vec3::new(-0.13, -0.19, 0.38), Vec3::new(0.13, -0.19, 0.38), Vec3::new(0.13, -0.16, 0.38), Vec3::new(-0.13, -0.16, 0.38)],
                 );
             });
         }

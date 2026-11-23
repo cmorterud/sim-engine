@@ -455,7 +455,7 @@ pub fn unit_look(key: &str) -> UnitLook {
         "t3_strategic_bomber" => UnitLook { length: 44.0, ..look(Shape::StrategicBomber, Some([0.50, 0.52, 0.38]), 0.5) },
         "t2_fighter_bomber" => look(Shape::FighterBomber, Some([0.85, 0.70, 0.55]), 0.55),
         "t2_flak" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::FlakGun, Some([0.35, 0.75, 0.95]), 1.0) },
-        "t2_mobile_flak" => UnitLook { base: Some(Shape::FlakHull), length: 20.0, ..look(Shape::FlakTurret, Some([0.22, 0.70, 0.98]), 1.0) },
+        "t2_mobile_flak" => UnitLook { base: Some(Shape::FlakHull), length: 23.0, ..look(Shape::FlakTurret, Some([0.22, 0.70, 0.98]), 1.0) },
         "t3_sam" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::SamLauncher, Some([0.15, 0.72, 1.00]), 1.1) },
         "t1_air_scout" => look(Shape::Scout, Some([0.85, 0.90, 0.95]), 0.5),
         "t1_interceptor" => look(Shape::Aircraft, Some([0.86, 0.88, 0.78]), 0.5),
@@ -1060,6 +1060,17 @@ mod tests {
         (length, length / (half_width * 2.0 * look.size))
     }
 
+    /// How much of the box round it a unit fills, seen from straight above: nearly all for a slab,
+    /// about half for a cross or a T. Two vehicles of one length and width can still be told
+    /// apart from above if one fills its box and the other does not.
+    fn filled(set: &super::super::meshes::MeshSet, look: &UnitLook) -> f32 {
+        use super::super::meshes::tests::{view, VIEW_SIDE};
+        let seen = view(set, &look_parts(look), 90.0);
+        let covered: Vec<(usize, usize)> = (0..seen.len()).filter(|&index| seen[index].is_some()).map(|index| (index % VIEW_SIDE, index / VIEW_SIDE)).collect();
+        let span = |of: fn(&(usize, usize)) -> usize| covered.iter().map(of).max().unwrap_or(0) + 1 - covered.iter().map(of).min().unwrap_or(0);
+        covered.len() as f32 / (span(|point| point.0) * span(|point| point.1)) as f32
+    }
+
     /// Whether two footprints differ by a tenth or more in length or in length for width.
     fn footprints_apart((length_a, slender_a): (f32, f32), (length_b, slender_b): (f32, f32)) -> bool {
         let apart = |a: f32, b: f32| (a - b).abs() >= 0.1 * a.max(b);
@@ -1089,7 +1100,9 @@ mod tests {
 
     /// Land vehicles are told apart from above the same way: no two of different models within a
     /// tenth of each other in both length and length for width (until 2026-11-20 every one was
-    /// about as long as it was wide). Upgrades of one model, the engineers, differ by size.
+    /// about as long as it was wide), or else by a fifth or more in how much of its box each
+    /// fills, as the mobile flak's cross beside the heavy tank's slab (2026-11-23). Upgrades of
+    /// one model, the engineers, differ by size.
     /// Walkers and the command rigs stand on legs, which set them apart.
     #[test]
     fn every_land_vehicle_has_a_footprint_of_its_own() {
@@ -1110,7 +1123,19 @@ mod tests {
                     continue;
                 }
                 let (fa, fb) = (footprint(&set, a), footprint(&set, b));
-                assert!(footprints_apart(fa, fb), "{first}, {:.0} long and {:.2} to 1, and {second}, {:.0} long and {:.2} to 1, look alike from above", fa.0, fa.1, fb.0, fb.1);
+                // Or by a fifth or more in how much of its box each fills: a cross beside a slab.
+                let (fill_a, fill_b) = (filled(&set, a), filled(&set, b));
+                let fills_apart = (fill_a - fill_b).abs() >= 0.2 * fill_a.max(fill_b);
+                assert!(
+                    footprints_apart(fa, fb) || fills_apart,
+                    "{first}, {:.0} long, {:.2} to 1, and {:.0}% filled, and {second}, {:.0} long, {:.2} to 1, and {:.0}% filled, look alike from above",
+                    fa.0,
+                    fa.1,
+                    fill_a * 100.0,
+                    fb.0,
+                    fb.1,
+                    fill_b * 100.0
+                );
             }
         }
     }
