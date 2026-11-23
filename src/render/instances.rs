@@ -363,12 +363,12 @@ pub fn unit_look(key: &str) -> UnitLook {
     let turret = |weapon, at, aft| Some(TurretMount { weapon, at, aft });
     match key {
         "command_rig" => UnitLook { base: Some(Shape::CommanderLegs), ..look(Shape::Commander, Some([1.00, 1.00, 1.00]), 1.0) },
-        "field_rig" => UnitLook { base: Some(Shape::CommanderLegs), ..look(Shape::FieldRig, Some([0.70, 0.75, 0.85]), 1.0) },
+        "field_rig" => UnitLook { base: Some(Shape::FieldRigLegs), ..look(Shape::FieldRig, Some([0.70, 0.75, 0.85]), 1.0) },
         "rig_yard" => look(Shape::RigYard, Some([0.55, 0.60, 1.00]), 0.6),
         "geothermal_plant" => look(Shape::GeothermalPlant, Some([0.85, 0.60, 0.25]), 0.7),
         "mass_fabricator" => look(Shape::Fabricator, Some([0.40, 0.95, 0.85]), 1.0),
         "mass_fabricator_t3" => look(Shape::Fabricator, Some([0.70, 0.45, 1.00]), 0.8),
-        "t2_engineer" => UnitLook { base: Some(Shape::EngineerHull), tier_shaded: false, ..look(Shape::EngineerT2, Some(ENGINEER_YELLOW), 1.0) },
+        "t2_engineer" => UnitLook { base: Some(Shape::EngineerHullT2), tier_shaded: false, ..look(Shape::EngineerT2, Some(ENGINEER_YELLOW), 1.0) },
         "t3_engineer" => UnitLook { base: Some(Shape::EngineerHullT3), tier_shaded: false, ..look(Shape::EngineerT3, Some(ENGINEER_YELLOW), 1.0) },
         "land_factory_t3" => look(Shape::FactoryT3, Some([0.10, 0.10, 0.20]), 0.85),
         "t1_engineer" => UnitLook { base: Some(Shape::EngineerHull), tier_shaded: false, ..look(Shape::Engineer, Some(ENGINEER_YELLOW), 1.0) },

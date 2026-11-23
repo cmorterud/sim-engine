@@ -249,13 +249,20 @@ pub enum Shape {
     /// The spy plane: a long slender jet with a swept delta wing, two engine nacelles, and
     /// canted fins.
     SpyPlane,
-    /// The field rig's upper body: the commander's chest and gun, with a tool arm on the left
-    /// in place of its fist, and a mast with a dish over its backpack.
+    /// The field rig's upper body, round where the commander's is angular: a rounded body, ball
+    /// shoulders, and a sensor head, with a mast and dish over its back, a tool arm on its left,
+    /// and the commander's gun on its right.
     FieldRig,
+    /// The T2 engineer's hover hull: a deck on a dark skirt rounded at both ends, with two fans
+    /// turning at its back.
+    EngineerHullT2,
+    /// The field rig's legs: a pelvis and two legs with their knees bent back, each on a
+    /// three-toed foot pointing the way it walks.
+    FieldRigLegs,
 }
 
 impl Shape {
-    pub const ALL: [Self; 119] = [
+    pub const ALL: [Self; 121] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -375,6 +382,8 @@ impl Shape {
         Self::TransportT3,
         Self::SpyPlane,
         Self::FieldRig,
+        Self::EngineerHullT2,
+        Self::FieldRigLegs,
     ];
     pub const COUNT: usize = Self::ALL.len();
 
@@ -405,6 +414,7 @@ impl Shape {
             Self::Gunship => Some(2.2),
             Self::Transport | Self::TransportT2 => Some(1.8),
             Self::TransportT3 => Some(1.5),
+            Self::EngineerHullT2 => Some(2.4),
             Self::HeavyGunship => Some(1.7),
             Self::Radar => Some(0.25),
             Self::AirFactoryT3 => Some(0.3),
@@ -438,7 +448,7 @@ impl Shape {
 
     /// Whether the shape is a pair of legs, which swing as the unit walks.
     pub const fn walks(self) -> bool {
-        matches!(self, Self::CommanderLegs | Self::BotLegs)
+        matches!(self, Self::CommanderLegs | Self::BotLegs | Self::FieldRigLegs)
     }
 }
 
@@ -1069,6 +1079,16 @@ impl MeshBuilder {
             self.face(&ring(radius[1], z[1]), part_center);
         }
     }
+}
+
+/// A flat outline rounded at both ends, `half_width` either side of the middle, from `back` to
+/// `front` along Y, for `MeshBuilder::prism`: each end is a half circle of `steps` sides.
+fn stadium(half_width: f32, back: f32, front: f32, steps: usize) -> Vec<[f32; 2]> {
+    let half = |center: f32, from: f32| (0..=steps).map(move |step| {
+        let angle = from + step as f32 / steps as f32 * std::f32::consts::PI;
+        [angle.cos() * half_width, center + angle.sin() * half_width]
+    });
+    half(back + half_width, std::f32::consts::PI).chain(half(front - half_width, 0.0)).collect()
 }
 
 /// One side of a bow, from `start` round to its tip at the front of the box, bending toward
@@ -2769,37 +2789,84 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Glass);
             mesh.body(0.0, &[[0.24, 0.02, 0.012, 0.03], [0.32, 0.025, 0.018, 0.03], [0.38, 0.008, 0.006, 0.02]], 6);
         }
+        // Round where the commander is angular: a rounded body in team colors under a cap, ball shoulders,
+        // and a sensor head, with a mast and dish over its back, a tool arm on its left, and the
+        // commander's gun on its right.
         Shape::FieldRig => {
-            mesh.prism(&[[-0.26, -0.15], [0.26, -0.15], [0.3, 0.04], [0.2, 0.2], [-0.2, 0.2], [-0.3, 0.04]], [-0.08, 0.28], [0.75, 1.0]);
+            mesh.frustum([0.0, 0.0], [-0.1, 0.14], [0.22, 0.27], 12);
+            mesh.frustum([0.0, 0.0], [0.14, 0.3], [0.27, 0.17], 12);
+            mesh.paint(Material::Hull);
+            mesh.frustum([0.0, 0.0], [0.3, 0.32], [0.18, 0.15], 12);
             mesh.paint(Material::Glow);
-            mesh.block([-0.07, 0.17, 0.08], [0.07, 0.215, 0.18]);
+            mesh.block([-0.06, 0.245, 0.03], [0.06, 0.275, 0.13]);
             mesh.paint(Material::Hull);
-            mesh.bevel([-0.15, -0.3, 0.0], [0.15, -0.13, 0.26], 0.04);
-            // A mast over the backpack, with a dish.
+            mesh.bevel([-0.13, -0.33, -0.02], [0.13, -0.19, 0.22], 0.04);
             mesh.paint(Material::Metal);
-            mesh.frustum([0.0, -0.24], [0.26, 0.42], [0.02, 0.016], 6);
-            mesh.frustum([0.0, -0.24], [0.4, 0.46], [0.1, 0.13], 10);
+            mesh.frustum([0.0, -0.26], [0.22, 0.4], [0.02, 0.016], 6);
+            mesh.frustum([0.0, -0.26], [0.38, 0.44], [0.1, 0.13], 10);
             mesh.paint(Material::Hull);
-            for x in [-0.34_f32, 0.34] {
-                mesh.bevel([x - 0.07, -0.1, 0.14], [x + 0.07, 0.1, 0.28], 0.05);
+            for x in [-0.3_f32, 0.3] {
+                mesh.ball([x, 0.0, 0.2], 0.085, 8, 4);
             }
+            mesh.ball([0.0, 0.05, 0.34], 0.09, 8, 4);
+            mesh.paint(Material::Glow);
+            mesh.block([-0.06, 0.12, 0.33], [0.06, 0.14, 0.38]);
             // A tool arm on the left, reaching forward.
-            mesh.beam([-0.34, 0.0, 0.16], [-0.374, 0.18, 0.06], 0.05, 0.05);
-            mesh.paint(Material::Metal);
-            mesh.beam([-0.374, 0.18, 0.06], [-0.34, 0.4, 0.1], 0.04, 0.04);
-            mesh.paint(Material::Glow);
-            mesh.moving(motion::PULSE, [-0.34, 0.42, 0.1], |mesh| mesh.frustum([-0.34, 0.42], [0.04, 0.14], [0.05, 0.03], 6));
-            // The gun on the right, as the commander's.
             mesh.paint(Material::Hull);
-            mesh.beam([0.34, 0.0, 0.16], [0.34, 0.08, 0.02], 0.06, 0.06);
+            mesh.beam([-0.3, 0.0, 0.17], [-0.34, 0.18, 0.06], 0.045, 0.045);
             mesh.paint(Material::Metal);
-            mesh.bevel([0.27, 0.0, -0.04], [0.41, 0.28, 0.1], 0.03);
-            mesh.moving(motion::RECOIL, [0.34, 0.0, 0.03], |mesh| mesh.body(0.34, &[[0.26, 0.04, 0.04, 0.03], [0.5, 0.032, 0.032, 0.03]], 6));
-            mesh.flash([0.34, 0.47, 0.03], 0.06);
-            mesh.paint(Material::Hull);
-            mesh.bevel([-0.1, -0.08, 0.28], [0.1, 0.1, 0.44], 0.04);
+            mesh.beam([-0.34, 0.18, 0.06], [-0.3, 0.4, 0.1], 0.038, 0.038);
             mesh.paint(Material::Glow);
-            mesh.block([-0.08, 0.1, 0.34], [0.08, 0.12, 0.4]);
+            mesh.moving(motion::PULSE, [-0.3, 0.42, 0.1], |mesh| mesh.frustum([-0.3, 0.42], [0.04, 0.14], [0.05, 0.03], 6));
+            // The gun on the right.
+            mesh.paint(Material::Hull);
+            mesh.beam([0.3, 0.0, 0.17], [0.32, 0.08, 0.03], 0.055, 0.055);
+            mesh.paint(Material::Metal);
+            mesh.bevel([0.25, 0.0, -0.04], [0.39, 0.26, 0.1], 0.03);
+            mesh.moving(motion::RECOIL, [0.32, 0.0, 0.03], |mesh| mesh.body(0.32, &[[0.24, 0.04, 0.04, 0.03], [0.5, 0.032, 0.032, 0.03]], 6));
+            mesh.flash([0.32, 0.47, 0.03], 0.06);
+        }
+        Shape::FieldRigLegs => {
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.17, -0.1, -0.17], [0.17, 0.1, -0.07], 0.03);
+            for x in [-0.15_f32, 0.15] {
+                mesh.moving(motion::SWING, [x, 0.0, -0.12], |mesh| {
+                    mesh.paint(Material::Hull);
+                    mesh.beam([x, 0.0, -0.12], [x, -0.13, -0.28], 0.06, 0.055);
+                    mesh.paint(Material::Metal);
+                    mesh.beam([x, -0.13, -0.28], [x, 0.03, -0.45], 0.045, 0.045);
+                    mesh.ball([x, -0.13, -0.28], 0.05, 6, 3);
+                    mesh.paint(Material::Hull);
+                    for (toe, spread) in [(-0.05_f32, -0.03_f32), (0.0, 0.0), (0.05, 0.03)] {
+                        mesh.beam([x, 0.0, -0.47], [x + toe + spread, 0.17, -0.47], 0.025, 0.03);
+                    }
+                    mesh.beam([x, 0.02, -0.47], [x, -0.12, -0.47], 0.025, 0.03);
+                });
+            }
+        }
+        // The T2 engineer's hover hull.
+        Shape::EngineerHullT2 => {
+            mesh.paint(Material::Metal);
+            mesh.prism(&stadium(0.37, -0.47, 0.45, 6), [-0.5, -0.38], [1.0, 0.95]);
+            mesh.paint(Material::Hull);
+            mesh.prism(&stadium(0.32, -0.42, 0.4, 6), [-0.38, -0.28], [1.0, 0.93]);
+            // A housing for the turntable's foot, sloping up from the front.
+            mesh.cuboid(
+                [Vec3::new(-0.2, -0.24, -0.28), Vec3::new(0.2, -0.24, -0.28), Vec3::new(0.2, 0.28, -0.28), Vec3::new(-0.2, 0.28, -0.28)],
+                [Vec3::new(-0.18, -0.22, -0.17), Vec3::new(0.18, -0.22, -0.17), Vec3::new(0.18, 0.12, -0.17), Vec3::new(-0.18, 0.12, -0.17)],
+            );
+            mesh.paint(Material::Trim);
+            mesh.bevel([-0.18, 0.16, -0.28], [0.18, 0.3, -0.24], 0.015);
+            // Two fans in ducts at the back, turning.
+            for x in [-0.25_f32, 0.25] {
+                mesh.paint(Material::Metal);
+                mesh.frustum([x, -0.3], [-0.28, -0.2], [0.11, 0.11], 12);
+                mesh.paint(Material::Panel);
+                mesh.moving(motion::SPIN, [x, -0.3, 0.0], |mesh| {
+                    mesh.block([x - 0.09, -0.315, -0.205], [x + 0.09, -0.285, -0.195]);
+                    mesh.block([x - 0.015, -0.39, -0.205], [x + 0.015, -0.21, -0.195]);
+                });
+            }
         }
         Shape::Airfield => {
             mesh.paint(Material::Hull);
