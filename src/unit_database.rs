@@ -6,6 +6,7 @@
 
 use std::fmt::Write as _;
 
+use crate::icons::Ground;
 use crate::math::fp::Fp;
 use crate::sim::blueprints::{Blueprint, BlueprintDb, FactoryKind, Res, Targets, UnitClass, WeaponDef, WeaponKind, TICKS_PER_SECOND};
 use crate::sim::components::MoveClass;
@@ -87,9 +88,12 @@ fn stats(unit: &Blueprint, db: &BlueprintDb) -> Vec<(&'static str, String)> {
     let mut add = |label: &'static str, value: String| rows.push((label, value));
     // Its tech level, cost and health head the card, so they are not repeated here.
     add("Build time", format!("{} build power × seconds", number(res(unit.build_time), 0)));
+    let ground = Ground::of(unit);
     if unit.is_structure() {
+        add("Built on", if ground == Ground::Ocean { "water" } else { "land" }.to_string());
         add("Footprint", format!("{0} × {0} cells", unit.footprint));
     } else {
+        add("Can go", ground.name().to_string());
         // Aircraft fly, whatever they would do on the ground.
         if !unit.is_air() {
             add("Moves", words(&format!("{:?}", unit.movement)));
@@ -344,6 +348,17 @@ impl<'a> Portraits<'a> {
 /// How large a portrait is shown, in CSS pixels.
 const PORTRAIT_PX: usize = 72;
 
+/// The CSS class of a backdrop, which `STYLE` paints to match the game's buttons.
+fn ground_class(ground: Ground) -> &'static str {
+    match ground {
+        Ground::Land => "g-land",
+        Ground::Coast => "g-coast",
+        Ground::Air => "g-air",
+        Ground::Ocean => "g-ocean",
+        Ground::Deep => "g-deep",
+    }
+}
+
 fn card(out: &mut String, unit: &Blueprint, db: &BlueprintDb, portraits: &Portraits, kind: Kind) {
     let anchor = match kind {
         Kind::Land => "land",
@@ -353,6 +368,8 @@ fn card(out: &mut String, unit: &Blueprint, db: &BlueprintDb, portraits: &Portra
     };
     let _ = write!(out, "<article class=\"unit\" id=\"{}\" data-kind=\"{anchor}\" data-tier=\"{}\" data-name=\"{}\">", escape(&unit.key), unit.tier, escape(&unit.name.to_lowercase()));
     out.push_str("<header>");
+    let ground = Ground::of(unit);
+    let _ = write!(out, "<span class=\"backdrop {}\" title=\"Can go: {}\">", ground_class(ground), ground.name());
     match portraits.index(&unit.key) {
         Some(index) => {
             let (column, row) = (index % portraits.columns, index / portraits.columns);
@@ -368,6 +385,7 @@ fn card(out: &mut String, unit: &Blueprint, db: &BlueprintDb, portraits: &Portra
         }
         None => out.push_str("<span class=\"portrait none\"></span>"),
     }
+    out.push_str("</span>");
     let _ = write!(out, "<div><h4>{}</h4><p class=\"sub\">T{} {}</p></div></header>", escape(&unit.name), unit.tier, what_it_is(unit));
     // At a glance: what it costs, how tough it is, and what it does a second.
     let weapons: Vec<&WeaponDef> = unit.weapon.iter().chain(&unit.extra_weapons).collect();
@@ -415,7 +433,13 @@ h3 { color: var(--muted); font-size: 14px; text-transform: uppercase; letter-spa
 .unit { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; scroll-margin-top: 64px; }
 .unit:target { border-color: var(--accent-strong); }
 .unit header { display: flex; gap: 12px; align-items: center; }
-.portrait { flex: none; width: 72px; height: 72px; border-radius: 8px; background-color: var(--panel-raised); background-image: url("portraits.png"); background-repeat: no-repeat; }
+.backdrop { flex: none; display: block; width: 72px; height: 72px; border-radius: 8px; overflow: hidden; background-color: var(--panel-raised); }
+.backdrop.g-land { background: linear-gradient(#58763e, #6a5c3a); }
+.backdrop.g-coast { background: linear-gradient(160deg, #b0a06a 0 50%, #46808f 50% 56%, #286894 56%); }
+.backdrop.g-air { background: radial-gradient(circle at 22% 80%, #fffc 0 9px, #fff0 10px), radial-gradient(circle at 80% 26%, #fffc 0 8px, #fff0 9px), linear-gradient(#4682c8, #a8d0ec); }
+.backdrop.g-ocean { background: repeating-linear-gradient(#bee4f578 0 1px, #0000 1px 18px), linear-gradient(#266ca0, #123a68); }
+.backdrop.g-deep { background: repeating-linear-gradient(#78aadc3c 0 1px, #0000 1px 28px), linear-gradient(#0e284e, #040c20); }
+.portrait { display: block; width: 72px; height: 72px; background-color: transparent; background-image: url("portraits.png"); background-repeat: no-repeat; }
 .portrait.none { background-image: none; }
 h4 { color: var(--text-strong); font-size: 17px; margin: 0; }
 h5 { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; margin: 12px 0 4px; }
@@ -585,6 +609,13 @@ mod tests {
             assert!(card.contains(&format!("data-tier=\"{}\"", unit.tier)), "{} is under its tech level", unit.key);
             assert!(portraits.index(&unit.key).is_some(), "{} has a portrait", unit.key);
             assert!(!card.contains("portrait none"), "{} shows its portrait", unit.key);
+            let ground = Ground::of(unit);
+            assert!(card.contains(&format!("class=\"backdrop {}\"", ground_class(ground))), "{} sits on its {ground:?} backdrop", unit.key);
+            assert!(card.contains(&format!("<dd>{}</dd>", ground.name())) || unit.is_structure(), "{} says where it can go", unit.key);
+        }
+        for (key, class) in [("t1_medium_tank", "g-land"), ("t1_interceptor", "g-air"), ("t1_frigate", "g-ocean"), ("t1_attack_sub", "g-deep"), ("t2_assault_hovercraft", "g-coast")] {
+            let start = html.find(&format!("id=\"{key}\"")).expect("listed");
+            assert!(html[start..start + 400].contains(class), "{key} is on {class}");
         }
     }
 }
