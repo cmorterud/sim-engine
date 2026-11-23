@@ -424,13 +424,24 @@ pub fn shown_tab(chosen: Option<CommandTab>, tabs: &[CommandTab]) -> CommandTab 
     chosen.filter(|tab| tabs.contains(tab)).unwrap_or(tabs[0])
 }
 
-/// A unit's picture on a button: its portrait, with its map symbol small in the top left corner
-/// in its role's color, or the symbol alone, large, if there is no portrait.
-fn unit_art(painter: &egui::Painter, rect: Rect, key: &str) {
+/// A unit's picture on a button: its portrait over a backdrop of where it can go (grass for land,
+/// a shore for amphibious, sky for air, waves for ships, depths for submarines), with its map
+/// symbol small in the top left corner in its role's color on a dark disc, or the symbol alone,
+/// large, if there is no portrait.
+fn unit_art(painter: &egui::Painter, rect: Rect, db: &BlueprintDb, key: &str) {
     let icon = Icon::for_key(key);
+    if let Some(id) = db.find(key) {
+        let backdrop = rect.shrink(0.5);
+        let clipped = painter.with_clip_rect(backdrop.intersect(painter.clip_rect()));
+        for shape in icons::ground_shapes(backdrop, icons::Ground::of(db.get(id))) {
+            clipped.add(shape);
+        }
+    }
     if hud::draw_portrait(painter, rect, key) {
         let half = (rect.height() * 0.1).clamp(3.5, 6.0);
-        icons::draw(painter, rect.left_top() + Vec2::new(half + 2.0, half + 2.0), half, icon, 0, icon.role().color());
+        let center = rect.left_top() + Vec2::new(half + 3.0, half + 3.0);
+        painter.circle_filled(center, half + 2.5, Color32::from_black_alpha(190));
+        icons::draw(painter, center, half, icon, 0, icon.role().color());
     } else {
         icons::draw_bar(painter, rect, icon);
     }
@@ -446,7 +457,7 @@ fn icon_button(ui: &mut egui::Ui, db: &BlueprintDb, option: BlueprintId, suffix:
     let suffix = suffix.trim().trim_matches(|c| c == '(' || c == ')').to_string();
     hud::square_button(ui, Vec2::splat(BAR_BUTTON), false, true, |painter, rect| {
         // The bar's toggle says the level, so there are no tech dots.
-        unit_art(painter, rect, &unit.key);
+        unit_art(painter, rect, db, &unit.key);
         if let Some(letter) = blueprint_hotkey(&unit.key) {
             let font = FontId::new(14.0, egui::FontFamily::Name(BOLD.into()));
             hud::outlined_text(painter, rect.right_bottom() + Vec2::new(-2.0, 0.0), Align2::RIGHT_BOTTOM, &hotkeys::key_name(letter), font, Color32::WHITE);
@@ -1408,7 +1419,7 @@ fn queue_chip_row(ui: &mut egui::Ui, chips: &[QueueChip], db: &BlueprintDb, acti
                 for chip in chips {
                     let button = hud::square_button(ui, Vec2::splat(QUEUE_BUTTON), false, true, |painter, rect| {
                         match chip.icon {
-                            ChipIcon::Item(blueprint) => unit_art(painter, rect, &db.get(blueprint).key),
+                            ChipIcon::Item(blueprint) => unit_art(painter, rect, db, &db.get(blueprint).key),
                             ChipIcon::Order(glyph) => hud::draw_glyph(painter, rect.shrink(3.0), glyph),
                         }
                         if chip.count > 1 {
@@ -1545,9 +1556,9 @@ fn draw_idle_badge(painter: &egui::Painter, rect: Rect, idle: usize) {
 }
 
 /// A big square with a unit's symbol, a count in its corner, and how many are idle.
-fn quick_square(ui: &mut egui::Ui, key: &str, count: Option<usize>, chosen: bool, health: Option<u16>, idle: usize) -> egui::Response {
+fn quick_square(ui: &mut egui::Ui, db: &BlueprintDb, key: &str, count: Option<usize>, chosen: bool, health: Option<u16>, idle: usize) -> egui::Response {
     hud::square_button(ui, Vec2::splat(QUICK_BUTTON), chosen, true, |painter, rect| {
-        unit_art(painter, rect.shrink(1.0), key);
+        unit_art(painter, rect.shrink(1.0), db, key);
         if idle > 0 {
             draw_idle_badge(painter, idle_badge_rect(rect.expand(2.0), idle), idle);
         }
@@ -1578,7 +1589,7 @@ fn quick_rows(
     let key_of = |id: SimId| find_unit(snapshot, id).filter(|unit| unit.blueprint != u16::MAX).map_or_else(String::new, |unit| db.get(BlueprintId(unit.blueprint)).key.clone());
     if let Some(commander) = groups.commander {
         let health = find_unit(snapshot, commander).map(|unit| unit.health_permille);
-        if quick_square(ui, &key_of(commander), None, selected.contains(&commander), health, 0).on_hover_text("Commander: click to select. The view stays where it is.").clicked() {
+        if quick_square(ui, db, &key_of(commander), None, selected.contains(&commander), health, 0).on_hover_text("Commander: click to select. The view stays where it is.").clicked() {
             actions.push(UiAction::QuickSelect { units: vec![commander], add: shift });
         }
     }
@@ -1594,7 +1605,7 @@ fn quick_rows(
         } else {
             format!("{}: {total}, {} with nothing to build. Click the red tag to select those, or elsewhere to {shown} the tech levels.", family.name, idle.len())
         };
-        let square = quick_square(ui, &key, Some(total), open, None, idle.len());
+        let square = quick_square(ui, db, &key, Some(total), open, None, idle.len());
         let on_badge = !idle.is_empty() && square.interact_pointer_pos().is_some_and(|at| idle_badge_rect(square.rect, idle.len()).expand(2.0).contains(at));
         if square.on_hover_text(hint).clicked() {
             if on_badge {
@@ -1693,7 +1704,7 @@ fn control_group_rows(ui: &mut egui::Ui, groups: &[(usize, Vec<SimId>)], snapsho
             let label = control_group_label(*group, members, snapshot, db);
             let hint = format!("{label}\nClick or press {group} to select. Hold Shift to add. Ctrl + {group} with nothing selected clears it.");
             let button = hud::square_button(ui, Vec2::new(CONTROL_GROUP_WIDTH, CONTROL_GROUP_HEIGHT), any_selected, true, |painter, rect| {
-                unit_art(painter, Rect::from_center_size(rect.center() + Vec2::new(0.0, 6.0), Vec2::splat(rect.width() - 2.0)), key);
+                unit_art(painter, Rect::from_center_size(rect.center() + Vec2::new(0.0, 6.0), Vec2::splat(rect.width() - 2.0)), db, key);
                 let bold = |size| FontId::new(size, egui::FontFamily::Name(BOLD.into()));
                 hud::outlined_text(painter, rect.left_top() + Vec2::new(3.0, 0.0), Align2::LEFT_TOP, &group.to_string(), bold(16.0), Color32::WHITE);
                 hud::outlined_text(painter, rect.right_bottom() + Vec2::new(-2.0, 1.0), Align2::RIGHT_BOTTOM, &members.len().to_string(), bold(12.0), hud::TEXT);
@@ -2123,7 +2134,7 @@ fn selection_info(ui: &mut egui::Ui, snapshot: &SimSnapshot, selected: &[SimId],
         for shape in hud::face_shapes(portrait, false, false, true) {
             ui.painter().add(shape);
         }
-        unit_art(ui.painter(), portrait.shrink(1.0), &unit.key);
+        unit_art(ui.painter(), portrait.shrink(1.0), db, &unit.key);
         // How many enemies it has destroyed, or the selection all together.
         let kills: u32 = units.iter().map(|unit| kills_of(snapshot, unit.id)).sum();
         kills_badge(ui.painter(), portrait, kills);
@@ -2204,7 +2215,7 @@ fn selection_info(ui: &mut egui::Ui, snapshot: &SimSnapshot, selected: &[SimId],
                 for shape in hud::face_shapes(rect, false, false, true) {
                     ui.painter().add(shape);
                 }
-                unit_art(ui.painter(), rect.shrink(1.0), &db.get(*item).key);
+                unit_art(ui.painter(), rect.shrink(1.0), db, &db.get(*item).key);
                 let progress = menu.and_then(|menu| menu.progress_permille).unwrap_or(0);
                 ui.label(egui::RichText::new(format!("{}%", progress / 10)).size(12.0).color(hud::TEXT));
             });
@@ -2326,7 +2337,7 @@ fn selection_group_bar(ui: &mut egui::Ui, snapshot: &SimSnapshot, selected: &[Si
         for (blueprint, units) in selection_groups(snapshot, selected) {
             let unit = db.get(BlueprintId(blueprint));
             let button = hud::square_button(ui, Vec2::splat(BAR_BUTTON), false, true, |painter, rect| {
-                unit_art(painter, rect, &unit.key);
+                unit_art(painter, rect, db, &unit.key);
                 hud::outlined_text(painter, rect.right_bottom() + Vec2::new(-2.0, 1.0), Align2::RIGHT_BOTTOM, &units.len().to_string(), FontId::new(15.0, egui::FontFamily::Name(BOLD.into())), Color32::WHITE);
             });
             if button.on_hover_text(format!("{} \u{d7}{}\nClick to select only these.", unit.name, units.len())).clicked() {

@@ -490,6 +490,122 @@ impl Mark {
     }
 }
 
+/// Where a unit can go, which sets the backdrop behind its button: land units stand on grass,
+/// amphibious ones on a shore, aircraft against sky, ships on open water, and submarines in
+/// the dark depths.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Ground {
+    Land,
+    /// Hovercraft and seabed walkers, which cross both land and water.
+    Coast,
+    Air,
+    Ocean,
+    /// Submarines.
+    Deep,
+}
+
+impl Ground {
+    pub const ALL: [Self; 5] = [Self::Land, Self::Coast, Self::Air, Self::Ocean, Self::Deep];
+
+    /// Where a blueprint's unit or structure can be: structures on water count as ships.
+    pub fn of(unit: &crate::sim::blueprints::Blueprint) -> Self {
+        use crate::sim::components::MoveClass;
+        match unit.move_class() {
+            MoveClass::Air => Self::Air,
+            _ if unit.on_water => Self::Ocean,
+            MoveClass::Land => Self::Land,
+            MoveClass::Hover | MoveClass::Seabed => Self::Coast,
+            MoveClass::Naval => Self::Ocean,
+            MoveClass::Submarine => Self::Deep,
+        }
+    }
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Land => "land",
+            Self::Coast => "land and water",
+            Self::Air => "air",
+            Self::Ocean => "water",
+            Self::Deep => "underwater",
+        }
+    }
+}
+
+/// A wavy line across `rect`, `rows` from the top, as a polyline.
+fn wave(rect: Rect, y: f32, phase: f32, amplitude: f32) -> Vec<Pos2> {
+    (0..=12)
+        .map(|step| {
+            let t = step as f32 / 12.0;
+            Pos2::new(rect.left() + rect.width() * t, rect.top() + rect.height() * y + amplitude * (t * std::f32::consts::TAU * 1.5 + phase).sin())
+        })
+        .collect()
+}
+
+/// A vertical gradient filling `rect`.
+fn gradient(rect: Rect, top: Color32, bottom: Color32) -> Shape {
+    let mut mesh = egui::epaint::Mesh::default();
+    mesh.colored_vertex(rect.left_top(), top);
+    mesh.colored_vertex(rect.right_top(), top);
+    mesh.colored_vertex(rect.right_bottom(), bottom);
+    mesh.colored_vertex(rect.left_bottom(), bottom);
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    Shape::mesh(mesh)
+}
+
+/// The backdrop for a button of `rect`: what the shapes of `Ground` look like, kept muted so
+/// the team-colored unit on top stands out.
+pub fn ground_shapes(rect: Rect, ground: Ground) -> Vec<Shape> {
+    let at = |x: f32, y: f32| Pos2::new(rect.left() + rect.width() * x, rect.top() + rect.height() * y);
+    let line = |points: Vec<Pos2>, color: Color32| Shape::line(points, Stroke::new((rect.height() * 0.035).max(1.0), color));
+    let mut out = Vec::new();
+    match ground {
+        Ground::Land => {
+            out.push(gradient(rect, Color32::from_rgb(88, 118, 62), Color32::from_rgb(106, 92, 58)));
+            // Tufts of grass and a pale track.
+            for (x, y) in [(0.2, 0.25), (0.75, 0.2), (0.12, 0.7), (0.86, 0.62), (0.55, 0.88)] {
+                let tuft = [(-0.04, 0.0), (0.0, -0.07), (0.04, 0.0)];
+                out.push(line(tuft.iter().map(|(dx, dy)| at(x + dx, y + dy)).collect(), Color32::from_rgb(60, 92, 44)));
+            }
+            out.push(line(vec![at(0.0, 0.92), at(0.4, 0.8), at(0.7, 0.9), at(1.0, 0.78)], Color32::from_rgba_unmultiplied(190, 170, 120, 90)));
+        }
+        Ground::Coast => {
+            // Sand above, water below, split on a diagonal with a line of foam.
+            out.push(Shape::convex_polygon(vec![rect.left_top(), rect.right_top(), at(1.0, 0.35), at(0.0, 0.75)], Color32::from_rgb(176, 160, 106), Stroke::NONE));
+            out.push(Shape::convex_polygon(vec![at(0.0, 0.75), at(1.0, 0.35), rect.right_bottom(), rect.left_bottom()], Color32::from_rgb(40, 104, 148), Stroke::NONE));
+            out.push(Shape::convex_polygon(vec![at(0.0, 0.7), at(1.0, 0.3), at(1.0, 0.38), at(0.0, 0.78)], Color32::from_rgb(70, 140, 170), Stroke::NONE));
+            out.push(line(vec![at(0.0, 0.7), at(0.25, 0.6), at(0.5, 0.5), at(0.75, 0.4), at(1.0, 0.3)], Color32::from_rgba_unmultiplied(240, 248, 250, 200)));
+            out.push(line(vec![at(0.0, 0.92), at(0.3, 0.84), at(0.6, 0.92), at(1.0, 0.8)], Color32::from_rgba_unmultiplied(160, 210, 235, 110)));
+            for (x, y) in [(0.2, 0.2), (0.7, 0.08), (0.45, 0.32)] {
+                out.push(Shape::circle_filled(at(x, y), rect.height() * 0.018, Color32::from_rgb(140, 124, 80)));
+            }
+        }
+        Ground::Air => {
+            out.push(gradient(rect, Color32::from_rgb(70, 130, 200), Color32::from_rgb(168, 208, 236)));
+            let cloud = Color32::from_rgba_unmultiplied(255, 255, 255, 190);
+            for (x, y, r) in [(0.22, 0.78, 0.1), (0.31, 0.8, 0.13), (0.42, 0.78, 0.09), (0.74, 0.28, 0.08), (0.82, 0.3, 0.1), (0.9, 0.28, 0.07)] {
+                out.push(Shape::circle_filled(at(x, y), rect.height() * r, cloud));
+            }
+        }
+        Ground::Ocean => {
+            out.push(gradient(rect, Color32::from_rgb(38, 108, 160), Color32::from_rgb(18, 58, 104)));
+            for (y, phase) in [(0.22, 0.0), (0.5, 1.7), (0.78, 3.1)] {
+                out.push(line(wave(rect, y, phase, rect.height() * 0.04), Color32::from_rgba_unmultiplied(190, 228, 245, 120)));
+            }
+        }
+        Ground::Deep => {
+            out.push(gradient(rect, Color32::from_rgb(14, 40, 78), Color32::from_rgb(4, 12, 32)));
+            for (y, phase) in [(0.12, 0.6), (0.4, 2.2)] {
+                out.push(line(wave(rect, y, phase, rect.height() * 0.03), Color32::from_rgba_unmultiplied(120, 170, 220, 60)));
+            }
+            for (x, y, r) in [(0.18, 0.62, 0.03), (0.24, 0.5, 0.02), (0.8, 0.72, 0.03), (0.86, 0.55, 0.02), (0.72, 0.4, 0.015)] {
+                out.push(Shape::circle_stroke(at(x, y), rect.height() * r, Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(150, 200, 240, 120))));
+            }
+        }
+    }
+    out
+}
+
 /// The colors of the rank bars, T1 to T3.
 pub const TIER_COLORS: [Color32; 3] = [Color32::WHITE, Color32::from_rgb(255, 212, 72), Color32::from_rgb(255, 138, 61)];
 
@@ -1132,6 +1248,46 @@ mod tests {
             let bounds = bar_shapes(rect, icon).iter().fold(Rect::NOTHING, |bounds, shape| bounds.union(shape.visual_bounding_rect()));
             assert!(bounds.width() > 23.0 && bounds.height() > 18.0, "{icon:?} is only {bounds:?}");
             assert!(rect.contains_rect(bounds), "{icon:?} spills out of its button: {bounds:?}");
+        }
+    }
+
+    #[test]
+    fn a_units_backdrop_says_where_it_can_go() {
+        let db = BlueprintDb::standard();
+        let ground = |key: &str| Ground::of(db.get(db.id(key)));
+        assert_eq!(ground("t1_medium_tank"), Ground::Land);
+        assert_eq!(ground("land_factory_t1"), Ground::Land);
+        assert_eq!(ground("t2_assault_hovercraft"), Ground::Coast);
+        assert_eq!(ground("t1_interceptor"), Ground::Air);
+        assert_eq!(ground("t2_gunship"), Ground::Air);
+        assert_eq!(ground("t1_frigate"), Ground::Ocean);
+        assert_eq!(ground("naval_factory"), Ground::Ocean);
+        assert_eq!(ground("t1_attack_sub"), Ground::Deep);
+        for unit in db.iter() {
+            let expected = match unit.move_class() {
+                crate::sim::components::MoveClass::Air => Ground::Air,
+                crate::sim::components::MoveClass::Hover | crate::sim::components::MoveClass::Seabed if !unit.on_water => Ground::Coast,
+                _ => Ground::of(unit),
+            };
+            assert_eq!(Ground::of(unit), expected, "{}", unit.key);
+        }
+        for domain in Ground::ALL {
+            assert!(db.iter().any(|unit| Ground::of(unit) == domain), "no unit is {domain:?}");
+        }
+    }
+
+    #[test]
+    fn the_backdrops_look_different_and_stay_inside_their_button() {
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::splat(46.0));
+        let drawn: Vec<String> = Ground::ALL.iter().map(|ground| format!("{:?}", ground_shapes(rect, *ground))).collect();
+        for first in 0..drawn.len() {
+            for second in first + 1..drawn.len() {
+                assert_ne!(drawn[first], drawn[second], "{:?} and {:?} look the same", Ground::ALL[first], Ground::ALL[second]);
+            }
+        }
+        for ground in Ground::ALL {
+            let bounds = ground_shapes(rect, ground).iter().fold(Rect::NOTHING, |bounds, shape| bounds.union(shape.visual_bounding_rect()));
+            assert!(rect.expand(2.0).contains_rect(bounds), "{ground:?} spills out: {bounds:?}");
         }
     }
 
