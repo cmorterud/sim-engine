@@ -555,6 +555,9 @@ struct MeshBuilder {
     pivot: Vec3,
     /// Whether large faces are cut into grids, for shapes shaded where their parts meet.
     subdivide: bool,
+    /// How far each side of a box drawn now leans in, as a share of its height (`ARMOR_SLOPE`),
+    /// or zero for upright boxes.
+    slope: f32,
 }
 
 impl MeshBuilder {
@@ -674,15 +677,23 @@ impl MeshBuilder {
     }
 
     fn block(&mut self, min: [f32; 3], max: [f32; 3]) {
-        let corners = |z: f32| {
+        let [lean_x, lean_y] = self.slope_inset(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
+        let corners = |z: f32, x: f32, y: f32| {
             [
-                Vec3::new(min[0], min[1], z),
-                Vec3::new(max[0], min[1], z),
-                Vec3::new(max[0], max[1], z),
-                Vec3::new(min[0], max[1], z),
+                Vec3::new(min[0] + x, min[1] + y, z),
+                Vec3::new(max[0] - x, min[1] + y, z),
+                Vec3::new(max[0] - x, max[1] - y, z),
+                Vec3::new(min[0] + x, max[1] - y, z),
             ]
         };
-        self.cuboid(corners(min[2]), corners(max[2]));
+        self.cuboid(corners(min[2], 0.0, 0.0), corners(max[2], lean_x, lean_y));
+    }
+
+    /// How far in the top of a box `width` across, `depth` deep, and `height` tall is drawn, either
+    /// way, for the slope its sides lean at now: never more than `SLOPE_INSET_MOST` of the box.
+    fn slope_inset(&self, width: f32, depth: f32, height: f32) -> [f32; 2] {
+        let lean = self.slope * height.max(0.0);
+        [lean.min(width * SLOPE_INSET_MOST), lean.min(depth * SLOPE_INSET_MOST)]
     }
 
     /// A long box between two points, such as a gun barrel.
@@ -711,16 +722,20 @@ impl MeshBuilder {
 
     /// A box whose top edges are cut back by `cut`, so that it catches the light along them.
     fn bevel(&mut self, min: [f32; 3], max: [f32; 3], cut: f32) {
-        self.block(min, [max[0], max[1], max[2] - cut]);
-        let corners = |inset: f32, z: f32| {
+        let lower = max[2] - cut;
+        self.block(min, [max[0], max[1], lower]);
+        // The cut starts where the box's sides end, leaning in if they do.
+        let (width, depth) = (max[0] - min[0], max[1] - min[1]);
+        let [lean_x, lean_y] = self.slope_inset(width, depth, lower - min[2]);
+        let corners = |x: f32, y: f32, z: f32| {
             [
-                Vec3::new(min[0] + inset, min[1] + inset, z),
-                Vec3::new(max[0] - inset, min[1] + inset, z),
-                Vec3::new(max[0] - inset, max[1] - inset, z),
-                Vec3::new(min[0] + inset, max[1] - inset, z),
+                Vec3::new(min[0] + x, min[1] + y, z),
+                Vec3::new(max[0] - x, min[1] + y, z),
+                Vec3::new(max[0] - x, max[1] - y, z),
+                Vec3::new(min[0] + x, max[1] - y, z),
             ]
         };
-        self.cuboid(corners(0.0, max[2] - cut), corners(cut, max[2]));
+        self.cuboid(corners(lean_x, lean_y, lower), corners((lean_x + cut).min(width * 0.45), (lean_y + cut).min(depth * 0.45), max[2]));
     }
 
     /// A half-round roof along Y, from the side walls at `half_width` up to `rise` above `z`.
@@ -2192,13 +2207,18 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 [Vec3::new(-0.3, 0.2, 0.45), Vec3::new(0.3, 0.2, 0.45), Vec3::new(0.3, 0.35, 0.45), Vec3::new(-0.3, 0.35, 0.45)],
             );
         }
+        // A long barrel laid nearly flat, half the plot's width out from a housing at its back to
+        // its edge, with a muzzle brake, and an ammunition box behind.
         Shape::ArtilleryGun => {
-            mesh.block([-0.3, -0.35, -0.15], [0.3, 0.2, 0.15]);
+            mesh.block([-0.26, -0.42, -0.15], [0.26, 0.0, 0.14]);
             mesh.paint(Material::Metal);
-            mesh.moving(motion::RECOIL, [0.0, -0.1, 0.0], |mesh| mesh.beam([0.0, -0.1, 0.0], [0.0, 0.42, 0.4], 0.07, 0.07));
-            mesh.flash([0.0, 0.42, 0.4], 0.07);
+            mesh.moving(motion::RECOIL, [0.0, -0.2, 0.04], |mesh| {
+                mesh.beam([0.0, -0.2, 0.04], [0.0, 0.47, 0.16], 0.055, 0.055);
+                mesh.beam([0.0, 0.42, 0.151], [0.0, 0.47, 0.16], 0.08, 0.065);
+            });
+            mesh.flash([0.0, 0.48, 0.17], 0.06);
             mesh.paint(Material::Hull);
-            mesh.block([-0.12, -0.45, 0.0], [0.12, -0.3, 0.12]);
+            mesh.block([-0.12, -0.5, 0.0], [0.12, -0.42, 0.11]);
         }
         // A dock: two piers with a slip of open water between them, open at both ends, under a crane.
         Shape::NavalFactory => {
@@ -3220,6 +3240,46 @@ const fn occlusion_ground(shape: Shape) -> Option<bool> {
     }
 }
 
+/// How far the sides of a box-built land unit's boxes lean in, as a share of their height, so
+/// that its hulls, turrets, and housings read as sloped armor rather than as blocks: about 17
+/// degrees, well inside `SMOOTH_CREASE_DEGREES`' crisp edges. It costs no triangles.
+const ARMOR_SLOPE: f32 = 0.3;
+/// The most a leaning box's top is drawn in on each side, as a share of the box, so that thin
+/// parts keep a top at least two fifths as wide as their foot.
+const SLOPE_INSET_MOST: f32 = 0.3;
+
+/// Whether a shape is drawn in sloped armor (`ARMOR_SLOPE`): the land units built from boxes,
+/// their hulls, turrets, and legs. The command rig and field rig keep their own lines.
+const fn sloped_armor(shape: Shape) -> bool {
+    matches!(
+        shape,
+        Shape::Bot
+            | Shape::BotLegs
+            | Shape::GrenadierWalker
+            | Shape::HeavyWalker
+            | Shape::SiegeWalker
+            | Shape::Tank
+            | Shape::TankHull
+            | Shape::HeavyTank
+            | Shape::HeavyTankHull
+            | Shape::Artillery
+            | Shape::ArtilleryHull
+            | Shape::HeavyArtillery
+            | Shape::CasemateHull
+            | Shape::TruckAntiAir
+            | Shape::WheeledHull
+            | Shape::FlakTurret
+            | Shape::HoverHull
+            | Shape::MissileRack
+            | Shape::MissileTruck
+            | Shape::LandScout
+            | Shape::ShieldEmitter
+            | Shape::ShieldCarrier
+            | Shape::CombatEngineerHull
+            | Shape::EngineerHull
+    )
+}
+
 /// Faces meeting at less than this angle, in degrees, are shaded as one smooth surface, so that
 /// round parts look round; sharper edges stay crisp: a box's corners, a bevel's 45 degrees, and
 /// the rim of a cylinder's cap. Until 2026-11-23 every face was shaded flat, which made every
@@ -3378,6 +3438,7 @@ impl MeshSet {
             mesh.pivot = Vec3::ZERO;
             let first_vertex = mesh.vertices.len();
             mesh.subdivide = occlusion_ground(shape).is_some();
+            mesh.slope = if sloped_armor(shape) { ARMOR_SLOPE } else { 0.0 };
             build_shape(shape, &mut mesh);
             smooth_normals(&mut mesh.vertices, first_vertex);
             let end = mesh.indices.len() as u32;
