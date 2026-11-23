@@ -449,16 +449,10 @@ pub fn portrait_index() -> (usize, usize, Vec<&'static str>) {
 /// Loads the portraits into the interface. Call once, before the first frame; without it,
 /// buttons show the units' symbols instead.
 pub fn install_portraits(ctx: &egui::Context) {
-    let decoder = png::Decoder::new(PORTRAIT_SHEET);
-    let Ok(mut reader) = decoder.read_info() else {
+    let Some((size, pixels)) = portrait_pixels() else {
         return;
     };
-    let mut pixels = vec![0; reader.output_buffer_size()];
-    let Ok(frame) = reader.next_frame(&mut pixels) else {
-        return;
-    };
-    let size = [frame.width as usize, frame.height as usize];
-    let image = egui::ColorImage::from_rgba_unmultiplied(size, &pixels[..frame.buffer_size()]);
+    let image = egui::ColorImage::from_rgba_unmultiplied(size, &pixels);
     let texture = ctx.load_texture(PORTRAITS, image, egui::TextureOptions::LINEAR);
     let (tile, columns, keys) = portrait_index();
     let (width, height) = (size[0] as f32, size[1] as f32);
@@ -487,6 +481,82 @@ pub fn draw_portrait(painter: &egui::Painter, rect: Rect, key: &str) -> bool {
     true
 }
 
+/// The portrait sheet's size, and its pixels as unmultiplied RGBA bytes, row by row.
+fn portrait_pixels() -> Option<([usize; 2], Vec<u8>)> {
+    let mut reader = png::Decoder::new(PORTRAIT_SHEET).read_info().ok()?;
+    let mut pixels = vec![0; reader.output_buffer_size()];
+    let frame = reader.next_frame(&mut pixels).ok()?;
+    pixels.truncate(frame.buffer_size());
+    Some(([frame.width as usize, frame.height as usize], pixels))
+}
+
+/// The side, in pixels, of the small picture a portrait is shrunk to for comparing it with the
+/// others: about as much of it as can be made out at a glance on a bar button.
+const GLANCE: usize = 24;
+/// What a portrait is laid over before it is shrunk: a plain grey, so that only the unit counts.
+const GLANCE_GROUND: f32 = 0.4;
+
+/// Every portrait shrunk to `GLANCE` pixels a side over `GLANCE_GROUND`, as colors from 0 to 1,
+/// with whose it is.
+pub fn portrait_glances() -> Vec<(&'static str, Vec<[f32; 3]>)> {
+    let Some((size, pixels)) = portrait_pixels() else {
+        return Vec::new();
+    };
+    let (tile, columns, keys) = portrait_index();
+    let block = tile / GLANCE;
+    keys.into_iter()
+        .enumerate()
+        .map(|(index, key)| {
+            let (left, top) = ((index % columns) * tile, (index / columns) * tile);
+            let glance = (0..GLANCE * GLANCE)
+                .map(|cell| {
+                    let (x, y) = (left + (cell % GLANCE) * block, top + (cell / GLANCE) * block);
+                    let mut sum = [0.0_f32; 3];
+                    for dy in 0..block {
+                        for dx in 0..block {
+                            let at = ((y + dy) * size[0] + x + dx) * 4;
+                            let alpha = f32::from(pixels[at + 3]) / 255.0;
+                            for channel in 0..3 {
+                                sum[channel] += f32::from(pixels[at + channel]) / 255.0 * alpha + GLANCE_GROUND * (1.0 - alpha);
+                            }
+                        }
+                    }
+                    sum.map(|total| total / (block * block) as f32)
+                })
+                .collect();
+            (key, glance)
+        })
+        .collect()
+}
+
+/// How unlike two shrunk portraits are: the mean distance between their colors, pixel by pixel,
+/// from 0 for the same picture to 1 for black against white everywhere.
+pub fn glance_distance(first: &[[f32; 3]], second: &[[f32; 3]]) -> f32 {
+    let total: f32 = first.iter().zip(second).map(|(a, b)| (0..3).map(|channel| (a[channel] - b[channel]).powi(2)).sum::<f32>().sqrt()).sum();
+    total / (first.len().max(1) as f32 * 3.0_f32.sqrt())
+}
+
+/// Every pair of portraits that could be side by side on a build bar, most alike first, with how
+/// unlike they are (`glance_distance`). Only units on the same backdrop are compared, since the
+/// backdrop already tells land from air from water, and structures only with structures, since
+/// engineers build those and factories the rest.
+pub fn most_alike_portraits(db: &crate::sim::blueprints::BlueprintDb) -> Vec<(f32, &'static str, &'static str)> {
+    let glances: Vec<_> = portrait_glances()
+        .into_iter()
+        .filter_map(|(key, glance)| db.find(key).map(|id| (key, (crate::icons::Ground::of(db.get(id)), db.get(id).is_structure()), glance)))
+        .collect();
+    let mut pairs = Vec::new();
+    for (index, (first, bar, glance)) in glances.iter().enumerate() {
+        for (second, other_bar, other) in &glances[index + 1..] {
+            if bar == other_bar {
+                pairs.push((glance_distance(glance, other), *first, *second));
+            }
+        }
+    }
+    pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
+    pairs
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -501,6 +571,35 @@ mod tests {
         assert_eq!(compact(47_569), "47.6k");
         assert_eq!(compact(669_000), "669k");
         assert_eq!(compact(-1_250_000), "-1.2M");
+    }
+
+    /// The least `glance_distance` allowed between two portraits that could share a build bar.
+    /// The most alike measured 0.0104 on 2026-11-23, the T2 naval factory and its support
+    /// factory: raise this as the most alike pairs, which `cargo run --release --example
+    /// portrait_likeness` lists, are given looks of their own.
+    const PORTRAIT_LIKENESS_FLOOR: f32 = 0.009;
+
+    #[test]
+    fn no_two_portraits_that_share_a_build_bar_are_nearly_the_same_picture() {
+        let db = crate::sim::blueprints::BlueprintDb::standard();
+        let pairs = most_alike_portraits(&db);
+        assert!(pairs.len() > 500, "most units are compared: only {} pairs", pairs.len());
+        let (distance, first, second) = pairs[0];
+        assert!(
+            distance >= PORTRAIT_LIKENESS_FLOOR,
+            "{first} and {second} have portraits too alike to tell apart on a button ({distance:.4}): give one a look of its own, then see `cargo run --release --example portrait_likeness`"
+        );
+    }
+
+    #[test]
+    fn the_likeness_measure_finds_one_model_in_two_tiers_more_alike_than_two_units() {
+        let glances: BTreeMap<&str, Vec<[f32; 3]>> = portrait_glances().into_iter().collect();
+        let distance = |first: &str, second: &str| glance_distance(&glances[first], &glances[second]);
+        assert_eq!(distance("t1_medium_tank", "t1_medium_tank"), 0.0);
+        let same_model = distance("t1_light_transport", "t2_transport");
+        let different = distance("t1_medium_tank", "t3_heavy_walker");
+        assert!(same_model * 2.0 < different, "a transport in two tiers ({same_model:.4}) is far more alike than a tank and a walker ({different:.4})");
+        assert!(different < 1.0);
     }
 
     #[test]

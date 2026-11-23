@@ -626,6 +626,53 @@ pub fn bar_shapes(rect: Rect, icon: Icon) -> Vec<Shape> {
     shapes(center, half, icon, 0, icon.role().color())
 }
 
+/// How tall the role strip across the top of a unit's button is, as a share of the button's
+/// height, and the least and most in points.
+const ROLE_STRIP: (f32, f32, f32) = (0.07, 2.0, 3.5);
+/// Half the height of the symbol on a unit's button, the same way. Until 2026-11-23 it was a
+/// tenth, at most 6 points, on a round dark disc: too small for its color to read along a bar.
+const ROLE_SYMBOL_HALF: (f32, f32, f32) = (0.15, 4.5, 8.0);
+/// The space round the symbol on its tab, in points.
+const ROLE_TAB_PAD: f32 = 2.0;
+/// How much of the button's width the tab may take, and how far down it may reach: wide frames,
+/// such as aircraft and factories, and the commanders' tall one are drawn smaller than the rest,
+/// so that every tab keeps to its corner and none hides much of the portrait.
+const ROLE_TAB_WIDEST: f32 = 0.45;
+const ROLE_TAB_REACH: f32 = 0.5;
+
+/// The header of a unit's button, over its portrait: a strip across the top in its role's color,
+/// so that a bar of buttons reads by color first, as the bar of symbols did before portraits,
+/// and with `symbol`, its map symbol in that color on a dark tab hanging from the strip's left end.
+pub fn role_header_shapes(rect: Rect, icon: Icon, symbol: bool) -> Vec<Shape> {
+    let color = icon.role().color();
+    let sized = |(share, least, most): (f32, f32, f32)| (rect.height() * share).clamp(least, most);
+    let strip = sized(ROLE_STRIP);
+    let mut out = vec![Shape::rect_filled(Rect::from_min_size(rect.min, Vec2::new(rect.width(), strip)), 0.0, color)];
+    if symbol {
+        let measured = |half: f32| {
+            let mark = shapes(Pos2::ZERO, half, icon, 0, color);
+            let bounds = mark.iter().fold(Rect::NOTHING, |bounds, shape| bounds.union(shape.visual_bounding_rect()));
+            (mark, bounds)
+        };
+        let half = sized(ROLE_SYMBOL_HALF);
+        let (mut mark, mut bounds) = measured(half);
+        let widest = rect.width() * ROLE_TAB_WIDEST - ROLE_TAB_PAD * 2.0;
+        let tallest = rect.height() * ROLE_TAB_REACH - strip - ROLE_TAB_PAD * 2.0;
+        let fits = (widest / bounds.width()).min(tallest / bounds.height());
+        if fits < 1.0 {
+            (mark, bounds) = measured(half * fits);
+        }
+        let tab = Rect::from_min_size(rect.min + Vec2::new(0.0, strip), bounds.size() + Vec2::splat(ROLE_TAB_PAD * 2.0));
+        out.push(Shape::rect_filled(tab, egui::Rounding { se: 4.0, ..egui::Rounding::ZERO }, Color32::from_black_alpha(200)));
+        let offset = tab.min + Vec2::splat(ROLE_TAB_PAD) - bounds.min;
+        for shape in &mut mark {
+            shape.translate(offset);
+        }
+        out.extend(mark);
+    }
+    out
+}
+
 /// Half the height, in points, of an icon on the map: large enough that its mark reads without
 /// squinting, and the command rigs larger still. Made a quarter larger on 2026-11-20, then a
 /// quarter smaller than that, which left them a little under their first size.
@@ -1288,6 +1335,28 @@ mod tests {
         for ground in Ground::ALL {
             let bounds = ground_shapes(rect, ground).iter().fold(Rect::NOTHING, |bounds, shape| bounds.union(shape.visual_bounding_rect()));
             assert!(rect.expand(2.0).contains_rect(bounds), "{ground:?} spills out: {bounds:?}");
+        }
+    }
+
+    #[test]
+    fn a_buttons_role_header_is_a_strip_in_its_roles_color_and_a_symbol_tab_clear_of_the_middle() {
+        let rect = Rect::from_min_size(Pos2::new(10.0, 20.0), Vec2::splat(42.0));
+        for icon in Icon::ALL.into_iter().filter(|icon| icon.frame() != Frame::Munition) {
+            let plain = role_header_shapes(rect, icon, false);
+            assert_eq!(plain.len(), 1, "{icon:?}: without the symbol, only the strip");
+            let Shape::Rect(strip) = &plain[0] else { panic!("{icon:?}: the strip is a rectangle") };
+            assert_eq!(strip.fill, icon.role().color(), "{icon:?}: the strip is in its role's color");
+            assert_eq!((strip.rect.top(), strip.rect.width()), (rect.top(), rect.width()), "{icon:?}: the strip runs along the top");
+
+            let shapes = role_header_shapes(rect, icon, true);
+            let bounds = shapes.iter().fold(Rect::NOTHING, |bounds, shape| bounds.union(shape.visual_bounding_rect()));
+            assert!(rect.contains_rect(bounds), "{icon:?} spills out of its button: {bounds:?}");
+            let symbol = shapes[2..].iter().fold(Rect::NOTHING, |bounds, shape| bounds.union(shape.visual_bounding_rect()));
+            let tab = shapes[1].visual_bounding_rect();
+            assert!(tab.contains_rect(symbol), "{icon:?}: the symbol sits on its tab");
+            assert!(tab.width() <= rect.width() * ROLE_TAB_WIDEST + 1.0, "{icon:?}: the tab is {} wide", tab.width());
+            assert!(tab.bottom() <= rect.top() + rect.height() * ROLE_TAB_REACH + 1.0, "{icon:?}: the tab stays above the middle, where the unit is: {tab:?}");
+            assert!(symbol.width().max(symbol.height()) >= rect.height() * 0.3, "{icon:?}: the symbol is large enough to read, not {symbol:?}");
         }
     }
 

@@ -1,31 +1,60 @@
 //! Draws every icon as the build bar shows it, and as the map shows it, and saves the sheet as a
-//! picture, for comparing icons before and after a change without starting the game.
+//! picture, for comparing icons before and after a change without starting the game. With
+//! `--buttons`, draws instead every unit's build bar button as the game does: its portrait over its
+//! backdrop, its role strip and symbol, and its key.
 //!
-//! `cargo run --release --example icon_sheet -- <output.bmp> [points per pixel]`
+//! `cargo run --release --example icon_sheet -- <output.bmp> [points per pixel] [--buttons]`
 //!
 //! egui lays the sheet out and tessellates it as it would in the game, and a small software
 //! rasterizer here fills the triangles, so no window or GPU is needed.
 use egui::epaint::{ClippedPrimitive, Primitive};
 use egui::{Align2, Color32, FontId, Pos2, Rect, Stroke, TextureId, Vec2};
 use sim_engine::icons::{self, Icon};
+use sim_engine::sim::blueprints::{BlueprintDb, UnitClass};
 
 const COLUMNS: usize = 10;
+/// Buttons a row, with `--buttons`, and the space between them, in points.
+const BUTTON_COLUMNS: usize = 12;
+const BUTTON_GAP: f32 = 4.0;
 const CELL: f32 = 66.0;
 const BUTTON: f32 = 46.0;
 
 fn main() {
-    let mut args = std::env::args().skip(1);
-    let output = args.next().unwrap_or_else(|| "icons.bmp".to_string());
-    let scale: f32 = args.next().and_then(|value| value.parse().ok()).unwrap_or(2.0);
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let buttons = args.iter().any(|arg| arg == "--buttons");
+    let mut positional = args.iter().filter(|arg| !arg.starts_with("--"));
+    let output = positional.next().cloned().unwrap_or_else(|| "icons.bmp".to_string());
+    let scale: f32 = positional.next().and_then(|value| value.parse().ok()).unwrap_or(2.0);
     let rows = Icon::ALL.len().div_ceil(COLUMNS);
-    // Bar buttons on top, then the same icons as the map draws them.
-    let size = Vec2::new(COLUMNS as f32 * CELL, rows as f32 * CELL * 2.0 + 20.0);
+    let db = BlueprintDb::standard();
+    let units: Vec<_> = db.iter().filter(|unit| unit.class != UnitClass::Ammo).map(|unit| db.id(&unit.key)).collect();
+    let size = if buttons {
+        let pitch = BUTTON + BUTTON_GAP;
+        Vec2::new(BUTTON_COLUMNS as f32 * pitch + 12.0, units.len().div_ceil(BUTTON_COLUMNS) as f32 * pitch + 12.0)
+    } else {
+        // Bar buttons on top, then the same icons as the map draws them.
+        Vec2::new(COLUMNS as f32 * CELL, rows as f32 * CELL * 2.0 + 20.0)
+    };
     let ctx = egui::Context::default();
     sim_engine::ui::install_fonts(&ctx);
+    if buttons {
+        sim_engine::hud::install_portraits(&ctx);
+    }
     ctx.set_pixels_per_point(scale);
     let input = || egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)), ..egui::RawInput::default() };
     let draw = |ctx: &egui::Context| {
-        egui::CentralPanel::default().frame(egui::Frame::none().fill(Color32::from_gray(27))).show(ctx, |ui| {
+        egui::CentralPanel::default().frame(egui::Frame::none().fill(Color32::from_gray(27)).inner_margin(6.0)).show(ctx, |ui| {
+            if buttons {
+                ui.spacing_mut().item_spacing = Vec2::splat(BUTTON_GAP);
+                for row in units.chunks(BUTTON_COLUMNS) {
+                    ui.horizontal(|ui| {
+                        for unit in row {
+                            sim_engine::ui::icon_button(ui, &db, *unit, "");
+                        }
+                    });
+                }
+                return;
+            }
             let painter = ui.painter();
             let visuals = ui.visuals().widgets.inactive;
             for (index, icon) in Icon::ALL.iter().enumerate() {
@@ -42,8 +71,17 @@ fn main() {
         });
     };
     // The first frame loads the fonts; the second is the one drawn.
-    let _ = ctx.run(input(), draw);
+    let first = ctx.run(input(), draw);
     let output_frame = ctx.run(input(), draw);
+    // Pictures, such as the portraits, arrive as textures to upload with the frame that loads them.
+    let mut images: Vec<(TextureId, Texture)> = Vec::new();
+    for (id, delta) in first.textures_delta.set.iter().chain(&output_frame.textures_delta.set) {
+        if let egui::ImageData::Color(image) = &delta.image {
+            let texels = image.pixels.iter().map(|color| [color.r(), color.g(), color.b(), color.a()].map(|value| f32::from(value) / 255.0)).collect();
+            images.retain(|(known, _)| known != id);
+            images.push((*id, Texture { width: image.width(), height: image.height(), texels }));
+        }
+    }
     // Shapes sample the font atlas too, at its white texel.
     let font = ctx.fonts(egui::epaint::Fonts::image).into_texture();
     let primitives = ctx.tessellate(output_frame.shapes, output_frame.pixels_per_point);
@@ -51,10 +89,13 @@ fn main() {
     let mut pixels = vec![[0.0_f32; 4]; width * height];
     for ClippedPrimitive { clip_rect, primitive } in &primitives {
         let Primitive::Mesh(mesh) = primitive else { continue };
-        if mesh.texture_id != TextureId::default() {
+        let texture = if mesh.texture_id == TextureId::default() {
+            &font
+        } else if let Some((_, image)) = images.iter().find(|(id, _)| *id == mesh.texture_id) {
+            image
+        } else {
             continue;
-        }
-        let texture = &font;
+        };
         let clip = Rect::from_min_max(clip_rect.min * scale, clip_rect.max * scale);
         for triangle in mesh.indices.as_chunks::<3>().0 {
             let [a, b, c] = [triangle[0], triangle[1], triangle[2]].map(|index| &mesh.vertices[index as usize]);
