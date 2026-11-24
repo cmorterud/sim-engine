@@ -30,14 +30,8 @@ fn column_count(units: usize) -> usize {
 /// already stand, so that paths cross as little as possible. Ties go to the lowest id, and the
 /// result does not depend on the order the units were given in.
 pub fn plan_formation(units: &[(SimId, Vec2Fp)], goal: Vec2Fp, spacing: Fp) -> Formation {
-    let count = units.len() as i64;
-    let center = units.iter().fold((0i64, 0i64), |sum, (_, position)| {
-        (sum.0 + i64::from(position.x.to_bits()), sum.1 + i64::from(position.y.to_bits()))
-    });
-    let center = Vec2Fp::new(
-        Fp::from_bits((center.0 / count.max(1)) as i32),
-        Fp::from_bits((center.1 / count.max(1)) as i32),
-    );
+    // Taken about the goal, so that mirror-image groups have mirror-image centers.
+    let center = crate::math::fp::mean_about(units.iter().map(|&(_, position)| position), goal);
     let travel = (goal - center).normalized();
     let forward = if travel == Vec2Fp::ZERO { Vec2Fp::new(Fp::ZERO, Fp::ONE) } else { travel };
     let (fx, fy) = (i64::from(forward.x.to_bits()), i64::from(forward.y.to_bits()));
@@ -62,8 +56,11 @@ pub fn plan_formation(units: &[(SimId, Vec2Fp)], goal: Vec2Fp, spacing: Fp) -> F
         let width = row_units.len() as i64;
         for (column, &index) in row_units.iter().enumerate() {
             let side = 2 * column as i64 - (width - 1);
+            // Rounded toward zero, so that a formation facing the other way is its mirror image:
+            // shifted down, each offset rounded toward negative infinity, a raw bit further out
+            // on one side than the other.
             let offset = |forward_axis: i64, right_axis: i64| {
-                ((forward_axis * depth + right_axis * side) * spacing_raw / 2) >> FP_FRAC_BITS
+                (forward_axis * depth + right_axis * side) * spacing_raw / 2 / (1 << FP_FRAC_BITS)
             };
             slots[index] = Vec2Fp::new(
                 Fp::from_bits(goal.x.to_bits().saturating_add(offset(fx, rx) as i32)),

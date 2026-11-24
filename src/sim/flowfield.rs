@@ -211,6 +211,9 @@ struct Route {
     last_reroute_tick: u32,
     field_slots: Vec<u32>,
     queued: Vec<bool>,
+    /// The player whose units take it, whose own share of each tick's field builds builds its
+    /// fields.
+    owner: usize,
 }
 
 /// The result of sampling a route at a position.
@@ -228,6 +231,14 @@ pub enum FlowSample {
 /// number alone.
 pub const NAVAL_ROUTE_BASE: u32 = 1 << 30;
 pub const AMPHIBIOUS_ROUTE_BASE: u32 = 1 << 29;
+
+/// A sector field to build for a route, at the back of its player's queue.
+fn enqueue(queues: &mut Vec<VecDeque<(u32, u32)>>, owner: usize, id: u32, sector: u32) {
+    if queues.len() <= owner {
+        queues.resize_with(owner + 1, VecDeque::new);
+    }
+    queues[owner].push_back((id, sector));
+}
 
 pub struct FlowField {
     /// Whose ground this field paths over: land, or water for ships.
@@ -251,7 +262,8 @@ pub struct FlowField {
     link_cache: Vec<BTreeMap<(u16, u16), u32>>,
     routes: BTreeMap<u32, Route>,
     next_route: u32,
-    queue: VecDeque<(u32, u32)>,
+    /// Sector fields waiting to be built, a queue for each player, by route and sector.
+    queues: Vec<VecDeque<(u32, u32)>>,
     fields: Vec<Option<Field>>,
     free_slots: Vec<u32>,
     search: SectorSearch,
@@ -274,7 +286,7 @@ impl FlowField {
             link_cache: vec![BTreeMap::new(); (cells / SECTOR_CELLS) * (cells / SECTOR_CELLS)],
             routes: BTreeMap::new(),
             next_route: 1,
-            queue: VecDeque::new(),
+            queues: Vec::new(),
             fields: Vec::new(),
             free_slots: Vec::new(),
             search: SectorSearch::new(),
@@ -333,17 +345,18 @@ impl FlowField {
         references: u32,
         arrive_radius: Fp,
         follow: Option<SimId>,
+        owner: usize,
     ) -> Option<u32> {
         if matches!(class, MoveClass::Naval | MoveClass::Submarine) && self.class == MoveClass::Land {
             let naval = self.naval.get_or_insert_with(|| Box::new(Self::new_naval(terrain)));
-            return naval.create_route(terrain, tick, goal, references, arrive_radius, follow);
+            return naval.create_route(terrain, tick, goal, references, arrive_radius, follow, owner);
         }
         // Without water, amphibians cross exactly what land units do, and share their routes.
         if matches!(class, MoveClass::Hover | MoveClass::Seabed) && self.class == MoveClass::Land && terrain.has_water() {
             let amphibious = self.amphibious.get_or_insert_with(|| Box::new(Self::new_amphibious(terrain)));
-            return amphibious.create_route(terrain, tick, goal, references, arrive_radius, follow);
+            return amphibious.create_route(terrain, tick, goal, references, arrive_radius, follow, owner);
         }
-        self.create_route(terrain, tick, goal, references, arrive_radius, follow)
+        self.create_route(terrain, tick, goal, references, arrive_radius, follow, owner)
     }
 
     /// Call after any cost grid change. The graph and existing routes rebuild on next use.
@@ -511,8 +524,9 @@ impl FlowField {
         self.ensure_graph(terrain);
     }
 
-    /// Creates a route. Returns `None` when no passable cell is near the goal.
-    /// The new route starts with one reference per unit in the group.
+    /// Creates a route for a player's units. Returns `None` when no passable cell is near the
+    /// goal. The new route starts with one reference per unit in the group.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_route(
         &mut self,
         terrain: &Terrain,
@@ -521,6 +535,7 @@ impl FlowField {
         references: u32,
         arrive_radius: Fp,
         follow: Option<SimId>,
+        owner: usize,
     ) -> Option<u32> {
         self.ensure_graph(terrain);
         nearest_passable_cell_for(terrain, self.class, goal)?;
@@ -543,6 +558,7 @@ impl FlowField {
                 last_reroute_tick: tick,
                 field_slots: vec![NO_SLOT; sectors],
                 queued: vec![false; sectors],
+                owner,
             },
         );
         self.route_to(id, terrain, goal);
@@ -711,7 +727,7 @@ impl FlowField {
         };
         if field_generation != Some(route.generation) && !route.queued[sector as usize] {
             route.queued[sector as usize] = true;
-            self.queue.push_back((id, sector));
+            enqueue(&mut self.queues, route.owner, id, sector);
         }
         if direction != DIR_NONE {
             FlowSample::Direction(direction_vector(direction as usize))
@@ -722,29 +738,35 @@ impl FlowField {
         }
     }
 
-    /// Builds queued sector fields, up to the fixed per-tick budget.
+    /// Builds queued sector fields, up to the fixed per-tick budget for each player, in the order
+    /// each asked for them. Each player has a budget of their own: shared, a player's fields
+    /// waited behind others' whenever more were asked for in a tick than it allowed, so in a
+    /// team match a unit could start on its way a tick after its mirror image on the other side,
+    /// whose turn in the queue came first.
     pub fn build_pending(&mut self, terrain: &Terrain, tick: u32) {
         for other in self.others_mut() {
             other.build_pending(terrain, tick);
         }
         self.ensure_graph(terrain);
-        let mut built = 0;
-        while built < MAX_FIELD_BUILDS_PER_TICK {
-            let Some((id, sector)) = self.queue.pop_front() else {
-                break;
-            };
-            let Some(route) = self.routes.get_mut(&id) else {
-                continue;
-            };
-            route.queued[sector as usize] = false;
-            let slot = route.field_slots[sector as usize];
-            let is_current = slot != NO_SLOT
-                && self.fields[slot as usize].as_ref().is_some_and(|field| field.generation == route.generation);
-            if is_current {
-                continue;
+        for owner in 0..self.queues.len() {
+            let mut built = 0;
+            while built < MAX_FIELD_BUILDS_PER_TICK {
+                let Some((id, sector)) = self.queues[owner].pop_front() else {
+                    break;
+                };
+                let Some(route) = self.routes.get_mut(&id) else {
+                    continue;
+                };
+                route.queued[sector as usize] = false;
+                let slot = route.field_slots[sector as usize];
+                let is_current = slot != NO_SLOT
+                    && self.fields[slot as usize].as_ref().is_some_and(|field| field.generation == route.generation);
+                if is_current {
+                    continue;
+                }
+                self.build_field(id, sector, terrain, tick);
+                built += 1;
             }
-            self.build_field(id, sector, terrain, tick);
-            built += 1;
         }
     }
 
@@ -821,12 +843,17 @@ impl FlowField {
         route.field_slots[sector as usize] = slot;
 
         // Prepare the next sectors along the route, so that units rarely wait at a border.
+        let owner = route.owner;
+        let mut wanted = Vec::new();
         for onward in onward_sectors {
             let onward_slot = route.field_slots[onward as usize];
             if onward_slot == NO_SLOT && !route.queued[onward as usize] {
                 route.queued[onward as usize] = true;
-                self.queue.push_back((id, onward));
+                wanted.push(onward);
             }
+        }
+        for onward in wanted {
+            enqueue(&mut self.queues, owner, id, onward);
         }
     }
 
@@ -868,9 +895,12 @@ impl FlowField {
             hasher.write(&route.arrive_radius.to_bits().to_le_bytes());
             hasher.write(&route.follow.map_or(u32::MAX, |target| target.0).to_le_bytes());
         }
-        for &(route, sector) in &self.queue {
-            hasher.write(&route.to_le_bytes());
-            hasher.write(&sector.to_le_bytes());
+        for (owner, queue) in self.queues.iter().enumerate() {
+            hasher.write(&(owner as u32).to_le_bytes());
+            for &(route, sector) in queue {
+                hasher.write(&route.to_le_bytes());
+                hasher.write(&sector.to_le_bytes());
+            }
         }
         for field in self.fields.iter().flatten() {
             hasher.write(&field.route.to_le_bytes());
@@ -1185,7 +1215,7 @@ mod tests {
     fn walks_straight_across_open_sectors() {
         let terrain = flat(SECTOR_UNITS * 4);
         let mut flow = FlowField::new(&terrain);
-        let route = flow.create_route(&terrain, 0, point(4_900, 700), 1, fp_int(1), None).unwrap();
+        let route = flow.create_route(&terrain, 0, point(4_900, 700), 1, fp_int(1), None, 0).unwrap();
         let (position, steps) = walk(&mut flow, &terrain, route, point(100, 700), 3_000);
         assert!(position.distance_squared(&point(4_900, 700)).to_num::<i64>() < 900);
         // 4,800 units at 5 per step is 960 steps. Allow a small margin for building and hugging.
@@ -1196,7 +1226,7 @@ mod tests {
     fn diagonal_route_does_not_staircase() {
         let terrain = flat(SECTOR_UNITS * 4);
         let mut flow = FlowField::new(&terrain);
-        let route = flow.create_route(&terrain, 0, point(4_900, 4_900), 1, fp_int(1), None).unwrap();
+        let route = flow.create_route(&terrain, 0, point(4_900, 4_900), 1, fp_int(1), None, 0).unwrap();
         let (position, steps) = walk(&mut flow, &terrain, route, point(100, 100), 3_000);
         assert!(position.distance_squared(&point(4_900, 4_900)).to_num::<i64>() < 900);
         // An ideal diagonal covers 6,788 units, or 1,358 steps. A Manhattan staircase covers 1,920.
@@ -1209,7 +1239,7 @@ mod tests {
         // A full-height wall with a gap near the top, spanning several sectors.
         terrain.add_box_obstacle(rect(2_500, 0, 2_560, 4_400));
         let mut flow = FlowField::new(&terrain);
-        let route = flow.create_route(&terrain, 0, point(4_800, 300), 1, fp_int(1), None).unwrap();
+        let route = flow.create_route(&terrain, 0, point(4_800, 300), 1, fp_int(1), None, 0).unwrap();
         let (position, steps) = walk(&mut flow, &terrain, route, point(200, 300), 6_000);
         assert!(position.distance_squared(&point(4_800, 300)).to_num::<i64>() < 900, "stopped at {position:?} after {steps}");
     }
@@ -1219,7 +1249,7 @@ mod tests {
         let mut terrain = flat(SECTOR_UNITS * 3);
         terrain.add_box_obstacle(rect(1_900, 0, 1_940, 3_840));
         let mut flow = FlowField::new(&terrain);
-        let route = flow.create_route(&terrain, 0, point(3_000, 300), 1, fp_int(1), None).unwrap();
+        let route = flow.create_route(&terrain, 0, point(3_000, 300), 1, fp_int(1), None, 0).unwrap();
         // Until a field exists there is nothing to go on, so it only holds.
         assert_eq!(flow.sample(route, 0, point(300, 300), &terrain), FlowSample::Hold);
         for tick in 0..4 {
@@ -1235,7 +1265,7 @@ mod tests {
         let mut terrain = flat(SECTOR_UNITS);
         terrain.add_box_obstacle(rect(600, 600, 700, 700));
         let mut flow = FlowField::new(&terrain);
-        let route = flow.create_route(&terrain, 0, point(650, 650), 1, fp_int(1), None).unwrap();
+        let route = flow.create_route(&terrain, 0, point(650, 650), 1, fp_int(1), None, 0).unwrap();
         let cell = flow.routes[&route].goal_cell;
         assert_ne!(land_cost(&terrain)[cell.1 * terrain.cells_per_side() + cell.0], COST_IMPASSABLE);
     }
@@ -1244,7 +1274,7 @@ mod tests {
     fn fields_are_built_lazily_and_within_budget() {
         let terrain = flat(SECTOR_UNITS * 16);
         let mut flow = FlowField::new(&terrain);
-        let route = flow.create_route(&terrain, 0, point(20_000, 20_000), 1, fp_int(1), None).unwrap();
+        let route = flow.create_route(&terrain, 0, point(20_000, 20_000), 1, fp_int(1), None, 0).unwrap();
         assert_eq!(flow.field_builds_total(), 0);
         for sector in 0..200 {
             let x = (sector % 16) * SECTOR_UNITS + 10;
@@ -1259,7 +1289,7 @@ mod tests {
     fn released_route_frees_its_fields() {
         let terrain = flat(SECTOR_UNITS * 2);
         let mut flow = FlowField::new(&terrain);
-        let route = flow.create_route(&terrain, 0, point(2_000, 2_000), 2, fp_int(1), None).unwrap();
+        let route = flow.create_route(&terrain, 0, point(2_000, 2_000), 2, fp_int(1), None, 0).unwrap();
         flow.sample(route, 0, point(10, 10), &terrain);
         flow.build_pending(&terrain, 0);
         assert!(flow.cached_field_count() > 0);

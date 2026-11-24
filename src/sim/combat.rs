@@ -6,7 +6,7 @@ use super::config::{GRAVITY_RAW, TERRAIN_CELL_UNITS};
 use super::components::Missile;
 use super::spatial::GridEntry;
 use super::terrain::Terrain;
-use crate::math::fp::{sqrt_wide, Vec2Fp};
+use crate::math::fp::{mul_toward_zero, sqrt_wide, Vec2Fp};
 
 pub const GRAVITY: Fp = Fp::from_bits(GRAVITY_RAW);
 
@@ -130,8 +130,11 @@ pub fn intercept(from: Vec3Fp, to: Vec3Fp, velocity: Vec3Fp, turn: Vec2Fp, speed
         if x * x + y * y + z * z <= speed * speed * t * t || ticks == most {
             return (ticks, at);
         }
-        // Each tick it turns, then moves along its new heading.
-        step = Vec2Fp::new(step.x * turn.x - step.y * turn.y, step.x * turn.y + step.y * turn.x);
+        // Each tick it turns, then moves along its new heading. Rounded toward zero, so that a
+        // shot at an aircraft and at its mirror image lead alike: `*` rounds toward negative
+        // infinity, and the step of one is the other's negated while the turn is the same.
+        let times = mul_toward_zero;
+        step = Vec2Fp::new(times(step.x, turn.x) - times(step.y, turn.y), times(step.x, turn.y) + times(step.y, turn.x));
         at = Vec3Fp::new(at.x + step.x, at.y + step.y, at.z);
     }
     (most, at)
@@ -154,7 +157,11 @@ pub fn segment_hit(start: Vec3Fp, step: Vec3Fp, x: i32, y: i32, z: i32, radius: 
         // i128 keeps this exact even for very fast shells over long segments.
         ((i128::from(along) << FP_FRAC_BITS) / i128::from(length_squared)) as i64
     };
-    let (ax, ay, az) = (mx - ((dx * t) >> FP_FRAC_BITS), my - ((dy * t) >> FP_FRAC_BITS), mz - ((dz * t) >> FP_FRAC_BITS));
+    // Divided rather than shifted, rounding toward zero, so that a shot and its mirror image
+    // come equally close: shifted, the one flying the negative way along an axis came a raw bit
+    // further each time, and could hit where its image missed.
+    let part = |d: i64| d * t / (1 << FP_FRAC_BITS);
+    let (ax, ay, az) = (mx - part(dx), my - part(dy), mz - part(dz));
     let radius = i64::from(radius);
     (ax * ax + ay * ay + az * az <= radius * radius).then_some(t as i32)
 }
@@ -233,7 +240,7 @@ pub fn probe_terrain(terrain: &Terrain, start: Vec3Fp, step: Vec3Fp) -> TerrainP
     let mut highest_ground = Fp::MIN;
     for sample in 1..=samples {
         let t = one * sample / samples;
-        let along = |value: Fp| Fp::from_bits(((i64::from(value.to_bits()) * i64::from(t)) >> FP_FRAC_BITS) as i32);
+        let along = |value: Fp| Fp::from_bits(((i64::from(value.to_bits()) * i64::from(t)) / (1 << FP_FRAC_BITS)) as i32);
         let at = Vec2Fp::new(start.x + along(step.x), start.y + along(step.y));
         let ground = terrain.height_at(at);
         highest_ground = highest_ground.max(ground);
@@ -271,7 +278,7 @@ pub fn shot_lands_near(terrain: &Terrain, from: Vec3Fp, to: Vec3Fp, horizontal_s
     let (mut position, mut velocity) = (from, solution.velocity);
     for _ in 0..solution.flight_ticks {
         if let Some(along) = probe_terrain(terrain, position, velocity).hit {
-            let part = |value: Fp| Fp::from_bits(((i64::from(value.to_bits()) * i64::from(along)) >> FP_FRAC_BITS) as i32);
+            let part = |value: Fp| Fp::from_bits(((i64::from(value.to_bits()) * i64::from(along)) / (1 << FP_FRAC_BITS)) as i32);
             let landing = Vec2Fp::new(position.x + part(velocity.x), position.y + part(velocity.y));
             return (landing - to.xy()).length_squared() <= reach * reach;
         }

@@ -275,6 +275,24 @@ pub struct MapData {
     pub scenery: Vec<(WreckKind, Vec2Fp)>,
 }
 
+/// A map's trees and rocks. Rocks vary in size as the skirmish's do, and a rock holds mass in
+/// proportion, so a rock and its images in the map's mirrors are one size, drawn once: each
+/// side's rocks hold what the other side's do. Trees are all one size.
+fn spawn_map_scenery(world: &mut SimWorld, map: &MapData) {
+    let full = fp_int(map.map_units);
+    let mut sizes = std::collections::BTreeMap::new();
+    for &(kind, position) in &map.scenery {
+        let radius = if kind == WreckKind::Rock {
+            let images = [position, Vec2Fp::new(full - position.x, position.y), Vec2Fp::new(position.x, full - position.y), Vec2Fp::new(full - position.x, full - position.y)];
+            let first = images.iter().map(|image| (image.x.to_bits(), image.y.to_bits())).min().expect("four images");
+            *sizes.entry(first).or_insert_with(|| world.rng.range_fp(fp_int(5), fp_int(10)))
+        } else {
+            Fp::ZERO
+        };
+        world.spawn_scenery(kind, position, radius);
+    }
+}
+
 /// A 1v1 on a map from a file: its terrain, deposits, scenery, and two of its starts.
 pub fn from_map(map: &MapData, seed: u64) -> Scenario {
     let config = SimConfig { map_units: map.map_units, friendly_fire: true, fog_of_war: true, ..SimConfig::default() };
@@ -282,11 +300,7 @@ pub fn from_map(map: &MapData, seed: u64) -> Scenario {
     let mut world = SimWorld::with_terrain(config, seed, terrain);
     world.deposits.clone_from(&map.deposits);
     world.vents.clone_from(&map.vents);
-    for &(kind, position) in &map.scenery {
-        // Rocks vary in size as the skirmish's do. Trees are all one size.
-        let radius = world.rng.range_fp(fp_int(5), fp_int(10));
-        world.spawn_scenery(kind, position, radius);
-    }
+    spawn_map_scenery(&mut world, map);
     let commander = world.blueprints.id("command_rig");
     world.starts = map.starts;
     world.spawn_mobile(commander, Team::Blue, map.starts[0]);
@@ -312,10 +326,7 @@ pub fn from_map_teams(map: &MapData, seed: u64, per_team: usize) -> Option<Scena
     world.set_players(&teams);
     world.deposits.clone_from(&map.deposits);
     world.vents.clone_from(&map.vents);
-    for &(kind, position) in &map.scenery {
-        let radius = world.rng.range_fp(fp_int(5), fp_int(10));
-        world.spawn_scenery(kind, position, radius);
-    }
+    spawn_map_scenery(&mut world, map);
     let commander = world.blueprints.id("command_rig");
     world.starts = [layout[0], layout[per_team]];
     for (index, &start) in layout.iter().enumerate() {

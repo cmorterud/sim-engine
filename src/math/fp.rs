@@ -26,6 +26,25 @@ pub fn mul_toward_zero(a: Fp, b: Fp) -> Fp {
     Fp::from_bits((i64::from(a.to_bits()) * i64::from(b.to_bits()) / (1 << FP_FRAC_BITS)) as i32)
 }
 
+/// The mean of some points, worked out as offsets from `about` and rounded toward it, so that on a
+/// mirrored map mirror images have mirror-image means. Map positions are all positive, so their
+/// plain mean rounded toward the map's corner on one side and toward the middle on the other, a
+/// raw bit apart: a transport headed for the middle of its riders turned a hair one way on one
+/// side and not on the other. `about` must be a mirror-image pair itself, as a goal or a unit's
+/// own position is. `about` if there are no points.
+pub fn mean_about(points: impl Iterator<Item = Vec2Fp>, about: Vec2Fp) -> Vec2Fp {
+    let (mut x, mut y, mut count) = (0_i64, 0_i64, 0_i64);
+    for point in points {
+        x += i64::from(point.x.to_bits()) - i64::from(about.x.to_bits());
+        y += i64::from(point.y.to_bits()) - i64::from(about.y.to_bits());
+        count += 1;
+    }
+    if count == 0 {
+        return about;
+    }
+    Vec2Fp::new(Fp::from_bits(about.x.to_bits() + (x / count) as i32), Fp::from_bits(about.y.to_bits() + (y / count) as i32))
+}
+
 /// The raw bits of an `FpWide` have 24 fractional bits, so their integer square
 /// root has 12 fractional bits: exactly the raw bits of an `Fp`.
 pub fn sqrt_wide(value: FpWide) -> Fp {

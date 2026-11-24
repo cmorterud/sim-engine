@@ -2237,12 +2237,17 @@ impl AiBrain {
         // Nothing under the water, which the army cannot hit: two commanders that followed
         // their waves onto the seabed once stalked each other there until the time ran out.
         let reachable = |enemy: &&Sighting| !enemy.is_air && !enemy.is_submerged;
+        // The enemy commander, then the structure nearest home, then whatever else is nearest,
+        // ties broken by where each stands as this side sees the map. It once took the first
+        // in the list, the oldest: in a team match that was one enemy player's for one team and
+        // the other's for the other, so mirror-image players sent their waves at different bases.
         let target = sightings
             .iter()
             .filter(reachable)
-            .find(|enemy| Some(enemy.id) == commander)
-            .or_else(|| sightings.iter().filter(reachable).find(|enemy| enemy.is_structure))
-            .or_else(|| sightings.iter().find(reachable))
+            .min_by_key(|enemy| {
+                let seen = self.plan_position(world, enemy.position);
+                (Some(enemy.id) != commander, !enemy.is_structure, enemy.position.distance_squared(&self.home), seen.x, seen.y)
+            })
             .map(|enemy| enemy.position);
         let late = world.current_tick >= (LATE_PUSH_TICKS - haste).max(self.skill.commander_push_ticks);
         let full_strength = gathered >= self.skill.largest_wave || (late && gathered >= self.skill.first_wave * 2);

@@ -95,6 +95,8 @@ struct Staging {
     id: SimId,
     team: super::components::Team,
     center: Vec2Fp,
+    /// Its four pads' corners, in the order aircraft take them (`pad_order`).
+    pads: [(i32, i32); 4],
     slots: u8,
     used: u8,
     repair: Fp,
@@ -104,9 +106,27 @@ struct Staging {
 impl Staging {
     fn pad(&self, pad: u8) -> Vec2Fp {
         let offset = fp_int(PAD_OFFSET_UNITS);
-        let (x, y) = [(-1, -1), (1, -1), (-1, 1), (1, 1)][usize::from(pad % 4)];
+        let (x, y) = self.pads[usize::from(pad % 4)];
         Vec2Fp::new(self.center.x + offset * x, self.center.y + offset * y)
     }
+}
+
+/// The order an airfield's pads are taken in: nearest the map's middle first, and of two as
+/// near, the one clockwise of the other about the middle. Both turn with the map, so an airfield
+/// and its mirror image fill mirror-image pads. They were taken south-west, south-east,
+/// north-west, north-east on every airfield, so that the first aircraft down on one side landed
+/// on the pad nearest its enemy and its mirror image on the pad furthest from its own.
+fn pad_order(center: Vec2Fp, middle: Vec2Fp) -> [(i32, i32); 4] {
+    let mut pads = [(-1, -1), (1, -1), (-1, 1), (1, 1)];
+    let (dx, dy) = (i64::from((center.x - middle.x).to_bits()), i64::from((center.y - middle.y).to_bits()));
+    let offset = i64::from(fp_int(PAD_OFFSET_UNITS).to_bits());
+    pads.sort_by_key(|&(x, y)| {
+        let (px, py) = (dx + offset * i64::from(x), dy + offset * i64::from(y));
+        // Clockwise about the middle: the cross product of where the airfield is and where the
+        // pad is, from the middle, which keeps its sign under a half turn.
+        (px * px + py * py, -(dx * py - dy * px).signum())
+    });
+    pads
 }
 
 impl SimWorld {
@@ -143,7 +163,8 @@ impl SimWorld {
                 let def = self.blueprints.get(self.ecs.get::<&super::components::Blueprinted>(entity).ok()?.0).airfield?;
                 let team = self.ecs.get::<&UnitStats>(entity).ok()?.team;
                 let center = self.ecs.get::<&Position>(entity).ok()?.0.xy();
-                Some(Staging { id, team, center, slots: def.slots, used: 0, repair: def.repair_per_tick, energy: def.energy_per_tick })
+                let pads = pad_order(center, Vec2Fp::new(fp_int(self.terrain.map_units() / 2), fp_int(self.terrain.map_units() / 2)));
+                Some(Staging { id, team, center, pads, slots: def.slots, used: 0, repair: def.repair_per_tick, energy: def.energy_per_tick })
             })
             .collect();
         for &(_, entity) in &self.aircraft {

@@ -114,15 +114,50 @@ fn the_named_maps_sides_play_mirror_images_through_the_opening() {
     }
 }
 
+/// Well past the opening, into the first fights, matches on the maps from files still play as
+/// mirror images. Each of these once parted, each for a fault of its own that favored a side:
+/// Highland's on the pad an airfield's first aircraft took, the south-west for both sides;
+/// Twin Passes' where a unit stood exactly on the map's middle row and both took the cell north
+/// of it; a 2v2 on Stillwater's where each team sent its waves at the other's oldest structure,
+/// one enemy player's for one team and the other's for the other; and a 3v3 on Saddleback's
+/// where a shot at an aircraft, rounded toward negative infinity as it led its turn and as it
+/// passed its target, hit on one side and missed on the other, and where each player's flow
+/// fields waited behind the others' for a share of one budget.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn matches_on_the_maps_from_files_play_mirror_images_into_the_first_fights() {
+    use std::sync::Arc;
+    use sim_engine::ai::Difficulty;
+    use sim_engine::ai_strategy::Strategy;
+    use sim_engine::sim::components::PlayerId;
+    use sim_engine::sim::maps::bundled;
+    use sim_engine::sim::scenario::MapSource;
+    const TICKS: u32 = 9_000;
+    for (name, per_team, seed) in [("highland", 1, 2), ("twin_passes", 1, 4), ("stillwater", 2, 1), ("saddleback", 3, 1)] {
+        let map = MapSource::Map(Arc::new(bundled(name).expect("a bundled map"))).teams(per_team).expect("starts for the match");
+        let mut world = map.scenario(seed).world;
+        let mut brains: Vec<AiBrain> = (0..world.players.len()).map(|player| AiBrain::for_player(&world, PlayerId(player as u8), seed, Difficulty::Normal, Strategy::balanced())).collect();
+        while world.current_tick < TICKS && world.match_result.is_none() {
+            advance_ai_vs_ai(&mut world, &mut brains);
+            assert!(
+                mirrored(&units(&world, Team::Blue), &units(&world, Team::Red), 4096 / 20),
+                "{name} {per_team}v{per_team}, seed {seed}: the sides stopped mirroring each other at tick {}",
+                world.current_tick
+            );
+        }
+    }
+}
+
 /// In a 2v2 each player's opposite number is their image turned about the map's center, and the
 /// two teams play mirror images through the opening as the two sides of a 1v1 do. They did not:
 /// each unit's turn at work done every so many ticks, such as checking whether the way straight
 /// to its goal is clear, was counted by team, so a player's units took turns one off their
 /// opposite number's, and the teams parted within 700 ticks. The soak had Blue winning 49 of 60
-/// 2v2s on Stillwater, and 38 of 60 on Saddleback.
+/// 2v2s on Stillwater, and 38 of 60 on Saddleback. A 3v3 on Saddleback and a 4v4 on Scattered
+/// Isles are held to the same.
 #[test]
 #[cfg_attr(debug_assertions, ignore = "release only")]
-fn the_teams_of_a_two_on_two_play_mirror_images_through_the_opening() {
+fn the_teams_of_a_team_match_play_mirror_images_through_the_opening() {
     use std::sync::Arc;
     use sim_engine::ai::Difficulty;
     use sim_engine::ai_strategy::Strategy;
@@ -130,15 +165,22 @@ fn the_teams_of_a_two_on_two_play_mirror_images_through_the_opening() {
     use sim_engine::sim::maps::{saddleback, scattered_isles, stillwater};
     use sim_engine::sim::scenario::MapSource;
     const TICKS: u32 = 4_000;
-    for (name, map) in [("saddleback", saddleback()), ("stillwater", stillwater()), ("scattered_isles", scattered_isles())] {
-        let map = MapSource::Map(Arc::new(map)).teams(2).expect("starts for a 2v2");
+    for (name, map, per_team) in [
+        ("saddleback", saddleback(), 2),
+        ("stillwater", stillwater(), 2),
+        ("scattered_isles", scattered_isles(), 2),
+        ("saddleback", saddleback(), 3),
+        ("scattered_isles", scattered_isles(), 4),
+    ] {
+        let map = MapSource::Map(Arc::new(map)).teams(per_team).expect("starts for the match");
         let mut world = map.scenario(1).world;
+        assert_eq!(world.players.len(), per_team * 2);
         let mut brains: Vec<AiBrain> = (0..world.players.len()).map(|player| AiBrain::for_player(&world, PlayerId(player as u8), 1, Difficulty::Normal, Strategy::balanced())).collect();
         while world.current_tick < TICKS {
             advance_ai_vs_ai(&mut world, &mut brains);
             assert!(
                 mirrored(&units(&world, Team::Blue), &units(&world, Team::Red), 4096 / 20),
-                "{name}: the teams stopped mirroring each other at tick {}",
+                "{name} {per_team}v{per_team}: the teams stopped mirroring each other at tick {}",
                 world.current_tick
             );
         }

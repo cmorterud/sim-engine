@@ -758,14 +758,14 @@ pub fn passes(settings: &MapSettings) -> MapData {
         peaks += 1;
     }
     // The starts: in 1v1 one each side on the middle column, facing the center valley; in 2v2
-    // two each side, each nearest a flank valley.
+    // two each side, each nearest a flank valley; and in 3v3 all three each side.
     let duel = (middle, middle + scale(150));
     let team = (middle - scale(150), middle + scale(144));
     // On a map for eight players, two more each side, between those and the middle column.
     let inner = (middle - scale(50), middle + scale(150));
     let sites: Vec<(i32, i32)> = match settings.players {
         0..=2 => vec![duel],
-        3..=4 => vec![duel, team],
+        3..=6 => vec![duel, team],
         _ => vec![duel, team, inner],
     };
     for &start in &sites {
@@ -863,14 +863,19 @@ pub fn passes(settings: &MapSettings) -> MapData {
     let mirror = |at: Vec2Fp| [at, Vec2Fp::new(full - at.x, at.y), Vec2Fp::new(at.x, full - at.y), Vec2Fp::new(full - at.x, full - at.y)];
     let duel_at = point(duel);
     let starts = [duel_at, Vec2Fp::new(full - duel_at.x, full - duel_at.y)];
-    // Two each side: the first team's in the north, the second's in the south. On a map for
-    // eight players, four each side as well, from west to east.
+    // Two each side: the first team's in the north, the second's in the south. On a map for six
+    // players, three each side as well: the 1v1's start between those two, each of the second
+    // team's the image of the first's, turned about the center. On a map for eight, four each
+    // side, from west to east.
     let [north_west, north_east, south_west, south_east] = mirror(point(team));
     let mut layouts = Vec::new();
     if settings.players >= 4 {
         layouts.push(vec![north_west, north_east, south_west, south_east]);
     }
-    if settings.players > 4 {
+    if settings.players == 6 {
+        layouts.push(vec![north_west, starts[0], north_east, south_east, starts[1], south_west]);
+    }
+    if settings.players > 6 {
         let [inner_north_west, inner_north_east, inner_south_west, inner_south_east] = mirror(point(inner));
         layouts.push(vec![north_west, inner_north_west, inner_north_east, north_east, south_west, inner_south_west, inner_south_east, south_east]);
     }
@@ -1522,16 +1527,28 @@ mod tests {
     }
 
     #[test]
-    fn saddleback_is_fair_for_one_on_one_and_two_on_two() {
+    fn saddleback_is_fair_for_one_on_one_two_on_two_and_three_on_three() {
         let map = saddleback();
         check(&map);
         check_four(&map);
         assert_eq!(map, saddleback(), "the same every time");
         let cells = (map.map_units / TERRAIN_CELL_UNITS) as usize;
         let samples = cells + 1;
+        // A 3v3 plays the 1v1's starts and the 2v2's, three a side, each of the second team's
+        // the first's image turned about the center.
+        assert_eq!(map.layouts.iter().map(Vec::len).collect::<Vec<_>>(), [4, 6]);
+        let three = &map.layouts[1];
+        let full = fp_int(map.map_units);
+        for (index, &start) in three[..3].iter().enumerate() {
+            assert_eq!(three[index + 3], Vec2Fp::new(full - start.x, full - start.y), "the second team's start {index} is the first's turned");
+            assert!(map.starts.contains(&start) || map.layouts[0].contains(&start), "a 3v3 start {start:?} is a 1v1 or 2v2 start");
+        }
+        // Holding six changes nothing else: the 1v1 and 2v2 play the map they did for four.
+        let four = passes(&MapSettings { players: 4, ..settings("saddleback").expect("data/maps/saddleback.toml") });
+        assert_eq!(MapData { layouts: four.layouts.clone(), ..map.clone() }, four, "six players change only the layouts");
+        assert_eq!(four.layouts, map.layouts[..1]);
         // Every start reaches every other.
-        let team = &map.layouts[0];
-        let every: Vec<Vec2Fp> = map.starts.iter().chain(team).copied().collect();
+        let every: Vec<Vec2Fp> = map.starts.iter().chain(map.layouts.iter().flatten()).copied().collect();
         for &from in &every {
             for &to in &every {
                 assert!(connected(&map, cell_of(&map, from), cell_of(&map, to)), "{from:?} cannot reach {to:?}");

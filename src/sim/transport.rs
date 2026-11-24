@@ -126,20 +126,17 @@ impl SimWorld {
             self.assign_route(&[id], OrderKind::Move, transport_at.xy(), Some(transport));
         }
         // The transport comes to the middle of them, and settles there.
-        let mut sum = (0_i64, 0_i64);
+        let mut places = Vec::with_capacity(riders.len());
         for &id in &riders {
             let (_, entity) = self.find_unit(id).expect("just checked");
-            let at = self.ecs.get::<&Position>(entity).expect("units have positions").0;
-            sum.0 += i64::from(at.x.to_bits());
-            sum.1 += i64::from(at.y.to_bits());
+            places.push(self.ecs.get::<&Position>(entity).expect("units have positions").0.xy());
             let route = self.ecs.get::<&Order>(entity).expect("units have orders").route;
             let _ = self.ecs.insert_one(entity, Boarding { transport, route });
             if let Err(at) = self.boarding.binary_search_by_key(&id, |unit| unit.0) {
                 self.boarding.insert(at, (id, entity));
             }
         }
-        let count = riders.len() as i64;
-        let middle = Vec2Fp::new(Fp::from_bits((sum.0 / count) as i32), Fp::from_bits((sum.1 / count) as i32));
+        let middle = crate::math::fp::mean_about(places.into_iter(), transport_at.xy());
         self.assign_route(&[transport], OrderKind::Move, middle, None);
     }
 

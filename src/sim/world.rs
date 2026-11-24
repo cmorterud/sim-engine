@@ -1504,6 +1504,8 @@ impl SimWorld {
         let mut members = Vec::with_capacity(units.len());
         let mut walkers = Vec::with_capacity(units.len());
         let mut largest_radius = 0;
+        // Whose units they are, whose share of the field builds their route draws on.
+        let mut owner = 0;
         for &id in units {
             if let Some((_, entity)) = self.find_unit(id) {
                 if !seen.insert(id) {
@@ -1511,6 +1513,9 @@ impl SimWorld {
                 }
                 members.push(id);
                 let stats = self.ecs.get::<&UnitStats>(entity).expect("units have stats");
+                if members.len() == 1 {
+                    owner = stats.owner.index();
+                }
                 largest_radius = largest_radius.max(stats.radius.to_bits());
                 // Aircraft fly straight to the goal itself, and keep no formation.
                 if !stats.is_structure && stats.move_class != MoveClass::Air {
@@ -1559,6 +1564,7 @@ impl SimWorld {
             members.len() as u32,
             arrive_radius,
             follow,
+            owner,
         ) else {
             return Vec::new();
         };
@@ -3433,13 +3439,15 @@ impl SimWorld {
                 .filter_map(|(index, dome)| sphere_entry(start, step, dome.center, dome.radius).map(|along| (along, index)))
                 .min();
             let first = |along: i32| best.is_none_or(|unit| along <= unit.0) && probe.hit.is_none_or(|ground| along <= ground);
+            // Parts of the step are divided out, rounding toward zero, rather than shifted, so that
+            // a shot and its mirror image strike mirror-image points.
             let point_at = |along: i32| {
-                let part = |value: Fp| ((i64::from(value.to_bits()) * i64::from(along)) >> FP_FRAC_BITS) as i32;
+                let part = |value: Fp| ((i64::from(value.to_bits()) * i64::from(along)) / (1 << FP_FRAC_BITS)) as i32;
                 (start.x.to_bits() + part(step.x), start.y.to_bits() + part(step.y))
             };
             // Where along this step it struck, in full, for the blast and for drawing.
             let impact_at = |along: i32| {
-                let part = |value: Fp| Fp::from_bits(((i64::from(value.to_bits()) * i64::from(along)) >> FP_FRAC_BITS) as i32);
+                let part = |value: Fp| Fp::from_bits(((i64::from(value.to_bits()) * i64::from(along)) / (1 << FP_FRAC_BITS)) as i32);
                 Vec3Fp::new(start.x + part(step.x), start.y + part(step.y), start.z + part(step.z))
             };
             if let Some((along, struck)) = dome_hit.filter(|(along, _)| first(*along)) {
@@ -3452,7 +3460,7 @@ impl SimWorld {
                 let damage = projectile.damage;
                 shield_hits.push((domes[struck].id, damage));
                 if projectile.splash_radius > Fp::ZERO {
-                    let part = |value: Fp| (i128::from(value.to_bits()) * i128::from(along)) >> FP_FRAC_BITS;
+                    let part = |value: Fp| (i128::from(value.to_bits()) * i128::from(along)) / (1 << FP_FRAC_BITS);
                     let point = [i128::from(start.x.to_bits()) + part(step.x), i128::from(start.y.to_bits()) + part(step.y), i128::from(start.z.to_bits()) + part(step.z)];
                     for (index, dome) in domes.iter().enumerate() {
                         let reach = i128::from(dome.radius) + i128::from(projectile.splash_radius.to_bits());

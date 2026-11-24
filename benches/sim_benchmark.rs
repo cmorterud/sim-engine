@@ -167,6 +167,7 @@ fn navigation_report() {
         1,
         Fp::ONE,
         None,
+        0,
     );
     println!(
         "  map generation {:.1} ms; portal graph ({} portals) plus first route {:.1} ms",
@@ -183,6 +184,7 @@ fn navigation_report() {
         1,
         Fp::ONE,
         None,
+        0,
     );
     println!("  later route search {:.2} ms", route_started.elapsed().as_secs_f64() * 1000.0);
 }

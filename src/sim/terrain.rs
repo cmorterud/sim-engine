@@ -262,21 +262,28 @@ impl Terrain {
     /// Red's mirror image in the cell east of it too, one apart from the mirror, and the two went
     /// different ways. "Within a few raw bits", because fixed-point rounding is not symmetric
     /// under negation, and one side's unit can stop a bit short of the line its mirror is on.
+    /// On the line through the center itself both cells are as near it, and the one taken is
+    /// the one on the side of the center that the point is, along the other axis: a unit
+    /// exactly on the middle row of Twin Passes, and its mirror image, once took the same cell,
+    /// which is not its mirror, and the two went different ways.
     pub fn unit_cell_of(&self, point: Vec2Fp) -> (usize, usize) {
         const ON_LINE_RAW: i64 = 8;
         let max = self.cells as i64 - 1;
         let half = self.cells as i64 * CELL_RAW / 2;
-        let axis = |raw: i64| {
+        let axis = |raw: i64, other: i64| {
             let line = (raw + CELL_RAW / 2).div_euclid(CELL_RAW);
             let cell = if (raw - line * CELL_RAW).abs() <= ON_LINE_RAW {
-                // The cell on the center's side of the line.
-                if raw > half { line - 1 } else { line }
+                // The cell on the center's side of the line, and on the middle line, the cell on
+                // the side the point is of the center, along the other axis.
+                let beyond = if raw == half { other > half } else { raw > half };
+                if beyond { line - 1 } else { line }
             } else {
                 raw.div_euclid(CELL_RAW)
             };
             cell.clamp(0, max)
         };
-        (axis(i64::from(point.x.to_bits())) as usize, axis(i64::from(point.y.to_bits())) as usize)
+        let (x, y) = (i64::from(point.x.to_bits()), i64::from(point.y.to_bits()));
+        (axis(x, y) as usize, axis(y, x) as usize)
     }
 
     pub fn is_passable(&self, point: Vec2Fp) -> bool {
@@ -348,6 +355,33 @@ mod tests {
         let c = Terrain::generate(2_560, TerrainStyle::Hills, &mut SimRng::new(6));
         assert_eq!(a.content_hash(), b.content_hash());
         assert_ne!(a.content_hash(), c.content_hash());
+    }
+
+    /// A unit and its mirror image through the center are in mirror-image cells, wherever they
+    /// stand: in a cell, on or a raw bit off the line between two, and on the lines through
+    /// the center itself. Only the very center, its own image, cannot be.
+    #[test]
+    fn a_unit_and_its_mirror_image_are_in_mirror_image_cells() {
+        let terrain = Terrain::generate(2_560, TerrainStyle::Hills, &mut SimRng::new(5));
+        let cells = terrain.cells_per_side();
+        let full = fp_int(2_560).to_bits();
+        let cell = i32::try_from(CELL_RAW).expect("a cell fits");
+        let mut values = Vec::new();
+        for line in [0, 1, 7, cells as i32 / 2 - 1, cells as i32 / 2, cells as i32 / 2 + 1, cells as i32 - 1] {
+            for nudge in [-9, -8, -1, 0, 1, 8, 9, cell / 2] {
+                values.push((line * cell + nudge).clamp(0, full));
+            }
+        }
+        for &x in &values {
+            for &y in &values {
+                if (x, y) == (full / 2, full / 2) {
+                    continue;
+                }
+                let (cx, cy) = terrain.unit_cell_of(Vec2Fp::new(Fp::from_bits(x), Fp::from_bits(y)));
+                let image = terrain.unit_cell_of(Vec2Fp::new(Fp::from_bits(full - x), Fp::from_bits(full - y)));
+                assert_eq!(image, (cells - 1 - cx, cells - 1 - cy), "raw ({x}, {y}) is in cell ({cx}, {cy})");
+            }
+        }
     }
 
     #[test]

@@ -58,6 +58,57 @@ fn a_map_becomes_a_world_with_its_terrain_starts_deposits_and_scenery() {
     let _ = Team::Blue;
 }
 
+/// Each side's rocks hold what their images on the other side hold. A rock's mass grows with
+/// its size, which a match draws for each rock, and each piece of a map file's scenery once drew
+/// its own: a rock and its image differed, so one side had more to reclaim near its base, a
+/// different amount every seed. The skirmish map always drew one size for a rock and its image.
+#[test]
+fn every_rock_on_a_map_from_a_file_holds_what_its_images_hold() {
+    use sim_engine::sim::components::Wreck;
+    use sim_engine::sim::maps::{bundled, BUNDLED};
+    use sim_engine::sim::world::SimWorld;
+    // Rocks by position, in raw fixed-point units, with their radius and mass.
+    let rocks = |world: &SimWorld| {
+        let mut rocks: Vec<((i64, i64), Fp, String)> = world
+            .wrecks
+            .iter()
+            .filter_map(|&(_, entity)| {
+                let wreck = *world.ecs.get::<&Wreck>(entity).ok()?;
+                (wreck.kind == WreckKind::Rock).then(|| ((i64::from(wreck.position.x.to_bits()), i64::from(wreck.position.y.to_bits())), wreck.radius, wreck.mass.to_string()))
+            })
+            .collect();
+        rocks.sort_unstable_by_key(|rock| rock.0);
+        rocks
+    };
+    for name in BUNDLED {
+        let map = Arc::new(bundled(name).expect("a bundled map"));
+        let full = i64::from(fp_int(map.map_units).to_bits());
+        // The 1v1, and every team layout the map has: a 2v2's opposite numbers are images
+        // turned about the center, and its teammates are images across the middle row.
+        let mut sources = vec![MapSource::Map(Arc::clone(&map))];
+        sources.extend(map.layouts.iter().filter_map(|layout| MapSource::Map(Arc::clone(&map)).teams(layout.len() / 2)));
+        for source in sources {
+            for seed in 1..=3 {
+                let world = source.scenario(seed).world;
+                let rocks = rocks(&world);
+                assert!(rocks.len() > 100, "{name}: {} rocks", rocks.len());
+                let at = |point: (i64, i64)| rocks.binary_search_by_key(&point, |rock| rock.0).ok().map(|index| &rocks[index]);
+                for rock in &rocks {
+                    let (x, y) = rock.0;
+                    let turned = at((full - x, full - y)).unwrap_or_else(|| panic!("{name}: the rock at {x}, {y} has no turned image"));
+                    assert_eq!((turned.1, &turned.2), (rock.1, &rock.2), "{name} ({} a side), seed {seed}: the rock at {x}, {y} and its turned image differ", source.per_team());
+                    // On a map that is its own image in both mirrors, any image there is matches too.
+                    for image in [(full - x, y), (x, full - y)] {
+                        if let Some(other) = at(image) {
+                            assert_eq!((other.1, &other.2), (rock.1, &rock.2), "{name} ({} a side), seed {seed}: the rock at {x}, {y} and its mirror image differ", source.per_team());
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn the_same_map_and_seed_play_the_same_match() {
     let source = MapSource::Map(Arc::new(test_map()));
