@@ -1760,21 +1760,22 @@ pub fn commander_alert(ctx: &egui::Context, strength: f32) {
         });
 }
 
-/// Materiel a team has standing, weighted by health, as the balance harness scores a duel.
-pub fn materiel_standing(snapshot: &SimSnapshot, blueprints: &BlueprintDb, team: Team) -> f64 {
+/// Materiel a team has standing, weighted by health, as the balance harness scores a duel: each
+/// unit at its cost at the fight's tier (`balance::cost_at`), energy valued at that tier's rate.
+pub fn materiel_standing(snapshot: &SimSnapshot, blueprints: &BlueprintDb, team: Team, tier: u8) -> f64 {
     snapshot
         .units
         .iter()
         .filter(|unit| unit.team == team)
-        .map(|unit| blueprints.get(BlueprintId(unit.blueprint)).mass.to_num::<f64>() * f64::from(unit.health_permille) / 1000.0)
+        .map(|unit| crate::balance::cost_at(blueprints.get(BlueprintId(unit.blueprint)), tier) * f64::from(unit.health_permille) / 1000.0)
         .sum()
 }
 
 /// A playtest scenario's score: each side's share of its materiel still standing, weighted by
 /// health, and the harness's score for Blue, the difference. Red's hides in the fog of war, as
 /// what the player cannot see cannot be counted.
-pub fn scenario_score(ctx: &egui::Context, snapshot: &SimSnapshot, blueprints: &BlueprintDb, start: [f64; 2], fog: bool) {
-    let share = |team: Team| materiel_standing(snapshot, blueprints, team) / start[team.index()].max(1.0);
+pub fn scenario_score(ctx: &egui::Context, snapshot: &SimSnapshot, blueprints: &BlueprintDb, start: [f64; 2], tier: u8, fog: bool) {
+    let share = |team: Team| materiel_standing(snapshot, blueprints, team, tier) / start[team.index()].max(1.0);
     let blue = share(Team::Blue);
     let text = if fog {
         format!("Blue keeps {:.0}% of its materiel  ·  Red's is hidden by the fog of war", blue * 100.0)

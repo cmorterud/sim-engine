@@ -6,6 +6,7 @@ use std::collections::BTreeSet;
 use sim_engine::sim::blueprints::BlueprintDb;
 use sim_engine::sim::commands::SimCommand;
 use sim_engine::sim::components::Team;
+use sim_engine::scenario_page;
 use sim_engine::sim::playtest_scenarios::{self, MAP_UNITS};
 use sim_engine::sim::scenario::MapSource;
 
@@ -53,8 +54,29 @@ fn every_scenario_builds_what_the_file_lists() {
     }
 }
 
+/// Each scenario that plays a balance target names one that exists, and fields its sides at the
+/// cost the harness fights it at: equal, unless it says Blue's is a multiple of Red's, within a
+/// tenth, at the scenario's tier's prices.
+#[test]
+fn every_target_scenario_names_its_target_and_keeps_its_cost() {
+    let db = BlueprintDb::standard();
+    let mut targeted = 0;
+    for scenario in playtest_scenarios::all() {
+        let Some(target) = &scenario.target else { continue };
+        targeted += 1;
+        assert!(scenario_page::target_value(target).is_some(), "{}: no target {target} in data/balance_targets.toml", scenario.id);
+        let tier = scenario.tier(&db);
+        let ratio = scenario_page::side_materiel(&db, &scenario.blue, tier) / scenario_page::side_materiel(&db, &scenario.red, tier);
+        let wanted = scenario.blue_over_red.unwrap_or(1.0);
+        assert!((ratio / wanted - 1.0).abs() <= 0.10, "{}: Blue's cost is {ratio:.2} times Red's, not {wanted:.2}", scenario.id);
+    }
+    assert!(targeted >= 16, "only {targeted} scenarios play a balance target");
+}
+
 /// Played with Blue attack-moving at Red, as a player who does nothing clever would, every
-/// scenario comes to a fight within three minutes: both sides lose materiel, or one is wiped out.
+/// scenario comes to a fight within three minutes: materiel is lost. Some fights are one-sided by
+/// design, a ship shelling a coast from beyond its reach, or submarines under ships with nothing
+/// to reach them, so it need not be both sides'.
 #[test]
 fn every_scenario_comes_to_a_fight() {
     for scenario in playtest_scenarios::all() {
@@ -73,8 +95,6 @@ fn every_scenario_comes_to_a_fight() {
             world.advance_tick(&[]);
         }
         let end = [worth(&world, Team::Blue), worth(&world, Team::Red)];
-        let lost = [end[0] < start[0], end[1] < start[1]];
-        let wiped = end[0] == 0.0 || end[1] == 0.0;
-        assert!((lost[0] && lost[1]) || wiped, "{}: no fight in three minutes (Blue {:.0} of {:.0}, Red {:.0} of {:.0})", scenario.id, end[0], start[0], end[1], start[1]);
+        assert!(end[0] < start[0] || end[1] < start[1], "{}: no fight in three minutes (Blue {:.0} of {:.0}, Red {:.0} of {:.0})", scenario.id, end[0], start[0], end[1], start[1]);
     }
 }

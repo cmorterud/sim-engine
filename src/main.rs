@@ -1144,12 +1144,13 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
         MapSource::Playtest => "Playtest".to_string(),
         MapSource::Scenario(scenario) => scenario.title.clone(),
     };
-    // A playtest scenario's materiel on each side at the start, for its score.
+    // A playtest scenario's materiel on each side at the start, at its tier's prices, and the
+    // tier, for its score.
     let scenario_start = match &map_source {
         MapSource::Scenario(scenario) => {
             let db = BlueprintDb::standard();
-            let worth = |groups: &[sim_engine::sim::playtest_scenarios::Group]| groups.iter().map(|group| db.get(db.id(&group.unit)).mass.to_num::<f64>() * f64::from(group.count)).sum::<f64>();
-            Some([worth(&scenario.blue), worth(&scenario.red)])
+            let tier = scenario.tier(&db);
+            Some((sim_engine::scenario_page::side_materiel(&db, &scenario.blue, tier), sim_engine::scenario_page::side_materiel(&db, &scenario.red, tier), tier))
         }
         _ => None,
     };
@@ -2046,8 +2047,8 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                 ui::resource_bar(ctx, &snapshot, &map.blueprints, &map_name, sound_label.as_deref(), game_paused, &mut range_toggles, &mut actions);
                                 minimap.show(ctx, &camera, &map.heights, f64::from(map.water_level), &snapshot, map.fog_side, &mut actions);
                                 ui::commander_alert(ctx, attack_alarm.alert_strength());
-                                if let Some(start) = scenario_start {
-                                    ui::scenario_score(ctx, &snapshot, &map.blueprints, start, fog);
+                                if let Some((blue, red, tier)) = scenario_start {
+                                    ui::scenario_score(ctx, &snapshot, &map.blueprints, [blue, red], tier, fog);
                                 }
                                 ui::control_group_bar(ctx, &group_rows, &snapshot, PLAYER_TEAM, &map.blueprints, &selected, &mut actions);
                                 ui::quick_select_bar(ctx, &snapshot, PLAYER_TEAM, &map.blueprints, &selected, camera.focus(), &mut quick_select, &mut actions);

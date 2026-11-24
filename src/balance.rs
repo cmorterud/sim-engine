@@ -11,8 +11,7 @@ use crate::sim::blueprints::{Blueprint, BlueprintDb, BlueprintId, TICKS_PER_SECO
 use crate::sim::commands::SimCommand;
 use crate::sim::blueprints::Res;
 use crate::sim::components::{Blueprinted, Health, SimId, Team};
-use crate::sim::config::{SimConfig, TerrainStyle, TERRAIN_CELL_UNITS};
-use crate::sim::terrain::{Terrain, HEIGHT_FRAC_BITS};
+use crate::sim::config::{SimConfig, TerrainStyle};
 use crate::sim::world::SimWorld;
 
 /// The duel ground: flat, 5 km across, so that every group starts in the open.
@@ -27,15 +26,9 @@ const MAX_TICKS: u32 = 6_000;
 /// Bisection steps for a break-even, over multipliers from 1/16 to 16.
 const BREAK_EVEN_STEPS: u32 = 12;
 
-/// Where a duel is fought (2026-11-24, for fights between domains): flat land, as every duel was
-/// before; open sea over the whole ground; or a shore, the sea on Blue's side, in the west, and
-/// land on Red's, for ships against what stands ashore.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum Ground {
-    Land,
-    Water,
-    Shore,
-}
+/// Where a duel is fought (2026-11-24, for fights between domains), shared with the playtest
+/// scenarios that play these fights by hand.
+pub use crate::sim::grounds::Ground;
 
 /// A duel's setting: its ground, and the tier whose prices weigh each side (`cost_at`), both in
 /// what a side buys and in what it has left.
@@ -54,31 +47,17 @@ impl Field {
     }
 }
 
-/// The sea grounds, in units: the water's surface, the sea floor below it, deep enough for ships
-/// and submarines everywhere, as the named maps' seas are, and the land of the shore above it.
-const WATER_LEVEL: i32 = 100;
-const SEA_FLOOR: i32 = 50;
-const SHORE_LAND: i32 = 110;
 /// Where the shore's land begins: west of the middle, so that a position built round the middle,
 /// as `siege` builds one, stands ashore, and both groups' starts are on their own sides of it.
-pub const SHORE_X: i32 = MAP_UNITS / 2 - 300;
+pub const SHORE_X: i32 = Ground::shore_x(MAP_UNITS);
 
 /// A world for a duel on a ground. Fog is off, so each side sees the other from the start.
 fn duel_world(ground: Ground) -> SimWorld {
     let config = SimConfig { map_units: MAP_UNITS, terrain: TerrainStyle::Flat, fog_of_war: false, ..SimConfig::default() };
-    if ground == Ground::Land {
-        return SimWorld::new(config, 1);
+    let mut world = ground.world(config, 1);
+    if ground != Ground::Land {
+        world.prepare_map();
     }
-    let cells = (MAP_UNITS / TERRAIN_CELL_UNITS) as usize;
-    let samples = cells + 1;
-    let shore = (SHORE_X / TERRAIN_CELL_UNITS) as usize;
-    let ashore = |sample: usize| ground == Ground::Shore && sample >= shore;
-    let heights = (0..samples * samples).map(|index| ((if ashore(index % samples) { SHORE_LAND } else { SEA_FLOOR }) << HEIGHT_FRAC_BITS) as i16).collect();
-    // Land units keep to the dry cells, those with land at every corner.
-    let blocked: Vec<bool> = (0..cells * cells).map(|index| !ashore(index % cells)).collect();
-    let terrain = Terrain::from_heights(MAP_UNITS, heights, &blocked, fp_int(WATER_LEVEL));
-    let mut world = SimWorld::with_terrain(config, 1, terrain);
-    world.prepare_map();
     world
 }
 
@@ -569,7 +548,7 @@ pub fn report(db: &Arc<BlueprintDb>) {
 }
 
 /// The balance targets (BALANCE.md, step 1).
-const TARGETS: &str = include_str!("../data/balance_targets.toml");
+pub const TARGETS: &str = include_str!("../data/balance_targets.toml");
 
 /// The anchor's numbers, from the targets.
 #[derive(Copy, Clone, Debug)]
