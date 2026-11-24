@@ -912,12 +912,30 @@ fn sound_check() {
     };
     engine.set_volume(SoundSettings::default().volume());
     let wait = |seconds: u64| std::thread::sleep(std::time::Duration::from_secs(seconds));
-    for (name, build, factory) in [("one builder", 0.33, 0.0), ("ten builders", 0.83, 0.0), ("one factory", 0.0, 0.33), ("ten factories", 0.0, 0.83)] {
+    let quiet = [audio::BedLevel::default(); audio::BEDS];
+    // Each continuous sound in turn, zoomed all the way in: a few, then a crowd, and the sea
+    // from the left, then the right.
+    let sounds = [
+        ("one builder", audio::Bed::Build, audio::BedLevel::new(1.0, 0.0, 0.33)),
+        ("ten builders", audio::Bed::Build, audio::BedLevel::new(1.0, 0.0, 0.83)),
+        ("one factory", audio::Bed::Factory, audio::BedLevel::new(1.0, 0.0, 0.33)),
+        ("ten factories", audio::Bed::Factory, audio::BedLevel::new(1.0, 0.0, 0.83)),
+        ("the sea, from the left", audio::Bed::Ocean, audio::BedLevel::new(1.0, -1.0, 0.0)),
+        ("the sea, from the right", audio::Bed::Ocean, audio::BedLevel::new(1.0, 1.0, 0.0)),
+        ("one ship under way", audio::Bed::Sailing, audio::BedLevel::new(0.5, 0.0, 0.0)),
+        ("a fleet under way", audio::Bed::Sailing, audio::BedLevel::new(0.85, 0.0, 0.0)),
+        ("tanks moving", audio::Bed::Engines, audio::BedLevel::new(0.75, 0.0, 0.0)),
+        ("aircraft passing", audio::Bed::Aircraft, audio::BedLevel::new(0.75, 0.0, 0.0)),
+    ];
+    for (name, bed, level) in sounds {
         println!("{name}");
-        engine.set_levels(audio::SoundLevels { build, factory });
-        wait(3);
+        let mut beds = quiet;
+        beds[bed as usize] = level;
+        engine.set_beds(&beds);
+        wait(4);
     }
-    engine.set_levels(audio::SoundLevels::default());
+    engine.set_beds(&quiet);
+    wait(1);
     println!("selecting a unit");
     engine.play_select();
     wait(1);
@@ -1243,6 +1261,8 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     let mut last_selected: Vec<SimId> = Vec::new();
     let mut attack_alarm = AttackAlarm::default();
     let mut sound_settings = SoundSettings::default();
+    // How fast each unit in view is moving, for the sound of ships, engines, and aircraft.
+    let mut movement = audio::Movement::default();
     // Whether the player has clicked or pressed a key yet, which the browser waits for before it
     // plays any sound.
     let mut sound_unlocked = false;
@@ -1778,12 +1798,28 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                 sound.play_select();
                             }
                             let viewport = camera.viewport();
-                            let levels = audio::sound_levels(&session.current, camera.zoom_from_closest(), |unit| {
+                            movement.update(&session.current);
+                            // Where a unit is across the screen, from -1 at the left to 1 at the right, if on it.
+                            let across = |unit: &sim_engine::sim::world::UnitView| {
                                 camera
                                     .world_to_screen([raw_to_world(unit.x), raw_to_world(unit.y), raw_to_world(unit.z)])
-                                    .is_some_and(|at| (0.0..=viewport[0]).contains(&at[0]) && (0.0..=viewport[1]).contains(&at[1]))
-                            });
-                            sound.set_levels(levels);
+                                    .filter(|at| (0.0..=viewport[0]).contains(&at[0]) && (0.0..=viewport[1]).contains(&at[1]))
+                                    .map(|at| (at[0] / viewport[0] * 2.0 - 1.0) as f32)
+                            };
+                            // The water in view, from a grid of points over the screen.
+                            const WATER_GRID: usize = 7;
+                            let mut points = Vec::with_capacity(WATER_GRID * WATER_GRID);
+                            for column in 0..WATER_GRID {
+                                for row in 0..WATER_GRID {
+                                    let screen = [viewport[0] * (column as f64 + 0.5) / WATER_GRID as f64, viewport[1] * (row as f64 + 0.5) / WATER_GRID as f64];
+                                    if let Some(ground) = camera.screen_to_ground(screen, &map.heights) {
+                                        let wet = map.heights.height_at(ground[0], ground[1]) < f64::from(map.water_level);
+                                        points.push(((screen[0] / viewport[0] * 2.0 - 1.0) as f32, wet));
+                                    }
+                                }
+                            }
+                            let listener = audio::Listener { zoom: camera.zoom_from_closest(), across: &across, water: audio::water_view(&points) };
+                            sound.set_beds(&audio::scene_levels(&session.current, &movement, &map.blueprints, &listener));
                             sound.set_volume(sound_settings.volume());
                             if attacked {
                                 sound.play_alarm();

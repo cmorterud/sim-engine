@@ -1,14 +1,20 @@
 //! Sound, generated in code so that there are no audio files to source. Presentation only:
 //! it reads snapshots and never touches the simulation, so it cannot affect determinism.
+//!
+//! Everything is soft enough to hear all match long, and fades in and out rather than switching.
+//! The battlefield is heard as it is seen, close up: the sea, ships under way, engines, aircraft,
+//! and builders at work, each from where it is across the screen. It is in stereo, but never hard
+//! to one side.
 
-use std::f32::consts::TAU;
+use std::f32::consts::{FRAC_PI_4, TAU};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample};
 
-use crate::sim::components::SimId;
+use crate::sim::blueprints::{BlueprintDb, BlueprintId};
+use crate::sim::components::{MoveClass, SimId};
 use crate::sim::world::{SimSnapshot, UnitView};
 
 /// How long "commander under attack" stays silent after playing, however often the commander is hit.
@@ -16,15 +22,39 @@ pub const ALARM_COOLDOWN_SECONDS: f64 = 30.0;
 /// How long the text alert stays on screen.
 const ALERT_SECONDS: f64 = 4.0;
 
-const BUILD_GAIN: f32 = 0.085;
-const FACTORY_GAIN: f32 = 0.07;
-const ALARM_GAIN: f32 = 0.4;
 /// How long sounds take to fade in and out, so that they never click.
 const FADE_SECONDS: f32 = 0.08;
-/// Building is only heard from close up: at full volume up to the first zoom level,
-/// fading to silence by the second. Zoom runs from 0, as close as allowed, to 1, all the way out.
+/// Work, ships, engines, and aircraft are only heard from close up: at full volume up to the
+/// first zoom level, fading to silence by the second. Zoom runs from 0, as close as allowed, to
+/// 1, all the way out.
 const FULL_VOLUME_ZOOM: f64 = 0.12;
 const SILENT_ZOOM: f64 = 0.3;
+/// The sea carries a little further out.
+const OCEAN_FULL_ZOOM: f64 = 0.15;
+const OCEAN_SILENT_ZOOM: f64 = 0.38;
+/// How far to one side a sound can sit, at the screen's edge: never all the way.
+const MAX_PAN: f32 = 0.6;
+/// Below this, a continuous sound is not worked out at all.
+const SILENT_LEVEL: f32 = 1e-4;
+
+/// The builders' chimes, and the factories', which are an octave lower and come slower.
+const BUILD_GAIN: f32 = 0.06;
+const FACTORY_GAIN: f32 = 0.065;
+const OCEAN_GAIN: f32 = 0.027;
+const SAILING_GAIN: f32 = 0.028;
+const ENGINE_GAIN: f32 = 0.024;
+const AIRCRAFT_GAIN: f32 = 0.018;
+const ALARM_GAIN: f32 = 0.4;
+
+/// F major pentatonic, from F4 to D5: any notes of it sound well together, struck at random.
+const BUILD_NOTES: [f32; 5] = [349.23, 392.0, 440.0, 523.25, 587.33];
+/// About how far apart the builders' notes come, in seconds, before the crowd hurries them.
+const BUILD_SPACING: f32 = 1.1;
+const FACTORY_SPACING: f32 = 1.7;
+/// A chime's strike, and how long it rings: struck softly, so that it never clicks.
+const CHIME_ATTACK: f32 = 0.008;
+const CHIME_RING: f32 = 0.38;
+const CHIME_VOICES: usize = 6;
 
 const SELECT_GAIN: f32 = 0.14;
 const SELECT_SECONDS: f32 = 0.12;
@@ -33,16 +63,62 @@ const ALARM_NOTE_SECONDS: f32 = 0.2;
 const ALARM_STEP_SECONDS: f32 = 0.22;
 const ALARM_NOTES: u32 = 4;
 
+/// The continuous sounds, each with a level and a place across the screen.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Bed {
+    /// Builders at work: soft chimes.
+    Build,
+    /// Factories making something: the same chimes, lower and slower.
+    Factory,
+    /// The sea, wherever water is in view.
+    Ocean,
+    /// The wash of ships under way.
+    Sailing,
+    /// Land units and hovercraft moving.
+    Engines,
+    /// Aircraft passing.
+    Aircraft,
+}
+
+pub const BEDS: usize = 6;
+
+impl Bed {
+    pub const ALL: [Self; BEDS] = [Self::Build, Self::Factory, Self::Ocean, Self::Sailing, Self::Engines, Self::Aircraft];
+}
+
+/// One continuous sound: how loud, from 0 to 1, where across the screen, from -1 at the left
+/// edge to 1 at the right, and, for the chimes, how busy, from 0 to 1, which hurries the notes
+/// without making each louder.
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
+pub struct BedLevel {
+    pub level: f32,
+    pub pan: f32,
+    pub busy: f32,
+}
+
+impl BedLevel {
+    pub const fn new(level: f32, pan: f32, busy: f32) -> Self {
+        Self { level, pan, busy }
+    }
+}
+
 /// What the sound should be doing right now. All levels run from 0 to 1.
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub struct SoundTargets {
-    pub build: f32,
-    pub factory: f32,
+    pub beds: [BedLevel; BEDS],
     pub volume: f32,
     /// Goes up by one for each alarm to play.
     pub alarm_serial: u32,
     /// Goes up by one for each selection cue to play.
     pub select_serial: u32,
+}
+
+impl SoundTargets {
+    /// These targets with one continuous sound set.
+    pub fn with(mut self, bed: Bed, level: BedLevel) -> Self {
+        self.beds[bed as usize] = level;
+        self
+    }
 }
 
 fn advance(phase: &mut f32, frequency: f32, rate: f32) -> f32 {
@@ -55,18 +131,247 @@ fn sine(phase: f32) -> f32 {
     (phase * TAU).sin()
 }
 
+/// A rise and fall from 0 to 1 and back, smooth at both ends.
+fn swell(phase: f32) -> f32 {
+    0.5 - 0.5 * (phase * TAU).cos()
+}
+
+/// How a sound across the screen is shared between the two speakers, at the same power wherever
+/// it is: in the middle each speaker gets all of it, as a single speaker did before stereo.
+fn pan_gains(pan: f32) -> (f32, f32) {
+    let angle = (pan.clamp(-1.0, 1.0) * MAX_PAN + 1.0) * FRAC_PI_4;
+    (angle.cos() * std::f32::consts::SQRT_2, angle.sin() * std::f32::consts::SQRT_2)
+}
+
+/// White noise from a seeded generator, so that tests hear the same thing every time.
+#[derive(Clone, Debug)]
+struct Noise(u32);
+
+impl Noise {
+    fn next(&mut self) -> f32 {
+        let mut x = self.0;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        self.0 = x;
+        (x as f32 / u32::MAX as f32) * 2.0 - 1.0
+    }
+
+    /// From 0 to 1.
+    fn unit(&mut self) -> f32 {
+        0.5 + 0.5 * self.next()
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+struct LowPass {
+    gain: f32,
+    out: f32,
+}
+
+impl LowPass {
+    fn new(cutoff: f32, rate: f32) -> Self {
+        Self { gain: 1.0 - (-TAU * cutoff / rate).exp(), out: 0.0 }
+    }
+
+    fn run(&mut self, input: f32) -> f32 {
+        self.out += self.gain * (input - self.out);
+        self.out
+    }
+}
+
+/// Two low-passes in a row: it falls away twice as steeply above the cutoff, so that noise
+/// through it is a soft rush rather than a hiss.
+#[derive(Copy, Clone, Debug)]
+struct SoftPass(LowPass, LowPass);
+
+impl SoftPass {
+    fn new(cutoff: f32, rate: f32) -> Self {
+        Self(LowPass::new(cutoff, rate), LowPass::new(cutoff, rate))
+    }
+
+    fn run(&mut self, input: f32) -> f32 {
+        self.1.run(self.0.run(input))
+    }
+}
+
+/// Noise between two pitches: what is above `low`, softened above `high`.
+#[derive(Copy, Clone, Debug)]
+struct Band {
+    low: LowPass,
+    high: SoftPass,
+}
+
+impl Band {
+    fn new(low: f32, high: f32, rate: f32) -> Self {
+        Self { low: LowPass::new(low, rate), high: SoftPass::new(high, rate) }
+    }
+
+    fn run(&mut self, input: f32) -> f32 {
+        self.high.run(input - self.low.run(input))
+    }
+}
+
+/// The sea: a soft rush, deep beneath, rising and falling in two slow swells out of step with
+/// each other, so that it never audibly repeats.
+#[derive(Clone, Debug)]
+struct Ocean {
+    surf: SoftPass,
+    deep: SoftPass,
+    swells: [f32; 2],
+}
+
+impl Ocean {
+    fn new(rate: f32) -> Self {
+        Self { surf: SoftPass::new(650.0, rate), deep: SoftPass::new(130.0, rate), swells: [0.0, 0.37] }
+    }
+
+    fn voice(&mut self, noise: &mut Noise, rate: f32) -> f32 {
+        let white = noise.next();
+        let surf = self.surf.run(white);
+        let deep = self.deep.run(white);
+        let first = swell(advance(&mut self.swells[0], 1.0 / 8.7, rate));
+        let second = swell(advance(&mut self.swells[1], 1.0 / 5.9, rate));
+        let rise = 0.35 + 0.65 * (0.65 * first * first + 0.35 * second);
+        (9.0 * surf + 14.0 * deep) * rise
+    }
+}
+
+/// The wash along a hull under way: water rushing and lapping, in the middle of the range.
+#[derive(Clone, Debug)]
+struct Wash {
+    band: Band,
+    laps: [f32; 2],
+}
+
+impl Wash {
+    fn new(rate: f32) -> Self {
+        Self { band: Band::new(240.0, 750.0, rate), laps: [0.0, 0.5] }
+    }
+
+    fn voice(&mut self, noise: &mut Noise, rate: f32) -> f32 {
+        let water = self.band.run(noise.next());
+        let lap = 0.7 + 0.18 * swell(advance(&mut self.laps[0], 0.63, rate)) + 0.12 * swell(advance(&mut self.laps[1], 1.07, rate));
+        12.0 * water * lap
+    }
+}
+
+/// Engines: a low, soft rumble, with a quiet tone in it that wanders a little in pitch, so that
+/// it reads as machinery at work without droning.
+#[derive(Clone, Debug)]
+struct Engines {
+    rumble: SoftPass,
+    tone: f32,
+    overtone: f32,
+    wander: f32,
+}
+
+impl Engines {
+    fn new(rate: f32) -> Self {
+        Self { rumble: SoftPass::new(170.0, rate), tone: 0.0, overtone: 0.0, wander: 0.0 }
+    }
+
+    fn voice(&mut self, noise: &mut Noise, rate: f32) -> f32 {
+        let rumble = self.rumble.run(noise.next());
+        let pitch = 58.0 * (1.0 + 0.03 * sine(advance(&mut self.wander, 0.21, rate)));
+        let tone = sine(advance(&mut self.tone, pitch, rate)) + 0.25 * sine(advance(&mut self.overtone, pitch * 2.0, rate));
+        16.0 * rumble + 0.35 * tone
+    }
+}
+
+/// Aircraft: an airy rush with a faint tone, rising and falling a little as they pass.
+#[derive(Clone, Debug)]
+struct Aircraft {
+    air: Band,
+    tone: f32,
+    pass: f32,
+}
+
+impl Aircraft {
+    fn new(rate: f32) -> Self {
+        Self { air: Band::new(380.0, 1100.0, rate), tone: 0.0, pass: 0.0 }
+    }
+
+    fn voice(&mut self, noise: &mut Noise, rate: f32) -> f32 {
+        let air = self.air.run(noise.next());
+        let tone = sine(advance(&mut self.tone, 205.0, rate));
+        let passing = 0.8 + 0.2 * swell(advance(&mut self.pass, 0.27, rate));
+        (9.0 * air + 0.12 * tone) * passing
+    }
+}
+
+/// A chime ringing out.
+#[derive(Copy, Clone, Debug, Default)]
+struct Ring {
+    frequency: f32,
+    phase: f32,
+    overtone: f32,
+    age: f32,
+    gain: f32,
+    sounding: bool,
+}
+
+/// Notes struck one at a time at uneven, unhurried moments, each from the scale and never the
+/// same note twice running: light, and pleasant to hear all match long.
+#[derive(Clone, Debug)]
+struct Chimes {
+    notes: [f32; 5],
+    spacing: f32,
+    rings: [Ring; CHIME_VOICES],
+    wait: f32,
+    last: usize,
+}
+
+impl Chimes {
+    fn new(notes: [f32; 5], spacing: f32) -> Self {
+        Self { notes, spacing, rings: [Ring::default(); CHIME_VOICES], wait: 0.0, last: 0 }
+    }
+
+    /// Strikes new notes while `playing`, as often as `busy` says, and rings out those struck.
+    fn voice(&mut self, noise: &mut Noise, playing: bool, busy: f32, rate: f32) -> f32 {
+        if playing {
+            self.wait -= 1.0 / rate;
+            if self.wait <= 0.0 {
+                let index = (self.last + 1 + (noise.unit() * 3.999) as usize) % self.notes.len();
+                self.last = index;
+                // A free voice, or else the one that has rung longest.
+                let slot = self.rings.iter().position(|ring| !ring.sounding).unwrap_or_else(|| {
+                    self.rings.iter().enumerate().max_by(|a, b| a.1.age.total_cmp(&b.1.age)).map_or(0, |(slot, _)| slot)
+                });
+                self.rings[slot] = Ring { frequency: self.notes[index] * (1.0 + 0.002 * noise.next()), gain: 0.75 + 0.25 * noise.unit(), sounding: true, ..Ring::default() };
+                self.wait = self.spacing / (0.5 + 1.5 * busy.clamp(0.0, 1.0)) * (0.6 + 0.8 * noise.unit());
+            }
+        }
+        let mut out = 0.0;
+        for ring in self.rings.iter_mut().filter(|ring| ring.sounding) {
+            let strike = (ring.age / CHIME_ATTACK).min(1.0);
+            let body = sine(advance(&mut ring.phase, ring.frequency, rate));
+            // A mallet's knock, a little above, gone almost at once.
+            let knock = sine(advance(&mut ring.overtone, ring.frequency * 2.76, rate)) * (-ring.age / 0.035).exp();
+            out += ring.gain * strike * (-ring.age / CHIME_RING).exp() * (body + 0.12 * knock);
+            ring.age += 1.0 / rate;
+            if ring.age > CHIME_RING * 6.0 {
+                ring.sounding = false;
+            }
+        }
+        out
+    }
+}
+
 /// Makes the samples. It does not know about audio devices, so that tests can check its output.
 #[derive(Clone, Debug)]
 pub struct Synth {
     rate: f32,
     fade: f32,
-    filter: f32,
-    build_level: f32,
-    factory_level: f32,
+    beds: [BedLevel; BEDS],
     volume: f32,
-    build_phases: [f32; 5],
-    factory_phases: [f32; 4],
-    factory_filtered: f32,
+    noise: Noise,
+    build: Chimes,
+    factory: Chimes,
+    ocean: Ocean,
+    wash: Wash,
+    engines: Engines,
+    aircraft: Aircraft,
     alarm_phase: f32,
     alarm_elapsed: Option<f32>,
     alarm_serial: u32,
@@ -80,13 +385,15 @@ impl Synth {
         Self {
             rate,
             fade: 1.0 - (-1.0 / (FADE_SECONDS * rate)).exp(),
-            filter: 1.0 - (-TAU * 700.0 / rate).exp(),
-            build_level: 0.0,
-            factory_level: 0.0,
+            beds: [BedLevel::default(); BEDS],
             volume: 0.0,
-            build_phases: [0.0; 5],
-            factory_phases: [0.0; 4],
-            factory_filtered: 0.0,
+            noise: Noise(0x9E37_79B9),
+            build: Chimes::new(BUILD_NOTES, BUILD_SPACING),
+            factory: Chimes::new(BUILD_NOTES.map(|note| note / 2.0), FACTORY_SPACING),
+            ocean: Ocean::new(rate),
+            wash: Wash::new(rate),
+            engines: Engines::new(rate),
+            aircraft: Aircraft::new(rate),
             alarm_phase: 0.0,
             alarm_elapsed: None,
             alarm_serial: 0,
@@ -94,35 +401,6 @@ impl Synth {
             select_elapsed: None,
             select_serial: 0,
         }
-    }
-
-    /// A soft, warm hum with a slow shimmer. A second, slightly detuned voice makes a crowd sound
-    /// fuller.
-    fn build_voice(&mut self) -> f32 {
-        let rate = self.rate;
-        let [low, fifth, octave, detuned, shimmer] = &mut self.build_phases;
-        let tone = 0.5 * sine(advance(low, 164.81, rate))
-            + 0.25 * sine(advance(fifth, 246.94, rate))
-            + 0.04 * sine(advance(octave, 329.63, rate))
-            + 0.25 * self.build_level * sine(advance(detuned, 165.4, rate));
-        tone * (0.93 + 0.07 * sine(advance(shimmer, 1.3, rate)))
-    }
-
-    /// A low, rounded machine sound that swells and settles about once a second, as if a press
-    /// is working: warm and low beside the builders' hum, with nothing sharp in it. Until
-    /// 2026-11-19 it was a buzz of sawtooth and narrow pulse waves, gated five times a second.
-    fn factory_voice(&mut self) -> f32 {
-        let rate = self.rate;
-        let [first, second, third, pulse] = &mut self.factory_phases;
-        // A raised cosine, so that the swell rises and falls smoothly.
-        let beat = 0.5 - 0.5 * sine(advance(pulse, 1.1, rate) + 0.25);
-        let swell = 0.72 + 0.28 * beat * beat;
-        // A triangle's overtones fall away fast, so it is round where a sawtooth buzzes.
-        let triangle = |phase: f32| 1.0 - 4.0 * (phase - 0.5).abs();
-        let tone = 0.5 * triangle(advance(first, 98.0, rate)) + 0.3 * sine(advance(second, 146.83, rate)) + 0.12 * sine(advance(third, 196.0, rate));
-        let raw = tone * swell;
-        self.factory_filtered += self.filter * (raw - self.factory_filtered);
-        self.factory_filtered
     }
 
     /// A short, soft blip that rises a little, so that it reads as a response and not a warning.
@@ -172,24 +450,52 @@ impl Synth {
         1.1 * envelope * (sine(phase) + 0.2 * sine((phase * 2.0).fract()))
     }
 
-    pub fn next_sample(&mut self, targets: SoundTargets) -> f32 {
-        self.build_level += self.fade * (targets.build - self.build_level);
-        self.factory_level += self.fade * (targets.factory - self.factory_level);
+    /// The next sample for each speaker, left then right.
+    pub fn next_frame(&mut self, targets: &SoundTargets) -> [f32; 2] {
+        let rate = self.rate;
         self.volume += self.fade * (targets.volume - self.volume);
-        let build = self.build_voice() * self.build_level * BUILD_GAIN;
-        let factory = self.factory_voice() * self.factory_level * FACTORY_GAIN;
-        let alarm = self.alarm_voice(targets.alarm_serial) * ALARM_GAIN;
-        let select = self.select_voice(targets.select_serial) * SELECT_GAIN;
+        let (mut left, mut right) = (0.0, 0.0);
+        for bed in Bed::ALL {
+            let index = bed as usize;
+            let (target, now) = (targets.beds[index], &mut self.beds[index]);
+            now.level += self.fade * (target.level - now.level);
+            now.pan += self.fade * (target.pan - now.pan);
+            now.busy += self.fade * (target.busy - now.busy);
+            let (level, pan, busy) = (now.level, now.pan, now.busy);
+            if level < SILENT_LEVEL && target.level <= 0.0 {
+                continue;
+            }
+            let playing = target.level > 0.0;
+            let noise = &mut self.noise;
+            let sound = match bed {
+                Bed::Build => self.build.voice(noise, playing, busy, rate) * BUILD_GAIN,
+                Bed::Factory => self.factory.voice(noise, playing, busy, rate) * FACTORY_GAIN,
+                Bed::Ocean => self.ocean.voice(noise, rate) * OCEAN_GAIN,
+                Bed::Sailing => self.wash.voice(noise, rate) * SAILING_GAIN,
+                Bed::Engines => self.engines.voice(noise, rate) * ENGINE_GAIN,
+                Bed::Aircraft => self.aircraft.voice(noise, rate) * AIRCRAFT_GAIN,
+            } * level;
+            let (to_left, to_right) = pan_gains(pan);
+            left += sound * to_left;
+            right += sound * to_right;
+        }
+        let middle = self.alarm_voice(targets.alarm_serial) * ALARM_GAIN + self.select_voice(targets.select_serial) * SELECT_GAIN;
         // Soft clipping, so that everything at once cannot distort harshly.
-        ((build + factory + alarm + select) * self.volume).tanh()
+        [((left + middle) * self.volume).tanh(), ((right + middle) * self.volume).tanh()]
+    }
+
+    /// Both speakers mixed to one, for checking how a sound sounds.
+    pub fn next_sample(&mut self, targets: &SoundTargets) -> f32 {
+        let [left, right] = self.next_frame(targets);
+        0.5 * (left + right)
     }
 }
 
 /// The values shared with the audio thread. Levels are stored as `f32` bits.
 #[derive(Debug, Default)]
 struct SharedTargets {
-    build: AtomicU32,
-    factory: AtomicU32,
+    /// Each continuous sound's level, pan, and busyness.
+    beds: [[AtomicU32; 3]; BEDS],
     volume: AtomicU32,
     alarm_serial: AtomicU32,
     select_serial: AtomicU32,
@@ -198,10 +504,13 @@ struct SharedTargets {
 
 impl SharedTargets {
     fn read(&self) -> SoundTargets {
+        let load = |value: &AtomicU32| f32::from_bits(value.load(Ordering::Relaxed));
         SoundTargets {
-            build: f32::from_bits(self.build.load(Ordering::Relaxed)),
-            factory: f32::from_bits(self.factory.load(Ordering::Relaxed)),
-            volume: f32::from_bits(self.volume.load(Ordering::Relaxed)),
+            beds: std::array::from_fn(|index| {
+                let [level, pan, busy] = &self.beds[index];
+                BedLevel { level: load(level), pan: load(pan), busy: load(busy) }
+            }),
+            volume: load(&self.volume),
             alarm_serial: self.alarm_serial.load(Ordering::Relaxed),
             select_serial: self.select_serial.load(Ordering::Relaxed),
         }
@@ -244,9 +553,13 @@ impl SoundEngine {
         }
     }
 
-    pub fn set_levels(&self, levels: SoundLevels) {
-        self.shared.build.store(levels.build.to_bits(), Ordering::Relaxed);
-        self.shared.factory.store(levels.factory.to_bits(), Ordering::Relaxed);
+    /// What each continuous sound should be doing.
+    pub fn set_beds(&self, beds: &[BedLevel; BEDS]) {
+        for (shared, bed) in self.shared.beds.iter().zip(beds) {
+            shared[0].store(bed.level.to_bits(), Ordering::Relaxed);
+            shared[1].store(bed.pan.to_bits(), Ordering::Relaxed);
+            shared[2].store(bed.busy.to_bits(), Ordering::Relaxed);
+        }
     }
 
     pub fn set_volume(&self, volume: f32) {
@@ -280,8 +593,17 @@ where
             move |output: &mut [T], _: &cpal::OutputCallbackInfo| {
                 let targets = shared.read();
                 for frame in output.chunks_mut(channels) {
-                    let value = T::from_sample(synth.next_sample(targets));
-                    frame.fill(value);
+                    let [left, right] = synth.next_frame(&targets);
+                    // A single speaker gets both; more than two get the middle on the rest.
+                    match frame {
+                        [only] => *only = T::from_sample(0.5 * (left + right)),
+                        [first, second, rest @ ..] => {
+                            *first = T::from_sample(left);
+                            *second = T::from_sample(right);
+                            rest.fill(T::from_sample(0.5 * (left + right)));
+                        }
+                        [] => {}
+                    }
                 }
                 shared.frames_played.fetch_add((output.len() / channels) as u64, Ordering::Relaxed);
             },
@@ -291,35 +613,174 @@ where
         .map_err(|error| error.to_string())
 }
 
-/// How loud the building sounds should be.
+/// One worker is light. More get louder and fuller, but never ten times as loud. Counted in
+/// shares: a unit at half speed counts as half.
+fn crowd(count: f32) -> f32 {
+    count / (count + 2.0)
+}
+
+/// How close the camera is, for a sound heard in full up to `full` and gone by `silent`.
+fn closeness(zoom: f64, full: f64, silent: f64) -> f32 {
+    ((silent - zoom) / (silent - full)).clamp(0.0, 1.0) as f32
+}
+
+/// What the camera shows, for working out what is heard.
+pub struct Listener<'a> {
+    /// How far out the camera is: 0 as close as allowed, 1 all the way out.
+    pub zoom: f64,
+    /// Where a unit is across the screen, from -1 at the left edge to 1 at the right, if it is
+    /// on screen at all.
+    pub across: &'a dyn Fn(&UnitView) -> Option<f32>,
+    /// The water in view.
+    pub water: WaterView,
+}
+
+/// How much of the ground in view is water, from 0 to 1, and where across the screen it lies.
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
-pub struct SoundLevels {
-    pub build: f32,
-    pub factory: f32,
+pub struct WaterView {
+    pub share: f32,
+    pub across: f32,
 }
 
-/// One worker is light. More get louder and fuller, but never ten times as loud.
-fn crowd_level(count: usize) -> f32 {
-    count as f32 / (count as f32 + 2.0)
-}
-
-/// Works out the levels from what is really happening on screen, when zoomed in. Builders only count while
-/// they have work links, which already stop when walking, waiting, or out of resources.
-pub fn sound_levels(snapshot: &SimSnapshot, zoom_fraction: f64, on_screen: impl Fn(&UnitView) -> bool) -> SoundLevels {
-    if snapshot.match_result.is_some() {
-        return SoundLevels::default();
+/// The water in view, from points spread over the screen: each where it is across the screen,
+/// from -1 to 1, and whether the ground there is under water. Points that miss the ground, as
+/// above the horizon, are left out.
+pub fn water_view(points: &[(f32, bool)]) -> WaterView {
+    if points.is_empty() {
+        return WaterView::default();
     }
+    let wet: Vec<f32> = points.iter().filter(|point| point.1).map(|point| point.0).collect();
+    if wet.is_empty() {
+        return WaterView::default();
+    }
+    WaterView { share: wet.len() as f32 / points.len() as f32, across: wet.iter().sum::<f32>() / wet.len() as f32 }
+}
+
+/// How far each unit moved between the two latest snapshots: units a tick. Kept between frames;
+/// each snapshot is looked at once.
+#[derive(Clone, Debug, Default)]
+pub struct Movement {
+    tick: Option<u32>,
+    /// Where each unit was in the snapshot before, sorted by unit.
+    places: Vec<(SimId, i32, i32)>,
+    /// Units that moved since, and how fast, sorted by unit.
+    speeds: Vec<(SimId, f32)>,
+}
+
+impl Movement {
+    pub fn update(&mut self, snapshot: &SimSnapshot) {
+        if self.tick == Some(snapshot.tick) {
+            return;
+        }
+        let ticks = self.tick.map_or(1, |tick| snapshot.tick.saturating_sub(tick).max(1)) as f32;
+        self.speeds.clear();
+        for unit in &snapshot.units {
+            if let Ok(index) = self.places.binary_search_by_key(&unit.id, |place| place.0) {
+                let (_, x, y) = self.places[index];
+                let moved = (f64::from(unit.x - x).hypot(f64::from(unit.y - y)) / 4096.0) as f32 / ticks;
+                if moved > 0.0 {
+                    self.speeds.push((unit.id, moved));
+                }
+            }
+        }
+        self.places.clear();
+        self.places.extend(snapshot.units.iter().map(|unit| (unit.id, unit.x, unit.y)));
+        self.places.sort_unstable_by_key(|place| place.0);
+        self.speeds.sort_unstable_by_key(|speed| speed.0);
+        self.tick = Some(snapshot.tick);
+    }
+
+    /// How fast a unit moved, in units a tick: 0 if it stood still or was not seen before.
+    pub fn speed(&self, id: SimId) -> f32 {
+        self.speeds.binary_search_by_key(&id, |speed| speed.0).map_or(0.0, |index| self.speeds[index].1)
+    }
+}
+
+/// A crowd heard together: how many, counting each by its share, and where they are on average.
+#[derive(Copy, Clone, Debug, Default)]
+struct Crowd {
+    count: f32,
+    across: f32,
+}
+
+impl Crowd {
+    fn add(&mut self, share: f32, across: f32) {
+        self.count += share;
+        self.across += share * across;
+    }
+
+    /// As a continuous sound, at `near` for how close the camera is. One unit under way is
+    /// heard at half the level of a crowd, so that a lone ship can still be made out.
+    fn bed(self, near: f32) -> BedLevel {
+        if self.count <= 0.0 {
+            return BedLevel::default();
+        }
+        BedLevel::new(self.count / (self.count + 1.0) * near, self.across / self.count, crowd(self.count))
+    }
+}
+
+/// What each continuous sound should be doing, from what is really happening in view:
+///
+/// * builders while they have work links, which already stop when walking, waiting, or out of
+///   resources, and factories while they are really producing;
+/// * ships, land units and hovercraft, and aircraft while they move, by how fast against their
+///   top speed;
+/// * the sea, by how much of the view is water.
+///
+/// All only when zoomed in, and nothing once the match is over.
+pub fn scene_levels(snapshot: &SimSnapshot, movement: &Movement, blueprints: &BlueprintDb, listener: &Listener) -> [BedLevel; BEDS] {
+    let mut beds = [BedLevel::default(); BEDS];
+    if snapshot.match_result.is_some() {
+        return beds;
+    }
+    let near = closeness(listener.zoom, FULL_VOLUME_ZOOM, SILENT_ZOOM);
     let find = |id: SimId| snapshot.units.binary_search_by_key(&id, |unit| unit.id).ok().map(|index| &snapshot.units[index]);
-    let builders = snapshot.work_links.iter().filter(|link| find(link.builder).is_some_and(&on_screen)).count();
+    let across = |unit: &UnitView| (listener.across)(unit);
+
+    let mut builders = Crowd::default();
+    for link in &snapshot.work_links {
+        if let Some(at) = find(link.builder).and_then(across) {
+            builders.add(1.0, at);
+        }
+    }
     let can_spend = snapshot.economy.satisfaction_permille > 0;
-    let factories = snapshot
-        .factories
-        .iter()
-        .filter(|factory| can_spend && !factory.queue.is_empty() && snapshot.paused.binary_search(&factory.id).is_err())
-        .filter(|factory| find(factory.id).is_some_and(|unit| unit.built_permille == 1000 && on_screen(unit)))
-        .count();
-    let distance = ((SILENT_ZOOM - zoom_fraction) / (SILENT_ZOOM - FULL_VOLUME_ZOOM)).clamp(0.0, 1.0) as f32;
-    SoundLevels { build: crowd_level(builders) * distance, factory: crowd_level(factories) * distance }
+    let mut factories = Crowd::default();
+    for factory in snapshot.factories.iter().filter(|factory| can_spend && !factory.queue.is_empty() && snapshot.paused.binary_search(&factory.id).is_err()) {
+        if let Some(at) = find(factory.id).filter(|unit| unit.built_permille == 1000).and_then(across) {
+            factories.add(1.0, at);
+        }
+    }
+    // Chimes keep each note as loud however many there are: more only hurry them.
+    beds[Bed::Build as usize] = BedLevel { level: if builders.count > 0.0 { near } else { 0.0 }, ..builders.bed(1.0) };
+    beds[Bed::Factory as usize] = BedLevel { level: if factories.count > 0.0 { near } else { 0.0 }, ..factories.bed(1.0) };
+
+    let (mut ships, mut engines, mut aircraft) = (Crowd::default(), Crowd::default(), Crowd::default());
+    if near > 0.0 {
+        for unit in snapshot.units.iter().filter(|unit| !unit.is_structure && !unit.remembered && unit.blueprint != u16::MAX) {
+            let speed = movement.speed(unit.id);
+            if speed <= 0.0 {
+                continue;
+            }
+            let Some(at) = across(unit) else { continue };
+            let blueprint = blueprints.get(BlueprintId(unit.blueprint));
+            let top = blueprint.speed.to_num::<f32>();
+            let share = if top > 0.0 { (speed / top).min(1.0) } else { 1.0 };
+            match blueprint.move_class() {
+                MoveClass::Naval | MoveClass::Submarine => ships.add(share, at),
+                MoveClass::Land | MoveClass::Hover | MoveClass::Seabed => engines.add(share, at),
+                MoveClass::Air => aircraft.add(share, at),
+            }
+        }
+    }
+    beds[Bed::Sailing as usize] = ships.bed(near);
+    beds[Bed::Engines as usize] = engines.bed(near);
+    beds[Bed::Aircraft as usize] = aircraft.bed(near);
+
+    let water = listener.water;
+    if water.share > 0.0 {
+        beds[Bed::Ocean as usize] = BedLevel::new(water.share.sqrt() * closeness(listener.zoom, OCEAN_FULL_ZOOM, OCEAN_SILENT_ZOOM), water.across, 0.0);
+    }
+    beds
 }
 
 /// Decides when "commander under attack" plays.
@@ -394,305 +855,4 @@ impl SoundSettings {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::sim::components::Team;
-    use crate::sim::world::{FactoryView, WorkLinkView};
-
-    const RATE: f32 = 48_000.0;
-
-    fn render(synth: &mut Synth, seconds: f32, targets: SoundTargets) -> Vec<f32> {
-        (0..(seconds * RATE) as usize).map(|_| synth.next_sample(targets)).collect()
-    }
-
-    fn loudness(samples: &[f32]) -> f32 {
-        (samples.iter().map(|value| value * value).sum::<f32>() / samples.len() as f32).sqrt()
-    }
-
-    /// The share of a sound's energy above about 1 kHz, which is what makes it buzz.
-    fn harshness(samples: &[f32]) -> f32 {
-        let keep = (-TAU * 1_000.0 / RATE).exp();
-        let (mut last_in, mut last_out) = (0.0, 0.0);
-        let high: Vec<f32> = samples
-            .iter()
-            .map(|&sample| {
-                last_out = keep * (last_out + sample - last_in);
-                last_in = sample;
-                last_out
-            })
-            .collect();
-        (loudness(&high) / loudness(samples)).powi(2)
-    }
-
-    fn settled(targets: SoundTargets) -> Vec<f32> {
-        let mut synth = Synth::new(RATE);
-        render(&mut synth, 1.0, targets);
-        render(&mut synth, 2.0, targets)
-    }
-
-    /// The steepest rise in loudness from one 25 ms window to the next, against the sound's
-    /// average: how abruptly it starts or pulses.
-    fn abruptness(samples: &[f32]) -> f32 {
-        let window = (RATE * 0.025) as usize;
-        let levels: Vec<f32> = samples.chunks(window).map(loudness).collect();
-        let rise = levels.windows(2).map(|pair| pair[1] - pair[0]).fold(0.0, f32::max);
-        rise / loudness(samples).max(1e-6)
-    }
-
-    #[test]
-    fn silence_when_nothing_is_happening_or_when_muted() {
-        let quiet = settled(SoundTargets { volume: 1.0, ..SoundTargets::default() });
-        assert!(quiet.iter().all(|sample| sample.abs() < 1e-6));
-        let muted = settled(SoundTargets { build: 1.0, factory: 1.0, volume: 0.0, ..SoundTargets::default() });
-        assert!(muted.iter().all(|sample| sample.abs() < 1e-3));
-    }
-
-    /// How often the sound crosses zero a second: about twice its main pitch.
-    fn crossings(samples: &[f32]) -> f32 {
-        samples.windows(2).filter(|pair| (pair[0] < 0.0) != (pair[1] < 0.0)).count() as f32 / (samples.len() as f32 / RATE)
-    }
-
-    /// Played on repeat for a whole match, so neither may nag. The factory was a buzz of sawtooth
-    /// and narrow pulse waves, about 0.055 harsh and gated five times a second, until it was
-    /// called jarring (2026-11-19); the first version, at about 0.1, was called annoying. Now it is
-    /// a low, rounded swell, told from the builders by its lower pitch rather than by grit.
-    #[test]
-    fn the_factory_sounds_lower_than_the_builders_and_neither_is_harsh() {
-        let build = settled(SoundTargets { build: 1.0, volume: 1.0, ..SoundTargets::default() });
-        let factory = settled(SoundTargets { factory: 1.0, volume: 1.0, ..SoundTargets::default() });
-        assert!(harshness(&factory) < 0.02, "factory at {}", harshness(&factory));
-        assert!(harshness(&build) < 0.035, "builders at {}", harshness(&build));
-        assert!(crossings(&factory) < crossings(&build) * 0.8, "factory {} a second, builders {}", crossings(&factory), crossings(&build));
-        for (name, samples) in [("builders", &build), ("factory", &factory)] {
-            assert!((0.015..0.045).contains(&loudness(samples)), "{name} at {}", loudness(samples));
-            assert!(abruptness(samples) < 0.3, "{name} pulses at {}", abruptness(samples));
-        }
-    }
-
-    #[test]
-    fn sounds_fade_in_and_out_without_clicking() {
-        let mut synth = Synth::new(RATE);
-        let on = SoundTargets { build: 1.0, volume: 1.0, ..SoundTargets::default() };
-        let off = SoundTargets { volume: 1.0, ..SoundTargets::default() };
-        let mut samples = render(&mut synth, 0.5, on);
-        samples.extend(render(&mut synth, 0.5, off));
-        let jump = samples.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0, f32::max);
-        assert!(jump < 0.02, "a jump of {jump} would click");
-    }
-
-    #[test]
-    fn the_alarm_plays_once_for_each_request_and_stands_out() {
-        let mut synth = Synth::new(RATE);
-        let before = SoundTargets { build: 1.0, volume: 0.6, ..SoundTargets::default() };
-        render(&mut synth, 1.0, before);
-        let background = loudness(&render(&mut synth, 1.0, before));
-        let alarm = render(&mut synth, 0.8, SoundTargets { alarm_serial: 1, ..before });
-        assert!(loudness(&alarm) > background * 2.0, "alarm {} over {background}", loudness(&alarm));
-        assert!(alarm.iter().all(|sample| sample.abs() <= 1.0));
-        // Struck like a chime, not switched on: each note takes over 10 ms to sound fully.
-        let start = alarm.iter().position(|sample| sample.abs() > 1e-4).expect("it plays");
-        let first_ms = peak(&alarm[start..start + (RATE * 0.002) as usize]);
-        let tenth = peak(&alarm[start..start + (RATE * 0.1) as usize]);
-        assert!(first_ms < tenth * 0.5, "it starts at {first_ms} of {tenth} within 2 ms");
-        let after = render(&mut synth, 1.0, SoundTargets { alarm_serial: 1, ..before });
-        assert!(loudness(&after[RATE as usize / 4..]) < background * 1.1, "the alarm must end, and not repeat");
-        let again = render(&mut synth, 0.8, SoundTargets { alarm_serial: 2, ..before });
-        assert!(loudness(&again) > background * 2.0, "the next request plays again");
-    }
-
-    fn peak(samples: &[f32]) -> f32 {
-        samples.iter().fold(0.0, |most, sample| most.max(sample.abs()))
-    }
-
-    #[test]
-    fn the_selection_cue_is_short_soft_and_plays_for_each_request() {
-        let mut synth = Synth::new(RATE);
-        let quiet = SoundTargets { volume: 1.0, ..SoundTargets::default() };
-        render(&mut synth, 1.0, quiet);
-        let cue = render(&mut synth, 0.2, SoundTargets { select_serial: 1, ..quiet });
-        let tail = (SELECT_SECONDS * RATE) as usize + 2;
-        assert!(peak(&cue[..tail]) > 0.05, "it should be heard, at {}", peak(&cue[..tail]));
-        assert!(peak(&cue) < ALARM_GAIN * 0.5, "it should be well under the alarm, at {}", peak(&cue));
-        assert!(peak(&cue[tail..]) < 1e-6, "it should be over quickly");
-        // It swept up past 2 kHz until 2026-11-19, at 0.39 harshness.
-        assert!(harshness(&cue[..tail]) < 0.3, "it should be soft, at {}", harshness(&cue[..tail]));
-        let jump = cue.windows(2).map(|pair| (pair[1] - pair[0]).abs()).fold(0.0, f32::max);
-        assert!(jump < 0.05, "a jump of {jump} would click");
-
-        let silent = render(&mut synth, 0.2, SoundTargets { select_serial: 1, ..quiet });
-        assert!(peak(&silent) < 1e-6, "it must not repeat by itself");
-        let again = render(&mut synth, 0.2, SoundTargets { select_serial: 2, ..quiet });
-        assert!(peak(&again) > 0.05, "the next request plays again");
-    }
-
-    #[test]
-    fn the_selection_cue_is_silent_when_muted_and_can_be_heard_over_building() {
-        let mut synth = Synth::new(RATE);
-        let muted = SoundTargets { select_serial: 1, ..SoundTargets::default() };
-        assert!(peak(&render(&mut synth, 0.2, muted)) < 1e-6);
-
-        let mut synth = Synth::new(RATE);
-        let busy = SoundTargets { build: 1.0, volume: 1.0, ..SoundTargets::default() };
-        render(&mut synth, 1.0, busy);
-        let hum = peak(&render(&mut synth, 0.2, busy));
-        let with_cue = peak(&render(&mut synth, 0.1, SoundTargets { select_serial: 1, ..busy }));
-        assert!(with_cue > hum * 1.3, "{with_cue} over {hum}");
-    }
-
-    fn view(id: u32, built_permille: u16) -> UnitView {
-        UnitView {
-            id: SimId(id),
-            team: Team::Blue,
-            x: 0,
-            y: 0,
-            z: 0,
-            radius: 4096,
-            blueprint: 0,
-            health_permille: 1000,
-            built_permille,
-            is_structure: false,
-            facing: [0, 0], aim: [0, 0], extra_aims: [[0; 2]; 3],
-            working: false,
-            assembling: None,
-            upgrade: None,
-            remembered: false,
-            ally: false,
-        }
-    }
-
-    fn working(ids: &[u32]) -> Vec<WorkLinkView> {
-        ids.iter().map(|id| WorkLinkView { builder: SimId(*id), target: [0; 3], reclaim: false }).collect()
-    }
-
-    fn factory(id: u32, queue: Vec<u16>) -> FactoryView {
-        FactoryView { id: SimId(id), queue, repeat: false, progress_permille: 0, rally: None }
-    }
-
-    fn scene() -> SimSnapshot {
-        let mut snapshot = SimSnapshot { units: vec![view(1, 1000), view(2, 1000), view(3, 1000), view(4, 500)], ..SimSnapshot::default() };
-        snapshot.economy.satisfaction_permille = 1000;
-        snapshot
-    }
-
-    #[test]
-    fn builders_are_only_heard_while_working_on_screen() {
-        let mut snapshot = scene();
-        assert_eq!(sound_levels(&snapshot, 0.0, |_| true), SoundLevels::default(), "nobody is working");
-        snapshot.work_links = working(&[1]);
-        let one = sound_levels(&snapshot, 0.0, |_| true).build;
-        assert!(one > 0.0);
-        assert_eq!(sound_levels(&snapshot, 0.0, |_| false).build, 0.0, "off screen");
-        assert_eq!(sound_levels(&snapshot, 0.0, |unit| unit.id != SimId(1)).build, 0.0);
-
-        // A crowd is louder, but well short of adding up.
-        snapshot.work_links = working(&[1, 2, 3]);
-        let three = sound_levels(&snapshot, 0.0, |_| true).build;
-        assert!(three > one && three < one * 3.0 && three < 1.0, "{one} then {three}");
-    }
-
-    #[test]
-    fn factories_are_only_heard_while_really_producing() {
-        let mut snapshot = scene();
-        snapshot.factories = vec![factory(1, vec![])];
-        assert_eq!(sound_levels(&snapshot, 0.0, |_| true).factory, 0.0, "nothing queued");
-        snapshot.factories = vec![factory(4, vec![7])];
-        assert_eq!(sound_levels(&snapshot, 0.0, |_| true).factory, 0.0, "it is still being built");
-        snapshot.factories = vec![factory(1, vec![7])];
-        assert!(sound_levels(&snapshot, 0.0, |_| true).factory > 0.0);
-        assert_eq!(sound_levels(&snapshot, 0.0, |_| false).factory, 0.0, "off screen");
-        snapshot.economy.satisfaction_permille = 0;
-        assert_eq!(sound_levels(&snapshot, 0.0, |_| true).factory, 0.0, "out of resources");
-    }
-
-    #[test]
-    fn building_is_only_heard_zoomed_in_and_silent_after_the_match() {
-        let mut snapshot = scene();
-        snapshot.work_links = working(&[1]);
-        snapshot.factories = vec![factory(2, vec![7])];
-        let at = |zoom: f64| sound_levels(&snapshot, zoom, |_| true);
-        let near = at(0.0);
-        assert!(near.build > 0.0 && near.factory > 0.0);
-        assert_eq!(at(FULL_VOLUME_ZOOM), near, "still at full volume");
-        let halfway = at((FULL_VOLUME_ZOOM + SILENT_ZOOM) / 2.0);
-        assert!(halfway.factory > 0.0 && halfway.factory < near.factory, "it should fade, not cut out");
-        assert_eq!(at(SILENT_ZOOM), SoundLevels::default());
-        assert_eq!(at(1.0), SoundLevels::default(), "silent zoomed out, whatever is in view");
-        snapshot.match_result = Some(crate::sim::world::MatchResult::Draw);
-        assert_eq!(sound_levels(&snapshot, 0.0, |_| true), SoundLevels::default());
-    }
-
-    #[test]
-    fn the_alarm_plays_on_damage_then_waits_thirty_seconds() {
-        let mut alarm = AttackAlarm::default();
-        let rig = |health| Some((SimId(1), health));
-        assert!(!alarm.update(rig(1000), 0.1), "the first sighting is not damage");
-        assert!(!alarm.update(rig(1000), 0.1), "no damage");
-        assert!(alarm.update(rig(990), 0.1), "first hit");
-        assert!(alarm.alert_strength() > 0.9, "the text alert should show");
-
-        // Constant damage for just under 30 seconds stays quiet.
-        let mut health = 990;
-        for _ in 0..299 {
-            health -= 1;
-            assert!(!alarm.update(rig(health), 0.1));
-        }
-        assert_eq!(alarm.alert_strength(), 0.0, "the text alert should have gone by now");
-        health -= 1;
-        assert!(!alarm.update(rig(health), 0.05), "only just short");
-        health -= 1;
-        assert!(alarm.update(rig(health), 0.1), "30 seconds later, it plays again");
-    }
-
-    #[test]
-    fn damage_during_the_cooldown_does_not_count_afterwards() {
-        let mut alarm = AttackAlarm::default();
-        let rig = |health| Some((SimId(1), health));
-        alarm.update(rig(1000), 0.1);
-        assert!(alarm.update(rig(900), 0.1));
-        assert!(!alarm.update(rig(800), 1.0));
-        for _ in 0..40 {
-            assert!(!alarm.update(rig(800), 1.0), "no new damage, so nothing to report");
-        }
-    }
-
-    #[test]
-    fn repairs_and_a_dead_or_replaced_commander_are_not_attacks() {
-        let mut alarm = AttackAlarm::default();
-        alarm.update(Some((SimId(1), 500)), 0.1);
-        assert!(!alarm.update(Some((SimId(1), 600)), 0.1), "being repaired");
-        assert!(!alarm.update(None, 0.1), "dead");
-        assert!(!alarm.update(Some((SimId(2), 100)), 0.1), "a different unit");
-    }
-
-    #[test]
-    fn volume_steps_stop_at_the_ends_and_mute_remembers_the_level() {
-        let mut settings = SoundSettings::default();
-        assert!((settings.volume() - 0.6).abs() < 1e-6);
-        settings.toggle_mute();
-        assert_eq!(settings.volume(), 0.0);
-        assert_eq!(settings.label(), "[N] Muted");
-        settings.toggle_mute();
-        assert!((settings.volume() - 0.6).abs() < 1e-6);
-        for _ in 0..20 {
-            settings.louder();
-        }
-        assert_eq!(settings.volume(), 1.0);
-        for _ in 0..20 {
-            settings.quieter();
-        }
-        assert_eq!(settings.volume(), 0.0);
-        settings.toggle_mute();
-        settings.louder();
-        assert!(!settings.muted, "changing the volume should unmute");
-    }
-
-    /// Needs a real audio device, so it is not run by default. Silent: the volume stays at zero.
-    #[test]
-    #[ignore = "needs an audio device"]
-    fn a_real_device_keeps_asking_for_samples() {
-        let engine = SoundEngine::start().expect("audio should start");
-        engine.set_volume(0.0);
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        assert!(engine.frames_played() > 1_000, "only {} frames", engine.frames_played());
-    }
-}
+mod tests;
