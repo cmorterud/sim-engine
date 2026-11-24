@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use sim_engine::balance::{break_even, duel, mirrored, Side, Tactics};
+use sim_engine::balance::{break_even, break_even_forces, duel, mirrored, mirrored_on, siege_on, Field, Ground, Side, Tactics, T2_POSITION};
 use sim_engine::sim::blueprints::BlueprintDb;
 
 fn db() -> Arc<BlueprintDb> {
@@ -238,4 +238,34 @@ fn the_t3_fighter_outclasses_the_t1_interceptor() {
     let materiel = 6.0 * cost_at(fighter, 3);
     let fight = mirrored(&db, bought_at(&db, "t3_air_superiority", materiel, 3), bought_at(&db, "t1_interceptor", materiel, 3), 1.0);
     assert!(fight.score >= number("beats_interceptors_by"), "six fighters score {} against as much in interceptors", fight.score);
+}
+
+/// The sea grounds (2026-11-24, for fights between domains) are as fair as the land: equal fleets
+/// come out even both ways round, every duel at sea is the same each time, and a fleet breaks even
+/// with itself.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn duels_at_sea_are_fair_and_repeatable() {
+    let db = db();
+    let field = Field::new(Ground::Water, 2);
+    let fleet = [Side { unit: db.id("t2_destroyer"), count: 2, tactics: Tactics::AttackMove }, Side { unit: db.id("t2_cruiser"), count: 2, tactics: Tactics::AttackMove }];
+    let result = mirrored_on(&db, field, &fleet, &fleet, 1.0);
+    assert!(result.finished && result.seconds > 5.0, "the fleets fight until one is sunk: {result:?}");
+    assert!(result.score.abs() < 0.05, "equal fleets, played both ways round, come out even: {result:?}");
+    assert!(mirrored_on(&db, field, &fleet, &fleet, 1.25).score > 0.2, "a quarter more health, against a fifth less, wins clearly at sea");
+    assert!(mirrored_on(&db, field, &fleet, &fleet, 0.8).score < -0.2);
+    assert_eq!(mirrored_on(&db, field, &fleet, &fleet, 1.0), result, "and every duel at sea is the same each time");
+    let even = break_even_forces(&db, field, &fleet, &fleet);
+    assert!((even.efficiency - 1.0).abs() < 0.05 && !even.at_limit, "a fleet is as good a buy as itself: {even:?}");
+}
+
+/// On the shore ground the sea is Blue's side and the land Red's: ships start at sea and shell a
+/// position built ashore, and nothing on land walks out to them.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn ships_on_the_shore_ground_shell_a_position_ashore() {
+    let db = db();
+    let cruisers = [Side { unit: db.id("t2_cruiser"), count: 4, tactics: Tactics::AttackMove }];
+    let result = siege_on(&db, Field::new(Ground::Shore, 2), &cruisers, T2_POSITION);
+    assert!(result.seconds > 0.0, "the cruisers reach the position from the sea: {result:?}");
 }

@@ -284,3 +284,101 @@ win_rate_max = 0.55
 mirror_p_min = 0.05
 # After 15 minutes, T1 units are still at least this share of units built: they stay useful.
 t1_share_after_15_min = 0.15
+
+[domains]
+# Between domains: land, air, navy, and the hovercraft that crosses from one to the other
+# (2026-11-24). Each domain is strongest in its own medium, and the map decides how much of each
+# medium there is. This is not "equal cost comes out even everywhere": navy rules open water and is
+# held back by where water reaches; air is weaker per cost against a proper fleet, and its strength
+# is reach, striking anything, anywhere. A map that is mostly ocean should favor navy, and one
+# with little water leaves it a side show.
+#
+# At sea, with equal resources, navy against air: a massed, mixed fleet (battleships,
+# battlecruisers, cruisers, destroyers, shield ships) is all but impenetrable from the air,
+# torpedo bombers included, as it plays in the inspiration (the designer's experience of it,
+# 2026-11-24). Its answers are another fleet, submarines against a fleet with no anti-submarine
+# weapon, torpedo launchers at a coast, and strategic missiles; massed T3 submarine hunters and
+# massed T3 torpedo defenses, which are not in the game yet, would be more. The inspiration's static
+# ratios put torpedo bombers at about 0.6 to 0.7 times a fleet's cost to break it, but they leave
+# out what keeps a fleet alive in play: torpedo defense, anti-air splash on massed aircraft, and
+# shields. The fights below follow the play.
+#
+# The numbers lean on the inspiration's ratios, for feel, as [decisions] does: each role's strength
+# per cost against its own T1 line unit, the median across its factions
+# (reports/balance/2026-11-24-inspiration-ratios.md). No unit's values come from it.
+
+# A role's strength per cost, √(damage a second × health) over its cost at its tier, by the damage
+# the role is for (anti-air for fighters, torpedoes for submarines and torpedo bombers, guns and
+# missiles for the rest), as a multiple of the anchor's: the inspiration's ratios for the roles not
+# yet derived. Each is to come within `strength_band` of its ratio.
+strength_band = [0.80, 1.25]
+
+[domains.strength_over_anchor]
+t1_frigate = 0.57
+t1_attack_sub = 0.24
+t2_destroyer = 0.33
+t2_cruiser = 0.20
+t2_torpedo_boat = 0.32
+t3_battleship = 0.40
+t3_battlecruiser = 0.25
+t2_gunship = 0.62
+t2_torpedo_bomber = 0.55
+t2_fighter_bomber = 0.45
+t3_heavy_gunship = 0.38
+t2_mobile_flak = 1.56
+
+# Standard forces, by how many of each a squadron has, bought by whole squadrons to the materiel of
+# a fight. The fleets are what a player fields: a T2 fleet is two destroyers, a couple of cruisers
+# for anti-air and missile defense, and an escort corvette's shield (the example the design was
+# decided on). The air forces are what the AI's air factories make: a third fighters, the rest
+# strike aircraft, every fourth at T2 a fighter-bomber.
+[domains.forces]
+t1_fleet = { t1_frigate = 3, t1_attack_sub = 1 }
+t2_fleet = { t2_destroyer = 2, t2_cruiser = 2, t2_escort_corvette = 1 }
+t2_fleet_without_anti_air = { t2_destroyer = 2 }
+t2_fleet_without_anti_submarine = { t2_cruiser = 2, t2_escort_corvette = 1 }
+t3_fleet = { t3_battleship = 1, t3_battlecruiser = 1, t2_cruiser = 2, t2_escort_corvette = 1 }
+t1_air_force = { t1_interceptor = 1, t1_bomber = 2 }
+t2_air_force = { t1_interceptor = 3, t2_gunship = 4, t2_fighter_bomber = 2 }
+t3_air_force = { t3_air_superiority = 3, t3_heavy_gunship = 4 }
+t2_torpedo_bombers = { t2_torpedo_bomber = 1 }
+t1_submarines = { t1_attack_sub = 1 }
+t2_destroyers = { t2_destroyer = 1 }
+t2_hovercraft = { t2_assault_hovercraft = 1 }
+t2_heavy_tanks = { t2_heavy_tank = 1 }
+# A T2 land army with a fifth anti-air by materiel, as [air] anti_air_escort_share has it at T1.
+t2_land_army = { t2_heavy_tank = 2, t2_grenadier_walker = 1, t2_mobile_missile_launcher = 1, t2_mobile_flak = 2 }
+
+[domains.cells]
+# Each a fight at equal cost unless it says otherwise, scored as [counters] scores it: the first
+# force's share of its materiel left, less the second's, from -1 to 1. A designed winner keeps
+# [counters] winner_survivors, so it scores at least the lower end; even is within even_margin.
+#
+# A composed fleet rules the water: it beats an equal cost of the air force over the sea, and a
+# massed T3 fleet keeps most of itself.
+fleet_beats_air_force_t2 = 0.40
+fleet_beats_air_force_t3 = 0.60
+# And it takes overwhelming torpedo bombers, this many times the fleet's cost, to break it: the
+# break-even's efficiency of the fleet against them. At least twice for a T2 fleet, and three times
+# for a massed T3 one. The upper ends only keep a wing of torpedo bombers from being worthless.
+torpedo_bombers_to_break_fleet_t2 = [2.0, 5.0]
+torpedo_bombers_to_break_fleet_t3 = [3.0, 8.0]
+# Skipping the counter loses. A fleet with no anti-air loses to torpedo bombers; one with no
+# anti-submarine weapon loses to submarines, which lose to destroyers.
+fleet_without_anti_air_loses_to_torpedo_bombers = -0.40
+submarines_beat_fleet_without_anti_submarine = 0.40
+destroyers_beat_submarines = 0.40
+# Air against a land army with a fifth anti-air, at T2: about even, as at T1 ([air]).
+air_force_against_land_army_t2_even = true
+# The hovercraft pays for crossing water: about as strong per materiel as the Heavy Tank on land,
+# by break-even, and losing clearly to an equal cost of a fleet on the water.
+hovercraft_over_heavy_tank_on_land = [0.85, 1.15]
+hovercraft_loses_to_fleet = -0.40
+# Ships break coastal bases from T2 up: these outrange the point defense of their tier by at least
+# [siege] outrange_defense_min, and an equal cost of them breaks a coastal position of that tier
+# within [siege] seconds_max, losing at most this share.
+coastal_ships = { t2_cruiser = "t2_point_defense", t3_battleship = "t3_heavy_point_defense" }
+coastal_losses_max = 0.10
+# Torpedo launchers and a counter-fleet are the answer: an equal cost of destroyers closing on
+# torpedo launchers does not break them.
+destroyers_break_torpedo_launchers = false

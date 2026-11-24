@@ -79,6 +79,15 @@ from their blueprints. The targets are chosen deliberately apart from them in pl
 little longer, range worth a little less, units cheaper for their income), and no unit's values
 were taken from them.
 
+On 2026-11-24, for balance between domains (`[domains]`), FAF's public unit blueprints were read
+again: the `FAForever/fa` repository on GitHub, `units/<id>/<id>_unit.bp`, for one unit per
+faction (UEF, Cybran, Aeon, Seraphim) in each land, air, naval, and defense role, and the UEF
+factories. A script kept outside this repository read their costs, health, shields, weapons, and
+ranges, and took the median across factions of each role's ratio to that faction's T1 line unit,
+and a few ratios between roles (`reports/balance/2026-11-24-inspiration-ratios.md`). Only those
+ratios are recorded, in `[domains] strength_over_anchor`, as a reference for feel; no file, value,
+or unit's numbers were taken.
+
 ## Names
 
 Replaced on 2026-11-15, in display names, ids, code, tests, and documentation:

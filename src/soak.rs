@@ -22,6 +22,61 @@ pub struct MatchSummary {
     pub result: Option<MatchResult>,
     pub replay_matches: bool,
     pub peak_units: usize,
+    /// The mass each team put into each domain, and lost from it (`Domain`), Blue's then Red's.
+    pub spent: [[u64; DOMAINS]; 2],
+    pub lost: [[u64; DOMAINS]; 2],
+}
+
+/// What a unit is for, for the soak's account of where each side's mass went (2026-11-24, for
+/// balance between domains): the base (structures, engineers, commanders, field rigs), and the
+/// four domains an army is made of.
+pub const DOMAINS: usize = 5;
+pub const DOMAIN_NAMES: [&str; DOMAINS] = ["base", "land", "hover", "naval", "air"];
+
+fn domain_of(unit: &crate::sim::blueprints::Blueprint) -> usize {
+    use crate::sim::blueprints::UnitClass;
+    use crate::sim::components::MoveClass;
+    if unit.is_structure() || matches!(unit.class, UnitClass::Engineer | UnitClass::Commander | UnitClass::FieldRig) {
+        return 0;
+    }
+    match unit.move_class() {
+        MoveClass::Land | MoveClass::Seabed => 1,
+        MoveClass::Hover => 2,
+        MoveClass::Naval | MoveClass::Submarine => 3,
+        MoveClass::Air => 4,
+    }
+}
+
+/// Every tenth tick, the units on the map: those new since the last look are mass spent, and
+/// those gone are mass lost, by team and domain. Units come and go over many ticks, so a look
+/// every tenth tick misses next to nothing, and costs little.
+#[derive(Default)]
+struct DomainTally {
+    alive: std::collections::BTreeMap<u32, (usize, usize, u64)>,
+    spent: [[u64; DOMAINS]; 2],
+    lost: [[u64; DOMAINS]; 2],
+}
+
+impl DomainTally {
+    fn look(&mut self, world: &crate::sim::world::SimWorld) {
+        use crate::sim::components::{Blueprinted, UnitStats};
+        let mut now = std::collections::BTreeMap::new();
+        for &(id, entity) in &world.units {
+            let (Ok(stats), Ok(unit)) = (world.ecs.get::<&UnitStats>(entity), world.ecs.get::<&Blueprinted>(entity)) else { continue };
+            let blueprint = world.blueprints.get(unit.0);
+            let entry = (stats.team.index(), domain_of(blueprint), blueprint.mass.to_num::<u64>());
+            // New, or upgraded in place since the last look, which keeps its id and adds its mass.
+            let before = self.alive.get(&id.0).map_or(0, |&(_, _, mass)| mass);
+            self.spent[entry.0][entry.1] += entry.2.saturating_sub(before);
+            now.insert(id.0, entry);
+        }
+        for (id, &(team, domain, mass)) in &self.alive {
+            if !now.contains_key(id) {
+                self.lost[team][domain] += mass;
+            }
+        }
+        self.alive = now;
+    }
 }
 
 pub struct SoakReport {
@@ -46,11 +101,16 @@ pub fn run_soak(first_seed: u64, count: u64, threads: usize, map: &MapSource, st
                 let seed = first_seed + index;
                 let mut local_times = Vec::with_capacity(20_000);
                 let mut last = Instant::now();
+                let mut tally = DomainTally::default();
                 let record = play_match_with(&map, seed, MATCH_TICK_LIMIT, strategies, |world| {
                     let now = Instant::now();
                     // Ticks that also compute a checksum would inflate the 99th percentile.
                     if !world.current_tick.is_multiple_of(CHECKSUM_INTERVAL) {
                         local_times.push(now - last);
+                    }
+                    // Counted before the clock restarts, so that it adds nothing to tick times.
+                    if world.current_tick.is_multiple_of(10) || world.match_result.is_some() {
+                        tally.look(world);
                     }
                     last = Instant::now();
                 });
@@ -61,6 +121,8 @@ pub fn run_soak(first_seed: u64, count: u64, threads: usize, map: &MapSource, st
                     result: record.result,
                     replay_matches,
                     peak_units: record.units_built_peak,
+                    spent: tally.spent,
+                    lost: tally.lost,
                 });
                 times.lock().expect("no worker panicked").extend(local_times);
             })
@@ -108,6 +170,14 @@ impl SoakReport {
             );
         }
         println!("  peak units on the map {peak}");
+        // Where each side's mass went, over every match: spent on each domain, and the share of
+        // it lost. A strategy soak reads these for balance between domains.
+        for (team, name) in [(0, "blue"), (1, "red")] {
+            let spent: Vec<u64> = (0..DOMAINS).map(|domain| self.matches.iter().map(|summary| summary.spent[team][domain]).sum()).collect();
+            let lost: Vec<u64> = (0..DOMAINS).map(|domain| self.matches.iter().map(|summary| summary.lost[team][domain]).sum()).collect();
+            let line: Vec<String> = DOMAIN_NAMES.iter().enumerate().map(|(domain, label)| format!("{label} {} lost {}", spent[domain], lost[domain])).collect();
+            println!("  {name} mass by domain: {}", line.join(", "));
+        }
         self.tick_times.sort_unstable();
         let mut tick_gate = true;
         if !self.tick_times.is_empty() {

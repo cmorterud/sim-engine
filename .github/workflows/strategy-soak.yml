@@ -7,7 +7,10 @@ name: Strategy soak
 # seeds, so that neither side's start counts. Turtle, which never attacks, is left out.
 #
 # Heavy, so it runs only when started by hand: from the Actions tab, or
-# `gh workflow run strategy-soak.yml`, optionally with `-f matches_per_pair=20`.
+# `gh workflow run strategy-soak.yml`, optionally with `-f matches_per_pair=20`. For balance
+# between domains (BALANCE.md, 2026-11-24), choose the strategies and maps, generated ones too, as
+# `generated:<kind>:<km>:<water>`, so that results can be read against how much water a map has:
+# `-f strategies=air,naval,balanced -f maps=stillwater,scattered_isles,generated:islands:20:lots`.
 on:
   workflow_dispatch:
     inputs:
@@ -20,6 +23,9 @@ on:
       shard_size:
         description: Matches per runner
         default: "25"
+      maps:
+        description: "The maps, by name, or generated as generated:<kind>:<km>:<water>"
+        default: "skirmish,highland,twin_passes,saddleback,stillwater,scattered_isles"
 
 permissions:
   contents: read
@@ -45,6 +51,7 @@ jobs:
           MATCHES: ${{ inputs.matches_per_pair }}
           STRATEGIES: ${{ inputs.strategies }}
           SHARD: ${{ inputs.shard_size }}
+          MAPS: ${{ inputs.maps }}
         run: |
           python3 - <<'EOF' >> "$GITHUB_OUTPUT"
           import itertools, json, os
@@ -52,8 +59,13 @@ jobs:
           each_way = max(1, int(os.environ["MATCHES"]) // 2)
           shard = max(1, int(os.environ["SHARD"]))
           shards = []
-          for map_name in ["skirmish", "highland", "twin_passes", "saddleback", "stillwater", "scattered_isles"]:
-              map_arg = "" if map_name == "skirmish" else f"--map {map_name} "
+          for map_name in [name.strip() for name in os.environ["MAPS"].split(",") if name.strip()]:
+              if map_name.startswith("generated:"):
+                  _, kind, km, water = map_name.split(":")
+                  water_arg = "" if kind == "passes" else f" --water {water}"
+                  map_arg = f"--generate {kind} --map-size {km}{water_arg} "
+              else:
+                  map_arg = "" if map_name == "skirmish" else f"--map {map_name} "
               for a, b in itertools.combinations(strategies, 2):
                   for blue, red in [(a, b), (b, a)]:
                       for first in range(1, each_way + 1, shard):
@@ -164,11 +176,19 @@ jobs:
               k = min(a, b)
               return min(1.0, 2 * sum(comb(n, i) for i in range(k + 1)) / 2 ** n)
           WATER = {"twin_passes", "stillwater", "scattered_isles"}
-          pairs, overall, problems = {}, {}, []
+          DOMAINS = ["base", "land", "hover", "naval", "air"]
+          pairs, overall, problems, spending = {}, {}, [], {}
           for path in sorted(glob.glob("strategy-soak-*/soak.txt")):
               text = open(path).read()
               mapname = re.search(r"^map (\S+):", text, re.M)
               where = mapname.group(1) if mapname else "skirmish"
+              # A generated map, by its kind, size, and water: its own row, and water if it has any.
+              generated = re.search(r"^generated: (\S+) of (\d+) km[^\n]*?(?:, (\S+) water)?, map seed", text, re.M)
+              if generated:
+                  kind, km, water = generated.group(1), generated.group(2), generated.group(3) or "no"
+                  where = f"generated {kind} {km} km, {water} water"
+                  if kind != "passes":
+                      WATER.add(where)
               sides = re.search(r"^strategies: blue (\S+), red (\S+)", text, re.M)
               wins = re.search(r"Blue wins (\d+), Red wins (\d+), draws (\d+), unfinished (\d+)", text)
               mismatches = re.search(r"replay mismatches (\d+)", text)
@@ -185,6 +205,15 @@ jobs:
               row[red] += red_wins
               row["draws"] += draws
               row["unfinished"] += unfinished
+              # Where each side's mass went, by domain: spent, and lost.
+              for side, strategy in (("blue", blue), ("red", red)):
+                  line = re.search(rf"^  {side} mass by domain: (.*)$", text, re.M)
+                  if not line:
+                      continue
+                  tally = spending.setdefault((where, strategy), {domain: [0, 0] for domain in DOMAINS})
+                  for domain, spent, lost in re.findall(r"(\w+) (\d+) lost (\d+)", line.group(1)):
+                      tally[domain][0] += int(spent)
+                      tally[domain][1] += int(lost)
               for strategy, won, lost in [(blue, blue_wins, red_wins), (red, red_wins, blue_wins)]:
                   if strategy == "naval" and where not in WATER:
                       continue
@@ -209,6 +238,21 @@ jobs:
               decided = row[a] + row[b]
               share = f"{100 * row[a] / decided:.1f}%" if decided else "-"
               print(f"| {where} | {a} | {b} | {row[a]} | {row[b]} | {share} | {p_value(row[a], row[b]):.3f} | {row['draws']} | {row['unfinished']} |")
+          if spending:
+              print()
+              print("## Where each strategy's mass went, by domain")
+              print()
+              print("Each domain's share of what a strategy spent on its armies (land, hover, naval, air; the base left out), over every match on the map, and in brackets the share of that domain's mass it lost.")
+              print()
+              print("| Map | Strategy | Land | Hover | Naval | Air |")
+              print("| :-- | :-- | --: | --: | --: | --: |")
+              for (where, strategy), tally in sorted(spending.items()):
+                  army = sum(tally[domain][0] for domain in DOMAINS[1:])
+                  cells = []
+                  for domain in DOMAINS[1:]:
+                      spent, lost = tally[domain]
+                      cells.append(f"{100 * spent / max(1, army):.0f}% ({100 * lost / max(1, spent):.0f}%)" if spent else "-")
+                  print(f"| {where} | {strategy} | " + " | ".join(cells) + " |")
           if problems:
               print()
               print("## Problems")

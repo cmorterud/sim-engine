@@ -11,7 +11,8 @@ use crate::sim::blueprints::{Blueprint, BlueprintDb, BlueprintId, TICKS_PER_SECO
 use crate::sim::commands::SimCommand;
 use crate::sim::blueprints::Res;
 use crate::sim::components::{Blueprinted, Health, SimId, Team};
-use crate::sim::config::{SimConfig, TerrainStyle};
+use crate::sim::config::{SimConfig, TerrainStyle, TERRAIN_CELL_UNITS};
+use crate::sim::terrain::{Terrain, HEIGHT_FRAC_BITS};
 use crate::sim::world::SimWorld;
 
 /// The duel ground: flat, 5 km across, so that every group starts in the open.
@@ -25,6 +26,61 @@ const LAYOUTS: [(i32, i32); 4] = [(0, 0), (160, 37), (320, -71), (480, 113)];
 const MAX_TICKS: u32 = 6_000;
 /// Bisection steps for a break-even, over multipliers from 1/16 to 16.
 const BREAK_EVEN_STEPS: u32 = 12;
+
+/// Where a duel is fought (2026-11-24, for fights between domains): flat land, as every duel was
+/// before; open sea over the whole ground; or a shore, the sea on Blue's side, in the west, and
+/// land on Red's, for ships against what stands ashore.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Ground {
+    Land,
+    Water,
+    Shore,
+}
+
+/// A duel's setting: its ground, and the tier whose prices weigh each side (`cost_at`), both in
+/// what a side buys and in what it has left.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Field {
+    pub ground: Ground,
+    pub tier: u8,
+}
+
+impl Field {
+    /// Flat land at T1's prices: every duel before 2026-11-24.
+    pub const LAND: Self = Self { ground: Ground::Land, tier: 1 };
+
+    pub const fn new(ground: Ground, tier: u8) -> Self {
+        Self { ground, tier }
+    }
+}
+
+/// The sea grounds, in units: the water's surface, the sea floor below it, deep enough for ships
+/// and submarines everywhere, as the named maps' seas are, and the land of the shore above it.
+const WATER_LEVEL: i32 = 100;
+const SEA_FLOOR: i32 = 50;
+const SHORE_LAND: i32 = 110;
+/// Where the shore's land begins: west of the middle, so that a position built round the middle,
+/// as `siege` builds one, stands ashore, and both groups' starts are on their own sides of it.
+pub const SHORE_X: i32 = MAP_UNITS / 2 - 300;
+
+/// A world for a duel on a ground. Fog is off, so each side sees the other from the start.
+fn duel_world(ground: Ground) -> SimWorld {
+    let config = SimConfig { map_units: MAP_UNITS, terrain: TerrainStyle::Flat, fog_of_war: false, ..SimConfig::default() };
+    if ground == Ground::Land {
+        return SimWorld::new(config, 1);
+    }
+    let cells = (MAP_UNITS / TERRAIN_CELL_UNITS) as usize;
+    let samples = cells + 1;
+    let shore = (SHORE_X / TERRAIN_CELL_UNITS) as usize;
+    let ashore = |sample: usize| ground == Ground::Shore && sample >= shore;
+    let heights = (0..samples * samples).map(|index| ((if ashore(index % samples) { SHORE_LAND } else { SEA_FLOOR }) << HEIGHT_FRAC_BITS) as i16).collect();
+    // Land units keep to the dry cells, those with land at every corner.
+    let blocked: Vec<bool> = (0..cells * cells).map(|index| !ashore(index % cells)).collect();
+    let terrain = Terrain::from_heights(MAP_UNITS, heights, &blocked, fp_int(WATER_LEVEL));
+    let mut world = SimWorld::with_terrain(config, 1, terrain);
+    world.prepare_map();
+    world
+}
 
 /// One side of a duel: so many of one unit, and how they are handled.
 #[derive(Copy, Clone, Debug)]
@@ -71,14 +127,13 @@ pub struct DuelResult {
 /// Each side's units have `health[team]` times their health, so that a break-even can be found
 /// smoothly; whole unit counts would make it jump.
 pub fn duel(db: &Arc<BlueprintDb>, blue: Side, red: Side, health: [f64; 2]) -> DuelResult {
-    duel_in(db, &[blue], &[red], health, LAYOUTS[0])
+    duel_in(db, Field::LAND, &[blue], &[red], health, LAYOUTS[0])
 }
 
 /// A duel in one starting layout: `(extra gap, Red's sideways offset)`. Each team may be several
 /// groups, an army with its escort, each in its own block behind the one before.
-fn duel_in(db: &Arc<BlueprintDb>, blue: &[Side], red: &[Side], health: [f64; 2], layout: (i32, i32)) -> DuelResult {
-    let config = SimConfig { map_units: MAP_UNITS, terrain: TerrainStyle::Flat, fog_of_war: false, ..SimConfig::default() };
-    let mut world = SimWorld::new(config, 1);
+fn duel_in(db: &Arc<BlueprintDb>, field: Field, blue: &[Side], red: &[Side], health: [f64; 2], layout: (i32, i32)) -> DuelResult {
+    let mut world = duel_world(field.ground);
     world.blueprints = Arc::clone(db);
     let middle = MAP_UNITS / 2;
     let gap = START_GAP + layout.0;
@@ -105,7 +160,7 @@ fn duel_in(db: &Arc<BlueprintDb>, blue: &[Side], red: &[Side], health: [f64; 2],
         SimCommand::AttackMove { units: moving(&blue_groups), goal: goal(east + gap / 2) },
         SimCommand::AttackMove { units: moving(&red_groups), goal: goal(west - gap / 2) },
     ]);
-    let full = |world: &SimWorld, ids: &[SimId]| ids.iter().map(|&id| worth(world, id)).sum::<f64>();
+    let full = |world: &SimWorld, ids: &[SimId]| ids.iter().map(|&id| worth(world, id, field.tier)).sum::<f64>();
     let (blue_full, red_full) = (full(&world, &blue_ids), full(&world, &red_ids));
     let mut first_damage = None;
     let mut finished = false;
@@ -220,11 +275,11 @@ pub fn cost_at(unit: &Blueprint, tier: u8) -> f64 {
     (unit.mass.to_num::<f64>() + unit.energy.to_num::<f64>() / rate) / land_share
 }
 
-/// A unit's cost, times its share of health left; nothing once destroyed.
-fn worth(world: &SimWorld, id: SimId) -> f64 {
+/// A unit's cost at a tier's prices, times its share of health left; nothing once destroyed.
+fn worth(world: &SimWorld, id: SimId, tier: u8) -> f64 {
     let Some(entity) = world.unit_entity(id) else { return 0.0 };
     let (Ok(health), Ok(unit)) = (world.ecs.get::<&Health>(entity), world.ecs.get::<&Blueprinted>(entity)) else { return 0.0 };
-    let price = cost(world.blueprints.get(unit.0));
+    let price = cost_at(world.blueprints.get(unit.0), tier);
     price * (health.current.to_num::<f64>() / health.max.to_num::<f64>().max(f64::MIN_POSITIVE)).clamp(0.0, 1.0)
 }
 
@@ -295,8 +350,13 @@ pub fn position_materiel(db: &BlueprintDb, position: Position) -> f64 {
 /// A siege: `count` of `unit` for Blue start west of `position`, beyond its reach, and
 /// attack-move onto it. Red has the energy to keep its shields up throughout.
 pub fn siege(db: &Arc<BlueprintDb>, unit: BlueprintId, count: u32, position: Position) -> SiegeResult {
-    let config = SimConfig { map_units: MAP_UNITS, terrain: TerrainStyle::Flat, fog_of_war: false, ..SimConfig::default() };
-    let mut world = SimWorld::new(config, 1);
+    siege_on(db, Field::LAND, &[Side { unit, count, tactics: Tactics::AttackMove }], position)
+}
+
+/// `siege` by a force of several groups, on a ground: on the shore the attackers start at sea and
+/// the position stands ashore, or on the water if it is built there, as torpedo launchers are.
+pub fn siege_on(db: &Arc<BlueprintDb>, field: Field, attackers: &[Side], position: Position) -> SiegeResult {
+    let mut world = duel_world(field.ground);
     world.blueprints = Arc::clone(db);
     let red = &mut world.economies[Team::Red.index()];
     for value in [&mut red.base_energy_capacity, &mut red.energy_capacity, &mut red.energy] {
@@ -308,10 +368,14 @@ pub fn siege(db: &Arc<BlueprintDb>, unit: BlueprintId, count: u32, position: Pos
         .collect();
     let middle = MAP_UNITS / 2;
     let reach = position.iter().filter_map(|&(key, _, _)| db.get(db.id(key)).weapon).map(|weapon| weapon.range.to_num::<i32>()).max().unwrap_or(0);
-    let start = middle - reach.max(db.get(unit).weapon.map_or(0, |weapon| weapon.range.to_num::<i32>())) - 400;
-    let attackers = spawn_group(&mut world, Side { unit, count, tactics: Tactics::AttackMove }, Team::Blue, start, -1, 0);
+    let longest = attackers.iter().filter_map(|side| db.get(side.unit).weapon).map(|weapon| weapon.range.to_num::<i32>()).max().unwrap_or(0);
+    let start = middle - reach.max(longest) - 400;
+    // On the shore, ships start at sea, and well inside the ground however far they reach.
+    let start = if field.ground == Ground::Shore { start.clamp(400, SHORE_X - 400) } else { start };
+    let groups = spawn_team(&mut world, attackers, Team::Blue, start, -1, 0);
+    let attackers: Vec<SimId> = groups.iter().flat_map(|(_, ids)| ids.iter().copied()).collect();
     world.advance_tick(&[SimCommand::AttackMove { units: attackers.clone(), goal: Vec2Fp::new(fp_int(middle), fp_int(middle)) }]);
-    let worth_of = |world: &SimWorld, ids: &[SimId]| ids.iter().map(|&id| worth(world, id)).sum::<f64>();
+    let worth_of = |world: &SimWorld, ids: &[SimId]| ids.iter().map(|&id| worth(world, id, field.tier)).sum::<f64>();
     let full = worth_of(&world, &attackers);
     let standing = |world: &SimWorld| structures.iter().filter(|&&id| world.unit_entity(id).is_some()).count();
     let shield_health = |world: &SimWorld| world.snapshot().shields.iter().map(|shield| i64::from(shield.health_permille)).sum::<i64>();
@@ -341,16 +405,67 @@ pub fn mirrored(db: &Arc<BlueprintDb>, a: Side, b: Side, h: f64) -> DuelResult {
 
 /// `mirrored`, between armies of several groups each.
 pub fn mirrored_armies(db: &Arc<BlueprintDb>, a: &[Side], b: &[Side], h: f64) -> DuelResult {
-    let (mut score, mut seconds, mut finished) = (0.0, 0.0, true);
+    mirrored_on(db, Field::LAND, a, b, h)
+}
+
+/// `mirrored_armies` on a field. On the shore, which is not the same both ways round, `a` is
+/// always at sea and `b` ashore, and only the layouts are averaged.
+pub fn mirrored_on(db: &Arc<BlueprintDb>, field: Field, a: &[Side], b: &[Side], h: f64) -> DuelResult {
+    let (mut score, mut seconds, mut finished, mut runs) = (0.0, 0.0, true, 0.0);
     for layout in LAYOUTS {
-        let first = duel_in(db, a, b, [h, 1.0 / h], layout);
-        let second = duel_in(db, b, a, [1.0 / h, h], layout);
-        score += first.score - second.score;
-        seconds += first.seconds + second.seconds;
-        finished &= first.finished && second.finished;
+        let first = duel_in(db, field, a, b, [h, 1.0 / h], layout);
+        score += first.score;
+        seconds += first.seconds;
+        finished &= first.finished;
+        runs += 1.0;
+        if field.ground != Ground::Shore {
+            let second = duel_in(db, field, b, a, [1.0 / h, h], layout);
+            score -= second.score;
+            seconds += second.seconds;
+            finished &= second.finished;
+            runs += 1.0;
+        }
     }
-    let runs = (LAYOUTS.len() * 2) as f64;
     DuelResult { score: score / runs, seconds: seconds / runs, finished }
+}
+
+/// The materiel a force costs at a tier's prices.
+pub fn force_materiel(db: &BlueprintDb, force: &[Side], tier: u8) -> f64 {
+    force.iter().map(|side| f64::from(side.count) * cost_at(db.get(side.unit), tier)).sum()
+}
+
+/// A force of whole squadrons, each with so many of each unit, bought to about `materiel` at a
+/// tier's prices: at least one squadron.
+pub fn squadrons(db: &BlueprintDb, squadron: &[(BlueprintId, u32)], materiel: f64, tier: u8, tactics: Tactics) -> Vec<Side> {
+    let one: f64 = squadron.iter().map(|&(unit, count)| f64::from(count) * cost_at(db.get(unit), tier)).sum();
+    let many = (materiel / one).round().max(1.0) as u32;
+    squadron.iter().map(|&(unit, count)| Side { unit, count: count * many, tactics }).collect()
+}
+
+/// Where two forces come out even, as `break_even` finds for two units: `a`'s health is scaled by
+/// `h` and `b`'s by its inverse, and `efficiency` is `a`'s strength per materiel over `b`'s, so it
+/// is also how many times `a`'s cost of `b` it takes to break `a`.
+pub fn break_even_forces(db: &Arc<BlueprintDb>, field: Field, a: &[Side], b: &[Side]) -> BreakEven {
+    let (mut low, mut high) = (-4.0f64, 4.0f64);
+    let mut seconds = 0.0;
+    for _ in 0..BREAK_EVEN_STEPS {
+        let middle = (low + high) / 2.0;
+        let result = mirrored_on(db, field, a, b, middle.exp2());
+        seconds = result.seconds;
+        if result.score == 0.0 {
+            (low, high) = (middle, middle);
+            break;
+        }
+        if result.score > 0.0 {
+            high = middle;
+        } else {
+            low = middle;
+        }
+    }
+    let exponent = (low + high) / 2.0;
+    let health_factor = exponent.exp2();
+    let efficiency = (force_materiel(db, b, field.tier) / force_materiel(db, a, field.tier)) / health_factor;
+    BreakEven { health_factor, efficiency, seconds, at_limit: exponent.abs() > 3.99 }
 }
 
 /// Where two units of equal materiel come out even.
@@ -1192,4 +1307,292 @@ pub fn print_t1_air_checks(db: &Arc<BlueprintDb>) {
     let caught_all = mirrored(db, bought(db, "t1_interceptor", materiel), bought(db, "t1_bomber", materiel), 1.0);
     println!("  interceptors against bombers:         {:+.2} in {:.1} s", caught_all.score, caught_all.seconds);
     println!("  interceptors against interceptors:    {:+.2} (even)", mirrored(db, bought(db, "t1_interceptor", materiel), bought(db, "t1_interceptor", materiel), 1.0).score);
+}
+
+// Fights between domains (BALANCE.md, 2026-11-24): `[domains]` in the targets.
+
+/// Three T2 torpedo launchers on the water just off the shore ground's land, for ships to close
+/// on: the answer to a fleet at a coast.
+pub const TORPEDO_POSITION: Position = &[("t2_torpedo_launcher", 106, 124), ("t2_torpedo_launcher", 106, 130), ("t2_torpedo_launcher", 109, 127)];
+
+/// What a weapon is for, for a role's strength: guns and missiles at things on the ground or the
+/// water, guns at aircraft, or torpedoes.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Purpose {
+    Surface,
+    Air,
+    Naval,
+}
+
+impl Purpose {
+    fn of(targets: crate::sim::blueprints::Targets) -> [bool; 3] {
+        use crate::sim::blueprints::Targets;
+        match targets {
+            Targets::Ground => [true, false, false],
+            Targets::Air => [false, true, false],
+            Targets::Both => [true, true, false],
+            Targets::Naval => [false, false, true],
+        }
+    }
+
+    const fn index(self) -> usize {
+        match self {
+            Self::Surface => 0,
+            Self::Air => 1,
+            Self::Naval => 2,
+        }
+    }
+
+    /// The damage a role is measured by: anti-air for what hunts aircraft, torpedoes for what
+    /// hunts ships from below, and guns and missiles for the rest.
+    pub fn of_role(key: &str) -> Self {
+        match key {
+            "t2_mobile_flak" | "t1_mobile_aa" | "t1_interceptor" | "t3_air_superiority" => Self::Air,
+            "t1_attack_sub" | "t2_torpedo_boat" | "t2_torpedo_bomber" | "t1_torpedo_launcher" | "t2_torpedo_launcher" => Self::Naval,
+            _ => Self::Surface,
+        }
+    }
+}
+
+/// A unit's damage a second, and longest reach, with all its weapons for a purpose.
+pub fn purpose_weapons(unit: &Blueprint, purpose: Purpose) -> (f64, f64) {
+    unit.weapon.iter().chain(&unit.extra_weapons).filter(|weapon| Purpose::of(weapon.targets)[purpose.index()]).fold((0.0, 0.0), |(dps, reach), weapon| {
+        let per_second = weapon.damage.to_num::<f64>() * TICKS_PER_SECOND as f64 / f64::from(weapon.reload_ticks.max(1));
+        (dps + per_second, reach.max(weapon.range.to_num::<f64>()))
+    })
+}
+
+/// A unit's strength per cost at its tier, by the damage its role is for, as a multiple of the
+/// anchor's: the measure `[domains] strength_over_anchor` gives the inspiration's ratios in.
+pub fn purpose_strength(db: &BlueprintDb, key: &str) -> f64 {
+    let measure = |key: &str, purpose: Purpose| {
+        let unit = db.get(db.id(key));
+        let (dps, _) = purpose_weapons(unit, purpose);
+        (dps * unit.health.to_num::<f64>()).sqrt() / cost_at(unit, unit.tier)
+    };
+    measure(key, Purpose::of_role(key)) / measure("t1_medium_tank", Purpose::Surface)
+}
+
+/// The materiel a position costs at a tier's prices.
+pub fn position_materiel_at(db: &BlueprintDb, position: Position, tier: u8) -> f64 {
+    position.iter().map(|&(key, _, _)| cost_at(db.get(db.id(key)), tier)).sum()
+}
+
+/// A force named in `[domains.forces]`, by squadron.
+pub fn domain_force(db: &BlueprintDb, name: &str) -> Vec<(BlueprintId, u32)> {
+    let table: toml::Table = TARGETS.parse().expect("data/balance_targets.toml is valid");
+    let force = table["domains"]["forces"][name].as_table().unwrap_or_else(|| panic!("[domains.forces] has {name}"));
+    let mut squadron: Vec<(BlueprintId, u32)> = force.iter().map(|(key, count)| (db.id(key), count.as_integer().expect("a count") as u32)).collect();
+    squadron.sort_by_key(|&(unit, _)| unit.0);
+    squadron
+}
+
+fn domain_cell(key: &str) -> toml::Value {
+    let table: toml::Table = TARGETS.parse().expect("data/balance_targets.toml is valid");
+    table["domains"]["cells"][key].clone()
+}
+
+fn as_number(value: &toml::Value) -> f64 {
+    value.as_float().or_else(|| value.as_integer().map(|value| value as f64)).expect("a number")
+}
+
+/// One row of the fights table.
+struct Cell {
+    name: String,
+    target: String,
+    measured: String,
+    met: Option<bool>,
+}
+
+/// Plays and prints every fight between domains, and how each compares with its target: the
+/// tables of reports/balance/<date>-domains.md (`--balance-derive domains`).
+pub fn derive_domains_report() {
+    let db = Arc::new(BlueprintDb::standard());
+    let table: toml::Table = TARGETS.parse().expect("data/balance_targets.toml is valid");
+    let domains = &table["domains"];
+
+    // Strength per cost against the inspiration's ratios.
+    let band = domains["strength_band"].as_array().expect("a band").iter().map(as_number).collect::<Vec<f64>>();
+    println!("## Strength per cost, against the inspiration's ratios\n");
+    println!("Each role's strength per cost at its tier, √(damage a second × health) over cost, by the damage the role is for, as a multiple of the anchor's. Within {:.2}–{:.2} of the inspiration's ratio counts as met.\n", band[0], band[1]);
+    println!("| Unit | Measured by | Ours | Inspiration | Ours over it | Met |");
+    println!("| :-- | :-- | --: | --: | --: | :-- |");
+    let mut ratios: Vec<(&String, &toml::Value)> = domains["strength_over_anchor"].as_table().expect("a table").iter().collect();
+    ratios.sort_by(|a, b| a.0.cmp(b.0));
+    for (key, inspiration) in ratios {
+        let inspiration = as_number(inspiration);
+        let ours = purpose_strength(&db, key);
+        let over = ours / inspiration;
+        let purpose = match Purpose::of_role(key) {
+            Purpose::Surface => "guns and missiles",
+            Purpose::Air => "anti-air",
+            Purpose::Naval => "torpedoes",
+        };
+        println!("| {} | {purpose} | {ours:.2} | {inspiration:.2} | {over:.2} | {} |", db.get(db.id(key)).name, if (band[0]..=band[1]).contains(&over) { "yes" } else { "**no**" });
+    }
+
+    // The fights.
+    let mut cells: Vec<Cell> = Vec::new();
+    let force = |name: &str, materiel: f64, tier: u8| squadrons(&db, &domain_force(&db, name), materiel, tier, Tactics::AttackMove);
+    let squadron_cost = |name: &str, tier: u8| force_materiel(&db, &squadrons(&db, &domain_force(&db, name), 0.0, tier, Tactics::AttackMove), tier);
+    let score_cell = |cells: &mut Vec<Cell>, name: &str, field: Field, first: &str, first_squadrons: f64, second: &str, at_least: Option<f64>, at_most: Option<f64>| {
+        let a = force(first, squadron_cost(first, field.tier) * first_squadrons, field.tier);
+        let materiel = force_materiel(&db, &a, field.tier);
+        let b = force(second, materiel, field.tier);
+        let result = mirrored_on(&db, field, &a, &b, 1.0);
+        let ratio = force_materiel(&db, &b, field.tier) / materiel;
+        let met = match (at_least, at_most) {
+            (Some(low), _) => Some(result.score >= low),
+            (_, Some(high)) => Some(result.score <= high),
+            _ => None,
+        };
+        let target = match (at_least, at_most) {
+            (Some(low), _) => format!("at least {low:+.2}"),
+            (_, Some(high)) => format!("at most {high:+.2}"),
+            _ => "(measured)".to_string(),
+        };
+        cells.push(Cell { name: name.to_string(), target, measured: format!("{:+.2} in {:.0} s{} ({:.0} materiel against {:.2} times it)", result.score, result.seconds, if result.finished { "" } else { ", unfinished" }, materiel, ratio), met });
+    };
+    let number = |key: &str| as_number(&domain_cell(key));
+    let water = |tier| Field::new(Ground::Water, tier);
+    score_cell(&mut cells, "T2 fleet against an equal cost of the T2 air force, over water", water(2), "t2_fleet", 2.0, "t2_air_force", Some(number("fleet_beats_air_force_t2")), None);
+    score_cell(&mut cells, "T3 fleet against an equal cost of the T3 air force, over water", water(3), "t3_fleet", 1.0, "t3_air_force", Some(number("fleet_beats_air_force_t3")), None);
+    score_cell(&mut cells, "T2 fleet with no anti-air against torpedo bombers", water(2), "t2_fleet_without_anti_air", 4.0, "t2_torpedo_bombers", None, Some(number("fleet_without_anti_air_loses_to_torpedo_bombers")));
+    score_cell(&mut cells, "Submarines against a T2 fleet with no anti-submarine weapon", water(2), "t1_submarines", 24.0, "t2_fleet_without_anti_submarine", Some(number("submarines_beat_fleet_without_anti_submarine")), None);
+    score_cell(&mut cells, "Destroyers against submarines", water(2), "t2_destroyers", 4.0, "t1_submarines", Some(number("destroyers_beat_submarines")), None);
+    score_cell(&mut cells, "Hovercraft against an equal cost of the T2 fleet, on water", water(2), "t2_hovercraft", 40.0, "t2_fleet", None, Some(number("hovercraft_loses_to_fleet")));
+    score_cell(&mut cells, "T1 fleet against an equal cost of the T1 air force, over water", water(1), "t1_fleet", 4.0, "t1_air_force", None, None);
+    // Air against land, about even, as at T1.
+    {
+        let margin = target_number("counters", "even_margin");
+        let land = Field::new(Ground::Land, 2);
+        let army = force("t2_land_army", squadron_cost("t2_land_army", 2) * 4.0, 2);
+        let materiel = force_materiel(&db, &army, 2);
+        let air = force("t2_air_force", materiel, 2);
+        let result = mirrored_on(&db, land, &air, &army, 1.0);
+        cells.push(Cell {
+            name: "T2 air force against an equal cost of a T2 land army a fifth anti-air".to_string(),
+            target: format!("within ±{margin:.2}"),
+            measured: format!("{:+.2} in {:.0} s ({:.0} materiel)", result.score, result.seconds, materiel),
+            met: Some(result.score.abs() <= margin),
+        });
+    }
+    // The torpedo bombers it takes to break a fleet, at T2 and a massed T3 one.
+    for (tier, fleet_name, squadrons_of_it, cell) in [(2, "t2_fleet", 2.0, "torpedo_bombers_to_break_fleet_t2"), (3, "t3_fleet", 2.0, "torpedo_bombers_to_break_fleet_t3")] {
+        let fleet = force(fleet_name, squadron_cost(fleet_name, tier) * squadrons_of_it, tier);
+        let materiel = force_materiel(&db, &fleet, tier);
+        let bombers = force("t2_torpedo_bombers", materiel, tier);
+        let even = break_even_forces(&db, water(tier), &fleet, &bombers);
+        let band = domain_cell(cell).as_array().expect("a band").iter().map(as_number).collect::<Vec<f64>>();
+        cells.push(Cell {
+            name: format!("Torpedo bombers it takes to break the T{tier} fleet, as a multiple of its cost"),
+            target: format!("{:.1}–{:.1}", band[0], band[1]),
+            measured: format!("{:.2}{} (the fleet's strength per materiel over theirs; even after {:.0} s)", even.efficiency, if even.at_limit { ", at the search's limit" } else { "" }, even.seconds),
+            met: Some((band[0]..=band[1]).contains(&even.efficiency)),
+        });
+    }
+    // The hovercraft on land, against the Heavy Tank.
+    {
+        let hover = force("t2_hovercraft", 2_400.0, 2);
+        let tanks = force("t2_heavy_tanks", force_materiel(&db, &hover, 2), 2);
+        let even = break_even_forces(&db, Field::new(Ground::Land, 2), &hover, &tanks);
+        let band = domain_cell("hovercraft_over_heavy_tank_on_land").as_array().expect("a band").iter().map(as_number).collect::<Vec<f64>>();
+        cells.push(Cell {
+            name: "Hovercraft on land, strength per materiel over the Heavy Tank's".to_string(),
+            target: format!("{:.2}–{:.2}", band[0], band[1]),
+            measured: format!("{:.2}", even.efficiency),
+            met: Some((band[0]..=band[1]).contains(&even.efficiency)),
+        });
+    }
+    // Coastal reach, and breaking a coastal position.
+    {
+        let edge = target_number("siege", "outrange_defense_min");
+        let seconds_max = target_number("siege", "seconds_max");
+        let losses_max = number("coastal_losses_max");
+        let ships = domain_cell("coastal_ships");
+        let mut pairs: Vec<(&String, &toml::Value)> = ships.as_table().expect("a table").iter().collect();
+        pairs.sort_by(|a, b| a.0.cmp(b.0));
+        for (ship, defense) in pairs {
+            let defense = defense.as_str().expect("a defense's key");
+            let (_, reach) = purpose_weapons(db.get(db.id(ship)), Purpose::Surface);
+            let (_, guarded) = purpose_weapons(db.get(db.id(defense)), Purpose::Surface);
+            let over = reach / guarded - 1.0;
+            cells.push(Cell {
+                name: format!("{} outranges the {}", db.get(db.id(ship)).name, db.get(db.id(defense)).name),
+                target: format!("by at least {:.0}%", edge * 100.0),
+                measured: format!("by {:.0}%", over * 100.0),
+                met: Some(over >= edge),
+            });
+            let tier = db.get(db.id(ship)).tier;
+            let position = if tier >= 3 { T3_POSITION } else { T2_POSITION };
+            let materiel = position_materiel_at(&db, position, tier);
+            let attackers = squadrons(&db, &[(db.id(ship), 1)], materiel, tier, Tactics::AttackMove);
+            let result = siege_on(&db, Field::new(Ground::Shore, tier), &attackers, position);
+            cells.push(Cell {
+                name: format!("An equal cost of the {} breaks a coastal position of its tier", db.get(db.id(ship)).name),
+                target: format!("within {seconds_max:.0} s, losing at most {:.0}%", losses_max * 100.0),
+                measured: format!("{} in {:.0} s, losing {:.0}%", if result.broken { "broken" } else { "not broken" }, result.seconds, result.losses * 100.0),
+                met: Some(result.broken && result.seconds <= seconds_max && result.losses <= losses_max),
+            });
+        }
+        let materiel = position_materiel_at(&db, TORPEDO_POSITION, 2);
+        let destroyers = squadrons(&db, &[(db.id("t2_destroyer"), 1)], materiel, 2, Tactics::AttackMove);
+        let result = siege_on(&db, Field::new(Ground::Shore, 2), &destroyers, TORPEDO_POSITION);
+        let breaks = domain_cell("destroyers_break_torpedo_launchers").as_bool().expect("true or false");
+        cells.push(Cell {
+            name: "An equal cost of destroyers closing on T2 torpedo launchers".to_string(),
+            target: if breaks { "breaks them" } else { "does not break them" }.to_string(),
+            measured: format!("{} in {:.0} s, losing {:.0}%", if result.broken { "broke them" } else { "did not break them" }, result.seconds, result.losses * 100.0),
+            met: Some(result.broken == breaks),
+        });
+    }
+    println!("\n## Fights between domains\n");
+    println!("Scored as [counters] scores a fight: the first force's share of its materiel left, less the second's, from -1 to 1, played both ways round and over four starting layouts (on the shore, the ships are always at sea).\n");
+    println!("| Fight | Target | Measured | Met |");
+    println!("| :-- | :-- | :-- | :-- |");
+    for cell in &cells {
+        let met = match cell.met {
+            Some(true) => "yes",
+            Some(false) => "**no**",
+            None => "-",
+        };
+        println!("| {} | {} | {} | {met} |", cell.name, cell.target, cell.measured);
+    }
+
+    // What fielding each domain costs.
+    println!("\n## What fielding each domain costs\n");
+    println!("Each factory's cost at its tier's prices and its build power, over the land factory's of the same tier.\n");
+    println!("| Tier | Air factory's cost | Its build power | Naval factory's cost | Its build power |");
+    println!("| :-- | --: | --: | --: | --: |");
+    for (label, tier, land, air, naval) in [
+        ("T1", 1, "land_factory_t1", "air_factory", "naval_factory"),
+        ("T2 headquarters", 2, "land_factory_t2", "air_factory_t2", "naval_factory_t2"),
+        ("T3 headquarters", 3, "land_factory_t3", "air_factory_t3", "naval_factory_t3"),
+        ("T2 support", 2, "land_factory_t2_support", "air_factory_t2_support", "naval_factory_t2_support"),
+        ("T3 support", 3, "land_factory_t3_support", "air_factory_t3_support", "naval_factory_t3_support"),
+    ] {
+        let (Some(land), Some(air), Some(naval)) = (db.find(land), db.find(air), db.find(naval)) else { continue };
+        let price = |id: BlueprintId| cost_at(db.get(id), tier);
+        let power = |id: BlueprintId| db.get(id).build_power.to_num::<f64>();
+        println!("| {label} | {:.2} | {:.2} | {:.2} | {:.2} |", price(air) / price(land), power(air) / power(land), price(naval) / price(land), power(naval) / power(land));
+    }
+    println!("\nTime to build each unit at its factory, build time over build power, as a multiple of the Medium Tank's at a T1 land factory.\n");
+    println!("| Unit | Factory | Time |");
+    println!("| :-- | :-- | --: |");
+    let seconds = |unit: &str, factory: &str| db.get(db.id(unit)).build_time.to_num::<f64>() / db.get(db.id(factory)).build_power.to_num::<f64>();
+    let anchor_seconds = seconds("t1_medium_tank", "land_factory_t1");
+    for (unit, factory) in [
+        ("t1_frigate", "naval_factory"),
+        ("t2_destroyer", "naval_factory_t2"),
+        ("t2_cruiser", "naval_factory_t2"),
+        ("t3_battleship", "naval_factory_t3"),
+        ("t1_bomber", "air_factory"),
+        ("t2_gunship", "air_factory_t2"),
+        ("t2_torpedo_bomber", "air_factory_t2"),
+        ("t3_strategic_bomber", "air_factory_t3"),
+        ("t2_heavy_tank", "land_factory_t2"),
+        ("t3_heavy_walker", "land_factory_t3"),
+    ] {
+        println!("| {} | {} | {:.1} |", db.get(db.id(unit)).name, db.get(db.id(factory)).name, seconds(unit, factory) / anchor_seconds);
+    }
 }
