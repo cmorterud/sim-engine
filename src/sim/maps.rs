@@ -7,6 +7,10 @@
 //!   strewn with rock fields to reclaim, with starts in opposite corners.
 //! * **Twin Passes:** 20 km, with a sea down the middle crossed by two land bridges, which are
 //!   the ways across, and forests on both shores. The starts face each other across the water.
+//!
+//! Named maps (GAME_SPECIFICATION.md §17.3) are a kind of map and its settings, in a file in
+//! data/maps, from which the kind's generator here makes the map: Saddleback is a Passes map and
+//! Stillwater a Central Lake.
 
 use super::components::WreckKind;
 use super::config::TERRAIN_CELL_UNITS;
@@ -16,15 +20,23 @@ use crate::math::fp::{fp_int, Fp, Vec2Fp};
 use crate::math::rng::SimRng;
 
 /// The maps that come with the game, by the name `--map` takes.
-pub const BUNDLED: [&str; 3] = ["highland", "twin_passes", "saddleback"];
+pub const BUNDLED: [&str; 4] = ["highland", "twin_passes", "saddleback", "stillwater"];
 
 /// A bundled map by name.
 pub fn bundled(name: &str) -> Option<MapData> {
     match name {
         "highland" => Some(highland()),
         "twin_passes" => Some(twin_passes()),
-        "saddleback" => Some(saddleback()),
-        _ => None,
+        _ => settings(name).map(|settings| generate(&settings)),
+    }
+}
+
+/// A map from its settings, by its kind.
+pub fn generate(settings: &MapSettings) -> MapData {
+    match settings.kind.as_str() {
+        "passes" => passes(settings),
+        "central_lake" => central_lake(settings),
+        kind => panic!("{}: {kind} is not a kind of map", settings.id),
     }
 }
 
@@ -35,7 +47,7 @@ pub fn bundled(name: &str) -> Option<MapData> {
 pub struct MapSettings {
     pub id: String,
     pub name: String,
-    /// "passes", for now; "central_lake" and "islands" to come.
+    /// "passes" or "central_lake"; "islands" to come.
     pub kind: String,
     pub size_km: u32,
     /// The most players it holds.
@@ -50,10 +62,14 @@ pub struct MapSettings {
     /// Passes: how many valleys cross the range, an odd number.
     #[serde(default)]
     pub valleys: u32,
+    /// "some" or "lots": how much of the map is under water, within what its kind allows. A
+    /// Passes map has none.
+    #[serde(default)]
+    pub water: String,
 }
 
 /// The named maps' settings files, by id.
-const NAMED: [(&str, &str); 1] = [("saddleback", include_str!("../../data/maps/saddleback.toml"))];
+const NAMED: [(&str, &str); 2] = [("saddleback", include_str!("../../data/maps/saddleback.toml")), ("stillwater", include_str!("../../data/maps/stillwater.toml"))];
 
 /// A named map's settings, by id.
 pub fn settings(id: &str) -> Option<MapSettings> {
@@ -63,6 +79,11 @@ pub fn settings(id: &str) -> Option<MapSettings> {
 /// Saddleback, 10 km: a mountain range across the middle, crossed by three valleys.
 pub fn saddleback() -> MapData {
     passes(&settings("saddleback").expect("data/maps/saddleback.toml"))
+}
+
+/// Stillwater, 10 km: a lake in the middle, inside a ring of land, with starts in the corners.
+pub fn stillwater() -> MapData {
+    central_lake(&settings("stillwater").expect("data/maps/stillwater.toml"))
 }
 
 /// A cell whose corners differ by more than this, in sixteenths of a unit, is too steep for land
@@ -171,6 +192,12 @@ impl Draft {
 /// either way, eased between with smoothstep.
 fn smooth_line(rng: &mut SimRng, length: i32, spacing: i32, amplitude: i32) -> Vec<i32> {
     let points: Vec<i32> = (0..length / spacing + 2).map(|_| rng.below(amplitude as u32 * 2 + 1) as i32 - amplitude).collect();
+    eased(&points, length, spacing)
+}
+
+/// `length` values through points `spacing` apart, eased between with smoothstep, so that the
+/// line is level at each point.
+fn eased(points: &[i32], length: i32, spacing: i32) -> Vec<i32> {
     (0..length)
         .map(|at| {
             let (index, offset) = ((at / spacing) as usize, i64::from(at % spacing));
@@ -558,11 +585,7 @@ pub fn passes(settings: &MapSettings) -> MapData {
     assert!(settings.valleys % 2 == 1, "{}: valleys must be odd, one in the center", settings.id);
     let cells = (settings.size_km as i32 * 1024 / TERRAIN_CELL_UNITS) as usize;
     let mut draft = Draft::new(cells, settings.seed, 300);
-    let (broad, middling, fine) = match settings.terrain.as_str() {
-        "flat" => (20, 6, 2),
-        "rugged" => (110, 30, 8),
-        _ => (60, 18, 5),
-    };
+    let (broad, middling, fine) = relief(&settings.terrain);
     draft.hills(80, broad);
     draft.hills(24, middling);
     draft.hills(8, fine);
@@ -736,6 +759,199 @@ pub fn passes(settings: &MapSettings) -> MapData {
     quarter_turn(MapData { name: settings.id.clone(), map_units: map, heights: draft.heights, blocked, water_level: fp_int(-1000), deposits, vents, starts, layouts, scenery })
 }
 
+/// How high the hills of a map's open land are, by its terrain setting: broad, middling, and
+/// fine, in units.
+fn relief(terrain: &str) -> (i32, i32, i32) {
+    match terrain {
+        "flat" => (20, 6, 2),
+        "rugged" => (110, 30, 8),
+        _ => (60, 18, 5),
+    }
+}
+
+/// A Central Lake map (GAME_SPECIFICATION.md §17.3) from its settings: a lake in the middle,
+/// inside a ring of land narrowest at the middle of each side and widest in the corners, where
+/// the starts are. Land armies go round the lake either way; ships and hovercraft cross it, and
+/// only they reach the islands in it, which hold deposits. It is its own image in both mirrors,
+/// so that its four starts are all alike: in 1v1 two opposite corners, and in 2v2 each team the
+/// two corners of one shore, west or east, with the lake between the teams. The richest
+/// deposits on land are on the narrow ground north and south of the lake, between the teams.
+pub fn central_lake(settings: &MapSettings) -> MapData {
+    const WATER_UNITS: i32 = 140;
+    /// How far a shore takes to go down from the land to the lake's floor, in cells, whatever
+    /// the map's size: any shorter and it would be too steep to walk down.
+    const SHORE: i32 = 26;
+    /// The least land left between the lake and the map's edge, in cells.
+    const NECK: i32 = 28;
+    assert_eq!(settings.kind, "central_lake", "{} is not a Central Lake map", settings.id);
+    let cells = (settings.size_km as i32 * 1024 / TERRAIN_CELL_UNITS) as usize;
+    let mut draft = Draft::new(cells, settings.seed, 300);
+    let (broad, middling, fine) = relief(&settings.terrain);
+    draft.hills(80, broad);
+    draft.hills(24, middling);
+    draft.hills(8, fine);
+    let last = cells as i32;
+    let middle = last / 2;
+    // Sizes are for 10 km, and scale with the map.
+    let scale = |value: i32| value * last / 512;
+    // The lake: about two fifths of the map with lots of water and a quarter with some, by how
+    // far its floor reaches from the middle; the water's edge is a little way up its shore. On a
+    // small map it is no wider than leaves a neck of land at the middle of each side.
+    let sway = scale(24);
+    let wide = last * if settings.water == "lots" { 345 } else { 270 } / 1000;
+    let radius = wide.min(middle - SHORE - NECK);
+    // Its shore wanders in and out round it, smoothly, the same in every quarter of the map, so
+    // that it stays fair while looking natural: by how far round its quarter a sample is, from
+    // the middle row to the middle column. It keeps to its plain width where the quarters meet,
+    // at the middle of each side, so that the necks of land there are as wide on every map. The
+    // shore is worked out in sixteenths of a cell: in whole cells it stepped a cell in or out
+    // from one sample to the next, and each step was a line of ground too steep to cross.
+    const FINE: i32 = 16;
+    let (steps, spacing) = (6, scale(160).max(32));
+    let mut points: Vec<i32> = (0..steps + 2).map(|_| draft.rng.below((sway * FINE) as u32 * 2 + 1) as i32 - sway * FINE).collect();
+    points[0] = 0;
+    points[steps as usize] = 0;
+    let wander = eased(&points, steps * spacing + 1, spacing);
+    let reach = |dx: i32, dy: i32| {
+        let (across, along) = (dx.abs(), dy.abs());
+        let round = if across + along == 0 { 0 } else { along * steps * spacing / (across + along) };
+        radius * FINE + wander[round as usize]
+    };
+    let from_middle = |at: (i32, i32)| isqrt((at.0 - middle).pow(2) + (at.1 - middle).pow(2));
+    let floor = (WATER_UNITS - 50) << HEIGHT_FRAC_BITS;
+    let furthest = radius + sway + SHORE;
+    for y in (middle - furthest).max(0)..=(middle + furthest).min(last) {
+        for x in (middle - furthest).max(0)..=(middle + furthest).min(last) {
+            let (dx, dy) = (x - middle, y - middle);
+            let out = isqrt((dx * dx + dy * dy) * FINE * FINE) - reach(dx, dy);
+            let depth = if out <= 0 { 256 } else if out < SHORE * FINE { 256 * (SHORE * FINE - out) / (SHORE * FINE) } else { 0 };
+            let height = &mut draft.heights[y as usize * draft.samples + x as usize];
+            *height = ((i32::from(*height) * (256 - depth) + floor * depth) / 256) as i16;
+        }
+    }
+    // Islands: one in the middle of the lake and one out in each quarter of it, low and flat,
+    // with shores gentle enough for hovercraft to climb.
+    let (island_rise, island_shore) = (80, 8);
+    let islet = radius * 55 / 100 * 181 / 256;
+    draft.disc((middle, middle), scale(12).max(8), island_shore, island_rise);
+    draft.disc_four((middle - islet, middle - islet), scale(8).max(6), island_shore, island_rise);
+    // The starts, in the corners. Around each, and in a lane round the lake's shore, the land is
+    // kept clear of outcrops, and the two overlap, so that no outcrops wall a start off from the
+    // way round.
+    let start = (scale(58), scale(58));
+    let clear = scale(44).max(30);
+    let lane = radius + sway + SHORE + 24;
+    let outcrops = match settings.terrain.as_str() {
+        "flat" => 0,
+        "rugged" => scale(10),
+        _ => scale(5),
+    };
+    let mut placed = 0;
+    for _ in 0..400 {
+        if placed == outcrops {
+            break;
+        }
+        let cell = (8 + draft.rng.below((middle - 8) as u32) as i32, 8 + draft.rng.below((middle - 8) as u32) as i32);
+        if from_middle(cell) < lane + 12 || chebyshev(cell, start) < clear + 12 {
+            continue;
+        }
+        let (size, height) = (3 + draft.rng.below(6) as i32, 30 + draft.rng.below(40) as i32);
+        draft.disc_four(cell, size, 2, height);
+        placed += 1;
+    }
+    for image in draft.images(start) {
+        draft.flatten(image, scale(30).max(22));
+    }
+    draft.symmetrize_four();
+
+    let blocked = draft.blocked(WATER_UNITS << HEIGHT_FRAC_BITS);
+    let mut layout = Layout { cells: last, blocked: &blocked, deposits: Vec::new(), vents: Vec::new(), scenery: Vec::new() };
+    // Each base has four deposits.
+    for offset in [(-6, -4), (5, -6), (-4, 7), (7, 5)] {
+        layout.deposit_four((start.0 + offset.0, start.1 + offset.1));
+    }
+    // The necks, the narrow ground at the middle of each side, halfway from the map's edge to
+    // the shore: four deposits on each of the two between the teams, north and south of the
+    // lake, and two on each of the two between teammates.
+    let neck = (middle - radius - SHORE) / 2;
+    layout.deposit_four((middle - scale(8).max(5), neck));
+    layout.deposit_four((middle - scale(22).max(12), neck + 2));
+    layout.deposit_four((neck, middle - scale(8).max(5)));
+    // The islands: four on the middle one, and one on each of the others.
+    layout.deposit_four((middle - 3, middle - 4));
+    layout.deposit_four((middle - islet - 1, middle - islet));
+    // A vent a short walk from every base.
+    let _ = (0..6).find(|step| layout.vent_four((start.0 + 14 + step * 2, start.1 - 14)));
+    // Expansions and more vents out on the ring, more or fewer by the map's resources and size.
+    let (wanted_deposits, wanted_vents) = match settings.resources.as_str() {
+        "sparse" => (3, 0),
+        "rich" => (10, 2),
+        _ => (6, 1),
+    };
+    let by_area = |count: i32| if count == 0 { 0 } else { (count * last * last / (512 * 512)).max(1) };
+    let start_cells = layout.images(start);
+    let near_start = |cell: (i32, i32), cells: i32| start_cells.iter().any(|&start| chebyshev(cell, start) <= cells);
+    let on_ring = |cell: (i32, i32)| from_middle(cell) > radius + sway + SHORE + 6;
+    let somewhere = |rng: &mut SimRng| (12 + rng.below((middle - 12) as u32) as i32, 12 + rng.below((middle - 12) as u32) as i32);
+    let mut expansions = 0;
+    for _ in 0..4_000 {
+        if expansions == by_area(wanted_deposits) {
+            break;
+        }
+        let cell = somewhere(&mut draft.rng);
+        if !on_ring(cell) || near_start(cell, 22) || layout.near_deposit(cell, 14) {
+            continue;
+        }
+        if layout.deposit_four(cell) {
+            expansions += 1;
+            if draft.rng.below(2) == 0 {
+                layout.deposit_four((cell.0 + 2, cell.1 + 1));
+            }
+        }
+    }
+    let mut vents = 0;
+    for _ in 0..2_000 {
+        if vents == by_area(wanted_vents) {
+            break;
+        }
+        let cell = somewhere(&mut draft.rng);
+        if on_ring(cell) && !near_start(cell, 24) && layout.vent_four(cell) {
+            vents += 1;
+        }
+    }
+    // Rock fields and woods on the ring.
+    let amount = match settings.reclaim.as_str() {
+        "none" => 0,
+        "lots" => 2,
+        _ => 1,
+    };
+    let map = draft.map_units();
+    let away = |cell: (i32, i32)| near_start(cell, 26);
+    for (kind, groups, per_group, spread) in [(WreckKind::Rock, by_area(8) * amount, 14, 120), (WreckKind::Tree, by_area(10) * amount, 16, 110)] {
+        let mut made = 0;
+        for _ in 0..groups * 20 {
+            if made == groups {
+                break;
+            }
+            let cell = somewhere(&mut draft.rng);
+            if on_ring(cell) {
+                layout.clump_four(&mut draft.rng, kind, cell_point(cell), per_group, spread, &away);
+                made += 1;
+            }
+        }
+    }
+    // Starts stand in the middle of a cell, as on a Passes map. Two each side: the first team's
+    // in the west, the second's in the east. A 1v1 uses two opposite corners of them.
+    let full = fp_int(map);
+    let low = cell_point(start);
+    let (west_a, west_b) = (Vec2Fp::new(low.x, full - low.y), low);
+    let (east_a, east_b) = (Vec2Fp::new(full - low.x, full - low.y), Vec2Fp::new(full - low.x, low.y));
+    let starts = [west_a, east_b];
+    let layouts = if settings.players >= 4 { vec![vec![west_a, west_b, east_a, east_b]] } else { Vec::new() };
+    let (deposits, vents, scenery) = (layout.deposits, layout.vents, layout.scenery);
+    MapData { name: settings.id.clone(), map_units: map, heights: draft.heights, blocked, water_level: fp_int(WATER_UNITS), deposits, vents, starts, layouts, scenery }
+}
+
 /// A map turned a quarter turn, north to west: a point (x, y) goes to (width - y, x).
 fn quarter_turn(map: MapData) -> MapData {
     let cells = (map.map_units / TERRAIN_CELL_UNITS) as usize;
@@ -849,14 +1065,13 @@ mod tests {
         (map.deposits.iter().filter(within).count(), map.vents.iter().filter(within).count())
     }
 
-    #[test]
-    fn saddleback_is_fair_for_one_on_one_and_two_on_two() {
-        let map = saddleback();
-        check(&map);
-        assert_eq!(map, saddleback(), "the same every time");
+    /// A map for four players is its own image in both mirrors, across the middle column and
+    /// the middle row: its ground, what blocks it, and its deposits and vents. It has four team
+    /// starts, two a side, the first team's in the west, each the others' image, and each start
+    /// in a set has the same deposits and vents within reach.
+    fn check_four(map: &MapData) {
         let cells = (map.map_units / TERRAIN_CELL_UNITS) as usize;
         let (samples, last) = (cells + 1, cells);
-        // Its own image in both mirrors, across the middle column and the middle row.
         for y in 0..samples {
             for x in 0..samples {
                 let height = map.heights[y * samples + x];
@@ -873,27 +1088,38 @@ mod tests {
             let mirror = (cells as u32 - 1 - x, y);
             assert!(map.deposits.contains(&mirror) || map.vents.contains(&mirror), "{x}, {y} has no mirror image");
         }
-        // Four team starts, two a side, each the others' image, and every start reaches every other.
         assert_eq!(map.layouts.len(), 1);
         let team = &map.layouts[0];
         assert_eq!(team.len(), 4);
         let full = fp_int(map.map_units);
         assert_eq!(team[1], Vec2Fp::new(team[0].x, full - team[0].y));
         assert_eq!(team[2], Vec2Fp::new(full - team[0].x, team[0].y));
+        assert_eq!(team[3], Vec2Fp::new(full - team[0].x, full - team[0].y));
         assert!(team[0].x < full / 2 && team[2].x > full / 2, "the first team is in the west, the second in the east");
         assert!(map.starts[0].x < full / 2 && map.starts[1].x > full / 2, "the 1v1 starts face each other west and east");
+        for set in [map.starts.to_vec(), team.clone()] {
+            let first = near(map, set[0], 1_500);
+            assert!(first.0 >= 4, "{} deposits near a start", first.0);
+            for &start in &set {
+                assert_eq!(near(map, start, 1_500), first, "a start has a different share");
+            }
+        }
+    }
+
+    #[test]
+    fn saddleback_is_fair_for_one_on_one_and_two_on_two() {
+        let map = saddleback();
+        check(&map);
+        check_four(&map);
+        assert_eq!(map, saddleback(), "the same every time");
+        let cells = (map.map_units / TERRAIN_CELL_UNITS) as usize;
+        let samples = cells + 1;
+        // Every start reaches every other.
+        let team = &map.layouts[0];
         let every: Vec<Vec2Fp> = map.starts.iter().chain(team).copied().collect();
         for &from in &every {
             for &to in &every {
                 assert!(connected(&map, cell_of(&map, from), cell_of(&map, to)), "{from:?} cannot reach {to:?}");
-            }
-        }
-        // Each start in a set has the same deposits and vents within reach.
-        for set in [map.starts.to_vec(), team.clone()] {
-            let first = near(&map, set[0], 1_500);
-            assert!(first.0 >= 4, "{} deposits near a start", first.0);
-            for &start in &set {
-                assert_eq!(near(&map, start, 1_500), first, "a start has a different share");
             }
         }
         // The range runs up the middle column, crossed only through the valleys: three gaps in
@@ -939,6 +1165,116 @@ mod tests {
         // The valleys hold more deposits than their share of the ground.
         let in_range = |&&(x, _): &&(u32, u32)| (x as usize).abs_diff(middle) < 40;
         assert!(map.deposits.iter().filter(in_range).count() >= 12, "deposits in the valleys");
+    }
+
+    /// Cells any of which is under the water.
+    fn wet(map: &MapData) -> Vec<bool> {
+        let cells = (map.map_units / TERRAIN_CELL_UNITS) as usize;
+        let water = map.water_level.to_num::<i32>() << HEIGHT_FRAC_BITS;
+        (0..cells * cells)
+            .map(|cell| {
+                let (x, y) = (cell % cells, cell / cells);
+                [(x, y), (x + 1, y), (x, y + 1), (x + 1, y + 1)].iter().any(|&(cx, cy)| i32::from(map.heights[cy * (cells + 1) + cx]) < water)
+            })
+            .collect()
+    }
+
+    /// What a Central Lake map is, whatever its settings: a lake in the middle that ships sail,
+    /// land all the way round it, by which every start reaches every other, and islands in the
+    /// lake with deposits no land route reaches. Returns the share of the map under water, in
+    /// hundredths, and the narrowest the land is at the middle of a side, in cells.
+    fn check_lake(map: &MapData) -> (usize, usize) {
+        use crate::sim::components::MoveClass;
+        let cells = (map.map_units / TERRAIN_CELL_UNITS) as usize;
+        let middle = cells / 2;
+        let every: Vec<Vec2Fp> = map.starts.iter().chain(map.layouts.iter().flatten()).copied().collect();
+        for &from in &every {
+            for &to in &every {
+                assert!(connected(map, cell_of(map, from), cell_of(map, to)), "{from:?} cannot reach {to:?} by land");
+            }
+        }
+        // The islands: deposits on open ground that no start reaches by land.
+        let home = cell_of(map, map.starts[0]);
+        let on_islands: Vec<(u32, u32)> = map.deposits.iter().copied().filter(|&(x, y)| !connected(map, home, (x as usize, y as usize))).collect();
+        assert!(on_islands.len() >= 8, "{} deposits on islands in the lake", on_islands.len());
+        assert!(on_islands.len() * 4 <= map.deposits.len(), "most deposits are on the ring: {} of {} are not", on_islands.len(), map.deposits.len());
+        // Ships sail the lake: from beside the middle island out toward every side.
+        let terrain = crate::sim::terrain::Terrain::from_heights(map.map_units, map.heights.clone(), &map.blocked, map.water_level);
+        let water = wet(map);
+        let sails = |x: usize, y: usize| terrain.passable_for(MoveClass::Naval, cell_point((x as i32, y as i32)));
+        let reach = (0..middle).take_while(|&step| water[middle * cells + middle + step] || !map.blocked[middle * cells + middle + step]).filter(|&step| water[middle * cells + middle + step]).count();
+        assert!(reach * 5 >= cells, "the lake reaches {reach} cells east of the middle of {cells}");
+        for (x, y) in [(middle + reach / 2, middle), (middle - reach / 2, middle), (middle, middle + reach / 2), (middle, middle - reach / 2)] {
+            assert!(sails(x, y), "a ship can sail at {x}, {y}");
+        }
+        // Hovercraft and seabed walkers reach the islands from the shore.
+        for &(x, y) in &on_islands {
+            assert!(terrain.passable_for(MoveClass::Hover, cell_point((x as i32, y as i32))), "a hovercraft can stand on the island at {x}, {y}");
+        }
+        // The land is narrowest at the middle of each side: the necks, wide enough to fight over.
+        let neck = (0..middle).take_while(|&y| !map.blocked[y * cells + middle]).count();
+        let share = water.iter().filter(|&&wet| wet).count() * 100 / water.len();
+        (share, neck)
+    }
+
+    #[test]
+    fn stillwater_is_a_lake_ringed_by_land_fair_for_one_on_one_and_two_on_two() {
+        let map = stillwater();
+        check(&map);
+        check_four(&map);
+        assert_eq!(map, stillwater(), "the same every time");
+        assert_eq!(bundled("stillwater").as_ref(), Some(&map));
+        let (share, neck) = check_lake(&map);
+        assert!((30..=45).contains(&share), "the lake is {share}% of the map, about two fifths");
+        assert!((40..=90).contains(&neck), "the land north of the lake is {neck} cells wide");
+        // A 1v1 uses two opposite corners of the four team starts.
+        let team = &map.layouts[0];
+        assert_eq!(map.starts, [team[0], team[3]]);
+        // The richest ground on land is between the teams, north and south of the lake.
+        let cells = (map.map_units / TERRAIN_CELL_UNITS) as usize;
+        let between = |&&(x, y): &&(u32, u32)| (x as usize).abs_diff(cells / 2) < 40 && ((y as usize) < neck || (y as usize) >= cells - neck);
+        assert!(map.deposits.iter().filter(between).count() >= 8, "deposits on the necks between the teams");
+    }
+
+    /// The generator makes a fair Central Lake from any settings the game offers: every size,
+    /// amount of water, kind of terrain, and a spread of seeds.
+    #[test]
+    fn every_central_lake_is_fair_and_joined_round_its_shore() {
+        for (size_km, players) in [(5, 2), (10, 4), (20, 4)] {
+            for (index, (water, terrain, resources)) in [("some", "flat", "sparse"), ("lots", "hilly", "normal"), ("some", "rugged", "rich"), ("lots", "rugged", "normal")].into_iter().enumerate() {
+                // The largest maps take longest to make, so fewer of them are tried.
+                if size_km == 20 && index % 2 == 0 {
+                    continue;
+                }
+                let settings = MapSettings {
+                    id: "generated".into(),
+                    name: "Generated".into(),
+                    kind: "central_lake".into(),
+                    size_km,
+                    players,
+                    seed: 7 + index as u64 * 1_001 + u64::from(size_km),
+                    resources: resources.into(),
+                    reclaim: "some".into(),
+                    terrain: terrain.into(),
+                    valleys: 0,
+                    water: water.into(),
+                };
+                let map = generate(&settings);
+                let label = format!("{size_km} km, {water} water, {terrain}, seed {}", settings.seed);
+                assert_eq!(map.map_units, size_km as i32 * 1024, "{label}");
+                assert_eq!(map.layouts.len(), usize::from(players >= 4), "{label}");
+                let (share, neck) = check_lake(&map);
+                assert!((12..=45).contains(&share), "{label}: the lake is {share}% of the map");
+                assert!(neck >= 20, "{label}: the land north of the lake is {neck} cells wide");
+                let full = fp_int(map.map_units);
+                assert_eq!(map.starts[1], Vec2Fp::new(full - map.starts[0].x, full - map.starts[0].y), "{label}: the starts mirror");
+                assert_eq!(near(&map, map.starts[0], 1_500), near(&map, map.starts[1], 1_500), "{label}: the starts have the same share");
+                assert!(near(&map, map.starts[0], 1_500).0 >= 4 && near(&map, map.starts[0], 1_500).1 >= 1, "{label}: a start has deposits and a vent");
+                if players >= 4 {
+                    check_four(&map);
+                }
+            }
+        }
     }
 
     #[test]

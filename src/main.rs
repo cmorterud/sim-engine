@@ -138,8 +138,9 @@ Usage: sim-engine [options]
   --seed <number>      Scenario seed
   --sound-check        Play each sound in turn, and exit
   --teams <1v1|2v2>    Players a side (default 1v1): 2v2 puts an AI ally beside you, against
-                       two AIs, on a map with team starts, such as saddleback
-  --map <name>         Play on a map that comes with the game: highland, twin_passes, or saddleback,
+                       two AIs, on a map with team starts: saddleback or stillwater
+  --map <name>         Play on a map that comes with the game: highland, twin_passes, saddleback,
+                       or stillwater,
                        for any of the modes above, or playtest: a sandbox with 5 of every
                        unit and no commander, against two coastal bases that a turtling
                        AI holds

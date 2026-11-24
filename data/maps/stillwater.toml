@@ -1,0 +1,23 @@
+# Stillwater (GAME_SPECIFICATION.md §17.3): a named map, a type with its settings fixed, from
+# which src/sim/maps.rs generates it, the same on every machine.
+#
+# A lake filling about the middle two fifths of the map, inside a ring of land that is narrowest
+# at the middle of each side and widest in the corners, where the starts are. In 1v1 the starts
+# are opposite corners; in 2v2 each team holds the two corners of one shore, west or east, with
+# the lake between the teams. Land armies go round the lake either way, through the narrow
+# ground north and south of it, where the richest deposits on land are; ships and hovercraft
+# cross it. Five small islands in the lake hold deposits that only they can take and hold.
+id = "stillwater"
+name = "Stillwater"
+kind = "central_lake"
+size_km = 10
+players = 4
+seed = 1398033772
+# sparse, normal, or rich: deposits and vents.
+resources = "normal"
+# none, some, or lots: rock fields and woods.
+reclaim = "some"
+# flat, hilly, or rugged: the land round the lake.
+terrain = "hilly"
+# some or lots: the lake is about a quarter of the map, or about two fifths.
+water = "lots"

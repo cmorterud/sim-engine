@@ -74,25 +74,29 @@ fn both_sides_play_mirror_images_through_the_opening() {
 /// through the map's middle, where a unit's two nearest cells are equally near the center, and
 /// the sides parted on the first tick; and the AI broke ties between vents and between raid
 /// targets the same way for both sides, where a map listed them in fours rather than pairs.
-/// Red won three matches in five.
+/// Red won three matches in five. Stillwater, the same kind of image with its 1v1 starts in
+/// opposite corners, is held to the same.
 #[test]
 #[cfg_attr(debug_assertions, ignore = "release only")]
-fn saddlebacks_sides_play_mirror_images_through_the_opening() {
+fn the_named_maps_sides_play_mirror_images_through_the_opening() {
     use std::sync::Arc;
-    use sim_engine::sim::maps::saddleback;
+    use sim_engine::sim::maps::{saddleback, stillwater};
     use sim_engine::sim::scenario::MapSource;
     const TICKS: u32 = 4_000;
-    let map = MapSource::Map(Arc::new(saddleback()));
-    for seed in 1..=2 {
-        let mut world = map.scenario(seed).world;
-        let mut brains = [AiBrain::new(Team::Blue, seed, world.starts), AiBrain::new(Team::Red, seed, world.starts)];
-        while world.current_tick < TICKS {
-            advance_ai_vs_ai(&mut world, &mut brains);
-            assert!(
-                mirrored(&units(&world, Team::Blue), &units(&world, Team::Red), 4096 / 20),
-                "seed {seed}: the sides stopped mirroring each other at tick {}",
-                world.current_tick
-            );
+    for (name, map) in [("saddleback", saddleback()), ("stillwater", stillwater())] {
+        assert_eq!(map.map_units, SKIRMISH_MAP_UNITS, "{name} is the size `units` turns Red's about");
+        let map = MapSource::Map(Arc::new(map));
+        for seed in 1..=2 {
+            let mut world = map.scenario(seed).world;
+            let mut brains = [AiBrain::new(Team::Blue, seed, world.starts), AiBrain::new(Team::Red, seed, world.starts)];
+            while world.current_tick < TICKS {
+                advance_ai_vs_ai(&mut world, &mut brains);
+                assert!(
+                    mirrored(&units(&world, Team::Blue), &units(&world, Team::Red), 4096 / 20),
+                    "{name}, seed {seed}: the sides stopped mirroring each other at tick {}",
+                    world.current_tick
+                );
+            }
         }
     }
 }
