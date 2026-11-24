@@ -421,7 +421,7 @@ impl Setup {
 }
 
 /// A main weapon, other than artillery's, whose shots land up to this far from where they are
-/// aimed: FAF's FiringRandomness, at 20 units to its one. Artillery keeps its spread in
+/// aimed: the inspiration's FiringRandomness, at 20 units to its one. Artillery keeps its spread in
 /// `Artillery`. Fixed from the blueprint, so not hashed.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Scatter(pub Fp);
@@ -470,7 +470,7 @@ pub struct Homing {
     pub underwater: bool,
 }
 
-/// A falling bomb. Bombs fall at FAF's gravity, which is stronger than that of shells.
+/// A falling bomb. Bombs fall at the inspiration's gravity, which is stronger than that of shells.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Falling;
 
@@ -632,7 +632,8 @@ pub struct Veterancy {
 }
 
 /// The damage enemies have done to a unit, by who did it, so that the experience for destroying
-/// it is shared out as FAF does: each by its share of the damage. Units nobody has hit have none.
+/// it is shared out as the inspiration does: each by its share of the damage. Units nobody has hit
+/// have none.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct VetDamage {
     /// Each attacker and the damage it has done, in the order they first hit.

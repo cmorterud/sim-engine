@@ -98,7 +98,8 @@ fn a_dome_that_runs_out_collapses_and_comes_back_at_full_strength() {
     let sheltered = spawn(&mut world, "t1_light_walker", Team::Red, point(1_020, 1_080), false);
     let full = world.unit_health(sheltered).unwrap();
     world.ecs.get::<&mut Shield>(world.unit_entity(generator).unwrap()).unwrap().health = fp_int(10);
-    // FAF's generator has only 250 health; this test is about its dome, not the generator.
+    // The inspiration's generator has only 250 health; this test is about its dome, not the
+    // generator.
     {
         let mut health = world.ecs.get::<&mut sim_engine::sim::components::Health>(world.unit_entity(generator).unwrap()).unwrap();
         health.max = fp_int(100_000);
@@ -203,7 +204,8 @@ fn power_generators_beside_a_shield_cut_its_upkeep() {
         world.spawn_finished_structure(power, Team::Red, x, y).expect("room for it");
     }
     world.advance_tick(&[]);
-    // A shield is FAF's 3 by 3 size, which a T1 generator takes 2.08% off, five times over.
+    // A shield is the inspiration's 3 by 3 size, which a T1 generator takes 2.08% off, five times
+    // over.
     assert!((268..=269).contains(&upkeep(&world)), "five neighbors: {}", upkeep(&world));
     // A T2 generator takes an eighth.
     let (mut world, generator) = shielded_world();

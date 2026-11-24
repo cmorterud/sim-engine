@@ -1884,7 +1884,7 @@ impl SimWorld {
                 adjacency.upkeep_discount += bonus.upkeep[size];
                 adjacency.mass_output_bonus += bonus.mass_output[size];
                 adjacency.energy_output_bonus += bonus.energy_output[size];
-                // Weapon energy and rate of fire only matter to artillery, as in FAF.
+                // Weapon energy and rate of fire only matter to artillery, as in the inspiration.
                 if artillery {
                     adjacency.weapon_energy_discount += bonus.weapon_energy[size];
                     adjacency.reload_discount += bonus.rate_of_fire[size];

@@ -18,7 +18,7 @@ fn open_world() -> SimWorld {
     let config = SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: false, ..SimConfig::default() };
     let mut world = SimWorld::new(config, 1);
     for economy in &mut world.economies {
-        // FAF's nuclear missiles cost 12,000 mass and 1,500,000 energy apiece.
+        // The inspiration's nuclear missiles cost 12,000 mass and 1,500,000 energy apiece.
         for capacity in [&mut economy.base_mass_capacity, &mut economy.mass_capacity, &mut economy.mass] {
             *capacity = Res::from_num(1_000_000);
         }
@@ -80,7 +80,8 @@ fn a_tactical_launcher_fires_only_on_order_and_only_missiles_it_has_built() {
     // Ordered, it fires, and one 1,500-damage missile is enough.
     world.advance_tick(&[SimCommand::Attack { units: vec![launcher], target }]);
     let took = run_until(&mut world, 300, |world| !alive(world, target)).expect("the missile should destroy it");
-    // About 57 ticks of flight at FAF's 28 a tick over the 1,600, plus the climb: not at once.
+    // About 57 ticks of flight at the inspiration's 28 a tick over the 1,600, plus the climb: not
+    // at once.
     assert!(took > 45, "it arrived after only {took} ticks");
 
     // With none left, an order waits for one to be built.

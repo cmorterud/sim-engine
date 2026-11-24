@@ -49,7 +49,7 @@ impl Slot {
 }
 
 /// A personal teleporter (GAME_SPECIFICATION.md §2.1): its charge costs energy and time that
-/// grow with the distance, as in FAF.
+/// grow with the distance, as in the inspiration.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct TeleporterDef {
     /// Energy for a jump of no distance.
@@ -155,7 +155,7 @@ pub enum WeaponKind {
 }
 
 /// What a structure gives the finished structures of its team that touch it (GAME_SPECIFICATION.md
-/// §3.2), as in FAF's `AdjacencyBuffs.lua`.
+/// §3.2), as in the inspiration's `AdjacencyBuffs.lua`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum AdjacencyGiver {
     T1Power,
@@ -172,7 +172,7 @@ pub enum AdjacencyGiver {
 }
 
 /// One neighbor's bonuses to a structure, in hundred-thousandths, by the structure's size class:
-/// FAF's SIZE4, SIZE8, SIZE12, SIZE16, and SIZE20. Discounts are positive.
+/// The inspiration's SIZE4, SIZE8, SIZE12, SIZE16, and SIZE20. Discounts are positive.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub struct AdjacencyBonus {
     /// Off the energy, and the mass, that what it builds or upgrades to costs.
@@ -192,7 +192,7 @@ pub struct AdjacencyBonus {
 pub const ADJACENCY_SCALE: i64 = 100_000;
 
 impl AdjacencyGiver {
-    /// FAF's numbers, unchanged.
+    /// The inspiration's numbers, unchanged.
     pub const fn bonus(self) -> AdjacencyBonus {
         const NONE: [i32; 5] = [0; 5];
         let (weapon_energy, rate_of_fire) = match self {
@@ -353,7 +353,8 @@ pub struct TorpedoDefenseDef {
 /// The commander's Discharge: a shot paid for from stored energy, that destroys almost any
 /// mobile unit but does little to structures.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-/// The commander's Discharge, by FAF's rule (GAME_SPECIFICATION.md §2.1): it fires only with
+/// The commander's Discharge, by the inspiration's rule (GAME_SPECIFICATION.md §2.1): it fires only
+/// with
 /// `energy_required` in store, and when the shell lands, it spends what it needs to destroy
 /// the toughest enemy where it lands, within `min_damage` and `max_damage` and what a share
 /// of the store can pay for, at `energy_per_damage` a point.
@@ -464,7 +465,8 @@ pub struct Blueprint {
     /// construction, production, or repair is within its build range, by itself.
     pub assists: bool,
     pub adjacency_giver: Option<AdjacencyGiver>,
-    /// FAF's size class, from 0 for SIZE4 to 4 for SIZE20, which picks the adjacency bonuses it gets.
+    /// The inspiration's size class, from 0 for SIZE4 to 4 for SIZE20, which picks the adjacency
+    /// bonuses it gets.
     pub adjacency_size: usize,
     /// Sensor ranges (GAME_SPECIFICATION.md §9). Zero for none.
     pub radar: Fp,
@@ -761,8 +763,8 @@ struct RawUnit {
     assists: bool,
     /// What it gives its neighbors, such as "t1_power" or "mass_storage".
     adjacency: Option<String>,
-    /// FAF's size class: 4, 8, 12, 16, or 20. Without one, 16 for factories, and otherwise from
-    /// the footprint: 1 is 4, 2 is 8, 3 is 12, 4 is 16, and larger is 20.
+    /// The inspiration's size class: 4, 8, 12, 16, or 20. Without one, 16 for factories, and
+    /// otherwise from the footprint: 1 is 4, 2 is 8, 3 is 12, 4 is 16, and larger is 20.
     adjacency_size: Option<u8>,
     radar: Option<Number>,
     sonar: Option<Number>,

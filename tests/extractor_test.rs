@@ -1,5 +1,5 @@
 //! Mass extractors: their upkeep, their upgrades from T1 to T3, and what an energy stall does
-//! to them (GAME_SPECIFICATION.md §3, with FAF's numbers).
+//! to them (GAME_SPECIFICATION.md §3, with the inspiration's numbers).
 
 use sim_engine::math::fp::fp_int;
 use sim_engine::sim::blueprints::Res;

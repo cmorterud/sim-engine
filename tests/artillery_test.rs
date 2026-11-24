@@ -265,8 +265,8 @@ fn shell_directions(kind: &str, team: Team, from: Vec2Fp, at: Vec2Fp, ticks: u32
 
 #[test]
 fn guns_with_firing_randomness_scatter_and_mirror_images_scatter_mirrored() {
-    // FAF's light artillery has a firing randomness of 0.5, a spread of 10 here; the light bot
-    // has none, so every shot it fires at one spot goes the same way.
+    // The inspiration's light artillery has a firing randomness of 0.5, a spread of 10 here; the
+    // light bot has none, so every shot it fires at one spot goes the same way.
     let scattering = shell_directions("t1_light_artillery", Team::Blue, point(1_000, 2_500), point(1_500, 2_500), 600);
     assert!(scattering.len() >= 3, "it should fire several times: {}", scattering.len());
     assert!(scattering.windows(2).any(|pair| pair[0] != pair[1]), "its shells should go different ways: {scattering:?}");

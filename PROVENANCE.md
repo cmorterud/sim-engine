@@ -29,8 +29,20 @@ the documentation change that followed them:
   (see Names, below), and the map importer and map downloader were removed.
 * Starting numbers are next: they are to be re-derived from this project's own cost model,
   targets, and tuning runs, after which "Starting numbers" below gives way to a dated note. Until
-  then, comments in the unit data and code still say "FAF's" next to the values that came from
-  FAF, so that the record stays accurate, and no new value is taken from FAF.
+  then, comments in the unit data and code said "FAF's" next to the values that came from FAF,
+  so that the record stayed accurate, and no new value is taken from FAF. Since 2026-11-24 they
+  say "the inspiration's" instead (see Comments, 2026-11-24, below).
+
+## Comments, 2026-11-24
+
+From 2026-11-24 no file but this one names FAF either: `.github/denylist.txt` has the name, so the
+CI check that keeps other games' names here fails on it anywhere else. Comments in the code, the
+tests, and `data/units.toml` that said "FAF's" or "as in FAF" next to a value or a rule now say
+"the inspiration's" or "as in the inspiration", which means *Forged Alliance* as FAF plays it, so
+that what came from elsewhere is still marked where it is used. Nothing else changed: no value
+moved, and nothing was re-derived. The values still taken are the ones listed under Starting
+numbers, which stays until they are re-derived from this game's own targets (BALANCE.md, Order
+of work), and it then gives way to a dated note of its own.
 
 ## Starting numbers
 

@@ -350,7 +350,7 @@ fn factory_repeat_loops_and_rally_sends_units() {
     run(&mut world, ticks * 4 + 20);
     let units: Vec<SimId> = world.units.iter().map(|unit| unit.0).filter(|unit| *unit != factory).collect();
     assert!(units.len() >= 4, "repeat should keep building, got {}", units.len());
-    // At FAF's speed, a light bot may already have reached the rally point.
+    // At the inspiration's speed, a light bot may already have reached the rally point.
     let at = world.unit_position(units[1]).unwrap().xy();
     let heading = world.unit_order(units[1]).unwrap().kind == OrderKind::Move;
     assert!(heading || at.distance_squared(&point(2_000, 1_000)) < sim_engine::math::fp::wide_mul(fp_int(200), fp_int(200)), "new units should head to the rally point");
@@ -370,7 +370,7 @@ fn upgrade_halts_production_then_improves_the_factory() {
         SimCommand::QueueUnit { factory, blueprint: t2, count: 1 },
         SimCommand::QueueUnit { factory, blueprint: bot, count: 1 },
     ]);
-    // FAF's 2,300 build time at 20 power is 115 s. The bot behind it must wait.
+    // The inspiration's 2,300 build time at 20 power is 115 s. The bot behind it must wait.
     run(&mut world, 1_100);
     assert_eq!(world.units.len(), 1, "production must halt during an upgrade");
     run(&mut world, 60);
@@ -1521,7 +1521,7 @@ fn a_unit_that_dies_hands_its_queued_routes_back() {
     for doomed in [unit, engineer] {
         world.ecs.get::<&mut Health>(entity(&world, doomed)).unwrap().current = Fp::ONE;
     }
-    // On their way, so that the light bot, at FAF's speed, cannot outrun it.
+    // On their way, so that the light bot, at the inspiration's speed, cannot outrun it.
     world.spawn_mobile(killer, Team::Red, point(1_300, 1_050));
     run(&mut world, 150);
     assert!(world.unit_entity(unit).is_none() && world.unit_entity(engineer).is_none(), "the test needs them dead");

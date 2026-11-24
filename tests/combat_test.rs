@@ -237,7 +237,7 @@ fn tank_with_enemy_behind() -> (SimWorld, SimId, SimId) {
     world.ecs.get::<&mut Turret>(entity).unwrap().facing = east;
     let target = world.spawn_mobile(bot, Team::Red, point(700, 1_000));
     // The bot must not shoot back, so that only the tank's aim is measured, nor die, with
-    // FAF's 60 health, before the turret has turned.
+    // The inspiration's 60 health, before the turret has turned.
     world.ecs.get::<&mut Combat>(world.unit_entity(target).unwrap()).unwrap().range = Fp::ZERO;
     {
         let mut health = world.ecs.get::<&mut Health>(world.unit_entity(target).unwrap()).unwrap();
@@ -482,7 +482,7 @@ fn destroying_twice_its_own_mass_earns_a_rank() {
             assert!(ticks < 400, "the prey never died");
         }
     };
-    // FAF's veterancy: a T1 unit's first rank takes twice its own mass destroyed.
+    // The inspiration's veterancy: a T1 unit's first rank takes twice its own mass destroyed.
     kill(&mut world, prey);
     let veterancy = veterancy_of(&world, hunter).expect("it should have experience");
     assert_eq!((veterancy.experience, veterancy.rank), (mass, 0), "one light bot is half a rank");
@@ -545,7 +545,7 @@ fn veterans_heal_over_time_and_ranks_stop_at_five() {
     world.ecs.get::<&mut Health>(entity).unwrap().current = max / 2;
     run_ticks(&mut world, 10);
     let healed = world.ecs.get::<&Health>(entity).unwrap().current - max / 2;
-    // FAF's regeneration for a T1 unit: 1 a second for each rank.
+    // The inspiration's regeneration for a T1 unit: 1 a second for each rank.
     assert_eq!(healed, fp_int(5), "healed {healed} in a second");
 }
 

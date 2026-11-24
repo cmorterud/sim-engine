@@ -100,7 +100,7 @@ fn the_t3_station_is_an_upgrade_with_more_build_power() {
     let db_world = test_world();
     let (t2, t3) = (db_world.blueprints.get(id(&db_world, "field_workshop")), db_world.blueprints.get(id(&db_world, "field_workshop_t3")));
     assert_eq!(t2.upgrades_to, Some(t3.id));
-    // FAF's build rates: 20 for the T2 station, 30 for the T3.
+    // The inspiration's build rates: 20 for the T2 station, 30 for the T3.
     assert_eq!((t2.build_power.to_num::<i64>(), t3.build_power.to_num::<i64>()), (20, 30));
     assert!(t2.assists && t3.assists);
 }

@@ -1561,8 +1561,9 @@ impl AiBrain {
             let tier = if factory.support { factory.tier.min(headquarters) } else { factory.tier };
             let upgrade = world.blueprints.get(factory.blueprint).upgrades_to;
             // One upgrade at a time: the first T1 factory to T2, that one to T3, then the rest.
-            // A factory upgrades only while another goes on making units: by FAF's costs, an
-            // upgrade to T3 takes minutes, and the only factory upgrading left the AI no army.
+            // A factory upgrades only while another goes on making units: by the inspiration's
+            // costs, an upgrade to T3 takes minutes, and the only factory upgrading left the AI no
+            // army.
             let others_producing = self.skill.upgrade_alone || forces.factories.iter().any(|other| other.id != factory.id && other.finished && !other.upgrading);
             let upgrade_wanted = others_producing && world.current_tick >= self.skill.first_upgrade_tick && upgrade.is_some_and(|into| {
                 let into = world.blueprints.get(into);

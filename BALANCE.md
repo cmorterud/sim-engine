@@ -191,7 +191,10 @@ out close and why: evidence about the process, not a target.
    strike aircraft go by `[domains]` (2026-11-24): T1 navy; then T2 air and navy; then T3; then,
    only if whole matches still favor a domain, factory costs and build rates.
 4. AI strategy variants and the global knobs.
-5. Remove the remaining "FAF's" comments, write PROVENANCE.md's dated note, and turn on the CI
-   gates.
+5. Name no other game in comments, write PROVENANCE.md's dated note, and turn on the CI gates.
+   Done on 2026-11-24 for the names: comments say "the inspiration's" next to a borrowed value,
+   PROVENANCE.md keeps the list, and the CI name check covers the abbreviation too. Left for after
+   step 4: re-deriving the values still borrowed (PROVENANCE.md, Starting numbers) and the
+   Guardrails' CI checks.
 
 The game stays playable throughout: only one tier is in flux at a time.
