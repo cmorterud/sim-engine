@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use sim_engine::balance::{
     break_even, break_even_forces, domain_force, duel, force_materiel, mirrored, mirrored_on, position_materiel_at, purpose_strength, siege_on, squadrons, Field, Ground, Side, Tactics,
-    T1_TORPEDO_POSITION, T2_POSITION, TORPEDO_POSITION,
+    T1_TORPEDO_POSITION, T2_POSITION, T3_POSITION, TORPEDO_POSITION,
 };
 use sim_engine::sim::blueprints::BlueprintDb;
 
@@ -398,4 +398,56 @@ fn t2_air_meets_a_land_army_evenly_and_cruisers_break_a_coastal_position() {
     let siege = siege_on(&db, Field::new(Ground::Shore, 2), &cruisers, T2_POSITION);
     let (seconds, losses) = (number(&domains(&["cells", "coastal_seconds_max"])), number(&domains(&["cells", "coastal_losses_max"])));
     assert!(siege.broken && siege.seconds <= seconds && siege.losses <= losses, "an equal cost of cruisers against a coastal T2 position: {siege:?}");
+}
+
+/// BALANCE.md, T3 air and navy (2026-11-24): the battleship, battlecruiser, and heavy gunship are
+/// as strong per cost against the anchor as the inspiration has its own against its T1 tank,
+/// within `[domains] strength_band`.
+#[test]
+fn t3_air_and_navy_are_as_strong_per_cost_as_the_inspirations() {
+    let db = db();
+    let band = domains(&["strength_band"]).as_array().expect("a band").iter().map(number).collect::<Vec<f64>>();
+    for key in ["t3_battleship", "t3_battlecruiser", "t3_heavy_gunship"] {
+        let ratio = purpose_strength(&db, key) / number(&domains(&["strength_over_anchor", key]));
+        assert!((band[0]..=band[1]).contains(&ratio), "{key} is {ratio:.2} of the inspiration's strength per cost");
+    }
+}
+
+/// `[domains]`: a massed T3 fleet, escorts two-thirds of its cost, beats an equal cost of the T3
+/// air force, and torpedo bombers need over twice its cost to break it; without its escorts, a
+/// battleship-heavy fleet breaks to its own cost of them.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn a_massed_t3_fleet_is_as_safe_from_the_air_as_it_is_escorted() {
+    let db = db();
+    let water = Field::new(Ground::Water, 3);
+    let air = fight(&db, water, "t3_fleet", 1.0, "t3_air_force");
+    assert!(air >= number(&domains(&["cells", "fleet_beats_air_force_t3"])), "the massed T3 fleet scores {air:+.2} against an equal cost of the T3 air force");
+    let multiple = |name: &str| {
+        let squadron = domain_force(&db, name);
+        let one = force_materiel(&db, &squadrons(&db, &squadron, 0.0, 3, Tactics::AttackMove), 3);
+        let fleet = squadrons(&db, &squadron, one * 2.0, 3, Tactics::AttackMove);
+        let bombers = squadrons(&db, &domain_force(&db, "t2_torpedo_bombers"), force_materiel(&db, &fleet, 3), 3, Tactics::AttackMove);
+        break_even_forces(&db, water, &fleet, &bombers).efficiency
+    };
+    let band = domains(&["cells", "torpedo_bombers_to_break_fleet_t3"]).as_array().expect("a band").iter().map(number).collect::<Vec<f64>>();
+    let escorted = multiple("t3_fleet");
+    assert!((band[0]..=band[1]).contains(&escorted), "torpedo bombers break the massed T3 fleet at {escorted:.2} times its cost");
+    let heavy = multiple("t3_battleship_heavy_fleet");
+    let most = number(&domains(&["cells", "battleship_heavy_fleet_breaks_to_torpedo_bombers_at_most"]));
+    assert!(heavy <= most, "torpedo bombers break a battleship-heavy fleet at {heavy:.2} times its cost");
+}
+
+/// `[domains]`: battleships break a coastal T3 position from beyond its reach. Whole battleships buy
+/// only near the position's cost, so the time is put at an equal cost, as the report puts it.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn battleships_break_a_coastal_t3_position() {
+    let db = db();
+    let materiel = position_materiel_at(&db, T3_POSITION, 3);
+    let battleships = squadrons(&db, &[(db.id("t3_battleship"), 1)], materiel, 3, Tactics::AttackMove);
+    let siege = siege_on(&db, Field::new(Ground::Shore, 3), &battleships, T3_POSITION);
+    let at_equal_cost = siege.seconds * force_materiel(&db, &battleships, 3) / materiel;
+    let (seconds, losses) = (number(&domains(&["cells", "coastal_seconds_max"])), number(&domains(&["cells", "coastal_losses_max"])));
+    assert!(siege.broken && at_equal_cost <= seconds && siege.losses <= losses, "battleships against a coastal T3 position: {siege:?}, about {at_equal_cost:.0} s at an equal cost");
 }

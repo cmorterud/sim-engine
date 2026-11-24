@@ -639,3 +639,25 @@ fn aircraft_fly_at_their_shares_of_the_spy_planes_height() {
         assert!(height(&unit.key) < top, "{} flies as high as the spy plane", unit.key);
     }
 }
+
+/// Aircraft go where they are ordered over a sea with no land anywhere, as on the balance
+/// harness's open sea (2026-11-24): their orders took a land route, found none, and were dropped,
+/// so they circled where they were.
+#[test]
+fn aircraft_obey_orders_over_open_sea() {
+    let map_units = 5_120;
+    let cells = (map_units / sim_engine::sim::config::TERRAIN_CELL_UNITS) as usize;
+    let heights = vec![(50 << sim_engine::sim::terrain::HEIGHT_FRAC_BITS) as i16; (cells + 1) * (cells + 1)];
+    let terrain = sim_engine::sim::terrain::Terrain::from_heights(map_units, heights, &vec![true; cells * cells], fp_int(100));
+    let config = SimConfig { map_units, terrain: TerrainStyle::Flat, fog_of_war: false, ..SimConfig::default() };
+    let mut world = SimWorld::with_terrain(config, 1, terrain);
+    world.prepare_map();
+    let gunship = spawn(&mut world, "t2_gunship", Team::Blue, point(1_000, 2_560));
+    let fighter = spawn(&mut world, "t1_interceptor", Team::Blue, point(1_000, 2_660));
+    world.advance_tick(&[SimCommand::AttackMove { units: vec![gunship, fighter], goal: point(4_000, 2_560) }]);
+    run(&mut world, 600);
+    for id in [gunship, fighter] {
+        let x = world.unit_position(id).expect("still flying").x.to_num::<i32>();
+        assert!(x > 3_000, "it should fly out over the sea, not stay at {x}");
+    }
+}

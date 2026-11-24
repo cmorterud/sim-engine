@@ -167,6 +167,21 @@ out close and why: evidence about the process, not a target.
   each on its own. A composed T2 fleet now beats an equal cost of the AI's air force (+0.65, from
   -0.62), torpedo bombers need 2.45 times its cost to break it (from 0.65), destroyers beat
   submarines, and hovercraft lose to it. The Mobile Flak is set by the anti-air share rule at T2.
+* 2026-11-24: T3 air and navy (`reports/balance/2026-11-24-t3-air-navy.md`): the Battleship,
+  Battlecruiser, and Heavy Gunship by the inspiration's ratios, the battleship's turrets and the
+  battlecruiser's lasers keeping their decided damage. A massed T3 fleet is kept from the air by
+  its escorts, as in the inspiration, whose battleships have next to no anti-air and no
+  anti-torpedo charge: escorts seven-tenths of its cost, it beats an equal cost of the T3 air force
+  (+0.95) and needs 2.04 times its cost in torpedo bombers to break, while a battleship-heavy fleet
+  breaks at 0.34. The AI's T3 naval factories build that escorted mix. Coastal sieges are judged
+  at an equal cost. Every `[domains]` cell is met.
+* 2026-11-24: aircraft obey orders over open sea (same report). On the harness's sea, with no land
+  anywhere, aircraft had dropped their orders and circled, so every fleet-against-air fight since
+  the first `[domains]` report was measured with idle aircraft, which favored ships. Measured again:
+  the frigate's railgun went from 20.8 to 27 to hold its own against T1 bombers, the massed T3
+  fleet took more escorts (12 cruisers, 4 destroyers, 4 corvettes), and torpedo bombers break a T2
+  fleet at 2.03 times its cost, not 2.45. The T1 and T2 navy reports' fights over open sea predate
+  this.
 
 ## Order of work
 

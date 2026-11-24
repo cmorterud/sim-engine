@@ -539,6 +539,20 @@ impl FlowField {
     ) -> Option<u32> {
         self.ensure_graph(terrain);
         nearest_passable_cell_for(terrain, self.class, goal)?;
+        Some(self.insert_route(terrain, tick, goal, references, arrive_radius, follow, owner))
+    }
+
+    /// A route for aircraft alone, which fly straight to its goal and take only that point from
+    /// it: made even where no unit of this field could stand anywhere, as over open sea, where
+    /// `create_route` finds no cell and makes none.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_air_route(&mut self, terrain: &Terrain, tick: u32, goal: Vec2Fp, references: u32, arrive_radius: Fp, follow: Option<SimId>, owner: usize) -> u32 {
+        self.ensure_graph(terrain);
+        self.insert_route(terrain, tick, goal, references, arrive_radius, follow, owner)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn insert_route(&mut self, terrain: &Terrain, tick: u32, goal: Vec2Fp, references: u32, arrive_radius: Fp, follow: Option<SimId>, owner: usize) -> u32 {
         let id = self.next_route;
         self.next_route += 1;
         let sectors = self.sectors_per_side * self.sectors_per_side;
@@ -562,7 +576,7 @@ impl FlowField {
             },
         );
         self.route_to(id, terrain, goal);
-        Some(id)
+        id
     }
 
     /// Runs Dijkstra outward from the goal over the portal graph. Every sector gets

@@ -73,7 +73,9 @@ Submarine, and T1 Torpedo Launcher, each from FAF's ratios against its own T1 ta
 across its factions, below) applied to this game's Medium Tank, not from FAF's values. And the same
 day (`reports/balance/2026-11-24-t2-air-navy.md`), the same way: the Destroyer, Cruiser, Torpedo
 Boat, T2 Torpedo Launcher, Gunship, Torpedo Bomber, and Fighter-Bomber, with this game's own
-changes past those ratios for its fights between domains.
+changes past those ratios for its fights between domains. And the Battleship, Battlecruiser, and
+Heavy Gunship (`reports/balance/2026-11-24-t3-air-navy.md`), keeping this game's own damage for
+the battleship's turrets and the battlecruiser's lasers.
 
 ## Balance targets
 
