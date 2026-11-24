@@ -3,7 +3,7 @@
 //!
 //! Everything is soft enough to hear all match long, and fades in and out rather than switching.
 //! The battlefield is heard as it is seen, close up: the sea, ships under way, engines, aircraft,
-//! and builders at work, each from where it is across the screen. It is in stereo, but never hard
+//! and the beams of builders at work, each from where it is across the screen. It is in stereo, but never hard
 //! to one side.
 
 use std::f32::consts::{FRAC_PI_4, TAU};
@@ -37,24 +37,24 @@ const MAX_PAN: f32 = 0.6;
 /// Below this, a continuous sound is not worked out at all.
 const SILENT_LEVEL: f32 = 1e-4;
 
-/// The builders' chimes, and the factories', which are an octave lower and come slower.
-const BUILD_GAIN: f32 = 0.06;
-const FACTORY_GAIN: f32 = 0.065;
+/// The builders' beams, and the factories', which are lower and pulse slower.
+const BUILD_GAIN: f32 = 0.023;
+const FACTORY_GAIN: f32 = 0.022;
 const OCEAN_GAIN: f32 = 0.027;
 const SAILING_GAIN: f32 = 0.028;
 const ENGINE_GAIN: f32 = 0.024;
 const AIRCRAFT_GAIN: f32 = 0.018;
 const ALARM_GAIN: f32 = 0.4;
 
-/// F major pentatonic, from F4 to D5: any notes of it sound well together, struck at random.
-const BUILD_NOTES: [f32; 5] = [349.23, 392.0, 440.0, 523.25, 587.33];
-/// About how far apart the builders' notes come, in seconds, before the crowd hurries them.
-const BUILD_SPACING: f32 = 1.1;
-const FACTORY_SPACING: f32 = 1.7;
-/// A chime's strike, and how long it rings: struck softly, so that it never clicks.
-const CHIME_ATTACK: f32 = 0.008;
-const CHIME_RING: f32 = 0.38;
-const CHIME_VOICES: usize = 6;
+/// A builder's beam sounds about C5, and a factory's a fifth below.
+const BUILD_PITCH: f32 = 523.25;
+const FACTORY_PITCH: f32 = 349.23;
+/// How often a pulse reaches the work along a builder's beam, as it is drawn: five pulses a
+/// beam, each crossing it in 1.1 s (`render::links`). A factory's swells come slower.
+const BUILD_PULSES: f32 = 5.0 / 1.1;
+const FACTORY_PULSES: f32 = 2.2;
+/// How long a beam takes to power up to its pitch, and down again.
+const BEAM_CHARGE_SECONDS: f32 = 0.25;
 
 const SELECT_GAIN: f32 = 0.14;
 const SELECT_SECONDS: f32 = 0.12;
@@ -66,9 +66,9 @@ const ALARM_NOTES: u32 = 4;
 /// The continuous sounds, each with a level and a place across the screen.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Bed {
-    /// Builders at work: soft chimes.
+    /// Builders at work: the soft shimmer of their beams.
     Build,
-    /// Factories making something: the same chimes, lower and slower.
+    /// Factories making something: the same beam, lower and slower.
     Factory,
     /// The sea, wherever water is in view.
     Ocean,
@@ -87,8 +87,8 @@ impl Bed {
 }
 
 /// One continuous sound: how loud, from 0 to 1, where across the screen, from -1 at the left
-/// edge to 1 at the right, and, for the chimes, how busy, from 0 to 1, which hurries the notes
-/// without making each louder.
+/// edge to 1 at the right, and, for the beams, how busy, from 0 to 1, which makes the sound
+/// fuller without making it much louder.
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub struct BedLevel {
     pub level: f32,
@@ -155,11 +155,6 @@ impl Noise {
         x ^= x << 5;
         self.0 = x;
         (x as f32 / u32::MAX as f32) * 2.0 - 1.0
-    }
-
-    /// From 0 to 1.
-    fn unit(&mut self) -> f32 {
-        0.5 + 0.5 * self.next()
     }
 }
 
@@ -300,61 +295,53 @@ impl Aircraft {
     }
 }
 
-/// A chime ringing out.
-#[derive(Copy, Clone, Debug, Default)]
-struct Ring {
-    frequency: f32,
-    phase: f32,
-    overtone: f32,
-    age: f32,
-    gain: f32,
-    sounding: bool,
-}
-
-/// Notes struck one at a time at uneven, unhurried moments, each from the scale and never the
-/// same note twice running: light, and pleasant to hear all match long.
+/// A building beam: a soft, pure tone with a slow shimmer, from two voices a hair apart, a quiet
+/// octave above, and a light vibrato, over a faint, high sizzle, swelling a little each time a
+/// pulse reaches the work. It glides up to its pitch as the beam powers on, and down as it powers
+/// off, as a laser would, and has nothing sharp in it. A crowd adds a soft voice a fifth above,
+/// which makes it fuller rather than louder.
 #[derive(Clone, Debug)]
-struct Chimes {
-    notes: [f32; 5],
-    spacing: f32,
-    rings: [Ring; CHIME_VOICES],
-    wait: f32,
-    last: usize,
+struct Beam {
+    pitch: f32,
+    pulses: f32,
+    sizzle_level: f32,
+    /// The voice, a hair above it, an octave above it, and a fifth above it.
+    phases: [f32; 4],
+    vibrato: f32,
+    pulse: f32,
+    sizzle: Band,
+    /// How far powered up, from 0 to 1.
+    charge: f32,
+    charging: f32,
 }
 
-impl Chimes {
-    fn new(notes: [f32; 5], spacing: f32) -> Self {
-        Self { notes, spacing, rings: [Ring::default(); CHIME_VOICES], wait: 0.0, last: 0 }
+impl Beam {
+    fn new(pitch: f32, pulses: f32, sizzle_level: f32, rate: f32) -> Self {
+        Self {
+            pitch,
+            pulses,
+            sizzle_level,
+            phases: [0.0; 4],
+            vibrato: 0.0,
+            pulse: 0.0,
+            sizzle: Band::new(1_800.0, 3_400.0, rate),
+            charge: 0.0,
+            charging: 1.0 - (-1.0 / (BEAM_CHARGE_SECONDS * rate)).exp(),
+        }
     }
 
-    /// Strikes new notes while `playing`, as often as `busy` says, and rings out those struck.
     fn voice(&mut self, noise: &mut Noise, playing: bool, busy: f32, rate: f32) -> f32 {
-        if playing {
-            self.wait -= 1.0 / rate;
-            if self.wait <= 0.0 {
-                let index = (self.last + 1 + (noise.unit() * 3.999) as usize) % self.notes.len();
-                self.last = index;
-                // A free voice, or else the one that has rung longest.
-                let slot = self.rings.iter().position(|ring| !ring.sounding).unwrap_or_else(|| {
-                    self.rings.iter().enumerate().max_by(|a, b| a.1.age.total_cmp(&b.1.age)).map_or(0, |(slot, _)| slot)
-                });
-                self.rings[slot] = Ring { frequency: self.notes[index] * (1.0 + 0.002 * noise.next()), gain: 0.75 + 0.25 * noise.unit(), sounding: true, ..Ring::default() };
-                self.wait = self.spacing / (0.5 + 1.5 * busy.clamp(0.0, 1.0)) * (0.6 + 0.8 * noise.unit());
-            }
-        }
-        let mut out = 0.0;
-        for ring in self.rings.iter_mut().filter(|ring| ring.sounding) {
-            let strike = (ring.age / CHIME_ATTACK).min(1.0);
-            let body = sine(advance(&mut ring.phase, ring.frequency, rate));
-            // A mallet's knock, a little above, gone almost at once.
-            let knock = sine(advance(&mut ring.overtone, ring.frequency * 2.76, rate)) * (-ring.age / 0.035).exp();
-            out += ring.gain * strike * (-ring.age / CHIME_RING).exp() * (body + 0.12 * knock);
-            ring.age += 1.0 / rate;
-            if ring.age > CHIME_RING * 6.0 {
-                ring.sounding = false;
-            }
-        }
-        out
+        self.charge += self.charging * (f32::from(u8::from(playing)) - self.charge);
+        let glide = 0.82 + 0.18 * self.charge;
+        let pitch = self.pitch * glide * (1.0 + 0.004 * sine(advance(&mut self.vibrato, 6.2, rate)));
+        let [voice, beside, octave, fifth] = &mut self.phases;
+        let tone = sine(advance(voice, pitch, rate))
+            + 0.6 * sine(advance(beside, pitch * 1.004, rate))
+            + 0.15 * sine(advance(octave, pitch * 2.0, rate))
+            + 0.3 * busy.clamp(0.0, 1.0) * sine(advance(fifth, pitch * 1.5, rate));
+        let pulse = swell(advance(&mut self.pulse, self.pulses, rate));
+        let sizzle = self.sizzle.run(noise.next()) * (0.6 + 0.4 * pulse);
+        tone * (0.88 + 0.12 * pulse) + self.sizzle_level * sizzle
     }
 }
 
@@ -366,8 +353,8 @@ pub struct Synth {
     beds: [BedLevel; BEDS],
     volume: f32,
     noise: Noise,
-    build: Chimes,
-    factory: Chimes,
+    build: Beam,
+    factory: Beam,
     ocean: Ocean,
     wash: Wash,
     engines: Engines,
@@ -388,8 +375,8 @@ impl Synth {
             beds: [BedLevel::default(); BEDS],
             volume: 0.0,
             noise: Noise(0x9E37_79B9),
-            build: Chimes::new(BUILD_NOTES, BUILD_SPACING),
-            factory: Chimes::new(BUILD_NOTES.map(|note| note / 2.0), FACTORY_SPACING),
+            build: Beam::new(BUILD_PITCH, BUILD_PULSES, 0.6, rate),
+            factory: Beam::new(FACTORY_PITCH, FACTORY_PULSES, 0.25, rate),
             ocean: Ocean::new(rate),
             wash: Wash::new(rate),
             engines: Engines::new(rate),
@@ -463,6 +450,12 @@ impl Synth {
             now.busy += self.fade * (target.busy - now.busy);
             let (level, pan, busy) = (now.level, now.pan, now.busy);
             if level < SILENT_LEVEL && target.level <= 0.0 {
+                // A beam gone quiet has powered down, and powers up again from the start.
+                match bed {
+                    Bed::Build => self.build.charge = 0.0,
+                    Bed::Factory => self.factory.charge = 0.0,
+                    _ => {}
+                }
                 continue;
             }
             let playing = target.level > 0.0;
@@ -479,6 +472,11 @@ impl Synth {
             left += sound * to_left;
             right += sound * to_right;
         }
+        // However many play at once, together they stay about as loud as one at its fullest:
+        // each gets quieter as more join, so that a busy scene never piles up into clutter, and
+        // the selection cue and the alarm are always heard over it.
+        let together = self.beds.iter().map(|bed| bed.level).sum::<f32>().max(1.0).sqrt().recip();
+        let (left, right) = (left * together, right * together);
         let middle = self.alarm_voice(targets.alarm_serial) * ALARM_GAIN + self.select_voice(targets.select_serial) * SELECT_GAIN;
         // Soft clipping, so that everything at once cannot distort harshly.
         [((left + middle) * self.volume).tanh(), ((right + middle) * self.volume).tanh()]
@@ -750,7 +748,7 @@ pub fn scene_levels(snapshot: &SimSnapshot, movement: &Movement, blueprints: &Bl
             factories.add(1.0, at);
         }
     }
-    // Chimes keep each note as loud however many there are: more only hurry them.
+    // A beam is about as loud however many build: more only make it fuller.
     beds[Bed::Build as usize] = BedLevel { level: if builders.count > 0.0 { near } else { 0.0 }, ..builders.bed(1.0) };
     beds[Bed::Factory as usize] = BedLevel { level: if factories.count > 0.0 { near } else { 0.0 }, ..factories.bed(1.0) };
 

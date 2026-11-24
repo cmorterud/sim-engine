@@ -86,27 +86,27 @@ fn silence_when_nothing_is_happening_or_when_muted() {
 }
 
 /// Each continuous sound, as loud as it gets, zoomed all the way in: light, and soft. The
-/// ambience sits under the builders' chimes, and none is near the selection cue's peak, so that
+/// ambience sits under the builders' beams, and none is near the selection cue's peak, so that
 /// a click is always heard over them.
 #[test]
 fn every_continuous_sound_is_light_and_soft() {
-    let chimes = settled(playing(Bed::Build, 1.0), 8.0);
+    let beams = settled(playing(Bed::Build, 1.0), 8.0);
     for bed in Bed::ALL {
         let samples = settled(playing(bed, 1.0), 8.0);
         let (loud, harsh) = (loudness(&samples), harshness(&samples));
         assert!((0.008..0.025).contains(&loud), "{bed:?} at {loud}");
         assert!(peak(&samples) < SELECT_GAIN * 0.8, "{bed:?} peaks at {}", peak(&samples));
-        // The chimes are pure tones from 350 to 600 Hz with a brief knock above; the rest is
+        // The beams are pure tones from 350 to 1050 Hz with a faint, high sizzle; the rest is
         // noise, softened above its band, and the aircraft's rush the airiest of it.
         let limit = match bed {
-            Bed::Build | Bed::Factory => 0.2,
+            Bed::Build | Bed::Factory => 0.35,
             Bed::Ocean | Bed::Engines => 0.1,
             Bed::Sailing => 0.3,
             Bed::Aircraft => 0.4,
         };
         assert!(harsh < limit, "{bed:?} is {harsh} harsh, over {limit}");
         if AMBIENCE.contains(&bed) {
-            assert!(loud <= loudness(&chimes) * 1.4, "{bed:?} at {loud}, over the chimes at {}", loudness(&chimes));
+            assert!(loud <= loudness(&beams) * 1.4, "{bed:?} at {loud}, over the beams at {}", loudness(&beams));
         }
     }
 }
@@ -133,64 +133,57 @@ fn each_sound_has_its_own_place_in_the_range() {
     assert!(engines < ocean && ocean < wash && wash < aircraft, "engines {engines}, sea {ocean}, wash {wash}, aircraft {aircraft}");
 }
 
-/// Notes struck in a chime, counted as they start.
-fn strikes(chimes: &mut Chimes, seconds: f32, busy: f32) -> (usize, Vec<f32>) {
-    let mut noise = Noise(7);
-    let (mut count, mut out) = (0, Vec::new());
-    for _ in 0..(seconds * RATE) as usize {
-        out.push(chimes.voice(&mut noise, true, busy, RATE));
-        count += chimes.rings.iter().filter(|ring| ring.sounding && ring.age <= 1.5 / RATE).count();
-    }
-    (count, out)
-}
-
-/// The chimes: struck softly, so that no note clicks in; varied, never the same note twice
-/// running; busier with more builders, but no louder for it; and the factories' an octave lower,
-/// so that the two are told apart.
+/// The builders' beam: a steady, soft tone that swells only a little with each pulse, so that it
+/// never pulses like the old factory sound; fuller with more builders but hardly louder; and
+/// lower for factories, so that the two are told apart.
 #[test]
-fn the_chimes_are_soft_varied_busier_with_more_builders_and_lower_for_factories() {
-    let mut one = Chimes::new(BUILD_NOTES, BUILD_SPACING);
-    let (few, quiet_notes) = strikes(&mut one, 30.0, crowd(1.0));
-    let mut ten = Chimes::new(BUILD_NOTES, BUILD_SPACING);
-    let (many, busy_notes) = strikes(&mut ten, 30.0, crowd(10.0));
-    assert!((15..45).contains(&few), "one builder strikes {few} notes in 30 seconds");
-    assert!(many > few * 3 / 2, "ten builders strike {many}, one {few}");
-    assert!(peak(&busy_notes) < peak(&quiet_notes) * 1.6, "a crowd's notes peak at {}, a builder's at {}", peak(&busy_notes), peak(&quiet_notes));
-    // Struck over 8 ms, like a soft mallet: a note's first 2 ms are well under its peak, so that
-    // it never clicks in.
-    let mut first = Chimes::new(BUILD_NOTES, BUILD_SPACING);
-    let mut noise = Noise(3);
-    let note: Vec<f32> = (0..(0.05 * RATE) as usize).map(|_| first.voice(&mut noise, true, 0.0, RATE)).collect();
-    let (opening, full) = (peak(&note[..(0.002 * RATE) as usize]), peak(&note));
-    assert!(opening < full * 0.4, "it starts at {opening} of {full} within 2 ms");
-
-    // Never one note twice running, and every note of the scale is heard.
-    let mut chimes = Chimes::new(BUILD_NOTES, BUILD_SPACING);
-    let mut noise = Noise(11);
-    let mut struck = Vec::new();
-    for _ in 0..(40.0 * RATE) as usize {
-        let before = chimes.last;
-        chimes.voice(&mut noise, true, 0.5, RATE);
-        if chimes.rings.iter().any(|ring| ring.sounding && ring.age <= 1.5 / RATE) {
-            assert_ne!(chimes.last, before, "the same note twice running");
-            struck.push(chimes.last);
-        }
+fn the_build_beam_is_soft_steady_fuller_with_more_builders_and_lower_for_factories() {
+    let busy = |busy: f32| quiet().with(Bed::Build, BedLevel::new(1.0, 0.0, busy));
+    let one = settled(busy(crowd(1.0)), 8.0);
+    let ten = settled(busy(crowd(10.0)), 8.0);
+    for (name, samples) in [("one builder", &one), ("ten builders", &ten)] {
+        let rise = abruptness(samples, 0.025);
+        assert!(rise < 0.3, "{name}'s beam rises by {rise} of its level in 25 ms");
     }
-    for note in 0..BUILD_NOTES.len() {
-        assert!(struck.contains(&note), "note {note} never heard in {} strikes", struck.len());
-    }
-
-    let builders = settled(playing(Bed::Build, 1.0), 8.0);
+    assert!(loudness(&ten) > loudness(&one) && loudness(&ten) < loudness(&one) * 1.3, "one builder at {}, ten at {}", loudness(&one), loudness(&ten));
     let factories = settled(playing(Bed::Factory, 1.0), 8.0);
-    assert!(crossings(&factories) < crossings(&builders) * 0.7, "factories {} a second, builders {}", crossings(&factories), crossings(&builders));
+    assert!(crossings(&factories) < crossings(&one) * 0.75, "factories {} a second, builders {}", crossings(&factories), crossings(&one));
+}
+
+/// A beam glides up to its pitch as it powers on, as a laser would, rather than starting at it,
+/// and powers on afresh after the work has stopped long enough to go quiet.
+#[test]
+fn the_build_beam_glides_up_as_it_powers_on() {
+    let mut synth = Synth::new(RATE);
+    let on = playing(Bed::Build, 1.0);
+    let opening = render(&mut synth, 0.12, on);
+    render(&mut synth, 1.0, on);
+    let steady = render(&mut synth, 0.12, on);
+    let (rising, settled_pitch) = (crossings(&opening[(0.04 * RATE) as usize..]), crossings(&steady));
+    assert!(rising < settled_pitch * 0.95, "it starts at {rising} crossings a second, settles at {settled_pitch}");
+    render(&mut synth, 1.5, quiet());
+    let again = render(&mut synth, 0.12, on);
+    assert!(crossings(&again[(0.04 * RATE) as usize..]) < settled_pitch * 0.95, "it powers on afresh");
 }
 
 #[test]
-fn chimes_stop_striking_when_the_work_stops_and_ring_out() {
+fn the_beam_stops_when_the_work_stops() {
     let mut synth = Synth::new(RATE);
-    render(&mut synth, 4.0, playing(Bed::Build, 1.0));
-    let after = render(&mut synth, 4.0, quiet());
-    assert!(peak(&after[(2.0 * RATE) as usize..]) < 1e-4, "it should be silent two seconds after the work stops");
+    render(&mut synth, 2.0, playing(Bed::Build, 1.0));
+    let after = render(&mut synth, 2.0, quiet());
+    assert!(peak(&after[(1.0 * RATE) as usize..]) < 1e-4, "it should be silent a second after the work stops");
+}
+
+/// Many sounds at once are together about as loud as one at its fullest, not six times as loud.
+#[test]
+fn many_sounds_together_stay_about_as_loud_as_one() {
+    let loudest_alone = Bed::ALL.iter().map(|&bed| loudness(&settled(playing(bed, 1.0), 6.0))).fold(0.0, f32::max);
+    let mut everything = quiet();
+    for bed in Bed::ALL {
+        everything = everything.with(bed, BedLevel::new(1.0, 0.0, 0.5));
+    }
+    let together = loudness(&settled(everything, 6.0));
+    assert!(together < loudest_alone * 1.4, "all six at {together}, the loudest alone at {loudest_alone}");
 }
 
 #[test]
@@ -272,11 +265,15 @@ fn the_selection_cue_is_silent_when_muted_and_can_be_heard_over_everything_else(
     for bed in Bed::ALL {
         busy = busy.with(bed, BedLevel::new(1.0, 0.0, 1.0));
     }
-    let mut synth = Synth::new(RATE);
-    render(&mut synth, 1.0, busy);
-    let everything = peak(&render(&mut synth, 0.5, busy));
-    let with_cue = peak(&render(&mut synth, 0.1, SoundTargets { select_serial: 1, ..busy }));
-    assert!(with_cue > everything * 1.2, "{with_cue} over {everything}");
+    // The same scene twice, once with the cue: the difference is the cue alone, heard against
+    // everything else over the cue's own tenth of a second.
+    let (mut without, mut with) = (Synth::new(RATE), Synth::new(RATE));
+    render(&mut without, 1.0, busy);
+    render(&mut with, 1.0, busy);
+    let background = render(&mut without, SELECT_SECONDS, busy);
+    let mixed = render(&mut with, SELECT_SECONDS, SoundTargets { select_serial: 1, ..busy });
+    let cue: Vec<f32> = mixed.iter().zip(&background).map(|(mixed, background)| mixed - background).collect();
+    assert!(loudness(&cue) > loudness(&background), "the cue at {}, everything else at {}", loudness(&cue), loudness(&background));
 }
 
 fn view(id: u32, blueprint: u16, x: i32, built_permille: u16) -> UnitView {
@@ -328,7 +325,7 @@ fn everywhere(_: &UnitView) -> Option<f32> {
 }
 
 #[test]
-fn builders_are_only_heard_while_working_on_screen_and_a_crowd_only_hurries_the_notes() {
+fn builders_are_only_heard_while_working_on_screen_and_a_crowd_only_fills_out_the_beam() {
     let db = BlueprintDb::standard();
     let still = Movement::default();
     let mut snapshot = scene(&db);
@@ -342,7 +339,7 @@ fn builders_are_only_heard_while_working_on_screen_and_a_crowd_only_hurries_the_
 
     snapshot.work_links = working(&[1, 2, 3]);
     let three = build(&snapshot, &everywhere);
-    assert_eq!(three.level, one.level, "each note is as loud however many build");
+    assert_eq!(three.level, one.level, "the beam is as loud however many build: a crowd only fills it out");
     assert!(three.busy > one.busy && three.busy < 1.0, "{} then {}", one.busy, three.busy);
     // Where the builders are across the screen.
     let left = build(&snapshot, &|_| Some(-0.8));

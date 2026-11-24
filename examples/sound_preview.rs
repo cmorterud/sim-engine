@@ -52,9 +52,11 @@ fn main() {
     std::fs::create_dir_all(&out).expect("output folder can be made");
     let quiet = SoundTargets { volume: SoundSettings::default().volume(), ..SoundTargets::default() };
     let one = |bed: Bed, level: BedLevel| quiet.with(bed, level);
-    let sounds: [(&str, Vec<(f32, SoundTargets)>); 9] = [
+    let sounds: [(&str, Vec<(f32, SoundTargets)>); 10] = [
         ("1-one-builder", vec![(10.0, one(Bed::Build, BedLevel::new(1.0, 0.0, 0.33)))]),
         ("2-ten-builders", vec![(10.0, one(Bed::Build, BedLevel::new(1.0, 0.0, 0.83)))]),
+        // A builder starting work, stopping, and starting again: its beam powers on and off.
+        ("2b-a-builder-starting-and-stopping", vec![(3.0, one(Bed::Build, BedLevel::new(1.0, 0.0, 0.33))), (2.0, quiet), (3.0, one(Bed::Build, BedLevel::new(1.0, 0.0, 0.33)))]),
         ("3-factories", vec![(10.0, one(Bed::Factory, BedLevel::new(1.0, 0.0, 0.6)))]),
         // From the left of the screen, then the middle, then the right.
         ("4-the-sea", vec![(6.0, one(Bed::Ocean, BedLevel::new(1.0, -1.0, 0.0))), (6.0, one(Bed::Ocean, BedLevel::new(1.0, 0.0, 0.0))), (6.0, one(Bed::Ocean, BedLevel::new(1.0, 1.0, 0.0)))]),
