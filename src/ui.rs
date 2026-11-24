@@ -2019,8 +2019,10 @@ fn score_columns(ui: &mut egui::Ui) {
     response.on_hover_text("Units: how many it has that you can see. Materiel/s: its materiel income. Army: the materiel its mobile units cost. A team out of sight shows only what you can see of it.");
 }
 
-/// Where each figure of a score row ends, from the row's left.
-const SCORE_COLUMNS: [f32; 3] = [150.0, 196.0, 240.0];
+/// Where each figure of a score row ends, from the row's left: far enough apart that the
+/// headings clear each other ("Units" and "Materiel/s" ran together at 150 and 196), and the
+/// last clear of the state at the right, "Victorious" the longest.
+const SCORE_COLUMNS: [f32; 3] = [128.0, 190.0, 234.0];
 
 const SCORE_WIDTH: f32 = 300.0;
 

@@ -60,6 +60,9 @@ const SECOND_T2_INCOME: i64 = 20;
 /// Mass income at which it starts upgrading extractors to T2, and to T3.
 const EXTRACTOR_T2_INCOME: i64 = 10;
 const EXTRACTOR_T3_INCOME: i64 = 40;
+/// While energy lags mass income, one more generator may be under way at once for each this
+/// much mass income a second, past the first two.
+const GENERATOR_INCOME_STEP: i64 = 100;
 /// Mass income at which new generators are T2, and T3, when a builder can make them.
 const GENERATOR_T2_INCOME: i64 = 15;
 const GENERATOR_T3_INCOME: i64 = 45;
@@ -309,6 +312,8 @@ struct Forces {
     /// Idle fighters, and idle strike aircraft, and all aircraft.
     idle_fighters: Vec<SimId>,
     idle_strike: Vec<SimId>,
+    /// Every finished fighter, on patrol or not, in order of `SimId`: escorts come from these.
+    fighters: Vec<SimId>,
     aircraft: usize,
     anti_air_structures: usize,
     airfields: usize,
@@ -911,6 +916,9 @@ impl AiBrain {
                 }
                 UnitClass::Air => {
                     forces.aircraft += 1;
+                    if finished && roster.is_fighter(blueprint) {
+                        forces.fighters.push(id);
+                    }
                     if order.kind == OrderKind::Idle && finished {
                         if roster.is_fighter(blueprint) {
                             forces.idle_fighters.push(id);
@@ -1116,7 +1124,11 @@ impl AiBrain {
         if energy_is_low {
             return generator.and_then(|generator| self.generator_site(world, forces, generator, planned).map(|cell| (generator, cell)));
         }
-        if let Some(generator) = generator.filter(|_| energy_lags && generators_coming < 2) {
+        // More at once as income grows: two at a time, while mass income passed 400 a second on
+        // islands with T3 extractors, left energy so far behind that naval yards and air
+        // factories, which start nothing while it is short, stood idle for half the match.
+        let generators_at_once = 2 + usize::try_from(mass_income / GENERATOR_INCOME_STEP).unwrap_or(0);
+        if let Some(generator) = generator.filter(|_| energy_lags && generators_coming < generators_at_once) {
             if let Some(cell) = self.generator_site(world, forces, generator, planned) {
                 return Some((generator, cell));
             }
@@ -1730,7 +1742,7 @@ impl AiBrain {
                 self.rally_set_on.push(factory.id);
                 commands.push(SimCommand::SetRally { factory: factory.id, point });
             }
-            if !factory.queue_is_empty || economy.satisfaction < Res::ONE / 2 || economy.energy < economy.energy_capacity / 4 {
+            if !factory.queue_is_empty || economy.satisfaction < Res::ONE / 2 || energy_running_short(&economy, 4) {
                 continue;
             }
             let tier = if factory.support { factory.tier.min(headquarters) } else { factory.tier };
@@ -1873,7 +1885,7 @@ impl AiBrain {
         let economy = world.economies[self.player.index()];
         let mass_income = self.planned_income((economy.mass_income * 10).to_num::<i64>());
         let energy_income = self.planned_income((economy.energy_income * 10).to_num::<i64>());
-        let energy_is_low = economy.energy < economy.energy_capacity / 2;
+        let energy_is_low = energy_running_short(&economy, 2);
         let mut upgrade_under_way = forces.air_factories.iter().any(|factory| factory.upgrading);
         let headquarters = forces.air_headquarters_tier;
         let air_threat = self.air_threat(world);
@@ -1947,11 +1959,26 @@ impl AiBrain {
             .filter(|enemy| self.skill.attacks || enemy.position.distance_squared(&self.home) <= wide_mul(defend, defend))
             .min_by_key(|enemy| (!enemy.is_structure, enemy.position.distance_squared(&self.home), enemy.id))
             .map(|enemy| enemy.position);
-        let Some(goal) = target.or_else(|| self.skill.attacks.then(|| self.search_point(world, false))) else {
-            return;
+        // A full-size wave goes for the enemy's base, or its commander where it can be seen, and
+        // takes half the fighters with it to clear the way: a wave sent at the nearest structure
+        // it could see only ever bombed outlying extractors, while most of a hundred aircraft
+        // patrolled at home, and on a map of islands nothing broke a base before the late push.
+        let full_strength = self.skill.attacks && forces.idle_strike.len() >= self.skill.largest_air_wave;
+        let goal = if full_strength {
+            let commander = self.enemy_commander(world);
+            sightings.iter().find(|enemy| Some(enemy.id) == commander).map_or(self.enemy_home, |enemy| enemy.position)
+        } else {
+            let Some(goal) = target.or_else(|| self.skill.attacks.then(|| self.search_point(world, false))) else {
+                return;
+            };
+            goal
         };
-        commands.push(SimCommand::AttackMove { units: forces.idle_strike.clone(), goal });
-        commands.push(SimCommand::QueueMove { units: forces.idle_strike.clone(), goal: self.home, attack: false });
+        let mut wave = forces.idle_strike.clone();
+        if full_strength {
+            wave.extend(forces.fighters.iter().take(forces.fighters.len() / 2));
+        }
+        commands.push(SimCommand::AttackMove { units: wave.clone(), goal });
+        commands.push(SimCommand::QueueMove { units: wave, goal: self.home, attack: false });
         self.air_wave_size = (self.air_wave_size + 2).min(self.skill.largest_air_wave);
     }
 
@@ -2423,6 +2450,14 @@ const fn cell_i32(cell: (u32, u32)) -> (i32, i32) {
 fn cell_of(position: Vec2Fp) -> (u32, u32) {
     let cell = |value: Fp| (value.to_num::<i32>() / TERRAIN_CELL_UNITS).max(0) as u32;
     (cell(position.x), cell(position.y))
+}
+
+/// Whether energy is running short: less is coming in than going out, and the store is below
+/// `1 / part` of what it holds. Factories of energy-hungry units start nothing then. The store
+/// alone once decided it, and the store grows with every energy storage built: an economy whose
+/// income kept up with what it spent, with the store never half full, never started an aircraft.
+fn energy_running_short(economy: &crate::sim::production::Economy, part: i64) -> bool {
+    economy.energy_demand >= economy.energy_income && economy.energy < economy.energy_capacity / part
 }
 
 fn cell_center(cell: (u32, u32)) -> Vec2Fp {

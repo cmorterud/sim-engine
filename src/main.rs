@@ -463,9 +463,12 @@ fn show_why_it_cannot_start(message: &str) {
         back.set_text_content(Some("Back to the setup"));
         let line = document.create_element("p")?;
         line.append_child(&back)?;
+        // One block, so that the page's centering keeps the two lines together.
+        let block = document.create_element("div")?;
+        block.append_child(&reason)?;
+        block.append_child(&line)?;
         status.set_text_content(None);
-        status.append_child(&reason)?;
-        status.append_child(&line)?;
+        status.append_child(&block)?;
         status.set_attribute("role", "alert")
     })();
     if shown.is_err() {

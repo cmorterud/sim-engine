@@ -112,6 +112,38 @@ fn on_scattered_isles_ais_keep_a_guard_at_home_and_cross_by_sea_and_air() {
     assert_eq!(replay_match_on(&map, 1, &record.log), record.checksums, "it replays from its orders");
 }
 
+/// On Scattered Isles the AIs spend what they make on ships and aircraft, which are how the war
+/// there is fought. Their naval yards and air factories once started nothing while stored energy
+/// was under a quarter, and a half, of what it could hold, and two generators at a time never got
+/// it there while T3 extractors raised mass income past 400 a second: by tick 12,000 each side
+/// had 8 ships and 2 aircraft, with its mass store full and running over.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn on_scattered_isles_ais_spend_on_a_fleet_and_an_air_force() {
+    use sim_engine::sim::components::MoveClass;
+    let map = MapSource::Map(Arc::new(scattered_isles()));
+    let (mut ships, mut aircraft) = ([0; 2], [0; 2]);
+    play_match_on(&map, 1, 12_000, |world| {
+        if world.current_tick != 12_000 {
+            return;
+        }
+        for &(_, entity) in &world.units {
+            let (Ok(stats), Ok(unit)) = (world.ecs.get::<&UnitStats>(entity), world.ecs.get::<&Blueprinted>(entity)) else { continue };
+            let unit = world.blueprints.get(unit.0);
+            if unit.is_structure() {
+                continue;
+            }
+            match unit.move_class() {
+                MoveClass::Naval | MoveClass::Submarine => ships[stats.team.index()] += 1,
+                MoveClass::Air => aircraft[stats.team.index()] += 1,
+                _ => {}
+            }
+        }
+    });
+    assert!(ships.iter().all(|&afloat| afloat >= 12), "both sides keep their yards busy: {ships:?} ships at tick 12,000");
+    assert!(aircraft.iter().all(|&flying| flying >= 20), "both sides keep their air factories busy: {aircraft:?} aircraft at tick 12,000");
+}
+
 /// On Scattered Isles each team has an island: a 2v2 and a 4v4 put all of Blue's commanders on
 /// the west one and all of Red's on the east.
 #[test]
