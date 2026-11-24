@@ -2474,9 +2474,17 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.beam([0.0, -0.1, -0.06], [0.0, -0.17, 0.16], 0.038, 0.05);
             mesh.paint(Material::Metal);
             mesh.beam([0.0, -0.165, 0.15], [0.0, -0.172, 0.17], 0.033, 0.044);
+            // A second funnel behind the first, and depth charge racks down the stern.
+            mesh.paint(Material::Hull);
+            mesh.beam([0.0, -0.21, -0.08], [0.0, -0.27, 0.11], 0.032, 0.042);
+            mesh.paint(Material::Metal);
+            mesh.beam([0.0, -0.266, 0.1], [0.0, -0.272, 0.12], 0.028, 0.037);
+            for x in [-0.04_f32, 0.04] {
+                mesh.block([x - 0.012, -0.49, -0.2], [x + 0.012, -0.44, -0.17]);
+            }
             // Torpedo tubes either side, behind the tower.
             for x in [-0.058_f32, 0.058] {
-                mesh.beam([x, -0.3, -0.17], [x, -0.2, -0.17], 0.013, 0.013);
+                mesh.beam([x, -0.33, -0.17], [x, -0.23, -0.17], 0.013, 0.013);
             }
             mesh.turret([0.0, 0.28], [-0.16, -0.08], 0.046, 1, 0.08, false);
             mesh.turret([0.0, -0.39], [-0.2, -0.12], 0.046, 1, 0.05, true);
@@ -2550,28 +2558,41 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         Shape::Battlecruiser => {
             // Long and narrow, its guns all forward.
             mesh.hull(&side(&[[0.077, -0.5]], [0.087, 0.14], [0.07, 0.384], 5), 0.0);
-            // A tower raked back: low at the stern, high at the bow.
+            // A great tower raked back, as wide as the hull: low at the stern, high at the bow.
             mesh.paint(Material::Hull);
             mesh.cuboid(
-                [Vec3::new(-0.065, -0.2, -0.2), Vec3::new(0.065, -0.2, -0.2), Vec3::new(0.065, 0.06, -0.2), Vec3::new(-0.065, 0.06, -0.2)],
-                [Vec3::new(-0.05, -0.16, -0.08), Vec3::new(0.05, -0.16, -0.08), Vec3::new(0.05, 0.03, 0.04), Vec3::new(-0.05, 0.03, 0.04)],
+                [Vec3::new(-0.082, -0.24, -0.2), Vec3::new(0.082, -0.24, -0.2), Vec3::new(0.082, 0.08, -0.2), Vec3::new(-0.082, 0.08, -0.2)],
+                [Vec3::new(-0.062, -0.19, -0.03), Vec3::new(0.062, -0.19, -0.03), Vec3::new(0.062, 0.05, 0.1), Vec3::new(-0.062, 0.05, 0.1)],
             );
             mesh.paint(Material::Trim);
             mesh.cuboid(
-                [Vec3::new(-0.04, -0.04, -0.03), Vec3::new(0.04, -0.04, -0.03), Vec3::new(0.04, 0.02, 0.03), Vec3::new(-0.04, 0.02, 0.03)],
-                [Vec3::new(-0.033, -0.03, 0.05), Vec3::new(0.033, -0.03, 0.05), Vec3::new(0.033, 0.01, 0.11), Vec3::new(-0.033, 0.01, 0.11)],
+                [Vec3::new(-0.05, -0.05, 0.03), Vec3::new(0.05, -0.05, 0.03), Vec3::new(0.05, 0.03, 0.09), Vec3::new(-0.05, 0.03, 0.09)],
+                [Vec3::new(-0.04, -0.04, 0.12), Vec3::new(0.04, -0.04, 0.12), Vec3::new(0.04, 0.02, 0.18), Vec3::new(-0.04, 0.02, 0.18)],
             );
-            // A raked funnel and a mast.
-            mesh.paint(Material::Hull);
-            mesh.beam([0.0, -0.17, -0.12], [0.0, -0.23, 0.06], 0.025, 0.03);
-            mesh.paint(Material::Metal);
-            mesh.frustum([0.0, -0.02], [0.08, 0.38], [0.014, 0.008], 6);
-            // A long quarterdeck aft, bare but for its missile cells.
+            // Two raked funnels side by side, and a mast.
+            for x in [-0.036_f32, 0.036] {
+                mesh.paint(Material::Hull);
+                mesh.beam([x, -0.2, -0.1], [x, -0.27, 0.1], 0.024, 0.032);
+                mesh.paint(Material::Metal);
+                mesh.beam([x, -0.266, 0.09], [x, -0.272, 0.11], 0.02, 0.027);
+            }
+            mesh.frustum([0.0, -0.02], [0.16, 0.44], [0.014, 0.008], 6);
+            // A broad missile deck aft, overhanging the hull either side, and a gun sponson out
+            // from each side amidships: wide at the stern and the waist, where a destroyer is
+            // lean from end to end.
             mesh.paint(Material::Trim);
-            mesh.block([-0.055, -0.465, -0.2], [0.055, -0.33, -0.17]);
+            mesh.bevel([-0.125, -0.49, -0.2], [0.125, -0.3, -0.15], 0.02);
             mesh.paint(Material::Metal);
-            for x in [-0.028_f32, 0.0, 0.028] {
-                mesh.block([x - 0.01, -0.45, -0.17], [x + 0.01, -0.345, -0.165]);
+            for x in [-0.08_f32, -0.027, 0.027, 0.08] {
+                mesh.block([x - 0.017, -0.47, -0.15], [x + 0.017, -0.32, -0.143]);
+            }
+            for x in [-0.105_f32, 0.105] {
+                mesh.paint(Material::Hull);
+                mesh.bevel([x - 0.035, -0.1, -0.3], [x + 0.035, 0.06, -0.17], 0.02);
+                mesh.paint(Material::Trim);
+                mesh.frustum([x, -0.02], [-0.17, -0.11], [0.026, 0.022], 6);
+                mesh.paint(Material::Metal);
+                mesh.beam([x, -0.02, -0.13], [x, 0.07, -0.13], 0.007, 0.007);
             }
             mesh.turret([0.0, 0.3], [-0.16, -0.08], 0.06, 2, 0.06, false);
             mesh.turret([0.0, 0.17], [-0.14, -0.05], 0.06, 2, 0.06, false);
@@ -2587,7 +2608,10 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.block([-0.03, -0.36, -0.255], [0.03, 0.36, -0.245]);
             mesh.paint(Material::Hull);
             mesh.block([-0.1, 0.1, -0.13], [0.1, 0.14, -0.115]);
-            mesh.block([-0.09, -0.46, -0.38], [0.09, -0.41, -0.365]);
+            // Broad diving planes at the bow and the stern: a hunter, slim between its fins,
+            // where the missile submarine is a long broad deck.
+            mesh.block([-0.18, 0.3, -0.34], [0.18, 0.37, -0.325]);
+            mesh.block([-0.15, -0.47, -0.38], [0.15, -0.4, -0.365]);
             mesh.block([-0.008, -0.47, -0.33], [0.008, -0.39, -0.21]);
             // The deck gun, forward of the sail.
             mesh.turret([0.0, 0.29], [-0.25, -0.2], 0.035, 1, 0.07, false);
@@ -2597,20 +2621,23 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Hull);
             mesh.prism(&outline, [-0.5, -0.3], [0.55, 1.0]);
             mesh.prism(&outline, [-0.3, -0.23], [1.0, 0.75]);
+            // A broad missile deck behind the tower, wider than the hull under it, with the
+            // team's stripe down each edge.
+            let deck = [[-0.13, -0.42], [0.13, -0.42], [0.13, 0.06], [0.09, 0.15], [-0.09, 0.15], [-0.13, 0.06]];
+            mesh.prism(&deck, [-0.34, -0.2], [0.85, 1.0]);
             mesh.paint(Material::Trim);
-            mesh.bevel([-0.036, 0.14, -0.25], [0.036, 0.34, -0.04], 0.02);
-            // The team's stripe down the deck, either side of the hatches.
-            for x in [-0.064_f32, 0.064] {
-                mesh.block([x - 0.01, -0.36, -0.235], [x + 0.01, 0.4, -0.225]);
+            mesh.bevel([-0.036, 0.16, -0.25], [0.036, 0.36, -0.04], 0.02);
+            for x in [-0.108_f32, 0.108] {
+                mesh.block([x - 0.018, -0.4, -0.2], [x + 0.018, 0.05, -0.192]);
             }
             mesh.paint(Material::Hull);
-            mesh.block([-0.095, 0.22, -0.09], [0.095, 0.26, -0.075]);
-            mesh.block([-0.008, -0.47, -0.3], [0.008, -0.38, -0.17]);
-            // Two long rows of missile hatches behind the tower.
+            mesh.block([-0.095, 0.24, -0.09], [0.095, 0.28, -0.075]);
+            mesh.block([-0.008, -0.47, -0.3], [0.008, -0.4, -0.17]);
+            // Two long rows of missile hatches down the deck.
             mesh.paint(Material::Glow);
-            for y in [-0.33_f32, -0.23, -0.13, -0.03, 0.07] {
-                for x in [-0.03_f32, 0.03] {
-                    mesh.block([x - 0.018, y - 0.03, -0.24], [x + 0.018, y + 0.03, -0.228]);
+            for y in [-0.35_f32, -0.25, -0.15, -0.05, 0.05] {
+                for x in [-0.045_f32, 0.045] {
+                    mesh.block([x - 0.028, y - 0.035, -0.2], [x + 0.028, y + 0.035, -0.19]);
                 }
             }
         }
