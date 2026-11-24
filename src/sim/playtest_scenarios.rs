@@ -10,6 +10,7 @@ use super::blueprints::{BlueprintDb, Res};
 use super::commands::SimCommand;
 use super::components::{SimId, Team};
 use super::config::{SimConfig, TerrainStyle};
+use super::grounds::Ground;
 use super::scenario::Scenario;
 use super::world::SimWorld;
 
@@ -37,6 +38,19 @@ pub struct PlaytestScenario {
     /// What to try in it.
     #[serde(rename = "try")]
     pub to_try: String,
+    /// Where it is fought: flat land unless it says (`land`, `water`, or `shore`), the balance
+    /// harness's grounds (`crate::sim::grounds`).
+    #[serde(default)]
+    pub ground: Ground,
+    /// The tier whose prices weigh each side, as the harness weighs a fight at its tier; the
+    /// highest tier among its units unless it says.
+    pub tier: Option<u8>,
+    /// The balance target it plays, a dotted path into data/balance_targets.toml, which the page
+    /// shows with its value.
+    pub target: Option<String>,
+    /// Blue's cost as a multiple of Red's, where the target asks for more than an equal cost: 1
+    /// unless it says. A test holds each scenario's sides to it.
+    pub blue_over_red: Option<f64>,
     /// The player's groups.
     pub blue: Vec<Group>,
     pub red: Vec<Group>,
@@ -84,11 +98,22 @@ impl Group {
 }
 
 impl PlaytestScenario {
+    /// The tier whose prices weigh its sides.
+    pub fn tier(&self, db: &BlueprintDb) -> u8 {
+        self.tier.unwrap_or_else(|| self.blue.iter().chain(&self.red).filter_map(|group| db.find(&group.unit)).map(|id| db.get(id).tier).max().unwrap_or(1))
+    }
+
     /// What is wrong with it against the unit data, if anything.
     pub fn problems(&self, db: &BlueprintDb) -> Vec<String> {
         let mut problems = Vec::new();
         if self.blue.is_empty() || self.red.is_empty() {
             problems.push(format!("{}: each side needs something", self.id));
+        }
+        if !matches!(self.tier, None | Some(1..=3)) {
+            problems.push(format!("{}: tier is 1, 2, or 3", self.id));
+        }
+        if self.blue_over_red.is_some_and(|ratio| ratio <= 0.0) {
+            problems.push(format!("{}: blue_over_red is a multiple above 0", self.id));
         }
         let first_at = self.blue.first().and_then(|group| group.at);
         if first_at.is_none() {
@@ -108,6 +133,14 @@ impl PlaytestScenario {
                     (false, Some(_), None) if group.count > 0 => {}
                     (false, ..) => problems.push(format!("{what}: units take a position and a count")),
                 }
+                // Every unit of a block on ground it can stand on: ships at sea, land units ashore.
+                if let (false, Some(_)) = (structure, group.at) {
+                    let team = if side == "blue" { Team::Blue } else { Team::Red };
+                    let moves = db.get(id).move_class();
+                    if block_points(db, group, team).iter().any(|&(x, _)| !self.ground.holds(MAP_UNITS, x, moves)) {
+                        problems.push(format!("{what}: some of the block stands where it cannot, on {}", self.ground.name()));
+                    }
+                }
                 match group.order.as_deref() {
                     None | Some("hold") => {}
                     Some("attack") if side == "red" && !structure => {}
@@ -121,7 +154,7 @@ impl PlaytestScenario {
     /// The scenario's world, with Red's opening orders, and fog of war as asked.
     pub fn build(&self, seed: u64, fog: bool) -> Scenario {
         let config = SimConfig { map_units: MAP_UNITS, terrain: TerrainStyle::Flat, fog_of_war: fog, ..SimConfig::default() };
-        let mut world = SimWorld::new(config, seed);
+        let mut world = self.ground.world(config, seed);
         let mut red_attackers = Vec::new();
         let mut red_start = None;
         for (team, groups) in [(Team::Red, &self.red), (Team::Blue, &self.blue)] {
@@ -164,20 +197,23 @@ fn point(x: i32, y: i32) -> Vec2Fp {
     Vec2Fp::new(fp_int(x), fp_int(y))
 }
 
-/// A block of a group's units, its first row at `at`, the rest behind it: west for Blue, east for
-/// Red.
-fn spawn_block(world: &mut SimWorld, group: &Group, team: Team) -> Vec<SimId> {
-    let blueprint = world.blueprints.id(&group.unit);
+/// Where a block of a group's units stands, its first row at `at`, the rest behind it: west for
+/// Blue, east for Red.
+fn block_points(db: &BlueprintDb, group: &Group, team: Team) -> Vec<(i32, i32)> {
     let [x, y] = group.at.expect("units have a position");
-    let radius = world.blueprints.get(blueprint).radius.to_num::<i32>().max(4);
+    let radius = db.get(db.id(&group.unit)).radius.to_num::<i32>().max(4);
     let spacing = radius * SPACING_RADII;
     let columns = group.columns.unwrap_or(COLUMNS).clamp(1, group.count.max(1)) as i32;
     let back = if team == Team::Blue { -1 } else { 1 };
     (0..group.count as i32)
         .map(|index| {
             let (row, column) = (index / columns, index % columns);
-            let along = y + (column * 2 - (columns - 1)) * spacing / 2;
-            world.spawn_mobile(blueprint, team, point(x + back * row * spacing, along))
+            (x + back * row * spacing, y + (column * 2 - (columns - 1)) * spacing / 2)
         })
         .collect()
+}
+
+fn spawn_block(world: &mut SimWorld, group: &Group, team: Team) -> Vec<SimId> {
+    let blueprint = world.blueprints.id(&group.unit);
+    block_points(&world.blueprints, group, team).into_iter().map(|(x, y)| world.spawn_mobile(blueprint, team, point(x, y))).collect()
 }

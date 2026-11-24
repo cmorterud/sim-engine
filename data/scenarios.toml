@@ -4,7 +4,9 @@
 # units, materiel, reach, and sight worked out from data/units.toml. So the text here names no
 # unit's numbers, which would go stale: the page shows them.
 #
-# Each is on flat open ground, the duel ground's size. You play Blue, in the west, with no
+# Each is on the duel ground, its size and, unless it says (`ground = "water"` or `"shore"`, the
+# sea in the west and land in the east), flat open land. Each side's materiel is valued as the
+# harness values it, energy at the tier's rate (`tier`, or its units' highest). You play Blue, in the west, with no
 # commander, no factories, and no income: only the units listed. Red's units attack-move at your
 # first group from the start ("attack"), or stand where they are and fire at whatever comes in
 # range ("hold", the default); structures hold. Both sides have the energy to keep shields up and
@@ -105,3 +107,241 @@ red = [
     { unit = "t1_medium_tank", count = 18, at = [3_000, 2_560], columns = 9 },
     { unit = "t1_mobile_aa", count = 4, at = [3_080, 2_560], columns = 4 },
 ]
+
+# Fights between domains (2026-11-24): each plays a `[domains]` cell of data/balance_targets.toml,
+# named by `target`, at the counts the harness fights it with (`--balance-derive domains`), and on
+# its ground. Mostly you play the side the target says should lose, to see whether it holds up
+# against a player. Red's fleets hold where they are, as a fleet at anchor guarding its water.
+
+[[scenario]]
+id = "navy_t2_fleet_against_air"
+title = "Navy against air: a T2 fleet against an equal cost of the T2 air force"
+ground = "water"
+target = "domains.cells.fleet_beats_air_force_t2"
+shows = "A composed T2 fleet, destroyers, cruisers, and shield corvettes, against an equal cost of the air force the AI builds: interceptors, gunships, and fighter-bombers. The cruisers' anti-air bursts over massed aircraft, so the fleet wins clearly. The interceptors have nothing to fight here: that is part of what an air player pays for at sea."
+try = "Attack-move in once. Then go for the cruisers first with everything, from one side, and keep the interceptors out of it."
+blue = [
+    { unit = "t1_interceptor", count = 24, at = [1_300, 2_560], columns = 8 },
+    { unit = "t2_fighter_bomber", count = 16, at = [1_180, 2_560], columns = 8 },
+    { unit = "t2_gunship", count = 32, at = [1_080, 2_560], columns = 8 },
+]
+red = [
+    { unit = "t2_destroyer", count = 4, at = [3_000, 2_560], columns = 4 },
+    { unit = "t2_escort_corvette", count = 2, at = [3_060, 2_560], columns = 2 },
+    { unit = "t2_cruiser", count = 4, at = [3_120, 2_560], columns = 4 },
+]
+
+[[scenario]]
+id = "navy_t2_fleet_against_torpedo_bombers"
+title = "Overwhelming torpedo bombers: twice a T2 fleet's cost"
+ground = "water"
+target = "domains.cells.torpedo_bombers_to_break_fleet_t2"
+blue_over_red = 2.0
+shows = "Torpedo bombers worth twice the fleet. Torpedoes go under the corvettes' shields, but the destroyers' and corvettes' anti-torpedo charges stop some, and the cruisers shoot the bombers down as they come. At twice its cost they come out about even with it: it takes overwhelming numbers."
+try = "Send them all at once. Then try waves, and try going for the cruisers first, which carry the fleet's anti-air."
+blue = [{ unit = "t2_torpedo_bomber", count = 117, at = [1_200, 2_560], columns = 13 }]
+red = [
+    { unit = "t2_destroyer", count = 4, at = [3_000, 2_560], columns = 4 },
+    { unit = "t2_escort_corvette", count = 2, at = [3_060, 2_560], columns = 2 },
+    { unit = "t2_cruiser", count = 4, at = [3_120, 2_560], columns = 4 },
+]
+
+[[scenario]]
+id = "navy_destroyers_against_torpedo_bombers"
+title = "Skipping anti-air: destroyers alone against torpedo bombers"
+ground = "water"
+target = "domains.cells.fleet_without_anti_air_loses_to_torpedo_bombers"
+shows = "Destroyers with no cruisers or corvettes, against an equal cost of torpedo bombers. Their anti-torpedo charges stop only a few of the torpedoes a wing drops, and they have next to no anti-air: the bombers win easily. A fleet that skips anti-air loses to the air."
+try = "Attack-move in, and compare with the T2 fleet against twice its cost in torpedo bombers."
+blue = [{ unit = "t2_torpedo_bomber", count = 55, at = [1_200, 2_560], columns = 11 }]
+red = [{ unit = "t2_destroyer", count = 8, at = [3_000, 2_560], columns = 4 }]
+
+[[scenario]]
+id = "navy_submarines_against_cruisers"
+title = "Skipping anti-submarine: submarines against cruisers and corvettes"
+ground = "water"
+target = "domains.cells.submarines_beat_fleet_without_anti_submarine"
+blue_over_red = 0.86
+shows = "Attack Submarines against cruisers and shield corvettes, a fleet with nothing that reaches under the water. The submarines win without loss, though slowly. The harness's count of submarines is a little under the fleet's cost."
+try = "Attack-move in. Then go for the corvettes first, and see whether it is any faster."
+blue = [{ unit = "t1_attack_sub", count = 24, at = [1_400, 2_560], columns = 6 }]
+red = [
+    { unit = "t2_escort_corvette", count = 2, at = [3_000, 2_560], columns = 2 },
+    { unit = "t2_cruiser", count = 4, at = [3_060, 2_560], columns = 4 },
+]
+
+[[scenario]]
+id = "navy_destroyers_against_submarines"
+title = "Hunting submarines: destroyers against submarines"
+ground = "water"
+target = "domains.cells.destroyers_beat_submarines"
+shows = "Destroyers, the fleet's submarine hunters, against an equal cost of Attack Submarines. The destroyers' torpedoes outrange the submarines', and their charges stop some of what comes back: they win."
+try = "Attack-move in. Then spread the submarines out and close from several sides at once."
+blue = [{ unit = "t1_attack_sub", count = 25, at = [1_400, 2_560], columns = 5 }]
+red = [{ unit = "t2_destroyer", count = 4, at = [3_000, 2_560], columns = 4 }]
+
+[[scenario]]
+id = "navy_t2_fleet_against_hovercraft"
+title = "Hovercraft at sea: against an equal cost of a T2 fleet"
+ground = "water"
+target = "domains.cells.hovercraft_loses_to_fleet"
+shows = "Assault Hovercraft cross water that tanks cannot, and pay for it: on the sea, against an equal cost of a T2 fleet, they lose clearly. The cruisers' missiles reach them long before they reach the fleet."
+try = "Attack-move in. Then rush the destroyers in a spread, as fast as they go."
+blue = [{ unit = "t2_assault_hovercraft", count = 60, at = [1_400, 2_560], columns = 10 }]
+red = [
+    { unit = "t2_destroyer", count = 4, at = [3_000, 2_560], columns = 4 },
+    { unit = "t2_escort_corvette", count = 2, at = [3_060, 2_560], columns = 2 },
+    { unit = "t2_cruiser", count = 4, at = [3_120, 2_560], columns = 4 },
+]
+
+[[scenario]]
+id = "navy_cruiser_against_a_coast"
+title = "From the sea: a Cruiser against a coastal T2 position"
+ground = "shore"
+target = "domains.cells.coastal_seconds_max"
+blue_over_red = 0.67
+shows = "A Cruiser at sea against point defenses under a shield, ashore. Its cruise missiles outrange the point defenses three times over, so it breaks the position without loss. One cruiser is two-thirds of the position's cost, as the harness buys whole ships, so an equal cost would be quicker still. Inland, beyond its reach, is safe from ships: that is navy's limit."
+try = "Attack-move at the position and time it. Then sail in within the point defenses' reach."
+blue = [{ unit = "t2_cruiser", count = 1, at = [600, 2_560] }]
+red = [
+    { unit = "shield_generator", cell = [127, 127] },
+    { unit = "t2_point_defense", cell = [124, 128] },
+    { unit = "t2_point_defense", cell = [132, 128] },
+    { unit = "t2_point_defense", cell = [128, 124] },
+]
+
+[[scenario]]
+id = "navy_destroyer_against_torpedo_launchers"
+title = "Defending a coast: a Destroyer closing on T2 torpedo launchers"
+ground = "shore"
+target = "domains.cells.destroyers_break_torpedo_launchers"
+blue_over_red = 0.68
+shows = "Torpedo launchers are the coast's answer to ships. A Destroyer, which must close to fight, sails in on three of them: its anti-torpedo charge stops one torpedo at a time, and each launcher fires four at once, so it is sunk before it breaks them. One destroyer is two-thirds of their cost, as the harness buys whole ships."
+try = "Attack-move in. Then try to pick off one launcher from the edge of the others' reach."
+blue = [{ unit = "t2_destroyer", count = 1, at = [600, 2_560] }]
+red = [
+    { unit = "t2_torpedo_launcher", cell = [106, 124] },
+    { unit = "t2_torpedo_launcher", cell = [106, 130] },
+    { unit = "t2_torpedo_launcher", cell = [109, 127] },
+]
+
+[[scenario]]
+id = "navy_frigates_against_torpedo_launchers"
+title = "Defending a coast at T1: Frigates closing on T1 torpedo launchers"
+ground = "shore"
+target = "domains.cells.frigates_break_t1_torpedo_launchers"
+shows = "Frigates against about an equal cost of T1 torpedo launchers. Frigates cannot hurt anything under the water from range, and the launchers sink them as they close."
+try = "Attack-move in, then try to rush one launcher with every frigate at once."
+blue = [{ unit = "t1_frigate", count = 4, at = [600, 2_560], columns = 4 }]
+red = [
+    { unit = "t1_torpedo_launcher", cell = [107, 124] },
+    { unit = "t1_torpedo_launcher", cell = [107, 131] },
+    { unit = "t1_torpedo_launcher", cell = [110, 127] },
+]
+
+[[scenario]]
+id = "navy_frigates_against_t1_bombers"
+title = "T1 at sea: Frigates against T1 bombers"
+ground = "water"
+target = "domains.cells.frigates_against_t1_bombers_at_least"
+shows = "Frigates hold their own against an equal cost of Attack Bombers over the water, so that early ships are not shut down by cheaper aircraft: about even, the frigates' anti-air set for it."
+try = "Bomb them in one pass. Then come in from several sides at once."
+blue = [{ unit = "t1_bomber", count = 15, at = [600, 2_560] }]
+red = [{ unit = "t1_frigate", count = 12, at = [3_000, 2_560], columns = 6 }]
+
+[[scenario]]
+id = "navy_t3_fleet_against_air"
+title = "Navy against air at T3: a massed fleet against an equal cost of the T3 air force"
+ground = "water"
+target = "domains.cells.fleet_beats_air_force_t3"
+shows = "A massed T3 fleet, a Battleship and a Battlecruiser with cruisers, destroyers, and shield corvettes seven-tenths of its cost, against an equal cost of the T3 air force: air superiority fighters and heavy gunships. The escorts keep the air off the capital ships, and the fleet keeps nearly all of itself."
+try = "Attack-move in. Then send the heavy gunships at the cruisers, one at a time, before going for the battleship."
+blue = [
+    { unit = "t3_air_superiority", count = 15, at = [1_300, 2_560], columns = 8 },
+    { unit = "t3_heavy_gunship", count = 20, at = [1_220, 2_560], columns = 10 },
+]
+red = [
+    { unit = "t2_destroyer", count = 4, at = [3_000, 2_560], columns = 4 },
+    { unit = "t2_cruiser", count = 12, at = [3_080, 2_560], columns = 6 },
+    { unit = "t2_escort_corvette", count = 4, at = [3_220, 2_560], columns = 4 },
+    { unit = "t3_battleship", count = 1, at = [3_330, 2_480] },
+    { unit = "t3_battlecruiser", count = 1, at = [3_330, 2_650] },
+]
+
+[[scenario]]
+id = "navy_t3_fleet_against_torpedo_bombers"
+title = "Overwhelming torpedo bombers at T3: twice a massed fleet's cost"
+ground = "water"
+target = "domains.cells.torpedo_bombers_to_break_fleet_t3"
+blue_over_red = 2.0
+shows = "Torpedo bombers worth twice the massed T3 fleet, hundreds of them. The fleet's escorts carry its defense: the cruisers' anti-air bursts over the swarm and the destroyers' charges stop torpedoes, while the capital ships, with next to no anti-air and no anti-torpedo charge of their own, soak up what gets through. It comes out about even: a massed, escorted fleet takes overwhelming air to break."
+try = "Send them all at once. Then go for the cruisers first, and see how much sooner the battleship goes once they are gone."
+blue = [{ unit = "t2_torpedo_bomber", count = 328, at = [1_200, 2_560], columns = 20 }]
+red = [
+    { unit = "t2_destroyer", count = 4, at = [3_000, 2_560], columns = 4 },
+    { unit = "t2_cruiser", count = 12, at = [3_080, 2_560], columns = 6 },
+    { unit = "t2_escort_corvette", count = 4, at = [3_220, 2_560], columns = 4 },
+    { unit = "t3_battleship", count = 1, at = [3_330, 2_480] },
+    { unit = "t3_battlecruiser", count = 1, at = [3_330, 2_650] },
+]
+
+[[scenario]]
+id = "navy_capital_ships_without_escorts"
+title = "Skimping on escorts: a battleship-heavy fleet against torpedo bombers"
+ground = "water"
+target = "domains.cells.battleship_heavy_fleet_breaks_to_torpedo_bombers_at_most"
+shows = "Battleships and battlecruisers with one each of the escorts for every pair, three-quarters of the fleet's cost in capital ships, against an equal cost of torpedo bombers. Without enough cruisers and destroyers, the capital ships are prey: the bombers break the fleet for far less than its cost. This is the counterplay to skimping on escorts."
+try = "Attack-move in, and compare with the massed fleet against twice its cost."
+blue = [{ unit = "t2_torpedo_bomber", count = 132, at = [1_200, 2_560], columns = 12 }]
+red = [
+    { unit = "t2_destroyer", count = 2, at = [3_000, 2_560], columns = 2 },
+    { unit = "t2_cruiser", count = 2, at = [3_060, 2_560], columns = 2 },
+    { unit = "t2_escort_corvette", count = 2, at = [3_120, 2_560], columns = 2 },
+    { unit = "t3_battleship", count = 2, at = [3_260, 2_560], columns = 2 },
+    { unit = "t3_battlecruiser", count = 2, at = [3_420, 2_560], columns = 2 },
+]
+
+[[scenario]]
+id = "navy_battleship_against_a_coast"
+title = "From the sea at T3: a Battleship against a coastal T3 position"
+ground = "shore"
+target = "domains.cells.coastal_seconds_max"
+blue_over_red = 0.70
+shows = "A Battleship at sea against heavy point defenses under a heavy shield, ashore. It outranges them twice over and breaks the position without loss. One battleship is seven-tenths of the position's cost, as the harness buys whole ships, so an equal cost would be quicker."
+try = "Attack-move at the position and time it. Then sail in within the heavy point defenses' reach."
+blue = [{ unit = "t3_battleship", count = 1, at = [600, 2_560] }]
+red = [
+    { unit = "t3_heavy_shield", cell = [127, 127] },
+    { unit = "t3_heavy_point_defense", cell = [124, 128] },
+    { unit = "t3_heavy_point_defense", cell = [132, 128] },
+    { unit = "t3_heavy_point_defense", cell = [128, 124] },
+]
+
+[[scenario]]
+id = "air_t2_against_a_land_army"
+title = "Air against land at T2: the T2 air force against an army a fifth anti-air"
+ground = "land"
+target = "domains.cells.air_force_against_land_army_t2_even"
+shows = "The T2 air force against an equal cost of a T2 land army with a fifth of it in Mobile Flak, as the anti-air rule has it. About even: an army that brings its anti-air holds off the air, and one that skips it does not."
+try = "Attack-move in. Then go for the flak first with the fighter-bombers, and bring the gunships in after."
+blue = [
+    { unit = "t1_interceptor", count = 6, at = [1_300, 2_560], columns = 6 },
+    { unit = "t2_fighter_bomber", count = 4, at = [1_250, 2_560], columns = 4 },
+    { unit = "t2_gunship", count = 8, at = [1_190, 2_560], columns = 8 },
+]
+red = [
+    { unit = "t2_heavy_tank", count = 8, at = [3_000, 2_560], columns = 8 },
+    { unit = "t2_grenadier_walker", count = 4, at = [3_040, 2_560], columns = 4 },
+    { unit = "t2_mobile_missile_launcher", count = 4, at = [3_080, 2_560], columns = 4 },
+    { unit = "t2_mobile_flak", count = 8, at = [3_120, 2_560], columns = 8 },
+]
+
+[[scenario]]
+id = "hover_against_heavy_tanks"
+title = "Hovercraft on land: Assault Hovercraft against Heavy Tanks"
+ground = "land"
+target = "domains.cells.hovercraft_over_heavy_tank_on_land"
+shows = "On land, the hovercraft is about as strong for its cost as the Heavy Tank: it pays for crossing water at sea, not here."
+try = "Fight it straight, then use the hovercraft's speed to flank."
+blue = [{ unit = "t2_assault_hovercraft", count = 10, at = [1_400, 2_560] }]
+red = [{ unit = "t2_heavy_tank", count = 20, at = [3_200, 2_560], columns = 10, order = "attack" }]
