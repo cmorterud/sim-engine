@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::f32::consts::FRAC_1_SQRT_2;
 
 use super::meshes::Shape;
+use super::pipeline::LOD_DOT_RATIO;
 use crate::sim::blueprints::BlueprintDb;
 use crate::sim::components::{SimId, Team, WreckKind};
 use crate::sim::world::{ProjectileKind, ProjectileView, ShieldView, UnitView, WorkLinkView};
@@ -142,6 +143,15 @@ fn instance(center: [f64; 3], size: [f32; 3], heading: [f32; 2], color: [f32; 3]
         hull: bytes(color),
         glow: bytes(color),
     }
+}
+
+/// Whether a part is so far from the eye that all of it is drawn as its tactical dot, as the
+/// shader works out for each of its vertices (`dot_morph`): a square in its team color, the same
+/// whatever its shape. Such a unit is drawn from a plain box, a dozen triangles in place of its
+/// model's hundreds, with nothing to tell them apart on screen.
+fn is_dot(part: &UnitInstanceRaw) -> bool {
+    let length = |[x, y, z, _]: [f32; 4]| (x * x + y * y + z * z).sqrt();
+    part.color[3] > NO_ICON && length(part.model_matrix[0]) / length(part.model_matrix[3]).max(0.001) <= LOD_DOT_RATIO
 }
 
 /// A unit's part, with its hull and glowing parts colored apart from its team color.
@@ -647,12 +657,18 @@ pub fn build_unit_instances(
             let color = if unit.remembered { remembered_color(color) } else { color };
             // Nothing glows until it is finished.
             let glow = if unit.built_permille >= 1000 && !unit.remembered { glow } else { hull };
-            // A structure's base stays put, and its gun, if any, turns to aim.
-            if let Some(base) = look.and_then(|look| look.base) {
-                out.push(base, animated(painted(center, [size, size, height], NORTH, trim, hull, glow, UNIT_ICON_PX * 1.6, eye), 0));
-            }
+            // A structure's base stays put, and its gun, if any, turns to aim. Far off, where it
+            // is only a dot, one box draws it.
             let aim = unit_vector(unit.aim).unwrap_or(NORTH);
-            out.push(shape, animated(painted(center, [size, size, height], aim, trim, hull, glow, UNIT_ICON_PX * 1.6, eye), spin));
+            let body = animated(painted(center, [size, size, height], aim, trim, hull, glow, UNIT_ICON_PX * 1.6, eye), spin);
+            if is_dot(&body) {
+                out.push(Shape::Cube, body);
+            } else {
+                if let Some(base) = look.and_then(|look| look.base) {
+                    out.push(base, animated(painted(center, [size, size, height], NORTH, trim, hull, glow, UNIT_ICON_PX * 1.6, eye), 0));
+                }
+                out.push(shape, body);
+            }
             // The foundation it stands on, laid before it rises, a little wider than it: a level
             // slab from the highest ground under it to below the lowest.
             if look.is_some_and(|look| look.apron) {
@@ -727,15 +743,21 @@ pub fn build_unit_instances(
             };
             // A ship, vehicle, or aircraft may be drawn longer or shorter than its footprint.
             let drawn = look.map(|look| look.length).filter(|&length| length > 0.0).unwrap_or(size);
-            if let Some(base) = look.and_then(|look| look.base) {
-                let stride = if base.walks() { byte(motion.stride(unit.id, center, drawn)) } else { 0 };
-                out.push(base, animated(painted(center, [drawn; 3], body, color, hull, glow, UNIT_ICON_PX, eye), stride));
-            }
-            out.push(shape, animated(painted(center, [drawn; 3], upper, color, hull, glow, UNIT_ICON_PX, eye), spin));
-            if let Some(look) = look {
-                let aim = |weapon| turned(weapon_aim(unit, weapon), before.map(|before| weapon_aim(before, weapon)), alpha);
-                for (at, facing) in mounted_turrets(look, center, [drawn; 3], body, aim) {
-                    out.push(Shape::NavalTurret, animated(painted(at, [drawn; 3], facing, color, hull, glow, UNIT_ICON_PX, eye), 0));
+            // Far off, where it is only a dot, one box draws all of it: hull, body, and turrets.
+            let top = animated(painted(center, [drawn; 3], upper, color, hull, glow, UNIT_ICON_PX, eye), spin);
+            if is_dot(&top) {
+                out.push(Shape::Cube, top);
+            } else {
+                if let Some(base) = look.and_then(|look| look.base) {
+                    let stride = if base.walks() { byte(motion.stride(unit.id, center, drawn)) } else { 0 };
+                    out.push(base, animated(painted(center, [drawn; 3], body, color, hull, glow, UNIT_ICON_PX, eye), stride));
+                }
+                out.push(shape, top);
+                if let Some(look) = look {
+                    let aim = |weapon| turned(weapon_aim(unit, weapon), before.map(|before| weapon_aim(before, weapon)), alpha);
+                    for (at, facing) in mounted_turrets(look, center, [drawn; 3], body, aim) {
+                        out.push(Shape::NavalTurret, animated(painted(at, [drawn; 3], facing, color, hull, glow, UNIT_ICON_PX, eye), 0));
+                    }
                 }
             }
         }
@@ -818,8 +840,14 @@ pub fn wreck_model_instances(center: [f64; 3], radius: f64, look: &UnitLook, fac
     let ground = center[2] - radius * 0.5;
     let at = [center[0], center[1], ground + f64::from(height) * 0.35];
     let (char_dark, char_light) = (WRECK, WRECK.map(|channel| channel * 1.35));
+    let part = painted(at, [size, size, height], facing, char_dark, char_light, char_dark, PROJECTILE_ICON_PX, eye);
+    // Far off, where it is only a dot, one box draws it.
+    if is_dot(&part) {
+        out.push(Shape::Cube, part);
+        return;
+    }
     for shape in look.base.into_iter().chain([look.shape]) {
-        out.push(shape, painted(at, [size, size, height], facing, char_dark, char_light, char_dark, PROJECTILE_ICON_PX, eye));
+        out.push(shape, part);
     }
     for (turret_at, turret_facing) in mounted_turrets(look, at, [size, size, height], facing, |_| None) {
         out.push(Shape::NavalTurret, painted(turret_at, [size, size, height], turret_facing, char_dark, char_light, char_dark, PROJECTILE_ICON_PX, eye));
@@ -1590,6 +1618,93 @@ mod tests {
                 assert!(look.turrets.iter().flatten().any(|mount| usize::from(mount.weapon) == index), "{}'s weapon {index} is mounted but not drawn on a turret", unit.key);
             }
         }
+    }
+
+    /// A unit too far off to be more than its dot is drawn from one plain box, in place of its
+    /// hull, body, and turrets: the same dot, in the same place and color, for a fraction of
+    /// the triangles. Any nearer, it is still its own model.
+    #[test]
+    fn a_unit_far_enough_to_be_only_a_dot_is_drawn_from_one_box() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let look = &looks[usize::from(db.id("t3_battleship").0)];
+        let mut ship = unit(1, 0);
+        ship.blueprint = db.id("t3_battleship").0;
+        ship.radius = db.get(db.id("t3_battleship")).radius.to_bits();
+        ship.facing = [0, 4096];
+        let draw = |height: f64| {
+            let mut out = InstanceBatches::default();
+            build_unit_instances(&[ship], &[ship], 1.0, [0.0, 0.0, height], &[], &looks, &[], &mut Motion::new(), &mut out);
+            out
+        };
+        let near = draw(500.0);
+        assert!(near.shape(Shape::Cube).is_empty(), "close up it is its own model");
+        assert_eq!(near.shape(Shape::NavalTurret).len(), 3);
+        let body = near.shape(look.shape)[0];
+        // The distance at which the shader has it wholly a dot.
+        let dot_distance = f64::from(body.model_matrix[0][1].hypot(body.model_matrix[0][0]) / LOD_DOT_RATIO);
+        let closer = draw(dot_distance * 0.99);
+        assert!(closer.shape(Shape::Cube).is_empty() && closer.shape(look.shape).len() == 1, "still partly its model just short of that");
+        let far = draw(dot_distance * 1.01);
+        assert_eq!(far.total(), 1, "one box for the hull, the body, and the turrets");
+        let dot = far.shape(Shape::Cube)[0];
+        assert_eq!(dot.color, body.color, "the dot keeps its team color and size");
+        assert_eq!(dot.model_matrix[..3], body.model_matrix[..3], "and the size it is judged far by");
+    }
+
+    /// Structures and wrecks too. What never becomes a dot, such as a structure's foundation,
+    /// is drawn as it was.
+    #[test]
+    fn a_far_structure_and_a_far_wreck_are_each_drawn_from_one_box() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let key = db.id("t3_artillery");
+        let look = &looks[usize::from(key.0)];
+        let base = look.base.expect("the T3 artillery stands on an emplacement");
+        let mut gun = unit(1, 0);
+        gun.blueprint = key.0;
+        gun.radius = db.get(key).radius.to_bits();
+        gun.is_structure = true;
+        let draw = |height: f64| {
+            let mut out = InstanceBatches::default();
+            build_unit_instances(&[], &[gun], 0.0, [0.0, 0.0, height], &[], &looks, &[], &mut Motion::new(), &mut out);
+            out
+        };
+        let near = draw(300.0);
+        assert!(near.shape(Shape::Cube).is_empty() && near.shape(look.shape).len() == 1 && near.shape(base).len() == 1);
+        let far = draw(1.0e6);
+        assert_eq!(far.shape(Shape::Cube).len(), 1);
+        assert!(far.shape(look.shape).is_empty() && far.shape(base).is_empty(), "neither its gun nor its emplacement is sent");
+        assert_eq!(far.shape(Shape::Apron).len(), near.shape(Shape::Apron).len(), "its foundation is drawn as before");
+
+        let tank = &looks[usize::from(db.id("t1_medium_tank").0)];
+        let wreck = |height: f64| {
+            let mut out = InstanceBatches::default();
+            wreck_model_instances([0.0, 0.0, 4.5], 9.0, tank, [1.0, 0.0], [0.0, 0.0, height], &mut out);
+            out
+        };
+        assert!(wreck(500.0).shape(Shape::Cube).is_empty());
+        let far = wreck(1.0e6);
+        assert_eq!((far.total(), far.shape(Shape::Cube).len()), (1, 1));
+    }
+
+    /// The box's dot is the whole square, as a model's is: its corners lie in all four quarters,
+    /// which is all the shader takes from a shape once it is a dot. And what has no dot, such as
+    /// a selection ring, is never taken for one however far off.
+    #[test]
+    fn the_box_makes_a_whole_dot_and_what_has_no_dot_is_never_one() {
+        let set = super::super::meshes::MeshSet::build();
+        let range = set.ranges[Shape::Cube as usize].clone();
+        let mut quarters = [false; 4];
+        for &index in &set.indices[range.start as usize..range.end as usize] {
+            let [x, y, _] = set.vertices[index as usize].position;
+            assert!(x != 0.0 && y != 0.0);
+            quarters[usize::from(x > 0.0) * 2 + usize::from(y > 0.0)] = true;
+        }
+        assert_eq!(quarters, [true; 4]);
+        let far = [0.0, 0.0, 1.0e6];
+        assert!(is_dot(&instance([0.0; 3], [10.0; 3], NORTH, BLUE, UNIT_ICON_PX, far)));
+        assert!(!is_dot(&instance([0.0; 3], [10.0; 3], NORTH, BLUE, NO_ICON, far)));
     }
 
     /// Each of a battleship's turrets turns to its own gun's aim, where it stands on the hull,

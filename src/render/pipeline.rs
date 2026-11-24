@@ -32,7 +32,7 @@ pub fn strategic_share(zoom_from_closest: f64) -> f32 {
 
 /// The size-to-distance ratios where a unit is fully a dot, and fully a cube. Based on
 /// apparent size, so that large units stay solid for longer. About 4 and 8 pixels at 1080p.
-const LOD_DOT_RATIO: f32 = 0.003;
+pub(super) const LOD_DOT_RATIO: f32 = 0.003;
 const LOD_CUBE_RATIO: f32 = 0.006;
 pub const FOG_CELL_UNITS: f64 = 80.0;
 
