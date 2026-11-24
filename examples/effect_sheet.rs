@@ -22,7 +22,7 @@ use winit::dpi::LogicalSize;
 use winit::event_loop::EventLoop;
 use winit::window::WindowBuilder;
 
-const MAP: f64 = 8_192.0;
+const MAP: f64 = 16_384.0;
 const CELL: f64 = 20.0;
 /// Land is this high, and the sea floor this deep, under a sea level of 0 across the map's
 /// middle third, from north to south.
@@ -67,7 +67,7 @@ fn main() {
         Row { key: "t1_bomber", kind: ProjectileKind::Shell, at_sea: false, burst_height: 0.0, stand_off: 200.0, moments: soon },
         Row { key: "t1_torpedo_launcher", kind: ProjectileKind::Shell, at_sea: true, burst_height: 0.0, stand_off: 110.0, moments: soon },
         Row { key: "tactical_missile_launcher", kind: ProjectileKind::TacticalMissile, at_sea: false, burst_height: 0.0, stand_off: 150.0, moments: soon },
-        Row { key: "strategic_missile_launcher", kind: ProjectileKind::StrategicMissile, at_sea: false, burst_height: 0.0, stand_off: 2_600.0, moments: [0.3, 2.5, 7.0] },
+        Row { key: "strategic_missile_launcher", kind: ProjectileKind::StrategicMissile, at_sea: false, burst_height: 0.0, stand_off: 2_000.0, moments: [0.5, 3.0, 8.0] },
     ];
 
     let db = BlueprintDb::standard();
@@ -130,13 +130,16 @@ fn main() {
             let alpha = f64::from(step) / 10.0;
             flying.trail(&first, &second, alpha, &looks, water, 0.1 + alpha * 0.1);
         }
-        // Blasts are seen at 45 degrees, as close up in a game, so that what rises shows.
+        // Blasts are seen at 45 degrees, as close up in a game, so that what rises shows; a nuclear
+        // cloud from low down, nearly side on, and looking at the middle of the cloud, so that
+        // its column and cap show.
+        let nuclear = row.kind == ProjectileKind::StrategicMissile;
         let draw = |renderer: &mut Renderer, effects: &mut Effects, look: [f64; 3], altitude: f64, time: f64, projectiles: bool| {
             let mut camera = Camera::new(MAP, [f64::from(size.width), f64::from(size.height)]);
             camera.look_at(look[0], look[1], look[2] + altitude);
             camera.update(0.0, &field);
             if !projectiles {
-                camera.orbit(0.0, 45.0 - camera.pitch_degrees());
+                camera.orbit(0.0, if nuclear { 20.0 } else { 45.0 } - camera.pitch_degrees());
                 camera.update(0.0, &field);
             }
             let beyond = (look[2] - ground(look[0], look[1]).max(0.0)).max(0.0) / camera.pitch_degrees().to_radians().tan();
@@ -158,7 +161,7 @@ fn main() {
         let third = snapshot(3, Vec::new(), vec![shot(5, 0.0, 0.0)]);
         landing.note_events(&snapshot(0, Vec::new(), Vec::new()), &second, 0.1, &ground, water, &looks);
         landing.note_events(&second, &third, 0.3, &ground, water, &looks);
-        let blast_at = [x, y, floor + row.burst_height];
+        let blast_at = [x, y, floor + row.burst_height + if nuclear { 700.0 } else { 0.0 }];
         for moment in row.moments {
             tiles.push(draw(&mut renderer, &mut landing, blast_at, row.stand_off, 0.3 + moment, false));
         }

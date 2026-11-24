@@ -17,6 +17,8 @@ const MAX_PUFFS: usize = 6_000;
 const TRAIL_SPACING: f64 = 0.6;
 /// How opaque smoke is when fresh. It thins away as it ages.
 const SMOKE_OPACITY: f32 = 0.55;
+/// How opaque dense smoke is, a nuclear cloud's: nearly solid, until near the end of its life.
+const DENSE_SMOKE_OPACITY: f32 = 0.92;
 /// How far apart a ship's wake puffs are, as a share of the ship's size.
 const WAKE_SPACING: f64 = 0.35;
 /// How far apart a ship's bow spray is thrown, as a share of its radius, and the bit that
@@ -85,6 +87,9 @@ struct Puff {
     height_share: f32,
     color: [f32; 3],
     fade_to: [f32; 3],
+    /// Smoke that stays thick most of its life and thins only at the end, as a nuclear cloud
+    /// does, rather than thinning all the way, as a shell's smoke does.
+    dense: bool,
 }
 
 impl Puff {
@@ -250,10 +255,10 @@ impl Effects {
     fn fireball(&mut self, at: [f64; 3], size: f32, time: f64, seed: u64) -> f64 {
         let life = 0.25 + f64::from(size).sqrt() * 0.08;
         if size < LOBED_FIREBALL {
-            self.add(Puff { shape: Shape::Fireball, at, rise: 0.0, born: time, life, size: size / FIREBALL_PEAK, growth: FIREBALL_GROWTH, height_share: 1.0, color: FIRE_HOT, fade_to: FIRE_COOL });
+            self.add(Puff { shape: Shape::Fireball, at, rise: 0.0, born: time, life, size: size / FIREBALL_PEAK, growth: FIREBALL_GROWTH, height_share: 1.0, color: FIRE_HOT, fade_to: FIRE_COOL, dense: false });
             return life;
         }
-        self.add(Puff { shape: Shape::Fireball, at, rise: 0.0, born: time, life: life * 0.6, size: size * 0.5 / FIREBALL_PEAK, growth: FIREBALL_GROWTH, height_share: 1.0, color: FLASH_WHITE, fade_to: FIRE_HOT });
+        self.add(Puff { shape: Shape::Fireball, at, rise: 0.0, born: time, life: life * 0.6, size: size * 0.5 / FIREBALL_PEAK, growth: FIREBALL_GROWTH, height_share: 1.0, color: FLASH_WHITE, fade_to: FIRE_HOT, dense: false });
         for index in 0..4 {
             let angle = (index as f64 + noise(seed ^ (index * 17 + 1)) * 0.6) / 4.0 * std::f64::consts::TAU;
             let reach = f64::from(size) * 0.22 * (0.7 + 0.6 * noise(seed ^ (index * 17 + 2)));
@@ -270,6 +275,7 @@ impl Effects {
                 height_share: 1.0,
                 color: LOBE_HOT,
                 fade_to: LOBE_COOL,
+                dense: false,
             });
         }
         life
@@ -284,20 +290,20 @@ impl Effects {
             let spot = [at[0] + angle.cos() * reach, at[1] + angle.sin() * reach, at[2]];
             let rise = f64::from(size) * (1.4 + 0.6 * noise(seed ^ (index * 11 + 7)));
             let life = 0.7 + 0.4 * noise(seed ^ (index * 11 + 8));
-            self.add(Puff { shape: Shape::Smoke, at: spot, rise, born: time, life, size: size * 0.32, growth: 0.5, height_share: 1.6, color, fade_to });
+            self.add(Puff { shape: Shape::Smoke, at: spot, rise, born: time, life, size: size * 0.32, growth: 0.5, height_share: 1.6, color, fade_to, dense: false });
         }
     }
 
     /// A puff of dust, or of spray on the water, kicked up where a small round lands.
     fn kick_up(&mut self, at: [f64; 3], size: f32, on_water: bool, time: f64) {
         let (color, fade_to) = if on_water { (FOAM, FOAM_OLD) } else { (DUST, SMOKE_PALE) };
-        self.add(Puff { shape: Shape::Smoke, at, rise: f64::from(size) * 0.8, born: time, life: 0.6, size: size * 0.6, growth: 0.8, height_share: 1.0, color, fade_to });
+        self.add(Puff { shape: Shape::Smoke, at, rise: f64::from(size) * 0.8, born: time, life: 0.6, size: size * 0.6, growth: 0.8, height_share: 1.0, color, fade_to, dense: false });
     }
 
     /// A ring of dust, or of foam, running out over the ground from a big blast.
     fn ring(&mut self, at: [f64; 3], size: f32, life: f64, on_water: bool, time: f64) {
         let (color, fade_to) = if on_water { (FOAM, FOAM_OLD) } else { (DUST, DUST) };
-        self.add(Puff { shape: Shape::Wake, at: [at[0], at[1], at[2] + 0.3], rise: 0.0, born: time, life, size: size * 0.6, growth: 1.8, height_share: 0.05, color, fade_to });
+        self.add(Puff { shape: Shape::Wake, at: [at[0], at[1], at[2] + 0.3], rise: 0.0, born: time, life, size: size * 0.6, growth: 1.8, height_share: 0.05, color, fade_to, dense: false });
     }
 
     /// Where a shell lands, by what fired it: `size` across, as wide as its blast. A round with
@@ -333,13 +339,13 @@ impl Effects {
             }
             // A small flash, and black smoke as wide as the blast.
             ShotLook::Flak => {
-                self.add(Puff { shape: Shape::Fireball, at, rise: 0.0, born: time, life: 0.15, size: size * 0.3, growth: 0.4, height_share: 1.0, color: FIRE_HOT, fade_to: FIRE_COOL });
+                self.add(Puff { shape: Shape::Fireball, at, rise: 0.0, born: time, life: 0.15, size: size * 0.3, growth: 0.4, height_share: 1.0, color: FIRE_HOT, fade_to: FIRE_COOL, dense: false });
                 for index in 0..3 {
                     let angle = noise(seed ^ (index * 13 + 1)) * std::f64::consts::TAU;
                     let reach = f64::from(size) * 0.25 * noise(seed ^ (index * 13 + 2));
                     let spot = [at[0] + angle.cos() * reach, at[1] + angle.sin() * reach, at[2] + reach * 0.3];
                     let life = 1.4 + 0.4 * noise(seed ^ (index * 13 + 3));
-                    self.add(Puff { shape: Shape::Smoke, at: spot, rise: 0.6, born: time, life, size: size * 0.45, growth: 0.8, height_share: 1.0, color: FLAK_BLACK, fade_to: SMOKE_DARK });
+                    self.add(Puff { shape: Shape::Smoke, at: spot, rise: 0.6, born: time, life, size: size * 0.45, growth: 0.8, height_share: 1.0, color: FLAK_BLACK, fade_to: SMOKE_DARK, dense: false });
                 }
             }
             // A column of water as tall as a ship, whatever the torpedo's blast.
@@ -348,7 +354,7 @@ impl Effects {
                 self.fireball(at, size * 0.4, time, seed);
                 self.fountain(at, size, 3, on_water, time, seed);
                 if on_water {
-                    self.add(Puff { shape: Shape::Smoke, at, rise: f64::from(size) * 1.5, born: time, life: 1.3, size: size * 0.5, growth: 0.6, height_share: 3.0, color: FOAM, fade_to: FOAM_OLD });
+                    self.add(Puff { shape: Shape::Smoke, at, rise: f64::from(size) * 1.5, born: time, life: 1.3, size: size * 0.5, growth: 0.6, height_share: 3.0, color: FOAM, fade_to: FOAM_OLD, dense: false });
                 }
                 self.ring(at, size, 1.2, on_water, time);
             }
@@ -362,27 +368,41 @@ impl Effects {
         self.ring(at, size, 0.9, on_water, time);
     }
 
-    /// A nuclear blast, `size` across: a white flash and a fireball as wide as the blast, a
-    /// shock ring running out over the ground, and a mushroom cloud, a fireball rising on a stem
-    /// of dust into a cap that glows, then greys, over some ten seconds.
+    /// A nuclear blast, `size` across: a white flash and fire as wide as the blast, a shock ring
+    /// running out over the ground, a skirt of dust, and a mushroom cloud: a column of dust rising
+    /// from the ground into a broad cap that billows out as it climbs, lit orange from below at
+    /// first and greying over some ten seconds. Its smoke is dense, thinning only at the end.
     fn mushroom(&mut self, at: [f64; 3], size: f32, time: f64, seed: u64) {
         let across = f64::from(size);
+        let dense = |shape, at, rise, born, life, size, growth, height_share, color, fade_to| Puff { shape, at, rise, born, life, size, growth, height_share, color, fade_to, dense: true };
         self.fireball(at, size, time, seed);
-        self.add(Puff { shape: Shape::Fireball, at, rise: 0.0, born: time, life: 0.35, size: size * 0.6, growth: 0.5, height_share: 1.0, color: FLASH_WHITE, fade_to: FIRE_HOT });
-        self.add(Puff { shape: Shape::Wake, at: [at[0], at[1], at[2] + 0.5], rise: 0.0, born: time, life: 2.0, size: size * 0.5, growth: 3.0, height_share: 0.02, color: [0.85, 0.82, 0.75], fade_to: DUST });
-        self.add(Puff { shape: Shape::Fireball, at: [at[0], at[1], at[2] + across * 0.1], rise: across * 0.18, born: time + 0.2, life: 3.0, size: size * 0.25, growth: 0.6, height_share: 1.0, color: FIRE_HOT, fade_to: FIRE_COOL });
+        self.add(Puff { shape: Shape::Fireball, at, rise: 0.0, born: time, life: 0.4, size: size * 0.6, growth: 0.5, height_share: 1.0, color: FLASH_WHITE, fade_to: FIRE_HOT, dense: false });
+        self.add(Puff { shape: Shape::Wake, at: [at[0], at[1], at[2] + 0.5], rise: 0.0, born: time, life: 2.0, size: size * 0.5, growth: 3.0, height_share: 0.02, color: [0.85, 0.82, 0.75], fade_to: DUST, dense: false });
+        // The skirt: dust rolling out low round the foot of the column.
         for index in 0..6 {
-            let height = across * (0.06 + 0.07 * f64::from(index));
-            let born = time + 0.3 + 0.15 * f64::from(index);
-            self.add(Puff { shape: Shape::Smoke, at: [at[0], at[1], at[2] + height], rise: across * 0.05, born, life: 9.0, size: size * 0.14, growth: 0.4, height_share: 1.3, color: STEM, fade_to: SMOKE_PALE });
+            let angle = (f64::from(index) + 0.5) / 6.0 * std::f64::consts::TAU;
+            let spot = [at[0] + angle.cos() * across * 0.22, at[1] + angle.sin() * across * 0.22, at[2] + across * 0.04];
+            self.add(dense(Shape::Smoke, spot, across * 0.01, time + 0.4, 8.0, size * 0.24, 0.6, 0.45, DUST, SMOKE_PALE));
         }
-        let cap = at[2] + across * 0.5;
+        // The column, from the ground to the cap, each puff a little after the one below it.
+        let cap = at[2] + across * 0.75;
         for index in 0..8 {
-            let angle = f64::from(index) / 8.0 * std::f64::consts::TAU;
-            let spot = [at[0] + angle.cos() * across * 0.16, at[1] + angle.sin() * across * 0.16, cap];
-            self.add(Puff { shape: Shape::Smoke, at: spot, rise: across * 0.04, born: time + 0.6, life: 10.0, size: size * 0.22, growth: 0.6, height_share: 0.8, color: FIRE_COOL, fade_to: SMOKE_PALE });
+            let height = across * (0.05 + 0.09 * f64::from(index));
+            self.add(dense(Shape::Smoke, [at[0], at[1], at[2] + height], across * 0.03, time + 0.2 + 0.12 * f64::from(index), 12.0, size * 0.21, 0.4, 1.3, STEM, SMOKE_PALE));
         }
-        self.add(Puff { shape: Shape::Smoke, at: [at[0], at[1], cap + across * 0.05], rise: across * 0.04, born: time + 0.6, life: 10.5, size: size * 0.3, growth: 0.6, height_share: 0.7, color: FIRE_COOL, fade_to: SMOKE_PALE });
+        // The fireball climbing ahead of the column into the cap.
+        self.add(Puff { shape: Shape::Fireball, at: [at[0], at[1], at[2] + across * 0.15], rise: across * 0.18, born: time + 0.2, life: 3.5, size: size * 0.28, growth: 0.5, height_share: 1.0, color: FIRE_HOT, fade_to: FIRE_COOL, dense: false });
+        // The cap: a ring of cloud rolling outward round its rim, and a dome over it.
+        for index in 0..10 {
+            let angle = f64::from(index) / 10.0 * std::f64::consts::TAU;
+            let spot = [at[0] + angle.cos() * across * 0.22, at[1] + angle.sin() * across * 0.22, cap];
+            self.add(dense(Shape::Smoke, spot, across * 0.04, time + 0.7, 12.0, size * 0.28, 0.8, 0.6, FIRE_COOL, SMOKE_PALE));
+        }
+        for index in 0..4 {
+            let angle = (f64::from(index) + 0.5) / 4.0 * std::f64::consts::TAU;
+            let spot = [at[0] + angle.cos() * across * 0.1, at[1] + angle.sin() * across * 0.1, cap + across * 0.08];
+            self.add(dense(Shape::Smoke, spot, across * 0.04, time + 0.8, 12.5, size * 0.3, 0.7, 0.7, FIRE_COOL, SMOKE_PALE));
+        }
     }
 
     /// Smoke after a fireball that burns for `life`: `clouds` of it, rising and drifting off.
@@ -403,6 +423,7 @@ impl Effects {
                 height_share: 1.0,
                 color: SMOKE_DARK,
                 fade_to: SMOKE_PALE,
+                dense: false,
             });
         }
     }
@@ -614,14 +635,14 @@ impl Effects {
                 ProjectileKind::TacticalMissile | ProjectileKind::StrategicMissile => {
                     let strategic = projectile.kind == ProjectileKind::StrategicMissile;
                     let (size, length, flame) = if strategic { (7.0, 20.0, 4.0) } else { (3.0, 9.0, 1.6) };
-                    let puff = Puff { shape: Shape::Smoke, at, rise: 1.5, born: time, life: 1.6, size, growth: 1.4, height_share: 1.0, color: TRAIL_FRESH, fade_to: TRAIL_OLD };
+                    let puff = Puff { shape: Shape::Smoke, at, rise: 1.5, born: time, life: 1.6, size, growth: 1.4, height_share: 1.0, color: TRAIL_FRESH, fade_to: TRAIL_OLD, dense: false };
                     lay(self, projectile.id, at, f64::from(size) * TRAIL_SPACING, puff);
                     // A flame at its tail, brief, the way it has come.
                     let way: [f64; 3] = std::array::from_fn(|axis| f64::from(now[axis] - then[axis]));
                     let distance = way[0].hypot(way[1]).hypot(way[2]);
                     if distance > 0.0 {
                         let tail: [f64; 3] = std::array::from_fn(|axis| at[axis] - way[axis] / distance * length * 0.5);
-                        let fire = Puff { shape: Shape::Fireball, at: tail, rise: 0.0, born: time, life: 0.14, size: flame, growth: 0.0, height_share: 1.0, color: FIRE_HOT, fade_to: FIRE_COOL };
+                        let fire = Puff { shape: Shape::Fireball, at: tail, rise: 0.0, born: time, life: 0.06, size: flame, growth: 0.0, height_share: 1.0, color: FIRE_HOT, fade_to: FIRE_COOL, dense: false };
                         lay(self, second, tail, f64::from(flame) * 0.8, fire);
                     }
                 }
@@ -629,14 +650,14 @@ impl Effects {
                     // Artillery rounds and bombs leave a thin wisp of smoke, so that they can be followed.
                     style @ ShotStyle { look: ShotLook::Artillery | ShotLook::HeavyGun | ShotLook::Bomb, .. } => {
                         let size = 1.6 * style.scale;
-                        let wisp = Puff { shape: Shape::Smoke, at, rise: 0.5, born: time, life: 0.45, size, growth: 1.0, height_share: 1.0, color: TRAIL_FRESH, fade_to: TRAIL_OLD };
+                        let wisp = Puff { shape: Shape::Smoke, at, rise: 0.5, born: time, life: 0.45, size, growth: 1.0, height_share: 1.0, color: TRAIL_FRESH, fade_to: TRAIL_OLD, dense: false };
                         lay(self, second, at, f64::from(size) * 5.0, wisp);
                     }
                     // A torpedo under the water shows by bubbles on the surface over it.
                     ShotStyle { look: ShotLook::Torpedo, .. } => {
                         if let Some(water) = water.filter(|water| at[2] < *water) {
                             let surface = [at[0], at[1], water + 0.2];
-                            let bubbles = Puff { shape: Shape::Wake, at: surface, rise: 0.0, born: time, life: 1.4, size: 1.4, growth: 1.2, height_share: 0.2, color: FOAM, fade_to: FOAM_OLD };
+                            let bubbles = Puff { shape: Shape::Wake, at: surface, rise: 0.0, born: time, life: 1.4, size: 1.4, growth: 1.2, height_share: 0.2, color: FOAM, fade_to: FOAM_OLD, dense: false };
                             lay(self, second, surface, 4.0, bubbles);
                         }
                     }
@@ -661,11 +682,11 @@ impl Effects {
                 let length = dx.hypot(dy);
                 let stern = [center[0] - dx / length * radius * 0.9, center[1] - dy / length * radius * 0.9, water + 0.3];
                 let size = (radius * 0.7) as f32;
-                let puff = Puff { shape: Shape::Wake, at: stern, rise: 0.0, born: time, life: 2.8, size, growth: 2.2, height_share: 0.08, color: FOAM, fade_to: FOAM_OLD };
+                let puff = Puff { shape: Shape::Wake, at: stern, rise: 0.0, born: time, life: 2.8, size, growth: 2.2, height_share: 0.08, color: FOAM, fade_to: FOAM_OLD, dense: false };
                 lay(self, unit.id, stern, radius * 2.0 * WAKE_SPACING, puff);
                 // And spray thrown up at the bow, brief and small, kept apart from the wake.
                 let bow = [center[0] + dx / length * radius * 0.85, center[1] + dy / length * radius * 0.85, water + 0.6];
-                let spray = Puff { shape: Shape::Wake, at: bow, rise: 1.5, born: time, life: 0.7, size: size * 0.45, growth: 1.6, height_share: 0.3, color: FOAM, fade_to: FOAM };
+                let spray = Puff { shape: Shape::Wake, at: bow, rise: 1.5, born: time, life: 0.7, size: size * 0.45, growth: 1.6, height_share: 0.3, color: FOAM, fade_to: FOAM, dense: false };
                 lay(self, SimId(unit.id.0 ^ BOW_SPRAY_ID), bow, radius * BOW_SPRAY_SPACING, spray);
             });
         }
@@ -772,7 +793,8 @@ impl Effects {
             // the hull color's last byte.
             if puff.shape == Shape::Smoke {
                 let age = ((time - puff.born) / puff.life) as f32;
-                instance.hull[3] = (SMOKE_OPACITY * (1.0 - age.powf(1.5)) * 255.0).round().clamp(0.0, 255.0) as u8;
+                let opacity = if puff.dense { DENSE_SMOKE_OPACITY * (1.0 - age.powi(4)) } else { SMOKE_OPACITY * (1.0 - age.powf(1.5)) };
+                instance.hull[3] = (opacity * 255.0).round().clamp(0.0, 255.0) as u8;
             }
             out.push(puff.shape, instance);
         }
@@ -1170,7 +1192,7 @@ mod tests {
 
     #[test]
     fn puffs_grow_then_shrink_away() {
-        let puff = Puff { shape: Shape::Smoke, at: [0.0; 3], rise: 1.0, born: 0.0, life: 1.0, size: 2.0, growth: 1.0, height_share: 1.0, color: SMOKE_DARK, fade_to: SMOKE_PALE };
+        let puff = Puff { shape: Shape::Smoke, at: [0.0; 3], rise: 1.0, born: 0.0, life: 1.0, size: 2.0, growth: 1.0, height_share: 1.0, color: SMOKE_DARK, fade_to: SMOKE_PALE, dense: false };
         let size = |time: f64| puff.at_time(time).map(|(_, size, _)| size);
         assert!(size(0.5).expect("alive") > size(0.0).expect("alive"));
         assert!(size(0.99).expect("alive") < size(0.5).expect("alive"));

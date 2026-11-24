@@ -946,6 +946,12 @@ pub fn build_unit_instances(
     });
 }
 
+/// The way a missile flies, up and down too, or for one just fired, with no position before,
+/// level along `heading`.
+fn missile_way(from: [i32; 3], to: [i32; 3], heading: [f32; 2]) -> [f32; 3] {
+    if from == to { [heading[0], heading[1], 0.0] } else { flight(from, to) }
+}
+
 /// The way a projectile flies, from one tick's position to the next, as a unit vector. One just
 /// fired, with no position before, points north.
 fn flight(from: [i32; 3], to: [i32; 3]) -> [f32; 3] {
@@ -965,6 +971,21 @@ fn tracer_instance(center: [f64; 3], direction: [f32; 3], length: f32, width: f3
     tracer.model_matrix[1] = [across.x * width, across.y * width, across.z * width, 0.0];
     tracer.model_matrix[2] = [up.x * width, up.y * width, up.z * width, 0.0];
     tracer
+}
+
+/// A missile, `length` along `direction` and `width` across, pointing the way it flies, up and
+/// down too: its mesh lies along y. Turned only across the ground, a missile climbing from its
+/// launcher, or diving onto its target, flew level, side on to its own trail, and a strategic
+/// missile going straight up looked to fly sideways.
+fn missile_instance(center: [f64; 3], direction: [f32; 3], length: f32, width: f32, color: [f32; 3], icon_px: f32, eye: [f64; 3]) -> UnitInstanceRaw {
+    let along = glam::Vec3::from(direction);
+    let across = along.cross(glam::Vec3::Z).try_normalize().unwrap_or(glam::Vec3::X);
+    let up = across.cross(along);
+    let mut missile = instance(center, [1.0; 3], NORTH, color, icon_px, eye);
+    missile.model_matrix[0] = [across.x * width, across.y * width, across.z * width, 0.0];
+    missile.model_matrix[1] = [along.x * length, along.y * length, along.z * length, 0.0];
+    missile.model_matrix[2] = [up.x * width, up.y * width, up.z * width, 0.0];
+    missile
 }
 
 /// Draws the projectiles in flight, and those that struck since the last tick (`landed`) on the
@@ -1021,8 +1042,8 @@ pub fn build_projectile_instances(
                 }
             }
             ProjectileKind::Discharge => out.push(Shape::Shell, tracer_instance(center, flight(from, now), DISCHARGE_SIZE * 3.0, DISCHARGE_SIZE, DISCHARGE_SHELL, UNIT_ICON_PX, eye)),
-            ProjectileKind::TacticalMissile => out.push(Shape::Missile, instance(center, [3.0, 9.0, 3.0], heading, MISSILE, UNIT_ICON_PX, eye)),
-            ProjectileKind::StrategicMissile => out.push(Shape::Missile, instance(center, [7.0, 20.0, 7.0], heading, NUKE, UNIT_ICON_PX * 1.6, eye)),
+            ProjectileKind::TacticalMissile => out.push(Shape::Missile, missile_instance(center, missile_way(from, now, heading), 9.0, 3.0, MISSILE, UNIT_ICON_PX, eye)),
+            ProjectileKind::StrategicMissile => out.push(Shape::Missile, missile_instance(center, missile_way(from, now, heading), 20.0, 7.0, NUKE, UNIT_ICON_PX * 1.6, eye)),
             // A beam is over within its tick: the effects draw it, from its muzzle to its mark.
             ProjectileKind::Beam => {}
         }
@@ -2074,6 +2095,28 @@ mod tests {
         assert_eq!(ShotStyle::resolve(&shell(1, 1), destroyer, false).look, ShotLook::Tracer);
         let guess = |splash: i32| ShotStyle::resolve(&ProjectileView { splash: splash << 12, ..shell(1, 1) }, None, false).look;
         assert_eq!([guess(0), guess(20), guess(70)], [ShotLook::Tracer, ShotLook::Cannon, ShotLook::Artillery]);
+    }
+
+    /// A missile points the way it flies, up and down as well as across the ground: one climbing
+    /// steeply from its launcher, or going straight up, is drawn nose up, not level and side on to
+    /// its own trail.
+    #[test]
+    fn missiles_point_the_way_they_fly_up_and_down_too() {
+        let missile = |kind: ProjectileKind, dx: i32, dz: i32| {
+            let before = ProjectileView { kind, ..shell(1, 1) };
+            let after = ProjectileView { x: 4096 * dx, z: 4096 * dz, ..before };
+            let mut out = InstanceBatches::default();
+            build_projectile_instances(&[before], &[after], &[], 0.5, [0.0; 3], &|projectile| ShotStyle::guess(projectile, false), None, &mut out);
+            let nose = out.shape(Shape::Missile)[0].model_matrix[1];
+            let length = nose[0].hypot(nose[1]).hypot(nose[2]);
+            [nose[0] / length, nose[1] / length, nose[2] / length]
+        };
+        let climbing = missile(ProjectileKind::TacticalMissile, 10, 10);
+        assert!((climbing[0] - climbing[2]).abs() < 1e-3 && climbing[2] > 0.7, "climbing at 45 degrees: {climbing:?}");
+        let rising = missile(ProjectileKind::StrategicMissile, 0, 30);
+        assert!(rising[2] > 0.999, "straight up: {rising:?}");
+        let level = missile(ProjectileKind::TacticalMissile, 30, 0);
+        assert!(level[0] > 0.999 && level[2].abs() < 1e-3, "level: {level:?}");
     }
 
     /// A shell on the tick it was fired has already flown a tick, so it is drawn from its gun,
