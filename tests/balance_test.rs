@@ -251,7 +251,9 @@ fn the_t3_fighter_outclasses_the_t1_interceptor() {
 fn duels_at_sea_are_fair_and_repeatable() {
     let db = db();
     let field = Field::new(Ground::Water, 2);
-    let fleet = [Side { unit: db.id("t2_destroyer"), count: 2, tactics: Tactics::AttackMove }, Side { unit: db.id("t2_cruiser"), count: 2, tactics: Tactics::AttackMove }];
+    // Destroyers: cruisers' missile defenses stop each other's every missile, and a fleet of them
+    // never finishes.
+    let fleet = [Side { unit: db.id("t2_destroyer"), count: 3, tactics: Tactics::AttackMove }];
     let result = mirrored_on(&db, field, &fleet, &fleet, 1.0);
     assert!(result.finished && result.seconds > 5.0, "the fleets fight until one is sunk: {result:?}");
     assert!(result.score.abs() < 0.05, "equal fleets, played both ways round, come out even: {result:?}");
@@ -345,4 +347,55 @@ fn skipping_the_counter_still_loses_and_ships_still_outrange_the_coast() {
         let over = reach(ship) / reach(defense.as_str().expect("a key")) - 1.0;
         assert!(over >= edge, "{ship} outranges {defense} by only {:.0}%", over * 100.0);
     }
+}
+
+/// BALANCE.md, T2 air and navy (2026-11-24): each is as strong per cost against the anchor as the
+/// inspiration has its own against its T1 tank, within `[domains] strength_band`.
+#[test]
+fn t2_air_and_navy_are_as_strong_per_cost_as_the_inspirations() {
+    let db = db();
+    let band = domains(&["strength_band"]).as_array().expect("a band").iter().map(number).collect::<Vec<f64>>();
+    for key in ["t2_destroyer", "t2_cruiser", "t2_torpedo_boat", "t2_torpedo_launcher", "t2_gunship", "t2_torpedo_bomber", "t2_fighter_bomber"] {
+        let ratio = purpose_strength(&db, key) / number(&domains(&["strength_over_anchor", key]));
+        assert!((band[0]..=band[1]).contains(&ratio), "{key} is {ratio:.2} of the inspiration's strength per cost");
+    }
+}
+
+/// `[domains]`: a composed T2 fleet rules the water. It beats an equal cost of the T2 air force,
+/// torpedo bombers need over twice its cost to break it, its destroyers beat submarines, and
+/// hovercraft lose to it.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn a_t2_fleet_rules_the_water() {
+    let db = db();
+    let water = Field::new(Ground::Water, 2);
+    let cell = |key: &str| number(&domains(&["cells", key]));
+    let air = fight(&db, water, "t2_fleet", 2.0, "t2_air_force");
+    assert!(air >= cell("fleet_beats_air_force_t2"), "the T2 fleet scores {air:+.2} against an equal cost of the T2 air force");
+    let fleet = squadrons(&db, &domain_force(&db, "t2_fleet"), 0.0, 2, Tactics::AttackMove);
+    let fleet = squadrons(&db, &domain_force(&db, "t2_fleet"), force_materiel(&db, &fleet, 2) * 2.0, 2, Tactics::AttackMove);
+    let bombers = squadrons(&db, &domain_force(&db, "t2_torpedo_bombers"), force_materiel(&db, &fleet, 2), 2, Tactics::AttackMove);
+    let multiple = break_even_forces(&db, water, &fleet, &bombers).efficiency;
+    let band = domains(&["cells", "torpedo_bombers_to_break_fleet_t2"]).as_array().expect("a band").iter().map(number).collect::<Vec<f64>>();
+    assert!((band[0]..=band[1]).contains(&multiple), "torpedo bombers break the T2 fleet at {multiple:.2} times its cost");
+    let hunters = fight(&db, water, "t2_destroyers", 4.0, "t1_submarines");
+    assert!(hunters >= cell("destroyers_beat_submarines"), "destroyers score {hunters:+.2} against submarines");
+    let hovercraft = fight(&db, water, "t2_fleet", 2.0, "t2_hovercraft");
+    assert!(-hovercraft <= cell("hovercraft_loses_to_fleet"), "hovercraft score {:+.2} against the T2 fleet", -hovercraft);
+}
+
+/// `[domains]`: at T2, the AI's air force comes out even with a land army a fifth flak, and an
+/// equal cost of cruisers breaks a coastal position of T2 point defenses under a dome, from beyond
+/// their reach.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn t2_air_meets_a_land_army_evenly_and_cruisers_break_a_coastal_position() {
+    let db = db();
+    let even = fight(&db, Field::new(Ground::Land, 2), "t2_land_army", 4.0, "t2_air_force");
+    let margin = sim_engine::balance::target_number("counters", "even_margin");
+    assert!(even.abs() <= margin, "a T2 land army a fifth flak scores {even:+.2} against the T2 air force");
+    let cruisers = squadrons(&db, &[(db.id("t2_cruiser"), 1)], position_materiel_at(&db, T2_POSITION, 2), 2, Tactics::AttackMove);
+    let siege = siege_on(&db, Field::new(Ground::Shore, 2), &cruisers, T2_POSITION);
+    let (seconds, losses) = (number(&domains(&["cells", "coastal_seconds_max"])), number(&domains(&["cells", "coastal_losses_max"])));
+    assert!(siege.broken && siege.seconds <= seconds && siege.losses <= losses, "an equal cost of cruisers against a coastal T2 position: {siege:?}");
 }

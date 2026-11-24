@@ -1462,7 +1462,7 @@ pub fn derive_domains_report() {
     score_cell(&mut cells, "T2 fleet with no anti-air against torpedo bombers", water(2), "t2_fleet_without_anti_air", 4.0, "t2_torpedo_bombers", None, Some(number("fleet_without_anti_air_loses_to_torpedo_bombers")));
     score_cell(&mut cells, "Submarines against a T2 fleet with no anti-submarine weapon", water(2), "t1_submarines", 24.0, "t2_fleet_without_anti_submarine", Some(number("submarines_beat_fleet_without_anti_submarine")), None);
     score_cell(&mut cells, "Destroyers against submarines", water(2), "t2_destroyers", 4.0, "t1_submarines", Some(number("destroyers_beat_submarines")), None);
-    score_cell(&mut cells, "Hovercraft against an equal cost of the T2 fleet, on water", water(2), "t2_hovercraft", 40.0, "t2_fleet", None, Some(number("hovercraft_loses_to_fleet")));
+    score_cell(&mut cells, "T2 fleet against an equal cost of hovercraft, on water", water(2), "t2_fleet", 2.0, "t2_hovercraft", Some(-number("hovercraft_loses_to_fleet")), None);
     score_cell(&mut cells, "T1 fleet against an equal cost of the T1 air force, over water", water(1), "t1_fleet", 4.0, "t1_air_force", None, None);
     score_cell(&mut cells, "Frigates against an equal cost of T1 bombers, over water", water(1), "t1_frigates", 12.0, "t1_bombers", Some(number("frigates_against_t1_bombers_at_least")), None);
     // Air against land, about even, as at T1.
@@ -1510,7 +1510,7 @@ pub fn derive_domains_report() {
     // Coastal reach, and breaking a coastal position.
     {
         let edge = target_number("siege", "outrange_defense_min");
-        let seconds_max = target_number("siege", "seconds_max");
+        let seconds_max = number("coastal_seconds_max");
         let losses_max = number("coastal_losses_max");
         let ships = domain_cell("coastal_ships");
         let mut pairs: Vec<(&String, &toml::Value)> = ships.as_table().expect("a table").iter().collect();

@@ -286,10 +286,13 @@ fn a_torpedo_bomber_sinks_a_ship() {
     let destroyer = spawn(&mut world, "t2_destroyer", Team::Red, point(2_000, 1_000));
     let combat = |world: &mut SimWorld, id: SimId| world.ecs.get::<&mut sim_engine::sim::components::ExtraWeapons>(world.unit_entity(id).unwrap()).unwrap().0.clear();
     combat(&mut world, destroyer);
+    // Its anti-torpedo charge off too: since 2026-11-24 it stops one torpedo a second, every one a
+    // lone torpedo bomber drops, and only a wing of them saturates it.
+    world.ecs.get::<&mut sim_engine::sim::components::TorpedoDefense>(world.unit_entity(destroyer).unwrap()).unwrap().range = Fp::ZERO;
     let bomber = spawn(&mut world, "t2_torpedo_bomber", Team::Blue, point(1_000, 1_000));
     world.advance_tick(&[SimCommand::Attack { units: vec![bomber], target: destroyer }]);
-    // Five torpedoes of 150 every 10 seconds, less the one its charge stops, against 7,200: about
-    // twelve runs, as in FAF, where one torpedo bomber is slow work against a destroyer.
+    // Five torpedoes of 189 every 10 seconds against 10,231: about eleven runs, as in FAF, where
+    // one torpedo bomber is slow work against a destroyer.
     let sunk = (0..1_800).any(|_| {
         world.advance_tick(&[]);
         world.unit_health(destroyer).is_none()

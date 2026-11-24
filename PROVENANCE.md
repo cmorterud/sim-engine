@@ -70,7 +70,10 @@ Tank, Grenadier Walker, Assault Hovercraft, and Mobile Missile Launcher. And on 
 (`reports/balance/2026-11-21-t3-land.md`): the Heavy Walker, Siege Walker, and Mobile Heavy
 Artillery. And on 2026-11-24 (`reports/balance/2026-11-24-t1-navy.md`): the Frigate, Attack
 Submarine, and T1 Torpedo Launcher, each from FAF's ratios against its own T1 tank (the medians
-across its factions, below) applied to this game's Medium Tank, not from FAF's values.
+across its factions, below) applied to this game's Medium Tank, not from FAF's values. And the same
+day (`reports/balance/2026-11-24-t2-air-navy.md`), the same way: the Destroyer, Cruiser, Torpedo
+Boat, T2 Torpedo Launcher, Gunship, Torpedo Bomber, and Fighter-Bomber, with this game's own
+changes past those ratios for its fights between domains.
 
 ## Balance targets
 

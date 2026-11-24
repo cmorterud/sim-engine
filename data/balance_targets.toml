@@ -317,6 +317,7 @@ strength_band = [0.80, 1.25]
 t1_frigate = 0.57
 t1_attack_sub = 0.24
 t1_torpedo_launcher = 0.45
+t2_torpedo_launcher = 0.64
 t2_destroyer = 0.33
 t2_cruiser = 0.20
 t2_torpedo_boat = 0.32
@@ -326,7 +327,8 @@ t2_gunship = 0.62
 t2_torpedo_bomber = 0.55
 t2_fighter_bomber = 0.45
 t3_heavy_gunship = 0.38
-t2_mobile_flak = 1.56
+# The mobile flak is not here: like the T1 mobile anti-air, it is set by the anti-air share rule
+# (air_force_against_land_army_t2_even), not by a ratio.
 
 # Standard forces, by how many of each a squadron has, bought by whole squadrons to the materiel of
 # a fight. The fleets are what a player fields: a T2 fleet is two destroyers, a couple of cruisers
@@ -383,8 +385,12 @@ hovercraft_over_heavy_tank_on_land = [0.85, 1.15]
 hovercraft_loses_to_fleet = -0.40
 # Ships break coastal bases from T2 up: these outrange the point defense of their tier by at least
 # [siege] outrange_defense_min, and an equal cost of them breaks a coastal position of that tier
-# within [siege] seconds_max, losing at most this share.
+# within coastal_seconds_max, losing at most coastal_losses_max. Slower than artillery's
+# [siege] seconds_max, which is for guns that take fire while they shell: ships shell from beyond
+# the defenses' reach and lose nothing, so their pace is all that is left to set, and within their
+# strength_band a cruiser's comes to about a minute and a half (2026-11-24).
 coastal_ships = { t2_cruiser = "t2_point_defense", t3_battleship = "t3_heavy_point_defense" }
+coastal_seconds_max = 120
 coastal_losses_max = 0.10
 # Torpedo launchers and a counter-fleet are the answer: an equal cost of destroyers closing on
 # torpedo launchers does not break them; and at T1, frigates closing on T1 torpedo launchers.

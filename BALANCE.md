@@ -159,6 +159,14 @@ out close and why: evidence about the process, not a target.
   which brought each from about half of its strength-per-cost ratio to within the band. Past the
   ratios, within the band: the frigate's railgun at half again, so that frigates hold even with an
   equal cost of T1 bombers, and the launcher's health at 3,000, so that frigates closing on it lose.
+* 2026-11-24: T2 air and navy against T1 frozen (`reports/balance/2026-11-24-t2-air-navy.md`): the
+  Destroyer, Cruiser, Torpedo Boat, T2 Torpedo Launcher, Gunship, Torpedo Bomber, and Fighter-Bomber
+  by the inspiration's ratios against its T1 tank, then what keeps a fleet alive: the cruiser's SAMs
+  burst over massed aircraft (a blast of 80, from 6), the corvette's and destroyer's anti-torpedo
+  charges keep up, the destroyer hunts submarines, and the T2 launcher fires its four torpedoes
+  each on its own. A composed T2 fleet now beats an equal cost of the AI's air force (+0.65, from
+  -0.62), torpedo bombers need 2.45 times its cost to break it (from 0.65), destroyers beat
+  submarines, and hovercraft lose to it. The Mobile Flak is set by the anti-air share rule at T2.
 
 ## Order of work
 

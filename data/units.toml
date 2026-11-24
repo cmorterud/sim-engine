@@ -704,7 +704,8 @@ vision = 400
 build_power = 120
 builds = ["t1_air_scout", "t1_interceptor", "t1_bomber", "t2_gunship", "t2_fighter_bomber", "t2_torpedo_bomber", "t3_spy_plane", "t3_air_superiority", "t3_strategic_bomber", "t3_heavy_gunship", "t1_light_transport", "t2_transport", "t3_heavy_transport"]
 
-# Hovers over what it attacks and fires down on it.
+# Hovers over what it attacks and fires down on it. Cost, build time, health, and damage set
+# against the Medium Tank as the inspiration has its gunship against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t2-air-navy.md).
 factory_kind = "air"
 
 [[unit]]
@@ -712,15 +713,15 @@ id = "t2_gunship"
 name = "Gunship"
 class = "air"
 tier = 2
-mass = 192
-energy = 3840
-build_time = 1280
-health = 700
+mass = 198
+energy = 3953
+build_time = 1474
+health = 1796
 speed = 27
 radius = 12
 vision = 640
 flight = { elevation = 198, turn_rate = 90, fuel = 400, hovers = true }
-weapon = { range = 440, reload_ticks = 3, projectile_speed = 160, damage = 16, spread = 4 }
+weapon = { range = 440, reload_ticks = 3, projectile_speed = 160, damage = "22.6", spread = 4 }
 
 [[unit]]
 id = "t3_spy_plane"
@@ -828,7 +829,9 @@ vision = 560
 # Its missiles steer themselves to their aircraft, as only anti-air missiles do.
 weapon = { range = 1200, reload_ticks = 32, projectile_speed = 90, damage = 2400, splash_radius = 30, targets = "air", turn_rate = 180, homing = true }
 
-# Two shells of 36 a volley in FAF, one of 72 here, and at 90 for the reason above.
+# Two shells a volley in FAF, one here, and at 90 for the reason above. Its damage is set by the
+# anti-air share rule at T2, as the T1 mobile anti-air's is at T1: a T2 land army a fifth flak by
+# materiel comes out even with an equal cost of the AI's T2 air force (2026-11-24: 64, from 72).
 [[unit]]
 id = "t2_mobile_flak"
 name = "Mobile Flak"
@@ -843,7 +846,7 @@ turn_rate = 90
 turn_radius = 20
 radius = 10
 vision = 400
-weapon = { kind = "flak", range = 800, reload_ticks = 5, projectile_speed = 40, damage = 72, splash_radius = 80, targets = "air", turn_rate = 180, spread = 60 }
+weapon = { kind = "flak", range = 800, reload_ticks = 5, projectile_speed = 40, damage = 64, splash_radius = 80, targets = "air", turn_rate = 180, spread = 60 }
 
 # Support factories (GAME_SPECIFICATION.md §15), as in FAF: T2 and T3 builders
 # build them for less than an upgrade costs, but only while the team has a headquarters, a factory
@@ -1072,24 +1075,25 @@ vision = 1010
 # (For a day its cost was halved to keep that fight; put back on 2026-11-24.)
 weapon = { range = 1680, reload_ticks = 115, projectile_speed = 56, damage = "859.1", splash_radius = 83, turn_rate = 30, artillery = true, min_range = 420, spread = 60, setup_ticks = 10 }
 
-# FAF's fighter-bomber: a carpet of twenty napalm bombs of 80, burning included, as one bomb of 1,600, and
-# two railguns of 75 a second at aircraft, as one.
+# FAF's fighter-bomber: a carpet of napalm bombs, burning included, as one bomb, and two railguns at
+# aircraft, as one. Cost, build time, health, and damage set against the Medium Tank as the
+# inspiration has its fighter-bomber against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t2-air-navy.md).
 [[unit]]
 id = "t2_fighter_bomber"
 name = "Fighter-Bomber"
 class = "air"
 tier = 2
-mass = 360
-energy = 12600
-build_time = 2800
-health = 1200
+mass = 267
+energy = 9341
+build_time = 2041
+health = 1696
 speed = 30
 radius = 12
 vision = 640
 radar = 1280
 flight = { elevation = 352, turn_rate = 270, break_off = 400, fuel = 500 }
-weapon = { kind = "bomb", range = 1200, reload_ticks = 100, projectile_speed = 30, damage = 1600, splash_radius = 36 }
-extra_weapons = [{ range = 600, reload_ticks = 10, projectile_speed = 180, damage = 150, targets = "air" }]
+weapon = { kind = "bomb", range = 1200, reload_ticks = 100, projectile_speed = 30, damage = 1256, splash_radius = 36 }
+extra_weapons = [{ range = 600, reload_ticks = 10, projectile_speed = 180, damage = 118, targets = "air" }]
 
 # Naval units (GAME_SPECIFICATION.md §10), with FAF's numbers. The naval factory goes on water
 # deep enough for ships, and its ships sail only there.
@@ -1206,16 +1210,20 @@ on_water = true
 builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_escort_corvette", "t3_battleship", "t3_battlecruiser", "t3_missile_sub", "t2_torpedo_boat"]
 
 # Two twin gauss cannons, a twin railgun at aircraft, torpedoes, and an anti-torpedo charge.
-# Each twin fires both muzzles at once (FAF's MuzzleSalvoDelay of 0).
+# Each twin fires both muzzles at once (FAF's MuzzleSalvoDelay of 0). Cost, build time, health,
+# and its guns' damage set against the Medium Tank as the inspiration has its destroyer
+# against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t2-air-navy.md). It is the fleet's hunter of submarines: its torpedoes do six times that ratio's, and its
+# anti-torpedo charge stops one torpedo a second, so that destroyers beat an equal cost of
+# submarines.
 [[unit]]
 id = "t2_destroyer"
 name = "Destroyer"
 class = "tank"
 tier = 2
-mass = 2250
-energy = 15000
-build_time = 10000
-health = 7200
+mass = 1658
+energy = 11050
+build_time = 8241
+health = 10231
 speed = 11
 turn_rate = 55
 turn_radius = 60
@@ -1224,26 +1232,31 @@ vision = 640
 radar = 800
 sonar = 720
 # An anti-torpedo charge, FAF's numbers: it shoots down a torpedo within 600 every 10 seconds.
-torpedo_defense = { range = 600, reload_ticks = 100 }
+torpedo_defense = { range = 600, reload_ticks = 10 }
 movement = "naval"
-weapon = { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 610, splash_radius = 20, turn_rate = 90, spread = 7 }
+weapon = { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 475, splash_radius = 20, turn_rate = 90, spread = 7 }
 extra_weapons = [
-    { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 610, splash_radius = 20, turn_rate = 90, spread = 7 },
-    { range = 1200, reload_ticks = 14, projectile_speed = 120, damage = 20, targets = "air", turn_rate = 180 },
-    { range = 900, reload_ticks = 40, projectile_speed = 30, damage = 120, targets = "naval" },
+    { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 475, splash_radius = 20, turn_rate = 90, spread = 7 },
+    { range = 1200, reload_ticks = 14, projectile_speed = 120, damage = "15.6", targets = "air", turn_rate = 180 },
+    { range = 900, reload_ticks = 40, projectile_speed = 30, damage = 560, targets = "naval" },
 ]
 
-# Cruise missiles it fires on its own, a gauss cannon, SAMs (four of 250 a volley, as one), and
-# a close-in gun that shoots down tactical missiles.
+# Cruise missiles it fires on its own, a gauss cannon, SAMs, and a close-in gun that shoots down
+# tactical missiles. Cost, build time, health, and damage set against the Medium Tank as the
+# inspiration has its cruiser against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t2-air-navy.md), its cruise missiles at the top of [domains] strength_band so
+# that it breaks a coastal position within coastal_seconds_max. It is the fleet's anti-air: its
+# SAMs burst over massed aircraft, a blast of 80 like the mobile flak's, so that a composed fleet
+# beats an equal cost of aircraft over water and torpedo bombers need over twice its cost to break
+# it ([domains]; with a blast of 6 it lost to them at -0.62).
 [[unit]]
 id = "t2_cruiser"
 name = "Cruiser"
 class = "tank"
 tier = 2
-mass = 2000
-energy = 18000
-build_time = 8000
-health = 2500
+mass = 1473
+energy = 13260
+build_time = 6592
+health = 4358
 speed = 9
 turn_rate = 40
 turn_radius = 60
@@ -1254,12 +1267,12 @@ sonar = 2400
 movement = "naval"
 # Cruise missiles climb high and come down on their target, as in FAF; they are not direct fire.
 # They fly at FAF's top speed for each missile, doubled for ticks: 28 to 40 a tick.
-weapon = { kind = "tactical_missile", automatic = true, range = 3000, reload_ticks = 25, projectile_speed = 32, damage = 300, splash_radius = 40, cruise_height = 400 }
+weapon = { kind = "tactical_missile", automatic = true, range = 3000, reload_ticks = 25, projectile_speed = 32, damage = 454, splash_radius = 40, cruise_height = 400 }
 extra_weapons = [
-    { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 200, splash_radius = 40, turn_rate = 90, spread = 10 },
+    { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 233, splash_radius = 40, turn_rate = 90, spread = 10 },
     # The fleet's anti-air missiles, which steer themselves: about three quarters of a SAM
     # against T3 aircraft.
-    { range = 1400, reload_ticks = 20, projectile_speed = 90, damage = 1100, splash_radius = 6, targets = "air", turn_rate = 180, homing = true },
+    { range = 1400, reload_ticks = 20, projectile_speed = 90, damage = 1279, splash_radius = 80, targets = "air", turn_rate = 180, homing = true },
 ]
 # The fleet's tactical missile defense: a mount that stops a missile within 620 every 2 seconds,
 # the same wherever it is carried. The cruiser and the battleship carry two, and the
@@ -1350,23 +1363,24 @@ weapon = { range = 640, reload_ticks = 40, projectile_speed = 30, damage = 185, 
 # FAF's deck gun, 25 a second out to 640, which fires only on the surface.
 extra_weapons = [{ range = 640, reload_ticks = 10, projectile_speed = 60, damage = 25, turn_rate = 90 }]
 
-# Five torpedoes of 150 a run, every 10 seconds: FAF's unit database counts its 3 projectiles a
-# fire once, not three times, so 15 a run was three times too many.
+# Five torpedoes a run, every 10 seconds: FAF's unit database counts its 3 projectiles a fire once,
+# not three times, so 15 a run was three times too many. Cost, build time, health, and damage set
+# against the Medium Tank as the inspiration has its torpedo bomber against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t2-air-navy.md).
 [[unit]]
 id = "t2_torpedo_bomber"
 name = "Torpedo Bomber"
 class = "air"
 tier = 2
-mass = 270
-energy = 8000
-build_time = 1600
-health = 860
+mass = 199
+energy = 5893
+build_time = 1318
+health = 1252
 speed = 30
 radius = 12
 vision = 640
 sonar = 880
 flight = { elevation = 240, turn_rate = 90, break_off = 400, fuel = 600 }
-weapon = { range = 840, reload_ticks = 20, projectile_speed = 30, damage = 150, targets = "naval" }
+weapon = { range = 840, reload_ticks = 20, projectile_speed = 30, damage = 189, targets = "naval" }
 
 [[unit]]
 id = "t1_sonar"
@@ -1420,21 +1434,25 @@ vision = 240
 sonar = 720
 weapon = { range = 1000, reload_ticks = 40, projectile_speed = 30, damage = 454, targets = "naval" }
 
-# Four torpedoes of 180 a volley, as one.
+# Four torpedoes a volley, each its own, so that a ship's anti-torpedo charge must stop every one:
+# fired as one, a destroyer's charge stopped them all. Cost, build time, and damage set against the
+# Medium Tank as the inspiration has its T2 torpedo launcher against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t2-air-navy.md), and its health a little past
+# that ratio (8,991), within [domains] strength_band, so that an equal cost of destroyers closing
+# on it loses.
 [[unit]]
 id = "t2_torpedo_launcher"
 name = "Torpedo Launcher (T2)"
 class = "defense"
 tier = 2
-mass = 1080
-energy = 9000
-build_time = 1446
-health = 6400
+mass = 796
+energy = 6630
+build_time = 1192
+health = 12000
 footprint = 2
 on_water = true
 vision = 400
 sonar = 720
-weapon = { range = 1200, reload_ticks = 40, projectile_speed = 30, damage = 720, targets = "naval" }
+weapon = { range = 1200, reload_ticks = 10, projectile_speed = 30, damage = 227, targets = "naval" }
 
 # Assault: tough, fast, and amphibious, it hovers over land and water alike at the anchor's speed,
 # with the Heavy Tank's range and twice its time to kill. About even with the Heavy Tank for its
@@ -1458,7 +1476,8 @@ movement = "hover"
 weapon = { range = 438, reload_ticks = 16, projectile_speed = 80, damage = "178.8", splash_radius = 10, turn_rate = 90, spread = 4 }
 
 # A fleet escort: a small dome that moves with it, over the ships around it, and an anti-torpedo
-# charge, one torpedo within 600 every 6 seconds. Sturdier and cheaper than a dome boat alone would
+# charge, one torpedo within 600 every 3 seconds (every 6 until 2026-11-24, when torpedo bombers
+# broke a fleet at a little over twice its cost and this gave a margin). Sturdier and cheaper than a dome boat alone would
 # be, since it sails with the fleet rather than behind it. This game's own numbers.
 [[unit]]
 id = "t2_escort_corvette"
@@ -1476,7 +1495,7 @@ radius = 16
 vision = 640
 sonar = 720
 movement = "naval"
-torpedo_defense = { range = 600, reload_ticks = 60 }
+torpedo_defense = { range = 600, reload_ticks = 30 }
 shield = { radius = 400, health = 4000, regen = 80, recharge_seconds = 30, upkeep = 80 }
 
 # FAF's numbers. It builds nuclear missiles as a strategic missile launcher does, on order or one after
@@ -1884,10 +1903,10 @@ id = "t2_torpedo_boat"
 name = "Torpedo Boat"
 class = "tank"
 tier = 2
-mass = 750
-energy = 6000
-build_time = 3000
-health = 2000
+mass = 796
+energy = 6365
+build_time = 3565
+health = 2800
 speed = 12
 turn_rate = 100
 turn_radius = 40
@@ -1895,8 +1914,9 @@ radius = 15
 vision = 640
 sonar = 1440
 movement = "naval"
-# Four-torpedo volleys, about 100 damage a second, and decoys against torpedoes.
-weapon = { range = 1100, reload_ticks = 8, projectile_speed = 30, damage = 80, targets = "naval" }
+# Four-torpedo volleys, and decoys against torpedoes. Cost, build time, health, and damage set
+# against the Medium Tank as the inspiration has its submarine hunter against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t2-air-navy.md).
+weapon = { range = 1100, reload_ticks = 8, projectile_speed = 30, damage = 100, targets = "naval" }
 torpedo_defense = { range = 500, reload_ticks = 25 }
 
 [[unit]]

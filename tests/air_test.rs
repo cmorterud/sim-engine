@@ -419,6 +419,10 @@ fn flak_bursts_hit_every_enemy_aircraft_around_it() {
     // Three gunships hovering together over what they attack, beside the cannon: hovering, they
     // are where flak expects them.
     let target = spawn(&mut world, "t1_engineer", Team::Blue, point(2_700, 2_500));
+    // Too sturdy to die while they hover over it, so that they stay where the flak expects them.
+    let mut health = world.ecs.get::<&mut sim_engine::sim::components::Health>(world.unit_entity(target).unwrap()).unwrap();
+    (health.max, health.current) = (fp_int(1_000_000), fp_int(1_000_000));
+    drop(health);
     let gunships: Vec<SimId> = (0..3).map(|index| spawn(&mut world, "t2_gunship", Team::Red, point(2_000 + index * 20, 2_000))).collect();
     world.advance_tick(&[SimCommand::Attack { units: gunships.clone(), target }]);
     // The cannon holds its fire until they hover over the target.
