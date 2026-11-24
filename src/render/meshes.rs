@@ -1071,6 +1071,72 @@ impl MeshBuilder {
         self.bevel([-0.44, y[0], -0.41], [0.44, y[1], -0.27], 0.02);
     }
 
+    /// A shed along an air deck's west (`side` -1) or east (1) edge, between the two `y`, under
+    /// a team-colored roof. A headquarters air factory gains one with each tier, so that from
+    /// above its hangars grow from a bar along one edge to an L and then a U around the pad.
+    fn deck_wing(&mut self, side: f32, y: [f32; 2], height: f32) {
+        let (west, east) = if side < 0.0 { (-0.5, -0.36) } else { (0.36, 0.5) };
+        let top = -0.44 + height;
+        self.paint(Material::Hull);
+        self.bevel([west, y[0], -0.44], [east, y[1], top], 0.03);
+        self.paint(Material::Trim);
+        self.block([west + 0.02, y[0] + 0.02, top], [east - 0.02, y[1] - 0.02, top + 0.015]);
+        // A lit door towards the pad.
+        self.paint(Material::Glow);
+        let door = if side < 0.0 { east } else { west };
+        self.block([door - 0.006, y[0] + 0.1, -0.42], [door + 0.006, y[1] - 0.1, -0.44 + height * 0.55]);
+    }
+
+    /// A low team-colored service wall along an air deck's west (`side` -1) or east (1) edge, on
+    /// a plinth, for service arms to stand on. Support air factories have these where their
+    /// headquarters have hangars and towers.
+    fn service_wall(&mut self, side: f32) {
+        let (west, east) = if side < 0.0 { (-0.5, -0.34) } else { (0.34, 0.5) };
+        self.paint(Material::Hull);
+        self.block([west, -0.46, -0.44], [east, 0.46, -0.41]);
+        self.paint(Material::Trim);
+        self.bevel([west + 0.01, -0.45, -0.41], [east - 0.01, 0.45, -0.27], 0.02);
+    }
+
+    /// A roof over one end of a dock's slip, the west (`side` -1) or east (1), `depth` along it,
+    /// from pier to pier on posts, with the team's bands across it. A headquarters naval factory
+    /// gains one with each tier past the first: ships are finished under cover and sail out
+    /// through the open end.
+    fn slip_roof(&mut self, side: f32, depth: f32, top: f32) {
+        let (west, east) = if side < 0.0 { (-0.5, -0.5 + depth) } else { (0.5 - depth, 0.5) };
+        self.paint(Material::Metal);
+        for x in [west + 0.03, east - 0.03] {
+            for y in [-0.4_f32, 0.4] {
+                self.block([x - 0.025, y - 0.025, -0.32], [x + 0.025, y + 0.025, top - 0.05]);
+            }
+        }
+        self.paint(Material::Hull);
+        self.bevel([west, -0.46, top - 0.06], [east, 0.46, top], 0.03);
+        self.paint(Material::Trim);
+        for y in [-0.34_f32, 0.2] {
+            self.block([west + 0.03, y, top], [east - 0.03, y + 0.14, top + 0.012]);
+        }
+    }
+
+    /// A team-colored service deck along a dock's pier, its southern edge at `y`: the inner half
+    /// of the pier's top, beside the stripe along its outer edge.
+    fn service_deck(&mut self, y: f32) {
+        self.paint(Material::Trim);
+        self.block([-0.47, y, -0.32], [0.47, y + 0.08, -0.3]);
+    }
+
+    /// A finger pier out into a dock's slip at `x`, from the south pier (`side` -1) or the north
+    /// (1), with a service arm at its end reaching `reach`. Support naval factories have these
+    /// where their headquarters have cranes and roofs: teeth along the slip, seen from above.
+    fn finger_pier(&mut self, x: f32, side: f32, reach: [f32; 2]) {
+        let (south, north) = if side < 0.0 { (-0.34, -0.15) } else { (0.15, 0.34) };
+        self.paint(Material::Hull);
+        self.bevel([x - 0.075, south, -0.5], [x + 0.075, north, -0.34], 0.02);
+        self.paint(Material::Trim);
+        self.block([x - 0.05, south + 0.02, -0.34], [x + 0.05, north - 0.02, -0.328]);
+        self.service_arm([x, side * 0.21, -0.34], reach);
+    }
+
     /// A torpedo launcher's turret, low on the water: a wide team-colored drum of `radius`, and a
     /// pod of two tubes under a hood at each of `pods` across it.
     fn torpedo_turret(&mut self, radius: f32, tube: f32, pods: &[f32]) {
@@ -2650,7 +2716,8 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         Shape::AirFactoryT2 => {
             mesh.air_deck();
 
-            // A larger hangar, with a lit sign over its door.
+            // A larger hangar, with a lit sign over its door, and a wing down the west side.
+            mesh.deck_wing(-1.0, [-0.3, 0.32], 0.3);
             mesh.paint(Material::Trim);
             mesh.arch(0.44, [0.34, 0.5], -0.44, 0.5, 12);
             mesh.paint(Material::Glow);
@@ -2675,7 +2742,9 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         Shape::AirFactoryT3 => {
             mesh.air_deck();
 
-            // A great hangar along the north edge, divided into two bays.
+            // A great hangar along the north edge, divided into two bays, and a wing down each side.
+            mesh.deck_wing(-1.0, [-0.3, 0.28], 0.36);
+            mesh.deck_wing(1.0, [-0.3, 0.28], 0.36);
             mesh.paint(Material::Trim);
             mesh.arch(0.46, [0.3, 0.5], -0.44, 0.62, 14);
             mesh.paint(Material::Hull);
@@ -2755,41 +2824,38 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         Shape::NavalFactoryT2 => {
             mesh.piers();
 
-            // Two cranes, and a covered workshop on the north pier.
-            for x in [-0.22_f32, 0.22] {
-                mesh.paint(Material::Metal);
-                for y in [-0.45_f32, 0.37] {
-                    mesh.block([x - 0.035, y, -0.32], [x + 0.035, y + 0.08, 0.26]);
-                }
-                mesh.block([x - 0.045, -0.45, 0.22], [x + 0.045, 0.45, 0.3]);
-                mesh.paint(Material::Trim);
-                mesh.block([x - 0.06, -0.06, 0.12], [x + 0.06, 0.06, 0.22]);
-            }
-            mesh.paint(Material::Trim);
-            mesh.arch(0.18, [0.34, 0.5], -0.32, 0.22, 8);
-            mesh.paint(Material::Glow);
-            mesh.moving(motion::PULSE, [0.0; 3], |mesh| {
-                for x in [-0.22_f32, 0.22] {
-                    mesh.block([x - 0.02, -0.02, 0.08], [x + 0.02, 0.02, 0.12]);
-                }
-            });
+            // A roof over the west end of the slip, and a crane over the open east end.
+            mesh.slip_roof(-1.0, 0.36, 0.2);
+            let x = 0.24_f32;
             mesh.paint(Material::Metal);
-            mesh.frustum([0.4, -0.42], [-0.32, 0.1], [0.04, 0.03], 6);
+            for y in [-0.45_f32, 0.37] {
+                mesh.block([x - 0.035, y, -0.32], [x + 0.035, y + 0.08, 0.26]);
+            }
+            mesh.block([x - 0.045, -0.45, 0.22], [x + 0.045, 0.45, 0.3]);
+            mesh.paint(Material::Trim);
+            mesh.block([x - 0.06, -0.06, 0.12], [x + 0.06, 0.06, 0.22]);
+            mesh.paint(Material::Glow);
+            mesh.moving(motion::PULSE, [0.0; 3], |mesh| mesh.block([x - 0.02, -0.02, 0.08], [x + 0.02, 0.02, 0.12]));
+            mesh.paint(Material::Metal);
+            mesh.frustum([0.44, -0.42], [-0.32, 0.1], [0.04, 0.03], 6);
         }
         // The T3 dock: a heavy gantry with a cab over the whole slip, lit seawalls, and a tower.
         Shape::NavalFactoryT3 => {
             mesh.piers();
 
-            // A heavy gantry over the whole slip, with an operator's cab, and lit seawalls.
+            // A roof over each end of the slip, and a heavy gantry over the open middle, with an
+            // operator's cab, and lit seawalls.
+            mesh.slip_roof(-1.0, 0.3, 0.26);
+            mesh.slip_roof(1.0, 0.3, 0.26);
             mesh.paint(Material::Metal);
-            for x in [-0.36_f32, 0.36] {
+            for x in [-0.15_f32, 0.15] {
                 for y in [-0.46_f32, 0.37] {
                     mesh.block([x - 0.04, y, -0.32], [x + 0.04, y + 0.09, 0.34]);
                 }
             }
             mesh.paint(Material::Trim);
             for y in [-0.42_f32, 0.38] {
-                mesh.block([-0.4, y, 0.3], [0.4, y + 0.05, 0.38]);
+                mesh.block([-0.19, y, 0.3], [0.19, y + 0.05, 0.38]);
             }
             mesh.paint(Material::Metal);
             for x in [-0.12_f32, 0.12] {
@@ -2800,11 +2866,11 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Glow);
             mesh.block([-0.13, -0.105, 0.24], [0.13, -0.095, 0.29]);
             mesh.lit_seawalls();
-            // A control tower on the north pier.
+            // A control tower on the north pier, by the gantry.
             mesh.paint(Material::Hull);
-            mesh.frustum([-0.42, 0.42], [-0.32, 0.2], [0.06, 0.05], 6);
+            mesh.frustum([0.0, 0.44], [-0.32, 0.44], [0.055, 0.045], 6);
             mesh.paint(Material::Glow);
-            mesh.frustum([-0.42, 0.42], [0.2, 0.28], [0.075, 0.07], 6);
+            mesh.frustum([0.0, 0.44], [0.44, 0.5], [0.06, 0.055], 6);
         }
         // A support factory: its headquarters' floor, walls, deck, or piers, with booms slanting
         // over it in place of straight gantries, cranes, towers, and stacks: two at T2, the same
@@ -2824,32 +2890,46 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.service_arm([x, y, 0.1], [-x * 0.7, -y * 0.75]);
             }
         }
+        // A service wall down the west side, where a headquarters has its hangar to the north.
         Shape::AirFactoryT2Support => {
             mesh.air_deck();
-            mesh.service_block([0.32, 0.5]);
-            for x in [-0.34_f32, 0.06] {
-                mesh.service_arm([x, 0.42, -0.27], [0.24, -0.32]);
+            mesh.service_wall(-1.0);
+            for y in [-0.24_f32, 0.24] {
+                mesh.service_arm([-0.42, y, -0.27], [0.34, -y * 0.5]);
             }
+            // The team's line painted down the open east side.
+            mesh.paint(Material::Trim);
+            mesh.block([0.38, -0.42, -0.44], [0.45, 0.42, -0.432]);
         }
+        // A service wall down each side, and a low depot across the north end between them.
         Shape::AirFactoryT3Support => {
             mesh.air_deck();
-            for (y, inward) in [([0.36_f32, 0.5_f32], -1.0_f32), ([-0.5, -0.36], 1.0)] {
-                mesh.service_block(y);
-                for x in [-0.3_f32, 0.3] {
-                    mesh.service_arm([x, -inward * 0.42, -0.27], [-x * 0.6, inward * 0.3]);
+            for side in [-1.0_f32, 1.0] {
+                mesh.service_wall(side);
+                for y in [-0.26_f32, 0.2] {
+                    mesh.service_arm([side * 0.42, y, -0.27], [-side * 0.3, -y * 0.4]);
                 }
             }
+            mesh.service_block([0.4, 0.5]);
         }
+        // A finger pier out from each side, one towards each end, each with a service arm, and a
+        // team-colored service deck along the north pier.
         Shape::NavalFactoryT2Support => {
             mesh.piers();
-            mesh.service_arm([-0.3, -0.41, -0.32], [0.26, 0.32]);
-            mesh.service_arm([0.3, 0.41, -0.32], [-0.26, -0.32]);
+            mesh.service_deck(0.34);
+            mesh.finger_pier(-0.26, -1.0, [0.2, 0.16]);
+            mesh.finger_pier(0.26, 1.0, [-0.2, -0.16]);
         }
+        // Two finger piers out from each side, and a service deck along each pier.
         Shape::NavalFactoryT3Support => {
             mesh.piers();
             mesh.lit_seawalls();
-            for (x, y) in [(-0.32_f32, -0.41_f32), (0.32, -0.41), (-0.32, 0.41), (0.32, 0.41)] {
-                mesh.service_arm([x, y, -0.32], [-x * 0.7, -y * 0.75]);
+            mesh.service_deck(-0.42);
+            mesh.service_deck(0.34);
+            for x in [-0.28_f32, 0.28] {
+                for side in [-1.0_f32, 1.0] {
+                    mesh.finger_pier(x, side, [-x * 0.55, -side * 0.14]);
+                }
             }
         }
         Shape::TorpedoLauncher => mesh.torpedo_turret(0.3, 0.06, &[0.0]),
@@ -3105,23 +3185,30 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.block([x - 0.012, -0.4, -0.46], [x + 0.012, -0.3, -0.445]);
             }
         }
+        // An eight-sided base under a broader emitter than the T2's, ringed by eight secondary
+        // emitters, one at each corner.
         Shape::ShieldGeneratorT3 => {
+            let corner = |index: usize, radius: f32| {
+                let angle = (index as f32 + 0.5) * std::f32::consts::FRAC_PI_4;
+                [radius * angle.cos(), radius * angle.sin()]
+            };
+            let eight: Vec<[f32; 2]> = (0..8).map(|index| corner(index, 0.5)).collect();
             mesh.paint(Material::Hull);
-            mesh.frustum([0.0, 0.0], [-0.5, -0.3], [0.5, 0.42], 8);
+            mesh.prism(&eight, [-0.5, -0.34], [1.0, 0.92]);
             mesh.paint(Material::Trim);
-            mesh.frustum([0.0, 0.0], [-0.3, -0.24], [0.34, 0.3], 8);
+            mesh.frustum([0.0, 0.0], [-0.34, -0.28], [0.4, 0.37], 8);
             mesh.paint(Material::Metal);
-            mesh.frustum([0.0, 0.0], [-0.3, 0.2], [0.16, 0.12], 6);
+            mesh.frustum([0.0, 0.0], [-0.28, 0.14], [0.2, 0.15], 6);
             mesh.paint(Material::Trim);
-            mesh.frustum([0.0, 0.0], [0.2, 0.35], [0.12, 0.3], 8);
+            mesh.frustum([0.0, 0.0], [0.14, 0.3], [0.15, 0.37], 8);
             mesh.paint(Material::Glow);
-            mesh.frustum([0.0, 0.0], [0.35, 0.5], [0.3, 0.1], 8);
-            // Four emitter pylons round the column, with lit tips.
-            for (x, y) in [(-0.27_f32, -0.27_f32), (0.27, -0.27), (-0.27, 0.27), (0.27, 0.27)] {
+            mesh.frustum([0.0, 0.0], [0.3, 0.46], [0.37, 0.12], 8);
+            for index in 0..8 {
+                let [x, y] = corner(index, 0.42);
                 mesh.paint(Material::Hull);
-                mesh.frustum([x, y], [-0.3, 0.08], [0.06, 0.045], 6);
+                mesh.frustum([x, y], [-0.34, -0.06], [0.05, 0.04], 5);
                 mesh.paint(Material::Glow);
-                mesh.ball([x, y, 0.12], 0.05, 6, 3);
+                mesh.ball([x, y, -0.02], 0.055, 5, 3);
             }
         }
         Shape::FabricatorT3 => {
