@@ -30,6 +30,10 @@ const LATE_PUSH_TICKS: u32 = 26_000;
 /// start. Even sides otherwise still traded to the limit now and then, a different seed after
 /// each change.
 const SUDDEN_DEATH_TICKS: u32 = 30_000;
+/// With no land route to the enemy, the late push and sudden death come this much sooner: the
+/// way there is across the sea, which takes a commander some eight minutes on a 20 km map, and
+/// started at the usual time, sudden death ended matches so near the limit that some ran over.
+const NO_LAND_ROUTE_HASTE_TICKS: u32 = 6_000;
 /// In sudden death, units already on their way are sent again at the enemy commander this often:
 /// sent only once idle, a group walked to where it had been, while it walked home to rebuild, and
 /// was 500 short of it when the time ran out.
@@ -89,6 +93,10 @@ const NAVAL_REACH_UNITS: i32 = 7_000;
 /// With no land route to the enemy, the most land units that cannot cross water it keeps, to
 /// guard home: the rest of what it makes goes into ships, aircraft, and hovercraft.
 const HOME_GUARD: usize = 12;
+/// With no land route, another naval yard for each this much mass income past the second's, up
+/// to this many.
+const ISLAND_YARD_INCOME: i64 = 40;
+const MOST_ISLAND_YARDS: i64 = 4;
 const FIRST_FLEET: usize = 4;
 const LARGEST_FLEET: usize = 12;
 /// A structure being built that costs at least this much mass is worth sending idle builders to.
@@ -315,6 +323,7 @@ struct Forces {
     /// Idle ships and submarines, and all of them.
     idle_naval: Vec<SimId>,
     naval_units: usize,
+    fleet: Vec<SimId>,
     generators: usize,
     generators_building: usize,
     storages: usize,
@@ -774,7 +783,7 @@ impl AiBrain {
         }
         self.command_army(world, &forces, &sightings, &mut commands);
         self.command_air(world, &forces, &sightings, &mut commands);
-        self.command_fleet(&forces, &sightings, &mut commands);
+        self.command_fleet(world, &forces, &sightings, &mut commands);
         if self.skill.missiles {
             self.command_missiles(world, &forces, &sightings, &mut commands);
         }
@@ -823,6 +832,9 @@ impl AiBrain {
             // Ships and submarines are the fleet's, whatever their class.
             if matches!(stats.move_class, MoveClass::Naval | MoveClass::Submarine) && !unit.is_structure() {
                 forces.naval_units += 1;
+                if finished {
+                    forces.fleet.push(id);
+                }
                 if order.kind == OrderKind::Idle && finished {
                     forces.idle_naval.push(id);
                 }
@@ -1143,8 +1155,13 @@ impl AiBrain {
                 .find(|&blueprint| world.can_build(builder, blueprint) && world.support_allowed(self.team, blueprint))
                 .unwrap_or(roster.naval_factory);
             let naval_planned = count_planned(roster.naval_factory) + roster.naval_support_factories.iter().map(|&blueprint| count_planned(blueprint)).sum::<usize>();
-            // With no land route to the enemy, one at once: the fleet is the main way across.
-            let naval_wanted = if mass_income >= self.naval(SECOND_NAVAL_FACTORY_INCOME) {
+            // With no land route to the enemy, one at once: the fleet is the main way across. And
+            // more of them as income grows, where on other maps the mass goes into land factories:
+            // with two yards and two land factories it banked most of what seventy extractors
+            // made, and matches ran to the time limit.
+            let naval_wanted = if !self.land_route && mass_income >= self.naval(SECOND_NAVAL_FACTORY_INCOME) {
+                (2 + (mass_income - self.naval(SECOND_NAVAL_FACTORY_INCOME)) / ISLAND_YARD_INCOME).min(MOST_ISLAND_YARDS) as usize
+            } else if mass_income >= self.naval(SECOND_NAVAL_FACTORY_INCOME) {
                 2
             } else {
                 usize::from(!self.land_route || forces.headquarters_tier >= 2 || mass_income >= self.naval(NAVAL_FACTORY_INCOME))
@@ -1177,15 +1194,16 @@ impl AiBrain {
         }
 
         // With no land route to the enemy, a naval yard and an air factory come before a second
-        // land factory, and there are never more than two of those: they make engineers, the
-        // home guard, and hovercraft.
+        // land factory: those make engineers, the home guard, and, from T2, hovercraft.
         if !self.land_route {
             if let Some(choice) = naval_choice().or_else(air_choice) {
                 return Some(choice);
             }
         }
         let factories_wanted = (((1 + mass_income / 10) * self.skill.land_percent + 50) / 100).max(1) as usize;
-        let factories_wanted = factories_wanted.min(self.skill.max_factories).min(if self.land_route { usize::MAX } else { 2 });
+        // Two until its headquarters is T2: before that they make only the home guard. After,
+        // each new one makes hovercraft.
+        let factories_wanted = factories_wanted.min(self.skill.max_factories).min(if self.land_route || forces.headquarters_tier >= 2 { usize::MAX } else { 2 });
         // A second factory goes up even in a stall, so that an upgrade never stops all production.
         if factories_total < factories_wanted && (economy.mass > Res::from_num(150) || factories_total < 2) {
             if let Some(cell) = self.site_near_home(world, factory, 1, planned) {
@@ -1761,7 +1779,29 @@ impl AiBrain {
 
     /// The fleet meets enemy ships that come near home, and otherwise sets out, once it is big
     /// enough, for the water nearest the enemy's start, shelling whatever it finds there.
-    fn command_fleet(&mut self, forces: &Forces, sightings: &[Sighting], commands: &mut Vec<SimCommand>) {
+    ///
+    /// In sudden death, when everything goes for the enemy commander, the fleet goes for it too
+    /// while it is under the sea, where only ships can hit it: a commander that had set out
+    /// across the seabed, and stopped there once the one it was after went under as well, stood
+    /// in mid-sea for minutes with the enemy's fleet at anchor off its base.
+    fn command_fleet(&mut self, world: &SimWorld, forces: &Forces, sightings: &[Sighting], commands: &mut Vec<SimCommand>) {
+        let haste = if self.land_route { 0 } else { NO_LAND_ROUTE_HASTE_TICKS };
+        let sudden_death = world.current_tick >= (SUDDEN_DEATH_TICKS - haste).max(self.skill.commander_push_ticks);
+        if sudden_death && self.skill.attacks && !forces.fleet.is_empty() {
+            let under_the_sea = self
+                .enemy_commander(world)
+                .and_then(|id| world.unit_position(id))
+                .map(|at| at.xy())
+                .filter(|&at| world.terrain.height_at(at) < world.terrain.water_level());
+            if let Some(goal) = under_the_sea {
+                // Those under way are sent again every so often, as the army is, and the idle at once.
+                let going = if world.current_tick.is_multiple_of(SUDDEN_DEATH_REAIM_TICKS) { &forces.fleet } else { &forces.idle_naval };
+                if !going.is_empty() {
+                    commands.push(SimCommand::AttackMove { units: going.clone(), goal });
+                }
+                return;
+            }
+        }
         if forces.idle_naval.is_empty() {
             return;
         }
@@ -2117,7 +2157,8 @@ impl AiBrain {
     }
 
     fn command_army(&mut self, world: &SimWorld, forces: &Forces, sightings: &[Sighting], commands: &mut Vec<SimCommand>) {
-        let sudden_death = world.current_tick >= SUDDEN_DEATH_TICKS.max(self.skill.commander_push_ticks);
+        let haste = if self.land_route { 0 } else { NO_LAND_ROUTE_HASTE_TICKS };
+        let sudden_death = world.current_tick >= (SUDDEN_DEATH_TICKS - haste).max(self.skill.commander_push_ticks);
         if sudden_death && world.current_tick.is_multiple_of(SUDDEN_DEATH_REAIM_TICKS) {
             let goal = self.enemy_commander(world).and_then(|id| world.unit_position(id)).map_or(self.enemy_home, |at| at.xy());
             let mut going = forces.attacking.clone();
@@ -2203,7 +2244,7 @@ impl AiBrain {
             .or_else(|| sightings.iter().filter(reachable).find(|enemy| enemy.is_structure))
             .or_else(|| sightings.iter().find(reachable))
             .map(|enemy| enemy.position);
-        let late = world.current_tick >= LATE_PUSH_TICKS.max(self.skill.commander_push_ticks);
+        let late = world.current_tick >= (LATE_PUSH_TICKS - haste).max(self.skill.commander_push_ticks);
         let full_strength = gathered >= self.skill.largest_wave || (late && gathered >= self.skill.first_wave * 2);
         let goal = target.unwrap_or_else(|| self.search_point(world, full_strength));
         // Not in formation: waves at the slowest unit's pace arrived late enough that, in 200
