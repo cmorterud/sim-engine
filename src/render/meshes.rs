@@ -276,10 +276,26 @@ pub enum Shape {
     /// The mobile flak's hull, a half-track, long and narrow, with outriggers either side at
     /// mid-length: wheels, a hood, and a cab at the front, and tracks under a bed behind.
     FlakHull,
+    /// What the T1 anti-air gun stands on: a pedestal on four splayed legs, a cross from above
+    /// where a point defense is a ring. Each kind of defense has a mount of its own, so that
+    /// they are told apart by more than their guns.
+    AntiAirMount,
+    /// The T2 point defense's mount: the point defense's ring, with a bastion at each corner.
+    PointDefenseBaseT2,
+    /// The flak cannon's mount: a square pit walled on all four sides, with the gun in the middle.
+    FlakPit,
+    /// The SAM launcher's mount: a hub with a broad outrigger to each side, a plus from above.
+    SamOutriggers,
+    /// The T3 heavy point defense's mount: an eight-sided bunker under the ring, buttressed on
+    /// each side.
+    HeavyDefenseBase,
+    /// The T2 artillery's mount: an oblong firing pad with its trails dug in behind and
+    /// ammunition stacked either side.
+    ArtilleryPad,
 }
 
 impl Shape {
-    pub const ALL: [Self; 128] = [
+    pub const ALL: [Self; 134] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -408,6 +424,12 @@ impl Shape {
         Self::FieldWorkshopT3,
         Self::ArtilleryEmplacement,
         Self::FlakHull,
+        Self::AntiAirMount,
+        Self::PointDefenseBaseT2,
+        Self::FlakPit,
+        Self::SamOutriggers,
+        Self::HeavyDefenseBase,
+        Self::ArtilleryPad,
     ];
     pub const COUNT: usize = Self::ALL.len();
 
@@ -1154,6 +1176,16 @@ impl MeshBuilder {
         });
     }
 
+    /// A point defense's mount: a broad skirt, a team-colored ring, and a pedestal for the gun.
+    fn defense_ring(&mut self) {
+        self.paint(Material::Hull);
+        self.frustum([0.0, 0.0], [-0.5, -0.32], [0.48, 0.44], 8);
+        self.paint(Material::Trim);
+        self.frustum([0.0, 0.0], [-0.32, -0.25], [0.42, 0.4], 8);
+        self.paint(Material::Hull);
+        self.frustum([0.0, 0.0], [-0.25, -0.05], [0.3, 0.24], 8);
+    }
+
     /// A round-ish solid from one radius to another. A top radius of zero makes a cone.
     fn frustum(&mut self, center: [f32; 2], z: [f32; 2], radius: [f32; 2], sides: usize) {
         let sides = round_sides(sides, radius[0].max(radius[1]));
@@ -1646,13 +1678,89 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.frustum([0.0, 0.0], [0.15, 0.5], [0.46, 0.14], 10);
         }
         // A stepped plinth with a team-colored ring, for turrets to stand on.
-        Shape::PointDefenseBase => {
+        Shape::PointDefenseBase => mesh.defense_ring(),
+        Shape::PointDefenseBaseT2 => {
+            mesh.defense_ring();
+            for (x, y) in [(-0.37_f32, -0.37_f32), (0.37, -0.37), (0.37, 0.37), (-0.37, 0.37)] {
+                mesh.paint(Material::Hull);
+                mesh.bevel([x - 0.12, y - 0.12, -0.5], [x + 0.12, y + 0.12, -0.2], 0.04);
+                mesh.paint(Material::Trim);
+                mesh.block([x - 0.05, y - 0.05, -0.2], [x + 0.05, y + 0.05, -0.16]);
+            }
+        }
+        Shape::HeavyDefenseBase => {
+            let eight = |radius: f32| -> Vec<[f32; 2]> {
+                (0..8).map(|side| { let angle = (side as f32 + 0.5) * std::f32::consts::FRAC_PI_4; [radius * angle.cos(), radius * angle.sin()] }).collect()
+            };
             mesh.paint(Material::Hull);
-            mesh.frustum([0.0, 0.0], [-0.5, -0.32], [0.48, 0.44], 8);
+            mesh.prism(&eight(0.5), [-0.5, -0.32], [1.0, 0.9]);
             mesh.paint(Material::Trim);
-            mesh.frustum([0.0, 0.0], [-0.32, -0.25], [0.42, 0.4], 8);
+            mesh.prism(&eight(0.4), [-0.32, -0.25], [1.0, 0.95]);
             mesh.paint(Material::Hull);
-            mesh.frustum([0.0, 0.0], [-0.25, -0.05], [0.3, 0.24], 8);
+            mesh.frustum([0.0, 0.0], [-0.25, -0.05], [0.3, 0.26], 8);
+            // A buttress against each side.
+            for (x, y) in [(0.0_f32, 0.38_f32), (0.38, 0.0), (0.0, -0.38), (-0.38, 0.0)] {
+                let (half_x, half_y) = if x == 0.0 { (0.09, 0.1) } else { (0.1, 0.09) };
+                mesh.paint(Material::Hull);
+                mesh.bevel([x - half_x, y - half_y, -0.34], [x + half_x, y + half_y, -0.14], 0.04);
+            }
+        }
+        Shape::AntiAirMount => {
+            mesh.paint(Material::Hull);
+            mesh.frustum([0.0, 0.0], [-0.5, -0.05], [0.18, 0.14], 8);
+            for (x, y) in [(-1.0_f32, -1.0_f32), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+                mesh.paint(Material::Metal);
+                mesh.beam([x * 0.1, y * 0.1, -0.2], [x * 0.4, y * 0.4, -0.45], 0.05, 0.04);
+                mesh.paint(Material::Trim);
+                mesh.bevel([x * 0.41 - 0.08, y * 0.41 - 0.08, -0.5], [x * 0.41 + 0.08, y * 0.41 + 0.08, -0.42], 0.02);
+            }
+        }
+        Shape::FlakPit => {
+            // Four walls round a sunken floor.
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.49, 0.33, -0.5], [0.49, 0.49, -0.18], 0.04);
+            mesh.bevel([-0.49, -0.49, -0.5], [0.49, -0.33, -0.18], 0.04);
+            mesh.bevel([0.33, -0.33, -0.5], [0.49, 0.33, -0.18], 0.04);
+            mesh.bevel([-0.49, -0.33, -0.5], [-0.33, 0.33, -0.18], 0.04);
+            mesh.paint(Material::Panel);
+            mesh.block([-0.33, -0.33, -0.5], [0.33, 0.33, -0.44]);
+            mesh.paint(Material::Trim);
+            mesh.frustum([0.0, 0.0], [-0.44, -0.36], [0.27, 0.25], 8);
+            mesh.paint(Material::Hull);
+            mesh.frustum([0.0, 0.0], [-0.36, -0.05], [0.19, 0.16], 8);
+        }
+        Shape::SamOutriggers => {
+            mesh.paint(Material::Hull);
+            mesh.frustum([0.0, 0.0], [-0.5, -0.05], [0.24, 0.2], 8);
+            for (x, y) in [(0.0_f32, 1.0_f32), (1.0, 0.0), (0.0, -1.0), (-1.0, 0.0)] {
+                // An arm out to a pad, along x or along y.
+                let (across, along) = (0.09, 0.33);
+                let (arm_x, arm_y) = if x == 0.0 { (across, along * 0.5) } else { (along * 0.5, across) };
+                let middle = [x * (0.16 + along * 0.5), y * (0.16 + along * 0.5)];
+                mesh.paint(Material::Hull);
+                mesh.block([middle[0] - arm_x, middle[1] - arm_y, -0.5], [middle[0] + arm_x, middle[1] + arm_y, -0.3]);
+                mesh.paint(Material::Trim);
+                mesh.bevel([x * 0.4 - 0.1 - x.abs() * 0.0, y * 0.4 - 0.1, -0.5], [x * 0.4 + 0.1, y * 0.4 + 0.1, -0.24], 0.03);
+            }
+        }
+        Shape::ArtilleryPad => {
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.3, -0.3, -0.5], [0.3, 0.46, -0.36], 0.03);
+            mesh.paint(Material::Trim);
+            mesh.frustum([0.0, 0.0], [-0.36, -0.3], [0.27, 0.25], 8);
+            mesh.paint(Material::Hull);
+            mesh.frustum([0.0, 0.0], [-0.3, -0.05], [0.2, 0.17], 8);
+            for x in [-1.0_f32, 1.0] {
+                // A trail back to a spade, and shells stacked beside the pad.
+                mesh.paint(Material::Metal);
+                mesh.beam([x * 0.14, -0.2, -0.34], [x * 0.4, -0.43, -0.45], 0.045, 0.04);
+                mesh.paint(Material::Trim);
+                mesh.bevel([x * 0.4 - 0.09, -0.5, -0.5], [x * 0.4 + 0.09, -0.4, -0.36], 0.02);
+                mesh.paint(Material::Hull);
+                mesh.bevel([x * 0.41 - 0.08, 0.06, -0.5], [x * 0.41 + 0.08, 0.4, -0.36], 0.02);
+                mesh.paint(Material::Metal);
+                mesh.block([x * 0.41 - 0.05, 0.1, -0.36], [x * 0.41 + 0.05, 0.36, -0.33]);
+            }
         }
         // A team-colored turret with a sloped front, a long gun, and a sensor with a glowing eye.
         // A fast buggy, twice as long as it is wide, whose team color is the radar dish turning
@@ -2211,18 +2319,31 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.body(0.0, &[[0.32, 0.03, 0.015, 0.05], [0.39, 0.04, 0.025, 0.045], [0.45, 0.02, 0.01, 0.025]], 6);
             mesh.paint(Material::Metal);
         }
+        // A round gun house with one fat barrel, and a rangefinder's arm out either side.
         Shape::FlakGun => {
-            mesh.block([-0.28, -0.28, -0.1], [0.28, 0.2, 0.2]);
+            mesh.frustum([0.0, -0.04], [-0.1, 0.18], [0.25, 0.2], 8);
+            mesh.paint(Material::Hull);
+            mesh.block([-0.38, -0.12, 0.02], [0.38, -0.04, 0.1]);
             mesh.paint(Material::Metal);
-            mesh.moving(motion::RECOIL, [0.0, -0.05, 0.1], |mesh| mesh.beam([0.0, -0.05, 0.1], [0.0, 0.28, 0.38], 0.1, 0.1));
-            mesh.flash([0.0, 0.3, 0.4], 0.08);
+            for x in [-0.38_f32, 0.38] {
+                mesh.block([x - 0.035, -0.15, -0.01], [x + 0.035, -0.01, 0.13]);
+            }
+            mesh.moving(motion::RECOIL, [0.0, -0.02, 0.1], |mesh| mesh.beam([0.0, -0.02, 0.1], [0.0, 0.3, 0.38], 0.095, 0.095));
+            mesh.flash([0.0, 0.32, 0.4], 0.08);
         }
+        // A turntable carrying a raised rack of four missiles, side by side.
         Shape::SamLauncher => {
-            mesh.block([-0.25, -0.25, -0.1], [0.25, 0.2, 0.15]);
+            mesh.bevel([-0.2, -0.26, -0.1], [0.2, 0.08, 0.1], 0.03);
             mesh.cuboid(
-                [Vec3::new(-0.3, -0.2, 0.05), Vec3::new(0.3, -0.2, 0.05), Vec3::new(0.3, -0.05, 0.05), Vec3::new(-0.3, -0.05, 0.05)],
-                [Vec3::new(-0.3, 0.2, 0.45), Vec3::new(0.3, 0.2, 0.45), Vec3::new(0.3, 0.35, 0.45), Vec3::new(-0.3, 0.35, 0.45)],
+                [Vec3::new(-0.36, -0.24, 0.04), Vec3::new(0.36, -0.24, 0.04), Vec3::new(0.36, -0.16, 0.0), Vec3::new(-0.36, -0.16, 0.0)],
+                [Vec3::new(-0.36, 0.2, 0.36), Vec3::new(0.36, 0.2, 0.36), Vec3::new(0.36, 0.28, 0.32), Vec3::new(-0.36, 0.28, 0.32)],
             );
+            for x in [-0.27_f32, -0.09, 0.09, 0.27] {
+                mesh.paint(Material::Hull);
+                mesh.body(x, &[[-0.26, 0.05, 0.05, 0.11], [0.2, 0.05, 0.05, 0.41]], 6);
+                mesh.paint(Material::Glow);
+                mesh.body(x, &[[0.2, 0.05, 0.05, 0.41], [0.3, 0.0, 0.0, 0.475]], 6);
+            }
         }
         // A long barrel laid nearly flat, half the plot's width out from a housing at its back to
         // its edge, with a muzzle brake, and an ammunition box behind.
@@ -3073,13 +3194,19 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Glow);
             mesh.block([-0.1, -0.1, 0.4], [0.1, 0.1, 0.5]);
         }
+        // A slim breech between two trunnion plates, with a long barrel outside each, raised to
+        // the sky: an H from above, where a point defense is a block with its gun down the middle.
         Shape::AntiAirGun => {
-            mesh.block([-0.25, -0.25, -0.1], [0.25, 0.2, 0.22]);
-            mesh.paint(Material::Metal);
-            for x in [-0.12_f32, 0.12] {
-                mesh.moving(motion::RECOIL, [x, -0.05, 0.1], |mesh| mesh.beam([x, -0.05, 0.1], [x, 0.38, 0.44], 0.05, 0.05));
-                mesh.flash([x, 0.38, 0.44], 0.05);
+            mesh.bevel([-0.1, -0.24, -0.1], [0.1, 0.12, 0.16], 0.03);
+            for x in [-0.2_f32, 0.2] {
+                mesh.paint(Material::Trim);
+                mesh.bevel([x - 0.045, -0.16, -0.1], [x + 0.045, 0.08, 0.22], 0.02);
+                mesh.paint(Material::Metal);
+                mesh.moving(motion::RECOIL, [x, -0.12, 0.08], |mesh| mesh.beam([x, -0.2, 0.02], [x, 0.4, 0.44], 0.035, 0.035));
+                mesh.flash([x, 0.41, 0.45], 0.045);
             }
+            mesh.paint(Material::Hull);
+            mesh.block([-0.2, -0.1, 0.02], [0.2, -0.02, 0.08]);
         }
         Shape::RigYard => {
             mesh.paint(Material::Hull);
