@@ -153,6 +153,12 @@ out close and why: evidence about the process, not a target.
   need at least twice a T2 fleet's cost and three times a massed T3 fleet's to break it, where today
   they need 0.60 and 0.18; the inspiration's static numbers (0.6 to 0.7) leave out torpedo defense,
   anti-air splash, and shields.
+* 2026-11-24: T1 navy (the Frigate, Attack Submarine, and T1 Torpedo Launcher) set against T1 land
+  and air frozen (`reports/balance/2026-11-24-t1-navy.md`): each given the inspiration's cost,
+  health, damage, and build time per mass against its own T1 tank, applied to the Medium Tank,
+  which brought each from about half of its strength-per-cost ratio to within the band. Past the
+  ratios, within the band: the frigate's railgun at half again, so that frigates hold even with an
+  equal cost of T1 bombers, and the launcher's health at 3,000, so that frigates closing on it lose.
 
 ## Order of work
 

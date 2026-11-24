@@ -68,7 +68,9 @@ Re-derived from this game's own targets and duels on 2026-11-15 (BALANCE.md,
 Artillery, and Land Scout. And on 2026-11-20 (`reports/balance/2026-11-20-t2-land.md`): the Heavy
 Tank, Grenadier Walker, Assault Hovercraft, and Mobile Missile Launcher. And on 2026-11-21
 (`reports/balance/2026-11-21-t3-land.md`): the Heavy Walker, Siege Walker, and Mobile Heavy
-Artillery.
+Artillery. And on 2026-11-24 (`reports/balance/2026-11-24-t1-navy.md`): the Frigate, Attack
+Submarine, and T1 Torpedo Launcher, each from FAF's ratios against its own T1 tank (the medians
+across its factions, below) applied to this game's Medium Tank, not from FAF's values.
 
 ## Balance targets
 
