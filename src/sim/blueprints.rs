@@ -148,6 +148,10 @@ pub enum WeaponKind {
     /// A gravity beam (GAME_SPECIFICATION.md §12): it lifts an enemy land unit, holds it, and
     /// crushes it once `crush_ticks` have passed.
     Tractor,
+    /// A laser: a beam that crosses to its target in a straight line within the tick it is
+    /// fired, and hits the first enemy, shield, or rise in the ground on the way. One target,
+    /// with no blast and no scatter, and nothing to lead or dodge.
+    Laser,
 }
 
 /// What a structure gives the finished structures of its team that touch it (GAME_SPECIFICATION.md
@@ -549,7 +553,8 @@ impl Number {
 struct RawWeapon {
     range: Number,
     reload_ticks: u32,
-    projectile_speed: Number,
+    /// Not given for a laser, which has none.
+    projectile_speed: Option<Number>,
     damage: Number,
     splash_radius: Option<Number>,
     /// How fast the weapon swivels, in degrees per second. Without one, it fires in any direction at once.
@@ -960,22 +965,34 @@ impl BlueprintDb {
                     None => [Fp::ZERO; 2],
                     Some([right, forward]) => [right.fp().map_err(context)?, forward.fp().map_err(context)?],
                 };
+                let kind = match weapon.kind.as_deref() {
+                    None | Some("shell") => WeaponKind::Shell,
+                    Some("tactical_missile") => WeaponKind::TacticalMissile,
+                    Some("strategic_missile") => WeaponKind::StrategicMissile,
+                    Some("bomb") => WeaponKind::Bomb,
+                    Some("flak") => WeaponKind::Flak,
+                    Some("tractor") => WeaponKind::Tractor,
+                    Some("laser") => WeaponKind::Laser,
+                    Some(other) => return Err(context(format!("unknown weapon kind {other:?}"))),
+                };
+                // A laser is a beam: it has no speed of its own to give, no blast, and no scatter.
+                let projectile_speed = match (kind, &weapon.projectile_speed) {
+                    (WeaponKind::Laser, None) => super::combat::BEAM_SPEED,
+                    (WeaponKind::Laser, Some(_)) => return Err(context("a laser has no projectile_speed".into())),
+                    (_, Some(speed)) => speed.fp().map_err(context)?,
+                    (_, None) => return Err(context("a weapon needs a projectile_speed".into())),
+                };
+                if kind == WeaponKind::Laser && (weapon.splash_radius.is_some() || weapon.spread.is_some() || weapon.artillery || weapon.homing) {
+                    return Err(context("a laser hits one target where it is aimed: it has no splash_radius or spread, and is neither artillery nor homing".into()));
+                }
                 Ok(WeaponDef {
                     range: weapon.range.fp().map_err(context)?,
                     reload_ticks: weapon.reload_ticks,
-                    projectile_speed: weapon.projectile_speed.fp().map_err(context)?,
+                    projectile_speed,
                     damage: weapon.damage.fp().map_err(context)?,
                     splash_radius: whole(&weapon.splash_radius)?,
                     turn_rate: weapon.turn_rate,
-                    kind: match weapon.kind.as_deref() {
-                        None | Some("shell") => WeaponKind::Shell,
-                        Some("tactical_missile") => WeaponKind::TacticalMissile,
-                        Some("strategic_missile") => WeaponKind::StrategicMissile,
-                        Some("bomb") => WeaponKind::Bomb,
-                        Some("flak") => WeaponKind::Flak,
-                        Some("tractor") => WeaponKind::Tractor,
-                        Some(other) => return Err(context(format!("unknown weapon kind {other:?}"))),
-                    },
+                    kind,
                     cruise_height: whole(&weapon.cruise_height)?,
                     targets: match weapon.targets.as_deref() {
                         None | Some("ground") => Targets::Ground,
@@ -1004,8 +1021,8 @@ impl BlueprintDb {
             // Extra weapons fire shells, or steering shots at aircraft, on their own targets.
             let extra_weapons = unit.extra_weapons.iter().map(parse_weapon).collect::<Result<Vec<_>, _>>()?;
             // Extra weapons fire shells, steering shots, or missiles that pick their own targets.
-            if extra_weapons.iter().any(|extra| extra.artillery || !(extra.kind == WeaponKind::Shell || (extra.kind == WeaponKind::TacticalMissile && extra.automatic))) {
-                return Err(context("extra weapons can only fire shells, or automatic tactical missiles".into()));
+            if extra_weapons.iter().any(|extra| extra.artillery || !(matches!(extra.kind, WeaponKind::Shell | WeaponKind::Laser) || (extra.kind == WeaponKind::TacticalMissile && extra.automatic))) {
+                return Err(context("extra weapons can only fire shells, lasers, or automatic tactical missiles".into()));
             }
             if !extra_weapons.is_empty() && weapon.is_none() {
                 return Err(context("extra weapons need a main weapon".into()));

@@ -93,7 +93,7 @@ fn damage(world: &SimWorld, id: SimId) -> i32 {
 /// What a weapon can be pointed at, and whether this test covers it.
 fn covered(weapon: &WeaponDef) -> bool {
     match weapon.kind {
-        WeaponKind::Shell | WeaponKind::Bomb | WeaponKind::Flak => true,
+        WeaponKind::Shell | WeaponKind::Bomb | WeaponKind::Flak | WeaponKind::Laser => true,
         WeaponKind::TacticalMissile => weapon.automatic,
         WeaponKind::StrategicMissile | WeaponKind::Tractor => false,
     }

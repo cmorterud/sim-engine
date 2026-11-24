@@ -595,14 +595,17 @@ fn every_mounted_gun_fires_from_its_own_turret() {
             let rest = if weapon.aft { view.facing.map(|axis| -axis) } else { view.facing };
             assert_eq!(aim_of(&view, index), rest, "{}'s weapon {index} rests facing {}", ship.key, if weapon.aft { "aft" } else { "forward" });
         }
-        // Something to shoot at, off to one side, so that every turret has to turn to it.
-        spawn(&mut world, "t2_destroyer", Team::Red, point(3_500, 4_000));
+        // Something to shoot at, off to one side, so that every turret has to turn to it, and
+        // within reach of every mounted gun.
+        let reach = weapons.iter().filter(|weapon| weapon.mount != [Fp::ZERO; 2]).map(|weapon| weapon.range.to_num::<i32>()).min().unwrap();
+        spawn(&mut world, "t2_destroyer", Team::Red, point(1_700 + (reach * 4 / 5).min(1_800), 4_000));
         let mut fired = Vec::new();
         for _ in 0..300 {
             world.advance_tick(&[]);
             let snapshot = world.snapshot();
             let me = snapshot.units.iter().find(|unit| unit.id == id).unwrap();
-            fired.extend(snapshot.projectiles.iter().filter(|shot| shot.source == id).filter_map(|shot| shot.from.map(|from| (from, me.x, me.y, me.facing))));
+            // A laser's beam is fired and lands within the tick, so it is only among the landed.
+            fired.extend(snapshot.projectiles.iter().chain(&snapshot.landed).filter(|shot| shot.source == id).filter_map(|shot| shot.from.map(|from| (from, me.x, me.y, me.facing))));
         }
         for (index, weapon) in weapons.iter().enumerate().filter(|(_, weapon)| weapon.mount != [Fp::ZERO; 2]) {
             let [right, forward] = weapon.mount.map(|axis| axis.to_num::<f64>());
@@ -614,4 +617,108 @@ fn every_mounted_gun_fires_from_its_own_turret() {
             assert!(from_turret, "{}'s weapon {index} fires from its turret at {right}, {forward}: shots left from {:?}", ship.key, fired.iter().map(|shot| shot.0).collect::<Vec<_>>());
         }
     }
+}
+
+/// A passive, very tough Red hovercraft, which rides over the water where torpedoes cannot
+/// reach it: something for a ship's guns alone to shoot at.
+fn tough_hovercraft(world: &mut SimWorld, at: Vec2Fp) -> SimId {
+    use sim_engine::sim::components::{Combat, Health};
+    let id = spawn(world, "t2_assault_hovercraft", Team::Red, at);
+    let entity = world.unit_entity(id).unwrap();
+    world.ecs.get::<&mut Combat>(entity).unwrap().enabled = false;
+    let mut health = world.ecs.get::<&mut Health>(entity).unwrap();
+    health.max = fp_int(400_000);
+    health.current = health.max;
+    id
+}
+
+fn health_of(world: &SimWorld, id: SimId) -> i64 {
+    i64::from(world.unit_health(id).unwrap().to_num::<i32>())
+}
+
+/// A laser's beams from `shooter` that landed in the tick just run.
+fn beams_landed(world: &SimWorld, shooter: SimId) -> Vec<sim_engine::sim::world::ProjectileView> {
+    let snapshot = world.snapshot();
+    assert!(snapshot.projectiles.iter().all(|shot| shot.kind != sim_engine::sim::world::ProjectileKind::Beam), "a beam is never left in flight at the end of a tick");
+    snapshot.landed.into_iter().filter(|shot| shot.kind == sim_engine::sim::world::ProjectileKind::Beam && shot.source == shooter).collect()
+}
+
+/// Every laser in the unit data (the battlecruiser's two): its beam lands in the tick it is
+/// fired, on one target, for exactly its damage, with no blast onto what stands beside it, and
+/// it fires as often as it reloads.
+#[test]
+fn every_laser_hits_within_the_tick_it_fires_and_only_what_it_is_aimed_at() {
+    use sim_engine::sim::blueprints::{BlueprintDb, WeaponKind};
+    let db = BlueprintDb::standard();
+    let armed: Vec<_> = db.iter().filter(|unit| unit.weapon.iter().chain(&unit.extra_weapons).any(|weapon| weapon.kind == WeaponKind::Laser)).collect();
+    assert!(armed.iter().any(|unit| unit.key == "t3_battlecruiser"), "the battlecruiser has lasers");
+    for ship in armed {
+        let lasers: Vec<_> = ship.weapon.iter().chain(&ship.extra_weapons).filter(|weapon| weapon.kind == WeaponKind::Laser).collect();
+        let damage = i64::from(lasers[0].damage.to_num::<i32>());
+        assert!(lasers.iter().all(|laser| i64::from(laser.damage.to_num::<i32>()) == damage && laser.splash_radius == Fp::ZERO && laser.spread == Fp::ZERO), "{}'s lasers", ship.key);
+        let reach = lasers.iter().map(|laser| laser.range.to_num::<i32>()).min().unwrap();
+        let mut world = lake_world();
+        let shooter = spawn(&mut world, &ship.key, Team::Blue, point(1_700, 4_000));
+        // Two targets side by side, closer together than any shell's blast would need.
+        let targets = [tough_hovercraft(&mut world, point(1_700 + reach * 3 / 5, 4_000)), tough_hovercraft(&mut world, point(1_700 + reach * 3 / 5, 4_030))];
+        let ticks = 400;
+        let mut fired = 0;
+        for tick in 0..ticks {
+            let before: Vec<i64> = targets.iter().map(|&target| health_of(&world, target)).collect();
+            world.advance_tick(&[]);
+            let beams = beams_landed(&world, shooter);
+            let drops: Vec<i64> = targets.iter().zip(&before).map(|(&target, &before)| before - health_of(&world, target)).collect();
+            assert_eq!(drops.iter().sum::<i64>(), beams.len() as i64 * damage, "{}: tick {tick}, {} beams landed and the targets lost {drops:?}", ship.key, beams.len());
+            assert!(drops.iter().all(|drop| drop % damage == 0), "{}: each target is hit by whole beams, not by a blast: {drops:?}", ship.key);
+            for beam in &beams {
+                assert!(beam.from.is_some(), "a beam says where it was fired from, for drawing");
+                let on_target = targets.iter().any(|&target| {
+                    let at = world.unit_position(target).unwrap();
+                    let (dx, dy) = (f64::from(beam.x) / 4096.0 - at.x.to_num::<f64>(), f64::from(beam.y) / 4096.0 - at.y.to_num::<f64>());
+                    dx.hypot(dy) <= 20.0
+                });
+                assert!(on_target, "{}'s beam ends on its target", ship.key);
+            }
+            fired += beams.len();
+        }
+        let expected: usize = lasers.iter().map(|laser| (ticks / laser.reload_ticks) as usize).sum();
+        assert!(fired >= expected - lasers.len() && fired <= expected + lasers.len(), "{} fired {fired} beams in {ticks} ticks, expected about {expected}", ship.key);
+    }
+}
+
+/// A laser is a straight beam: an enemy dome stops it short of what is under it, and it is not
+/// fired at all across ground that rises into its line, where a shell would arc over.
+#[test]
+fn a_dome_stops_a_laser_and_rising_ground_blocks_it() {
+    // A dome: the escort corvette's, with a hovercraft under it.
+    let mut world = lake_world();
+    let shooter = spawn(&mut world, "t3_battlecruiser", Team::Blue, point(1_700, 4_000));
+    let corvette = spawn(&mut world, "t2_escort_corvette", Team::Red, point(2_700, 4_000));
+    let sheltered = tough_hovercraft(&mut world, point(2_650, 4_000));
+    let before = health_of(&world, sheltered);
+    let mut beams = Vec::new();
+    for _ in 0..200 {
+        world.advance_tick(&[]);
+        beams.extend(beams_landed(&world, shooter));
+    }
+    assert!(beams.len() >= 4, "the battlecruiser fires at what it can see: {} beams", beams.len());
+    assert_eq!(health_of(&world, sheltered), before, "the dome takes the beams");
+    let dome = world.unit_position(corvette).unwrap();
+    for beam in &beams {
+        let (dx, dy) = (f64::from(beam.x) / 4096.0 - dome.x.to_num::<f64>(), f64::from(beam.y) / 4096.0 - dome.y.to_num::<f64>());
+        assert!(dx.hypot(dy) > 300.0, "a beam ends on the dome, {:.0} from its middle, not inside it", dx.hypot(dy));
+    }
+
+    // The island, 20 above the water, between the ship and a target close behind it: the line
+    // from the ship's guns, high on its hull, down to the target runs into the far shore.
+    let mut world = lake_world();
+    let shooter = spawn(&mut world, "t3_battlecruiser", Team::Blue, point(1_800, 2_500));
+    let hidden = tough_hovercraft(&mut world, point(2_880, 2_500));
+    let before = health_of(&world, hidden);
+    let mut beams = 0;
+    for _ in 0..200 {
+        world.advance_tick(&[]);
+        beams += beams_landed(&world, shooter).len();
+    }
+    assert_eq!((beams, health_of(&world, hidden)), (0, before), "no beam is fired into the island");
 }

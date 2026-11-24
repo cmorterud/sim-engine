@@ -157,7 +157,26 @@ pub struct Effects {
     seen_tick: Option<u32>,
     /// Where each missile and ship last left a puff.
     trail_ends: Vec<(SimId, [f64; 3])>,
+    /// Laser beams lately fired, each from its muzzle to where it struck.
+    beams: VecDeque<LaserBeam>,
 }
+
+/// A laser's beam, which the simulation fires and lands within one tick: drawn for a moment
+/// after, thinning out, so that it is seen.
+#[derive(Copy, Clone, Debug)]
+struct LaserBeam {
+    from: [f64; 3],
+    to: [f64; 3],
+    born: f64,
+    color: [f32; 3],
+}
+
+/// How long a laser's beam shows, in seconds, how wide it starts, in units, and how far its
+/// team's color is lifted towards white.
+const LASER_LIFE: f64 = 0.28;
+const LASER_WIDTH: f32 = 1.6;
+const LASER_WHITEN: f32 = 0.55;
+const MAX_BEAMS: usize = 512;
 
 impl Effects {
     pub fn new() -> Self {
@@ -258,7 +277,7 @@ impl Effects {
                 None => (last_seen, time),
             };
             let least: f32 = match projectile.kind {
-                ProjectileKind::Shell => 2.5,
+                ProjectileKind::Shell | ProjectileKind::Beam => 2.5,
                 ProjectileKind::Discharge => 8.0,
                 ProjectileKind::TacticalMissile => 14.0,
                 ProjectileKind::StrategicMissile => 220.0,
@@ -276,6 +295,21 @@ impl Effects {
                 self.scar(spot, radius, !strategic, time, u64::from(projectile.id.0));
             }
         });
+        // A laser's beam is fired and lands within a tick, so it is never seen in flight: it is
+        // drawn from its muzzle to where it struck, with a flash there.
+        for struck in current.landed.iter().filter(|struck| struck.kind == ProjectileKind::Beam) {
+            let Some(from) = struck.from else { continue };
+            let to = raw_point(struck.x, struck.y, struck.z);
+            let team = match struck.team {
+                crate::sim::components::Team::Blue => super::instances::BLUE,
+                crate::sim::components::Team::Red => super::instances::RED,
+            };
+            if self.beams.len() >= MAX_BEAMS {
+                self.beams.pop_front();
+            }
+            self.beams.push_back(LaserBeam { from: raw_point(from[0], from[1], from[2]), to, born: arrival, color: team.map(|channel| channel + (1.0 - channel) * LASER_WHITEN) });
+            self.explode(to, 3.0, arrival, u64::from(struck.id.0));
+        }
         // A unit that dies leaves a wreck where it stood. One that only goes out of sight does not,
         // nor a remembered structure found gone: it died out of sight, long since.
         let mut gone: Vec<UnitView> = Vec::new();
@@ -451,6 +485,18 @@ impl Effects {
         self.puffs.retain(|puff| time - puff.born < puff.life && puff.born - time < 10.0);
         self.scars.retain(|scar| time - scar.born < SCAR_LIFE && scar.born - time < 10.0);
         self.tracks.retain(|track| time - track.born < TRACK_LIFE && track.born - time < 10.0);
+        self.beams.retain(|beam| time - beam.born < LASER_LIFE && beam.born - time < 10.0);
+        for beam in &self.beams {
+            let age = ((time - beam.born) / LASER_LIFE).clamp(0.0, 1.0) as f32;
+            // Not yet due: its snapshot is still ahead of what is drawn.
+            if time < beam.born {
+                continue;
+            }
+            let width = LASER_WIDTH * (1.0 - age * age);
+            if let Some(rod) = super::links::stretched(beam.from, beam.to, width, width, beam.color, beam.color, eye) {
+                out.push(Shape::Beam, rod);
+            }
+        }
         for track in &self.tracks {
             // The shader reads a scar's look from its color: tracks are its third kind.
             let look = [2.0, track.strength(time), 0.0];

@@ -366,6 +366,8 @@ pub enum ProjectileKind {
     Discharge,
     TacticalMissile,
     StrategicMissile,
+    /// A laser's beam, drawn as a line from `from`, its muzzle, to where it struck.
+    Beam,
 }
 
 /// A shield generator's dome, for drawing and for the command panel. Values are raw `Fp` bits.
@@ -779,9 +781,10 @@ pub struct SimWorld {
 }
 
 /// How a projectile looks to the renderer, at its position.
-fn projectile_view(id: SimId, position: &Position, projectile: &Projectile, discharged: Option<&Discharged>, missile: Option<&Missile>) -> ProjectileView {
+fn projectile_view(id: SimId, position: &Position, projectile: &Projectile, discharged: Option<&Discharged>, missile: Option<&Missile>, beam: Option<&super::components::Beam>) -> ProjectileView {
     let (x, y, z) = (position.0.x.to_bits(), position.0.y.to_bits(), position.0.z.to_bits());
     let kind = match (discharged, missile) {
+        _ if beam.is_some() => ProjectileKind::Beam,
         (Some(_), _) => ProjectileKind::Discharge,
         (None, Some(missile)) if missile.strategic => ProjectileKind::StrategicMissile,
         (None, Some(_)) => ProjectileKind::TacticalMissile,
@@ -789,7 +792,9 @@ fn projectile_view(id: SimId, position: &Position, projectile: &Projectile, disc
     };
     // A Discharge shell's blast is worked out when it lands, by its own reach.
     let splash = discharged.map_or(projectile.splash_radius, |discharged| discharged.def.splash_radius);
-    ProjectileView { id, team: projectile.source_team, x, y, z, kind, source: projectile.source, from: None, splash: splash.to_bits() }
+    // A beam is drawn from its muzzle whenever it is seen, not only on the tick it was fired.
+    let from = beam.map(|beam| [beam.from.x.to_bits(), beam.from.y.to_bits(), beam.from.z.to_bits()]);
+    ProjectileView { id, team: projectile.source_team, x, y, z, kind, source: projectile.source, from, splash: splash.to_bits() }
 }
 
 impl SimWorld {
@@ -3006,6 +3011,24 @@ impl SimWorld {
                 }
                 continue;
             }
+            // A beam crosses to where it was aimed within this tick, in a straight line, and is
+            // spent: the projectile step takes it there, and it strikes the first enemy, dome, or
+            // rise in the ground on the way. It never hits a friend.
+            if super::combat::is_beam(shot.speed) {
+                let projectile = Projectile {
+                    velocity: shot.to - shot.from,
+                    damage: shot.damage,
+                    source: shot.source,
+                    source_team: shot.team,
+                    lifetime_ticks: 1,
+                    splash_radius: Fp::ZERO,
+                    allied_safe_ticks: 1,
+                };
+                let id = self.spawn_projectile(shot.from, projectile);
+                let entity = self.projectiles.last().filter(|last| last.0 == id).expect("just spawned").1;
+                self.ecs.insert_one(entity, super::components::Beam { from: shot.from }).expect("just spawned");
+                continue;
+            }
             // A shell aims where its target will be when it arrives.
             let target_velocity = shot.lead.and_then(|target| self.ecs.get::<&Velocity>(target).ok().map(|velocity| velocity.0));
             // Flak flies straight, in three dimensions, to where the aircraft meets it.
@@ -3744,8 +3767,8 @@ impl SimWorld {
             self.projectiles.retain(|&(id, entity)| {
                 if dead.get(next_dead) == Some(&id) {
                     next_dead += 1;
-                    if let Ok((position, projectile, discharged, missile)) = ecs.query_one_mut::<(&Position, &Projectile, Option<&Discharged>, Option<&Missile>)>(entity) {
-                        landed.push(projectile_view(id, position, projectile, discharged, missile));
+                    if let Ok((position, projectile, discharged, missile, beam)) = ecs.query_one_mut::<(&Position, &Projectile, Option<&Discharged>, Option<&Missile>, Option<&super::components::Beam>)>(entity) {
+                        landed.push(projectile_view(id, position, projectile, discharged, missile, beam));
                     }
                     ecs.despawn(entity).expect("dead projectiles are live until now");
                     false
@@ -4284,16 +4307,18 @@ impl SimWorld {
             }
             units.sort_by_key(|unit| unit.id);
         }
-        let mut projectile_query = self.ecs.query::<(&Position, &Projectile, Option<&Discharged>, Option<&Missile>)>();
+        let mut projectile_query = self.ecs.query::<(&Position, &Projectile, Option<&Discharged>, Option<&Missile>, Option<&super::components::Beam>)>();
         let projectile_view = projectile_query.view();
         let projectiles = self
             .projectiles
             .iter()
             .filter_map(|&(id, entity)| {
-                let (position, projectile, discharged, missile) = projectile_view.get(entity).expect("projectile list only holds live projectiles");
-                let mut view = self::projectile_view(id, position, projectile, discharged, missile);
+                let (position, projectile, discharged, missile, beam) = projectile_view.get(entity).expect("projectile list only holds live projectiles");
+                let mut view = self::projectile_view(id, position, projectile, discharged, missile, beam);
                 // Ids only grow, so this tick's launches are in id order.
-                view.from = self.launched.binary_search_by_key(&id, |launch| launch.0).ok().map(|index| self.launched[index].1);
+                if view.from.is_none() {
+                    view.from = self.launched.binary_search_by_key(&id, |launch| launch.0).ok().map(|index| self.launched[index].1);
+                }
                 seen(projectile.source_team, view.x, view.y).then_some(view)
             })
             .collect();

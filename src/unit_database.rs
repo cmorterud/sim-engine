@@ -263,6 +263,7 @@ fn weapon_stats(weapon: &WeaponDef) -> Vec<(&'static str, String)> {
         WeaponKind::Bomb => "bombs",
         WeaponKind::Flak => "flak",
         WeaponKind::Tractor => "tractor beam",
+        WeaponKind::Laser => "a laser beam",
     };
     add("Fires", kind.to_string());
     add(
@@ -290,7 +291,9 @@ fn weapon_stats(weapon: &WeaponDef) -> Vec<(&'static str, String)> {
     if weapon.inner_radius > Fp::ZERO {
         add("Inner blast", format!("{} more within {}", number(fp(weapon.inner_damage), 0), number(fp(weapon.inner_radius), 0)));
     }
-    if weapon.projectile_speed > Fp::ZERO {
+    if weapon.kind == WeaponKind::Laser {
+        add("Shot speed", "hits at once".to_string());
+    } else if weapon.projectile_speed > Fp::ZERO {
         add("Shot speed", format!("{} a second", number(fp(weapon.projectile_speed) * PER_SECOND, 0)));
     }
     add("Turret", weapon.turn_rate.map_or_else(|| "fires any way at once".to_string(), |rate| format!("turns {rate}° a second")));

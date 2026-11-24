@@ -444,6 +444,14 @@ pub struct AntiAir {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Fused;
 
+/// A laser's beam (`WeaponKind::Laser`): a shot that crosses to its target in a straight line
+/// within the tick it is fired and is spent. `from` is the muzzle it left, for drawing the beam
+/// from there to where it struck; it plays no part in the game.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Beam {
+    pub from: Vec3Fp,
+}
+
 /// A torpedo weapon: it hits ships and submarines, and nothing else.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Torpedo;

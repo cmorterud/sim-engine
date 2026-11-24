@@ -94,7 +94,7 @@ fn lerp(from: [f64; 3], to: [f64; 3], share: f64) -> [f64; 3] {
 
 /// A shape lying along X, stretched from `from` to `to`, `width` across and `height` up.
 #[allow(clippy::too_many_arguments)]
-fn stretched(from: [f64; 3], to: [f64; 3], width: f32, height: f32, hull: [f32; 3], glow: [f32; 3], eye: [f64; 3]) -> Option<UnitInstanceRaw> {
+pub(super) fn stretched(from: [f64; 3], to: [f64; 3], width: f32, height: f32, hull: [f32; 3], glow: [f32; 3], eye: [f64; 3]) -> Option<UnitInstanceRaw> {
     let delta = glam::DVec3::from(to) - glam::DVec3::from(from);
     let length = delta.length();
     if length < 1e-6 {

@@ -10,6 +10,16 @@ use crate::math::fp::{sqrt_wide, Vec2Fp};
 
 pub const GRAVITY: Fp = Fp::from_bits(GRAVITY_RAW);
 
+/// The speed a beam weapon's shots are given, in units a tick: further than any map is across, so
+/// that a laser's beam reaches whatever it is fired at within the tick (`WeaponKind::Laser`).
+pub const BEAM_SPEED: Fp = Fp::from_bits(100_000 << FP_FRAC_BITS);
+
+/// Whether a shot at this speed is a beam: it crosses to its target in a straight line within
+/// the tick it is fired, with no arc, no lead, and no scatter.
+pub fn is_beam(speed: Fp) -> bool {
+    speed >= BEAM_SPEED
+}
+
 /// A firing solution: the launch velocity and the number of ticks to reach the aim point.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct FiringSolution {
@@ -238,6 +248,10 @@ pub fn probe_terrain(terrain: &Terrain, start: Vec3Fp, step: Vec3Fp) -> TerrainP
 /// the same arc as a real shell. Ground in the last step does not count, because a target on a
 /// slope is hit before its shell lands.
 pub fn shot_is_clear(terrain: &Terrain, from: Vec3Fp, to: Vec3Fp, horizontal_speed: Fp) -> bool {
+    // A beam goes straight there, so the ground must be clear of that line all the way.
+    if is_beam(horizontal_speed) {
+        return probe_terrain(terrain, from, to - from).hit.is_none();
+    }
     let solution = firing_solution(from, to, horizontal_speed);
     let (mut position, mut velocity) = (from, solution.velocity);
     for _ in 1..solution.flight_ticks {

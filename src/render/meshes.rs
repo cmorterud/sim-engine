@@ -292,10 +292,13 @@ pub enum Shape {
     /// The T2 artillery's mount: an oblong firing pad with its trails dug in behind and
     /// ammunition stacked either side.
     ArtilleryPad,
+    /// A laser cannon's turret, drawn on its own so that it turns to its aim, as a
+    /// `NavalTurret` is: a drum under a housing, with a long ribbed emitter in place of barrels.
+    LaserTurret,
 }
 
 impl Shape {
-    pub const ALL: [Self; 134] = [
+    pub const ALL: [Self; 135] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -430,6 +433,7 @@ impl Shape {
         Self::SamOutriggers,
         Self::HeavyDefenseBase,
         Self::ArtilleryPad,
+        Self::LaserTurret,
     ];
     pub const COUNT: usize = Self::ALL.len();
 
@@ -1240,6 +1244,47 @@ impl MeshBuilder {
             mesh.block([x - blade, y - 0.018, 0.104], [x + blade, y + 0.018, 0.118]);
             mesh.block([x - 0.018, y - blade, 0.104], [x + 0.018, y + blade, 0.118]);
         });
+    }
+
+    /// The tactical missile defense's mount, standing on `foot`, its dome `width` across: a collar,
+    /// a column, and a white dome over a team-colored band, with a short gun out of its face. The
+    /// same on everything that carries one, the land structure and each ship, so that it is known
+    /// wherever it is seen: callers on hulls drawn at different sizes pass a `width` that comes
+    /// to the same size in the world (`MISSILE_DEFENSE_WIDTH`).
+    fn missile_defense_mount(&mut self, foot: [f32; 3], width: f32) {
+        let [x, y, z] = foot;
+        let at = |height: f32| z + height * width;
+        self.paint(Material::Hull);
+        self.frustum([x, y], [z, at(0.25)], [0.42 * width, 0.34 * width], 6);
+        self.paint(Material::Metal);
+        self.frustum([x, y], [at(0.25), at(0.7)], [0.22 * width, 0.2 * width], 6);
+        self.paint(Material::Trim);
+        self.frustum([x, y], [at(0.7), at(0.85)], [0.5 * width, 0.5 * width], 8);
+        self.paint(Material::Hull);
+        self.frustum([x, y], [at(0.85), at(1.3)], [0.5 * width, 0.42 * width], 8);
+        self.frustum([x, y], [at(1.3), at(1.55)], [0.42 * width, 0.16 * width], 8);
+        self.paint(Material::Metal);
+        self.beam([x, y + 0.3 * width, at(1.05)], [x, y + 0.85 * width, at(1.05)], 0.07 * width, 0.07 * width);
+    }
+
+    /// The T1 anti-air gun, standing with the middle of its foot at `foot`, drawn at `scale` of
+    /// the turret's own: a slim breech between two trunnion plates, with a long barrel outside
+    /// each, raised to the sky. An H from above, where a point defense is a block with its gun
+    /// down the middle. The anti-air turret is one of these on its mount, and ships that carry
+    /// the same gun carry the same shape.
+    fn anti_air_gun(&mut self, foot: [f32; 3], scale: f32) {
+        let at = |x: f32, y: f32, z: f32| [foot[0] + x * scale, foot[1] + y * scale, foot[2] + (z + 0.1) * scale];
+        self.paint(Material::Trim);
+        self.bevel(at(-0.1, -0.24, -0.1), at(0.1, 0.12, 0.16), 0.03 * scale);
+        for x in [-0.2_f32, 0.2] {
+            self.paint(Material::Trim);
+            self.bevel(at(x - 0.045, -0.16, -0.1), at(x + 0.045, 0.08, 0.22), 0.02 * scale);
+            self.paint(Material::Metal);
+            self.moving(motion::RECOIL, at(x, -0.12, 0.08), |mesh| mesh.beam(at(x, -0.2, 0.02), at(x, 0.4, 0.44), 0.035 * scale, 0.035 * scale));
+            self.flash(at(x, 0.41, 0.45), 0.045 * scale);
+        }
+        self.paint(Material::Hull);
+        self.block(at(-0.2, -0.1, 0.02), at(0.2, -0.02, 0.08));
     }
 
     /// A point defense's mount: a broad skirt, a team-colored ring, and a pedestal for the gun.
@@ -2055,12 +2100,10 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Hull);
             mesh.beam([0.0, -0.3, -0.1], [0.0, 0.36, 0.36], 0.18, 0.1);
         }
+        // The fleet's mount, large, on a base of its own.
         Shape::MissileDefense => {
             mesh.frustum([0.0, 0.0], [-0.5, -0.25], [0.5, 0.4], 6);
-            mesh.paint(Material::Metal);
-            mesh.frustum([0.0, 0.0], [-0.25, 0.3], [0.1, 0.07], 6);
-            mesh.paint(Material::Glow);
-            mesh.block([-0.22, -0.15, 0.3], [0.22, 0.15, 0.5]);
+            mesh.missile_defense_mount([0.0, 0.0, -0.25], 0.46);
         }
         Shape::NukeSilo => {
             mesh.paint(Material::Hull);
@@ -2505,6 +2548,8 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             }
             mesh.paint(Material::Trim);
             mesh.bevel([-0.06, -0.06, 0.0], [0.06, 0.05, 0.12], 0.025);
+            // Its tactical missile defense: the fleet's mount, on the deckhouse aft of the mast.
+            mesh.missile_defense_mount([0.0, -0.17, 0.0], MISSILE_DEFENSE_WIDTH / 40.0);
             // A tall, square block over the bridge, its radar faces in team colors.
             mesh.paint(Material::Hull);
             mesh.bevel([-0.05, -0.04, 0.12], [0.05, 0.04, 0.24], 0.015);
@@ -2544,11 +2589,13 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Metal);
             mesh.frustum([0.0, -0.06], [0.18, 0.44], [0.014, 0.008], 6);
             mesh.block([-0.06, -0.07, 0.34], [0.06, -0.05, 0.36]);
-            // Small guns along each side of the tower.
+            // Its anti-air: the T1 anti-air gun, one each side of the tower.
             for x in [-0.14_f32, 0.14] {
-                for y in [-0.16_f32, -0.04] {
-                    mesh.block([x - 0.018, y - 0.022, -0.2], [x + 0.018, y + 0.022, -0.16]);
-                }
+                mesh.anti_air_gun([x, -0.1, -0.2], 0.17);
+            }
+            // Its tactical missile defense: the fleet's mount, one each side of the tower's top.
+            for x in [-0.05_f32, 0.05] {
+                mesh.missile_defense_mount([x, -0.135, 0.08], MISSILE_DEFENSE_WIDTH / 92.0);
             }
             // Its three turrets are `Shape::NavalTurret`s of their own, which turn to aim. The
             // middle one stands on a barbette, to fire over the front one.
@@ -2556,7 +2603,8 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.frustum([0.0, 0.109], [-0.16, -0.11], [0.085, 0.085], 8);
         }
         Shape::Battlecruiser => {
-            // Long and narrow, its guns all forward.
+            // Long and narrow. Its two laser turrets, one on the forecastle and one on the
+            // quarterdeck, are `Shape::LaserTurret`s of their own, which turn to aim.
             mesh.hull(&side(&[[0.077, -0.5]], [0.087, 0.14], [0.07, 0.384], 5), 0.0);
             // A great tower raked back, as wide as the hull: low at the stern, high at the bow.
             mesh.paint(Material::Hull);
@@ -2577,25 +2625,33 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.beam([x, -0.266, 0.09], [x, -0.272, 0.11], 0.02, 0.027);
             }
             mesh.frustum([0.0, -0.02], [0.16, 0.44], [0.014, 0.008], 6);
-            // A broad missile deck aft, overhanging the hull either side, and a gun sponson out
-            // from each side amidships: wide at the stern and the waist, where a destroyer is
-            // lean from end to end.
-            mesh.paint(Material::Trim);
-            mesh.bevel([-0.125, -0.49, -0.2], [0.125, -0.3, -0.15], 0.02);
-            mesh.paint(Material::Metal);
-            for x in [-0.08_f32, -0.027, 0.027, 0.08] {
-                mesh.block([x - 0.017, -0.47, -0.15], [x + 0.017, -0.32, -0.143]);
-            }
+            // Its tactical missile defense: the fleet's mount, on a platform behind the bridge.
+            mesh.paint(Material::Hull);
+            mesh.block([-0.035, -0.15, -0.03], [0.035, -0.07, 0.03]);
+            mesh.missile_defense_mount([0.0, -0.11, 0.03], MISSILE_DEFENSE_WIDTH / 86.0);
+            // Its torpedoes: a pair of tubes under a hood on a sponson out from each side
+            // amidships. Wide at the waist, where a destroyer is lean from end to end.
             for x in [-0.105_f32, 0.105] {
                 mesh.paint(Material::Hull);
                 mesh.bevel([x - 0.035, -0.1, -0.3], [x + 0.035, 0.06, -0.17], 0.02);
                 mesh.paint(Material::Trim);
-                mesh.frustum([x, -0.02], [-0.17, -0.11], [0.026, 0.022], 6);
+                mesh.bevel([x - 0.03, -0.08, -0.17], [x + 0.03, -0.01, -0.135], 0.01);
                 mesh.paint(Material::Metal);
-                mesh.beam([x, -0.02, -0.13], [x, 0.07, -0.13], 0.007, 0.007);
+                for tube in [-0.014_f32, 0.014] {
+                    mesh.beam([x + tube, -0.02, -0.152], [x + tube, 0.07, -0.152], 0.01, 0.01);
+                }
             }
-            mesh.turret([0.0, 0.3], [-0.16, -0.08], 0.06, 2, 0.06, false);
-            mesh.turret([0.0, 0.17], [-0.14, -0.05], 0.06, 2, 0.06, false);
+            // Its anti-torpedo charges: two racks at the stern.
+            for x in [-0.04_f32, 0.04] {
+                mesh.paint(Material::Metal);
+                mesh.block([x - 0.014, -0.49, -0.2], [x + 0.014, -0.44, -0.165]);
+                mesh.paint(Material::Trim);
+                mesh.block([x - 0.016, -0.47, -0.165], [x + 0.016, -0.455, -0.158]);
+            }
+            // The barbettes its turrets stand on.
+            mesh.paint(Material::Metal);
+            mesh.frustum([0.0, 27.0 / 86.0], [-0.16, -0.15], [0.085, 0.085], 8);
+            mesh.frustum([0.0, -31.0 / 86.0], [-0.2, -0.19], [0.085, 0.085], 8);
         }
         Shape::Submarine => {
             let outline = [[-0.03, -0.5], [0.03, -0.5], [0.08, -0.38], [0.09, 0.24], [0.045, 0.44], [-0.045, 0.44], [-0.09, 0.24], [-0.08, -0.38]];
@@ -3308,20 +3364,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Glow);
             mesh.block([-0.1, -0.1, 0.4], [0.1, 0.1, 0.5]);
         }
-        // A slim breech between two trunnion plates, with a long barrel outside each, raised to
-        // the sky: an H from above, where a point defense is a block with its gun down the middle.
-        Shape::AntiAirGun => {
-            mesh.bevel([-0.1, -0.24, -0.1], [0.1, 0.12, 0.16], 0.03);
-            for x in [-0.2_f32, 0.2] {
-                mesh.paint(Material::Trim);
-                mesh.bevel([x - 0.045, -0.16, -0.1], [x + 0.045, 0.08, 0.22], 0.02);
-                mesh.paint(Material::Metal);
-                mesh.moving(motion::RECOIL, [x, -0.12, 0.08], |mesh| mesh.beam([x, -0.2, 0.02], [x, 0.4, 0.44], 0.035, 0.035));
-                mesh.flash([x, 0.41, 0.45], 0.045);
-            }
-            mesh.paint(Material::Hull);
-            mesh.block([-0.2, -0.1, 0.02], [0.2, -0.02, 0.08]);
-        }
+        Shape::AntiAirGun => mesh.anti_air_gun([0.0, 0.0, -0.1], 1.0),
         Shape::RigYard => {
             mesh.paint(Material::Hull);
             mesh.block([-0.5, -0.5, -0.5], [0.5, 0.5, -0.35]);
@@ -3492,6 +3535,21 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             });
         }
         Shape::NavalTurret => mesh.turret([0.0, 0.0], [0.0, 0.09], 0.095, 2, 0.06, false),
+        Shape::LaserTurret => {
+            mesh.paint(Material::Trim);
+            mesh.frustum([0.0, 0.0], [0.0, 0.065], [0.08, 0.068], 8);
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.045, -0.065, 0.065], [0.045, 0.05, 0.115], 0.015);
+            // The emitter: a long rod through cooling ribs, to a lens that glows, and flares as it fires.
+            mesh.paint(Material::Metal);
+            mesh.beam([0.0, 0.04, 0.09], [0.0, 0.21, 0.09], 0.013, 0.013);
+            for y in [0.075_f32, 0.105, 0.135, 0.165] {
+                mesh.block([-0.032, y, 0.064], [0.032, y + 0.009, 0.116]);
+            }
+            mesh.paint(Material::Glow);
+            mesh.block([-0.02, 0.2, 0.07], [0.02, 0.225, 0.11]);
+            mesh.flash([0.0, 0.235, 0.09], 0.035);
+        }
         Shape::Beam => {
             mesh.paint(Material::Glow);
             mesh.beam([-0.5, 0.0, 0.0], [0.5, 0.0, 0.0], 0.5, 0.5);
@@ -3563,7 +3621,8 @@ const fn occlusion_ground(shape: Shape) -> Option<bool> {
         | Shape::MissileSubmarine
         | Shape::EscortCorvette
         | Shape::TorpedoBoat
-        | Shape::NavalTurret => Some(false),
+        | Shape::NavalTurret
+        | Shape::LaserTurret => Some(false),
         _ => Some(true),
     }
 }
@@ -3805,6 +3864,10 @@ impl MeshSet {
 /// How many cells a side a shape is cut into, seen from above, for its far model: each cell
 /// that the shape covers becomes one box.
 const FAR_CELLS: usize = 3;
+/// How wide the tactical missile defense's dome is, in world units, on every ship that carries
+/// one: each ship's shape divides it by the length it is drawn at.
+const MISSILE_DEFENSE_WIDTH: f32 = 4.6;
+
 /// A far model is only made for a shape with at least this many times its triangles.
 const FAR_SAVING: u32 = 3;
 /// A cell is part of the far model if the shape covers this share of it, seen from above.
