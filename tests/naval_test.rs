@@ -696,12 +696,19 @@ fn a_dome_stops_a_laser_and_rising_ground_blocks_it() {
     let corvette = spawn(&mut world, "t2_escort_corvette", Team::Red, point(2_700, 4_000));
     let sheltered = tough_hovercraft(&mut world, point(2_650, 4_000));
     let before = health_of(&world, sheltered);
+    // For as long as the dome can stand what the lasers do to it: they wear it down, as shells do.
+    let db = sim_engine::sim::blueprints::BlueprintDb::standard();
+    let dome_health = db.get(db.id("t2_escort_corvette")).shield.expect("the corvette has a dome").health.to_num::<f64>();
+    let beam_damage = db.get(db.id("t3_battlecruiser")).weapon.expect("the battlecruiser has lasers").damage.to_num::<f64>();
     let mut beams = Vec::new();
     for _ in 0..200 {
+        if (beams.len() + 2) as f64 * beam_damage > dome_health * 0.8 {
+            break;
+        }
         world.advance_tick(&[]);
         beams.extend(beams_landed(&world, shooter));
     }
-    assert!(beams.len() >= 4, "the battlecruiser fires at what it can see: {} beams", beams.len());
+    assert!(beams.len() >= 2, "the battlecruiser fires at what it can see: {} beams", beams.len());
     assert_eq!(health_of(&world, sheltered), before, "the dome takes the beams");
     let dome = world.unit_position(corvette).unwrap();
     for beam in &beams {
@@ -721,4 +728,29 @@ fn a_dome_stops_a_laser_and_rising_ground_blocks_it() {
         beams += beams_landed(&world, shooter).len();
     }
     assert_eq!((beams, health_of(&world, hidden)), (0, before), "no beam is fired into the island");
+}
+
+/// The battlecruiser out-shoots the battleship up close: each of its two laser cannons does
+/// twice the damage a second of one of the battleship's three turrets, so the two together do
+/// more than the battleship's three, within a shorter reach and with less health.
+#[test]
+fn each_battlecruiser_laser_does_twice_a_battleship_turrets_damage_a_second() {
+    use sim_engine::sim::blueprints::{BlueprintDb, Targets, WeaponDef, WeaponKind};
+    let db = BlueprintDb::standard();
+    let guns = |key: &str, kind: WeaponKind| -> Vec<WeaponDef> {
+        let unit = db.get(db.id(key));
+        unit.weapon.iter().chain(&unit.extra_weapons).filter(|weapon| weapon.kind == kind && weapon.targets == Targets::Ground).copied().collect()
+    };
+    let a_tick = |weapon: &WeaponDef| weapon.damage.to_num::<f64>() / f64::from(weapon.reload_ticks);
+    let (lasers, turrets) = (guns("t3_battlecruiser", WeaponKind::Laser), guns("t3_battleship", WeaponKind::Shell));
+    assert_eq!((lasers.len(), turrets.len()), (2, 3));
+    for laser in &lasers {
+        for turret in &turrets {
+            assert!((a_tick(laser) - 2.0 * a_tick(turret)).abs() < 1e-9, "a laser does {} a tick, a battleship turret {}", a_tick(laser), a_tick(turret));
+        }
+    }
+    let total = |weapons: &[WeaponDef]| weapons.iter().map(a_tick).sum::<f64>();
+    assert!(total(&lasers) > total(&turrets));
+    let (cruiser, ship) = (db.get(db.id("t3_battlecruiser")), db.get(db.id("t3_battleship")));
+    assert!(lasers[0].range < turrets[0].range && cruiser.health < ship.health, "the battlecruiser has the shorter reach and the lower health");
 }

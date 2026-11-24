@@ -1304,9 +1304,12 @@ radar = 960
 sonar = 400
 torpedo_defense = { range = 600, reload_ticks = 100 }
 movement = "naval"
-weapon = { kind = "laser", range = 1600, reload_ticks = 67, damage = 210, turn_rate = 60, mount = [0, 27] }
+# Each laser does twice the damage a second of one of the battleship's three turrets (600 every
+# 2 seconds against 3,000 every 20), so the two together out-shoot the battleship, 600 a second
+# to 450, inside a little over half its reach and with half its health.
+weapon = { kind = "laser", range = 1600, reload_ticks = 20, damage = 600, turn_rate = 60, mount = [0, 27] }
 extra_weapons = [
-    { kind = "laser", range = 1600, reload_ticks = 67, damage = 210, turn_rate = 60, mount = [0, -31], aft = true },
+    { kind = "laser", range = 1600, reload_ticks = 20, damage = 600, turn_rate = 60, mount = [0, -31], aft = true },
     { range = 1200, reload_ticks = 100, projectile_speed = 30, damage = 200, targets = "naval" },
 ]
 missile_defense = { kind = "tactical", range = 620, reload_ticks = 20 }
