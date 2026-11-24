@@ -293,6 +293,16 @@ t1_share_after_15_min = 0.15
 # is reach, striking anything, anywhere. A map that is mostly ocean should favor navy, and one
 # with little water leaves it a side show.
 #
+# At sea, with equal resources, navy against air: a massed, mixed fleet (battleships,
+# battlecruisers, cruisers, destroyers, shield ships) is all but impenetrable from the air,
+# torpedo bombers included, as it plays in the inspiration (the designer's experience of it,
+# 2026-11-24). Its answers are another fleet, submarines against a fleet with no anti-submarine
+# weapon, torpedo launchers at a coast, and strategic missiles; massed T3 submarine hunters and
+# massed T3 torpedo defenses, which are not in the game yet, would be more. The inspiration's static
+# ratios put torpedo bombers at about 0.6 to 0.7 times a fleet's cost to break it, but they leave
+# out what keeps a fleet alive in play: torpedo defense, anti-air splash on massed aircraft, and
+# shields. The fights below follow the play.
+#
 # The numbers lean on the inspiration's ratios, for feel, as [decisions] does: each role's strength
 # per cost against its own T1 line unit, the median across its factions
 # (reports/balance/2026-11-24-inspiration-ratios.md). No unit's values come from it.
@@ -344,14 +354,15 @@ t2_land_army = { t2_heavy_tank = 2, t2_grenadier_walker = 1, t2_mobile_missile_l
 # force's share of its materiel left, less the second's, from -1 to 1. A designed winner keeps
 # [counters] winner_survivors, so it scores at least the lower end; even is within even_margin.
 #
-# A composed fleet rules the water: it beats an equal cost of the air force over the sea.
+# A composed fleet rules the water: it beats an equal cost of the air force over the sea, and a
+# massed T3 fleet keeps most of itself.
 fleet_beats_air_force_t2 = 0.40
-fleet_beats_air_force_t3 = 0.40
+fleet_beats_air_force_t3 = 0.60
 # And it takes overwhelming torpedo bombers, this many times the fleet's cost, to break it: the
-# break-even's efficiency of the fleet against them. Measured first with today's ships and
-# torpedo bombers, which keep the inspiration's relation to each other (both are half its ratio to
-# the anchor), and set from that (2026-11-24 report).
-torpedo_bombers_to_break_fleet_t2 = [1.5, 3.0]
+# break-even's efficiency of the fleet against them. At least twice for a T2 fleet, and three times
+# for a massed T3 one. The upper ends only keep a wing of torpedo bombers from being worthless.
+torpedo_bombers_to_break_fleet_t2 = [2.0, 5.0]
+torpedo_bombers_to_break_fleet_t3 = [3.0, 8.0]
 # Skipping the counter loses. A fleet with no anti-air loses to torpedo bombers; one with no
 # anti-submarine weapon loses to submarines, which lose to destroyers.
 fleet_without_anti_air_loses_to_torpedo_bombers = -0.40

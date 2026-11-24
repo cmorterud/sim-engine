@@ -1477,15 +1477,15 @@ pub fn derive_domains_report() {
             met: Some(result.score.abs() <= margin),
         });
     }
-    // The torpedo bombers it takes to break a fleet.
-    {
-        let fleet = force("t2_fleet", squadron_cost("t2_fleet", 2) * 2.0, 2);
-        let materiel = force_materiel(&db, &fleet, 2);
-        let bombers = force("t2_torpedo_bombers", materiel, 2);
-        let even = break_even_forces(&db, water(2), &fleet, &bombers);
-        let band = domain_cell("torpedo_bombers_to_break_fleet_t2").as_array().expect("a band").iter().map(as_number).collect::<Vec<f64>>();
+    // The torpedo bombers it takes to break a fleet, at T2 and a massed T3 one.
+    for (tier, fleet_name, squadrons_of_it, cell) in [(2, "t2_fleet", 2.0, "torpedo_bombers_to_break_fleet_t2"), (3, "t3_fleet", 2.0, "torpedo_bombers_to_break_fleet_t3")] {
+        let fleet = force(fleet_name, squadron_cost(fleet_name, tier) * squadrons_of_it, tier);
+        let materiel = force_materiel(&db, &fleet, tier);
+        let bombers = force("t2_torpedo_bombers", materiel, tier);
+        let even = break_even_forces(&db, water(tier), &fleet, &bombers);
+        let band = domain_cell(cell).as_array().expect("a band").iter().map(as_number).collect::<Vec<f64>>();
         cells.push(Cell {
-            name: "Torpedo bombers it takes to break the T2 fleet, as a multiple of its cost".to_string(),
+            name: format!("Torpedo bombers it takes to break the T{tier} fleet, as a multiple of its cost"),
             target: format!("{:.1}–{:.1}", band[0], band[1]),
             measured: format!("{:.2}{} (the fleet's strength per materiel over theirs; even after {:.0} s)", even.efficiency, if even.at_limit { ", at the search's limit" } else { "" }, even.seconds),
             met: Some((band[0]..=band[1]).contains(&even.efficiency)),

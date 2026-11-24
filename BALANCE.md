@@ -148,9 +148,11 @@ out close and why: evidence about the process, not a target.
   role, and the T2 and T3 strike aircraft, are about half as strong per cost against the land as
   the inspiration has them, having kept first-draft prices through the land rebaseline; a composed
   T2 fleet loses to an equal cost of the AI's air force (-0.57), and torpedo bombers costing 0.60
-  times it break it; submarines beat destroyers, and hovercraft beat a fleet on the water. Open:
-  how hard a fleet should be to break from the air (`torpedo_bombers_to_break_fleet_t2`), where the
-  design's feel says 1.5 to 3 times its cost and the inspiration's numbers 0.6 to 0.7.
+  times it break it; submarines beat destroyers, and hovercraft beat a fleet on the water. Decided: a
+  massed mixed fleet is all but impenetrable from the air at equal resources, so torpedo bombers
+  need at least twice a T2 fleet's cost and three times a massed T3 fleet's to break it, where today
+  they need 0.60 and 0.18; the inspiration's static numbers (0.6 to 0.7) leave out torpedo defense,
+  anti-air splash, and shields.
 
 ## Order of work
 
