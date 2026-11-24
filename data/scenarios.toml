@@ -30,9 +30,9 @@ red = [
 
 [[scenario]]
 id = "t3_artillery_defends"
-title = "Defending: set-up T3 artillery against massed T1"
-shows = "T3 artillery standing still, set up, as an equal materiel of T1 tanks walks into it. Its blast is wide, so a shell kills every tank around where it lands. Set up, it wipes out a charge of tanks that come at it bunched up."
-try = "Hold still and let them come. Then play it again and keep moving, to see what setting up costs it. Bunched-up armies are what it wrecks; spread out, the tanks would win."
+title = "Caught alone: set-up T3 artillery against massed T1"
+shows = "T3 artillery standing still, set up, as an equal materiel of T1 tanks walks into it. Its blast is wide, so a shell kills every tank around where it lands, but it fires slowly: it kills most of the charge, and the last few tanks reach it and finish it. It is a siege piece, and loses to what reaches it."
+try = "Hold still and let them come, and count the tanks left at the end. Then play the next scenario, where walkers stand in front of it, and compare."
 blue = [{ unit = "t3_mobile_artillery", count = 6, at = [1_000, 2_560], columns = 3 }]
 red = [{ unit = "t1_medium_tank", count = 90, at = [3_400, 2_560], columns = 10, order = "attack" }]
 

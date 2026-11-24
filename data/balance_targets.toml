@@ -188,7 +188,9 @@ tactical_missile_launcher = { field_rig = 2, command_rig = 2 }
 # two, and one shell kills a Medium Tank. Its shell keeps the damage the arcs pass gave it, 859, and
 # its spread, 60, makes it inaccurate, as heavy artillery is in the inspiration, so that it is for
 # clumps and positions rather than picking off single units. Priced by the walk-in duel, with its
-# blast wide, it wiped out Heavy Walkers at the lowest strength the search allows.
+# blast wide, it wiped out Heavy Walkers at the lowest strength the search allows. Since 2026-11-24
+# it fires about half as often, to sit under the battleship's turrets, and a swarm of Medium Tanks
+# of its cost overruns it; it is not asked to win that fight.
 t3_mobile_artillery = { t3_mobile_artillery = 2, t1_medium_tank = 1 }
 # The T3 Artillery Installation destroys any T3 land unit with a direct hit, but its spread is
 # wide, so it is for base-sized targets; the T2 one, with a moderate spread, for small bases.

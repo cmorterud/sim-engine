@@ -96,16 +96,16 @@ fn the_t3_line_unit_is_about_as_strong_per_materiel_as_the_t2_line_unit() {
     assert!((1.0..=1.15).contains(&even.efficiency), "the heavy walker is {:.2} times the heavy tank per materiel", even.efficiency);
 }
 
-/// BALANCE.md, T3 land and [kills]: Mobile Heavy Artillery is a glass cannon with a wide blast.
-/// It wrecks line units that attack-move into it bunched up; spread out and charging, they win,
-/// and so do raiders, which its inaccuracy misses and its least range lets in.
+/// BALANCE.md, T3 land and [kills]: Mobile Heavy Artillery is a glass cannon with a wide blast,
+/// and a siege piece: it loses to what reaches it. Units spread out and charging beat it, and so
+/// do raiders, which its inaccuracy misses and its least range lets in. Until 2026-11-24 it also
+/// had to beat Medium Tanks that attack-moved into it bunched up; since it fires half as often,
+/// to sit under the battleship's turrets, that is no longer asked of it.
 #[test]
-fn t3_artillery_wrecks_clumps_and_loses_to_spread_units_and_raiders() {
+fn t3_artillery_loses_to_spread_units_and_raiders() {
     let db = db();
     let side = |key: &str, tactics: Tactics| Side { unit: db.id(key), count: (3_600.0 / db.get(db.id(key)).mass.to_num::<f64>()).round() as u32, tactics };
     let artillery = side("t3_mobile_artillery", Tactics::AttackMove);
-    let plain = mirrored(&db, artillery, side("t1_medium_tank", Tactics::AttackMove), 1.0);
-    assert!(plain.score >= 0.4, "against Medium Tanks attack-moving, the artillery keeps {:.2} more", plain.score);
     let spread = mirrored(&db, side("t1_medium_tank", Tactics::Micro), artillery, 1.0);
     assert!(spread.score >= 0.3, "spread out and charging, the tanks keep {:.2} more", spread.score);
     let raid = mirrored(&db, side("t1_light_walker", Tactics::AttackMove), artillery, 1.0);
