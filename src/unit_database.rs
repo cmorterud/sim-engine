@@ -194,7 +194,8 @@ fn stats(unit: &Blueprint, db: &BlueprintDb) -> Vec<(&'static str, String)> {
     }
     if let Some(defense) = unit.missile_defense {
         let kind = if defense.strategic { "Strategic missile defense" } else { "Tactical missile defense" };
-        add(kind, format!("range {}, every {}", number(fp(defense.range), 0), seconds(defense.reload_ticks)));
+        let mounts = if defense.mounts > 1 { format!(", from {} mounts", defense.mounts) } else { String::new() };
+        add(kind, format!("range {}, every {}{mounts}", number(fp(defense.range), 0), seconds(defense.reload_ticks)));
     }
     if let Some(defense) = unit.torpedo_defense {
         add("Torpedo defense", format!("range {}, every {}", number(fp(defense.range), 0), seconds(defense.reload_ticks)));

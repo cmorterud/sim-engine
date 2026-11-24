@@ -1267,19 +1267,6 @@ impl MeshBuilder {
         }
     }
 
-    /// A ship's anti-torpedo charges: a rack either side of the middle, `gap` out, from `y` forward,
-    /// standing on `z`, each under a team-colored cap. `unit` is one world unit on this hull, so
-    /// that the racks are the same size on every ship that carries them.
-    fn torpedo_charge_racks(&mut self, y: f32, z: f32, unit: f32, gap: f32) {
-        for side in [-1.0_f32, 1.0] {
-            let x = side * gap * unit;
-            self.paint(Material::Metal);
-            self.block([x - 1.2 * unit, y, z], [x + 1.2 * unit, y + 4.3 * unit, z + 3.0 * unit]);
-            self.paint(Material::Trim);
-            self.block([x - 1.4 * unit, y + 1.5 * unit, z + 3.0 * unit], [x + 1.4 * unit, y + 2.8 * unit, z + 3.6 * unit]);
-        }
-    }
-
     /// The tactical missile defense's mount, standing on `foot`, its dome `width` across: a collar,
     /// a column, and a white dome over a team-colored band, with a short gun out of its face. The
     /// same on everything that carries one, the land structure and each ship, so that it is known
@@ -2018,8 +2005,6 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.body(x, &[[-0.46, 0.03, 0.03, -0.19], [-0.2, 0.03, 0.03, -0.19]], 6);
             }
             mesh.frustum([0.0, -0.26], [-0.06, 0.2], [0.015, 0.01], 6);
-            // Its anti-torpedo charges: a rack on the cabin roof either side of the mast.
-            mesh.torpedo_charge_racks(-0.36, -0.06, 1.0 / 24.0, 1.8);
             // A team-colored chevron on the foredeck, pointing ahead.
             mesh.paint(Material::Trim);
             mesh.prism(&[[-0.142, -0.042], [0.0, 0.092], [0.0, 0.375]], [-0.2, -0.15], [1.0, 1.0]);
@@ -2542,13 +2527,12 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.beam([0.0, -0.1, -0.06], [0.0, -0.17, 0.16], 0.038, 0.05);
             mesh.paint(Material::Metal);
             mesh.beam([0.0, -0.165, 0.15], [0.0, -0.172, 0.17], 0.033, 0.044);
-            // A second funnel behind the first, and its anti-torpedo charges in racks at the stern.
+            // A second funnel behind the first. (Its anti-torpedo charges, like every ship's,
+            // leave from the hull under the water, and are not modeled.)
             mesh.paint(Material::Hull);
             mesh.beam([0.0, -0.21, -0.08], [0.0, -0.27, 0.11], 0.032, 0.042);
             mesh.paint(Material::Metal);
             mesh.beam([0.0, -0.266, 0.1], [0.0, -0.272, 0.12], 0.028, 0.037);
-            mesh.torpedo_charge_racks(-0.49, -0.2, 1.0 / 46.0, 2.0);
-            mesh.paint(Material::Metal);
             // Torpedo tubes either side, behind the tower.
             for x in [-0.058_f32, 0.058] {
                 mesh.beam([x, -0.33, -0.17], [x, -0.23, -0.17], 0.013, 0.013);
@@ -2574,8 +2558,10 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             }
             mesh.paint(Material::Trim);
             mesh.bevel([-0.06, -0.06, 0.0], [0.06, 0.05, 0.12], 0.025);
-            // Its tactical missile defense: the fleet's mount, on the deckhouse aft of the mast.
-            mesh.missile_defense_mount([0.0, -0.17, 0.0], MISSILE_DEFENSE_WIDTH / 40.0);
+            // Its tactical missile defense: two of the fleet's mount, on the deckhouse aft of the mast.
+            for foot in missile_defense_mounts(Shape::Cruiser) {
+                mesh.missile_defense_mount(*foot, MISSILE_DEFENSE_WIDTH / 40.0);
+            }
             // A tall, square block over the bridge, its radar faces in team colors.
             mesh.paint(Material::Hull);
             mesh.bevel([-0.05, -0.04, 0.12], [0.05, 0.04, 0.24], 0.015);
@@ -2615,13 +2601,15 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Metal);
             mesh.frustum([0.0, -0.06], [0.18, 0.44], [0.014, 0.008], 6);
             mesh.block([-0.06, -0.07, 0.34], [0.06, -0.05, 0.36]);
-            // Its anti-air: the T1 anti-air gun, one each side of the tower.
+            // Its anti-air: four of the T1 anti-air gun, two each side of the tower.
             for x in [-0.14_f32, 0.14] {
-                mesh.anti_air_gun([x, -0.1, -0.2], SHIP_ANTI_AIR_SIZE / 92.0);
+                for y in [-0.17_f32, -0.05] {
+                    mesh.anti_air_gun([x, y, -0.2], SHIP_ANTI_AIR_SIZE / 92.0);
+                }
             }
-            // Its tactical missile defense: the fleet's mount, one each side of the tower's top.
-            for x in [-0.05_f32, 0.05] {
-                mesh.missile_defense_mount([x, -0.135, 0.08], MISSILE_DEFENSE_WIDTH / 92.0);
+            // Its tactical missile defense: two of the fleet's mount, on the tower behind the bridge.
+            for foot in missile_defense_mounts(Shape::Battleship) {
+                mesh.missile_defense_mount(*foot, MISSILE_DEFENSE_WIDTH / 92.0);
             }
             // Its three turrets are `Shape::NavalTurret`s of their own, which turn to aim. The
             // middle one stands on a barbette, to fire over the front one.
@@ -2651,10 +2639,12 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.beam([x, -0.266, 0.09], [x, -0.272, 0.11], 0.02, 0.027);
             }
             mesh.frustum([0.0, -0.02], [0.16, 0.44], [0.014, 0.008], 6);
-            // Its tactical missile defense: the fleet's mount, on a platform behind the bridge.
+            // Its tactical missile defense: one of the fleet's mount, on a platform behind the bridge.
             mesh.paint(Material::Hull);
             mesh.block([-0.035, -0.15, -0.03], [0.035, -0.07, 0.03]);
-            mesh.missile_defense_mount([0.0, -0.11, 0.03], MISSILE_DEFENSE_WIDTH / 86.0);
+            for foot in missile_defense_mounts(Shape::Battlecruiser) {
+                mesh.missile_defense_mount(*foot, MISSILE_DEFENSE_WIDTH / 86.0);
+            }
             // Its torpedoes: a pair of tubes under a hood on a sponson out from each side
             // amidships. Wide at the waist, where a destroyer is lean from end to end.
             for x in [-0.105_f32, 0.105] {
@@ -2667,8 +2657,6 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                     mesh.beam([x + tube, -0.02, -0.152], [x + tube, 0.07, -0.152], 0.01, 0.01);
                 }
             }
-            // Its anti-torpedo charges: the racks every ship with them carries, at the stern.
-            mesh.torpedo_charge_racks(-0.49, -0.2, 1.0 / 86.0, 3.4);
             // The barbettes its turrets stand on.
             mesh.paint(Material::Metal);
             mesh.frustum([0.0, 27.0 / 86.0], [-0.16, -0.15], [0.085, 0.085], 8);
@@ -2746,8 +2734,6 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.bevel([-0.065, -0.25, -0.2], [0.065, 0.12, 0.0], 0.03);
             mesh.paint(Material::Trim);
             mesh.bevel([-0.05, 0.03, 0.0], [0.05, 0.11, 0.08], 0.02);
-            // Its anti-torpedo charges: a rack on the cross deck over each outrigger.
-            mesh.torpedo_charge_racks(-0.29, -0.205, 1.0 / 30.0, 5.4);
             // The shield emitter on a tall mast, over the cross deck.
             mesh.paint(Material::Metal);
             mesh.frustum([0.0, -0.133], [0.0, 0.28], [0.03, 0.022], 8);
@@ -3902,6 +3888,18 @@ const FAR_CELLS: usize = 3;
 /// Where a laser turret's lens is, forward of its middle and above its foot, in its box: the
 /// beam is drawn leaving it from here.
 pub(super) const LASER_LENS: [f32; 2] = [0.2125, 0.09];
+
+/// Where each of a ship's tactical missile defense mounts stands in its shape's box: one for
+/// each mount the ship's blueprint gives it, since every mount is the same and a ship with two
+/// stops missiles twice as often as a ship with one.
+pub(super) const fn missile_defense_mounts(shape: Shape) -> &'static [[f32; 3]] {
+    match shape {
+        Shape::Cruiser => &[[-0.05, -0.165, 0.0], [0.05, -0.165, 0.0]],
+        Shape::Battleship => &[[-0.05, -0.135, 0.08], [0.05, -0.135, 0.08]],
+        Shape::Battlecruiser => &[[0.0, -0.11, 0.03]],
+        _ => &[],
+    }
+}
 
 /// How wide the tactical missile defense's dome is, in world units, on every ship that carries
 /// one: each ship's shape divides it by the length it is drawn at.

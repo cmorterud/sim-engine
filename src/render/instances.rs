@@ -1771,6 +1771,22 @@ mod tests {
         assert!(!is_dot(&instance([0.0; 3], [10.0; 3], NORTH, BLUE, NO_ICON, far)));
     }
 
+    /// A ship is drawn with as many tactical missile defense mounts as its blueprint gives it:
+    /// the cruiser and the battleship two, the battlecruiser one, and a ship without the defense
+    /// none.
+    #[test]
+    fn every_ship_shows_each_of_its_missile_defense_mounts() {
+        let db = BlueprintDb::standard();
+        let mut checked = 0;
+        for unit in db.iter().filter(|unit| unit.movement == crate::sim::components::MoveClass::Naval) {
+            let drawn = super::super::meshes::missile_defense_mounts(unit_look(&unit.key).shape).len();
+            let carried = unit.missile_defense.filter(|defense| !defense.strategic).map_or(0, |defense| usize::from(defense.mounts));
+            assert_eq!(drawn, carried, "{} is drawn with {drawn} missile defense mounts and carries {carried}", unit.key);
+            checked += usize::from(carried > 0);
+        }
+        assert_eq!(checked, 3, "the cruiser, the battleship, and the battlecruiser");
+    }
+
     /// A laser's beam is drawn leaving the lens of the turret that fired it, at the turret's
     /// height on the deck, not the top of the unit the simulation fires from, and only that
     /// turret flashes: the battlecruiser's aft turret, firing east, here.

@@ -336,7 +336,12 @@ pub struct MissileDefenseDef {
     /// builds. Tactical ones stop cruise missiles, one at a time, as often as they reload.
     pub strategic: bool,
     pub range: Fp,
+    /// How often it stops a missile, with all its mounts together: each mount reloads in
+    /// `reload_ticks * mounts`.
     pub reload_ticks: u32,
+    /// How many mounts it has, each the same as every other unit's: a battleship carries two
+    /// where a battlecruiser carries one, and so stops missiles twice as often.
+    pub mounts: u8,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -636,7 +641,10 @@ struct RawMissileDefense {
     /// "tactical" or "strategic".
     kind: String,
     range: Number,
+    /// One mount's reload.
     reload_ticks: Option<u32>,
+    /// How many mounts it has: one, if not given.
+    mounts: Option<u8>,
 }
 
 #[derive(Deserialize)]
@@ -1053,6 +1061,9 @@ impl BlueprintDb {
             let shield = unit.shield.as_ref().map(parse_shield).transpose().map_err(context)?;
             let missile_defense = match &unit.missile_defense {
                 None => None,
+                Some(defense) if defense.mounts == Some(0) || defense.reload_ticks.unwrap_or(0) % u32::from(defense.mounts.unwrap_or(1).max(1)) != 0 => {
+                    return Err(context("a missile defense has at least one mount, and its reload_ticks divide evenly among them".into()));
+                }
                 Some(defense) => Some(MissileDefenseDef {
                     strategic: match defense.kind.as_str() {
                         "tactical" => false,
@@ -1060,7 +1071,8 @@ impl BlueprintDb {
                         other => return Err(context(format!("unknown missile defense {other:?}"))),
                     },
                     range: defense.range.fp().map_err(context)?,
-                    reload_ticks: defense.reload_ticks.unwrap_or(0),
+                    reload_ticks: defense.reload_ticks.unwrap_or(0) / u32::from(defense.mounts.unwrap_or(1)),
+                    mounts: defense.mounts.unwrap_or(1),
                 }),
             };
             let airfield = match &unit.airfield {

@@ -1251,9 +1251,10 @@ extra_weapons = [
     # against T3 aircraft.
     { range = 1400, reload_ticks = 20, projectile_speed = 90, damage = 1100, splash_radius = 6, targets = "air", turn_rate = 180, homing = true },
 ]
-# The fleet's tactical missile defense: one mount, the same on the cruiser, the battleship, and
-# the battlecruiser, with the same reach and reload on each.
-missile_defense = { kind = "tactical", range = 620, reload_ticks = 10 }
+# The fleet's tactical missile defense: a mount that stops a missile within 620 every 2 seconds,
+# the same wherever it is carried. The cruiser and the battleship carry two, and the
+# battlecruiser one.
+missile_defense = { kind = "tactical", range = 620, reload_ticks = 20, mounts = 2 }
 
 # Three gauss turrets of three shells of 1,000 each, four twin anti-air guns as one (each fires
 # both muzzles at once, 12 a shell, every 1.7 seconds), and two close-in guns, as one.
@@ -1281,10 +1282,10 @@ extra_weapons = [
     { range = 3000, reload_ticks = 200, projectile_speed = 60, damage = 3000, splash_radius = 40, turn_rate = 30, spread = 6, mount = [0, -31], aft = true },
     { range = 1200, reload_ticks = 17, projectile_speed = 180, damage = 96, targets = "air", turn_rate = 180 },
 ]
-missile_defense = { kind = "tactical", range = 620, reload_ticks = 10 }
+missile_defense = { kind = "tactical", range = 620, reload_ticks = 20, mounts = 2 }
 
-# A laser cannon forward and one aft, torpedoes, the fleet's tactical missile defense, and an
-# anti-torpedo charge. A laser's beam hits the tick it is fired, one target, with no blast.
+# A laser cannon forward and one aft, torpedoes, one of the fleet's tactical missile defense
+# mounts, and an anti-torpedo charge. A laser's beam hits the tick it is fired, one target, with no blast.
 [[unit]]
 id = "t3_battlecruiser"
 name = "Battlecruiser"
@@ -1308,7 +1309,7 @@ extra_weapons = [
     { kind = "laser", range = 1600, reload_ticks = 67, damage = 210, turn_rate = 60, mount = [0, -31], aft = true },
     { range = 1200, reload_ticks = 100, projectile_speed = 30, damage = 200, targets = "naval" },
 ]
-missile_defense = { kind = "tactical", range = 620, reload_ticks = 10 }
+missile_defense = { kind = "tactical", range = 620, reload_ticks = 20 }
 
 # Under the sea (GAME_SPECIFICATION.md §10). A submarine sails submerged, where only torpedoes
 # reach it and only sonar finds it. Torpedoes steer to ships and submarines, and hit nothing

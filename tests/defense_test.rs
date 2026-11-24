@@ -182,16 +182,18 @@ fn every_torpedo_defense_destroys_torpedoes_as_fast_as_it_reloads() {
 }
 
 /// The fleet's tactical missile defense is one mount, the same on every ship that carries it:
-/// the cruiser's, the battleship's, and the battlecruiser's reach as far and reload as fast.
+/// each reaches as far and reloads as fast. A ship with two stops missiles twice as often as a
+/// ship with one: the battleship and the cruiser carry two, the battlecruiser one.
 #[test]
-fn every_ships_tactical_missile_defense_is_the_same() {
+fn every_ships_tactical_missile_defense_mount_is_the_same() {
     let db = sim_engine::sim::blueprints::BlueprintDb::standard();
-    let mounts: Vec<_> = db.iter().filter(|def| def.movement == MoveClass::Naval).filter_map(|def| def.missile_defense.filter(|defense| !defense.strategic).map(|defense| (def.key.clone(), defense))).collect();
-    for ship in ["t2_cruiser", "t3_battleship", "t3_battlecruiser"] {
-        assert!(mounts.iter().any(|(key, _)| key == ship), "{ship} carries a tactical missile defense");
-    }
-    let (first, mount) = &mounts[0];
-    for (key, other) in &mounts {
-        assert_eq!(other, mount, "{key}'s tactical missile defense is not {first}'s");
+    let ships: Vec<_> = db.iter().filter(|def| def.movement == MoveClass::Naval).filter_map(|def| def.missile_defense.filter(|defense| !defense.strategic).map(|defense| (def.key.clone(), defense))).collect();
+    let mounts_on = |ship: &str| ships.iter().find(|(key, _)| key == ship).unwrap_or_else(|| panic!("{ship} carries a tactical missile defense")).1.mounts;
+    assert_eq!((mounts_on("t2_cruiser"), mounts_on("t3_battleship"), mounts_on("t3_battlecruiser")), (2, 2, 1));
+    // One mount's reach, and its own reload.
+    let one = |defense: &sim_engine::sim::blueprints::MissileDefenseDef| (defense.range, defense.reload_ticks * u32::from(defense.mounts));
+    let (first, mount) = (&ships[0].0, one(&ships[0].1));
+    for (key, defense) in &ships {
+        assert_eq!(one(defense), mount, "{key}'s tactical missile defense mount is not {first}'s");
     }
 }
