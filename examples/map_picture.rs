@@ -4,7 +4,10 @@
 //! `cargo run --release --example map_picture -- highland highland.ppm`
 //!
 //! `skirmish` draws the generated skirmish map, from the seed the game starts with unless a
-//! third argument gives another.
+//! third argument gives another. `generate` draws a map made from settings, given after the
+//! output file as its kind, size in km, players, and map seed, with the usual for the rest:
+//!
+//! `cargo run --release --example map_picture -- generate lake.ppm central_lake 20 8 3`
 use sim_engine::math::fp::{Fp, Vec2Fp};
 use sim_engine::sim::components::WreckKind;
 use sim_engine::sim::config::TERRAIN_CELL_UNITS;
@@ -45,6 +48,16 @@ fn main() {
     let out = std::env::args().nth(2).expect("output file");
     let map = if name == "skirmish" {
         skirmish_map(std::env::args().nth(3).and_then(|seed| seed.parse().ok()).unwrap_or(DEFAULT_SEED))
+    } else if name == "generate" {
+        let number = |index: usize| std::env::args().nth(index).and_then(|text| text.parse().ok());
+        let choices = sim_engine::sim::maps::Choices {
+            kind: std::env::args().nth(3).expect("a kind of map"),
+            size_km: number(4),
+            players: number(5),
+            seed: std::env::args().nth(6).and_then(|text| text.parse().ok()),
+            ..Default::default()
+        };
+        sim_engine::sim::maps::generate(&sim_engine::sim::maps::MapSettings::chosen(&choices).expect("settings the generator makes"))
     } else {
         sim_engine::sim::maps::bundled(&name).expect("a bundled map")
     };

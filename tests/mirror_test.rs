@@ -75,15 +75,29 @@ fn both_sides_play_mirror_images_through_the_opening() {
 /// the sides parted on the first tick; and the AI broke ties between vents and between raid
 /// targets the same way for both sides, where a map listed them in fours rather than pairs.
 /// Red won three matches in five. Stillwater and Scattered Isles, the same kind of image with
-/// their 1v1 starts in opposite corners, are held to the same.
+/// their 1v1 starts in opposite corners, are held to the same, and so is a generated map of
+/// each kind.
 #[test]
 #[cfg_attr(debug_assertions, ignore = "release only")]
 fn the_named_maps_sides_play_mirror_images_through_the_opening() {
     use std::sync::Arc;
-    use sim_engine::sim::maps::{saddleback, scattered_isles, stillwater};
+    use sim_engine::sim::maps::{generate, saddleback, scattered_isles, stillwater, Choices, MapSettings};
     use sim_engine::sim::scenario::MapSource;
     const TICKS: u32 = 4_000;
-    for (name, map) in [("saddleback", saddleback()), ("stillwater", stillwater()), ("scattered_isles", scattered_isles())] {
+    // And a generated map of each kind, which is as much its own image as the named ones.
+    let generated = |kind: &str| {
+        let choices = Choices { kind: kind.into(), seed: Some(5), ..Choices::default() };
+        generate(&MapSettings::chosen(&choices).expect("settings the game offers"))
+    };
+    let maps = [
+        ("saddleback", saddleback()),
+        ("stillwater", stillwater()),
+        ("scattered_isles", scattered_isles()),
+        ("generated passes", generated("passes")),
+        ("generated central lake", generated("central_lake")),
+        ("generated islands", generated("islands")),
+    ];
+    for (name, map) in maps {
         let map = MapSource::Map(Arc::new(map));
         for seed in 1..=2 {
             let mut world = map.scenario(seed).world;

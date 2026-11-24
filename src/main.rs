@@ -145,6 +145,18 @@ Usage: sim-engine [options]
                        for any of the modes above, or playtest: a sandbox with 5 of every
                        unit and no commander, against two coastal bases that a turtling
                        AI holds
+  --generate <kind>    Play on a map made for the match: passes (a mountain range crossed by
+                       valleys), central_lake (a lake ringed by land), or islands (a home
+                       island each, and no land route). The same settings and map seed
+                       always make the same map. Its settings, each optional:
+                         --map-size <5|10|15|20>      km across (default 10)
+                         --map-players <2|4|8>        starts: up to 2 at 5 km, 4 at 10 and
+                                                      15 km, 8 at 20 km (default: up to 4)
+                         --resources <sparse|normal|rich>
+                         --reclaim <none|some|lots>   rock fields and woods
+                         --terrain <flat|hilly|rugged>
+                         --water <some|lots>          not for passes, which has none
+                         --map-seed <number>          (default 1)
   --ai <easy|normal>   How well the AI opponent plays (default easy; normal in the
                        playtest). --ai turtle is normal with --strategy turtle
   --strategy <name>    What the AI opponent plays (data/ai_strategies.toml): balanced
@@ -235,6 +247,8 @@ struct Options {
     seed: Option<u64>,
     sound_check: bool,
     map: Option<PathBuf>,
+    /// A map made for the match from these choices, instead of one that comes with the game.
+    generate: Option<sim_engine::sim::maps::Choices>,
     /// How hard the AI opponent plays: easy unless asked otherwise.
     difficulty: Option<Difficulty>,
     /// What it plays, by its id in data/ai_strategies.toml, or "random": balanced unless asked.
@@ -284,6 +298,19 @@ fn parse_options() -> Result<Option<Options>, String> {
     }
     let params = web_sys::UrlSearchParams::new_with_str(&search).map_err(|_| "the page address cannot be read".to_string())?;
     options.map = params.get("map").filter(|name| name != "skirmish").map(PathBuf::from);
+    if params.get("map").as_deref() == Some("generate") {
+        options.map = None;
+        options.generate = Some(sim_engine::sim::maps::Choices {
+            kind: params.get("kind").unwrap_or_default(),
+            size_km: params.get("size").and_then(|size| size.parse().ok()),
+            players: params.get("players").and_then(|players| players.parse().ok()),
+            resources: params.get("resources"),
+            reclaim: params.get("reclaim"),
+            terrain: params.get("terrain"),
+            water: params.get("water"),
+            seed: params.get("mapseed").and_then(|seed| seed.parse().ok()),
+        });
+    }
     options.seed = params.get("seed").and_then(|seed| seed.parse().ok());
     options.battle = params.has("battle");
     if let Some(name) = params.get("ai") {
@@ -362,6 +389,14 @@ fn parse_options() -> Result<Option<Options>, String> {
             "--seed" => options.seed = Some(number("--seed", value("--seed")?)?),
             "--sound-check" => options.sound_check = true,
             "--map" => options.map = Some(PathBuf::from(value("--map")?)),
+            "--generate" => options.generate.get_or_insert_default().kind = value("--generate")?,
+            "--map-size" => options.generate.get_or_insert_default().size_km = Some(number("--map-size", value("--map-size")?)? as u32),
+            "--map-players" => options.generate.get_or_insert_default().players = Some(number("--map-players", value("--map-players")?)? as u32),
+            "--map-seed" => options.generate.get_or_insert_default().seed = Some(number("--map-seed", value("--map-seed")?)?),
+            "--resources" => options.generate.get_or_insert_default().resources = Some(value("--resources")?),
+            "--reclaim" => options.generate.get_or_insert_default().reclaim = Some(value("--reclaim")?),
+            "--terrain" => options.generate.get_or_insert_default().terrain = Some(value("--terrain")?),
+            "--water" => options.generate.get_or_insert_default().water = Some(value("--water")?),
             "--ai" => {
                 let (difficulty, strategy) = parse_opponent(&value("--ai")?).ok_or("--ai needs easy or normal, or turtle")?;
                 options.difficulty = Some(difficulty);
@@ -425,14 +460,40 @@ fn main() {
             std::process::exit(1);
         })
     });
+    let generated = options.generate.as_ref().map(|choices| {
+        sim_engine::sim::maps::MapSettings::chosen(choices).unwrap_or_else(|problem| {
+            println!("cannot generate that map: {problem}");
+            std::process::exit(1);
+        })
+    });
+    let describe = |map: &sim_engine::sim::scenario::MapData| {
+        let trees = map.scenery.iter().filter(|(kind, _)| *kind == sim_engine::sim::components::WreckKind::Tree).count();
+        println!("map {}: {} km, {} materiel deposits, {} trees and {} rocks", map.name, map.map_units / 1024, map.deposits.len(), trees, map.scenery.len() - trees);
+    };
     let map_source = match &options.map {
         _ if scenario.is_some() => MapSource::Scenario(Arc::new(scenario.expect("just checked"))),
+        _ if generated.is_some() => {
+            let settings = generated.expect("just checked");
+            let map = sim_engine::sim::maps::generate(&settings);
+            println!(
+                "generated: {} of {} km for {} players, {} resources, {} reclaim, {} terrain{}, map seed {}",
+                settings.kind,
+                settings.size_km,
+                settings.players,
+                settings.resources,
+                settings.reclaim,
+                settings.terrain,
+                if settings.water.is_empty() { String::new() } else { format!(", {} water", settings.water) },
+                settings.seed
+            );
+            describe(&map);
+            MapSource::Map(Arc::new(map))
+        }
         None => MapSource::Skirmish,
         Some(name) if name.to_str() == Some("playtest") => MapSource::Playtest,
         Some(_) if bundled.is_some() => {
             let map = bundled.expect("just checked");
-            let trees = map.scenery.iter().filter(|(kind, _)| *kind == sim_engine::sim::components::WreckKind::Tree).count();
-            println!("map {}: {} km, {} materiel deposits, {} trees and {} rocks", map.name, map.map_units / 1024, map.deposits.len(), trees, map.scenery.len() - trees);
+            describe(&map);
             MapSource::Map(Arc::new(map))
         }
         Some(name) => {
@@ -445,7 +506,7 @@ fn main() {
     let map_source = match map_source.clone().teams(per_team) {
         Some(source) => source,
         None => {
-            println!("this map has no starts for {per_team}v{per_team}: Saddleback holds 2v2");
+            println!("this map has no starts for {per_team}v{per_team}: Saddleback, Stillwater, and Scattered Isles hold 2v2, Scattered Isles 4v4 too, and a generated map as many as its --map-players");
             #[cfg(not(target_arch = "wasm32"))]
             std::process::exit(1);
             #[cfg(target_arch = "wasm32")]

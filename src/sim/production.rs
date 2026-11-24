@@ -371,11 +371,18 @@ impl SimWorld {
     /// beside it. One left there was walled in: an engineer coming out of a factory, onto the spot
     /// where the commander began a generator, could not take a step, and its order to the rally
     /// point was given up as unreachable.
+    ///
+    /// A unit exactly on the footprint's edge is beside it, not on it, whichever edge: counted
+    /// as on it along the low edges and beside it along the high ones, an engineer waiting at
+    /// its factory's exit, on a line between cells, was moved for one side of a mirrored map and
+    /// left for the other. And a unit as near one side as another goes out toward the middle of
+    /// the map, which turns with the map as the sides do.
     fn move_units_off(&mut self, cell_x: u32, cell_y: u32, size: u32) {
         let cell = fp_int(TERRAIN_CELL_UNITS);
         let (min_x, min_y) = (cell * cell_x as i32, cell * cell_y as i32);
         let (max_x, max_y) = (min_x + cell * size as i32, min_y + cell * size as i32);
-        let inside = |at: Vec2Fp| at.x >= min_x && at.x < max_x && at.y >= min_y && at.y < max_y;
+        let inside = |at: Vec2Fp| at.x > min_x && at.x < max_x && at.y > min_y && at.y < max_y;
+        let middle = fp_int(self.terrain.map_units() / 2);
         let trapped: Vec<(SimId, hecs::Entity)> = self
             .units
             .iter()
@@ -392,17 +399,18 @@ impl SimWorld {
             };
             let here = self.ecs.get::<&Position>(entity).expect("units have positions").0.xy();
             let clear = radius + fp_int(2);
-            // Out the nearest side, then the others.
+            // Out the nearest side, then the others; of two as near, the one toward the middle
+            // of the map. Each with how far it is, and how far toward the middle it leads.
             let mut ways = [
-                (here.x - min_x, Vec2Fp::new(min_x - clear, here.y)),
-                (max_x - here.x, Vec2Fp::new(max_x + clear, here.y)),
-                (here.y - min_y, Vec2Fp::new(here.x, min_y - clear)),
-                (max_y - here.y, Vec2Fp::new(here.x, max_y + clear)),
+                (here.x - min_x, here.x - middle, Vec2Fp::new(min_x - clear, here.y)),
+                (max_x - here.x, middle - here.x, Vec2Fp::new(max_x + clear, here.y)),
+                (here.y - min_y, here.y - middle, Vec2Fp::new(here.x, min_y - clear)),
+                (max_y - here.y, middle - here.y, Vec2Fp::new(here.x, max_y + clear)),
             ];
-            ways.sort_by_key(|way| way.0);
+            ways.sort_by_key(|way| (way.0, std::cmp::Reverse(way.1)));
             let spot = ways
                 .iter()
-                .map(|way| way.1)
+                .map(|way| way.2)
                 .find(|&spot| self.terrain.in_bounds(spot) && self.terrain.passable_for(class, spot))
                 .or_else(|| super::flowfield::nearest_passable_cell_for(&self.terrain, class, here).map(|(x, y)| cell_center(x as u32, y as u32, 1)));
             let Some(spot) = spot else { continue };

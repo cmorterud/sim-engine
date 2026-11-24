@@ -69,6 +69,81 @@ pub struct MapSettings {
     pub water: String,
 }
 
+/// What a player chose for a generated map (GAME_SPECIFICATION.md §17.3): its kind, and each
+/// setting as given, or nothing for the usual.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Choices {
+    pub kind: String,
+    pub size_km: Option<u32>,
+    pub players: Option<u32>,
+    pub resources: Option<String>,
+    pub reclaim: Option<String>,
+    pub terrain: Option<String>,
+    pub water: Option<String>,
+    pub seed: Option<u64>,
+}
+
+impl MapSettings {
+    /// The kinds of map the generator makes.
+    pub const KINDS: [&'static str; 3] = ["passes", "central_lake", "islands"];
+    /// The sizes it makes them, in km: those that come to a whole, even number of cells.
+    pub const SIZES_KM: [u32; 4] = [5, 10, 15, 20];
+
+    /// The most players a map of a size holds: 2 at 5 km, 4 up to 15 km, and 8 at 20 km.
+    pub const fn most_players(size_km: u32) -> u32 {
+        match size_km {
+            0..=5 => 2,
+            6..=15 => 4,
+            _ => 8,
+        }
+    }
+
+    /// A generated map's settings from what a player chose, or what is wrong with the choice.
+    /// Left unsaid: 10 km, as many players as the size holds up to four, normal resources, some
+    /// reclaim, hilly, some water where the kind has any, and seed 1.
+    pub fn chosen(choices: &Choices) -> Result<Self, String> {
+        let one_of = |what: &str, given: &Option<String>, usual: &str, allowed: &[&str]| {
+            let word = given.as_deref().unwrap_or(usual);
+            if allowed.contains(&word) { Ok(word.to_string()) } else { Err(format!("{what} is {}, not {word}", allowed.join(", "))) }
+        };
+        if choices.kind.is_empty() {
+            return Err(format!("a generated map needs its kind: {}", Self::KINDS.join(", ")));
+        }
+        let kind = one_of("a map's kind", &Some(choices.kind.clone()), "", &Self::KINDS)?;
+        let size_km = choices.size_km.unwrap_or(10);
+        if !Self::SIZES_KM.contains(&size_km) {
+            return Err(format!("a map is 5, 10, 15, or 20 km, not {size_km}"));
+        }
+        let most = Self::most_players(size_km);
+        let players = choices.players.unwrap_or_else(|| most.min(4));
+        if ![2, 4, 8].contains(&players) || players > most {
+            return Err(format!("a {size_km} km map holds 2{} players, not {players}", if most >= 8 { ", 4, or 8" } else if most >= 4 { " or 4" } else { "" }));
+        }
+        let water = if kind == "passes" {
+            match choices.water.as_deref() {
+                None | Some("none") => String::new(),
+                Some(other) => return Err(format!("a Passes map has no water, not {other}")),
+            }
+        } else {
+            one_of("water", &choices.water, "some", &["some", "lots"])?
+        };
+        Ok(Self {
+            id: "generated".into(),
+            name: "Generated".into(),
+            // One valley on the smallest Passes, where three would each be too narrow to fight in.
+            valleys: if kind == "passes" { if size_km <= 5 { 1 } else { 3 } } else { 0 },
+            kind,
+            size_km,
+            players,
+            seed: choices.seed.unwrap_or(1),
+            resources: one_of("resources", &choices.resources, "normal", &["sparse", "normal", "rich"])?,
+            reclaim: one_of("reclaim", &choices.reclaim, "some", &["none", "some", "lots"])?,
+            terrain: one_of("terrain", &choices.terrain, "hilly", &["flat", "hilly", "rugged"])?,
+            water,
+        })
+    }
+}
+
 /// The named maps' settings files, by id.
 const NAMED: [(&str, &str); 3] = [
     ("saddleback", include_str!("../../data/maps/saddleback.toml")),
@@ -203,6 +278,24 @@ impl Draft {
 fn smooth_line(rng: &mut SimRng, length: i32, spacing: i32, amplitude: i32) -> Vec<i32> {
     let points: Vec<i32> = (0..length / spacing + 2).map(|_| rng.below(amplitude as u32 * 2 + 1) as i32 - amplitude).collect();
     eased(&points, length, spacing)
+}
+
+/// Keeps a wandering shore's points within `most` of their neighbors, leaving the `pinned` ones
+/// where they are. A shore that swings in or out faster than about half as far as it runs is,
+/// with the fall of the beach, a wedge of ground too steep to cross.
+fn gentle(points: &mut [i32], most: i32, pinned: &[usize]) {
+    for _ in 0..4 {
+        for index in 1..points.len() {
+            if !pinned.contains(&index) {
+                points[index] = points[index].clamp(points[index - 1] - most, points[index - 1] + most);
+            }
+        }
+        for index in (0..points.len() - 1).rev() {
+            if !pinned.contains(&index) {
+                points[index] = points[index].clamp(points[index + 1] - most, points[index + 1] + most);
+            }
+        }
+    }
 }
 
 /// `length` values through points `spacing` apart, eased between with smoothstep, so that the
@@ -668,9 +761,16 @@ pub fn passes(settings: &MapSettings) -> MapData {
     // two each side, each nearest a flank valley.
     let duel = (middle, middle + scale(150));
     let team = (middle - scale(150), middle + scale(144));
-    for start in [duel, team] {
+    // On a map for eight players, two more each side, between those and the middle column.
+    let inner = (middle - scale(50), middle + scale(150));
+    let sites: Vec<(i32, i32)> = match settings.players {
+        0..=2 => vec![duel],
+        3..=4 => vec![duel, team],
+        _ => vec![duel, team, inner],
+    };
+    for &start in &sites {
         for image in draft.images(start) {
-            draft.flatten(image, scale(30));
+            draft.flatten(image, scale(30).max(22));
         }
     }
     draft.symmetrize_four();
@@ -690,8 +790,10 @@ pub fn passes(settings: &MapSettings) -> MapData {
     for offset in [(-6, -4), (-5, 7)] {
         layout.deposit_four((duel.0 + offset.0, duel.1 + offset.1));
     }
-    for offset in [(-6, -4), (5, -6), (-4, 7), (7, 5)] {
-        layout.deposit_four((team.0 + offset.0, team.1 + offset.1));
+    for &start in &sites[1..] {
+        for offset in [(-6, -4), (5, -6), (-4, 7), (7, 5)] {
+            layout.deposit_four((start.0 + offset.0, start.1 + offset.1));
+        }
     }
     // The valleys hold the richest, out in their funnels three quarters of the way to the
     // mouths: eight in the center one, two in each of the others.
@@ -704,16 +806,18 @@ pub fn passes(settings: &MapSettings) -> MapData {
         layout.deposit_four((center - scale(4), funnel(center)));
     }
     // A vent a short walk from every base.
-    for start in [duel, team] {
+    for &start in &sites {
         let _ = (0..6).find(|step| layout.vent_four((start.0 + 14 + step * 2, start.1 - 14)));
     }
-    // Expansions out toward the flanks, more or fewer by the map's resources.
+    // Expansions out toward the flanks, more or fewer by the map's resources, and by its size:
+    // by its area up to 10 km, and by its length beyond.
     let wanted = match settings.resources.as_str() {
         "sparse" => 6,
         "rich" => 14,
         _ => 9,
     };
-    let start_cells: Vec<(i32, i32)> = [duel, team].iter().flat_map(|&start| layout.images(start)).collect();
+    let wanted = if last <= 512 { (wanted * last * last / (512 * 512)).max(1) } else { wanted * last / 512 };
+    let start_cells: Vec<(i32, i32)> = sites.iter().flat_map(|&start| layout.images(start)).collect();
     let near_start = |cell: (i32, i32), cells: i32| start_cells.iter().any(|&start| chebyshev(cell, start) <= cells);
     let widest = band + scale(10) + edge;
     let lowland = (middle + widest + 12, last - 16);
@@ -759,9 +863,17 @@ pub fn passes(settings: &MapSettings) -> MapData {
     let mirror = |at: Vec2Fp| [at, Vec2Fp::new(full - at.x, at.y), Vec2Fp::new(at.x, full - at.y), Vec2Fp::new(full - at.x, full - at.y)];
     let duel_at = point(duel);
     let starts = [duel_at, Vec2Fp::new(full - duel_at.x, full - duel_at.y)];
-    // Two each side: the first team's in the north, the second's in the south.
+    // Two each side: the first team's in the north, the second's in the south. On a map for
+    // eight players, four each side as well, from west to east.
     let [north_west, north_east, south_west, south_east] = mirror(point(team));
-    let layouts = vec![vec![north_west, north_east, south_west, south_east]];
+    let mut layouts = Vec::new();
+    if settings.players >= 4 {
+        layouts.push(vec![north_west, north_east, south_west, south_east]);
+    }
+    if settings.players > 4 {
+        let [inner_north_west, inner_north_east, inner_south_west, inner_south_east] = mirror(point(inner));
+        layouts.push(vec![north_west, inner_north_west, inner_north_east, north_east, south_west, inner_south_west, inner_south_east, south_east]);
+    }
     let (deposits, vents, scenery) = (layout.deposits, layout.vents, layout.scenery);
     // Made with the range across the map, and turned so that it runs up it: the sides face each
     // other west and east, as the camera sees both alike, rather than one looking down at the
@@ -817,10 +929,14 @@ pub fn central_lake(settings: &MapSettings) -> MapData {
     // shore is worked out in sixteenths of a cell: in whole cells it stepped a cell in or out
     // from one sample to the next, and each step was a line of ground too steep to cross.
     const FINE: i32 = 16;
-    let (steps, spacing) = (6, scale(160).max(32));
+    // Three points a quarter, each no further in or out than its neighbors than two fifths of
+    // the way between them along the shore where they are closest, at the middle of a side.
+    let (steps, spacing) = (3, scale(320).max(64));
     let mut points: Vec<i32> = (0..steps + 2).map(|_| draft.rng.below((sway * FINE) as u32 * 2 + 1) as i32 - sway * FINE).collect();
     points[0] = 0;
     points[steps as usize] = 0;
+    points[steps as usize + 1] = 0;
+    gentle(&mut points, radius * FINE * 2 / (5 * steps), &[0, steps as usize, steps as usize + 1]);
     let wander = eased(&points, steps * spacing + 1, spacing);
     let reach = |dx: i32, dy: i32| {
         let (across, along) = (dx.abs(), dy.abs());
@@ -849,6 +965,10 @@ pub fn central_lake(settings: &MapSettings) -> MapData {
     // kept clear of outcrops, and the two overlap, so that no outcrops wall a start off from the
     // way round.
     let start = (scale(58), scale(58));
+    // On a map for eight players, another on each shore between a corner and the middle of the
+    // side, halfway from the map's edge to the lake.
+    let between = ((middle - radius - SHORE) / 2, middle - scale(90));
+    let sites: Vec<(i32, i32)> = if settings.players > 4 { vec![start, between] } else { vec![start] };
     let clear = scale(44).max(30);
     let lane = radius + sway + SHORE + 24;
     let outcrops = match settings.terrain.as_str() {
@@ -862,23 +982,27 @@ pub fn central_lake(settings: &MapSettings) -> MapData {
             break;
         }
         let cell = (8 + draft.rng.below((middle - 8) as u32) as i32, 8 + draft.rng.below((middle - 8) as u32) as i32);
-        if from_middle(cell) < lane + 12 || chebyshev(cell, start) < clear + 12 {
+        if from_middle(cell) < lane + 12 || sites.iter().any(|&site| chebyshev(cell, site) < clear + 12) {
             continue;
         }
         let (size, height) = (3 + draft.rng.below(6) as i32, 30 + draft.rng.below(40) as i32);
         draft.disc_four(cell, size, 2, height);
         placed += 1;
     }
-    for image in draft.images(start) {
-        draft.flatten(image, scale(30).max(22));
+    for &site in &sites {
+        for image in draft.images(site) {
+            draft.flatten(image, scale(30).max(22));
+        }
     }
     draft.symmetrize_four();
 
     let blocked = draft.blocked(WATER_UNITS << HEIGHT_FRAC_BITS);
     let mut layout = Layout { cells: last, blocked: &blocked, deposits: Vec::new(), vents: Vec::new(), scenery: Vec::new() };
     // Each base has four deposits.
-    for offset in [(-6, -4), (5, -6), (-4, 7), (7, 5)] {
-        layout.deposit_four((start.0 + offset.0, start.1 + offset.1));
+    for &site in &sites {
+        for offset in [(-6, -4), (5, -6), (-4, 7), (7, 5)] {
+            layout.deposit_four((site.0 + offset.0, site.1 + offset.1));
+        }
     }
     // The necks, the narrow ground at the middle of each side, halfway from the map's edge to
     // the shore: four deposits on each of the two between the teams, north and south of the
@@ -891,7 +1015,9 @@ pub fn central_lake(settings: &MapSettings) -> MapData {
     layout.deposit_four((middle - 3, middle - 4));
     layout.deposit_four((middle - islet - 1, middle - islet));
     // A vent a short walk from every base.
-    let _ = (0..6).find(|step| layout.vent_four((start.0 + 14 + step * 2, start.1 - 14)));
+    for &site in &sites {
+        let _ = (0..6).find(|step| layout.vent_four((site.0 + 14 + step * 2, site.1 - 14)));
+    }
     // Expansions and more vents out on the ring, more or fewer by the map's resources and size.
     let (wanted_deposits, wanted_vents) = match settings.resources.as_str() {
         "sparse" => (3, 0),
@@ -899,7 +1025,7 @@ pub fn central_lake(settings: &MapSettings) -> MapData {
         _ => (6, 1),
     };
     let by_area = |count: i32| if count == 0 { 0 } else { (count * last * last / (512 * 512)).max(1) };
-    let start_cells = layout.images(start);
+    let start_cells: Vec<(i32, i32)> = sites.iter().flat_map(|&site| layout.images(site)).collect();
     let near_start = |cell: (i32, i32), cells: i32| start_cells.iter().any(|&start| chebyshev(cell, start) <= cells);
     let on_ring = |cell: (i32, i32)| from_middle(cell) > radius + sway + SHORE + 6;
     let somewhere = |rng: &mut SimRng| (12 + rng.below((middle - 12) as u32) as i32, 12 + rng.below((middle - 12) as u32) as i32);
@@ -936,7 +1062,8 @@ pub fn central_lake(settings: &MapSettings) -> MapData {
         _ => 1,
     };
     let map = draft.map_units();
-    let away = |cell: (i32, i32)| near_start(cell, 26);
+    // Clear of the starts: by less on a small map, where the usual left it no room at all.
+    let away = |cell: (i32, i32)| near_start(cell, scale(26).clamp(14, 26));
     for (kind, groups, per_group, spread) in [(WreckKind::Rock, by_area(8) * amount, 14, 120), (WreckKind::Tree, by_area(10) * amount, 16, 110)] {
         let mut made = 0;
         for _ in 0..groups * 20 {
@@ -957,7 +1084,16 @@ pub fn central_lake(settings: &MapSettings) -> MapData {
     let (west_a, west_b) = (Vec2Fp::new(low.x, full - low.y), low);
     let (east_a, east_b) = (Vec2Fp::new(full - low.x, full - low.y), Vec2Fp::new(full - low.x, low.y));
     let starts = [west_a, east_b];
-    let layouts = if settings.players >= 4 { vec![vec![west_a, west_b, east_a, east_b]] } else { Vec::new() };
+    let mut layouts = Vec::new();
+    if settings.players >= 4 {
+        layouts.push(vec![west_a, west_b, east_a, east_b]);
+    }
+    if settings.players > 4 {
+        let low = cell_point(between);
+        let (west_c, west_d) = (Vec2Fp::new(low.x, full - low.y), low);
+        let (east_c, east_d) = (Vec2Fp::new(full - low.x, full - low.y), Vec2Fp::new(full - low.x, low.y));
+        layouts.push(vec![west_a, west_c, west_d, west_b, east_a, east_c, east_d, east_b]);
+    }
     let (deposits, vents, scenery) = (layout.deposits, layout.vents, layout.scenery);
     MapData { name: settings.id.clone(), map_units: map, heights: draft.heights, blocked, water_level: fp_int(WATER_UNITS), deposits, vents, starts, layouts, scenery }
 }
@@ -1004,11 +1140,13 @@ pub fn islands(settings: &MapSettings) -> MapData {
     // sample is: the same north and south of it, and on both islands, so that the map stays
     // fair. Both are back at the island's plain width where its end rounds off.
     let sway = scale(16).max(2);
-    let (steps, spacing) = (6, (straight / 6).max(4));
+    let (steps, spacing) = (4, (straight / 4).max(4));
     let shore_line = |rng: &mut SimRng| {
         let mut points: Vec<i32> = (0..steps + 2).map(|_| rng.below((sway * FINE) as u32 * 2 + 1) as i32 - sway * FINE).collect();
         points[steps as usize] = 0;
         points[steps as usize + 1] = 0;
+        // No further in or out from one point to the next than two fifths of the way between.
+        gentle(&mut points, spacing * FINE * 2 / 5, &[steps as usize, steps as usize + 1]);
         eased(&points, steps * spacing + 1, spacing)
     };
     let (outer, inner) = (shore_line(&mut draft.rng), shore_line(&mut draft.rng));
@@ -1106,24 +1244,26 @@ pub fn islands(settings: &MapSettings) -> MapData {
         }
         let _ = (0..6).find(|step| layout.vent_four((site.0 + 14 + step * 2, site.1 - 14)));
     }
-    // The small islands hold the contested deposits: four on the middle one, and one or two on
-    // each of the others, by its size.
+    // The small islands hold the contested deposits: four on the middle one, and one on each of
+    // the others, or two on the larger ones of a rich map.
     if center_island {
         layout.deposit_four((middle - 3, middle - 4));
     }
     for &(at, size) in &isles {
         layout.deposit_four((at.0 - 1, at.1 - 1));
-        if size >= scale(20).max(9) {
+        if settings.resources == "rich" && size >= scale(20).max(9) {
             layout.deposit_four((at.0 + 2, at.1 + 1));
         }
     }
     // Expansions and more vents on the home islands, more or fewer by the map's resources and
-    // size.
+    // by its length, as the small islands are, so that the home islands always hold more
+    // deposits than the small ones do.
     let (wanted_deposits, wanted_vents) = match settings.resources.as_str() {
         "sparse" => (4, 0),
         "rich" => (12, 2),
         _ => (8, 1),
     };
+    let by_length = |count: i32| if count == 0 { 0 } else { (count * last / 1024).max(1) };
     let by_area = |count: i32| if count == 0 { 0 } else { (count * last / 1024 * last / 1024).max(1) };
     let site_cells: Vec<(i32, i32)> = sites.iter().flat_map(|&site| layout.images(site)).collect();
     let near_site = |cell: (i32, i32), cells: i32| site_cells.iter().any(|&site| chebyshev(cell, site) <= cells);
@@ -1132,7 +1272,7 @@ pub fn islands(settings: &MapSettings) -> MapData {
     let ashore = |cell: (i32, i32)| off_home(cell.0, cell.1) < -8 * FINE;
     let mut expansions = 0;
     for _ in 0..4_000 {
-        if expansions == by_area(wanted_deposits) {
+        if expansions == by_length(wanted_deposits) {
             break;
         }
         let cell = somewhere(&mut draft.rng);
@@ -1148,7 +1288,7 @@ pub fn islands(settings: &MapSettings) -> MapData {
     }
     let mut vents = 0;
     for _ in 0..2_000 {
-        if vents == by_area(wanted_vents) {
+        if vents == by_length(wanted_vents) {
             break;
         }
         let cell = somewhere(&mut draft.rng);
@@ -1274,9 +1414,16 @@ mod tests {
         assert!(connected(map, cell_of(map, map.starts[0]), cell_of(map, map.starts[1])), "the starts must be joined by land");
     }
 
-    /// What every map is: its own image turned about its center, with its deposits and vents on
-    /// open ground and its 1v1 starts each other's image.
+    /// What every map that comes with the game is: fair, and with enough to fight over.
     fn check_turned(map: &MapData) {
+        check_image(map);
+        assert!(map.vents.len() >= 6, "{} vents", map.vents.len());
+        assert!(map.deposits.len() >= 30, "{} deposits", map.deposits.len());
+    }
+
+    /// What every map is, generated ones too: its own image turned about its center, with its
+    /// deposits and vents on open ground and its 1v1 starts each other's image.
+    fn check_image(map: &MapData) {
         let cells = (map.map_units / TERRAIN_CELL_UNITS) as usize;
         assert_eq!(map.heights.len(), (cells + 1) * (cells + 1));
         // It turns into itself about the center: heights, blocked cells, deposits, and starts.
@@ -1290,7 +1437,6 @@ mod tests {
             assert!(!map.blocked[y as usize * cells + x as usize], "deposit {x}, {y} is on blocked ground");
         }
         // Vents mirror too, and a plant fits over each, clear of deposits.
-        assert!(map.vents.len() >= 6, "{} vents", map.vents.len());
         for &(x, y) in &map.vents {
             assert!(map.vents.contains(&(cells as u32 - 1 - x, cells as u32 - 1 - y)), "vent {x}, {y} has no partner");
             for (cx, cy) in (y - 1..=y + 1).flat_map(|cy| (x - 1..=x + 1).map(move |cx| (cx, cy))) {
@@ -1302,7 +1448,6 @@ mod tests {
         // Each start is open.
         let (blue, red) = (cell_of(map, map.starts[0]), cell_of(map, map.starts[1]));
         assert!(!map.blocked[blue.1 * cells + blue.0] && !map.blocked[red.1 * cells + red.0]);
-        assert!(map.deposits.len() >= 30, "{} deposits", map.deposits.len());
     }
 
     #[test]
@@ -1642,6 +1787,80 @@ mod tests {
                 assert!(near(&map, map.starts[0], 1_500).0 >= 4 && near(&map, map.starts[0], 1_500).1 >= 1, "{label}: a start has deposits and a vent");
                 if players >= 4 {
                     check_four(&map);
+                }
+            }
+        }
+    }
+
+    /// What a player may choose for a generated map comes to its settings, with the usual for
+    /// what is left unsaid, and what the generator cannot make is refused with the reason.
+    #[test]
+    fn a_generated_maps_settings_are_checked() {
+        let choose = |kind: &str| Choices { kind: kind.into(), ..Choices::default() };
+        let usual = MapSettings::chosen(&choose("central_lake")).expect("the usual lake");
+        assert_eq!((usual.size_km, usual.players, usual.seed), (10, 4, 1));
+        assert_eq!([usual.resources.as_str(), usual.reclaim.as_str(), usual.terrain.as_str(), usual.water.as_str()], ["normal", "some", "hilly", "some"]);
+        // A Passes map has no water, three valleys, and one where it is smallest.
+        let passes = MapSettings::chosen(&choose("passes")).expect("the usual passes");
+        assert_eq!((passes.water.as_str(), passes.valleys), ("", 3));
+        assert_eq!(MapSettings::chosen(&Choices { size_km: Some(5), ..choose("passes") }).expect("small passes").valleys, 1);
+        assert!(MapSettings::chosen(&Choices { water: Some("none".into()), ..choose("passes") }).is_ok());
+        assert!(MapSettings::chosen(&Choices { water: Some("lots".into()), ..choose("passes") }).is_err_and(|problem| problem.contains("no water")));
+        // As many players as the size holds, up to four unless more are asked for.
+        assert_eq!(MapSettings::chosen(&Choices { size_km: Some(5), ..choose("islands") }).expect("small islands").players, 2);
+        assert_eq!(MapSettings::chosen(&Choices { size_km: Some(20), ..choose("islands") }).expect("large islands").players, 4);
+        assert_eq!(MapSettings::chosen(&Choices { size_km: Some(20), players: Some(8), ..choose("islands") }).expect("for eight").players, 8);
+        for (wrong, reason) in [
+            (choose("archipelago"), "passes, central_lake, islands"),
+            (Choices { size_km: Some(12), ..choose("passes") }, "5, 10, 15, or 20 km"),
+            (Choices { size_km: Some(5), players: Some(4), ..choose("islands") }, "a 5 km map holds 2 players"),
+            (Choices { players: Some(8), ..choose("central_lake") }, "a 10 km map holds 2 or 4 players"),
+            (Choices { size_km: Some(20), players: Some(6), ..choose("islands") }, "2, 4, or 8 players"),
+            (Choices { resources: Some("plenty".into()), ..choose("islands") }, "sparse, normal, rich"),
+            (Choices { reclaim: Some("much".into()), ..choose("islands") }, "none, some, lots"),
+            (Choices { terrain: Some("mountains".into()), ..choose("islands") }, "flat, hilly, rugged"),
+            (Choices { water: Some("none".into()), ..choose("central_lake") }, "some, lots"),
+        ] {
+            let problem = MapSettings::chosen(&wrong).expect_err("refused");
+            assert!(problem.contains(reason), "{wrong:?} is refused with: {problem}");
+        }
+    }
+
+    /// The generator makes a fair map of every kind, at every size, for every count of players
+    /// the size holds: its own image, every start with the same share as its opposite number,
+    /// starts for each count of players up to the map's, and the way between the sides that its
+    /// kind promises.
+    #[test]
+    fn every_kind_of_map_is_fair_at_every_size_for_every_count_of_players() {
+        for kind in MapSettings::KINDS {
+            for size_km in MapSettings::SIZES_KM {
+                for players in [2, 4, 8].into_iter().filter(|&players| players <= MapSettings::most_players(size_km)) {
+                    let choices = Choices { kind: kind.into(), size_km: Some(size_km), players: Some(players), seed: Some(u64::from(size_km * 7 + players)), ..Choices::default() };
+                    let settings = MapSettings::chosen(&choices).expect("settings the game offers");
+                    let map = generate(&settings);
+                    let label = format!("{kind}, {size_km} km, {players} players");
+                    assert_eq!(map, generate(&settings), "{label}: the same every time");
+                    assert_eq!(map.map_units, size_km as i32 * 1024, "{label}");
+                    check_image(&map);
+                    assert_eq!(map.layouts.iter().map(Vec::len).collect::<Vec<_>>(), [4, 8][..(players as usize / 4).min(2)], "{label}: starts for each count of players");
+                    let share = near(&map, map.starts[0], 1_500);
+                    assert_eq!(share, near(&map, map.starts[1], 1_500), "{label}: the 1v1 starts have the same share");
+                    assert!(share.0 >= 4 && share.1 >= 1, "{label}: a start has {} deposits and {} vents in reach", share.0, share.1);
+                    if players >= 4 {
+                        check_four(&map);
+                    }
+                    match kind {
+                        "islands" => drop(check_isles(&map)),
+                        "central_lake" => drop(check_lake(&map)),
+                        _ => {
+                            let walked = walked(&map, cell_of(&map, map.starts[0]));
+                            let cells = (map.map_units / TERRAIN_CELL_UNITS) as usize;
+                            for &start in map.starts.iter().chain(map.layouts.iter().flatten()) {
+                                let (x, y) = cell_of(&map, start);
+                                assert!(walked[y * cells + x], "{label}: {start:?} cannot be reached from the first start by land");
+                            }
+                        }
+                    }
                 }
             }
         }

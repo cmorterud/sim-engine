@@ -74,6 +74,7 @@
     .map strong { display: block; color: var(--text-strong); font-size: 16px; }
     .map .facts { color: var(--muted); font-size: 13px; }
     .map .about { margin: 6px 0 0; font-size: 13.5px; }
+    .generate { border: 0; padding: 0; margin: 0; min-width: 0; }
 
     .row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 14px 28px; }
     .field { display: grid; align-content: start; gap: 6px; }
@@ -163,10 +164,88 @@
             <img src="maps/scattered_isles.png" alt="Scattered Isles map from above: a long island at each end, west and east, and a sea of small islands between">
             <span class="text">
               <strong>Scattered Isles</strong>
-              <span class="facts">20 km &middot; 144 materiel deposits</span>
+              <span class="facts">20 km &middot; 152 materiel deposits</span>
               <p class="about">Each side has a home island, with no land route between them. Tanks only guard home: the war is ships, aircraft, and hovercraft, and the small islands in the sea between hold the deposits worth fighting for.</p>
             </span>
           </label>
+          <label class="map">
+            <input type="radio" name="map" value="generate" id="map-generate">
+            <img src="maps/generate.png" alt="Three kinds of generated map side by side: a mountain range with passes, a lake ringed by land, and islands">
+            <span class="text">
+              <strong>Generate a map</strong>
+              <span class="facts">5 to 20 km &middot; made from your settings</span>
+              <p class="about">A new map of a kind you choose: mountain passes, a central lake, or islands. The same settings and map seed always make the same map, fair to every start.</p>
+            </span>
+          </label>
+        </fieldset>
+
+        <fieldset id="generate-options" class="generate" hidden disabled aria-labelledby="generate-heading">
+          <h2 id="generate-heading">The map to generate</h2>
+          <div class="row">
+            <div class="field">
+              <label for="kind">Kind</label>
+              <select id="kind" name="kind">
+                <option value="passes">Passes</option>
+                <option value="central_lake" selected>Central Lake</option>
+                <option value="islands">Islands</option>
+              </select>
+              <span class="hint" id="kind-hint"></span>
+            </div>
+            <div class="field">
+              <label for="size">Size</label>
+              <select id="size" name="size">
+                <option value="5">5 km</option>
+                <option value="10" selected>10 km</option>
+                <option value="15">15 km</option>
+                <option value="20">20 km</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="map-players">Starts</label>
+              <select id="map-players" name="players" aria-describedby="map-players-hint">
+                <option value="2">2</option>
+                <option value="4" selected>4</option>
+                <option value="8">8</option>
+              </select>
+              <span class="hint" id="map-players-hint">How many players the map holds: up to 2 at 5 km, 4 at 10 and 15 km, and 8 at 20 km. A 2v2 needs 4.</span>
+            </div>
+            <div class="field">
+              <label for="resources">Resources</label>
+              <select id="resources" name="resources">
+                <option value="sparse">Sparse</option>
+                <option value="normal" selected>Normal</option>
+                <option value="rich">Rich</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="reclaim">Reclaim</label>
+              <select id="reclaim" name="reclaim">
+                <option value="none">None</option>
+                <option value="some" selected>Some</option>
+                <option value="lots">Lots</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="terrain">Terrain</label>
+              <select id="terrain" name="terrain">
+                <option value="flat">Flat</option>
+                <option value="hilly" selected>Hilly</option>
+                <option value="rugged">Rugged</option>
+              </select>
+            </div>
+            <div class="field" id="water-field">
+              <label for="water">Water</label>
+              <select id="water" name="water">
+                <option value="some" selected>Some</option>
+                <option value="lots">Lots</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="mapseed">Map seed</label>
+              <input id="mapseed" name="mapseed" type="number" min="0" step="1" inputmode="numeric" value="1" required>
+              <span class="hint">Another seed makes another map of the same kind.</span>
+            </div>
+          </div>
         </fieldset>
 
         <h2>Opponents</h2>
@@ -184,7 +263,7 @@
               <option value="1v1" selected>1v1</option>
               <option value="2v2">2v2, with an AI ally</option>
             </select>
-            <span class="hint" id="teams-hint">2v2 needs a map with team starts: Saddleback, Stillwater, or Scattered Isles.</span>
+            <span class="hint" id="teams-hint">2v2 needs a map with team starts: Saddleback, Stillwater, Scattered Isles, or a generated map with 4 starts or more.</span>
           </div>
           <div class="field">
             <label for="strategy">Strategy</label>
@@ -313,9 +392,35 @@
         if (field.name && field.value === '') field.disabled = true;
       }
     });
+    // The settings of a generated map show, and go in the address, only when one is asked for.
+    const generateOptions = document.getElementById('generate-options');
+    const kinds = {
+      passes: 'A mountain range up the middle, crossed by valleys. No water.',
+      central_lake: 'A lake in the middle, ringed by land, with islands in it.',
+      islands: 'A home island each, and a sea of small islands between. No land route.',
+    };
+    const syncGenerate = () => {
+      const wanted = document.getElementById('map-generate').checked;
+      generateOptions.hidden = !wanted;
+      generateOptions.disabled = !wanted;
+      const kind = document.getElementById('kind').value;
+      document.getElementById('kind-hint').textContent = kinds[kind];
+      // A Passes map has no water to choose.
+      document.getElementById('water-field').hidden = kind === 'passes';
+      document.getElementById('water').disabled = !wanted || kind === 'passes';
+      // A map holds 2 players at 5 km, up to 4 at 10 and 15 km, and up to 8 at 20 km.
+      const size = Number(document.getElementById('size').value);
+      const most = size <= 5 ? 2 : size <= 15 ? 4 : 8;
+      const players = document.getElementById('map-players');
+      for (const option of players.options) option.disabled = Number(option.value) > most;
+      if (Number(players.value) > most) players.value = String(most);
+    };
+    for (const field of document.querySelectorAll('input[name="map"], #kind, #size')) field.addEventListener('change', syncGenerate);
+    syncGenerate();
     // Coming back with the back button restores the form; re-enable what submitting disabled.
     window.addEventListener('pageshow', () => {
       for (const field of document.getElementById('setup').elements) field.disabled = false;
+      syncGenerate();
     });
   </script>
 </body>
