@@ -69,10 +69,11 @@ pub(super) const STRUCTURE_SHARE: f32 = 0.9;
 /// world units, half of it below the ground so that it sits flush on a slope.
 const APRON_WIDTH: f32 = 1.1;
 const APRON_HEIGHT: f32 = 2.4;
-/// Bare armor, before it takes on a little of the team's and the blueprint's color.
-const ARMOR: [f32; 3] = [0.50, 0.52, 0.55];
-/// How much of the blueprint's tint, then the team's color, the armor takes on.
-const ARMOR_TINT: f32 = 0.85;
+/// The faction's hull color, a light blue: every unit and structure's body is this, whatever it
+/// is and whoever's, and the team's color is on its trim. Until 2026-11-23 each kind of unit had
+/// a hull color of its own, a yellow engineer beside a tan tank, which read as many factions.
+const FACTION_HULL: [f32; 3] = [0.62, 0.76, 0.90];
+/// How much of the team's color the hull takes on.
 const ARMOR_TEAM: f32 = 0.06;
 /// How far glowing parts are lifted towards white.
 const GLOW_WHITEN: f32 = 0.25;
@@ -112,20 +113,9 @@ fn mix(from: [f32; 3], to: [f32; 3], share: f32) -> [f32; 3] {
     std::array::from_fn(|channel| from[channel] + (to[channel] - from[channel]) * share)
 }
 
-/// The armor of a unit: grey, with a little of what it is and whose it is.
-fn armor(team: [f32; 3], tint: Option<[f32; 3]>) -> [f32; 3] {
-    mix(tint.map_or(ARMOR, |tint| mix(ARMOR, tint, ARMOR_TINT)), team, ARMOR_TEAM)
-}
-
-/// How much of its armor's brightness a unit keeps by tech level, from none to T3: higher
-/// tiers are heavier and darker, so that a tier reads on the model as the dots read on its icon.
-const TIER_SHADE: [f32; 4] = [1.0, 1.0, 0.88, 0.76];
-
-/// The color of a unit's body: its armor, darkened by its tier unless it is one of those that
-/// keep one color whatever their tier (`UnitLook::tier_shaded`).
-fn hull_of(team: [f32; 3], look: &UnitLook) -> [f32; 3] {
-    let shade = if look.tier_shaded { TIER_SHADE[usize::from(look.tier.min(3))] } else { 1.0 };
-    armor(team, look.tint).map(|channel| channel * shade)
+/// The color of a unit's body: the faction's hull color, with a little of the team's.
+fn hull_of(team: [f32; 3]) -> [f32; 3] {
+    mix(FACTION_HULL, team, ARMOR_TEAM)
 }
 
 /// A color at full brightness, lifted a little towards white, for parts lit from inside.
@@ -317,7 +307,8 @@ pub(super) fn merge_by_id<T>(previous: &[T], current: &[T], id: impl Fn(&T) -> S
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct UnitLook {
     pub shape: Shape,
-    /// Blended lightly into the team color, because the shape already shows what it is.
+    /// The color of its glowing parts, such as lights, cores, and tools: the team's, if none. Its
+    /// body is the faction's hull color whatever this is.
     pub tint: Option<[f32; 3]>,
     /// A structure's height, as a share of its width.
     pub height_share: f32,
@@ -330,11 +321,6 @@ pub struct UnitLook {
     /// footprint: zero for its footprint. From above, units are told apart by their outline and
     /// length, so these keep apart some that share a footprint in the simulation.
     pub length: f32,
-    /// Its tech level, which darkens its armor. Zero from `unit_look`; `unit_looks` sets it.
-    pub tier: u8,
-    /// Whether its armor darkens with its tech level (`TIER_SHADE`): every unit's but the
-    /// engineers', which tell their tiers apart by shape and are all one work yellow.
-    pub tier_shaded: bool,
     /// Whether it stands on a concrete foundation: structures on land, but walls. False from
     /// `unit_look`; `unit_looks` sets it.
     pub apron: bool,
@@ -354,13 +340,12 @@ pub struct TurretMount {
     pub aft: bool,
 }
 
-/// The engineers' work yellow, the same at every tier: their tiers show in how many arms they
-/// carry, one to three, and in their size, drawn a little larger than their footprint at T2 and T3.
+/// The work yellow the engineers' tools glow, the same at every tier.
 const ENGINEER_YELLOW: [f32; 3] = [1.00, 0.70, 0.12];
 
 /// Maps a blueprint to its look. Unknown keys fall back to a plain cube.
 pub fn unit_look(key: &str) -> UnitLook {
-    let look = |shape, tint, height_share| UnitLook { shape, tint, height_share, base: None, size: 0.0, length: 0.0, tier: 0, tier_shaded: true, apron: false, turrets: [None; 3] };
+    let look = |shape, tint, height_share| UnitLook { shape, tint, height_share, base: None, size: 0.0, length: 0.0, apron: false, turrets: [None; 3] };
     let turret = |weapon, at, aft| Some(TurretMount { weapon, at, aft });
     match key {
         "command_rig" => UnitLook { base: Some(Shape::CommanderLegs), ..look(Shape::Commander, Some([1.00, 1.00, 1.00]), 1.0) },
@@ -369,10 +354,10 @@ pub fn unit_look(key: &str) -> UnitLook {
         "geothermal_plant" => look(Shape::GeothermalPlant, Some([0.85, 0.60, 0.25]), 0.7),
         "mass_fabricator" => look(Shape::Fabricator, Some([0.40, 0.95, 0.85]), 1.0),
         "mass_fabricator_t3" => look(Shape::FabricatorT3, Some([0.70, 0.45, 1.00]), 0.8),
-        "t2_engineer" => UnitLook { base: Some(Shape::EngineerHull), length: 19.0, tier_shaded: false, ..look(Shape::EngineerT2, Some(ENGINEER_YELLOW), 1.0) },
-        "t3_engineer" => UnitLook { base: Some(Shape::EngineerHull), length: 23.0, tier_shaded: false, ..look(Shape::EngineerT3, Some(ENGINEER_YELLOW), 1.0) },
+        "t2_engineer" => UnitLook { base: Some(Shape::EngineerHull), length: 19.0, ..look(Shape::EngineerT2, Some(ENGINEER_YELLOW), 1.0) },
+        "t3_engineer" => UnitLook { base: Some(Shape::EngineerHull), length: 23.0, ..look(Shape::EngineerT3, Some(ENGINEER_YELLOW), 1.0) },
         "land_factory_t3" => look(Shape::FactoryT3, Some([0.10, 0.10, 0.20]), 0.85),
-        "t1_engineer" => UnitLook { base: Some(Shape::EngineerHull), tier_shaded: false, ..look(Shape::Engineer, Some(ENGINEER_YELLOW), 1.0) },
+        "t1_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some(ENGINEER_YELLOW), 1.0) },
         "t1_light_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::Bot, Some([0.78, 0.70, 0.50]), 1.0) },
         "t1_land_scout" => UnitLook { length: 14.0, ..look(Shape::LandScout, Some([0.75, 0.95, 1.00]), 1.0) },
         "t1_medium_tank" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::Tank, Some([0.80, 0.85, 0.70]), 1.0) },
@@ -475,7 +460,6 @@ pub fn unit_looks(blueprints: &BlueprintDb) -> Vec<UnitLook> {
             let look = unit_look(&unit.key);
             UnitLook {
                 size: if look.length > 0.0 { look.length } else { unit.radius.to_num::<f32>() * 2.0 },
-                tier: unit.tier,
                 apron: unit.is_structure() && !unit.on_water && look.shape != Shape::Wall,
                 ..look
             }
@@ -613,7 +597,7 @@ pub fn build_unit_instances(
         };
         let look = looks.get(usize::from(unit.blueprint));
         let tint = look.and_then(|look| look.tint);
-        let hull = look.map_or_else(|| armor(color, None), |look| hull_of(color, look));
+        let hull = hull_of(color);
         let glow = glowing(tint.unwrap_or(color));
         let shape = look.map_or(Shape::Cube, |look| look.shape);
         let size = (f64::from(unit.radius) * RAW_TO_WORLD * 2.0) as f32;
@@ -693,7 +677,7 @@ pub fn build_unit_instances(
                     let full = size * next.height_share;
                     let rising = full * (0.1 + 0.9 * progress);
                     let at = [center[0], center[1], ground + f64::from(rising) * 0.5];
-                    let next_hull = hull_of(color, next).map(|channel| channel * (0.6 + 0.4 * progress));
+                    let next_hull = hull_of(color).map(|channel| channel * (0.6 + 0.4 * progress));
                     let next_trim = color.map(|channel| channel * (0.6 + 0.4 * progress));
                     let grown = size * 1.02;
                     if let Some(base) = next.base {
@@ -714,7 +698,7 @@ pub fn build_unit_instances(
                     let at = [center[0], center[1], ground + f64::from(height * floor + rise * 0.5)];
                     let dim = 0.55 + 0.45 * progress;
                     let made_trim = color.map(|channel| channel * dim);
-                    let made_hull = hull_of(color, made).map(|channel| channel * dim);
+                    let made_hull = hull_of(color).map(|channel| channel * dim);
                     let extent = [made.size, made.size, rise];
                     if let Some(base) = made.base {
                         out.push(base, painted(at, extent, EAST, made_trim, made_hull, made_hull, NO_ICON, eye));
@@ -1024,26 +1008,6 @@ mod tests {
         }
     }
 
-    /// Surface warships look much alike at a glance, long grey hulls, so each is painted a hull
-    /// of its own, for either team, far enough from every other's to tell apart in a button.
-    #[test]
-    fn every_surface_warship_has_a_hull_color_of_its_own() {
-        use crate::sim::components::MoveClass;
-        let db = BlueprintDb::standard();
-        let looks = unit_looks(&db);
-        let ships: Vec<_> = db.iter().filter(|unit| unit.movement == MoveClass::Naval && !unit.is_structure()).collect();
-        assert!(ships.len() >= 5, "the fleet is there");
-        for team in [[0.25, 0.5, 1.0], [1.0, 0.3, 0.25]] {
-            let hulls: Vec<(&str, [f32; 3])> = ships.iter().map(|unit| (unit.key.as_str(), hull_of(team, &looks[usize::from(unit.id.0)]))).collect();
-            for (index, (first, a)) in hulls.iter().enumerate() {
-                for (second, b) in &hulls[index + 1..] {
-                    let distance = (0..3).map(|channel| (a[channel] - b[channel]).powi(2)).sum::<f32>().sqrt();
-                    assert!(distance > 0.08, "{first} and {second} have hulls too alike: {a:?} and {b:?}");
-                }
-            }
-        }
-    }
-
     /// A unit's length as drawn, and how long it is for its width, from above: its base and
     /// what turns on it, facing the same way.
     fn footprint(set: &super::super::meshes::MeshSet, look: &UnitLook) -> (f32, f32) {
@@ -1264,36 +1228,30 @@ mod tests {
         assert!(unarmed.is_empty(), "these shell the ground but show no gun: {unarmed:?}");
     }
 
-    /// The engineers are one work yellow at every tier, for either team: their tiers show in
-    /// their shapes, not their color.
+    /// Every finished unit and structure is drawn in the faction's one hull color, for either
+    /// team, with only a little of the team's in it: what a unit is shows in its shape, and whose
+    /// it is in its trim.
     #[test]
-    fn engineers_are_one_color_whatever_their_tier() {
+    fn every_unit_wears_the_factions_hull_color() {
         let db = BlueprintDb::standard();
         let looks = unit_looks(&db);
-        for team in [BLUE, RED] {
-            let hulls: Vec<[f32; 3]> = ["t1_engineer", "t2_engineer", "t3_engineer"].iter().map(|key| hull_of(team, &looks[usize::from(db.id(key).0)])).collect();
-            assert!(hulls.iter().all(|hull| *hull == hulls[0]), "the engineers' hulls differ: {hulls:?}");
-        }
-    }
-
-    /// A unit's role shows in its color, whoever's it is: mobile builders are work yellow and
-    /// orange, and what only shoots at aircraft, on the ground or the water, is a cool cyan.
-    #[test]
-    fn builders_are_work_yellow_and_anti_air_is_cyan() {
-        use crate::sim::blueprints::Targets;
-        let db = BlueprintDb::standard();
-        let looks = unit_looks(&db);
-        for team in [BLUE, RED] {
-            for unit in db.iter() {
-                let hull = hull_of(team, &looks[usize::from(unit.id.0)]);
-                let builds_structures = unit.builds.iter().any(|&made| db.get(made).is_structure());
-                if builds_structures && !unit.is_structure() && !unit.is_commander() && unit.class != crate::sim::blueprints::UnitClass::FieldRig {
-                    assert!(hull[0] > hull[2] + 0.05, "{} builds, but its hull is not warm: {hull:?}", unit.key);
-                }
-                if !unit.is_air() && unit.weapon.is_some_and(|weapon| weapon.targets == Targets::Air) {
-                    assert!(hull[2] > hull[0] + 0.05 && hull[1] > hull[0], "{} shoots at aircraft, but its hull is not cyan: {hull:?}", unit.key);
+        for (team, color) in [(Team::Blue, BLUE), (Team::Red, RED)] {
+            let expected = bytes(hull_of(color));
+            for blueprint in db.iter().filter(|blueprint| blueprint.class != crate::sim::blueprints::UnitClass::Ammo) {
+                let mut drawn = unit(1, 0);
+                drawn.blueprint = blueprint.id.0;
+                drawn.team = team;
+                drawn.is_structure = blueprint.is_structure();
+                let mut out = InstanceBatches::default();
+                build_unit_instances(&[], &[drawn], 0.0, [0.0; 3], &[], &looks, &[], &mut Motion::new(), &mut out);
+                let look = unit_look(&blueprint.key);
+                for shape in look.base.into_iter().chain([look.shape]) {
+                    let instance = out.shape(shape).first().unwrap_or_else(|| panic!("{} is drawn", blueprint.key));
+                    assert_eq!(instance.hull[..3], expected[..3], "{}'s hull is not the faction's", blueprint.key);
                 }
             }
+            let [red, green, blue] = hull_of(color);
+            assert!(blue > red + 0.15 && blue > green && green > red, "the hull is light blue for either team: {:?}", hull_of(color));
         }
     }
 
@@ -1497,7 +1455,7 @@ mod tests {
     }
 
     #[test]
-    fn units_have_grey_armor_and_glow_only_once_built() {
+    fn units_wear_armor_apart_from_their_team_color_and_glow_only_once_built() {
         let db = BlueprintDb::standard();
         let looks = unit_looks(&db);
         let mut generator = unit(1, 0);
