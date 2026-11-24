@@ -113,3 +113,34 @@ fn the_named_maps_sides_play_mirror_images_through_the_opening() {
         }
     }
 }
+
+/// In a 2v2 each player's opposite number is their image turned about the map's center, and the
+/// two teams play mirror images through the opening as the two sides of a 1v1 do. They did not:
+/// each unit's turn at work done every so many ticks, such as checking whether the way straight
+/// to its goal is clear, was counted by team, so a player's units took turns one off their
+/// opposite number's, and the teams parted within 700 ticks. The soak had Blue winning 49 of 60
+/// 2v2s on Stillwater, and 38 of 60 on Saddleback.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn the_teams_of_a_two_on_two_play_mirror_images_through_the_opening() {
+    use std::sync::Arc;
+    use sim_engine::ai::Difficulty;
+    use sim_engine::ai_strategy::Strategy;
+    use sim_engine::sim::components::PlayerId;
+    use sim_engine::sim::maps::{saddleback, scattered_isles, stillwater};
+    use sim_engine::sim::scenario::MapSource;
+    const TICKS: u32 = 4_000;
+    for (name, map) in [("saddleback", saddleback()), ("stillwater", stillwater()), ("scattered_isles", scattered_isles())] {
+        let map = MapSource::Map(Arc::new(map)).teams(2).expect("starts for a 2v2");
+        let mut world = map.scenario(1).world;
+        let mut brains: Vec<AiBrain> = (0..world.players.len()).map(|player| AiBrain::for_player(&world, PlayerId(player as u8), 1, Difficulty::Normal, Strategy::balanced())).collect();
+        while world.current_tick < TICKS {
+            advance_ai_vs_ai(&mut world, &mut brains);
+            assert!(
+                mirrored(&units(&world, Team::Blue), &units(&world, Team::Red), 4096 / 20),
+                "{name}: the teams stopped mirroring each other at tick {}",
+                world.current_tick
+            );
+        }
+    }
+}

@@ -637,8 +637,12 @@ pub struct SimWorld {
     pub config: SimConfig,
     pub current_tick: u32,
     pub next_sim_id: u32,
-    /// How many units each team has had, which sets each new unit's `UnitStats::phase`.
-    pub units_spawned: [u32; 2],
+    /// How many units each player has had, which sets each new unit's `UnitStats::phase`: the
+    /// turn it takes at work done every so many ticks, such as looking for a target. By player,
+    /// so that a unit and its mirror image on the other team take the same turn: counted by
+    /// team, in a team match a player's units took turns one off their opposite number's, and
+    /// the teams stopped playing as mirror images within a minute.
+    pub units_spawned: Vec<u32>,
     /// Sorted by `SimId`: spawns append, despawns retain order. Any loop whose order
     /// can affect results iterates these, never a `hecs` query.
     pub units: Vec<(SimId, hecs::Entity)>,
@@ -825,7 +829,7 @@ impl SimWorld {
             config,
             current_tick: 0,
             next_sim_id: 0,
-            units_spawned: [0; 2],
+            units_spawned: vec![0; 2],
             units: Vec::new(),
             projectiles: Vec::new(),
             obstacles: Vec::new(),
@@ -926,6 +930,7 @@ impl SimWorld {
         assert!(self.units.is_empty(), "players are set before anything is spawned");
         assert!(teams.contains(&Team::Blue) && teams.contains(&Team::Red), "both teams have players");
         self.players = teams.to_vec();
+        self.units_spawned = vec![0; teams.len()];
         self.economies = vec![Economy::default(); teams.len()];
         self.commanders = vec![None; teams.len()];
         self.eliminated = vec![false; teams.len()];
@@ -962,8 +967,8 @@ impl SimWorld {
     pub(super) fn spawn_unit_anywhere(&mut self, spawn: UnitSpawn, move_class: MoveClass) -> SimId {
         assert!(self.terrain.in_bounds(spawn.position), "unit spawned outside the map");
         let id = self.next_id();
-        let phase = self.units_spawned[spawn.team.index()];
-        self.units_spawned[spawn.team.index()] += 1;
+        let phase = self.units_spawned[spawn.owner.index()];
+        self.units_spawned[spawn.owner.index()] += 1;
         // Ships float on the water.
         let ground = match move_class {
             MoveClass::Naval | MoveClass::Hover => self.terrain.height_at(spawn.position).max(self.terrain.water_level()),
