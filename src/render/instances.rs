@@ -70,12 +70,12 @@ pub(super) const STRUCTURE_SHARE: f32 = 0.9;
 /// world units, half of it below the ground so that it sits flush on a slope.
 const APRON_WIDTH: f32 = 1.1;
 const APRON_HEIGHT: f32 = 2.4;
-/// The faction's hull color, a light blue: every unit and structure's body is this, whatever it
-/// is and whoever's, and the team's color is on its trim. Until 2026-11-23 each kind of unit had
-/// a hull color of its own, a yellow engineer beside a tan tank, which read as many factions.
-const FACTION_HULL: [f32; 3] = [0.62, 0.76, 0.90];
-/// How much of the team's color the hull takes on.
-const ARMOR_TEAM: f32 = 0.06;
+/// The faction's hull color, a pale grey-blue: every unit and structure's body is this, whatever
+/// it is and whoever's, and the team's color is on its trim. Until 2026-11-23 each kind of unit
+/// had a hull color of its own, a yellow engineer beside a tan tank, which read as many factions.
+/// It is pale, and takes on none of the team's color, so that Blue's trim stands as far from it
+/// as Red's does: a stronger light blue with a little of the team's in it left Blue blue on blue.
+const FACTION_HULL: [f32; 3] = [0.80, 0.86, 0.91];
 /// How far glowing parts are lifted towards white.
 const GLOW_WHITEN: f32 = 0.25;
 /// How far a unit must have moved in a tick, in raw squared units, to count as heading somewhere.
@@ -112,11 +112,6 @@ fn bytes(color: [f32; 3]) -> [u8; 4] {
 
 fn mix(from: [f32; 3], to: [f32; 3], share: f32) -> [f32; 3] {
     std::array::from_fn(|channel| from[channel] + (to[channel] - from[channel]) * share)
-}
-
-/// The color of a unit's body: the faction's hull color, with a little of the team's.
-fn hull_of(team: [f32; 3]) -> [f32; 3] {
-    mix(FACTION_HULL, team, ARMOR_TEAM)
 }
 
 /// A color at full brightness, lifted a little towards white, for parts lit from inside.
@@ -607,7 +602,7 @@ pub fn build_unit_instances(
         };
         let look = looks.get(usize::from(unit.blueprint));
         let tint = look.and_then(|look| look.tint);
-        let hull = hull_of(color);
+        let hull = FACTION_HULL;
         let glow = glowing(tint.unwrap_or(color));
         let shape = look.map_or(Shape::Cube, |look| look.shape);
         let size = (f64::from(unit.radius) * RAW_TO_WORLD * 2.0) as f32;
@@ -693,7 +688,7 @@ pub fn build_unit_instances(
                     let full = size * next.height_share;
                     let rising = full * (0.1 + 0.9 * progress);
                     let at = [center[0], center[1], ground + f64::from(rising) * 0.5];
-                    let next_hull = hull_of(color).map(|channel| channel * (0.6 + 0.4 * progress));
+                    let next_hull = FACTION_HULL.map(|channel| channel * (0.6 + 0.4 * progress));
                     let next_trim = color.map(|channel| channel * (0.6 + 0.4 * progress));
                     let grown = size * 1.02;
                     if let Some(base) = next.base {
@@ -714,7 +709,7 @@ pub fn build_unit_instances(
                     let at = [center[0], center[1], ground + f64::from(height * floor + rise * 0.5)];
                     let dim = 0.55 + 0.45 * progress;
                     let made_trim = color.map(|channel| channel * dim);
-                    let made_hull = hull_of(color).map(|channel| channel * dim);
+                    let made_hull = FACTION_HULL.map(|channel| channel * dim);
                     let extent = [made.size, made.size, rise];
                     if let Some(base) = made.base {
                         out.push(base, painted(at, extent, EAST, made_trim, made_hull, made_hull, NO_ICON, eye));
@@ -1256,15 +1251,15 @@ mod tests {
         assert!(unarmed.is_empty(), "these shell the ground but show no gun: {unarmed:?}");
     }
 
-    /// Every finished unit and structure is drawn in the faction's one hull color, for either
-    /// team, with only a little of the team's in it: what a unit is shows in its shape, and whose
-    /// it is in its trim.
+    /// Every finished unit and structure is drawn in the faction's one hull color, the same for
+    /// either team: what a unit is shows in its shape, and whose it is in its trim. The hull is a
+    /// pale blue, and each team's color stands well apart from it.
     #[test]
     fn every_unit_wears_the_factions_hull_color() {
         let db = BlueprintDb::standard();
         let looks = unit_looks(&db);
         for (team, color) in [(Team::Blue, BLUE), (Team::Red, RED)] {
-            let expected = bytes(hull_of(color));
+            let expected = bytes(FACTION_HULL);
             for blueprint in db.iter().filter(|blueprint| blueprint.class != crate::sim::blueprints::UnitClass::Ammo) {
                 let mut drawn = unit(1, 0);
                 drawn.blueprint = blueprint.id.0;
@@ -1278,9 +1273,12 @@ mod tests {
                     assert_eq!(instance.hull[..3], expected[..3], "{}'s hull is not the faction's", blueprint.key);
                 }
             }
-            let [red, green, blue] = hull_of(color);
-            assert!(blue > red + 0.15 && blue > green && green > red, "the hull is light blue for either team: {:?}", hull_of(color));
+            // Far enough from the team's color in at least one channel to tell trim from hull.
+            let apart = (0..3).map(|channel| (FACTION_HULL[channel] - color[channel]).abs()).fold(0.0, f32::max);
+            assert!(apart >= 0.5, "{team:?}'s color is only {apart} from the hull's");
         }
+        let [red, green, blue] = FACTION_HULL;
+        assert!(blue > green && green > red && red >= 0.7, "the hull is a pale blue: {FACTION_HULL:?}");
     }
 
     /// A wreck whose unit is known is drawn with that unit's models, charred, lower than it
