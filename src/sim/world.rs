@@ -271,6 +271,46 @@ pub struct WreckView {
     pub kind: WreckKind,
 }
 
+/// A player as the score panel shows them (GAME_SPECIFICATION.md §17.2): what the viewer can see
+/// of their units, and, for a player of the viewer's team or a viewer who sees everything, their
+/// income and where they started. An enemy's income and base stay hidden behind the fog.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct PlayerView {
+    pub team: Team,
+    /// Out of the match: their commander has fallen.
+    pub out: bool,
+    /// Their units the viewer can see now, and what the mobile ones among them cost, in mass.
+    /// Enemy structures remembered out of sight do not say whose they were, so they are not here.
+    pub units: u32,
+    pub army: i64,
+    /// Mass income a second, as `EconomyView::mass_income`.
+    pub mass_income: Option<i64>,
+    /// Their start, as raw `Fp` bits.
+    pub start: Option<[i32; 2]>,
+}
+
+impl EconomyView {
+    /// A team's economy: what its players hold, earn, and spend, added up, building at the pace of
+    /// the slowest of them, so that one player stalling shows.
+    pub fn team(players: &[Self]) -> Self {
+        players.iter().fold(Self { satisfaction_permille: 1000, ..Self::default() }, |sum, player| Self {
+            mass: sum.mass + player.mass,
+            energy: sum.energy + player.energy,
+            mass_capacity: sum.mass_capacity + player.mass_capacity,
+            energy_capacity: sum.energy_capacity + player.energy_capacity,
+            mass_income: sum.mass_income + player.mass_income,
+            energy_income: sum.energy_income + player.energy_income,
+            mass_demand: sum.mass_demand + player.mass_demand,
+            energy_demand: sum.energy_demand + player.energy_demand,
+            satisfaction_permille: sum.satisfaction_permille.min(player.satisfaction_permille),
+            mass_reclaim: sum.mass_reclaim + player.mass_reclaim,
+            energy_reclaim: sum.energy_reclaim + player.energy_reclaim,
+            mass_reclaimed: sum.mass_reclaimed + player.mass_reclaimed,
+            energy_reclaimed: sum.energy_reclaimed + player.energy_reclaimed,
+        })
+    }
+}
+
 /// The viewer's economy, in whole units and per-second rates.
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub struct EconomyView {
@@ -497,9 +537,11 @@ pub struct SimSnapshot {
     /// sorted by `SimId`.
     pub kills: Vec<(SimId, u32)>,
     pub economy: EconomyView,
-    /// Both teams' economies, Blue's then Red's, for a watcher who sees everything: only in
-    /// snapshots for no one side.
+    /// Both teams' economies, Blue's then Red's, for a watcher who sees everything: each the
+    /// sum of its players' (`EconomyView::team`). Only in snapshots for no one side.
     pub team_economies: Option<[EconomyView; 2]>,
+    /// Every player of the match, in order, for the score panel.
+    pub players: Vec<PlayerView>,
     /// Present when fog of war is on: one byte per cell, for the renderer.
     pub fog: Option<Arc<Vec<u8>>>,
     pub match_result: Option<MatchResult>,
@@ -4236,6 +4278,8 @@ impl SimWorld {
         builders.sort_unstable();
         let mut unit_query = self.ecs.query::<(&Position, &UnitStats, &Health, Option<&Blueprinted>, Option<&Construction>, Option<&Turning>, Option<&Turret>, Option<&Factory>, Option<&Paused>, Option<&super::components::ExtraWeapons>)>();
         let unit_view = unit_query.view();
+        // Each player's units in the snapshot, and what the mobile ones cost.
+        let mut tallies = vec![(0_u32, 0_i64); self.players.len()];
         let units: Vec<UnitView> = self
             .units
             .iter()
@@ -4245,7 +4289,14 @@ impl SimWorld {
                 let producing = factory.is_some_and(|factory| !factory.queue.is_empty()) && paused.is_none() && powered;
                 let (x, y, z) = (position.0.x.to_bits(), position.0.y.to_bits(), position.0.z.to_bits());
                 let cloaked_away = viewer.is_some_and(|viewer| self.concealed[viewer.index()].binary_search(&id).is_ok());
-                (seen(stats.team, x, y) && !cloaked_away).then(|| UnitView {
+                let shown = seen(stats.team, x, y) && !cloaked_away;
+                if let (true, Some(tally)) = (shown && blueprint.is_some(), tallies.get_mut(stats.owner.index())) {
+                    tally.0 += 1;
+                    if !stats.is_structure {
+                        tally.1 += blueprint.map_or(0, |blueprint| self.blueprints.get(blueprint.0).mass.to_num::<i64>());
+                    }
+                }
+                shown.then(|| UnitView {
                     id,
                     team: stats.team,
                     ally: stats.owner != self.first_player(stats.team),
@@ -4525,7 +4576,28 @@ impl SimWorld {
         let idle_factories = viewer.map_or_else(Vec::new, |viewer| self.idle_factories(viewer));
         // The viewer's own economy: its team's first player's, the one a person plays.
         let economy = viewer.map_or_else(EconomyView::default, |viewer| self.economies[self.first_player(viewer).index()].view());
-        let team_economies = viewer.is_none().then(|| [Team::Blue, Team::Red].map(|team| self.economies[self.first_player(team).index()].view()));
+        let team_economies = viewer.is_none().then(|| {
+            [Team::Blue, Team::Red].map(|team| EconomyView::team(&self.players_of(team).map(|player| self.economies[player.index()].view()).collect::<Vec<_>>()))
+        });
+        // A player's income and start are known to their own team, and to a watcher seeing all.
+        let known = |team: Team| viewer.is_none_or(|viewer| viewer == team);
+        let players = self
+            .players
+            .iter()
+            .enumerate()
+            .map(|(index, &team)| {
+                let player = super::components::PlayerId(index as u8);
+                let start = self.start_of(player);
+                PlayerView {
+                    team,
+                    out: self.eliminated.get(index).copied().unwrap_or(false),
+                    units: tallies[index].0,
+                    army: tallies[index].1,
+                    mass_income: known(team).then(|| self.economies[index].view().mass_income),
+                    start: known(team).then(|| [start.x.to_bits(), start.y.to_bits()]),
+                }
+            })
+            .collect();
         let fog = match viewer {
             Some(viewer) if self.config.fog_of_war => Some(Arc::new(self.visibility.fog_bytes(viewer))),
             _ => None,
@@ -4601,6 +4673,7 @@ impl SimWorld {
             },
             economy,
             team_economies,
+            players,
             fog,
             match_result: self.match_result,
         }

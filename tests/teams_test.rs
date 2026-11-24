@@ -113,3 +113,56 @@ fn a_two_on_two_of_ais_plays_out_and_replays() {
     assert!(matches!(record.result, Some(MatchResult::Winner(_))), "a team wins: {:?} at tick {}", record.result, record.ticks);
     assert_eq!(replay_team_match(&map, 2, 2, &record.log).expect("again"), record.checksums, "it replays from its orders");
 }
+
+/// The score panel's players (`SimSnapshot::players`), on Saddleback's 2v2 with fog of war: each
+/// player's units and army as the viewer sees them, their income and start only for the viewer's
+/// own team, everyone's for a watcher, and who is out. A watcher's team economies are each the
+/// sum of the team's players', not its first player's alone.
+#[test]
+fn a_snapshot_tells_the_players_apart_and_keeps_an_enemys_income_and_base_hidden() {
+    use std::sync::Arc;
+    use sim_engine::sim::maps::saddleback;
+    use sim_engine::sim::scenario::MapSource;
+    let map = MapSource::Map(Arc::new(saddleback())).teams(2).expect("Saddleback holds a 2v2");
+    let mut world = map.scenario(1).world;
+    assert!(world.config.fog_of_war);
+    world.advance_tick(&[]);
+    let rig = world.blueprints.id("command_rig");
+    let commander_mass = world.blueprints.get(rig).mass.to_num::<i64>();
+    let start = |player: usize| {
+        let at = world.start_of(PlayerId(player as u8));
+        [at.x.to_bits(), at.y.to_bits()]
+    };
+
+    let blue = world.snapshot_for(Some(Team::Blue));
+    assert_eq!(blue.players.iter().map(|player| player.team).collect::<Vec<_>>(), [Team::Blue, Team::Blue, Team::Red, Team::Red]);
+    for (index, player) in blue.players.iter().enumerate() {
+        let ours = index < 2;
+        // Red's commanders are across the range, out of Blue's sight.
+        assert_eq!((player.units, player.army), if ours { (1, commander_mass) } else { (0, 0) }, "player {index}");
+        assert_eq!(player.mass_income, ours.then(|| world.economies[index].view().mass_income), "player {index}'s income");
+        assert_eq!(player.start, ours.then(|| start(index)), "player {index}'s start");
+        assert!(!player.out);
+    }
+    assert_ne!(blue.players[0].start, blue.players[1].start, "each Blue player has a base of their own");
+
+    let watcher = world.snapshot_for(None);
+    for (index, player) in watcher.players.iter().enumerate() {
+        assert_eq!((player.units, player.mass_income, player.start), (1, Some(world.economies[index].view().mass_income), Some(start(index))), "player {index}");
+    }
+    let teams = watcher.team_economies.expect("a watcher sees both teams' economies");
+    for (team, players) in [(0, [0, 1]), (1, [2, 3])] {
+        let views = players.map(|player| world.economies[player].view());
+        assert_eq!(teams[team].mass, views[0].mass + views[1].mass);
+        assert_eq!(teams[team].mass_income, views[0].mass_income + views[1].mass_income);
+        assert_eq!(teams[team].energy_capacity, views[0].energy_capacity + views[1].energy_capacity);
+    }
+
+    // Blue's second player goes out: they are out, with nothing left, and their team plays on.
+    let commander = world.commanders[1].expect("player 1 has a commander");
+    self_destruct(&mut world, &[commander]);
+    let blue = world.snapshot_for(Some(Team::Blue));
+    assert!(blue.players[1].out && blue.players[1].units == 0, "{:?}", blue.players[1]);
+    assert!(!blue.players[0].out);
+    assert_eq!(world.match_result, None);
+}
