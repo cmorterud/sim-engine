@@ -3,6 +3,9 @@ name: CI
 on:
   push:
     branches: [main]
+  # Every pull request into main gets the same checks, so that main only takes what passes.
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read

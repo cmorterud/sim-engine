@@ -6,6 +6,11 @@ name: Soak
 on:
   push:
     branches: [main]
+  # A smaller soak for each pull request into main (the plan below): enough matches on every map
+  # and team size to catch one that never ends, a replay that differs, or a panic, in a fraction
+  # of the time, but too few to judge a side's lean. The full soak runs once it is merged.
+  pull_request:
+    branches: [main]
   workflow_dispatch:
     inputs:
       skirmish_matches:
@@ -46,7 +51,9 @@ env:
   CARGO_INCREMENTAL: "0"
 
 jobs:
-  # Splits the matches into shards of seeds, one runner each. A push plays the 200 skirmish
+  # Splits the matches into shards of seeds, one runner each. A pull request plays 40 skirmish
+  # matches, 20 on each bundled map, 10 of each team match, and 5 4v4s, in shards of 10. A push
+  # to main plays the 200 skirmish
   # matches of the exit criteria and 120 on each bundled map (Highland, Twin Passes, Saddleback,
   # Stillwater, and Scattered Isles): enough matches that a side winning 60% of them stands out
   # from chance. And 60 2v2s on each of Saddleback, Stillwater, and Scattered Isles, four AIs,
@@ -60,11 +67,13 @@ jobs:
     steps:
       - id: plan
         env:
-          SKIRMISH: ${{ inputs.skirmish_matches || '200' }}
-          BUNDLED: ${{ inputs.bundled_matches || '120' }}
-          SHARD: ${{ inputs.shard_size || '25' }}
-          TEAMS: ${{ inputs.team_matches || '60' }}
-          FOURS: ${{ inputs.four_team_matches || '20' }}
+          # A push to main plays the full soak; a pull request the smaller one, in smaller shards,
+          # so that more runners share it and it finishes sooner.
+          SKIRMISH: ${{ inputs.skirmish_matches || (github.event_name == 'pull_request' && '40' || '200') }}
+          BUNDLED: ${{ inputs.bundled_matches || (github.event_name == 'pull_request' && '20' || '120') }}
+          SHARD: ${{ inputs.shard_size || (github.event_name == 'pull_request' && '10' || '25') }}
+          TEAMS: ${{ inputs.team_matches || (github.event_name == 'pull_request' && '10' || '60') }}
+          FOURS: ${{ inputs.four_team_matches || (github.event_name == 'pull_request' && '5' || '20') }}
           MAPS: ${{ inputs.maps || '' }}
           FIRST_SEED: ${{ inputs.first_seed || '1' }}
         run: |
