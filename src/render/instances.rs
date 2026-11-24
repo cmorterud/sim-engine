@@ -5,7 +5,7 @@ use std::f32::consts::FRAC_1_SQRT_2;
 
 use super::meshes::Shape;
 use super::pipeline::LOD_DOT_RATIO;
-use crate::sim::blueprints::BlueprintDb;
+use crate::sim::blueprints::{BlueprintDb, Targets, WeaponDef, WeaponKind};
 use crate::sim::components::{SimId, Team, WreckKind};
 use crate::sim::world::{ProjectileKind, ProjectileView, ShieldView, UnitView, WorkLinkView};
 
@@ -23,7 +23,7 @@ pub(super) const RAW_TO_WORLD: f64 = 1.0 / 4096.0;
 /// `TRACER_MAX_WIDTH`, and `TRACER_LENGTH_SHARE` times as long, so that a shell can be followed
 /// in flight close up. A medium tank is 18 across.
 const TRACER_WIDTH: f32 = 1.2;
-const TRACER_MAX_WIDTH: f32 = 3.0;
+const TRACER_MAX_WIDTH: f32 = 2.2;
 const TRACER_LENGTH_SHARE: f32 = 4.0;
 /// A shell far off shows as a dot this many pixels across, as a glint.
 const TRACER_ICON_PX: f32 = 1.5;
@@ -51,7 +51,15 @@ pub(super) const RED: [f32; 3] = [1.00, 0.27, 0.22];
 pub(super) const BLUE_ALLY: [f32; 3] = [0.25, 0.85, 0.95];
 pub(super) const RED_ALLY: [f32; 3] = [1.00, 0.62, 0.18];
 const SELECTED: [f32; 3] = [0.25, 1.00, 0.35];
-const SHELL: [f32; 3] = [1.00, 0.85, 0.35];
+/// A direct-fire shell with a blast: an orange streak.
+const SHELL: [f32; 3] = [1.00, 0.66, 0.26];
+/// A round from a gun with no blast: a thin, near-white streak.
+const TRACER: [f32; 3] = [1.00, 0.95, 0.78];
+/// The glowing base of an artillery round, a bomb, or a flak shell, and its dot from afar.
+const ROUND_GLOW: [f32; 3] = [1.00, 0.55, 0.18];
+/// An artillery round at T2, in units: this long and this thick, and more or less by tier.
+const ROUND_LENGTH: f32 = 6.0;
+const ROUND_WIDTH: f32 = 2.0;
 const DISCHARGE_SHELL: [f32; 3] = [0.75, 0.95, 1.00];
 const DISCHARGE_SIZE: f32 = 2.4;
 const MISSILE: [f32; 3] = [0.92, 0.92, 0.88];
@@ -357,6 +365,115 @@ pub struct UnitLook {
     pub apron: bool,
     /// Gun turrets drawn on their own, each turning to its weapon's aim.
     pub turrets: [Option<TurretMount>; 3],
+    /// What the shells of each of its weapons look like, by the weapon's splash radius in raw
+    /// `Fp` bits, which is how a shot in a snapshot is told back to the weapon that fired it.
+    /// Empty from `unit_look`; `unit_looks` sets it.
+    pub shots: [Option<(i32, ShotLook)>; 4],
+    /// How big its artillery rounds and bombs are drawn, by its tier.
+    pub shot_scale: f32,
+}
+
+/// What a shot looks like, in flight and where it lands, by the kind of weapon that fired it.
+/// Drawing only: the simulation knows nothing of it.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ShotLook {
+    /// A direct-fire round with no blast, from a tank, a point defense, or an anti-air gun.
+    Tracer,
+    /// A direct-fire shell with a small blast.
+    Cannon,
+    /// A lobbed artillery shell.
+    Artillery,
+    /// A long-range gun's shell, such as a battleship's: an artillery round with less of a bang.
+    HeavyGun,
+    /// A shell that bursts among aircraft.
+    Flak,
+    Bomb,
+    Torpedo,
+}
+
+/// Direct-fire shells with a blast reaching this far, in units, are heavy guns' rounds.
+const HEAVY_GUN_RANGE: i32 = 2_000;
+
+impl ShotLook {
+    /// What a weapon's shots look like, if it fires shells, flak, or bombs.
+    pub fn of(weapon: &WeaponDef) -> Option<Self> {
+        let blast = weapon.splash_radius > crate::math::fp::Fp::ZERO;
+        match weapon.kind {
+            WeaponKind::Bomb => Some(Self::Bomb),
+            WeaponKind::Flak => Some(Self::Flak),
+            WeaponKind::Shell => Some(match weapon.targets {
+                Targets::Naval => Self::Torpedo,
+                Targets::Air if blast => Self::Flak,
+                Targets::Air => Self::Tracer,
+                _ if weapon.artillery => Self::Artillery,
+                _ if !blast => Self::Tracer,
+                _ if weapon.range >= crate::math::fp::fp_int(HEAVY_GUN_RANGE) => Self::HeavyGun,
+                _ => Self::Cannon,
+            }),
+            _ => None,
+        }
+    }
+}
+
+/// A shot's look and how big it is drawn.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct ShotStyle {
+    pub look: ShotLook,
+    pub scale: f32,
+}
+
+/// Shells with a blast reaching at least this far, in units, from a gun out of sight, are taken
+/// for artillery.
+const GUESSED_ARTILLERY_SPLASH: i32 = 60;
+
+impl ShotStyle {
+    /// What a shell fired by a unit drawn as `shooter` looks like: the look of its weapon whose
+    /// blast matches the shell's. Of two that match, a torpedo only if the shell starts under
+    /// water. With no shooter in sight, or no weapon that matches, a guess from its blast.
+    pub fn resolve(projectile: &ProjectileView, shooter: Option<&UnitLook>, under_water: bool) -> Self {
+        let mut found: Option<ShotLook> = None;
+        for &(splash, look) in shooter.iter().flat_map(|shooter| shooter.shots.iter().flatten()) {
+            if splash != projectile.splash {
+                continue;
+            }
+            let fits = (look == ShotLook::Torpedo) == under_water;
+            if found.is_none() || fits {
+                found = Some(look);
+            }
+            if fits {
+                break;
+            }
+        }
+        let Some(look) = found else { return Self::guess(projectile, under_water) };
+        let scale = match look {
+            ShotLook::Artillery | ShotLook::Bomb => shooter.map_or(1.0, |shooter| shooter.shot_scale),
+            _ => 1.0,
+        };
+        Self { look, scale }
+    }
+
+    /// A shell's look from its blast alone, for one whose gun is not in sight.
+    pub fn guess(projectile: &ProjectileView, under_water: bool) -> Self {
+        let look = if under_water {
+            ShotLook::Torpedo
+        } else if projectile.splash == 0 {
+            ShotLook::Tracer
+        } else if projectile.splash >= GUESSED_ARTILLERY_SPLASH << 12 {
+            ShotLook::Artillery
+        } else {
+            ShotLook::Cannon
+        };
+        Self { look, scale: 1.0 }
+    }
+}
+
+/// How big rounds and bombs are drawn at each tier.
+fn tier_scale(tier: u8) -> f32 {
+    match tier {
+        0 | 1 => 0.7,
+        2 => 1.0,
+        _ => 1.4,
+    }
 }
 
 /// A turret on a hull, drawn on its own so that it turns to its weapon's aim.
@@ -378,7 +495,7 @@ const ENGINEER_YELLOW: [f32; 3] = [1.00, 0.70, 0.12];
 
 /// Maps a blueprint to its look. Unknown keys fall back to a plain cube.
 pub fn unit_look(key: &str) -> UnitLook {
-    let look = |shape, tint, height_share| UnitLook { shape, tint, height_share, base: None, size: 0.0, length: 0.0, apron: false, turrets: [None; 3] };
+    let look = |shape, tint, height_share| UnitLook { shape, tint, height_share, base: None, size: 0.0, length: 0.0, apron: false, turrets: [None; 3], shots: [None; 4], shot_scale: 1.0 };
     let turret = |weapon, at, aft| Some(TurretMount { shape: Shape::NavalTurret, weapon, at, aft });
     let laser = |weapon, at, aft| Some(TurretMount { shape: Shape::LaserTurret, weapon, at, aft });
     match key {
@@ -497,9 +614,15 @@ pub fn unit_looks(blueprints: &BlueprintDb) -> Vec<UnitLook> {
         .iter()
         .map(|unit| {
             let look = unit_look(&unit.key);
+            let mut shots = [None; 4];
+            for (slot, weapon) in shots.iter_mut().zip(unit.weapon.iter().chain(&unit.extra_weapons)) {
+                *slot = ShotLook::of(weapon).map(|look| (weapon.splash_radius.to_bits(), look));
+            }
             UnitLook {
                 size: if look.length > 0.0 { look.length } else { unit.radius.to_num::<f32>() * 2.0 },
                 apron: unit.is_structure() && !unit.on_water && look.shape != Shape::Wall,
+                shots,
+                shot_scale: tier_scale(unit.tier),
                 ..look
             }
         })
@@ -823,6 +946,12 @@ pub fn build_unit_instances(
     });
 }
 
+/// The way a missile flies, up and down too, or for one just fired, with no position before,
+/// level along `heading`.
+fn missile_way(from: [i32; 3], to: [i32; 3], heading: [f32; 2]) -> [f32; 3] {
+    if from == to { [heading[0], heading[1], 0.0] } else { flight(from, to) }
+}
+
 /// The way a projectile flies, from one tick's position to the next, as a unit vector. One just
 /// fired, with no position before, points north.
 fn flight(from: [i32; 3], to: [i32; 3]) -> [f32; 3] {
@@ -844,9 +973,36 @@ fn tracer_instance(center: [f64; 3], direction: [f32; 3], length: f32, width: f3
     tracer
 }
 
+/// A missile, `length` along `direction` and `width` across, pointing the way it flies, up and
+/// down too: its mesh lies along y. Turned only across the ground, a missile climbing from its
+/// launcher, or diving onto its target, flew level, side on to its own trail, and a strategic
+/// missile going straight up looked to fly sideways.
+fn missile_instance(center: [f64; 3], direction: [f32; 3], length: f32, width: f32, color: [f32; 3], icon_px: f32, eye: [f64; 3]) -> UnitInstanceRaw {
+    let along = glam::Vec3::from(direction);
+    let across = along.cross(glam::Vec3::Z).try_normalize().unwrap_or(glam::Vec3::X);
+    let up = across.cross(along);
+    let mut missile = instance(center, [1.0; 3], NORTH, color, icon_px, eye);
+    missile.model_matrix[0] = [across.x * width, across.y * width, across.z * width, 0.0];
+    missile.model_matrix[1] = [along.x * length, along.y * length, along.z * length, 0.0];
+    missile.model_matrix[2] = [up.x * width, up.y * width, up.z * width, 0.0];
+    missile
+}
+
 /// Draws the projectiles in flight, and those that struck since the last tick (`landed`) on the
 /// way from where they were to where they struck, so that a shell is seen to reach its target.
-pub fn build_projectile_instances(previous: &[ProjectileView], current: &[ProjectileView], landed: &[ProjectileView], alpha: f64, eye: [f64; 3], out: &mut InstanceBatches) {
+/// `shot` says what each shell looks like (`Effects::shot`), and `water` is the water's height,
+/// under which a torpedo is not drawn.
+#[allow(clippy::too_many_arguments)]
+pub fn build_projectile_instances(
+    previous: &[ProjectileView],
+    current: &[ProjectileView],
+    landed: &[ProjectileView],
+    alpha: f64,
+    eye: [f64; 3],
+    shot: &dyn Fn(&ProjectileView) -> ShotStyle,
+    water: Option<f64>,
+    out: &mut InstanceBatches,
+) {
     let mut draw = |before: Option<&ProjectileView>, projectile: &ProjectileView| {
         let now = [projectile.x, projectile.y, projectile.z];
         // One just fired is drawn leaving its gun.
@@ -860,13 +1016,34 @@ pub fn build_projectile_instances(previous: &[ProjectileView], current: &[Projec
         };
         match projectile.kind {
             ProjectileKind::Shell => {
-                let splash = (f64::from(projectile.splash) * RAW_TO_WORLD) as f32;
-                let width = (TRACER_WIDTH + splash * 0.08).min(TRACER_MAX_WIDTH);
-                out.push(Shape::Shell, tracer_instance(center, flight(from, now), width * TRACER_LENGTH_SHARE, width, SHELL, TRACER_ICON_PX, eye));
+                let shot = shot(projectile);
+                let direction = flight(from, now);
+                let round = |length: f32, width: f32| tracer_instance(center, direction, length, width, ROUND_GLOW, TRACER_ICON_PX, eye);
+                match shot.look {
+                    ShotLook::Tracer => {
+                        let width = TRACER_WIDTH * 0.75;
+                        out.push(Shape::Shell, tracer_instance(center, direction, width * TRACER_LENGTH_SHARE * 1.2, width, TRACER, TRACER_ICON_PX, eye));
+                    }
+                    ShotLook::Cannon => {
+                        let splash = (f64::from(projectile.splash) * RAW_TO_WORLD) as f32;
+                        let width = (TRACER_WIDTH + splash * 0.03).min(TRACER_MAX_WIDTH);
+                        out.push(Shape::Shell, tracer_instance(center, direction, width * TRACER_LENGTH_SHARE, width, SHELL, TRACER_ICON_PX, eye));
+                    }
+                    // A dark round with a glowing base, the bigger the gun the bigger the round.
+                    ShotLook::Artillery | ShotLook::HeavyGun => out.push(Shape::Round, round(ROUND_LENGTH * shot.scale, ROUND_WIDTH * shot.scale)),
+                    ShotLook::Bomb => out.push(Shape::Round, round(ROUND_LENGTH * 0.9 * shot.scale, ROUND_WIDTH * 1.6 * shot.scale)),
+                    ShotLook::Flak => out.push(Shape::Round, round(ROUND_LENGTH * 0.5, ROUND_WIDTH * 0.6)),
+                    // Under water a torpedo shows only by the bubbles over it (effects.rs).
+                    ShotLook::Torpedo => {
+                        if water.is_none_or(|water| center[2] >= water) {
+                            out.push(Shape::Round, round(ROUND_LENGTH * 0.8, ROUND_WIDTH * 0.7));
+                        }
+                    }
+                }
             }
             ProjectileKind::Discharge => out.push(Shape::Shell, tracer_instance(center, flight(from, now), DISCHARGE_SIZE * 3.0, DISCHARGE_SIZE, DISCHARGE_SHELL, UNIT_ICON_PX, eye)),
-            ProjectileKind::TacticalMissile => out.push(Shape::Missile, instance(center, [3.0, 9.0, 3.0], heading, MISSILE, UNIT_ICON_PX, eye)),
-            ProjectileKind::StrategicMissile => out.push(Shape::Missile, instance(center, [7.0, 20.0, 7.0], heading, NUKE, UNIT_ICON_PX * 1.6, eye)),
+            ProjectileKind::TacticalMissile => out.push(Shape::Missile, missile_instance(center, missile_way(from, now, heading), 9.0, 3.0, MISSILE, UNIT_ICON_PX, eye)),
+            ProjectileKind::StrategicMissile => out.push(Shape::Missile, missile_instance(center, missile_way(from, now, heading), 20.0, 7.0, NUKE, UNIT_ICON_PX * 1.6, eye)),
             // A beam is over within its tick: the effects draw it, from its muzzle to its mark.
             ProjectileKind::Beam => {}
         }
@@ -1856,6 +2033,92 @@ mod tests {
         assert!((east[0].1[0] - front).abs() < 1e-3 && east[0].1[1].abs() < 1e-3, "the front turret is east of the middle: {:?}", east[0].1);
     }
 
+    /// Every weapon that fires shells, flak, or bombs has a look for its shots, and every unit's
+    /// table holds a look for each, by its blast, so that no shot is left a plain yellow tracer.
+    #[test]
+    fn every_shell_flak_and_bomb_weapon_has_a_look() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let mut checked = 0;
+        for unit in db.iter() {
+            for weapon in unit.weapon.iter().chain(&unit.extra_weapons).filter(|weapon| matches!(weapon.kind, WeaponKind::Shell | WeaponKind::Flak | WeaponKind::Bomb)) {
+                let look = ShotLook::of(weapon).unwrap_or_else(|| panic!("{}: no look for its {:?}", unit.key, weapon.kind));
+                let table = looks[usize::from(unit.id.0)].shots;
+                assert!(table.iter().flatten().any(|shot| *shot == (weapon.splash_radius.to_bits(), look)), "{}: its table {table:?} lacks {look:?}", unit.key);
+                checked += 1;
+            }
+        }
+        assert!(checked > 30, "only {checked} weapons");
+    }
+
+    /// The look of a shell from a unit of `key`, drawn halfway through its flight, and the
+    /// length it is drawn.
+    fn fired_by(key: &str, under_water: bool) -> (ShotStyle, Shape, f32) {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let unit = db.get(db.id(key));
+        let weapon = unit.weapon.expect("it has a weapon");
+        let projectile = ProjectileView { splash: weapon.splash_radius.to_bits(), x: 4096 * 10, ..shell(1, 1) };
+        let style = ShotStyle::resolve(&projectile, looks.get(usize::from(unit.id.0)), under_water);
+        let mut out = InstanceBatches::default();
+        build_projectile_instances(&[shell(1, 1)], &[projectile], &[], 0.5, [0.0; 3], &|_| style, None, &mut out);
+        let (shape, part) = [Shape::Shell, Shape::Round].into_iter().find_map(|shape| out.shape(shape).first().map(|part| (shape, *part))).expect("it is drawn");
+        let length = part.model_matrix[0][0].hypot(part.model_matrix[0][1]).hypot(part.model_matrix[0][2]);
+        (style, shape, length)
+    }
+
+    /// Artillery fires rounds, not tracers, the heavier the bigger: T3's larger than T2's, and
+    /// T2's than T1's. A battleship's main guns fire T2 artillery's round. Tanks fire tracers.
+    #[test]
+    fn artillery_and_battleships_fire_rounds_the_heavier_the_bigger() {
+        let (light, heavy, siege, battleship) = (fired_by("t1_light_artillery", false), fired_by("t2_artillery", false), fired_by("t3_artillery", false), fired_by("t3_battleship", false));
+        for (style, shape, _) in [light, heavy, siege] {
+            assert_eq!((style.look, shape), (ShotLook::Artillery, Shape::Round));
+        }
+        assert_eq!((battleship.0.look, battleship.1), (ShotLook::HeavyGun, Shape::Round));
+        assert!(siege.2 > heavy.2 && heavy.2 > light.2, "rounds by tier: {} {} {}", light.2, heavy.2, siege.2);
+        assert!((battleship.2 - heavy.2).abs() < 1e-3, "a battleship's round is T2 artillery's: {} and {}", battleship.2, heavy.2);
+        assert_eq!(fired_by("t1_medium_tank", false).0.look, ShotLook::Tracer);
+        assert_eq!(fired_by("t2_flak", false).0.look, ShotLook::Flak);
+        assert_eq!(fired_by("t1_bomber", false).0.look, ShotLook::Bomb);
+    }
+
+    /// A destroyer's anti-air gun and its torpedoes both have no blast: a shot that starts under
+    /// the water is a torpedo, and one over it anti-air. Out of sight, a shot is guessed from
+    /// its blast.
+    #[test]
+    fn shots_with_the_same_blast_are_told_apart_by_the_water_and_unseen_ones_guessed() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let destroyer = looks.get(usize::from(db.id("t2_destroyer").0));
+        assert_eq!(ShotStyle::resolve(&shell(1, 1), destroyer, true).look, ShotLook::Torpedo);
+        assert_eq!(ShotStyle::resolve(&shell(1, 1), destroyer, false).look, ShotLook::Tracer);
+        let guess = |splash: i32| ShotStyle::resolve(&ProjectileView { splash: splash << 12, ..shell(1, 1) }, None, false).look;
+        assert_eq!([guess(0), guess(20), guess(70)], [ShotLook::Tracer, ShotLook::Cannon, ShotLook::Artillery]);
+    }
+
+    /// A missile points the way it flies, up and down as well as across the ground: one climbing
+    /// steeply from its launcher, or going straight up, is drawn nose up, not level and side on to
+    /// its own trail.
+    #[test]
+    fn missiles_point_the_way_they_fly_up_and_down_too() {
+        let missile = |kind: ProjectileKind, dx: i32, dz: i32| {
+            let before = ProjectileView { kind, ..shell(1, 1) };
+            let after = ProjectileView { x: 4096 * dx, z: 4096 * dz, ..before };
+            let mut out = InstanceBatches::default();
+            build_projectile_instances(&[before], &[after], &[], 0.5, [0.0; 3], &|projectile| ShotStyle::guess(projectile, false), None, &mut out);
+            let nose = out.shape(Shape::Missile)[0].model_matrix[1];
+            let length = nose[0].hypot(nose[1]).hypot(nose[2]);
+            [nose[0] / length, nose[1] / length, nose[2] / length]
+        };
+        let climbing = missile(ProjectileKind::TacticalMissile, 10, 10);
+        assert!((climbing[0] - climbing[2]).abs() < 1e-3 && climbing[2] > 0.7, "climbing at 45 degrees: {climbing:?}");
+        let rising = missile(ProjectileKind::StrategicMissile, 0, 30);
+        assert!(rising[2] > 0.999, "straight up: {rising:?}");
+        let level = missile(ProjectileKind::TacticalMissile, 30, 0);
+        assert!(level[0] > 0.999 && level[2].abs() < 1e-3, "level: {level:?}");
+    }
+
     /// A shell on the tick it was fired has already flown a tick, so it is drawn from its gun,
     /// not from where that tick took it.
     #[test]
@@ -1863,7 +2126,7 @@ mod tests {
         let fired = ProjectileView { x: 4096 * 60, from: Some([4096 * 10, 0, 0]), ..shell(1, 1) };
         let draw = |alpha: f64| {
             let mut out = InstanceBatches::default();
-            build_projectile_instances(&[], &[fired], &[], alpha, [0.0; 3], &mut out);
+            build_projectile_instances(&[], &[fired], &[], alpha, [0.0; 3], &|projectile| ShotStyle::guess(projectile, false), None, &mut out);
             out.shape(Shape::Shell)[0].model_matrix[3][0]
         };
         assert!((draw(0.0) - 10.0).abs() < 1e-3, "at the gun: {}", draw(0.0));

@@ -2201,13 +2201,16 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                         motion.note_shots(&previous.projectiles, &current.projectiles);
                         motion.note_beams(&current.landed, &current.units, &looks);
                         instances::build_unit_instances(&previous.units, &current.units, alpha, eye, selection.selected(), &looks, &current.work_links, &mut motion, &mut scene_instances);
+                        // Explosions, missile trails, and wakes, made from the snapshots alone. The
+                        // snapshot's events come first, so that a new shell's look, from the weapon
+                        // that fired it, is known before it is drawn.
+                        let water = (map.water_level > -1.0e5).then_some(f64::from(map.water_level));
+                        effects.note_events(previous, current, motion.time, &|x, y| map.heights.height_at(x, y), water, &looks);
                         let drawn_units_and_shells = {
                             let units = scene_instances.total();
-                            instances::build_projectile_instances(&previous.projectiles, &current.projectiles, &current.landed, alpha, eye, &mut scene_instances);
+                            instances::build_projectile_instances(&previous.projectiles, &current.projectiles, &current.landed, alpha, eye, &|projectile| effects.shot(projectile), water, &mut scene_instances);
                             units + current.projectiles.len()
                         };
-                        // Explosions, missile trails, and wakes, made from the snapshots alone.
-                        effects.note_events(previous, current, motion.time, &|x, y| map.heights.height_at(x, y), (map.water_level > -1.0e5).then_some(f64::from(map.water_level)), &looks);
                         effects.trail(previous, current, alpha, &looks, Some(f64::from(map.water_level)), motion.time);
                         effects.build(motion.time, eye, &mut scene_instances);
                         // Builders' beams and adjacency wiring are in the world, and only up close:
