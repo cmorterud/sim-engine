@@ -334,8 +334,8 @@ t3_heavy_gunship = 0.38
 # a fight. The fleets are what a player fields: a T2 fleet is two destroyers, a couple of cruisers
 # for anti-air and missile defense, and an escort corvette's shield (the example the design was
 # decided on). The air forces are what the AI's air factories make: a third fighters, the rest
-# strike aircraft, every fourth at T2 a fighter-bomber. A massed T3 fleet's escorts are two-thirds
-# of its cost (2026-11-24): they carry its anti-air and its anti-torpedo charges, as in the
+# strike aircraft, every fourth at T2 a fighter-bomber. A massed T3 fleet's escorts are
+# seven-tenths of its cost (2026-11-24): they carry its anti-air and its anti-torpedo charges, as in the
 # inspiration, whose battleships have next to no anti-air and no anti-torpedo charge, so a fleet
 # is as safe from the air as it is escorted. The AI's T3 naval factories build this mix.
 [domains.forces]
@@ -343,7 +343,7 @@ t1_fleet = { t1_frigate = 3, t1_attack_sub = 1 }
 t2_fleet = { t2_destroyer = 2, t2_cruiser = 2, t2_escort_corvette = 1 }
 t2_fleet_without_anti_air = { t2_destroyer = 2 }
 t2_fleet_without_anti_submarine = { t2_cruiser = 2, t2_escort_corvette = 1 }
-t3_fleet = { t3_battleship = 1, t3_battlecruiser = 1, t2_cruiser = 10, t2_destroyer = 4, t2_escort_corvette = 3 }
+t3_fleet = { t3_battleship = 1, t3_battlecruiser = 1, t2_cruiser = 12, t2_destroyer = 4, t2_escort_corvette = 4 }
 # One of each, as the AI's T3 naval factories built until 2026-11-24: capital ships three-quarters
 # of its cost, lightly escorted.
 t3_battleship_heavy_fleet = { t3_battleship = 1, t3_battlecruiser = 1, t2_cruiser = 1, t2_destroyer = 1, t2_escort_corvette = 1 }
@@ -380,7 +380,7 @@ torpedo_bombers_to_break_fleet_t3 = [2.0, 5.0]
 battleship_heavy_fleet_breaks_to_torpedo_bombers_at_most = 1.0
 # At T1, frigates hold their own against an equal cost of T1 bombers over water: at least even,
 # within [counters] even_margin, so that early ships are not shut down by cheaper aircraft. The
-# frigate's railgun is set by this (2026-11-24).
+# frigate's railgun is set by this (2026-11-24, and again once aircraft obeyed orders over open sea).
 frigates_against_t1_bombers_at_least = -0.15
 # Skipping the counter loses. A fleet with no anti-air loses to torpedo bombers; one with no
 # anti-submarine weapon loses to submarines, which lose to destroyers.

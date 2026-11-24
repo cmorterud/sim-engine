@@ -1119,8 +1119,9 @@ upgrades_to = "naval_factory_t2"
 # A gun for ships and shore, and a twin railgun at aircraft, both muzzles at once. Cost, build
 # time, health, and the gun's damage set against the Medium Tank as the inspiration has its frigate
 # against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t1-navy.md). The railgun
-# does half again what that ratio gives (13.9), so that frigates hold their own against an equal
-# cost of T1 bombers: navy is strong at sea ([domains]).
+# does about twice what that ratio gives (13.9), so that frigates hold their own against an equal
+# cost of T1 bombers: navy is strong at sea ([domains]). It did half again (20.8) until aircraft
+# were made to obey orders over open sea (reports/balance/2026-11-24-t3-air-navy.md).
 [[unit]]
 id = "t1_frigate"
 name = "Frigate"
@@ -1139,7 +1140,7 @@ radar = 1600
 sonar = 320
 movement = "naval"
 weapon = { range = 560, reload_ticks = 17, projectile_speed = 60, damage = 118, splash_radius = 20, turn_rate = 120, spread = 4 }
-extra_weapons = [{ range = 960, reload_ticks = 10, projectile_speed = 90, damage = "20.8", targets = "air", turn_rate = 180 }]
+extra_weapons = [{ range = 960, reload_ticks = 10, projectile_speed = 90, damage = 27, targets = "air", turn_rate = 180 }]
 
 # T2 and T3 naval factories: headquarters by upgrade, and support factories for T2 and T3
 # builders, as for land and air.
