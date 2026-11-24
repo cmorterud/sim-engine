@@ -1055,16 +1055,21 @@ id = "t3_mobile_artillery"
 name = "Mobile Heavy Artillery"
 class = "artillery"
 tier = 3
-mass = 600
-energy = 3000
-build_time = 3600
+mass = 300
+energy = 1500
+build_time = 1800
 health = 1300
 speed = "4.3"
 turn_rate = 75
 turn_radius = 20
 radius = 12
 vision = 1010
-weapon = { range = 1680, reload_ticks = 60, projectile_speed = 56, damage = "859.1", splash_radius = 83, turn_rate = 30, artillery = true, min_range = 420, spread = 60, setup_ticks = 10 }
+# It fires every 11.5 seconds, so that one of the battleship's three turrets does twice its damage
+# a second, and one and a half times a T2 Artillery Installation's (2026-11-24; it fired every 6
+# seconds before, out-shooting the installation). The shell is as it was, and kills what it did.
+# At its old cost (600 materiel, 3,000 energy, 3,600 build time) the slower gun lost to bunched
+# Medium Tanks of equal materiel, so its cost was halved with its rate of fire.
+weapon = { range = 1680, reload_ticks = 115, projectile_speed = 56, damage = "859.1", splash_radius = 83, turn_rate = 30, artillery = true, min_range = 420, spread = 60, setup_ticks = 10 }
 
 # FAF's fighter-bomber: a carpet of twenty napalm bombs of 80, burning included, as one bomb of 1,600, and
 # two railguns of 75 a second at aircraft, as one.

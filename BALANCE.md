@@ -116,6 +116,12 @@ out close and why: evidence about the process, not a target.
   wide (`[splash]`); the snipe weapons set by exact hits to kill (`[kills]`), with the commander
   up to 18,000 health. Mobile Heavy Artillery, wide and a glass cannon, is set by hits, not by the
   walk-in duel, which a wide blast broke: 1,300 health, 859 a shell, a spread of 60.
+* 2026-11-24: big guns set against each other by damage a second: each of the battleship's three
+  turrets does twice a Mobile Heavy Artillery's and one and a half times a T2 Artillery
+  Installation's, and each of the battlecruiser's two lasers twice a battleship turret's. The
+  mobile artillery was slowed to fit, from a shell every 6 seconds to one every 11.5, and its
+  materiel, energy, and build time halved (300, 1,500, 1,800), since at its old cost the slower
+  gun lost to bunched Medium Tanks.
 * 2026-11-22: T1 air (the Attack Bomber, Interceptor, and Mobile Anti-Air) set by rules against
   T1 land frozen (`reports/balance/2026-11-22-t1-air.md`), each rule one number: a tank and a
   Mobile Anti-Air take two bombs; one interceptor downs a bomber in about 10 seconds; an army a

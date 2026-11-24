@@ -754,3 +754,19 @@ fn each_battlecruiser_laser_does_twice_a_battleship_turrets_damage_a_second() {
     let (cruiser, ship) = (db.get(db.id("t3_battlecruiser")), db.get(db.id("t3_battleship")));
     assert!(lasers[0].range < turrets[0].range && cruiser.health < ship.health, "the battlecruiser has the shorter reach and the lower health");
 }
+
+/// How the big guns stand to one another: one of the battleship's three turrets does twice the
+/// damage a second of a T3 Mobile Heavy Artillery piece, and one and a half times that of a T2
+/// Artillery Installation.
+#[test]
+fn a_battleship_turret_does_twice_a_mobile_artillerys_damage_a_second_and_half_again_an_installations() {
+    use sim_engine::sim::blueprints::BlueprintDb;
+    let db = BlueprintDb::standard();
+    let a_tick = |key: &str| {
+        let weapon = db.get(db.id(key)).weapon.unwrap_or_else(|| panic!("{key} has a gun"));
+        weapon.damage.to_num::<f64>() / f64::from(weapon.reload_ticks)
+    };
+    let (turret, mobile, installation) = (a_tick("t3_battleship"), a_tick("t3_mobile_artillery"), a_tick("t2_artillery"));
+    assert!((turret / mobile - 2.0).abs() < 0.02, "a battleship turret does {:.2} times a mobile artillery's damage a second", turret / mobile);
+    assert!((turret / installation - 1.5).abs() < 0.02, "a battleship turret does {:.2} times a T2 artillery installation's damage a second", turret / installation);
+}
