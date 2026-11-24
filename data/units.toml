@@ -1110,16 +1110,20 @@ on_water = true
 builds = ["t1_frigate", "t1_attack_sub"]
 upgrades_to = "naval_factory_t2"
 
-# A gun for ships and shore, and a twin railgun at aircraft, both muzzles at once: 10 a second.
+# A gun for ships and shore, and a twin railgun at aircraft, both muzzles at once. Cost, build
+# time, health, and the gun's damage set against the Medium Tank as the inspiration has its frigate
+# against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t1-navy.md). The railgun
+# does half again what that ratio gives (13.9), so that frigates hold their own against an equal
+# cost of T1 bombers: navy is strong at sea ([domains]).
 [[unit]]
 id = "t1_frigate"
 name = "Frigate"
 class = "tank"
 tier = 1
-mass = 280
-energy = 2800
-build_time = 1400
-health = 2120
+mass = 203
+energy = 2026
+build_time = 1133
+health = 2984
 speed = 12
 turn_rate = 60
 turn_radius = 40
@@ -1128,8 +1132,8 @@ vision = 640
 radar = 1600
 sonar = 320
 movement = "naval"
-weapon = { range = 560, reload_ticks = 17, projectile_speed = 60, damage = 85, splash_radius = 20, turn_rate = 120, spread = 4 }
-extra_weapons = [{ range = 960, reload_ticks = 10, projectile_speed = 90, damage = 10, targets = "air", turn_rate = 180 }]
+weapon = { range = 560, reload_ticks = 17, projectile_speed = 60, damage = 118, splash_radius = 20, turn_rate = 120, spread = 4 }
+extra_weapons = [{ range = 960, reload_ticks = 10, projectile_speed = 90, damage = "20.8", targets = "air", turn_rate = 180 }]
 
 # T2 and T3 naval factories: headquarters by upgrade, and support factories for T2 and T3
 # builders, as for land and air.
@@ -1329,10 +1333,12 @@ id = "t1_attack_sub"
 name = "Attack Submarine"
 class = "tank"
 tier = 1
-mass = 360
-energy = 2880
-build_time = 1440
-health = 800
+# Cost, build time, health, and damage against the Medium Tank as the inspiration has its
+# submarine against its T1 tank (2026-11-24, [domains]).
+mass = 265
+energy = 2122
+build_time = 1187
+health = 1163
 speed = 12
 turn_rate = 80
 turn_radius = 30
@@ -1340,7 +1346,7 @@ radius = 12
 vision = 640
 sonar = 1200
 movement = "submarine"
-weapon = { range = 640, reload_ticks = 40, projectile_speed = 30, damage = 150, targets = "naval" }
+weapon = { range = 640, reload_ticks = 40, projectile_speed = 30, damage = 185, targets = "naval" }
 # FAF's deck gun, 25 a second out to 640, which fires only on the surface.
 extra_weapons = [{ range = 640, reload_ticks = 10, projectile_speed = 60, damage = 25, turn_rate = 90 }]
 
@@ -1394,21 +1400,25 @@ vision = 480
 sonar = 5760
 upkeep = 100
 
-# Two torpedoes of 180 a volley, as one.
+# Two torpedoes a volley, as one. Cost, build time, and damage against the Medium Tank as the
+# inspiration has its T1 torpedo launcher against its T1 tank (2026-11-24, [domains]): the coast's
+# answer to T1 ships keeps up with them. Its health is a little more than that ratio gives (2,482),
+# within [domains] strength_band, so that an equal cost of frigates closing on it loses rather than
+# breaking it with a fifth of themselves left.
 [[unit]]
 id = "t1_torpedo_launcher"
 name = "Torpedo Launcher"
 class = "defense"
 tier = 1
-mass = 450
-energy = 3600
-build_time = 450
-health = 1700
+mass = 332
+energy = 2652
+build_time = 371
+health = 3000
 footprint = 1
 on_water = true
 vision = 240
 sonar = 720
-weapon = { range = 1000, reload_ticks = 40, projectile_speed = 30, damage = 360, targets = "naval" }
+weapon = { range = 1000, reload_ticks = 40, projectile_speed = 30, damage = 454, targets = "naval" }
 
 # Four torpedoes of 180 a volley, as one.
 [[unit]]

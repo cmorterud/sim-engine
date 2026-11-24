@@ -2,7 +2,10 @@
 
 use std::sync::Arc;
 
-use sim_engine::balance::{break_even, break_even_forces, duel, mirrored, mirrored_on, siege_on, Field, Ground, Side, Tactics, T2_POSITION};
+use sim_engine::balance::{
+    break_even, break_even_forces, domain_force, duel, force_materiel, mirrored, mirrored_on, position_materiel_at, purpose_strength, siege_on, squadrons, Field, Ground, Side, Tactics,
+    T1_TORPEDO_POSITION, T2_POSITION, TORPEDO_POSITION,
+};
 use sim_engine::sim::blueprints::BlueprintDb;
 
 fn db() -> Arc<BlueprintDb> {
@@ -268,4 +271,78 @@ fn ships_on_the_shore_ground_shell_a_position_ashore() {
     let cruisers = [Side { unit: db.id("t2_cruiser"), count: 4, tactics: Tactics::AttackMove }];
     let result = siege_on(&db, Field::new(Ground::Shore, 2), &cruisers, T2_POSITION);
     assert!(result.seconds > 0.0, "the cruisers reach the position from the sea: {result:?}");
+}
+
+const TARGETS: &str = include_str!("../data/balance_targets.toml");
+
+/// A value in `[domains]`, or in one of its tables.
+fn domains(path: &[&str]) -> toml::Value {
+    let mut value: toml::Value = TARGETS.parse::<toml::Table>().expect("data/balance_targets.toml is valid").remove("domains").expect("[domains]");
+    for key in path {
+        value = value.get(key).unwrap_or_else(|| panic!("[domains] has {path:?}")).clone();
+    }
+    value
+}
+
+fn number(value: &toml::Value) -> f64 {
+    value.as_float().or_else(|| value.as_integer().map(|value| value as f64)).expect("a number")
+}
+
+/// `first`, so many squadrons of it, against an equal cost of `second`, on a field.
+fn fight(db: &Arc<BlueprintDb>, field: Field, first: &str, how_many: f64, second: &str) -> f64 {
+    let squadron = domain_force(db, first);
+    let one = force_materiel(db, &squadrons(db, &squadron, 0.0, field.tier, Tactics::AttackMove), field.tier);
+    let a = squadrons(db, &squadron, one * how_many, field.tier, Tactics::AttackMove);
+    let b = squadrons(db, &domain_force(db, second), force_materiel(db, &a, field.tier), field.tier, Tactics::AttackMove);
+    mirrored_on(db, field, &a, &b, 1.0).score
+}
+
+/// BALANCE.md, T1 navy (2026-11-24): the frigate, the attack submarine, and the T1 torpedo
+/// launcher are as strong per cost against the anchor as the inspiration has its own against its
+/// T1 tank, within `[domains] strength_band`.
+#[test]
+fn t1_navy_is_as_strong_per_cost_as_the_inspirations() {
+    let db = db();
+    let band = domains(&["strength_band"]).as_array().expect("a band").iter().map(number).collect::<Vec<f64>>();
+    for key in ["t1_frigate", "t1_attack_sub", "t1_torpedo_launcher"] {
+        let ratio = purpose_strength(&db, key) / number(&domains(&["strength_over_anchor", key]));
+        assert!((band[0]..=band[1]).contains(&ratio), "{key} is {ratio:.2} of the inspiration's strength per cost");
+    }
+}
+
+/// `[domains]`: frigates hold their own against an equal cost of T1 bombers over water, and an
+/// equal cost of them closing on T1 torpedo launchers does not break them.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn frigates_hold_off_t1_bombers_and_lose_to_t1_torpedo_launchers() {
+    let db = db();
+    let score = fight(&db, Field::new(Ground::Water, 1), "t1_frigates", 12.0, "t1_bombers");
+    let least = number(&domains(&["cells", "frigates_against_t1_bombers_at_least"]));
+    assert!(score >= least, "frigates score {score:+.2} against T1 bombers, under {least:+.2}");
+    let frigates = squadrons(&db, &[(db.id("t1_frigate"), 1)], position_materiel_at(&db, T1_TORPEDO_POSITION, 1), 1, Tactics::AttackMove);
+    let siege = siege_on(&db, Field::new(Ground::Shore, 1), &frigates, T1_TORPEDO_POSITION);
+    assert!(!siege.broken, "an equal cost of frigates broke the T1 torpedo launchers: {siege:?}");
+}
+
+/// `[domains]`, cells met before any naval pass that must stay met: skipping the counter loses (a
+/// fleet with no anti-air to torpedo bombers, one with no anti-submarine weapon to submarines),
+/// destroyers do not break T2 torpedo launchers, and cruisers and battleships outrange the point
+/// defenses of their tier.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn skipping_the_counter_still_loses_and_ships_still_outrange_the_coast() {
+    let db = db();
+    let water = Field::new(Ground::Water, 2);
+    let bare = fight(&db, water, "t2_fleet_without_anti_air", 4.0, "t2_torpedo_bombers");
+    assert!(bare <= number(&domains(&["cells", "fleet_without_anti_air_loses_to_torpedo_bombers"])), "a fleet with no anti-air scores {bare:+.2} against torpedo bombers");
+    let submarines = fight(&db, water, "t1_submarines", 24.0, "t2_fleet_without_anti_submarine");
+    assert!(submarines >= number(&domains(&["cells", "submarines_beat_fleet_without_anti_submarine"])), "submarines score {submarines:+.2} against a fleet with no anti-submarine weapon");
+    let destroyers = squadrons(&db, &[(db.id("t2_destroyer"), 1)], position_materiel_at(&db, TORPEDO_POSITION, 2), 2, Tactics::AttackMove);
+    assert!(!siege_on(&db, Field::new(Ground::Shore, 2), &destroyers, TORPEDO_POSITION).broken, "an equal cost of destroyers broke the T2 torpedo launchers");
+    let edge = sim_engine::balance::target_number("siege", "outrange_defense_min");
+    for (ship, defense) in domains(&["cells", "coastal_ships"]).as_table().expect("a table") {
+        let reach = |key: &str| sim_engine::balance::purpose_weapons(db.get(db.id(key)), sim_engine::balance::Purpose::Surface).1;
+        let over = reach(ship) / reach(defense.as_str().expect("a key")) - 1.0;
+        assert!(over >= edge, "{ship} outranges {defense} by only {:.0}%", over * 100.0);
+    }
 }
