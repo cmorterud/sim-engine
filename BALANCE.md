@@ -139,11 +139,26 @@ out close and why: evidence about the process, not a target.
   went to 340 degrees a second, a quarter quicker than the interceptor's. Land units and T1 air
   come out the same. Next: the rest of T2 and T3 air.
 
+* 2026-11-24: fights between domains measured for the first time (`reports/balance/
+  2026-11-24-domains.md`), against `[domains]`: each domain strongest in its own medium, the map
+  deciding how much of each medium there is, and each naval and air role's strength per cost set
+  against the inspiration's ratio (`reports/balance/2026-11-24-inspiration-ratios.md`). The duels
+  gained a water ground and a shore ground, prices at any tier, and forces of several units;
+  soaks gained an account of each side's mass by domain. No unit data changed. Found: every naval
+  role, and the T2 and T3 strike aircraft, are about half as strong per cost against the land as
+  the inspiration has them, having kept first-draft prices through the land rebaseline; a composed
+  T2 fleet loses to an equal cost of the AI's air force (-0.57), and torpedo bombers costing 0.60
+  times it break it; submarines beat destroyers, and hovercraft beat a fleet on the water. Open:
+  how hard a fleet should be to break from the air (`torpedo_bombers_to_break_fleet_t2`), where the
+  design's feel says 1.5 to 3 times its cost and the inspiration's numbers 0.6 to 0.7.
+
 ## Order of work
 
 1. Targets (this draft), cost model, and archetype templates; first-pass T1 land numbers.
 2. The duel harness, the break-even solver, and the strength fit; tune T1 land.
-3. T2, then T3, air, and naval, each against the frozen tiers below it.
+3. T2, then T3, air, and naval, each against the frozen tiers below it. Navy and the T2 and T3
+   strike aircraft go by `[domains]` (2026-11-24): T1 navy; then T2 air and navy; then T3; then,
+   only if whole matches still favor a domain, factory costs and build rates.
 4. AI strategy variants and the global knobs.
 5. Remove the remaining "FAF's" comments, write PROVENANCE.md's dated note, and turn on the CI
    gates.
