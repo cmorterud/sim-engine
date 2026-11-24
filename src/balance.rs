@@ -1459,6 +1459,7 @@ pub fn derive_domains_report() {
     let water = |tier| Field::new(Ground::Water, tier);
     score_cell(&mut cells, "T2 fleet against an equal cost of the T2 air force, over water", water(2), "t2_fleet", 2.0, "t2_air_force", Some(number("fleet_beats_air_force_t2")), None);
     score_cell(&mut cells, "T3 fleet against an equal cost of the T3 air force, over water", water(3), "t3_fleet", 1.0, "t3_air_force", Some(number("fleet_beats_air_force_t3")), None);
+    score_cell(&mut cells, "Battleship-heavy T3 fleet against an equal cost of the T3 air force, over water", water(3), "t3_battleship_heavy_fleet", 2.0, "t3_air_force", None, None);
     score_cell(&mut cells, "T2 fleet with no anti-air against torpedo bombers", water(2), "t2_fleet_without_anti_air", 4.0, "t2_torpedo_bombers", None, Some(number("fleet_without_anti_air_loses_to_torpedo_bombers")));
     score_cell(&mut cells, "Submarines against a T2 fleet with no anti-submarine weapon", water(2), "t1_submarines", 24.0, "t2_fleet_without_anti_submarine", Some(number("submarines_beat_fleet_without_anti_submarine")), None);
     score_cell(&mut cells, "Destroyers against submarines", water(2), "t2_destroyers", 4.0, "t1_submarines", Some(number("destroyers_beat_submarines")), None);
@@ -1481,15 +1482,20 @@ pub fn derive_domains_report() {
         });
     }
     // The torpedo bombers it takes to break a fleet, at T2 and a massed T3 one.
-    for (tier, fleet_name, squadrons_of_it, cell) in [(2, "t2_fleet", 2.0, "torpedo_bombers_to_break_fleet_t2"), (3, "t3_fleet", 2.0, "torpedo_bombers_to_break_fleet_t3")] {
+    for (tier, fleet_name, squadrons_of_it, cell) in [(2, "t2_fleet", 2.0, "torpedo_bombers_to_break_fleet_t2"), (3, "t3_fleet", 2.0, "torpedo_bombers_to_break_fleet_t3"), (3, "t3_battleship_heavy_fleet", 2.0, "battleship_heavy_fleet_breaks_to_torpedo_bombers_at_most")] {
         let fleet = force(fleet_name, squadron_cost(fleet_name, tier) * squadrons_of_it, tier);
         let materiel = force_materiel(&db, &fleet, tier);
         let bombers = force("t2_torpedo_bombers", materiel, tier);
         let even = break_even_forces(&db, water(tier), &fleet, &bombers);
-        let band = domain_cell(cell).as_array().expect("a band").iter().map(as_number).collect::<Vec<f64>>();
+        // A band, or for the battleship-heavy fleet a ceiling.
+        let band = match domain_cell(cell).as_array() {
+            Some(band) => band.iter().map(as_number).collect::<Vec<f64>>(),
+            None => vec![0.0, number(cell)],
+        };
+        let which = if fleet_name == "t3_battleship_heavy_fleet" { "battleship-heavy T3 fleet".to_string() } else { format!("T{tier} fleet") };
         cells.push(Cell {
-            name: format!("Torpedo bombers it takes to break the T{tier} fleet, as a multiple of its cost"),
-            target: format!("{:.1}–{:.1}", band[0], band[1]),
+            name: format!("Torpedo bombers it takes to break the {which}, as a multiple of its cost"),
+            target: if band[0] > 0.0 { format!("{:.1}–{:.1}", band[0], band[1]) } else { format!("at most {:.1}", band[1]) },
             measured: format!("{:.2}{} (the fleet's strength per materiel over theirs; even after {:.0} s)", even.efficiency, if even.at_limit { ", at the search's limit" } else { "" }, even.seconds),
             met: Some((band[0]..=band[1]).contains(&even.efficiency)),
         });
@@ -1531,11 +1537,15 @@ pub fn derive_domains_report() {
             let materiel = position_materiel_at(&db, position, tier);
             let attackers = squadrons(&db, &[(db.id(ship), 1)], materiel, tier, Tactics::AttackMove);
             let result = siege_on(&db, Field::new(Ground::Shore, tier), &attackers, position);
+            // Whole ships buy only near the position's cost, and a siege's length goes about as the
+            // inverse of the guns on it, so the time is put at an equal cost by their ratio.
+            let bought = force_materiel(&db, &attackers, tier) / materiel;
+            let at_equal_cost = result.seconds * bought;
             cells.push(Cell {
                 name: format!("An equal cost of the {} breaks a coastal position of its tier", db.get(db.id(ship)).name),
                 target: format!("within {seconds_max:.0} s, losing at most {:.0}%", losses_max * 100.0),
-                measured: format!("{} in {:.0} s, losing {:.0}%", if result.broken { "broken" } else { "not broken" }, result.seconds, result.losses * 100.0),
-                met: Some(result.broken && result.seconds <= seconds_max && result.losses <= losses_max),
+                measured: format!("{} in {:.0} s by {:.2} times its cost, about {at_equal_cost:.0} s at an equal cost, losing {:.0}%", if result.broken { "broken" } else { "not broken" }, result.seconds, bought, result.losses * 100.0),
+                met: Some(result.broken && at_equal_cost <= seconds_max && result.losses <= losses_max),
             });
         }
         for (tier, ship, position, cell, label) in [

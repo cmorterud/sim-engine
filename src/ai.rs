@@ -1768,7 +1768,14 @@ impl AiBrain {
                     match tier {
                         1 => [roster.frigate, roster.frigate, roster.submarine][turn % 3],
                         2 => [roster.destroyer, roster.torpedo_boat, roster.cruiser, roster.destroyer, roster.frigate, roster.escort_corvette][turn],
-                        _ => [roster.battleship, roster.destroyer, roster.battlecruiser, roster.cruiser, roster.torpedo_boat, roster.escort_corvette][turn],
+                        // `[domains.forces] t3_fleet`, in this order: escorts two-thirds of its
+                        // cost, since they carry its anti-air and anti-torpedo charges, and
+                        // capital ships without them are torpedo bombers' prey (2026-11-24).
+                        _ => {
+                            let (bs, bc, cr, de, co) = (roster.battleship, roster.battlecruiser, roster.cruiser, roster.destroyer, roster.escort_corvette);
+                            let order = [bs, cr, de, cr, co, cr, cr, de, cr, bc, cr, co, de, cr, cr, de, cr, co, cr];
+                            order[self.unit_counter as usize % order.len()]
+                        }
                     }
                 }
             };

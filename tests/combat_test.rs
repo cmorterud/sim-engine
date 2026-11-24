@@ -554,9 +554,10 @@ fn ships_regenerate_and_rank_up_by_their_own_tables() {
     let world = flat_map(false);
     let battleship = world.blueprints.get(world.blueprints.id("t3_battleship"));
     let commander = world.blueprints.get(world.blueprints.id("command_rig"));
-    // The Summit's card: 12,500 mass a level, and 9 a second of regeneration a level.
-    assert_eq!(sim_engine::sim::world::vet_threshold(battleship, 1), Res::from_num(12_500));
-    assert_eq!(sim_engine::sim::world::vet_threshold(battleship, 3), Res::from_num(37_500));
+    // The Summit's card: a level for 1.25 times its own mass destroyed (12,500 for its 10,000,
+    // read from its mass, which balance passes change), and 9 a second of regeneration a level.
+    assert_eq!(sim_engine::sim::world::vet_threshold(battleship, 1), battleship.mass * 5 / 4);
+    assert_eq!(sim_engine::sim::world::vet_threshold(battleship, 3), battleship.mass * 15 / 4);
     assert_eq!(sim_engine::sim::world::vet_regen_per_second(battleship, 1), 9);
     // The commander has its own steps, and regenerates as T3 does.
     assert_eq!(sim_engine::sim::world::vet_threshold(commander, 1), Res::from_num(1_000));

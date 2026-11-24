@@ -334,13 +334,19 @@ t3_heavy_gunship = 0.38
 # a fight. The fleets are what a player fields: a T2 fleet is two destroyers, a couple of cruisers
 # for anti-air and missile defense, and an escort corvette's shield (the example the design was
 # decided on). The air forces are what the AI's air factories make: a third fighters, the rest
-# strike aircraft, every fourth at T2 a fighter-bomber.
+# strike aircraft, every fourth at T2 a fighter-bomber. A massed T3 fleet's escorts are two-thirds
+# of its cost (2026-11-24): they carry its anti-air and its anti-torpedo charges, as in the
+# inspiration, whose battleships have next to no anti-air and no anti-torpedo charge, so a fleet
+# is as safe from the air as it is escorted. The AI's T3 naval factories build this mix.
 [domains.forces]
 t1_fleet = { t1_frigate = 3, t1_attack_sub = 1 }
 t2_fleet = { t2_destroyer = 2, t2_cruiser = 2, t2_escort_corvette = 1 }
 t2_fleet_without_anti_air = { t2_destroyer = 2 }
 t2_fleet_without_anti_submarine = { t2_cruiser = 2, t2_escort_corvette = 1 }
-t3_fleet = { t3_battleship = 1, t3_battlecruiser = 1, t2_cruiser = 2, t2_escort_corvette = 1 }
+t3_fleet = { t3_battleship = 1, t3_battlecruiser = 1, t2_cruiser = 10, t2_destroyer = 4, t2_escort_corvette = 3 }
+# One of each, as the AI's T3 naval factories built until 2026-11-24: capital ships three-quarters
+# of its cost, lightly escorted.
+t3_battleship_heavy_fleet = { t3_battleship = 1, t3_battlecruiser = 1, t2_cruiser = 1, t2_destroyer = 1, t2_escort_corvette = 1 }
 t1_air_force = { t1_interceptor = 1, t1_bomber = 2 }
 t2_air_force = { t1_interceptor = 3, t2_gunship = 4, t2_fighter_bomber = 2 }
 t3_air_force = { t3_air_superiority = 3, t3_heavy_gunship = 4 }
@@ -364,10 +370,14 @@ t2_land_army = { t2_heavy_tank = 2, t2_grenadier_walker = 1, t2_mobile_missile_l
 fleet_beats_air_force_t2 = 0.40
 fleet_beats_air_force_t3 = 0.60
 # And it takes overwhelming torpedo bombers, this many times the fleet's cost, to break it: the
-# break-even's efficiency of the fleet against them. At least twice for a T2 fleet, and three times
-# for a massed T3 one. The upper ends only keep a wing of torpedo bombers from being worthless.
+# break-even's efficiency of the fleet against them. At least twice, for a T2 fleet and a massed,
+# escorted T3 one (three times for T3 until 2026-11-24, when the escorts were chosen to carry it,
+# as in the inspiration). The upper ends only keep a wing of torpedo bombers from being worthless.
 torpedo_bombers_to_break_fleet_t2 = [2.0, 5.0]
-torpedo_bombers_to_break_fleet_t3 = [3.0, 8.0]
+torpedo_bombers_to_break_fleet_t3 = [2.0, 5.0]
+# And capital ships without their escorts are torpedo bombers' prey: a battleship-heavy fleet
+# breaks to at most its own cost of them. That is the counterplay to skimping on escorts.
+battleship_heavy_fleet_breaks_to_torpedo_bombers_at_most = 1.0
 # At T1, frigates hold their own against an equal cost of T1 bombers over water: at least even,
 # within [counters] even_margin, so that early ships are not shut down by cheaper aircraft. The
 # frigate's railgun is set by this (2026-11-24).

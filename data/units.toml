@@ -778,22 +778,24 @@ weapon = { kind = "bomb", range = 1800, reload_ticks = 80, projectile_speed = 40
 extra_weapons = [{ range = 880, reload_ticks = 7, projectile_speed = 90, damage = 32, targets = "air" }]
 
 # With an anti-air gun.
+# Cost, build time, health, and damage set against the Medium Tank as the inspiration has its
+# heavy gunship against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t3-air-navy.md).
 [[unit]]
 id = "t3_heavy_gunship"
 name = "Heavy Gunship"
 class = "air"
 tier = 3
-mass = 1500
-energy = 65000
-build_time = 6300
-health = 6000
+mass = 1092
+energy = 47318
+build_time = 5272
+health = 8789
 speed = 20
 radius = 16
 vision = 640
 flight = { elevation = 198, turn_rate = 60, fuel = 800, hovers = true }
-weapon = { range = 500, reload_ticks = 4, projectile_speed = 70, damage = 100, spread = 6 }
+weapon = { range = 500, reload_ticks = 4, projectile_speed = 70, damage = 115, spread = 6 }
 # Its railgun, two shots of 8 every 1.3 seconds, as one.
-extra_weapons = [{ range = 880, reload_ticks = 13, projectile_speed = 90, damage = 16, targets = "air" }]
+extra_weapons = [{ range = 880, reload_ticks = 13, projectile_speed = 90, damage = "18.4", targets = "air" }]
 
 # Flak bursts on an aircraft and hits every enemy aircraft around it. Its shells fly at 90, not
 # FAF's 70, so that they can catch the fastest aircraft, which steer here instead of
@@ -1281,15 +1283,19 @@ missile_defense = { kind = "tactical", range = 620, reload_ticks = 20, mounts = 
 
 # Three gauss turrets of three shells of 1,000 each, four twin anti-air guns as one (each fires
 # both muzzles at once, 12 a shell, every 1.7 seconds), and two close-in guns, as one.
+# Cost and build time set against the Medium Tank as the inspiration has its battleship against
+# its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t3-air-navy.md); its turrets keep the damage set against T3 artillery, so its
+# health is half again its ratio's, to its strength per cost. Like the inspiration's, it has next
+# to no anti-air and no anti-torpedo charge: its escorts keep aircraft and torpedoes off it.
 [[unit]]
 id = "t3_battleship"
 name = "Battleship"
 class = "tank"
 tier = 3
-mass = 10000
-energy = 62000
-build_time = 31600
-health = 51000
+mass = 6842
+energy = 42423
+build_time = 24423
+health = 107000
 speed = "5.5"
 turn_rate = 27
 turn_radius = 100
@@ -1309,15 +1315,17 @@ missile_defense = { kind = "tactical", range = 620, reload_ticks = 20, mounts = 
 
 # A laser cannon forward and one aft, torpedoes, one of the fleet's tactical missile defense
 # mounts, and an anti-torpedo charge. A laser's beam hits the tick it is fired, one target, with no blast.
+# Cost, build time, and health set against the Medium Tank as the inspiration has its
+# battlecruiser against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t3-air-navy.md); its lasers keep twice a turret's damage.
 [[unit]]
 id = "t3_battlecruiser"
 name = "Battlecruiser"
 class = "tank"
 tier = 3
-mass = 7000
-energy = 60000
-build_time = 25200
-health = 25000
+mass = 5128
+energy = 43956
+build_time = 20677
+health = 35000
 speed = "8.5"
 turn_rate = 35
 turn_radius = 80
