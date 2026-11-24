@@ -49,7 +49,8 @@ jobs:
             ready=false
           fi
           for workflow in ci.yml soak.yml; do
-            result=$(gh run list -R "$GITHUB_REPOSITORY" --workflow "$workflow" --commit "$SHA" --json status,conclusion \
+            # Only the runs a push started: a soak started by hand may play only some maps.
+            result=$(gh run list -R "$GITHUB_REPOSITORY" --workflow "$workflow" --commit "$SHA" --event push --json status,conclusion \
               --jq '[.[] | select(.status == "completed")] | .[0].conclusion // "not finished"')
             echo "$workflow on $SHA: $result"
             [ "$result" = success ] || ready=false
