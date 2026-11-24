@@ -1018,6 +1018,16 @@ impl AiBrain {
                 commands.push(SimCommand::Assist { units: vec![id], target: lead });
                 continue;
             }
+            // With no land factory finished, one left unfinished comes before anything new: an
+            // energy crisis took the commander off its only factory at 99.8%, it never went back,
+            // and with nothing to make engineers, the match never ended.
+            if !forces.energy_crisis && !forces.factories.iter().any(|factory| factory.finished) {
+                let unfinished = forces.factories.iter().filter_map(|factory| world.unit_entity(factory.id).and_then(|entity| world.ecs.get::<&Position>(entity).ok().map(|at| (factory.id, at.0.xy()))));
+                if let Some((site, _)) = unfinished.min_by_key(|(site, at)| (at.distance_squared(&position), *site)) {
+                    commands.push(SimCommand::Assist { units: vec![id], target: site });
+                    continue;
+                }
+            }
             let plan = self.next_structure(world, forces, entity, position, is_commander, &planned, &new_blueprints);
             if let Some((blueprint, cell)) = plan {
                 planned.extend(footprint_cells(world, blueprint, cell));
