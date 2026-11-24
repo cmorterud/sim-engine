@@ -3,7 +3,7 @@
 //! It lives outside `SimWorld`, so a match can be replayed from its command log alone.
 #![deny(clippy::float_arithmetic)]
 
-use crate::math::fp::{fp_int, wide_mul, Fp, FpWide, Vec2Fp};
+use crate::math::fp::{fp_int, sqrt_wide, wide_mul, Fp, FpWide, Vec2Fp};
 use crate::ai_strategy::Strategy;
 use crate::math::rng::SimRng;
 use crate::sim::blueprints::{BlueprintId, FactoryKind, Res, UnitClass};
@@ -86,6 +86,9 @@ const NAVAL_T3_INCOME: i64 = 70;
 /// How far from home it looks for water deep enough for a naval factory.
 const NAVAL_REACH_UNITS: i32 = 7_000;
 /// Fleets set out at this size, growing to the largest.
+/// With no land route to the enemy, the most land units that cannot cross water it keeps, to
+/// guard home: the rest of what it makes goes into ships, aircraft, and hovercraft.
+const HOME_GUARD: usize = 12;
 const FIRST_FLEET: usize = 4;
 const LARGEST_FLEET: usize = 12;
 /// A structure being built that costs at least this much mass is worth sending idle builders to.
@@ -178,6 +181,8 @@ struct Roster {
     torpedo_boat: BlueprintId,
     mobile_shield: BlueprintId,
     heavy_walker: BlueprintId,
+    /// The land army that crosses water, for a map with no land route to the enemy.
+    hovercraft: BlueprintId,
     /// Radars by tier: the radar and the T2 radar.
     radars: [BlueprintId; 2],
     shield: BlueprintId,
@@ -235,6 +240,7 @@ impl Roster {
             torpedo_boat: id("t2_torpedo_boat"),
             energy_storage: id("energy_storage"),
             mobile_shield: id("t2_mobile_shield"),
+            hovercraft: id("t2_assault_hovercraft"),
             heavy_walker: id("t3_heavy_walker"),
             radars: [id("radar"), id("radar_t2")],
             shield: id("shield_generator"),
@@ -274,6 +280,10 @@ struct Forces {
     /// The team's best finished land headquarters' tier, 1 for none.
     headquarters_tier: u8,
     idle_combat: Vec<SimId>,
+    /// Those of them that cross water, hovercraft and seabed walkers, and how many of its land
+    /// units cannot.
+    idle_crossing: Vec<SimId>,
+    landbound: usize,
     /// Land combat units on an attack-move, which sudden death re-aims.
     attacking: Vec<SimId>,
     combat_units: usize,
@@ -618,6 +628,9 @@ pub struct AiBrain {
     /// Worked out once per map: deep water near home where a naval factory fits, nearest
     /// first, and the deep water nearest the enemy's start, where fleets go.
     naval_plan: Option<NavalPlan>,
+    /// Worked out once per map: whether land units can walk from home to the enemy's start. On
+    /// a map of islands they cannot, and an army of them would only stand at home.
+    land_route: bool,
     /// Whether an enemy strategic missile launcher has been seen, which calls for a defense.
     enemy_nuke_seen: bool,
     /// The transport drop under way, and when a transport was last ordered.
@@ -665,6 +678,7 @@ impl AiBrain {
             enemy_air_seen: None,
             fleet_size: FIRST_FLEET,
             naval_plan: None,
+            land_route: true,
             enemy_nuke_seen: false,
             drop: None,
             transport_ordered: None,
@@ -734,6 +748,7 @@ impl AiBrain {
         if self.roster.is_none() {
             self.roster = Some(Roster::new(world, self.strategy));
             self.naval_plan = Some(self.plan_naval(world));
+            self.land_route = self.plan_land_route(world);
         }
         let mut forces = self.survey(world);
         let sightings = visible_enemies(world, self.team);
@@ -842,11 +857,16 @@ impl AiBrain {
                 }
                 UnitClass::Bot | UnitClass::Artillery | UnitClass::Tank => {
                     forces.combat_units += 1;
+                    let crosses = stats.move_class != MoveClass::Land;
+                    forces.landbound += usize::from(!crosses);
                     if order.kind == OrderKind::AttackMove {
                         forces.attacking.push(id);
                     }
                     if order.kind == OrderKind::Idle {
                         forces.idle_combat.push(id);
+                        if crosses {
+                            forces.idle_crossing.push(id);
+                        }
                         if unit.tier == 1 && finished && world.ecs.get::<&crate::sim::components::Boarding>(entity).is_err() {
                             forces.idle_light_combat.push((id, position));
                         }
@@ -1097,10 +1117,11 @@ impl AiBrain {
                 .find(|&blueprint| world.can_build(builder, blueprint) && world.support_allowed(self.team, blueprint))
                 .unwrap_or(roster.air_factory);
             let air_planned = count_planned(roster.air_factory) + roster.air_support_factories.iter().map(|&blueprint| count_planned(blueprint)).sum::<usize>();
+            // With no land route to the enemy, one at once: aircraft are a way across.
             let air_wanted = if mass_income >= self.air(SECOND_AIR_FACTORY_INCOME) {
                 self.skill.max_air_factories
             } else {
-                usize::from(forces.headquarters_tier >= 2 || mass_income >= self.air(AIR_FACTORY_INCOME)).min(self.skill.max_air_factories)
+                usize::from(!self.land_route || forces.headquarters_tier >= 2 || mass_income >= self.air(AIR_FACTORY_INCOME)).min(self.skill.max_air_factories)
             };
             // The first needs no mass in store: it is cheap, and the AI spends all it makes. Nor
             // do any for a strategy that favours air, which would otherwise never get a second.
@@ -1122,10 +1143,11 @@ impl AiBrain {
                 .find(|&blueprint| world.can_build(builder, blueprint) && world.support_allowed(self.team, blueprint))
                 .unwrap_or(roster.naval_factory);
             let naval_planned = count_planned(roster.naval_factory) + roster.naval_support_factories.iter().map(|&blueprint| count_planned(blueprint)).sum::<usize>();
+            // With no land route to the enemy, one at once: the fleet is the main way across.
             let naval_wanted = if mass_income >= self.naval(SECOND_NAVAL_FACTORY_INCOME) {
                 2
             } else {
-                usize::from(forces.headquarters_tier >= 2 || mass_income >= self.naval(NAVAL_FACTORY_INCOME))
+                usize::from(!self.land_route || forces.headquarters_tier >= 2 || mass_income >= self.naval(NAVAL_FACTORY_INCOME))
             };
             let naval_total = forces.naval_factories.len() + naval_planned;
             let affordable = naval_total == 0 || self.skill.favours == Favours::Naval || economy.mass > Res::from_num(150);
@@ -1154,8 +1176,16 @@ impl AiBrain {
             return Some((roster.extractor, cell));
         }
 
+        // With no land route to the enemy, a naval yard and an air factory come before a second
+        // land factory, and there are never more than two of those: they make engineers, the
+        // home guard, and hovercraft.
+        if !self.land_route {
+            if let Some(choice) = naval_choice().or_else(air_choice) {
+                return Some(choice);
+            }
+        }
         let factories_wanted = (((1 + mass_income / 10) * self.skill.land_percent + 50) / 100).max(1) as usize;
-        let factories_wanted = factories_wanted.min(self.skill.max_factories);
+        let factories_wanted = factories_wanted.min(self.skill.max_factories).min(if self.land_route { usize::MAX } else { 2 });
         // A second factory goes up even in a stall, so that an upgrade never stops all production.
         if factories_total < factories_wanted && (economy.mass > Res::from_num(150) || factories_total < 2) {
             if let Some(cell) = self.site_near_home(world, factory, 1, planned) {
@@ -1451,6 +1481,8 @@ impl AiBrain {
         // past it. One making an engineer or upgrading counts as well, which only errs small.
         let busy = |factories: &[FactoryInfo]| factories.iter().filter(|factory| factory.finished && !factory.queue_is_empty).count();
         let mut army = forces.combat_units + busy(&forces.factories);
+        // With no land route to the enemy, land units that cannot cross water only guard home.
+        let mut landbound = forces.landbound + busy(&forces.factories);
         let engineers_wanted = self.skill.max_engineers.min(2 + mass_income as usize / 5);
         let rally = self.rally_point();
         let headquarters = forces.headquarters_tier;
@@ -1529,16 +1561,30 @@ impl AiBrain {
                 if army >= self.skill.max_army {
                     continue;
                 }
+                // A squad for a transport is made whatever the map: flying is a way across.
+                let for_drop = drop_squad > 0;
+                // With no land route, a factory that can makes hovercraft, which cross, and one
+                // that cannot adds to the home guard until that is full, and then waits.
+                let crossing = !self.land_route && !for_drop && tier >= 2;
+                if !self.land_route && !for_drop && !crossing {
+                    if landbound >= HOME_GUARD {
+                        continue;
+                    }
+                    landbound += 1;
+                }
                 army += 1;
                 self.unit_counter += 1;
                 let air_threat = self.air_threat(world);
                 let roster = self.roster();
                 // Against aircraft, every fourth unit is anti-air.
-                if drop_squad > 0 {
+                if for_drop {
                     drop_squad -= 1;
                     roster.bot
-                } else if air_threat && self.unit_counter.is_multiple_of(4) {
+                } else if air_threat && self.unit_counter.is_multiple_of(4) && (self.land_route || landbound < HOME_GUARD) {
+                    landbound += 1;
                     roster.mobile_anti_air[usize::from(tier >= 2)]
+                } else if crossing {
+                    roster.hovercraft
                 } else {
                 // Its strategy's list for the tier, in turn. Mobile shields in it are kept to two.
                 let mix = &roster.land_mix[usize::from(tier.clamp(1, 3)) - 1];
@@ -1561,9 +1607,12 @@ impl AiBrain {
         }
     }
 
-    /// Finds, once, the deep water near home where naval factories fit, and the deep water
-    /// nearest the enemy's start. Ties go by the cell as seen on the plan, so that both sides
-    /// of a mirrored map choose mirrored spots. Nothing, on a map without water.
+    /// Finds, once, the water nearest the enemy's start, where fleets go, and the water near
+    /// home where naval factories fit: only water that ships can sail from to the enemy's, never
+    /// a pond or a cut-off strip behind an island, and nearest first, counting a quarter of the
+    /// way on to the enemy as well, so that of two shores as near, it takes the one that faces
+    /// them. Ties go by the cell as seen on the plan, so that both sides of a mirrored map choose
+    /// mirrored spots. Nothing, on a map without water.
     fn plan_naval(&self, world: &SimWorld) -> NavalPlan {
         if !world.terrain.has_water() {
             return NavalPlan { sites: Vec::new(), enemy_water: None };
@@ -1572,32 +1621,70 @@ impl AiBrain {
         let size = footprint(world, factory);
         let cells = world.terrain.cells_per_side() as u32;
         let plan_cell = |cell: (u32, u32), size: i32| self.flip_site(world, cell_i32(cell), size);
-        let reach = wide_mul(fp_int(NAVAL_REACH_UNITS), fp_int(NAVAL_REACH_UNITS));
-        // Each candidate with its distance, its cell on the plan for ties, and its cell.
-        type Candidate = (FpWide, (i32, i32), (u32, u32));
-        let mut sites: Vec<Candidate> = Vec::new();
-        let mut enemy_water: Option<Candidate> = None;
-        for y in 0..cells {
-            for x in 0..cells {
-                if !world.terrain.cell_is_navigable(x, y) {
-                    continue;
-                }
-                let center = cell_center((x, y));
-                let to_enemy = center.distance_squared(&self.enemy_home);
-                let candidate = (to_enemy, plan_cell((x, y), 1), (x, y));
-                if enemy_water.is_none_or(|best| (candidate.0, candidate.1) < (best.0, best.1)) {
-                    enemy_water = Some(candidate);
-                }
-                // A site is named by its corner, so its middle is a cell in from it.
-                let middle = cell_center((x + size as u32 / 2, y + size as u32 / 2));
-                let from_home = middle.distance_squared(&self.home);
-                if from_home <= reach && from_home < middle.distance_squared(&self.enemy_home) && world.can_place(factory, x, y) {
-                    sites.push((from_home, plan_cell((x, y), size), (x, y)));
+        let navigable = || (0..cells).flat_map(|y| (0..cells).map(move |x| (x, y))).filter(|&(x, y)| world.terrain.cell_is_navigable(x, y));
+        let Some(enemy_water) = navigable().min_by_key(|&cell| (cell_center(cell).distance_squared(&self.enemy_home), plan_cell(cell, 1))) else {
+            return NavalPlan { sites: Vec::new(), enemy_water: None };
+        };
+        // Every cell ships can sail to from there.
+        let index = |(x, y): (u32, u32)| (y * cells + x) as usize;
+        let mut sailed = vec![false; (cells * cells) as usize];
+        let mut queue = std::collections::VecDeque::from([enemy_water]);
+        sailed[index(enemy_water)] = true;
+        while let Some((x, y)) = queue.pop_front() {
+            for next in [(x.wrapping_sub(1), y), (x + 1, y), (x, y.wrapping_sub(1)), (x, y + 1)] {
+                if world.terrain.cell_is_navigable(next.0, next.1) && !sailed[index(next)] {
+                    sailed[index(next)] = true;
+                    queue.push_back(next);
                 }
             }
         }
+        let reach = wide_mul(fp_int(NAVAL_REACH_UNITS), fp_int(NAVAL_REACH_UNITS));
+        // Each candidate with how far it is, its cell on the plan for ties, and its cell.
+        type Candidate = (Fp, (i32, i32), (u32, u32));
+        let mut sites: Vec<Candidate> = Vec::new();
+        for (x, y) in navigable().filter(|&cell| sailed[index(cell)]) {
+            // A site is named by its corner, and measured from its middle: the true middle, on
+            // the line between cells for a site an even number of cells across. Measured from
+            // the middle of the cell past it, a site and its mirror image were not the same
+            // distance from their own sides' homes, and the sides chose different shores.
+            let half = size * TERRAIN_CELL_UNITS / 2;
+            let middle = Vec2Fp::new(fp_int(x as i32 * TERRAIN_CELL_UNITS + half), fp_int(y as i32 * TERRAIN_CELL_UNITS + half));
+            let (from_home, to_enemy) = (middle.distance_squared(&self.home), middle.distance_squared(&self.enemy_home));
+            if from_home <= reach && from_home < to_enemy && world.can_place(factory, x, y) {
+                sites.push((sqrt_wide(from_home) + sqrt_wide(to_enemy) / 4, plan_cell((x, y), size), (x, y)));
+            }
+        }
         sites.sort_unstable();
-        NavalPlan { sites: sites.into_iter().map(|(_, _, cell)| cell).collect(), enemy_water: enemy_water.map(|(_, _, cell)| cell_center(cell)) }
+        NavalPlan { sites: sites.into_iter().map(|(_, _, cell)| cell).collect(), enemy_water: Some(cell_center(enemy_water)) }
+    }
+
+    /// Whether land units can walk from home to the enemy's start, over the ground alone: walls
+    /// and buildings come and go, and are the pathfinder's to get round.
+    fn plan_land_route(&self, world: &SimWorld) -> bool {
+        let Some(grid) = world.terrain.cost_grid(MoveClass::Land) else {
+            return true;
+        };
+        let cells = world.terrain.cells_per_side();
+        let (from, to) = (world.terrain.unit_cell_of(self.home), world.terrain.unit_cell_of(self.enemy_home));
+        let open = |x: usize, y: usize| grid[y * cells + x] != crate::sim::terrain::COST_IMPASSABLE;
+        if !open(from.0, from.1) || !open(to.0, to.1) {
+            return true;
+        }
+        let mut seen = vec![false; cells * cells];
+        let mut queue = std::collections::VecDeque::from([from]);
+        seen[from.1 * cells + from.0] = true;
+        while let Some((x, y)) = queue.pop_front() {
+            if (x, y) == to {
+                return true;
+            }
+            for (nx, ny) in [(x.wrapping_sub(1), y), (x + 1, y), (x, y.wrapping_sub(1)), (x, y + 1)] {
+                if nx < cells && ny < cells && !seen[ny * cells + nx] && open(nx, ny) {
+                    seen[ny * cells + nx] = true;
+                    queue.push_back((nx, ny));
+                }
+            }
+        }
+        false
     }
 
     /// The nearest site that is still free, with a cell of open water around it so that
@@ -1618,7 +1705,7 @@ impl AiBrain {
         let energy_income = self.planned_income((economy.energy_income * 10).to_num::<i64>());
         let mut upgrade_under_way = forces.naval_factories.iter().any(|factory| factory.upgrading);
         let headquarters = forces.naval_headquarters_tier;
-        let rally = self.naval_rally();
+        let rally = self.naval_rally(world);
         let mut fleet = forces.naval_units + forces.naval_factories.iter().filter(|factory| factory.finished && !factory.queue_is_empty).count();
         for factory in forces.naval_factories.iter().filter(|factory| factory.finished) {
             if let Some(point) = rally.filter(|_| !self.rally_set_on.contains(&factory.id)) {
@@ -1659,9 +1746,17 @@ impl AiBrain {
         }
     }
 
-    /// Where new ships wait: the water off the first naval site.
-    fn naval_rally(&self) -> Option<Vec2Fp> {
-        self.naval_plan.as_ref()?.sites.first().map(|&cell| cell_center(cell))
+    /// Where new ships wait: the water off the first naval site, on the way to where the fleet
+    /// goes. Measured from the site's true middle, so that the two sides' ships leave their
+    /// yards as mirror images: they once made for the middle of the site's corner cell, which
+    /// for one side was the corner toward the enemy and for the other the corner away.
+    fn naval_rally(&self, world: &SimWorld) -> Option<Vec2Fp> {
+        let plan = self.naval_plan.as_ref()?;
+        let &(x, y) = plan.sites.first()?;
+        let half = footprint(world, self.roster().naval_factory) * TERRAIN_CELL_UNITS / 2;
+        let middle = Vec2Fp::new(fp_int(x as i32 * TERRAIN_CELL_UNITS + half), fp_int(y as i32 * TERRAIN_CELL_UNITS + half));
+        let toward = plan.enemy_water.map_or(Vec2Fp::ZERO, |water| (water - middle).normalized());
+        (0..=4).rev().map(|step| middle + toward.scaled(fp_int(half + step * 40))).find(|&at| world.terrain.passable_for(MoveClass::Naval, at)).or(Some(middle))
     }
 
     /// The fleet meets enemy ships that come near home, and otherwise sets out, once it is big
@@ -2067,7 +2162,13 @@ impl AiBrain {
         if world.current_tick < self.skill.first_attack_tick || !self.skill.attacks {
             return;
         }
-        let gathered = forces.idle_combat.len();
+        // With no land route to the enemy, only what crosses water goes at them: the rest stays
+        // to guard home, where orders to march at the far shore would only bunch it on the beach.
+        let movers = if self.land_route { &forces.idle_combat } else { &forces.idle_crossing };
+        if movers.is_empty() {
+            return;
+        }
+        let gathered = movers.len();
         if gathered > self.gathered.0 {
             self.gathered = (gathered, world.current_tick);
         }
@@ -2079,7 +2180,7 @@ impl AiBrain {
             // hunting it, while the armies marched back and forth around the passes.
             let enemy_commander = self.enemy_commander(world);
             let goal = enemy_commander.and_then(|id| world.unit_position(id)).map_or(self.enemy_home, |at| at.xy());
-            let mut everyone = forces.idle_combat.clone();
+            let mut everyone = movers.clone();
             if !commander_enhancing(world, forces) && world.terrain.height_at(goal) >= world.terrain.water_level() {
                 everyone.extend(forces.commander);
             }
@@ -2107,7 +2208,7 @@ impl AiBrain {
         let goal = target.unwrap_or_else(|| self.search_point(world, full_strength));
         // Not in formation: waves at the slowest unit's pace arrived late enough that, in 200
         // AI-vs-AI matches, 6 went past the time limit, against none with each at its own speed.
-        let mut wave = forces.idle_combat.clone();
+        let mut wave = movers.clone();
         // A long, even game is one a defended base keeps winning. The commander joins a
         // full-size wave, which either breaks the enemy's base or loses the commander.
         let on_land = world.terrain.height_at(goal) >= world.terrain.water_level();

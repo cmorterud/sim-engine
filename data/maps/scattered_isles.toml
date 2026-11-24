@@ -1,0 +1,24 @@
+# Scattered Isles (GAME_SPECIFICATION.md §17.3): a named map, a type with its settings fixed,
+# from which src/sim/maps.rs generates it, the same on every machine.
+#
+# Each team on a large home island at one end of the map, west or east, long from north to
+# south, with a sea between them dotted with small islands, the largest in the middle. There is
+# no land route between the home islands: only ships, aircraft, hovercraft, and seabed walkers
+# cross. Each home island has four start sites along it. In 1v1 the two players start at
+# opposite far ends of the two islands; a 2v2 takes the two sites either side of each island's
+# middle, and a 4v4 fills both islands. Home islands are rich, and the small islands hold the
+# contested deposits.
+id = "scattered_isles"
+name = "Scattered Isles"
+kind = "islands"
+size_km = 20
+players = 8
+seed = 1230196819
+# sparse, normal, or rich: deposits and vents.
+resources = "rich"
+# none, some, or lots: rock fields and woods.
+reclaim = "some"
+# flat, hilly, or rugged: the home islands.
+terrain = "hilly"
+# some or lots: with less water there are more small islands.
+water = "some"

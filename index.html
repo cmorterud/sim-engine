@@ -158,6 +158,15 @@
               <p class="about">A lake fills the middle, with starts in the corners. Armies go round it either way, through the narrow ground north and south, where the richest deposits on land are; ships and hovercraft cut across, and only they reach the islands.</p>
             </span>
           </label>
+          <label class="map">
+            <input type="radio" name="map" value="scattered_isles">
+            <img src="maps/scattered_isles.png" alt="Scattered Isles map from above: a long island at each end, west and east, and a sea of small islands between">
+            <span class="text">
+              <strong>Scattered Isles</strong>
+              <span class="facts">20 km &middot; 144 materiel deposits</span>
+              <p class="about">Each side has a home island, with no land route between them. Tanks only guard home: the war is ships, aircraft, and hovercraft, and the small islands in the sea between hold the deposits worth fighting for.</p>
+            </span>
+          </label>
         </fieldset>
 
         <h2>Opponents</h2>
@@ -175,7 +184,7 @@
               <option value="1v1" selected>1v1</option>
               <option value="2v2">2v2, with an AI ally</option>
             </select>
-            <span class="hint" id="teams-hint">2v2 needs a map with team starts: Saddleback or Stillwater.</span>
+            <span class="hint" id="teams-hint">2v2 needs a map with team starts: Saddleback, Stillwater, or Scattered Isles.</span>
           </div>
           <div class="field">
             <label for="strategy">Strategy</label>
@@ -233,6 +242,7 @@
               <option value="twin_passes">Twin Passes</option>
               <option value="saddleback">Saddleback</option>
               <option value="stillwater">Stillwater</option>
+              <option value="scattered_isles">Scattered Isles</option>
             </select>
           </div>
           <div class="field">

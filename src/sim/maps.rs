@@ -9,8 +9,8 @@
 //!   the ways across, and forests on both shores. The starts face each other across the water.
 //!
 //! Named maps (GAME_SPECIFICATION.md §17.3) are a kind of map and its settings, in a file in
-//! data/maps, from which the kind's generator here makes the map: Saddleback is a Passes map and
-//! Stillwater a Central Lake.
+//! data/maps, from which the kind's generator here makes the map: Saddleback is a Passes map,
+//! Stillwater a Central Lake, and Scattered Isles an Islands map.
 
 use super::components::WreckKind;
 use super::config::TERRAIN_CELL_UNITS;
@@ -20,7 +20,7 @@ use crate::math::fp::{fp_int, Fp, Vec2Fp};
 use crate::math::rng::SimRng;
 
 /// The maps that come with the game, by the name `--map` takes.
-pub const BUNDLED: [&str; 4] = ["highland", "twin_passes", "saddleback", "stillwater"];
+pub const BUNDLED: [&str; 5] = ["highland", "twin_passes", "saddleback", "stillwater", "scattered_isles"];
 
 /// A bundled map by name.
 pub fn bundled(name: &str) -> Option<MapData> {
@@ -36,6 +36,7 @@ pub fn generate(settings: &MapSettings) -> MapData {
     match settings.kind.as_str() {
         "passes" => passes(settings),
         "central_lake" => central_lake(settings),
+        "islands" => islands(settings),
         kind => panic!("{}: {kind} is not a kind of map", settings.id),
     }
 }
@@ -47,7 +48,7 @@ pub fn generate(settings: &MapSettings) -> MapData {
 pub struct MapSettings {
     pub id: String,
     pub name: String,
-    /// "passes" or "central_lake"; "islands" to come.
+    /// "passes", "central_lake", or "islands".
     pub kind: String,
     pub size_km: u32,
     /// The most players it holds.
@@ -69,7 +70,11 @@ pub struct MapSettings {
 }
 
 /// The named maps' settings files, by id.
-const NAMED: [(&str, &str); 2] = [("saddleback", include_str!("../../data/maps/saddleback.toml")), ("stillwater", include_str!("../../data/maps/stillwater.toml"))];
+const NAMED: [(&str, &str); 3] = [
+    ("saddleback", include_str!("../../data/maps/saddleback.toml")),
+    ("stillwater", include_str!("../../data/maps/stillwater.toml")),
+    ("scattered_isles", include_str!("../../data/maps/scattered_isles.toml")),
+];
 
 /// A named map's settings, by id.
 pub fn settings(id: &str) -> Option<MapSettings> {
@@ -84,6 +89,11 @@ pub fn saddleback() -> MapData {
 /// Stillwater, 10 km: a lake in the middle, inside a ring of land, with starts in the corners.
 pub fn stillwater() -> MapData {
     central_lake(&settings("stillwater").expect("data/maps/stillwater.toml"))
+}
+
+/// Scattered Isles, 20 km: a home island at each end, and a sea of small islands between.
+pub fn scattered_isles() -> MapData {
+    islands(&settings("scattered_isles").expect("data/maps/scattered_isles.toml"))
 }
 
 /// A cell whose corners differ by more than this, in sixteenths of a unit, is too steep for land
@@ -952,6 +962,244 @@ pub fn central_lake(settings: &MapSettings) -> MapData {
     MapData { name: settings.id.clone(), map_units: map, heights: draft.heights, blocked, water_level: fp_int(WATER_UNITS), deposits, vents, starts, layouts, scenery }
 }
 
+/// An Islands map (GAME_SPECIFICATION.md §17.3) from its settings: each team on a large home
+/// island at one end of the map, west or east, long from north to south with rounded ends, and
+/// a sea between them dotted with small islands, one of them in the middle. There is no land
+/// route between the home islands: ships, aircraft, hovercraft, and seabed walkers cross. Ships
+/// sail all the way round a home island on any but the smallest maps. Home islands hold most
+/// deposits, and the small islands the contested ones. It is its own image in both mirrors. Each
+/// home island has two start sites either side of its middle, and on a map for eight players
+/// two more toward its ends: a 2v2 or a 4v4 fills each team's island, and a 1v1 uses the two
+/// furthest apart, at opposite ends of the two islands.
+pub fn islands(settings: &MapSettings) -> MapData {
+    const WATER_UNITS: i32 = 140;
+    /// How far a home island's shore takes to go down to the sea floor, in cells, whatever the
+    /// map's size: any shorter and it would be too steep to walk down.
+    const SHORE: i32 = 26;
+    /// Shores are worked out in sixteenths of a cell, as a Central Lake's is.
+    const FINE: i32 = 16;
+    assert_eq!(settings.kind, "islands", "{} is not an Islands map", settings.id);
+    let cells = (settings.size_km as i32 * 1024 / TERRAIN_CELL_UNITS) as usize;
+    let mut draft = Draft::new(cells, settings.seed, 300);
+    let (broad, middling, fine) = relief(&settings.terrain);
+    draft.hills(80, broad);
+    draft.hills(24, middling);
+    draft.hills(8, fine);
+    let last = cells as i32;
+    let middle = last / 2;
+    // Sizes are for 20 km, and scale with the map.
+    let scale = |value: i32| value * last / 1024;
+    // A home island: its axis runs north to south, 18.5% of the way in from its end of the map;
+    // at the water's edge it is a quarter of the map wide and 82% of it long, about a fifth of
+    // the map's area. Its level ground stops short of the water's edge by the beach, and on a
+    // small map, where that would leave too little, it is as wide as a base needs.
+    const BEACH: i32 = 20;
+    let axis = last * 185 / 1000;
+    let half_width = (last * 125 / 1000 - BEACH).max(24);
+    let half_length = (last * 41 / 100 - BEACH).max(half_width + 8);
+    // How far from the middle row its sides run before its end rounds off.
+    let straight = half_length - half_width;
+    // Its two long shores, the one facing the map's edge and the one facing the sea between,
+    // wander in and out, smoothly and each its own way, by how far along from the middle row a
+    // sample is: the same north and south of it, and on both islands, so that the map stays
+    // fair. Both are back at the island's plain width where its end rounds off.
+    let sway = scale(16).max(2);
+    let (steps, spacing) = (6, (straight / 6).max(4));
+    let shore_line = |rng: &mut SimRng| {
+        let mut points: Vec<i32> = (0..steps + 2).map(|_| rng.below((sway * FINE) as u32 * 2 + 1) as i32 - sway * FINE).collect();
+        points[steps as usize] = 0;
+        points[steps as usize + 1] = 0;
+        eased(&points, steps * spacing + 1, spacing)
+    };
+    let (outer, inner) = (shore_line(&mut draft.rng), shore_line(&mut draft.rng));
+    // How far outside a home island's shore a sample is, in sixteenths of a cell: less than
+    // nothing on the island.
+    let off_home = |x: i32, y: i32| {
+        // From the island's axis toward the sea between the islands, or, below nothing, toward
+        // its end of the map.
+        let seaward = (middle - axis) - (x - middle).abs();
+        let along = (y - middle).abs();
+        let past = (along - straight).max(0);
+        let line = if seaward >= 0 { &inner } else { &outer };
+        isqrt((seaward * seaward + past * past) * FINE * FINE) - half_width * FINE - line[along.min(steps * spacing) as usize]
+    };
+    let floor = (WATER_UNITS - 50) << HEIGHT_FRAC_BITS;
+    for y in 0..=last {
+        for x in 0..=last {
+            let out = off_home(x, y);
+            let land = if out <= 0 { 256 } else if out < SHORE * FINE { 256 * (SHORE * FINE - out) / (SHORE * FINE) } else { 0 };
+            let height = &mut draft.heights[y as usize * draft.samples + x as usize];
+            *height = ((i32::from(*height) * land + floor * (256 - land)) / 256) as i16;
+        }
+    }
+    // The small islands, low and flat, with shores gentle enough for hovercraft to climb: the
+    // largest in the middle of the map, and the rest scattered over the sea between the home
+    // islands, more of them with less water, each with its images in both mirrors.
+    let (island_rise, island_shore) = (80, 8);
+    // East of this, on the west half, the sea floor is flat.
+    let sea_from = axis + half_width + sway + SHORE;
+    let center_size = scale(34).max(10);
+    let center_island = middle - center_size - island_shore > sea_from;
+    if center_island {
+        draft.disc((middle, middle), center_size, island_shore, island_rise);
+    }
+    let apart = |a: (i32, i32), b: (i32, i32)| isqrt((a.0 - b.0).pow(2) + (a.1 - b.1).pow(2));
+    let wanted_isles = (if settings.water == "lots" { 4 } else { 7 } * last / 1024).max(1) as usize;
+    let mut isles: Vec<((i32, i32), i32)> = Vec::new();
+    for _ in 0..2_000 {
+        if isles.len() == wanted_isles {
+            break;
+        }
+        let size = scale(14 + draft.rng.below(13) as i32).max(6);
+        let reach = size + island_shore + 2;
+        let (west, east, north, south) = (sea_from + reach, middle - reach - 2, reach + 4, middle - reach - 2);
+        if west >= east || north >= south {
+            continue;
+        }
+        let at = (west + draft.rng.below((east - west) as u32) as i32, north + draft.rng.below((south - north) as u32) as i32);
+        let room = 2 * island_shore + scale(20);
+        if apart(at, (middle, middle)) < size + center_size + room || isles.iter().any(|&(other, other_size)| apart(at, other) < size + other_size + room) {
+            continue;
+        }
+        draft.disc_four(at, size, island_shore, island_rise);
+        isles.push((at, size));
+    }
+    // The start sites, on each island's axis: one either side of its middle, and on a map for
+    // eight players another toward each end.
+    let inner_site = (axis, middle - half_length * 30 / 100);
+    let outer_site = (axis, middle - half_length * 72 / 100);
+    let sites: Vec<(i32, i32)> = if settings.players > 4 { vec![inner_site, outer_site] } else { vec![inner_site] };
+    // Outcrops on the home islands, well in from their shores, clear of the start sites, and
+    // never on the strip down an island's axis, which joins its sites whatever else is there.
+    let clear = scale(88).max(30);
+    let outcrops = match settings.terrain.as_str() {
+        "flat" => 0,
+        "rugged" => scale(24),
+        _ => scale(12),
+    };
+    let mut placed = 0;
+    for _ in 0..600 {
+        if placed == outcrops {
+            break;
+        }
+        let cell = (axis - half_width + draft.rng.below(half_width as u32 * 2) as i32, middle - half_length + draft.rng.below(half_length as u32) as i32);
+        if off_home(cell.0, cell.1) > -14 * FINE || (cell.0 - axis).abs() < scale(30).max(12) || sites.iter().any(|&site| chebyshev(cell, site) < clear + 12) {
+            continue;
+        }
+        let (size, height) = (3 + draft.rng.below(6) as i32, 30 + draft.rng.below(40) as i32);
+        draft.disc_four(cell, size, 2, height);
+        placed += 1;
+    }
+    for &site in &sites {
+        for image in draft.images(site) {
+            draft.flatten(image, scale(60).max(22));
+        }
+    }
+    draft.symmetrize_four();
+
+    let blocked = draft.blocked(WATER_UNITS << HEIGHT_FRAC_BITS);
+    let mut layout = Layout { cells: last, blocked: &blocked, deposits: Vec::new(), vents: Vec::new(), scenery: Vec::new() };
+    // Each start site has four deposits, and a vent a short walk away.
+    for &site in &sites {
+        for offset in [(-6, -4), (5, -6), (-4, 7), (7, 5)] {
+            layout.deposit_four((site.0 + offset.0, site.1 + offset.1));
+        }
+        let _ = (0..6).find(|step| layout.vent_four((site.0 + 14 + step * 2, site.1 - 14)));
+    }
+    // The small islands hold the contested deposits: four on the middle one, and one or two on
+    // each of the others, by its size.
+    if center_island {
+        layout.deposit_four((middle - 3, middle - 4));
+    }
+    for &(at, size) in &isles {
+        layout.deposit_four((at.0 - 1, at.1 - 1));
+        if size >= scale(20).max(9) {
+            layout.deposit_four((at.0 + 2, at.1 + 1));
+        }
+    }
+    // Expansions and more vents on the home islands, more or fewer by the map's resources and
+    // size.
+    let (wanted_deposits, wanted_vents) = match settings.resources.as_str() {
+        "sparse" => (4, 0),
+        "rich" => (12, 2),
+        _ => (8, 1),
+    };
+    let by_area = |count: i32| if count == 0 { 0 } else { (count * last / 1024 * last / 1024).max(1) };
+    let site_cells: Vec<(i32, i32)> = sites.iter().flat_map(|&site| layout.images(site)).collect();
+    let near_site = |cell: (i32, i32), cells: i32| site_cells.iter().any(|&site| chebyshev(cell, site) <= cells);
+    // A cell on the west island's north half, somewhere.
+    let somewhere = |rng: &mut SimRng| (axis - half_width + rng.below(half_width as u32 * 2) as i32, middle - half_length + rng.below(half_length as u32) as i32);
+    let ashore = |cell: (i32, i32)| off_home(cell.0, cell.1) < -8 * FINE;
+    let mut expansions = 0;
+    for _ in 0..4_000 {
+        if expansions == by_area(wanted_deposits) {
+            break;
+        }
+        let cell = somewhere(&mut draft.rng);
+        if !ashore(cell) || near_site(cell, 22) || layout.near_deposit(cell, 14) {
+            continue;
+        }
+        if layout.deposit_four(cell) {
+            expansions += 1;
+            if draft.rng.below(2) == 0 {
+                layout.deposit_four((cell.0 + 2, cell.1 + 1));
+            }
+        }
+    }
+    let mut vents = 0;
+    for _ in 0..2_000 {
+        if vents == by_area(wanted_vents) {
+            break;
+        }
+        let cell = somewhere(&mut draft.rng);
+        if ashore(cell) && !near_site(cell, 24) && layout.vent_four(cell) {
+            vents += 1;
+        }
+    }
+    // Rock fields and woods on the home islands.
+    let amount = match settings.reclaim.as_str() {
+        "none" => 0,
+        "lots" => 2,
+        _ => 1,
+    };
+    let map = draft.map_units();
+    let away = |cell: (i32, i32)| near_site(cell, 26);
+    for (kind, groups, per_group, spread) in [(WreckKind::Rock, by_area(12) * amount, 14, 120), (WreckKind::Tree, by_area(20) * amount, 16, 110)] {
+        let mut made = 0;
+        for _ in 0..groups * 20 {
+            if made == groups {
+                break;
+            }
+            let cell = somewhere(&mut draft.rng);
+            if ashore(cell) {
+                layout.clump_four(&mut draft.rng, kind, cell_point(cell), per_group, spread, &away);
+                made += 1;
+            }
+        }
+    }
+    // Starts stand in the middle of a cell, as on the other kinds. A site's four images: on the
+    // west island or the east, and on its north half or its south.
+    let full = fp_int(map);
+    let at = |site: (i32, i32), east: bool, south: bool| {
+        let low = cell_point(site);
+        Vec2Fp::new(if east { full - low.x } else { low.x }, if south { low.y } else { full - low.y })
+    };
+    // The first team's in the west, the second's in the east, each island's from north to south.
+    let mut layouts = Vec::new();
+    if settings.players >= 4 {
+        layouts.push(vec![at(inner_site, false, false), at(inner_site, false, true), at(inner_site, true, false), at(inner_site, true, true)]);
+    }
+    if settings.players > 4 {
+        let island = |east: bool| [at(outer_site, east, false), at(inner_site, east, false), at(inner_site, east, true), at(outer_site, east, true)];
+        layouts.push(island(false).into_iter().chain(island(true)).collect());
+    }
+    // A 1v1 uses the two sites furthest apart: one at the far end of each island.
+    let far = *sites.last().expect("a map has a start site");
+    let starts = [at(far, false, false), at(far, true, true)];
+    let (deposits, vents, scenery) = (layout.deposits, layout.vents, layout.scenery);
+    MapData { name: settings.id.clone(), map_units: map, heights: draft.heights, blocked, water_level: fp_int(WATER_UNITS), deposits, vents, starts, layouts, scenery }
+}
+
 /// A map turned a quarter turn, north to west: a point (x, y) goes to (width - y, x).
 fn quarter_turn(map: MapData) -> MapData {
     let cells = (map.map_units / TERRAIN_CELL_UNITS) as usize;
@@ -988,24 +1236,30 @@ mod tests {
     use super::*;
     use std::collections::VecDeque;
 
-    /// Whether land units can walk from one cell to another, around blocked ground.
-    fn connected(map: &MapData, from: (usize, usize), to: (usize, usize)) -> bool {
-        let cells = (map.map_units / TERRAIN_CELL_UNITS) as usize;
+    /// Every cell that can be reached from one, over cells that are `open`.
+    fn reached(cells: usize, open: impl Fn(usize) -> bool, from: (usize, usize)) -> Vec<bool> {
         let mut seen = vec![false; cells * cells];
         let mut queue = VecDeque::from([from]);
         seen[from.1 * cells + from.0] = true;
         while let Some((x, y)) = queue.pop_front() {
-            if (x, y) == to {
-                return true;
-            }
             for (nx, ny) in [(x.wrapping_sub(1), y), (x + 1, y), (x, y.wrapping_sub(1)), (x, y + 1)] {
-                if nx < cells && ny < cells && !seen[ny * cells + nx] && !map.blocked[ny * cells + nx] {
+                if nx < cells && ny < cells && !seen[ny * cells + nx] && open(ny * cells + nx) {
                     seen[ny * cells + nx] = true;
                     queue.push_back((nx, ny));
                 }
             }
         }
-        false
+        seen
+    }
+
+    /// Every cell land units can walk to from one, around blocked ground.
+    fn walked(map: &MapData, from: (usize, usize)) -> Vec<bool> {
+        reached((map.map_units / TERRAIN_CELL_UNITS) as usize, |cell| !map.blocked[cell], from)
+    }
+
+    /// Whether land units can walk from one cell to another, around blocked ground.
+    fn connected(map: &MapData, from: (usize, usize), to: (usize, usize)) -> bool {
+        walked(map, from)[to.1 * (map.map_units / TERRAIN_CELL_UNITS) as usize + to.0]
     }
 
     fn cell_of(map: &MapData, point: Vec2Fp) -> (usize, usize) {
@@ -1014,7 +1268,15 @@ mod tests {
         (cell(point.x), cell(point.y))
     }
 
+    /// A map whose 1v1 starts are joined by land, as on every kind but Islands.
     fn check(map: &MapData) {
+        check_turned(map);
+        assert!(connected(map, cell_of(map, map.starts[0]), cell_of(map, map.starts[1])), "the starts must be joined by land");
+    }
+
+    /// What every map is: its own image turned about its center, with its deposits and vents on
+    /// open ground and its 1v1 starts each other's image.
+    fn check_turned(map: &MapData) {
         let cells = (map.map_units / TERRAIN_CELL_UNITS) as usize;
         assert_eq!(map.heights.len(), (cells + 1) * (cells + 1));
         // It turns into itself about the center: heights, blocked cells, deposits, and starts.
@@ -1037,10 +1299,9 @@ mod tests {
         }
         let full = fp_int(map.map_units);
         assert_eq!(map.starts[1], Vec2Fp::new(full - map.starts[0].x, full - map.starts[0].y), "the starts mirror");
-        // Each start is open, and the two are joined by land.
+        // Each start is open.
         let (blue, red) = (cell_of(map, map.starts[0]), cell_of(map, map.starts[1]));
         assert!(!map.blocked[blue.1 * cells + blue.0] && !map.blocked[red.1 * cells + red.0]);
-        assert!(connected(map, blue, red), "the starts must be joined by land");
         assert!(map.deposits.len() >= 30, "{} deposits", map.deposits.len());
     }
 
@@ -1065,10 +1326,11 @@ mod tests {
         (map.deposits.iter().filter(within).count(), map.vents.iter().filter(within).count())
     }
 
-    /// A map for four players is its own image in both mirrors, across the middle column and
-    /// the middle row: its ground, what blocks it, and its deposits and vents. It has four team
-    /// starts, two a side, the first team's in the west, each the others' image, and each start
-    /// in a set has the same deposits and vents within reach.
+    /// A map for four players or more is its own image in both mirrors, across the middle column
+    /// and the middle row: its ground, what blocks it, and its deposits and vents. It has four
+    /// team starts, two a side, the first team's in the west, each the others' image, and each
+    /// start in a set has the same deposits and vents within reach. Where it has starts for more
+    /// players, each team's have the same shares between them as the other's.
     fn check_four(map: &MapData) {
         let cells = (map.map_units / TERRAIN_CELL_UNITS) as usize;
         let (samples, last) = (cells + 1, cells);
@@ -1088,9 +1350,7 @@ mod tests {
             let mirror = (cells as u32 - 1 - x, y);
             assert!(map.deposits.contains(&mirror) || map.vents.contains(&mirror), "{x}, {y} has no mirror image");
         }
-        assert_eq!(map.layouts.len(), 1);
-        let team = &map.layouts[0];
-        assert_eq!(team.len(), 4);
+        let team = map.layouts.iter().find(|layout| layout.len() == 4).expect("starts for four players");
         let full = fp_int(map.map_units);
         assert_eq!(team[1], Vec2Fp::new(team[0].x, full - team[0].y));
         assert_eq!(team[2], Vec2Fp::new(full - team[0].x, team[0].y));
@@ -1103,6 +1363,16 @@ mod tests {
             for &start in &set {
                 assert_eq!(near(map, start, 1_500), first, "a start has a different share");
             }
+        }
+        for layout in &map.layouts {
+            let shares = |team: &[Vec2Fp]| {
+                let mut shares: Vec<(usize, usize)> = team.iter().map(|&start| near(map, start, 1_500)).collect();
+                shares.sort_unstable();
+                shares
+            };
+            let (first, second) = layout.split_at(layout.len() / 2);
+            assert!(first.iter().all(|start| start.x < full / 2) && second.iter().all(|start| start.x > full / 2), "the first team is in the west, the second in the east");
+            assert_eq!(shares(first), shares(second), "the teams of {} have different shares", layout.len() / 2);
         }
     }
 
@@ -1188,14 +1458,13 @@ mod tests {
         let cells = (map.map_units / TERRAIN_CELL_UNITS) as usize;
         let middle = cells / 2;
         let every: Vec<Vec2Fp> = map.starts.iter().chain(map.layouts.iter().flatten()).copied().collect();
-        for &from in &every {
-            for &to in &every {
-                assert!(connected(map, cell_of(map, from), cell_of(map, to)), "{from:?} cannot reach {to:?} by land");
-            }
+        let ring = walked(map, cell_of(map, map.starts[0]));
+        let on_ring = |(x, y): (usize, usize)| ring[y * cells + x];
+        for &start in &every {
+            assert!(on_ring(cell_of(map, start)), "{start:?} cannot be reached from the first start by land");
         }
         // The islands: deposits on open ground that no start reaches by land.
-        let home = cell_of(map, map.starts[0]);
-        let on_islands: Vec<(u32, u32)> = map.deposits.iter().copied().filter(|&(x, y)| !connected(map, home, (x as usize, y as usize))).collect();
+        let on_islands: Vec<(u32, u32)> = map.deposits.iter().copied().filter(|&(x, y)| !on_ring((x as usize, y as usize))).collect();
         assert!(on_islands.len() >= 8, "{} deposits on islands in the lake", on_islands.len());
         assert!(on_islands.len() * 4 <= map.deposits.len(), "most deposits are on the ring: {} of {} are not", on_islands.len(), map.deposits.len());
         // Ships sail the lake: from beside the middle island out toward every side.
@@ -1266,6 +1535,107 @@ mod tests {
                 let (share, neck) = check_lake(&map);
                 assert!((12..=45).contains(&share), "{label}: the lake is {share}% of the map");
                 assert!(neck >= 20, "{label}: the land north of the lake is {neck} cells wide");
+                let full = fp_int(map.map_units);
+                assert_eq!(map.starts[1], Vec2Fp::new(full - map.starts[0].x, full - map.starts[0].y), "{label}: the starts mirror");
+                assert_eq!(near(&map, map.starts[0], 1_500), near(&map, map.starts[1], 1_500), "{label}: the starts have the same share");
+                assert!(near(&map, map.starts[0], 1_500).0 >= 4 && near(&map, map.starts[0], 1_500).1 >= 1, "{label}: a start has deposits and a vent");
+                if players >= 4 {
+                    check_four(&map);
+                }
+            }
+        }
+    }
+
+    /// What an Islands map is, whatever its settings: a home island at each end, with every
+    /// start of a team on its own and no land route to the other; a sea between that ships
+    /// cross, and hovercraft and seabed walkers too; and small islands in it with deposits no
+    /// home island reaches by land. Returns the share of the map that is land, in hundredths,
+    /// how many deposits the small islands hold, and whether ships can sail behind a home island.
+    fn check_isles(map: &MapData) -> (usize, usize, bool) {
+        use crate::sim::components::MoveClass;
+        let cells = (map.map_units / TERRAIN_CELL_UNITS) as usize;
+        let full = fp_int(map.map_units);
+        let every: Vec<Vec2Fp> = map.starts.iter().chain(map.layouts.iter().flatten()).copied().collect();
+        let (west, east) = (walked(map, cell_of(map, map.starts[0])), walked(map, cell_of(map, map.starts[1])));
+        let at = |(x, y): (usize, usize)| y * cells + x;
+        assert!(map.starts[0].x < full / 2 && map.starts[1].x > full / 2, "Blue starts in the west and Red in the east");
+        for &start in &every {
+            let (home, away) = if start.x < full / 2 { (&west, &east) } else { (&east, &west) };
+            assert!(home[at(cell_of(map, start))], "{start:?} is on its team's home island");
+            assert!(!away[at(cell_of(map, start))], "{start:?} has no land route to the other island");
+        }
+        let terrain = crate::sim::terrain::Terrain::from_heights(map.map_units, map.heights.clone(), &map.blocked, map.water_level);
+        let open_to = |class: MoveClass, cell: usize| terrain.passable_for(class, cell_point(((cell % cells) as i32, (cell / cells) as i32)));
+        // Ships: from the first water deep enough for them east of Blue's start, to the first
+        // west of Red's, and from the same row at the map's west edge, behind Blue's island.
+        let sails = |cell: usize| open_to(MoveClass::Naval, cell);
+        let (blue, red) = (cell_of(map, map.starts[0]), cell_of(map, map.starts[1]));
+        let blue_sea = (blue.0..cells).find(|&x| sails(at((x, blue.1)))).expect("sea east of Blue's island");
+        let red_sea = (0..red.0).rev().find(|&x| sails(at((x, red.1)))).expect("sea west of Red's island");
+        let sailed = reached(cells, sails, (blue_sea, blue.1));
+        assert!(sailed[at((red_sea, red.1))], "ships cross from one home island to the other");
+        let behind = (0..blue.0).any(|x| sailed[at((x, blue.1))]);
+        // Hovercraft and seabed walkers go from start to start.
+        assert!(reached(cells, |cell| open_to(MoveClass::Hover, cell), blue)[at(red)], "hovercraft cross from start to start");
+        // The small islands' deposits: on open ground no home island reaches by land.
+        let on_isles = map.deposits.iter().filter(|&&(x, y)| !west[at((x as usize, y as usize))] && !east[at((x as usize, y as usize))]).count();
+        assert!(on_isles >= 4, "{on_isles} deposits on the small islands");
+        assert!(on_isles * 2 <= map.deposits.len(), "the home islands hold most deposits: {on_isles} of {} are not on them", map.deposits.len());
+        let land = wet(map).iter().filter(|&&wet| !wet).count() * 100 / (cells * cells);
+        (land, on_isles, behind)
+    }
+
+    #[test]
+    fn scattered_isles_is_two_home_islands_across_a_sea_of_small_ones() {
+        let map = scattered_isles();
+        check_turned(&map);
+        check_four(&map);
+        assert_eq!(map, scattered_isles(), "the same every time");
+        assert_eq!(bundled("scattered_isles").as_ref(), Some(&map));
+        assert_eq!(map.map_units, 20 * 1024);
+        let (land, on_isles, behind) = check_isles(&map);
+        assert!((35..=50).contains(&land), "{land}% of the map is land, about a fifth of it each home island");
+        assert!(on_isles >= 30, "{on_isles} deposits on the small islands");
+        assert!(behind, "ships sail all the way round a home island");
+        // Starts for four players and for eight, four to an island: a 1v1 uses the two at
+        // opposite far ends, and a 2v2 the two either side of each island's middle.
+        assert_eq!(map.layouts.iter().map(Vec::len).collect::<Vec<_>>(), [4, 8]);
+        let (four, eight) = (&map.layouts[0], &map.layouts[1]);
+        assert_eq!(map.starts, [eight[0], eight[7]]);
+        assert_eq!(four[..], [eight[1], eight[2], eight[5], eight[6]]);
+        let full = fp_int(map.map_units);
+        let from_middle = |start: &Vec2Fp| (start.y - full / 2).abs();
+        assert!(eight.iter().all(|start| from_middle(start) <= from_middle(&map.starts[0])), "the 1v1 starts are the furthest from the middle row");
+    }
+
+    /// The generator makes a fair Islands map from any settings the game offers.
+    #[test]
+    fn every_islands_map_is_fair_and_has_no_land_route_between_its_home_islands() {
+        for (size_km, players) in [(5, 2), (10, 4), (20, 8)] {
+            for (index, (water, terrain, resources)) in [("some", "flat", "sparse"), ("lots", "hilly", "normal"), ("some", "rugged", "rich")].into_iter().enumerate() {
+                // The largest maps take longest to make, so fewer of them are tried.
+                if size_km == 20 && index != 1 {
+                    continue;
+                }
+                let settings = MapSettings {
+                    id: "generated".into(),
+                    name: "Generated".into(),
+                    kind: "islands".into(),
+                    size_km,
+                    players,
+                    seed: 11 + index as u64 * 1_001 + u64::from(size_km),
+                    resources: resources.into(),
+                    reclaim: "some".into(),
+                    terrain: terrain.into(),
+                    valleys: 0,
+                    water: water.into(),
+                };
+                let map = generate(&settings);
+                let label = format!("{size_km} km, {water} water, {terrain}, seed {}", settings.seed);
+                assert_eq!(map.map_units, size_km as i32 * 1024, "{label}");
+                assert_eq!(map.layouts.iter().map(Vec::len).collect::<Vec<_>>(), [4, 8][..(players as usize / 4).min(2)], "{label}");
+                let (land, ..) = check_isles(&map);
+                assert!((25..=55).contains(&land), "{label}: {land}% of the map is land");
                 let full = fp_int(map.map_units);
                 assert_eq!(map.starts[1], Vec2Fp::new(full - map.starts[0].x, full - map.starts[0].y), "{label}: the starts mirror");
                 assert_eq!(near(&map, map.starts[0], 1_500), near(&map, map.starts[1], 1_500), "{label}: the starts have the same share");
