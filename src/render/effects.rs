@@ -252,8 +252,9 @@ impl Effects {
     /// Starts what the latest snapshot shows has happened since the one before: shells and
     /// missiles that have hit, and units that have died. Call every frame; each snapshot is
     /// looked at once. `ground` gives the ground's height at a point, so that what lands on it
-    /// leaves a mark, and `water` the water's height, under which nothing is marked.
-    pub fn note_events(&mut self, previous: &SimSnapshot, current: &SimSnapshot, time: f64, ground: &dyn Fn(f64, f64) -> f64, water: Option<f64>) {
+    /// leaves a mark, and `water` the water's height, under which nothing is marked. `looks`
+    /// says where each unit's laser turrets are drawn, for drawing a beam from the right one.
+    pub fn note_events(&mut self, previous: &SimSnapshot, current: &SimSnapshot, time: f64, ground: &dyn Fn(f64, f64) -> f64, water: Option<f64>, looks: &[UnitLook]) {
         // The ground under a point, if a blast there would mark it.
         let marks = |at: [f64; 3], reach: f64| {
             let height = ground(at[0], at[1]);
@@ -307,7 +308,11 @@ impl Effects {
             if self.beams.len() >= MAX_BEAMS {
                 self.beams.pop_front();
             }
-            self.beams.push_back(LaserBeam { from: raw_point(from[0], from[1], from[2]), to, born: arrival, color: team.map(|channel| channel + (1.0 - channel) * LASER_WHITEN) });
+            // From the lens of the turret that fired it, if its unit is in sight.
+            let from = raw_point(from[0], from[1], from[2]);
+            let shooter = current.units.binary_search_by_key(&struck.source, |unit| unit.id).ok().map(|index| &current.units[index]);
+            let from = shooter.and_then(|unit| looks.get(usize::from(unit.blueprint)).map(|look| super::instances::laser_muzzle(look, unit, from, to))).unwrap_or(from);
+            self.beams.push_back(LaserBeam { from, to, born: arrival, color: team.map(|channel| channel + (1.0 - channel) * LASER_WHITEN) });
             self.explode(to, 3.0, arrival, u64::from(struck.id.0));
         }
         // A unit that dies leaves a wreck where it stood. One that only goes out of sight does not,
@@ -594,7 +599,7 @@ mod tests {
         after.landed = vec![struck];
         let mut effects = Effects::new();
         // At tick 1's time, the shell is still on its way to tick 2.
-        effects.note_events(&before, &after, 0.1, &|_, _| 0.0, None);
+        effects.note_events(&before, &after, 0.1, &|_, _| 0.0, None, &[]);
         assert_eq!(count(&mut effects, 0.15, Shape::Fireball), 0, "not before it gets there");
         let mut out = InstanceBatches::default();
         effects.build(0.21, [0.0; 3], &mut out);
@@ -614,8 +619,8 @@ mod tests {
         before.projectiles = vec![shell(5, ProjectileKind::Shell)];
         let after = snapshot(2);
         let mut effects = Effects::new();
-        effects.note_events(&before, &after, 0.0, &|_, _| 0.0, None);
-        effects.note_events(&before, &after, 0.01, &|_, _| 0.0, None);
+        effects.note_events(&before, &after, 0.0, &|_, _| 0.0, None, &[]);
+        effects.note_events(&before, &after, 0.01, &|_, _| 0.0, None, &[]);
         assert_eq!(count(&mut effects, 0.01, Shape::Fireball), 1, "one hit, however many frames show it");
         assert_eq!(count(&mut effects, 5.0, Shape::Fireball), 0, "and it burns out");
         assert!(effects.is_empty());
@@ -629,7 +634,7 @@ mod tests {
         bomb.z = 4096;
         before.projectiles = vec![bomb];
         let mut effects = Effects::new();
-        effects.note_events(&before, &snapshot(2), 0.0, &|_, _| 0.0, None);
+        effects.note_events(&before, &snapshot(2), 0.0, &|_, _| 0.0, None, &[]);
         let mut out = InstanceBatches::default();
         effects.build(0.0, [0.0; 3], &mut out);
         let fireball = out.shape(Shape::Fireball)[0];
@@ -669,13 +674,13 @@ mod tests {
                 let mut after = snapshot(2);
                 if dies {
                     after.blasts = vec![crate::sim::world::BlastView { team: Team::Red, x: 0, y: 0, radius: radius.to_bits() }];
-                    effects.note_events(&before, &after, 0.0, &|_, _| 0.0, None);
+                    effects.note_events(&before, &after, 0.0, &|_, _| 0.0, None, &[]);
                 } else {
                     let mut before = before;
                     let mut bomb = shell(5, ProjectileKind::Shell);
                     bomb.splash = radius.to_bits();
                     before.projectiles = vec![bomb];
-                    effects.note_events(&before, &after, 0.0, &|_, _| 0.0, None);
+                    effects.note_events(&before, &after, 0.0, &|_, _| 0.0, None, &[]);
                 }
                 let across = radius.to_num::<f32>() * 2.0;
                 let width = widest_fireball(&mut effects);
@@ -695,7 +700,7 @@ mod tests {
         after.wrecks = vec![WreckView { id: SimId(9), x: 4096 * 50, y: 4096 * 50, z: 0, radius: 4096 * 3, mass: 1, energy: 0, kind: WreckKind::Debris }];
         before.units[1].x = 4096 * 900;
         let mut effects = Effects::new();
-        effects.note_events(&before, &after, 0.0, &|_, _| 0.0, None);
+        effects.note_events(&before, &after, 0.0, &|_, _| 0.0, None, &[]);
         assert_eq!(count(&mut effects, 0.01, Shape::Fireball), 1);
     }
 
@@ -712,12 +717,12 @@ mod tests {
         let mut after = snapshot(2);
         after.wrecks = vec![wreck, stranger];
         let mut effects = Effects::new();
-        effects.note_events(&before, &after, 0.0, &|_, _| 0.0, None);
+        effects.note_events(&before, &after, 0.0, &|_, _| 0.0, None, &[]);
         assert_eq!(effects.wreck_origin(SimId(9)), Some((7, [1.0, 0.0])));
         assert_eq!(effects.wreck_origin(SimId(10)), None, "no unit died there");
         let mut later = snapshot(3);
         later.wrecks = vec![stranger];
-        effects.note_events(&after, &later, 1.0, &|_, _| 0.0, None);
+        effects.note_events(&after, &later, 1.0, &|_, _| 0.0, None, &[]);
         assert_eq!(effects.wreck_origin(SimId(9)), None, "reclaimed");
     }
 
@@ -735,7 +740,7 @@ mod tests {
         before.projectiles = vec![shell(5, ProjectileKind::Shell), high];
         let after = snapshot(2);
         let mut effects = Effects::new();
-        effects.note_events(&before, &after, 0.0, &|_, _| 3.0, None);
+        effects.note_events(&before, &after, 0.0, &|_, _| 3.0, None, &[]);
         let marks = scars(&mut effects, 1.0);
         assert_eq!(marks.len(), 1, "only the shell near the ground marks it");
         assert_eq!(marks[0].color[0], 1.0, "a crater");
@@ -751,7 +756,7 @@ mod tests {
         beside.x += 4096;
         before.projectiles = vec![shell(5, ProjectileKind::Shell), beside];
         let mut effects = Effects::new();
-        effects.note_events(&before, &snapshot(2), 0.0, &|_, _| 3.0, None);
+        effects.note_events(&before, &snapshot(2), 0.0, &|_, _| 3.0, None, &[]);
         assert_eq!(scars(&mut effects, 1.0).len(), 1);
     }
 
@@ -760,7 +765,7 @@ mod tests {
         let mut before = snapshot(1);
         before.projectiles = vec![shell(5, ProjectileKind::Shell)];
         let mut effects = Effects::new();
-        effects.note_events(&before, &snapshot(2), 0.0, &|_, _| -10.0, Some(0.0));
+        effects.note_events(&before, &snapshot(2), 0.0, &|_, _| -10.0, Some(0.0), &[]);
         assert!(scars(&mut effects, 1.0).is_empty());
     }
 

@@ -2052,6 +2052,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                         scene_instances.clear();
                         motion.time = (f64::from(previous.tick) + alpha) * TICK_DURATION.as_secs_f64();
                         motion.note_shots(&previous.projectiles, &current.projectiles);
+                        motion.note_beams(&current.landed, &current.units, &looks);
                         instances::build_unit_instances(&previous.units, &current.units, alpha, eye, selection.selected(), &looks, &current.work_links, &mut motion, &mut scene_instances);
                         let drawn_units_and_shells = {
                             let units = scene_instances.total();
@@ -2059,7 +2060,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                             units + current.projectiles.len()
                         };
                         // Explosions, missile trails, and wakes, made from the snapshots alone.
-                        effects.note_events(previous, current, motion.time, &|x, y| map.heights.height_at(x, y), (map.water_level > -1.0e5).then_some(f64::from(map.water_level)));
+                        effects.note_events(previous, current, motion.time, &|x, y| map.heights.height_at(x, y), (map.water_level > -1.0e5).then_some(f64::from(map.water_level)), &looks);
                         effects.trail(previous, current, alpha, &looks, Some(f64::from(map.water_level)), motion.time);
                         effects.build(motion.time, eye, &mut scene_instances);
                         // Builders' beams and adjacency wiring are in the world, and only up close:

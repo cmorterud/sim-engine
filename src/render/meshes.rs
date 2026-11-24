@@ -1246,6 +1246,40 @@ impl MeshBuilder {
         });
     }
 
+    /// A SAM launcher's turntable and its raised rack of four missiles, side by side, standing
+    /// with the middle of its foot at `foot`, at `scale` of the launcher's own. The SAM Launcher
+    /// is one of these on its outriggers, and a ship with the same missiles carries the same rack.
+    fn sam_rack(&mut self, foot: [f32; 3], scale: f32) {
+        let at = |x: f32, y: f32, z: f32| [foot[0] + x * scale, foot[1] + y * scale, foot[2] + (z + 0.1) * scale];
+        let point = |x: f32, y: f32, z: f32| Vec3::from(at(x, y, z));
+        self.paint(Material::Trim);
+        self.bevel(at(-0.2, -0.26, -0.1), at(0.2, 0.08, 0.1), 0.03 * scale);
+        self.cuboid(
+            [point(-0.36, -0.24, 0.04), point(0.36, -0.24, 0.04), point(0.36, -0.16, 0.0), point(-0.36, -0.16, 0.0)],
+            [point(-0.36, 0.2, 0.36), point(0.36, 0.2, 0.36), point(0.36, 0.28, 0.32), point(-0.36, 0.28, 0.32)],
+        );
+        for x in [-0.27_f32, -0.09, 0.09, 0.27] {
+            let station = |y: f32, half: f32, z: f32| [foot[1] + y * scale, half * scale, half * scale, foot[2] + (z + 0.1) * scale];
+            self.paint(Material::Hull);
+            self.body(foot[0] + x * scale, &[station(-0.26, 0.05, 0.11), station(0.2, 0.05, 0.41)], 6);
+            self.paint(Material::Glow);
+            self.body(foot[0] + x * scale, &[station(0.2, 0.05, 0.41), station(0.3, 0.0, 0.475)], 6);
+        }
+    }
+
+    /// A ship's anti-torpedo charges: a rack either side of the middle, `gap` out, from `y` forward,
+    /// standing on `z`, each under a team-colored cap. `unit` is one world unit on this hull, so
+    /// that the racks are the same size on every ship that carries them.
+    fn torpedo_charge_racks(&mut self, y: f32, z: f32, unit: f32, gap: f32) {
+        for side in [-1.0_f32, 1.0] {
+            let x = side * gap * unit;
+            self.paint(Material::Metal);
+            self.block([x - 1.2 * unit, y, z], [x + 1.2 * unit, y + 4.3 * unit, z + 3.0 * unit]);
+            self.paint(Material::Trim);
+            self.block([x - 1.4 * unit, y + 1.5 * unit, z + 3.0 * unit], [x + 1.4 * unit, y + 2.8 * unit, z + 3.6 * unit]);
+        }
+    }
+
     /// The tactical missile defense's mount, standing on `foot`, its dome `width` across: a collar,
     /// a column, and a white dome over a team-colored band, with a short gun out of its face. The
     /// same on everything that carries one, the land structure and each ship, so that it is known
@@ -1984,6 +2018,8 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.body(x, &[[-0.46, 0.03, 0.03, -0.19], [-0.2, 0.03, 0.03, -0.19]], 6);
             }
             mesh.frustum([0.0, -0.26], [-0.06, 0.2], [0.015, 0.01], 6);
+            // Its anti-torpedo charges: a rack on the cabin roof either side of the mast.
+            mesh.torpedo_charge_racks(-0.36, -0.06, 1.0 / 24.0, 1.8);
             // A team-colored chevron on the foredeck, pointing ahead.
             mesh.paint(Material::Trim);
             mesh.prism(&[[-0.142, -0.042], [0.0, 0.092], [0.0, 0.375]], [-0.2, -0.15], [1.0, 1.0]);
@@ -2440,20 +2476,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.moving(motion::RECOIL, [0.0, -0.02, 0.1], |mesh| mesh.beam([0.0, -0.02, 0.1], [0.0, 0.3, 0.38], 0.095, 0.095));
             mesh.flash([0.0, 0.32, 0.4], 0.08);
         }
-        // A turntable carrying a raised rack of four missiles, side by side.
-        Shape::SamLauncher => {
-            mesh.bevel([-0.2, -0.26, -0.1], [0.2, 0.08, 0.1], 0.03);
-            mesh.cuboid(
-                [Vec3::new(-0.36, -0.24, 0.04), Vec3::new(0.36, -0.24, 0.04), Vec3::new(0.36, -0.16, 0.0), Vec3::new(-0.36, -0.16, 0.0)],
-                [Vec3::new(-0.36, 0.2, 0.36), Vec3::new(0.36, 0.2, 0.36), Vec3::new(0.36, 0.28, 0.32), Vec3::new(-0.36, 0.28, 0.32)],
-            );
-            for x in [-0.27_f32, -0.09, 0.09, 0.27] {
-                mesh.paint(Material::Hull);
-                mesh.body(x, &[[-0.26, 0.05, 0.05, 0.11], [0.2, 0.05, 0.05, 0.41]], 6);
-                mesh.paint(Material::Glow);
-                mesh.body(x, &[[0.2, 0.05, 0.05, 0.41], [0.3, 0.0, 0.0, 0.475]], 6);
-            }
-        }
+        Shape::SamLauncher => mesh.sam_rack([0.0, 0.0, -0.1], 1.0),
         // A long barrel laid nearly flat, half the plot's width out from a housing at its back to
         // its edge, with a muzzle brake, and an ammunition box behind.
         Shape::ArtilleryGun => {
@@ -2491,8 +2514,10 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Trim);
             mesh.bevel([-0.05, -0.06, -0.02], [0.05, 0.03, 0.06], 0.02);
             mesh.paint(Material::Metal);
-            mesh.frustum([0.0, -0.1], [-0.02, 0.36], [0.016, 0.01], 6);
-            mesh.block([-0.06, -0.12, 0.26], [0.06, -0.1, 0.28]);
+            mesh.frustum([0.0, -0.015], [0.06, 0.38], [0.016, 0.01], 6);
+            mesh.block([-0.06, -0.025, 0.28], [0.06, -0.005, 0.3]);
+            // Its anti-air: the anti-air gun, on the deckhouse behind the bridge.
+            mesh.anti_air_gun([0.0, -0.14, -0.02], SHIP_ANTI_AIR_SIZE / 28.0);
             // A team-colored helipad on the stern.
             mesh.paint(Material::Trim);
             mesh.frustum([0.0, -0.345], [-0.2, -0.19], [0.09, 0.09], 12);
@@ -2507,24 +2532,23 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.bevel([-0.055, -0.15, -0.2], [0.055, 0.17, -0.03], 0.025);
             mesh.paint(Material::Trim);
             mesh.bevel([-0.045, 0.06, -0.03], [0.045, 0.16, 0.07], 0.02);
-            mesh.paint(Material::Hull);
-            mesh.frustum([0.0, -0.02], [-0.03, 0.08], [0.03, 0.026], 8);
+            // Its anti-air: the anti-air gun, on the deckhouse behind the bridge.
+            mesh.anti_air_gun([0.0, -0.04, -0.03], SHIP_ANTI_AIR_SIZE / 46.0);
             mesh.paint(Material::Metal);
-            mesh.frustum([0.0, 0.04], [0.07, 0.42], [0.015, 0.009], 6);
-            mesh.block([-0.06, 0.03, 0.32], [0.06, 0.05, 0.34]);
+            mesh.frustum([0.0, 0.11], [0.07, 0.42], [0.015, 0.009], 6);
+            mesh.block([-0.06, 0.1, 0.32], [0.06, 0.12, 0.34]);
             // A big raked funnel behind the tower: a fast ship, low and lean.
             mesh.paint(Material::Hull);
             mesh.beam([0.0, -0.1, -0.06], [0.0, -0.17, 0.16], 0.038, 0.05);
             mesh.paint(Material::Metal);
             mesh.beam([0.0, -0.165, 0.15], [0.0, -0.172, 0.17], 0.033, 0.044);
-            // A second funnel behind the first, and depth charge racks down the stern.
+            // A second funnel behind the first, and its anti-torpedo charges in racks at the stern.
             mesh.paint(Material::Hull);
             mesh.beam([0.0, -0.21, -0.08], [0.0, -0.27, 0.11], 0.032, 0.042);
             mesh.paint(Material::Metal);
             mesh.beam([0.0, -0.266, 0.1], [0.0, -0.272, 0.12], 0.028, 0.037);
-            for x in [-0.04_f32, 0.04] {
-                mesh.block([x - 0.012, -0.49, -0.2], [x + 0.012, -0.44, -0.17]);
-            }
+            mesh.torpedo_charge_racks(-0.49, -0.2, 1.0 / 46.0, 2.0);
+            mesh.paint(Material::Metal);
             // Torpedo tubes either side, behind the tower.
             for x in [-0.058_f32, 0.058] {
                 mesh.beam([x, -0.33, -0.17], [x, -0.23, -0.17], 0.013, 0.013);
@@ -2537,8 +2561,10 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.hull(&side(&[[0.105, -0.5], [0.125, -0.2]], [0.125, 0.2], [0.09, 0.4], 4), 0.08);
             mesh.paint(Material::Hull);
             mesh.bevel([-0.09, -0.2, -0.2], [0.09, 0.07, 0.0], 0.035);
-            // Missile cells: team-colored decks with dark hatches.
-            for (y0, y1, z) in [(0.12_f32, 0.28_f32, -0.16_f32), (-0.44, -0.26, -0.2)] {
+            // Its anti-air missiles: the SAM launcher's rack, on the quarterdeck.
+            mesh.sam_rack([0.0, -0.36, -0.2], SHIP_SAM_SIZE / 40.0);
+            // Its cruise missiles: cells under dark hatches in a team-colored deck, forward.
+            for (y0, y1, z) in [(0.12_f32, 0.28_f32, -0.16_f32)] {
                 mesh.paint(Material::Trim);
                 mesh.block([-0.075, y0, z], [0.075, y1, z + 0.03]);
                 mesh.paint(Material::Metal);
@@ -2564,7 +2590,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.paint(Material::Metal);
                 mesh.frustum([x, 0.0], [-0.21, -0.1], [0.03, 0.025], 6);
                 mesh.paint(Material::Trim);
-                mesh.ball([x, 0.0, -0.04], 0.08, 10, 6);
+                mesh.ball([x, 0.0, -0.04], 0.08, 7, 4);
             }
             mesh.paint(Material::Metal);
             mesh.frustum([0.0, -0.12], [0.0, 0.4], [0.016, 0.011], 6);
@@ -2591,7 +2617,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.block([-0.06, -0.07, 0.34], [0.06, -0.05, 0.36]);
             // Its anti-air: the T1 anti-air gun, one each side of the tower.
             for x in [-0.14_f32, 0.14] {
-                mesh.anti_air_gun([x, -0.1, -0.2], 0.17);
+                mesh.anti_air_gun([x, -0.1, -0.2], SHIP_ANTI_AIR_SIZE / 92.0);
             }
             // Its tactical missile defense: the fleet's mount, one each side of the tower's top.
             for x in [-0.05_f32, 0.05] {
@@ -2641,13 +2667,8 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                     mesh.beam([x + tube, -0.02, -0.152], [x + tube, 0.07, -0.152], 0.01, 0.01);
                 }
             }
-            // Its anti-torpedo charges: two racks at the stern.
-            for x in [-0.04_f32, 0.04] {
-                mesh.paint(Material::Metal);
-                mesh.block([x - 0.014, -0.49, -0.2], [x + 0.014, -0.44, -0.165]);
-                mesh.paint(Material::Trim);
-                mesh.block([x - 0.016, -0.47, -0.165], [x + 0.016, -0.455, -0.158]);
-            }
+            // Its anti-torpedo charges: the racks every ship with them carries, at the stern.
+            mesh.torpedo_charge_racks(-0.49, -0.2, 1.0 / 86.0, 3.4);
             // The barbettes its turrets stand on.
             mesh.paint(Material::Metal);
             mesh.frustum([0.0, 27.0 / 86.0], [-0.16, -0.15], [0.085, 0.085], 8);
@@ -2671,6 +2692,11 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.block([-0.008, -0.47, -0.33], [0.008, -0.39, -0.21]);
             // The deck gun, forward of the sail.
             mesh.turret([0.0, 0.29], [-0.25, -0.2], 0.035, 1, 0.07, false);
+            // Its torpedo tubes, out of the bow either side of the stem.
+            mesh.paint(Material::Metal);
+            for x in [-0.028_f32, 0.028] {
+                mesh.body(x, &[[0.38, 0.016, 0.016, -0.31], [0.47, 0.016, 0.016, -0.31]], 6);
+            }
         }
         Shape::MissileSubmarine => {
             let outline = [[-0.03, -0.5], [0.03, -0.5], [0.076, -0.38], [0.084, 0.28], [0.042, 0.46], [-0.042, 0.46], [-0.084, 0.28], [-0.076, -0.38]];
@@ -2689,11 +2715,18 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Hull);
             mesh.block([-0.095, 0.24, -0.09], [0.095, 0.28, -0.075]);
             mesh.block([-0.008, -0.47, -0.3], [0.008, -0.4, -0.17]);
-            // Two long rows of missile hatches down the deck.
+            // Its nuclear missiles: three great hatches down the middle of the deck, one for each
+            // it can keep. Its cruise missiles: two rows of small hatches forward of them.
+            for y in [-0.35_f32, -0.23, -0.11] {
+                mesh.paint(Material::Metal);
+                mesh.block([-0.075, y - 0.05, -0.2], [0.075, y + 0.05, -0.192]);
+                mesh.paint(Material::Glow);
+                mesh.block([-0.055, y - 0.036, -0.192], [0.055, y + 0.036, -0.186]);
+            }
             mesh.paint(Material::Glow);
-            for y in [-0.35_f32, -0.25, -0.15, -0.05, 0.05] {
+            for y in [-0.025_f32, 0.035] {
                 for x in [-0.045_f32, 0.045] {
-                    mesh.block([x - 0.028, y - 0.035, -0.2], [x + 0.028, y + 0.035, -0.19]);
+                    mesh.block([x - 0.024, y - 0.022, -0.2], [x + 0.024, y + 0.022, -0.19]);
                 }
             }
         }
@@ -2713,6 +2746,8 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.bevel([-0.065, -0.25, -0.2], [0.065, 0.12, 0.0], 0.03);
             mesh.paint(Material::Trim);
             mesh.bevel([-0.05, 0.03, 0.0], [0.05, 0.11, 0.08], 0.02);
+            // Its anti-torpedo charges: a rack on the cross deck over each outrigger.
+            mesh.torpedo_charge_racks(-0.29, -0.205, 1.0 / 30.0, 5.4);
             // The shield emitter on a tall mast, over the cross deck.
             mesh.paint(Material::Metal);
             mesh.frustum([0.0, -0.133], [0.0, 0.28], [0.03, 0.022], 8);
@@ -3547,8 +3582,8 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.block([-0.032, y, 0.064], [0.032, y + 0.009, 0.116]);
             }
             mesh.paint(Material::Glow);
-            mesh.block([-0.02, 0.2, 0.07], [0.02, 0.225, 0.11]);
-            mesh.flash([0.0, 0.235, 0.09], 0.035);
+            mesh.block([-0.02, LASER_LENS[0] - 0.0125, LASER_LENS[1] - 0.02], [0.02, LASER_LENS[0] + 0.0125, LASER_LENS[1] + 0.02]);
+            mesh.flash([0.0, LASER_LENS[0] + 0.0225, LASER_LENS[1]], 0.035);
         }
         Shape::Beam => {
             mesh.paint(Material::Glow);
@@ -3864,9 +3899,18 @@ impl MeshSet {
 /// How many cells a side a shape is cut into, seen from above, for its far model: each cell
 /// that the shape covers becomes one box.
 const FAR_CELLS: usize = 3;
+/// Where a laser turret's lens is, forward of its middle and above its foot, in its box: the
+/// beam is drawn leaving it from here.
+pub(super) const LASER_LENS: [f32; 2] = [0.2125, 0.09];
+
 /// How wide the tactical missile defense's dome is, in world units, on every ship that carries
 /// one: each ship's shape divides it by the length it is drawn at.
 const MISSILE_DEFENSE_WIDTH: f32 = 4.6;
+/// How large the anti-air gun is drawn on a ship, as the side of its box in world units: about
+/// half the turret's own size on land, and the same on every ship that carries one.
+const SHIP_ANTI_AIR_SIZE: f32 = 10.0;
+/// And the SAM rack a ship carries, the same way.
+const SHIP_SAM_SIZE: f32 = 10.0;
 
 /// A far model is only made for a shape with at least this many times its triangles.
 const FAR_SAVING: u32 = 3;

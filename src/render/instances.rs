@@ -214,6 +214,9 @@ pub struct Motion {
     headings: Headings,
     strides: BTreeMap<SimId, Stride>,
     shots: BTreeMap<SimId, Shot>,
+    /// Each laser turret's latest beam, by its unit and its weapon: a turret flashes as it
+    /// fires, and its unit's other turrets do not.
+    beam_shots: BTreeMap<(SimId, u8), Shot>,
     /// The ground, for standing structures level on a slope. Without it, a structure stands at
     /// the height of the ground at its middle.
     ground: Option<crate::render::camera::HeightField>,
@@ -251,6 +254,29 @@ impl Motion {
         self.headings.retain(|id, _| keep(id));
         self.strides.retain(|id, _| keep(id));
         self.shots.retain(|id, _| keep(id));
+        self.beam_shots.retain(|(id, _), _| keep(id));
+    }
+
+    /// Notes which laser turrets fired in the latest tick, from their beams, which are never
+    /// seen in flight, only landed: so that each flashes as it fires, and only it.
+    pub fn note_beams(&mut self, landed: &[ProjectileView], units: &[UnitView], looks: &[UnitLook]) {
+        let time = self.time;
+        for beam in landed.iter().filter(|shot| shot.kind == ProjectileKind::Beam) {
+            let Some(from) = beam.from else { continue };
+            let Ok(index) = units.binary_search_by_key(&beam.source, |unit| unit.id) else { continue };
+            let unit = &units[index];
+            let from = [f64::from(from[0]) * RAW_TO_WORLD, f64::from(from[1]) * RAW_TO_WORLD, f64::from(from[2]) * RAW_TO_WORLD];
+            let Some((weapon, _)) = looks.get(usize::from(unit.blueprint)).and_then(|look| laser_turret(look, unit, from)) else { continue };
+            let shot = self.beam_shots.entry((unit.id, weapon)).or_insert(Shot { shell: beam.id, at: time });
+            if beam.id > shot.shell {
+                *shot = Shot { shell: beam.id, at: time };
+            }
+        }
+    }
+
+    /// How bright a laser turret's flash is, from 1 as it fires to 0.
+    fn beam_flash(&self, id: SimId, weapon: u8) -> f32 {
+        self.beam_shots.get(&(id, weapon)).map_or(0.0, |shot| (1.0 - (self.time - shot.at) / RECOIL_SECONDS).clamp(0.0, 1.0) as f32)
     }
 
     /// Notes which units fired since the last snapshot: those whose shells are new in it.
@@ -567,6 +593,31 @@ fn mounted_turrets(look: &UnitLook, center: [f64; 3], extent: [f32; 3], body: [f
     })
 }
 
+/// Where a laser's beam is drawn leaving a unit: the lens of the laser turret it was fired
+/// from, the one nearest `from`, turned towards `to`. The simulation fires every weapon from the
+/// top of its unit, for what the ground hides from it, which is far above a turret on a deck: a
+/// beam drawn from there would hang in the air beside the gun. `from` itself if the unit has no
+/// laser turret drawn.
+pub(super) fn laser_muzzle(look: &UnitLook, unit: &UnitView, from: [f64; 3], to: [f64; 3]) -> [f64; 3] {
+    let Some((_, foot)) = laser_turret(look, unit, from) else { return from };
+    let (dx, dy) = (to[0] - foot[0], to[1] - foot[1]);
+    let length = dx.hypot(dy).max(1e-6);
+    let (forward, up) = (f64::from(super::meshes::LASER_LENS[0] * look.size), f64::from(super::meshes::LASER_LENS[1] * look.size));
+    [foot[0] + dx / length * forward, foot[1] + dy / length * forward, foot[2] + up]
+}
+
+/// The laser turret on a unit that a beam leaving `from` was fired by, the one nearest it: which
+/// weapon it is, and where its foot stands in the world.
+fn laser_turret(look: &UnitLook, unit: &UnitView, from: [f64; 3]) -> Option<(u8, [f64; 3])> {
+    let center = [f64::from(unit.x) * RAW_TO_WORLD, f64::from(unit.y) * RAW_TO_WORLD, f64::from(unit.z) * RAW_TO_WORLD];
+    let body = unit_vector(unit.facing).unwrap_or(NORTH);
+    mounted_turrets(look, center, [look.size; 3], body, |_| None)
+        .zip(look.turrets.into_iter().flatten())
+        .filter(|((shape, _, _), _)| *shape == Shape::LaserTurret)
+        .map(|((_, foot, _), mount)| (mount.weapon, foot))
+        .min_by(|(_, first), (_, second)| (first[0] - from[0]).hypot(first[1] - from[1]).total_cmp(&(second[0] - from[0]).hypot(second[1] - from[1])))
+}
+
 /// Which way a unit's weapon aims, as the simulation has it: 0 for the main weapon, then its
 /// extra ones. Zero for one that does not swivel.
 fn weapon_aim(unit: &UnitView, weapon: u8) -> [i32; 2] {
@@ -758,8 +809,13 @@ pub fn build_unit_instances(
                 out.push(shape, top);
                 if let Some(look) = look {
                     let aim = |weapon| turned(weapon_aim(unit, weapon), before.map(|before| weapon_aim(before, weapon)), alpha);
-                    for (turret, at, facing) in mounted_turrets(look, center, [drawn; 3], body, aim) {
-                        out.push(turret, animated(painted(at, [drawn; 3], facing, color, hull, glow, UNIT_ICON_PX, eye), 0));
+                    for ((turret, at, facing), mount) in mounted_turrets(look, center, [drawn; 3], body, aim).zip(look.turrets.into_iter().flatten()) {
+                        let mut part = animated(painted(at, [drawn; 3], facing, color, hull, glow, UNIT_ICON_PX, eye), 0);
+                        // A laser turret flashes as it fires itself, not as the ship's other one does.
+                        if turret == Shape::LaserTurret {
+                            part.glow[3] = byte(motion.beam_flash(unit.id, mount.weapon));
+                        }
+                        out.push(turret, part);
                     }
                 }
             }
@@ -1713,6 +1769,39 @@ mod tests {
         let far = [0.0, 0.0, 1.0e6];
         assert!(is_dot(&instance([0.0; 3], [10.0; 3], NORTH, BLUE, UNIT_ICON_PX, far)));
         assert!(!is_dot(&instance([0.0; 3], [10.0; 3], NORTH, BLUE, NO_ICON, far)));
+    }
+
+    /// A laser's beam is drawn leaving the lens of the turret that fired it, at the turret's
+    /// height on the deck, not the top of the unit the simulation fires from, and only that
+    /// turret flashes: the battlecruiser's aft turret, firing east, here.
+    #[test]
+    fn a_beam_leaves_the_lens_of_the_turret_that_fired_it_and_only_that_turret_flashes() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let key = db.id("t3_battlecruiser");
+        let look = &looks[usize::from(key.0)];
+        let mut ship = unit(1, 0);
+        ship.blueprint = key.0;
+        ship.radius = db.get(key).radius.to_bits();
+        ship.facing = [0, 4096];
+        let raw = |value: f64| (value * 4096.0) as i32;
+        // The aft laser is mounted 31 astern, and the simulation fires it from the unit's top.
+        let (from, to) = ([0.0, -31.0, 40.0], [300.0, -31.0, 0.0]);
+        let muzzle = laser_muzzle(look, &ship, from, to);
+        let lens = super::super::meshes::LASER_LENS.map(|share| f64::from(share * look.size));
+        assert!((muzzle[0] - lens[0]).abs() < 0.01 && (muzzle[1] + 31.0).abs() < 0.01, "the lens is out from the aft mount towards the target: {muzzle:?}");
+        assert!((muzzle[2] - (f64::from(-0.2 * look.size) + lens[1])).abs() < 0.01 && muzzle[2] < 0.0, "at the turret's height on the quarterdeck: {muzzle:?}");
+
+        let beam = ProjectileView { id: SimId(9), team: Team::Blue, x: raw(to[0]), y: raw(to[1]), z: 0, kind: ProjectileKind::Beam, source: SimId(1), from: Some(from.map(raw)), splash: 0 };
+        let mut motion = Motion::new();
+        motion.time = 1.0;
+        motion.note_beams(&[beam], &[ship], &looks);
+        let mut out = InstanceBatches::default();
+        build_unit_instances(&[ship], &[ship], 1.0, [0.0; 3], &[], &looks, &[], &mut motion, &mut out);
+        let turrets = out.shape(Shape::LaserTurret);
+        assert_eq!(turrets.len(), 2, "a laser turret forward and one aft");
+        let (fore, aft) = if turrets[0].model_matrix[3][1] > turrets[1].model_matrix[3][1] { (turrets[0], turrets[1]) } else { (turrets[1], turrets[0]) };
+        assert!(aft.glow[3] > 200 && fore.glow[3] == 0, "only the turret that fired flashes: fore {}, aft {}", fore.glow[3], aft.glow[3]);
     }
 
     /// Each of a battleship's turrets turns to its own gun's aim, where it stands on the hull,
