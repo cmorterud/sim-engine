@@ -115,56 +115,56 @@
         <h2 id="map-heading">Map</h2>
         <fieldset class="maps" aria-labelledby="map-heading">
           <label class="map">
-            <input type="radio" name="map" value="skirmish" checked>
+            <input type="radio" name="map" value="skirmish" data-teams="1v1" checked>
             <img src="maps/skirmish.png" alt="Skirmish map from above: rolling hills, with two walls across the middle">
             <span class="text">
               <strong>Skirmish</strong>
-              <span class="facts">10 km &middot; 24 materiel deposits</span>
+              <span class="facts">10 km &middot; 2 players &middot; 24 materiel deposits</span>
               <p class="about">Rolling hills, with a choke point between two walls in the middle. Generated from the seed, so a new seed gives a new map.</p>
             </span>
           </label>
           <label class="map">
-            <input type="radio" name="map" value="highland">
+            <input type="radio" name="map" value="highland" data-teams="1v1">
             <img src="maps/highland.png" alt="Highland map from above: hills and craters scattered with rocks">
             <span class="text">
               <strong>Highland</strong>
-              <span class="facts">10 km &middot; 50 materiel deposits</span>
+              <span class="facts">10 km &middot; 2 players &middot; 50 materiel deposits</span>
               <p class="about">Open hills pocked with craters and boulder fields. Short distances, so armies meet early.</p>
             </span>
           </label>
           <label class="map">
-            <input type="radio" name="map" value="twin_passes">
+            <input type="radio" name="map" value="twin_passes" data-teams="1v1">
             <img src="maps/twin_passes.png" alt="Twin Passes map from above: a river down the middle with two land bridges">
             <span class="text">
               <strong>Twin Passes</strong>
-              <span class="facts">20 km &middot; 80 materiel deposits</span>
+              <span class="facts">20 km &middot; 2 players &middot; 80 materiel deposits</span>
               <p class="about">A river splits the map, crossed by two land bridges. Hold the passes, or take to the water and the air.</p>
             </span>
           </label>
           <label class="map">
-            <input type="radio" name="map" value="saddleback">
+            <input type="radio" name="map" value="saddleback" data-teams="1v1 2v2 3v3">
             <img src="maps/saddleback.png" alt="Saddleback map from above: a mountain range up the middle, crossed by three valleys">
             <span class="text">
               <strong>Saddleback</strong>
-              <span class="facts">10 km &middot; 88 materiel deposits</span>
+              <span class="facts">10 km &middot; up to 6 players &middot; 88 materiel deposits</span>
               <p class="about">A mountain range up the middle, between west and east, crossed by a wide valley in the center and a narrow one on each flank, each funneling to a choke in the middle. The richest deposits are in the valleys' mouths: fight for the passes, and watch the one the enemy is not using.</p>
             </span>
           </label>
           <label class="map">
-            <input type="radio" name="map" value="stillwater">
+            <input type="radio" name="map" value="stillwater" data-teams="1v1 2v2">
             <img src="maps/stillwater.png" alt="Stillwater map from above: a lake in the middle with five small islands, ringed by land">
             <span class="text">
               <strong>Stillwater</strong>
-              <span class="facts">10 km &middot; 72 materiel deposits</span>
+              <span class="facts">10 km &middot; up to 4 players &middot; 72 materiel deposits</span>
               <p class="about">A lake fills the middle, with starts in the corners. Armies go round it either way, through the narrow ground north and south, where the richest deposits on land are; ships and hovercraft cut across, and only they reach the islands.</p>
             </span>
           </label>
           <label class="map">
-            <input type="radio" name="map" value="scattered_isles">
+            <input type="radio" name="map" value="scattered_isles" data-teams="1v1 2v2 4v4">
             <img src="maps/scattered_isles.png" alt="Scattered Isles map from above: a long island at each end, west and east, and a sea of small islands between">
             <span class="text">
               <strong>Scattered Isles</strong>
-              <span class="facts">20 km &middot; 152 materiel deposits</span>
+              <span class="facts">20 km &middot; up to 8 players &middot; 152 materiel deposits</span>
               <p class="about">Each side has a home island, with no land route between them. Tanks only guard home: the war is ships, aircraft, and hovercraft, and the small islands in the sea between hold the deposits worth fighting for.</p>
             </span>
           </label>
@@ -173,7 +173,7 @@
             <img src="maps/generate.png" alt="Three kinds of generated map side by side: a mountain range with passes, a lake ringed by land, and islands">
             <span class="text">
               <strong>Generate a map</strong>
-              <span class="facts">5 to 20 km &middot; made from your settings</span>
+              <span class="facts">5 to 20 km &middot; 2 to 8 players &middot; made from your settings</span>
               <p class="about">A new map of a kind you choose: mountain passes, a central lake, or islands. The same settings and map seed always make the same map, fair to every start.</p>
             </span>
           </label>
@@ -207,7 +207,7 @@
                 <option value="4" selected>4</option>
                 <option value="8">8</option>
               </select>
-              <span class="hint" id="map-players-hint">How many players the map holds: up to 2 at 5 km, 4 at 10 and 15 km, and 8 at 20 km. A 2v2 needs 4.</span>
+              <span class="hint" id="map-players-hint">How many players the map holds: up to 2 at 5 km, 4 at 10 and 15 km, and 8 at 20 km. A 2v2 needs 4, and a 4v4 8.</span>
             </div>
             <div class="field">
               <label for="resources">Resources</label>
@@ -248,6 +248,22 @@
           </div>
         </fieldset>
 
+        <h2>Players</h2>
+        <div class="row">
+          <div class="field">
+            <label for="teams">Players</label>
+            <!-- Only those the map has starts for: its data-teams, or for a generated map, what
+                 its Starts hold. -->
+            <select id="teams" name="teams" aria-describedby="teams-hint">
+              <option value="1v1" selected>1v1</option>
+              <option value="2v2">2v2, with an AI ally</option>
+              <option value="3v3">3v3, with two AI allies</option>
+              <option value="4v4">4v4, with three AI allies</option>
+            </select>
+            <span class="hint" id="teams-hint"></span>
+          </div>
+        </div>
+
         <h2>Opponents</h2>
         <div class="row">
           <div class="field">
@@ -256,14 +272,6 @@
               <option value="easy" selected>Easy</option>
               <option value="normal">Normal</option>
             </select>
-          </div>
-          <div class="field">
-            <label for="teams">Players</label>
-            <select id="teams" name="teams" aria-describedby="teams-hint">
-              <option value="1v1" selected>1v1</option>
-              <option value="2v2">2v2, with an AI ally</option>
-            </select>
-            <span class="hint" id="teams-hint">2v2 needs a map with team starts: Saddleback, Stillwater, Scattered Isles, or a generated map with 4 starts or more.</span>
           </div>
           <div class="field">
             <label for="strategy">Strategy</label>
@@ -316,18 +324,28 @@
           <div class="field">
             <label for="watch-map">Map</label>
             <select id="watch-map" name="map">
-              <option value="skirmish" selected>Skirmish</option>
-              <option value="highland">Highland</option>
-              <option value="twin_passes">Twin Passes</option>
-              <option value="saddleback">Saddleback</option>
-              <option value="stillwater">Stillwater</option>
-              <option value="scattered_isles">Scattered Isles</option>
+              <option value="skirmish" data-teams="1v1" selected>Skirmish</option>
+              <option value="highland" data-teams="1v1">Highland</option>
+              <option value="twin_passes" data-teams="1v1">Twin Passes</option>
+              <option value="saddleback" data-teams="1v1 2v2 3v3">Saddleback</option>
+              <option value="stillwater" data-teams="1v1 2v2">Stillwater</option>
+              <option value="scattered_isles" data-teams="1v1 2v2 4v4">Scattered Isles</option>
             </select>
+          </div>
+          <div class="field">
+            <label for="watch-teams">Players</label>
+            <select id="watch-teams" name="teams" aria-describedby="watch-teams-hint">
+              <option value="1v1" selected>1v1</option>
+              <option value="2v2">2v2</option>
+              <option value="3v3">3v3</option>
+              <option value="4v4">4v4</option>
+            </select>
+            <span class="hint" id="watch-teams-hint"></span>
           </div>
           <div class="field">
             <label for="watch-seed">Seed</label>
             <input id="watch-seed" name="seed" type="number" min="1" step="1" inputmode="numeric" value="1" required aria-describedby="watch-seed-hint">
-            <span class="hint" id="watch-seed-hint">The soak plays seeds 1&ndash;200 on Skirmish, 1&ndash;120 on the others.</span>
+            <span class="hint" id="watch-seed-hint">The soak plays seeds 1&ndash;200 on Skirmish, 1&ndash;120 on the others, 1&ndash;60 of each 2v2 and of the 3v3, and 1&ndash;20 of the 4v4.</span>
           </div>
           <div class="field">
             <label for="watch-view">See</label>
@@ -415,12 +433,47 @@
       for (const option of players.options) option.disabled = Number(option.value) > most;
       if (Number(players.value) > most) players.value = String(most);
     };
+    // The map decides how many can play on it: only the matches it has starts for are offered
+    // (a map's data-teams; a generated map holds a 2v2 with 4 starts, and a 4v4 with 8). One it
+    // cannot hold is hidden (greyed out where a browser cannot hide one), and a choice it
+    // cannot hold steps down to the largest it can.
+    const mapNames = {
+      skirmish: 'Skirmish', highland: 'Highland', twin_passes: 'Twin Passes', saddleback: 'Saddleback',
+      stillwater: 'Stillwater', scattered_isles: 'Scattered Isles',
+    };
+    const fitPlayers = (select, hint, name, teams) => {
+      const allowed = [...select.options].filter((option) => teams.includes(option.value));
+      for (const option of select.options) {
+        const fits = allowed.includes(option);
+        option.hidden = !fits;
+        option.disabled = !fits;
+      }
+      if (!allowed.some((option) => option.selected)) {
+        const below = allowed.filter((option) => option.index < select.selectedIndex);
+        (below.length ? below[below.length - 1] : allowed[0]).selected = true;
+      }
+      const most = Math.max(...teams.map((match) => Number(match.split('v')[0]) * 2));
+      const list = teams.length === 1 ? `${teams[0]} only` : `${teams.slice(0, -1).join(', ')} or ${teams[teams.length - 1]}`;
+      hint.textContent = `${name} has starts for ${most} players: ${list}.`;
+    };
+    const syncPlayers = () => {
+      const map = document.querySelector('#setup input[name="map"]:checked');
+      const generating = map.value === 'generate';
+      const starts = Number(document.getElementById('map-players').value);
+      const teams = generating ? ['1v1', '2v2', '4v4'].filter((match) => Number(match.split('v')[0]) * 2 <= starts) : map.dataset.teams.split(' ');
+      fitPlayers(document.getElementById('teams'), document.getElementById('teams-hint'), generating ? 'This generated map' : mapNames[map.value], teams);
+      const watched = document.getElementById('watch-map').selectedOptions[0];
+      fitPlayers(document.getElementById('watch-teams'), document.getElementById('watch-teams-hint'), watched.textContent, watched.dataset.teams.split(' '));
+    };
     for (const field of document.querySelectorAll('input[name="map"], #kind, #size')) field.addEventListener('change', syncGenerate);
+    for (const field of document.querySelectorAll('input[name="map"], #kind, #size, #map-players, #watch-map')) field.addEventListener('change', syncPlayers);
     syncGenerate();
+    syncPlayers();
     // Coming back with the back button restores the form; re-enable what submitting disabled.
     window.addEventListener('pageshow', () => {
       for (const field of document.getElementById('setup').elements) field.disabled = false;
       syncGenerate();
+      syncPlayers();
     });
   </script>
 </body>

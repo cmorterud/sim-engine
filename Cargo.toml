@@ -48,7 +48,7 @@ web-time = "1"
 wgpu = { version = "0.20", features = ["webgl"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["Window", "Location", "UrlSearchParams", "Document", "HtmlDocument"] }
+web-sys = { version = "0.3", features = ["Window", "Location", "UrlSearchParams", "Document", "HtmlDocument", "Element", "Node"] }
 # Sound through the browser's Web Audio.
 cpal = { version = "0.18.2", features = ["wasm-bindgen"] }
 console_error_panic_hook = "0.1"

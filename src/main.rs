@@ -137,9 +137,10 @@ Usage: sim-engine [options]
                        shared machines such as CI runners
   --seed <number>      Scenario seed
   --sound-check        Play each sound in turn, and exit
-  --teams <1v1|2v2>    Players a side (default 1v1): 2v2 puts an AI ally beside you, against
-                       two AIs, on a map with team starts: saddleback, stillwater, or
-                       scattered_isles, which also holds 4v4
+  --teams <1v1|2v2|3v3|4v4>
+                       Players a side (default 1v1): 2v2 puts an AI ally beside you, against
+                       two AIs, on a map with team starts: saddleback, which also holds 3v3,
+                       stillwater, or scattered_isles, which also holds 4v4
   --map <name>         Play on a map that comes with the game: highland, twin_passes, saddleback,
                        stillwater, or scattered_isles,
                        for any of the modes above, or playtest: a sandbox with 5 of every
@@ -431,6 +432,47 @@ fn parse_options() -> Result<Option<Options>, String> {
     Ok(Some(options))
 }
 
+/// Why a match cannot start, from options that ask for one that cannot be: a map or scenario
+/// that does not exist, or a map that cannot be generated. In a terminal it is printed, and the
+/// program exits failing. In the browser, where the page has already put up its loading line
+/// and would show it for good, the reason goes on the page in its place.
+fn cannot_start(message: &str) {
+    println!("{message}");
+    #[cfg(not(target_arch = "wasm32"))]
+    std::process::exit(1);
+    #[cfg(target_arch = "wasm32")]
+    show_why_it_cannot_start(message);
+}
+
+/// The page's loading line (index.html, `#status`) replaced by why the game cannot start, and a
+/// link back to the setup. The reason can quote the address, so it goes in as text, never markup.
+#[cfg(target_arch = "wasm32")]
+fn show_why_it_cannot_start(message: &str) {
+    let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+        return;
+    };
+    let Some(status) = document.get_element_by_id("status") else {
+        return;
+    };
+    let shown = (|| {
+        let reason = document.create_element("p")?;
+        reason.set_text_content(Some(&format!("The game cannot start: {message}.")));
+        let back = document.create_element("a")?;
+        // The page without its options is the setup.
+        back.set_attribute("href", &web_sys::window().and_then(|window| window.location().pathname().ok()).unwrap_or_else(|| "./".into()))?;
+        back.set_text_content(Some("Back to the setup"));
+        let line = document.create_element("p")?;
+        line.append_child(&back)?;
+        status.set_text_content(None);
+        status.append_child(&reason)?;
+        status.append_child(&line)?;
+        status.set_attribute("role", "alert")
+    })();
+    if shown.is_err() {
+        log::error!("the game cannot start: {message}");
+    }
+}
+
 fn main() {
     #[cfg(target_arch = "wasm32")]
     {
@@ -448,24 +490,28 @@ fn main() {
         Ok(None) => return,
         Err(message) => {
             println!("{message}");
+            #[cfg(target_arch = "wasm32")]
+            show_why_it_cannot_start(&message);
             return;
         }
     };
     let seed = options.seed.unwrap_or(DEFAULT_SEED);
     let bundled = options.map.as_ref().and_then(|name| name.to_str()).and_then(sim_engine::sim::maps::bundled);
-    let scenario = options.scenario.as_deref().map(|id| {
-        sim_engine::sim::playtest_scenarios::find(id).unwrap_or_else(|| {
-            let ids: Vec<String> = sim_engine::sim::playtest_scenarios::all().into_iter().map(|scenario| scenario.id).collect();
-            println!("unknown scenario {id}: the scenarios are {}", ids.join(", "));
-            std::process::exit(1);
-        })
-    });
-    let generated = options.generate.as_ref().map(|choices| {
-        sim_engine::sim::maps::MapSettings::chosen(choices).unwrap_or_else(|problem| {
-            println!("cannot generate that map: {problem}");
-            std::process::exit(1);
-        })
-    });
+    let scenario = match options.scenario.as_deref() {
+        None => None,
+        Some(id) => match sim_engine::sim::playtest_scenarios::find(id) {
+            Some(scenario) => Some(scenario),
+            None => {
+                let ids: Vec<String> = sim_engine::sim::playtest_scenarios::all().into_iter().map(|scenario| scenario.id).collect();
+                return cannot_start(&format!("unknown scenario {id}: the scenarios are {}", ids.join(", ")));
+            }
+        },
+    };
+    let generated = match options.generate.as_ref().map(sim_engine::sim::maps::MapSettings::chosen) {
+        None => None,
+        Some(Ok(settings)) => Some(settings),
+        Some(Err(problem)) => return cannot_start(&format!("cannot generate that map: {problem}")),
+    };
     let describe = |map: &sim_engine::sim::scenario::MapData| {
         let trees = map.scenery.iter().filter(|(kind, _)| *kind == sim_engine::sim::components::WreckKind::Tree).count();
         println!("map {}: {} km, {} materiel deposits, {} trees and {} rocks", map.name, map.map_units / 1024, map.deposits.len(), trees, map.scenery.len() - trees);
@@ -497,8 +543,7 @@ fn main() {
             MapSource::Map(Arc::new(map))
         }
         Some(name) => {
-            println!("unknown map {}: the maps are {}, and the playtest sandbox", name.display(), sim_engine::sim::maps::BUNDLED.join(", "));
-            std::process::exit(1);
+            return cannot_start(&format!("unknown map {}: the maps are {}, and the playtest sandbox", name.display(), sim_engine::sim::maps::BUNDLED.join(", ")));
         }
     };
     // A team match, on a map with starts for that many a side (GAME_SPECIFICATION.md §17.2).
@@ -506,11 +551,9 @@ fn main() {
     let map_source = match map_source.clone().teams(per_team) {
         Some(source) => source,
         None => {
-            println!("this map has no starts for {per_team}v{per_team}: Saddleback, Stillwater, and Scattered Isles hold 2v2, Scattered Isles 4v4 too, and a generated map as many as its --map-players");
-            #[cfg(not(target_arch = "wasm32"))]
-            std::process::exit(1);
-            #[cfg(target_arch = "wasm32")]
-            map_source
+            return cannot_start(&format!(
+                "this map has no starts for {per_team}v{per_team}: Saddleback holds 2v2 and 3v3, Stillwater 2v2, Scattered Isles 2v2 and 4v4, and a generated map 2v2 with 4 starts and 4v4 with 8"
+            ));
         }
     };
     if options.sound_check {

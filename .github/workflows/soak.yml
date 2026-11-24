@@ -15,11 +15,20 @@ on:
         description: Matches on each bundled map
         default: "120"
       team_matches:
-        description: 2v2 matches on each map with team starts
+        description: 2v2 matches on each map with team starts, and 3v3s on Saddleback
         default: "60"
+      four_team_matches:
+        description: 4v4 matches on each map with starts for eight
+        default: "20"
       shard_size:
         description: Matches per runner
         default: "25"
+      maps:
+        description: "Only these maps, by name, space-separated (skirmish counts as one; empty plays every map)"
+        default: ""
+      first_seed:
+        description: "The first seed: more matches on fresh seeds, for a side-bias question"
+        default: "1"
 
 permissions:
   contents: read
@@ -41,7 +50,8 @@ jobs:
   # matches of the exit criteria and 120 on each bundled map (Highland, Twin Passes, Saddleback,
   # Stillwater, and Scattered Isles): enough matches that a side winning 60% of them stands out
   # from chance. And 60 2v2s on each of Saddleback, Stillwater, and Scattered Isles, four AIs,
-  # which take longer each.
+  # which take longer each, 60 3v3s on Saddleback, and 20 4v4s on Scattered Isles, eight AIs:
+  # too few to judge a lean, but enough to show that they finish and replay.
   plan:
     name: Plan the shards
     runs-on: ubuntu-latest
@@ -54,22 +64,31 @@ jobs:
           BUNDLED: ${{ inputs.bundled_matches || '120' }}
           SHARD: ${{ inputs.shard_size || '25' }}
           TEAMS: ${{ inputs.team_matches || '60' }}
+          FOURS: ${{ inputs.four_team_matches || '20' }}
+          MAPS: ${{ inputs.maps || '' }}
+          FIRST_SEED: ${{ inputs.first_seed || '1' }}
         run: |
           python3 - <<'EOF' >> "$GITHUB_OUTPUT"
           import json, os
           shard = max(1, int(os.environ["SHARD"]))
+          only = set(os.environ["MAPS"].split())
+          start = int(os.environ["FIRST_SEED"])
           shards = []
           for map_name, matches, teams in [("skirmish", int(os.environ["SKIRMISH"]), ""),
                                            ("highland", int(os.environ["BUNDLED"]), ""),
                                            ("twin_passes", int(os.environ["BUNDLED"]), ""),
                                            ("saddleback", int(os.environ["BUNDLED"]), ""),
                                            ("saddleback", int(os.environ["TEAMS"]), "2v2"),
+                                           ("saddleback", int(os.environ["TEAMS"]), "3v3"),
                                            ("stillwater", int(os.environ["BUNDLED"]), ""),
                                            ("stillwater", int(os.environ["TEAMS"]), "2v2"),
                                            ("scattered_isles", int(os.environ["BUNDLED"]), ""),
-                                           ("scattered_isles", int(os.environ["TEAMS"]), "2v2")]:
-              for first in range(1, matches + 1, shard):
-                  count = min(shard, matches + 1 - first)
+                                           ("scattered_isles", int(os.environ["TEAMS"]), "2v2"),
+                                           ("scattered_isles", int(os.environ["FOURS"]), "4v4")]:
+              if only and map_name not in only:
+                  continue
+              for first in range(start, start + matches, shard):
+                  count = min(shard, start + matches - first)
                   map_arg = "" if map_name == "skirmish" else f"--map {map_name} "
                   team_arg = f" --teams {teams}" if teams else ""
                   label = f"{map_name} {teams}".strip()
