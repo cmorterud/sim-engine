@@ -1941,26 +1941,32 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 );
             });
         }
+        // A broad, low body under a rack of four grenade tubes on its back, raised over its
+        // shoulders: from above, four barrels side by side, where the light walker is a small
+        // body with a head and one gun arm.
         Shape::GrenadierWalker => {
-            mesh.bevel([-0.22, -0.18, -0.02], [0.22, 0.18, 0.34], 0.05);
-            mesh.paint(Material::Hull);
-            mesh.bevel([0.22, -0.12, 0.08], [0.38, 0.2, 0.3], 0.04);
+            mesh.bevel([-0.3, -0.16, -0.02], [0.3, 0.2, 0.24], 0.06);
+            // The rack's housing, in the team's colors, behind and over the body.
+            mesh.cuboid(
+                [Vec3::new(-0.3, -0.34, 0.1), Vec3::new(0.3, -0.34, 0.1), Vec3::new(0.3, -0.1, 0.2), Vec3::new(-0.3, -0.1, 0.2)],
+                [Vec3::new(-0.3, -0.3, 0.3), Vec3::new(0.3, -0.3, 0.3), Vec3::new(0.3, -0.06, 0.4), Vec3::new(-0.3, -0.06, 0.4)],
+            );
             mesh.paint(Material::Metal);
-            mesh.moving(motion::RECOIL, [0.3, 0.2, 0.19], |mesh| {
-                for (dx, dz) in [(-0.035_f32, 0.0_f32), (0.035, 0.0), (0.0, 0.05)] {
-                    mesh.body(0.3 + dx, &[[0.2, 0.02, 0.02, 0.17 + dz], [0.49, 0.018, 0.018, 0.17 + dz]], 5);
+            mesh.moving(motion::RECOIL, [0.0, -0.1, 0.3], |mesh| {
+                for x in [-0.21_f32, -0.07, 0.07, 0.21] {
+                    mesh.body(x, &[[-0.3, 0.055, 0.055, 0.27], [0.12, 0.055, 0.055, 0.43]], 6);
                 }
             });
-            mesh.flash([0.3, 0.48, 0.19], 0.06);
+            for x in [-0.21_f32, 0.21] {
+                mesh.flash([x, 0.14, 0.44], 0.055);
+            }
+            // A stub arm either side, to steady it, and a visor low on its front.
             mesh.paint(Material::Hull);
-            mesh.bevel([-0.38, -0.12, 0.22], [-0.2, 0.14, 0.38], 0.03);
-            mesh.paint(Material::Metal);
-            mesh.body(-0.29, &[[0.14, 0.045, 0.045, 0.3], [0.26, 0.045, 0.045, 0.3]], 6);
-            mesh.paint(Material::Hull);
-            mesh.beam([-0.3, 0.0, 0.18], [-0.3, 0.2, 0.08], 0.05, 0.05);
-            mesh.bevel([-0.1, -0.06, 0.34], [0.1, 0.12, 0.46], 0.03);
+            for x in [-0.4_f32, 0.4] {
+                mesh.bevel([x - 0.08, -0.1, 0.0], [x + 0.08, 0.14, 0.2], 0.04);
+            }
             mesh.paint(Material::Glow);
-            mesh.block([-0.08, 0.12, 0.38], [0.08, 0.135, 0.42]);
+            mesh.block([-0.12, 0.2, 0.1], [0.12, 0.215, 0.16]);
         }
         // A big glowing dome on a low mount, ringed in the team's colors, over most of a carrier.
         Shape::ShieldEmitter => {
