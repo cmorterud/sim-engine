@@ -11,11 +11,11 @@ use crate::icons::{self, Icon};
 use crate::input::feedback::{Marker, MarkerKind, OrderFeedback, LABEL_SECONDS};
 use crate::input::hotkeys::{self, blueprint_hotkey};
 use crate::input::orders::PendingBuild;
-use crate::math::fp::Fp;
+use crate::math::fp::{Fp, FP_FRAC_BITS};
 use crate::render::camera::Camera;
 use crate::sim::blueprints::{BlueprintDb, BlueprintId, Enhancement, EnhancementId, FactoryKind, Res, Slot, Targets, UnitClass, WeaponKind, TICKS_PER_SECOND};
 use crate::sim::components::{BuildTask, OrderKind, SimId, Team};
-use crate::sim::world::{EconomyView, MatchResult, PlanStepKind, SimSnapshot, UnitRatesView, UnitView};
+use crate::sim::world::{EconomyView, MatchResult, PlanStepKind, PlayerView, SimSnapshot, UnitRatesView, UnitView};
 
 /// Trails are capped so that a large selection stays readable and cheap to draw.
 const MAX_TRAIL_UNITS: usize = 64;
@@ -2009,6 +2009,116 @@ fn score_row(ui: &mut egui::Ui, color: Color32, name: &str, figures: [String; 3]
     painter.text(Pos2::new(rect.right(), rect.center().y), Align2::RIGHT_CENTER, state.0, FontId::proportional(12.0), state.1);
 }
 
+/// An ally's color in the score panel, as on the minimap: a lighter shade of the team's, cyan
+/// beside Blue's blue and orange beside Red's red, for any player of a team but its first.
+const BLUE_ALLY: Color32 = Color32::from_rgb(70, 220, 240);
+const RED_ALLY: Color32 = Color32::from_rgb(255, 165, 50);
+
+/// A line of the score panel in a team match: a team with its players' totals, or one player
+/// under it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScoreLine {
+    pub color: Color32,
+    pub name: String,
+    /// Units, mass income, and army value, as `score_row` shows them.
+    pub figures: [String; 3],
+    pub state: (String, Color32),
+    /// A player's line, set in under their team's.
+    pub player: bool,
+    /// Where clicking the line takes the camera, in whole units: a player's start, only where
+    /// the viewer knows it, which is their own team's, or everyone's for a watcher seeing all.
+    pub jump: Option<[i32; 2]>,
+}
+
+/// The score panel's lines in a team match: each team with its players' totals, and under it a
+/// line for each player, in order. Playing, the person is the first of Blue's players, "You",
+/// and the others on Blue are their allies; watching, everyone is an AI.
+pub fn team_match_lines(players: &[PlayerView], result: Option<MatchResult>, watching: bool) -> Vec<ScoreLine> {
+    let mut lines = Vec::new();
+    for team in [Team::Blue, Team::Red] {
+        let theirs: Vec<&PlayerView> = players.iter().filter(|player| player.team == team).collect();
+        let incomes: Option<Vec<i64>> = theirs.iter().map(|player| player.mass_income).collect();
+        let income = |income: Option<i64>| income.map_or_else(|| "?".to_string(), |income| format!("+{income}"));
+        let playing = theirs.iter().filter(|player| !player.out).count();
+        let team_line_state = match result {
+            Some(_) => {
+                let (state, color) = team_state(result, team);
+                (state.to_string(), color)
+            }
+            None if playing < theirs.len() => (format!("{playing} of {} playing", theirs.len()), hud::TEXT),
+            None => ("Playing".to_string(), hud::TEXT),
+        };
+        lines.push(ScoreLine {
+            color: team_color(team),
+            name: if team == Team::Blue { "Blue" } else { "Red" }.to_string(),
+            figures: [
+                theirs.iter().map(|player| player.units).sum::<u32>().to_string(),
+                income(incomes.map(|incomes| incomes.iter().sum())),
+                hud::compact(theirs.iter().map(|player| player.army).sum()),
+            ],
+            state: team_line_state,
+            player: false,
+            jump: None,
+        });
+        for (number, player) in theirs.iter().enumerate() {
+            let name = match (team, number, watching) {
+                (Team::Blue, 0, false) => "You".to_string(),
+                (Team::Blue, _, false) => format!("Ally {} (AI)", number + 1),
+                (Team::Blue, _, true) => format!("Blue {} (AI)", number + 1),
+                (Team::Red, _, _) => format!("Red {} (AI)", number + 1),
+            };
+            let color = match (team, number) {
+                (_, 0) => team_color(team),
+                (Team::Blue, _) => BLUE_ALLY,
+                (Team::Red, _) => RED_ALLY,
+            };
+            let state = match (result, player.out) {
+                (Some(_), _) => {
+                    let (state, color) = team_state(result, team);
+                    (state.to_string(), color)
+                }
+                (None, true) => ("Out".to_string(), hud::DIM_TEXT),
+                (None, false) => ("Playing".to_string(), hud::TEXT),
+            };
+            lines.push(ScoreLine {
+                color,
+                name,
+                figures: [player.units.to_string(), income(player.mass_income), hud::compact(player.army)],
+                state,
+                player: true,
+                jump: player.start.map(|[x, y]| [x >> FP_FRAC_BITS, y >> FP_FRAC_BITS]),
+            });
+        }
+    }
+    lines
+}
+
+/// A team match's line in the score panel, as `score_row` draws a team's, a player's set in
+/// under their team's. One that can take the camera to a player's base lights up under the
+/// pointer, and does so on a click.
+fn score_line(ui: &mut egui::Ui, line: &ScoreLine, actions: &mut Vec<UiAction>) {
+    let sense = if line.jump.is_some() { egui::Sense::click() } else { egui::Sense::hover() };
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(SCORE_WIDTH, 17.0), sense);
+    let painter = ui.painter();
+    if line.jump.is_some() && response.hovered() {
+        painter.rect_filled(rect, 2.0, hud::GLOW.gamma_multiply(0.16));
+    }
+    let indent = if line.player { 12.0 } else { 0.0 };
+    let swatch = Rect::from_center_size(Pos2::new(rect.left() + 6.0 + indent, rect.center().y), Vec2::splat(if line.player { 7.0 } else { 9.0 }));
+    painter.rect(swatch, 1.0, line.color, Stroke::new(1.0_f32, Color32::from_black_alpha(160)));
+    let name = if line.player { FontId::proportional(12.5) } else { FontId::proportional(13.0) };
+    painter.text(Pos2::new(rect.left() + 16.0 + indent, rect.center().y), Align2::LEFT_CENTER, &line.name, name, hud::TEXT);
+    for (figure, column) in line.figures.iter().zip(SCORE_COLUMNS) {
+        painter.text(Pos2::new(rect.left() + column, rect.center().y), Align2::RIGHT_CENTER, figure, FontId::proportional(12.0), hud::TEXT);
+    }
+    painter.text(Pos2::new(rect.right(), rect.center().y), Align2::RIGHT_CENTER, &line.state.0, FontId::proportional(12.0), line.state.1);
+    if let Some(at) = line.jump {
+        if response.on_hover_text("Click to look at their base.").clicked() {
+            actions.push(UiAction::CenterCamera(at));
+        }
+    }
+}
+
 /// The score panel's column headings, over the figures of `score_row`.
 fn score_columns(ui: &mut egui::Ui) {
     let (rect, response) = ui.allocate_exact_size(Vec2::new(SCORE_WIDTH, 14.0), egui::Sense::hover());
@@ -2090,12 +2200,19 @@ pub fn resource_bar(ctx: &egui::Context, snapshot: &SimSnapshot, db: &BlueprintD
     });
     let ((), score) = hud::panel_rect(ctx, "score", Align2::RIGHT_TOP, Vec2::new(-4.0, 4.0), |ui| {
         ui.spacing_mut().item_spacing.y = 2.0;
-        let mine = snapshot.units.iter().filter(|unit| unit.team == Team::Blue && unit.blueprint != u16::MAX).count();
+        // The person's own units: in a team match, not their allies'.
+        let mine = snapshot.players.first().map_or_else(|| snapshot.units.iter().filter(|unit| unit.team == Team::Blue && unit.blueprint != u16::MAX).count(), |you| you.units as usize);
         score_header(ui, snapshot.tick, &format!("{mine} units"));
         panel_rule(ui);
         score_columns(ui);
-        score_row(ui, BLUE, "Blue (you)", team_figures(snapshot, Team::Blue, db, Some(snapshot.economy.mass_income)), team_state(snapshot.match_result, Team::Blue));
-        score_row(ui, RED, "Red (AI)", team_figures(snapshot, Team::Red, db, None), team_state(snapshot.match_result, Team::Red));
+        if snapshot.players.len() > 2 {
+            for line in team_match_lines(&snapshot.players, snapshot.match_result, false) {
+                score_line(ui, &line, actions);
+            }
+        } else {
+            score_row(ui, BLUE, "Blue (you)", team_figures(snapshot, Team::Blue, db, Some(snapshot.economy.mass_income)), team_state(snapshot.match_result, Team::Blue));
+            score_row(ui, RED, "Red (AI)", team_figures(snapshot, Team::Red, db, None), team_state(snapshot.match_result, Team::Red));
+        }
         panel_rule(ui);
         ui.vertical_centered(|ui| {
             ui.label(egui::RichText::new(format!("Map: {map}")).size(12.0).color(hud::DIM_TEXT));
@@ -2726,14 +2843,20 @@ pub fn watch_bar(ctx: &egui::Context, snapshot: &SimSnapshot, db: &BlueprintDb, 
         score_header(ui, snapshot.tick, &format!("{}x", state.speed));
         panel_rule(ui);
         score_columns(ui);
-        for team in [Team::Blue, Team::Red] {
-            let economy = match (&snapshot.team_economies, state.view) {
-                (Some(economies), None) => Some(&economies[team as usize]),
-                (_, Some(seen)) if seen == team => Some(&snapshot.economy),
-                _ => None,
-            };
-            let figures = team_figures(snapshot, team, db, economy.map(|economy| economy.mass_income));
-            score_row(ui, team_color(team), &format!("{} (AI)", team_name(team)), figures, team_state(snapshot.match_result, team));
+        if snapshot.players.len() > 2 {
+            for line in team_match_lines(&snapshot.players, snapshot.match_result, true) {
+                score_line(ui, &line, actions);
+            }
+        } else {
+            for team in [Team::Blue, Team::Red] {
+                let economy = match (&snapshot.team_economies, state.view) {
+                    (Some(economies), None) => Some(&economies[team as usize]),
+                    (_, Some(seen)) if seen == team => Some(&snapshot.economy),
+                    _ => None,
+                };
+                let figures = team_figures(snapshot, team, db, economy.map(|economy| economy.mass_income));
+                score_row(ui, team_color(team), &format!("{} (AI)", team_name(team)), figures, team_state(snapshot.match_result, team));
+            }
         }
         panel_rule(ui);
         ui.label(egui::RichText::new("Observer").strong().color(Color32::from_rgb(255, 170, 60)));
@@ -5503,5 +5626,55 @@ mod tests {
         let across = clip_segment(Pos2::new(50.0, 50.0), Pos2::new(1_000_000.0, 50.0), bounds).unwrap();
         assert_eq!(across, (Pos2::new(50.0, 50.0), Pos2::new(100.0, 50.0)));
         assert_eq!(clip_segment(Pos2::new(200.0, 0.0), Pos2::new(300.0, 50.0), bounds), None);
+    }
+
+    /// A team match's score lines: each team with its players' totals, then each player, you
+    /// first; an enemy's income unknown, and with it the team's; an ally who is out says so; only
+    /// the bases the viewer knows can be clicked, which playing are your team's alone; and once the
+    /// match is decided every line says how it ended.
+    #[test]
+    fn a_team_match_lists_each_player_under_their_team() {
+        let raw = |x: i32, y: i32| Some([x << FP_FRAC_BITS, y << FP_FRAC_BITS]);
+        let player = |team, out, units, army, mass_income, start| PlayerView { team, out, units, army, mass_income, start };
+        let players = [
+            player(Team::Blue, false, 10, 500, Some(20), raw(100, 200)),
+            player(Team::Blue, true, 0, 0, Some(5), raw(300, 200)),
+            player(Team::Red, false, 3, 100, None, None),
+            player(Team::Red, false, 0, 0, None, None),
+        ];
+        let lines = team_match_lines(&players, None, false);
+        // Name, figures, state, whether a player's line, and where a click takes the camera.
+        type Summary<'a> = (&'a str, [&'a str; 3], &'a str, bool, Option<[i32; 2]>);
+        let summary: Vec<Summary> = lines
+            .iter()
+            .map(|line| (line.name.as_str(), [line.figures[0].as_str(), line.figures[1].as_str(), line.figures[2].as_str()], line.state.0.as_str(), line.player, line.jump))
+            .collect();
+        let (five_hundred, hundred, nothing) = (hud::compact(500), hud::compact(100), hud::compact(0));
+        assert_eq!(
+            summary,
+            [
+                ("Blue", ["10", "+25", five_hundred.as_str()], "1 of 2 playing", false, None),
+                ("You", ["10", "+20", five_hundred.as_str()], "Playing", true, Some([100, 200])),
+                ("Ally 2 (AI)", ["0", "+5", nothing.as_str()], "Out", true, Some([300, 200])),
+                ("Red", ["3", "?", hundred.as_str()], "Playing", false, None),
+                ("Red 1 (AI)", ["3", "?", hundred.as_str()], "Playing", true, None),
+                ("Red 2 (AI)", ["0", "?", nothing.as_str()], "Playing", true, None),
+            ]
+        );
+        // Each team's first player in its color, the others in the lighter shade the minimap uses.
+        assert_eq!(lines.iter().map(|line| line.color).collect::<Vec<_>>(), [BLUE, BLUE, BLUE_ALLY, RED, RED, RED_ALLY]);
+
+        // Watching, everyone is an AI, and a watcher seeing everything can look at any base.
+        let seen_by_all = players.map(|player| PlayerView { mass_income: player.mass_income.or(Some(7)), start: player.start.or(raw(900, 900)), ..player });
+        let watched = team_match_lines(&seen_by_all, None, true);
+        let names: Vec<&str> = watched.iter().map(|line| line.name.as_str()).collect();
+        assert_eq!(names, ["Blue", "Blue 1 (AI)", "Blue 2 (AI)", "Red", "Red 1 (AI)", "Red 2 (AI)"]);
+        assert!(watched.iter().filter(|line| line.player).all(|line| line.jump.is_some()));
+        assert_eq!(watched[3].figures[1], "+14", "a team's income is its players' together");
+
+        // Decided, every line says how it ended, out or not.
+        let decided = team_match_lines(&players, Some(MatchResult::Winner(Team::Red)), false);
+        let states: Vec<&str> = decided.iter().map(|line| line.state.0.as_str()).collect();
+        assert_eq!(states, ["Defeated", "Defeated", "Defeated", "Victorious", "Victorious", "Victorious"]);
     }
 }
