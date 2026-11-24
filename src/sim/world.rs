@@ -1598,16 +1598,13 @@ impl SimWorld {
                 slots.push((id, slot, (crossing + SLOT_EXTRA_TICKS).min(i64::from(u32::MAX)) as u32));
             }
         }
-        let Some(route) = self.flow_field.create_route_for(
-            class,
-            &self.terrain,
-            self.current_tick,
-            goal,
-            members.len() as u32,
-            arrive_radius,
-            follow,
-            owner,
-        ) else {
+        let route = self.flow_field.create_route_for(class, &self.terrain, self.current_tick, goal, members.len() as u32, arrive_radius, follow, owner).or_else(|| {
+            // Aircraft alone fly straight to the goal, so they go even where no land unit could
+            // route to it, over a sea with no land at all (2026-11-24: they once ignored orders
+            // there, on the balance harness's open sea).
+            walkers.is_empty().then(|| self.flow_field.create_air_route(&self.terrain, self.current_tick, goal, members.len() as u32, arrive_radius, follow, owner))
+        });
+        let Some(route) = route else {
             return Vec::new();
         };
         if let Some(travel) = keep_formation {
