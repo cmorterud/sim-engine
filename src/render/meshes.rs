@@ -295,10 +295,13 @@ pub enum Shape {
     /// A laser cannon's turret, drawn on its own so that it turns to its aim, as a
     /// `NavalTurret` is: a drum under a housing, with a long ribbed emitter in place of barrels.
     LaserTurret,
+    /// An artillery round, a bomb, or a flak shell in flight: a dark slug along x, the way it
+    /// flies, with a narrower nose and a glowing base, where a `Shell` is all glow.
+    Round,
 }
 
 impl Shape {
-    pub const ALL: [Self; 135] = [
+    pub const ALL: [Self; 136] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -434,6 +437,7 @@ impl Shape {
         Self::HeavyDefenseBase,
         Self::ArtilleryPad,
         Self::LaserTurret,
+        Self::Round,
     ];
     pub const COUNT: usize = Self::ALL.len();
 
@@ -455,7 +459,7 @@ impl Shape {
     /// Whether the shape throws a shadow on the ground. Markers, see-through domes, and shells
     /// too small to see do not.
     pub const fn casts_shadow(self) -> bool {
-        !matches!(self, Self::Dome | Self::SelectionRing | Self::SelectionBox | Self::Shell | Self::Fireball | Self::Smoke | Self::Wake | Self::Scar | Self::Apron | Self::Beam | Self::Cable)
+        !matches!(self, Self::Dome | Self::SelectionRing | Self::SelectionBox | Self::Shell | Self::Round | Self::Fireball | Self::Smoke | Self::Wake | Self::Scar | Self::Apron | Self::Beam | Self::Cable)
     }
 
     /// How many turns a second the shape's spinning parts make, if it has any.
@@ -2108,6 +2112,15 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.beam([-0.5, 0.0, 0.0], [0.3, 0.0, 0.0], 0.32, 0.32);
             mesh.beam([0.3, 0.0, 0.0], [0.5, 0.0, 0.0], 0.5, 0.5);
         }
+        // A round: a dark metal body along x, stepping in to its nose, with its base aglow.
+        Shape::Round => {
+            mesh.paint(Material::Metal);
+            mesh.beam([-0.38, 0.0, 0.0], [0.2, 0.0, 0.0], 0.5, 0.5);
+            mesh.beam([0.2, 0.0, 0.0], [0.38, 0.0, 0.0], 0.36, 0.36);
+            mesh.beam([0.38, 0.0, 0.0], [0.5, 0.0, 0.0], 0.18, 0.18);
+            mesh.paint(Material::Glow);
+            mesh.beam([-0.5, 0.0, 0.0], [-0.38, 0.0, 0.0], 0.42, 0.42);
+        }
         Shape::Missile => {
             mesh.beam([0.0, -0.5, 0.0], [0.0, 0.3, 0.0], 0.12, 0.12);
             mesh.beam([0.0, 0.3, 0.0], [0.0, 0.5, 0.0], 0.06, 0.06);
@@ -3673,7 +3686,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
 /// not shaded so; aircraft fly and ships float, clear of the ground at the bottom of their box.
 const fn occlusion_ground(shape: Shape) -> Option<bool> {
     match shape {
-        Shape::Cube | Shape::Shell | Shape::Missile | Shape::Fireball | Shape::Smoke | Shape::Wake | Shape::Scar | Shape::Dome | Shape::SelectionRing | Shape::SelectionBox | Shape::Beam | Shape::Cable => None,
+        Shape::Cube | Shape::Shell | Shape::Round | Shape::Missile | Shape::Fireball | Shape::Smoke | Shape::Wake | Shape::Scar | Shape::Dome | Shape::SelectionRing | Shape::SelectionBox | Shape::Beam | Shape::Cable => None,
         Shape::Aircraft
         | Shape::Bomber
         | Shape::Gunship
