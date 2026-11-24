@@ -15,6 +15,7 @@ use winit::window::Window;
 use super::camera::{Camera, HeightField};
 use super::instances::{InstanceBatches, UnitInstanceRaw};
 use super::meshes::{MeshSet, MeshVertex, Shape};
+use super::sight::{Presence, Sight};
 
 /// The most terrain samples a side the grid holds: enough for a 20 km map at full detail.
 const MAX_TERRAIN_GRID: u32 = 1025;
@@ -144,6 +145,8 @@ pub struct Renderer {
     water_level: f32,
     /// The lowest ground on the map, so that water nowhere above it is not drawn at all.
     lowest_ground: f32,
+    /// The ground's heights, for telling where shadows fall when leaving out what is out of sight.
+    ground: HeightField,
     icon_scale: f32,
     fog_texture: wgpu::Texture,
     fog_side: u32,
@@ -696,6 +699,7 @@ impl Renderer {
             height_scale: heights.units_per_step() as f32,
             water_level: -1.0e6,
             lowest_ground: heights.heights().iter().copied().min().map_or(0.0, |lowest| f32::from(lowest) * heights.units_per_step() as f32),
+            ground: HeightField::new(heights.samples(), heights.heights().to_vec(), heights.cell_units(), heights.units_per_step()),
             icon_scale,
             fog_texture,
             fog_side: fog_extent,
@@ -811,11 +815,22 @@ impl Renderer {
             water: [scene.time, self.grid_size as f32, strategic_share(camera.zoom_from_closest()), 0.0],
         };
         self.queue.write_buffer(&self.globals_buffer, 0, bytemuck::bytes_of(&globals));
+        // Only what can show in the picture is sent: the rest of the map's units, scenery, and
+        // effects would be worked through by the graphics card and then thrown away.
+        let sight = Sight::new(camera.view_projection(), viewport[1] as f32, self.icon_scale);
+        let water = f64::from(self.water_level);
+        let heights = &self.ground;
+        let ground = |x: f32, y: f32| (heights.height_at(f64::from(x) + eye[0], f64::from(y) + eye[1]).max(water) - eye[2]) as f32;
         self.flat_instances.clear();
         self.shape_instances.clear();
         for shape in Shape::ALL {
+            let presence = match shape {
+                Shape::Scar => Presence::OnGround,
+                shape if shape.casts_shadow() => Presence::Shadowed,
+                _ => Presence::Solid,
+            };
             let start = self.flat_instances.len() as u32;
-            self.flat_instances.extend_from_slice(scene.instances.shape(shape));
+            self.flat_instances.extend(scene.instances.shape(shape).iter().filter(|part| sight.sees(part, presence, ground)));
             self.shape_instances.push(start..self.flat_instances.len() as u32);
         }
         self.instance_buffer.write(&self.device, &self.queue, &self.flat_instances);
