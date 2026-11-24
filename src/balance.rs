@@ -1314,6 +1314,8 @@ pub fn print_t1_air_checks(db: &Arc<BlueprintDb>) {
 /// Three T2 torpedo launchers on the water just off the shore ground's land, for ships to close
 /// on: the answer to a fleet at a coast.
 pub const TORPEDO_POSITION: Position = &[("t2_torpedo_launcher", 106, 124), ("t2_torpedo_launcher", 106, 130), ("t2_torpedo_launcher", 109, 127)];
+/// The same at T1: three T1 torpedo launchers off the shore.
+pub const T1_TORPEDO_POSITION: Position = &[("t1_torpedo_launcher", 107, 124), ("t1_torpedo_launcher", 107, 131), ("t1_torpedo_launcher", 110, 127)];
 
 /// What a weapon is for, for a role's strength: guns and missiles at things on the ground or the
 /// water, guns at aircraft, or torpedoes.
@@ -1462,6 +1464,7 @@ pub fn derive_domains_report() {
     score_cell(&mut cells, "Destroyers against submarines", water(2), "t2_destroyers", 4.0, "t1_submarines", Some(number("destroyers_beat_submarines")), None);
     score_cell(&mut cells, "Hovercraft against an equal cost of the T2 fleet, on water", water(2), "t2_hovercraft", 40.0, "t2_fleet", None, Some(number("hovercraft_loses_to_fleet")));
     score_cell(&mut cells, "T1 fleet against an equal cost of the T1 air force, over water", water(1), "t1_fleet", 4.0, "t1_air_force", None, None);
+    score_cell(&mut cells, "Frigates against an equal cost of T1 bombers, over water", water(1), "t1_frigates", 12.0, "t1_bombers", Some(number("frigates_against_t1_bombers_at_least")), None);
     // Air against land, about even, as at T1.
     {
         let margin = target_number("counters", "even_margin");
@@ -1535,16 +1538,21 @@ pub fn derive_domains_report() {
                 met: Some(result.broken && result.seconds <= seconds_max && result.losses <= losses_max),
             });
         }
-        let materiel = position_materiel_at(&db, TORPEDO_POSITION, 2);
-        let destroyers = squadrons(&db, &[(db.id("t2_destroyer"), 1)], materiel, 2, Tactics::AttackMove);
-        let result = siege_on(&db, Field::new(Ground::Shore, 2), &destroyers, TORPEDO_POSITION);
-        let breaks = domain_cell("destroyers_break_torpedo_launchers").as_bool().expect("true or false");
-        cells.push(Cell {
-            name: "An equal cost of destroyers closing on T2 torpedo launchers".to_string(),
-            target: if breaks { "breaks them" } else { "does not break them" }.to_string(),
-            measured: format!("{} in {:.0} s, losing {:.0}%", if result.broken { "broke them" } else { "did not break them" }, result.seconds, result.losses * 100.0),
-            met: Some(result.broken == breaks),
-        });
+        for (tier, ship, position, cell, label) in [
+            (2, "t2_destroyer", TORPEDO_POSITION, "destroyers_break_torpedo_launchers", "destroyers closing on T2 torpedo launchers"),
+            (1, "t1_frigate", T1_TORPEDO_POSITION, "frigates_break_t1_torpedo_launchers", "frigates closing on T1 torpedo launchers"),
+        ] {
+            let materiel = position_materiel_at(&db, position, tier);
+            let ships = squadrons(&db, &[(db.id(ship), 1)], materiel, tier, Tactics::AttackMove);
+            let result = siege_on(&db, Field::new(Ground::Shore, tier), &ships, position);
+            let breaks = domain_cell(cell).as_bool().expect("true or false");
+            cells.push(Cell {
+                name: format!("An equal cost of {label}"),
+                target: if breaks { "breaks them" } else { "does not break them" }.to_string(),
+                measured: format!("{} in {:.0} s, losing {:.0}%", if result.broken { "broke them" } else { "did not break them" }, result.seconds, result.losses * 100.0),
+                met: Some(result.broken == breaks),
+            });
+        }
     }
     println!("\n## Fights between domains\n");
     println!("Scored as [counters] scores a fight: the first force's share of its materiel left, less the second's, from -1 to 1, played both ways round and over four starting layouts (on the shore, the ships are always at sea).\n");

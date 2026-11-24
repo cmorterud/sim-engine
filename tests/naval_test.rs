@@ -250,10 +250,11 @@ fn only_torpedoes_hurt_a_submarine() {
     let mut world = lake_world();
     let sub = spawn(&mut world, "t1_attack_sub", Team::Blue, point(2_000, 1_000));
     world.ecs.get::<&mut sim_engine::sim::components::Combat>(world.unit_entity(sub).unwrap()).unwrap().range = Fp::ZERO;
+    let full = world.unit_health(sub);
     // A frigate close enough for its sonar to find the sub, whose guns cannot reach it.
     spawn(&mut world, "t1_frigate", Team::Red, point(2_200, 1_000));
     run_ticks(&mut world, 200);
-    assert_eq!(world.unit_health(sub), Some(fp_int(800)), "shells pass over it");
+    assert_eq!(world.unit_health(sub), full, "shells pass over it");
     // A destroyer's torpedoes do.
     spawn(&mut world, "t2_destroyer", Team::Red, point(2_300, 1_100));
     let sunk = (0..600).any(|_| {
