@@ -52,7 +52,10 @@ env:
 
 jobs:
   # Splits the matches into shards of seeds, one runner each. A pull request plays 40 skirmish
-  # matches, 20 on each bundled map, 10 of each team match, and 5 4v4s, in shards of 10. A push
+  # matches, 20 on each bundled map, 10 of each team match, and 5 4v4s, in shards of 20: twelve
+  # runners rather than nineteen, since the account runs only so many jobs at once, and smaller
+  # shards spent longer waiting for a runner than playing. A pull request that changes nothing
+  # the soak runs (the drawing, the sound, the interface, the docs) plays no soak at all. A push
   # to main plays the 200 skirmish
   # matches of the exit criteria and 120 on each bundled map (Highland, Twin Passes, Saddleback,
   # Stillwater, and Scattered Isles): enough matches that a side winning 60% of them stands out
@@ -64,14 +67,42 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       shards: ${{ steps.plan.outputs.shards }}
+      run: ${{ steps.changes.outputs.run }}
     steps:
+      # The merge commit and its first parent, main as it stands, are enough to see what the
+      # pull request changes.
+      - uses: actions/checkout@v7
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 2
+
+      # What the soak runs: the simulation and its arithmetic, the AI, the soak itself, the
+      # command line that starts it, the unit and map data, the dependencies, and this workflow.
+      # A pull request that touches none of them cannot change what the soak finds. A push to
+      # main, or a run by hand, always soaks.
+      - id: changes
+        run: |
+          if [ "${{ github.event_name }}" != pull_request ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(git diff --name-only HEAD^1 HEAD)
+          echo "$changed"
+          pattern='^(src/sim/|src/math/|src/ai\.rs$|src/ai_strategy\.rs$|src/soak\.rs$|src/lib\.rs$|src/main\.rs$|data/|Cargo\.toml$|Cargo\.lock$|\.github/workflows/soak\.yml$)'
+          if echo "$changed" | grep -qE "$pattern"; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing the soak runs has changed, so this pull request plays no soak." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - id: plan
         env:
-          # A push to main plays the full soak; a pull request the smaller one, in smaller shards,
-          # so that more runners share it and it finishes sooner.
+          # A push to main plays the full soak; a pull request the smaller one, in shards of 20,
+          # which leave each map and team size on a runner or two.
           SKIRMISH: ${{ inputs.skirmish_matches || (github.event_name == 'pull_request' && '40' || '200') }}
           BUNDLED: ${{ inputs.bundled_matches || (github.event_name == 'pull_request' && '20' || '120') }}
-          SHARD: ${{ inputs.shard_size || (github.event_name == 'pull_request' && '10' || '25') }}
+          SHARD: ${{ inputs.shard_size || (github.event_name == 'pull_request' && '20' || '25') }}
           TEAMS: ${{ inputs.team_matches || (github.event_name == 'pull_request' && '10' || '60') }}
           FOURS: ${{ inputs.four_team_matches || (github.event_name == 'pull_request' && '5' || '20') }}
           MAPS: ${{ inputs.maps || '' }}
@@ -108,6 +139,8 @@ jobs:
 
   build:
     name: Build the release binary
+    needs: plan
+    if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -152,6 +185,7 @@ jobs:
   soak:
     name: Soak (${{ matrix.name }})
     needs: [plan, build]
+    if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
