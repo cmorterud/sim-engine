@@ -129,10 +129,11 @@ Usage: sim-engine [options]
                        With --soak, the strategies Blue and Red play (default
                        balanced,balanced)
   --balance            Measure the unit data with the balance harness's duels (BALANCE.md)
-  --balance-derive <t1|t2|t3|t1-air>
+  --balance-derive <t1|t2|t3|t1-air|domains>
                        Derive a tier of land units' numbers, or T1 air's, from
                        data/balance_targets.toml, priced by duels against the tiers below as
-                       the unit data has them
+                       the unit data has them; or, with domains, measure the fights between
+                       land, air, navy, and hovercraft against [domains]
   --no-tick-gate       With --soak, report tick times without failing on them, for
                        shared machines such as CI runners
   --seed <number>      Scenario seed
@@ -569,7 +570,8 @@ fn main() {
             "t2" => sim_engine::balance::derive_t2_report(),
             "t3" => sim_engine::balance::derive_t3_report(),
             "t1-air" => sim_engine::balance::derive_t1_air_report(),
-            other => println!("--balance-derive takes t1, t2, t3, or t1-air, not {other}"),
+            "domains" => sim_engine::balance::derive_domains_report(),
+            other => println!("--balance-derive takes t1, t2, t3, t1-air, or domains, not {other}"),
         }
         return;
     }
