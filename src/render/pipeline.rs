@@ -35,6 +35,13 @@ pub fn strategic_share(zoom_from_closest: f64) -> f32 {
 /// apparent size, so that large units stay solid for longer. About 4 and 8 pixels at 1080p.
 pub(super) const LOD_DOT_RATIO: f32 = 0.003;
 const LOD_CUBE_RATIO: f32 = 0.006;
+
+/// Whether a part is small enough on screen to have begun turning into its dot, as the shader
+/// works out (`dot_morph`): from there on its far model is drawn in its place.
+fn is_small(part: &UnitInstanceRaw) -> bool {
+    let length = |[x, y, z, _]: [f32; 4]| (x * x + y * y + z * z).sqrt();
+    part.color[3] > 0.0 && length(part.model_matrix[0]) / length(part.model_matrix[3]).max(0.001) <= LOD_CUBE_RATIO
+}
 pub const FOG_CELL_UNITS: f64 = 80.0;
 
 #[repr(C)]
@@ -130,12 +137,16 @@ pub struct Renderer {
     mesh_vertices: wgpu::Buffer,
     mesh_indices: wgpu::Buffer,
     shape_indices: Vec<std::ops::Range<u32>>,
+    /// Each shape's far model, drawn in its place once it is small on screen.
+    far_indices: Vec<std::ops::Range<u32>>,
     terrain_index_buffer: wgpu::Buffer,
     terrain_index_count: u32,
     instance_buffer: InstanceBuffer,
     /// Every shape's instances, one after another, with where each shape's begin and end.
     flat_instances: Vec<UnitInstanceRaw>,
     shape_instances: Vec<std::ops::Range<u32>>,
+    /// Where each shape's instances small enough for its far model begin and end.
+    far_instances: Vec<std::ops::Range<u32>>,
     samples_per_side: i32,
     /// Samples a side in the terrain grid: the whole map, unless it is larger than the grid.
     grid_size: u32,
@@ -688,11 +699,13 @@ impl Renderer {
             mesh_vertices,
             mesh_indices,
             shape_indices: meshes.ranges,
+            far_indices: meshes.far_ranges,
             terrain_index_buffer,
             terrain_index_count: grid_indices.len() as u32,
             instance_buffer,
             flat_instances: Vec::new(),
             shape_instances: Vec::with_capacity(Shape::COUNT),
+            far_instances: Vec::with_capacity(Shape::COUNT),
             samples_per_side: heights.samples() as i32,
             grid_size,
             cell_units: heights.cell_units(),
@@ -823,15 +836,26 @@ impl Renderer {
         let ground = |x: f32, y: f32| (heights.height_at(f64::from(x) + eye[0], f64::from(y) + eye[1]).max(water) - eye[2]) as f32;
         self.flat_instances.clear();
         self.shape_instances.clear();
+        self.far_instances.clear();
         for shape in Shape::ALL {
             let presence = match shape {
                 Shape::Scar => Presence::OnGround,
                 shape if shape.casts_shadow() => Presence::Shadowed,
                 _ => Presence::Solid,
             };
+            // Those small on screen are drawn from the shape's far model, if it has one: a few
+            // boxes in place of hundreds of triangles that would each cover less than a pixel.
+            // (Scars, smoke, and domes are drawn their own ways, and never as dots.)
+            let has_far = self.far_indices[shape as usize] != self.shape_indices[shape as usize] && !matches!(shape, Shape::Dome | Shape::Scar | Shape::Smoke);
+            let seen = || scene.instances.shape(shape).iter().filter(|part| sight.sees(part, presence, ground));
             let start = self.flat_instances.len() as u32;
-            self.flat_instances.extend(scene.instances.shape(shape).iter().filter(|part| sight.sees(part, presence, ground)));
-            self.shape_instances.push(start..self.flat_instances.len() as u32);
+            self.flat_instances.extend(seen().filter(|part| !(has_far && is_small(part))));
+            let far_start = self.flat_instances.len() as u32;
+            self.shape_instances.push(start..far_start);
+            if has_far {
+                self.flat_instances.extend(seen().filter(|part| is_small(part)));
+            }
+            self.far_instances.push(far_start..self.flat_instances.len() as u32);
         }
         self.instance_buffer.write(&self.device, &self.queue, &self.flat_instances);
     }
@@ -881,9 +905,19 @@ impl Renderer {
                 pass.draw_indexed(indices.clone(), 0, instances.clone());
             }
         }
+        for ((indices, instances), shape) in self.far_indices.iter().zip(&self.far_instances).zip(Shape::ALL) {
+            if !instances.is_empty() && shape.casts_shadow() {
+                pass.draw_indexed(indices.clone(), 0, instances.clone());
+            }
+        }
         pass.set_pipeline(&self.unit_pipeline);
         for ((indices, instances), shape) in self.shape_indices.iter().zip(&self.shape_instances).zip(Shape::ALL) {
             if !instances.is_empty() && !matches!(shape, Shape::Dome | Shape::Scar | Shape::Smoke) {
+                pass.draw_indexed(indices.clone(), 0, instances.clone());
+            }
+        }
+        for (indices, instances) in self.far_indices.iter().zip(&self.far_instances) {
+            if !instances.is_empty() {
                 pass.draw_indexed(indices.clone(), 0, instances.clone());
             }
         }
@@ -1043,6 +1077,23 @@ mod tests {
             assert!(indices.iter().all(|&index| index < size * size));
             assert_eq!(indices.len() as u32, (size - 1) * (size - 1) * 6);
         }
+    }
+
+    /// A part is drawn from its far model from where the shader begins to turn it into its dot,
+    /// and one that never becomes a dot, such as a foundation, never is.
+    #[test]
+    fn a_part_is_small_from_where_it_begins_to_turn_into_its_dot() {
+        let part = |distance: f32, icon: f32| UnitInstanceRaw {
+            model_matrix: [[0.0, -18.0, 0.0, 0.0], [18.0, 0.0, 0.0, 0.0], [0.0, 0.0, 18.0, 0.0], [0.0, 0.0, -distance, 1.0]],
+            color: [1.0, 1.0, 1.0, icon],
+            hull: [0; 4],
+            glow: [0; 4],
+        };
+        let begins = 18.0 / LOD_CUBE_RATIO;
+        assert!(!is_small(&part(begins * 0.99, 2.5)), "still wholly its model");
+        assert!(is_small(&part(begins * 1.01, 2.5)));
+        assert!(is_small(&part(18.0 / LOD_DOT_RATIO * 2.0, 2.5)), "and all the way to a dot");
+        assert!(!is_small(&part(begins * 100.0, 0.0)), "what has no dot is never small");
     }
 
     #[test]

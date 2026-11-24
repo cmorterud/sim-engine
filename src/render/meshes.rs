@@ -3513,6 +3513,10 @@ pub struct MeshSet {
     pub indices: Vec<u32>,
     /// The indices belonging to each shape, in the order of `Shape::ALL`.
     pub ranges: Vec<std::ops::Range<u32>>,
+    /// The indices of each shape's far model, in the same order: a few boxes of its bulk and
+    /// colors, drawn in its place once it is small on screen (`far_model`). A shape too simple to
+    /// gain from one has its own indices here.
+    pub far_ranges: Vec<std::ops::Range<u32>>,
 }
 
 impl MeshSet {
@@ -3535,8 +3539,170 @@ impl MeshSet {
             }
             ranges.push(start..end);
         }
-        Self { vertices: mesh.vertices, indices: mesh.indices, ranges }
+        // Far models are plain: upright boxes, lit as open to the sky, with nothing moving.
+        mesh.motion = 0;
+        mesh.pivot = Vec3::ZERO;
+        mesh.subdivide = false;
+        mesh.slope = 0.0;
+        let far_ranges = ranges
+            .iter()
+            .map(|range| {
+                let model = far_model(&mesh.vertices, &mesh.indices[range.start as usize..range.end as usize], FAR_CELLS);
+                let start = mesh.indices.len() as u32;
+                // Only where it saves most of the work.
+                if model.triangles() * FAR_SAVING > (range.end - range.start) / 3 {
+                    return range.clone();
+                }
+                model.add_to(&mut mesh);
+                start..mesh.indices.len() as u32
+            })
+            .collect();
+        Self { vertices: mesh.vertices, indices: mesh.indices, ranges, far_ranges }
     }
+}
+
+/// How many cells a side a shape is cut into, seen from above, for its far model: each cell
+/// that the shape covers becomes one box.
+const FAR_CELLS: usize = 3;
+/// A far model is only made for a shape with at least this many times its triangles.
+const FAR_SAVING: u32 = 3;
+/// A cell is part of the far model if the shape covers this share of it, seen from above.
+const FAR_COVER: f32 = 0.25;
+/// Half the width of the speck at a far model's middle that grows into its dot.
+const FAR_DOT_SPECK: f32 = 1.0e-4;
+
+/// One box of a far model: its corners, and what its top is painted with (a material, with
+/// `motion::PULSE` if it glows only at work).
+struct FarBox {
+    min: [f32; 3],
+    max: [f32; 3],
+    top: u32,
+}
+
+/// A shape's far model: its boxes, and how high the shape's top is.
+struct FarModel {
+    boxes: Vec<FarBox>,
+    top: f32,
+}
+
+impl FarModel {
+    fn triangles(&self) -> u32 {
+        self.boxes.len() as u32 * 10 + 2
+    }
+
+    fn add_to(&self, mesh: &mut MeshBuilder) {
+        for part in &self.boxes {
+            let corners = |z: f32| [Vec3::new(part.min[0], part.min[1], z), Vec3::new(part.max[0], part.min[1], z), Vec3::new(part.max[0], part.max[1], z), Vec3::new(part.min[0], part.max[1], z)];
+            let (bottom, top) = (corners(part.min[2]), corners(part.max[2]));
+            let center = (Vec3::from(part.min) + Vec3::from(part.max)) * 0.5;
+            // Its sides are the body's color, and its top what the shape mostly shows there.
+            // Nothing sees it from below.
+            mesh.paint(Material::Hull);
+            mesh.motion = 0;
+            for index in 0..4 {
+                let next = (index + 1) % 4;
+                mesh.face(&[bottom[index], bottom[next], top[next], top[index]], center);
+            }
+            mesh.paint(material_of(part.top & motion::MATERIAL_MASK));
+            mesh.motion = part.top & motion::PULSE;
+            mesh.face(&top, center);
+        }
+        // As a shape turns into its dot, each vertex goes to the dot's corner on its side of the
+        // middle, so the boxes alone may not fill it. This speck does: unseen at the middle of
+        // the shape, with a corner on every side, it grows into the whole dot.
+        mesh.paint(Material::Trim);
+        mesh.motion = 0;
+        let speck = FAR_DOT_SPECK;
+        let corners = [Vec3::new(-speck, -speck, self.top), Vec3::new(speck, -speck, self.top), Vec3::new(speck, speck, self.top), Vec3::new(-speck, speck, self.top)];
+        mesh.face(&corners, Vec3::new(0.0, 0.0, self.top - 1.0));
+    }
+}
+
+fn material_of(bits: u32) -> Material {
+    match bits {
+        1 => Material::Hull,
+        2 => Material::Metal,
+        3 => Material::Glow,
+        4 => Material::Panel,
+        5 => Material::Glass,
+        _ => Material::Trim,
+    }
+}
+
+/// Works out a shape's far model from its triangles: seen from above, the shape is cut into
+/// `cells` by `cells` cells, and each one it covers enough of becomes a box as high as the
+/// shape's top is there on average, painted on top with what shows most there. So a far model
+/// keeps the shape's outline, bulk, and colors, at a few dozen triangles. Muzzle flashes, which
+/// show only for a moment, are left out.
+fn far_model(vertices: &[MeshVertex], indices: &[u32], cells: usize) -> FarModel {
+    const MATERIALS: usize = 6;
+    let cells = cells.max(1);
+    let kept = || indices.as_chunks::<3>().0.iter().filter(|triangle| triangle.iter().all(|&index| vertices[index as usize].material & motion::FLASH == 0));
+    let triangles: Vec<[Vec3; 3]> = kept().map(|triangle| triangle.map(|corner| Vec3::from(vertices[corner as usize].position))).collect();
+    let kinds: Vec<u32> = kept().map(|triangle| vertices[triangle[0] as usize].material & (motion::MATERIAL_MASK | motion::PULSE)).collect();
+    let (mut low, mut high) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+    for point in triangles.iter().flatten() {
+        low = low.min(*point);
+        high = high.max(*point);
+    }
+    if triangles.is_empty() {
+        return FarModel { boxes: Vec::new(), top: 0.0 };
+    }
+    let size = (high - low).max(Vec3::splat(1.0e-3));
+    let cell_of = |point: Vec3| {
+        let along = |value: f32, from: f32, span: f32| (((value - from) / span * cells as f32) as usize).min(cells - 1);
+        along(point.y, low.y, size.y) * cells + along(point.x, low.x, size.x)
+    };
+    // What shows from above in each cell: how much, how high, and of which material.
+    let mut cover = vec![0.0_f32; cells * cells];
+    let mut height = vec![0.0_f32; cells * cells];
+    let mut shown = vec![[[0.0_f32; 2]; MATERIALS]; cells * cells];
+    const STEPS: usize = 8;
+    for (corners, kind) in triangles.iter().zip(&kinds) {
+        let facing = (corners[1] - corners[0]).cross(corners[2] - corners[0]);
+        // Twice its area as seen from above, and only if it faces up.
+        if facing.z <= 1.0e-7 {
+            continue;
+        }
+        let samples = STEPS * (STEPS + 1) / 2;
+        let share = facing.z * 0.5 / samples as f32;
+        for row in 0..STEPS {
+            for column in 0..STEPS - row {
+                // The middles of a triangle of smaller triangles.
+                let (u, v) = ((column as f32 + 1.0 / 3.0) / STEPS as f32, (row as f32 + 1.0 / 3.0) / STEPS as f32);
+                let point = corners[0] + (corners[1] - corners[0]) * u + (corners[2] - corners[0]) * v;
+                let cell = cell_of(point);
+                cover[cell] += share;
+                height[cell] += share * point.z;
+                let material = ((kind & motion::MATERIAL_MASK) as usize).min(MATERIALS - 1);
+                shown[cell][material][usize::from(kind & motion::PULSE != 0)] += share;
+            }
+        }
+    }
+    let cell_area = size.x * size.y / (cells * cells) as f32;
+    let mut boxes = Vec::new();
+    for cell in 0..cells * cells {
+        if cover[cell] < cell_area * FAR_COVER {
+            continue;
+        }
+        let (column, row) = (cell % cells, cell / cells);
+        let edge = |index: usize, from: f32, span: f32| from + span * index as f32 / cells as f32;
+        let top = (height[cell] / cover[cell]).max(low.z + size.z * 0.05);
+        let mut most = (0_u32, 0.0_f32);
+        for (material, by_pulse) in shown[cell].iter().enumerate() {
+            for (pulsing, &area) in by_pulse.iter().enumerate() {
+                if area > most.1 {
+                    most = (material as u32 | if pulsing == 1 { motion::PULSE } else { 0 }, area);
+                }
+            }
+        }
+        boxes.push(FarBox { min: [edge(column, low.x, size.x), edge(row, low.y, size.y), low.z], max: [edge(column + 1, low.x, size.x), edge(row + 1, low.y, size.y), top], top: most.0 });
+    }
+    // A shape too thin to cover any cell is one box, all of it.
+    if boxes.is_empty() {
+        boxes.push(FarBox { min: low.to_array(), max: (low + size).to_array(), top: kinds.first().copied().unwrap_or(0) });
+    }
+    FarModel { boxes, top: high.z }
 }
 
 #[cfg(test)]
@@ -3715,6 +3881,133 @@ pub(super) mod tests {
         for shape in [Shape::Dome, Shape::SelectionRing, Shape::SelectionBox, Shape::Shell] {
             assert!(!shape.casts_shadow(), "{shape:?} should not cast a shadow");
         }
+    }
+
+    fn far_vertices(set: &MeshSet, shape: usize) -> Vec<MeshVertex> {
+        set.indices[set.far_ranges[shape].start as usize..set.far_ranges[shape].end as usize].iter().map(|&index| set.vertices[index as usize]).collect()
+    }
+
+    /// A far model is there to save work, so each is a small fraction of its shape, and the
+    /// shapes that fill armies and bases all have one.
+    #[test]
+    fn far_models_are_a_fraction_of_their_shapes() {
+        let set = MeshSet::build();
+        assert_eq!(set.far_ranges.len(), Shape::COUNT);
+        let most = (FAR_CELLS * FAR_CELLS * 10 + 2) as u32;
+        let mut with_one = 0;
+        for (index, shape) in Shape::ALL.iter().enumerate() {
+            let (full, far) = (&set.ranges[index], &set.far_ranges[index]);
+            if far == full {
+                assert!((full.end - full.start) / 3 < most * FAR_SAVING, "{shape:?} has {} triangles and no far model", (full.end - full.start) / 3);
+                continue;
+            }
+            with_one += 1;
+            let triangles = (far.end - far.start) / 3;
+            assert!(triangles <= most, "{shape:?}'s far model has {triangles} triangles");
+            assert!(triangles * FAR_SAVING <= (full.end - full.start) / 3, "{shape:?}'s far model saves too little");
+        }
+        assert!(with_one * 2 > Shape::COUNT, "only {with_one} shapes have far models");
+        for shape in [Shape::Tank, Shape::TankHull, Shape::Factory, Shape::Battleship, Shape::Gunship, Shape::Commander] {
+            assert_ne!(set.far_ranges[shape as usize], set.ranges[shape as usize], "{shape:?} should have a far model");
+        }
+    }
+
+    /// A far model stands where its shape does: inside the shape's own bounds, reaching most of
+    /// the way across them, so that a unit keeps its place, size, and proportions as it shrinks.
+    #[test]
+    fn a_far_model_keeps_its_shapes_place_and_size() {
+        let set = MeshSet::build();
+        for (index, shape) in Shape::ALL.iter().enumerate() {
+            if set.far_ranges[index] == set.ranges[index] {
+                continue;
+            }
+            let bounds = |vertices: &[MeshVertex]| {
+                let (mut low, mut high) = (Vec3::splat(f32::MAX), Vec3::splat(f32::MIN));
+                for vertex in vertices.iter().filter(|vertex| vertex.material & motion::FLASH == 0) {
+                    low = low.min(Vec3::from(vertex.position));
+                    high = high.max(Vec3::from(vertex.position));
+                }
+                (low, high)
+            };
+            let (low, high) = bounds(&shape_vertices(&set, index));
+            let (far_low, far_high) = bounds(&far_vertices(&set, index));
+            for axis in 0..3 {
+                assert!(far_low[axis] >= low[axis] - 1e-4 && far_high[axis] <= high[axis] + 1e-4, "{shape:?}'s far model leaves its shape's bounds on axis {axis}");
+            }
+            // Seen from above it covers at least a third of the shape's width and length.
+            for axis in 0..2 {
+                assert!(far_high[axis] - far_low[axis] >= (high[axis] - low[axis]) / 3.0 - 1e-4, "{shape:?}'s far model is too small on axis {axis}");
+            }
+        }
+    }
+
+    /// A far model shows its shape's colors: where the shape shows team color from above, so
+    /// does its far model, and its sides are the body's color.
+    #[test]
+    fn a_far_model_shows_its_shapes_colors() {
+        let set = MeshSet::build();
+        for (index, shape) in Shape::ALL.iter().enumerate() {
+            if set.far_ranges[index] == set.ranges[index] {
+                continue;
+            }
+            let far = far_vertices(&set, index);
+            let kinds = |vertices: &[MeshVertex]| {
+                let mut seen = [false; 6];
+                for vertex in vertices.iter().filter(|vertex| vertex.normal[2] > 0.5 && vertex.material & motion::FLASH == 0) {
+                    seen[(vertex.material & motion::MATERIAL_MASK) as usize] = true;
+                }
+                seen
+            };
+            let (own, shown) = (kinds(&shape_vertices(&set, index)), kinds(&far));
+            for material in 0..6 {
+                // (Team color is always there, in the speck that grows into the dot.)
+                assert!(!shown[material] || own[material] || material == Material::Trim as usize, "{shape:?}'s far model shows a material its shape does not show from above: {material}");
+            }
+            assert!(far.iter().filter(|vertex| vertex.normal[2].abs() < 0.5).all(|vertex| vertex.material & motion::MATERIAL_MASK == Material::Hull as u32), "{shape:?}'s far model's sides are the body's color");
+            assert!(far.iter().all(|vertex| vertex.material & (motion::SPIN | motion::SWING | motion::RECOIL | motion::FLASH) == 0), "{shape:?}'s far model has nothing that moves");
+        }
+    }
+
+    /// A far model turns into the same dot its shape does: it has a corner in every quarter, and
+    /// one face whose corners are in all four, which grows into the whole square.
+    #[test]
+    fn every_far_model_fills_a_dot() {
+        let set = MeshSet::build();
+        for (index, shape) in Shape::ALL.iter().enumerate() {
+            if set.far_ranges[index] == set.ranges[index] {
+                continue;
+            }
+            let range = set.far_ranges[index].clone();
+            let indices = &set.indices[range.start as usize..range.end as usize];
+            // The last face added is the speck: two triangles over the four corners.
+            let speck: Vec<[f32; 3]> = indices[indices.len() - 6..].iter().map(|&vertex| set.vertices[vertex as usize].position).collect();
+            for (x_sign, y_sign) in [(1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0)] {
+                assert!(speck.iter().any(|corner| corner[0] * x_sign > 0.0 && corner[1] * y_sign > 0.0), "{shape:?}'s far model has no corner in quarter ({x_sign}, {y_sign})");
+            }
+            assert!(speck.iter().all(|corner| corner[0].abs() <= FAR_DOT_SPECK && corner[1].abs() <= FAR_DOT_SPECK), "{shape:?}'s speck is too small to see");
+        }
+    }
+
+    /// How a far model is worked out, on a shape simple enough to check by hand: one box for
+    /// each cell the shape covers, as high as the shape is there, topped with its color there.
+    #[test]
+    fn a_far_model_is_one_box_for_each_cell_its_shape_covers() {
+        let mut mesh = MeshBuilder::default();
+        // An L: a long bar along the left, and a foot at the front right.
+        mesh.paint(Material::Hull);
+        mesh.block([-0.5, -0.5, -0.5], [-0.2, 0.5, 0.0]);
+        mesh.paint(Material::Trim);
+        mesh.block([-0.2, 0.2, -0.5], [0.5, 0.5, -0.2]);
+        let model = far_model(&mesh.vertices, &mesh.indices, 3);
+        // The bar fills the left column of three cells, and the foot the other two at the front.
+        assert_eq!(model.boxes.len(), 5, "{:?}", model.boxes.iter().map(|part| (part.min, part.max)).collect::<Vec<_>>());
+        let at = |x: f32, y: f32| model.boxes.iter().find(|part| part.min[0] < x && x < part.max[0] && part.min[1] < y && y < part.max[1]);
+        let bar = at(-0.4, 0.0).expect("the bar");
+        assert!((bar.max[2] - 0.0).abs() < 1e-3 && bar.top == Material::Hull as u32, "as high as the bar, and its color");
+        let foot = at(0.3, 0.4).expect("the foot");
+        assert!((foot.max[2] + 0.2).abs() < 1e-3 && foot.top == Material::Trim as u32, "as high as the foot, and its color");
+        assert!(at(0.3, -0.3).is_none(), "nothing where the shape is not");
+        assert_eq!(model.triangles(), 52);
     }
 
     /// When zoomed out, each vertex moves to a corner of a dot based on its quadrant, so a shape
