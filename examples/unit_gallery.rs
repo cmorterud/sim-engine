@@ -3,6 +3,10 @@
 //!
 //! `cargo run --release --example unit_gallery -- <output folder>`
 //!
+//! `GALLERY_FOCUS=<blueprint key>` adds close-ups of that unit, `GALLERY_DOORS=<thousandths>`
+//! opens every silo's doors that far, and `GALLERY_TIME=<seconds>` sets the clock that moves the
+//! waves and the shields' shimmer.
+//!
 //! Each row is one kind of unit: land, air, navy, then structures. Blue's units stand in front,
 //! with Red's copies behind them.
 use std::path::PathBuf;
@@ -220,6 +224,12 @@ fn main() {
             }
         }
     }
+    // The domes of the shield generators, drawn standing, and a view of the first.
+    let domes: Vec<_> = snapshot.shields.iter().map(|shield| sim_engine::sim::world::ShieldView { up: true, ..*shield }).collect();
+    if let Some(dome) = domes.first() {
+        let (x, y, radius) = (f64::from(dome.center[0]) / 4096.0, f64::from(dome.center[1]) / 4096.0, f64::from(dome.radius) / 4096.0);
+        rows.push(("shield_dome".to_string(), [x, y], radius * 3.2, 0.0));
+    }
     // `GALLERY_FOCUS=<blueprint key>` adds close-ups of Blue's copy of that unit, near and nearer.
     if let Ok(key) = std::env::var("GALLERY_FOCUS") {
         let id = blueprints.id(&key).0;
@@ -242,6 +252,14 @@ fn main() {
         1.0 / f64::from(1 << HEIGHT_FRAC_BITS),
     );
     let looks = unit_looks(&blueprints);
+    // `GALLERY_TIME=<seconds>` sets the clock that moves waves and shield shimmer.
+    let time: f32 = std::env::var("GALLERY_TIME").ok().and_then(|value| value.parse().ok()).unwrap_or(0.0);
+    // `GALLERY_DOORS=<thousandths>` opens every silo's doors that far, as in a launch.
+    let mut motion = Motion::new();
+    if let Some(open) = std::env::var("GALLERY_DOORS").ok().and_then(|value| value.parse::<u16>().ok()) {
+        let silos: Vec<_> = snapshot.units.iter().filter(|unit| looks.get(usize::from(unit.blueprint)).is_some_and(|look| look.shape.has_doors())).map(|unit| (unit.id, open)).collect();
+        motion.note_doors(&silos, &silos);
+    }
     // A battle fought a minute ago, so that only its marks are left.
     let mut battle = battlefield();
 
@@ -262,7 +280,10 @@ fn main() {
             camera.update(0.0, &heights);
         }
         let mut instances = InstanceBatches::default();
-        build_unit_instances(&snapshot.units, &snapshot.units, 1.0, camera.eye(), &[], &looks, &[], &mut Motion::new(), &mut instances);
+        build_unit_instances(&snapshot.units, &snapshot.units, 1.0, camera.eye(), &[], &looks, &[], &mut motion, &mut instances);
+        for dome in &domes {
+            instances.push(sim_engine::render::meshes::Shape::Dome, sim_engine::render::instances::dome_instance(dome, camera.eye()));
+        }
         links::build_wiring_instances(&snapshot.adjacency, &snapshot.units, 0.3, camera.eye(), &mut instances);
         links::build_work_beam_instances(&links::work_beams(&snapshot, &snapshot, 1.0), 0.3, camera.eye(), &mut instances);
         // The battle a moment after it ended, smoke still rising, or a minute after, only marks left.
@@ -272,7 +293,7 @@ fn main() {
         } else {
             battle.build(60.0, camera.eye(), &mut instances);
         }
-        let scene = FrameScene { camera: &camera, instances: &instances, selection_box: None, time: 0.0 };
+        let scene = FrameScene { camera: &camera, instances: &instances, selection_box: None, time };
         let path = out.join(format!("{name}.bmp"));
         renderer.capture(&scene, None, &path).expect("capture saves");
         println!("saved {}", path.display());

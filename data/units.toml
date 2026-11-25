@@ -216,7 +216,10 @@ weapon = { range = 520, reload_ticks = 3, projectile_speed = 70, damage = 150, t
 # (GAME_SPECIFICATION.md §8.1). Tier 2. Upkeep is energy per second while the dome is up.
 # It regenerates a little faster than one cruiser's missiles wear it down (181.6 a second), so
 # that it holds against one cruiser for as long as it is paid for, and falls to two (2026-11-25,
-# reports/plans/2026-11-25-weapons-nukes-shields.md).
+# reports/plans/2026-11-25-weapons-nukes-shields.md). It heals its whole health in about 70
+# seconds, so its health is 70 times its regeneration, and one battleship broadside takes it
+# down exactly; it comes back 20 seconds after it falls, at full health (the design owner's
+# numbers, 2026-11-25).
 [[unit]]
 id = "shield_generator"
 name = "Shield Generator"
@@ -228,7 +231,7 @@ build_time = 1150
 health = 250
 footprint = 3
 vision = 400
-shield = { radius = 260, health = 5000, regen = 190, recharge_seconds = 30, upkeep = 30 }
+shield = { radius = 260, health = 13020, regen = 186, recharge_seconds = 20, upkeep = 30 }
 
 # Missiles (GAME_SPECIFICATION.md §8). The launchers and defenses are tier 2 and 3: T2 and T3
 # engineers build them, and so does the commander once it has the engineering upgrade. A launcher
@@ -1241,9 +1244,9 @@ builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_escor
 # Two twin gauss cannons, a twin railgun at aircraft, torpedoes, and an anti-torpedo charge.
 # Each twin fires both muzzles at once (the inspiration's MuzzleSalvoDelay of 0). Cost, build time, health,
 # and its guns' damage set against the Medium Tank as the inspiration has its destroyer
-# against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t2-air-navy.md). It is the fleet's hunter of submarines, and its
-# anti-torpedo charge stops one torpedo a second, so that destroyers beat an equal cost of
-# submarines. Its guns and torpedoes are set by kill times ([kill_times] in
+# against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t2-air-navy.md). It is the fleet's hunter of submarines, one at
+# a time: six Attack Submarines, about its cost, sink it in about 33 seconds, having lost one
+# ([kill_times], 2026-11-25). Its guns and torpedoes are set by kill times ([kill_times] in
 # data/balance_targets.toml, 2026-11-25): its guns destroy a commander with no enhancements on
 # land in about 80 seconds; its torpedoes, a submerged Attack Submarine in about 25, and five
 # destroyers' a commander under the water in about 80.
@@ -1263,8 +1266,9 @@ radius = 20
 vision = 640
 radar = 800
 sonar = 720
-# An anti-torpedo charge, the inspiration's numbers: it shoots down a torpedo within 600 every 10 seconds.
-torpedo_defense = { range = 600, reload_ticks = 10 }
+# An anti-torpedo charge, the inspiration's numbers: it lures a torpedo within 600 onto a decoy every
+# 10 seconds (once a second from 2026-11-24 to 2026-11-25, when destroyers were to beat submarines).
+torpedo_defense = { range = 600, reload_ticks = 100 }
 movement = "naval"
 weapon = { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 455, splash_radius = 20, turn_rate = 90, spread = 7 }
 extra_weapons = [
@@ -1317,12 +1321,22 @@ extra_weapons = [
 # defense of its own. The cruiser and the battleship carry two, and the battlecruiser one.
 missile_defense = { kind = "tactical", range = 620, reload_ticks = 18, mounts = 2 }
 
-# Three gauss turrets of three shells of 1,000 each, four twin anti-air guns as one (each fires
-# both muzzles at once, 12 a shell, every 1.7 seconds), and two close-in guns, as one.
-# Cost and build time set against the Medium Tank as the inspiration has its battleship against
-# its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t3-air-navy.md); its turrets keep the damage set against T3 artillery, so its
-# health is half again its ratio's, to its strength per cost. Like the inspiration's, it has next
-# to no anti-air and no anti-torpedo charge: its escorts keep aircraft and torpedoes off it.
+# Three gauss turrets, four twin anti-air guns as one (each fires both muzzles at once, 12 a
+# shell, every 1.7 seconds), and two close-in guns, as one. Cost and build time set against the
+# Medium Tank as the inspiration has its battleship against its T1 tank (2026-11-24, [domains],
+# reports/balance/2026-11-24-t3-air-navy.md), and health half again its ratio's. Like the
+# inspiration's, it has next to no anti-air and no anti-torpedo charge: its escorts keep aircraft
+# and torpedoes off it.
+#
+# Its turrets fire as one broadside, every 16 seconds: three shells of 4,400, a ripple apart,
+# 13,200 in all, set by the design owner's targets (2026-11-25, [broadsides] and [kill_times] in
+# data/balance_targets.toml). A volley destroys a T3 extractor and takes down a T2 Shield
+# Generator's dome, exactly; two destroy a commander. It outranges a T2 Artillery Installation by
+# 1.30, and from between the two reaches destroys a shielded position of them in about 45
+# seconds, unanswered; a T3 Heavy Shield Generator holds it off for about 45 seconds, and the
+# volley that breaks the dome destroys the generator. Its volleys come faster than a dome comes
+# back (20 seconds), which is what lets one battleship break a position at all. Until 2026-11-25
+# its turrets fired 3,000 each, every 20 seconds, on their own.
 [[unit]]
 id = "t3_battleship"
 name = "Battleship"
@@ -1340,11 +1354,11 @@ vision = 1000
 radar = 960
 sonar = 400
 movement = "naval"
-# Three turrets, two forward and one aft, each firing from where it sits.
-weapon = { range = 3000, reload_ticks = 200, projectile_speed = 60, damage = 3000, splash_radius = 40, turn_rate = 30, spread = 6, mount = [0, 28] }
+# Three turrets, two forward and one aft, each firing from where it sits, as one broadside.
+weapon = { range = 3000, reload_ticks = 160, projectile_speed = 60, damage = 4400, splash_radius = 40, turn_rate = 30, spread = 6, mount = [0, 28] }
 extra_weapons = [
-    { range = 3000, reload_ticks = 200, projectile_speed = 60, damage = 3000, splash_radius = 40, turn_rate = 30, spread = 6, mount = [0, 10] },
-    { range = 3000, reload_ticks = 200, projectile_speed = 60, damage = 3000, splash_radius = 40, turn_rate = 30, spread = 6, mount = [0, -31], aft = true },
+    { range = 3000, reload_ticks = 160, projectile_speed = 60, damage = 4400, splash_radius = 40, turn_rate = 30, spread = 6, mount = [0, 10], broadside = true },
+    { range = 3000, reload_ticks = 160, projectile_speed = 60, damage = 4400, splash_radius = 40, turn_rate = 30, spread = 6, mount = [0, -31], aft = true, broadside = true },
     { range = 1200, reload_ticks = 17, projectile_speed = 180, damage = 96, targets = "air", turn_rate = 180 },
 ]
 missile_defense = { kind = "tactical", range = 620, reload_ticks = 18, mounts = 2 }
@@ -1352,7 +1366,9 @@ missile_defense = { kind = "tactical", range = 620, reload_ticks = 18, mounts = 
 # A laser cannon forward and one aft, torpedoes, one of the fleet's tactical missile defense
 # mounts, and an anti-torpedo charge. A laser's beam hits the tick it is fired, one target, with no blast.
 # Cost, build time, and health set against the Medium Tank as the inspiration has its
-# battlecruiser against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t3-air-navy.md); its lasers keep twice a turret's damage.
+# battlecruiser against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t3-air-navy.md). Its lasers did twice a battleship
+# turret's damage a second until 2026-11-25, when the battleship's broadside was set by its own
+# targets.
 [[unit]]
 id = "t3_battlecruiser"
 name = "Battlecruiser"
@@ -1392,8 +1408,9 @@ id = "t1_attack_sub"
 name = "Attack Submarine"
 class = "tank"
 tier = 1
-# Cost, build time, health, and damage against the Medium Tank as the inspiration has its
-# submarine against its T1 tank (2026-11-24, [domains]).
+# Cost, build time, and health against the Medium Tank as the inspiration has its submarine
+# against its T1 tank (2026-11-24, [domains]). Its torpedo, 185 until 2026-11-25, is set so that six
+# of them sink a destroyer in about 33 seconds ([kill_times]), within its strength band.
 mass = 265
 energy = 2122
 build_time = 1187
@@ -1405,7 +1422,7 @@ radius = 12
 vision = 640
 sonar = 1200
 movement = "submarine"
-weapon = { range = 640, reload_ticks = 40, projectile_speed = 30, damage = 185, targets = "naval" }
+weapon = { range = 640, reload_ticks = 40, projectile_speed = 30, damage = 235, targets = "naval" }
 # The inspiration's deck gun, 25 a second out to 640, which fires only on the surface.
 extra_weapons = [{ range = 640, reload_ticks = 10, projectile_speed = 60, damage = 25, turn_rate = 90 }]
 
@@ -1988,6 +2005,11 @@ vision = 480
 # A gatling cannon: 15-round bursts, about 250 damage a second.
 weapon = { range = 1400, reload_ticks = 7, projectile_speed = 64, damage = 438, splash_radius = 20, turn_rate = 90, spread = 4 }
 
+# The T3 dome: a little more regeneration a second than the T2 one, and far more health, so it
+# heals more slowly for its size, in about three minutes. One battleship, unassisted, wears it
+# down in about 45 seconds, a broadside every 16 that it cannot heal in time, and the one that
+# breaks it destroys the generator under it (2026-11-25). Until then it healed 500 a second, faster
+# than a battleship's guns, so that one battleship never broke it.
 [[unit]]
 id = "t3_heavy_shield"
 name = "Heavy Shield Generator"
@@ -1999,7 +2021,7 @@ build_time = 5000
 health = 500
 footprint = 3
 vision = 400
-shield = { radius = 440, health = 17000, regen = 500, recharge_seconds = 23, upkeep = 400 }
+shield = { radius = 440, health = 36000, regen = 200, recharge_seconds = 20, upkeep = 400 }
 
 [[unit]]
 id = "wall"

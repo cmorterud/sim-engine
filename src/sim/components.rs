@@ -430,6 +430,12 @@ pub struct ExtraWeapon {
     pub stun_ticks: u32,
     /// Fires in volleys, and where it is in its volley.
     pub salvo: Option<Salvo>,
+    /// Fires with the main weapon, as one broadside (`WeaponDef::broadside`).
+    pub broadside: bool,
+    /// Whether it pointed at what it aims at, as of the last tick: a broadside waits for it.
+    pub aimed: bool,
+    /// A broadside gun is due to fire once each time the main weapon fires, and only then.
+    pub due: bool,
 }
 
 impl ExtraWeapon {

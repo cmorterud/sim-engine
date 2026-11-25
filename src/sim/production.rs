@@ -504,6 +504,9 @@ impl SimWorld {
                     spread: weapon.spread,
                     stun_ticks: weapon.stun_ticks,
                     salvo: weapon.salvo.map(super::components::Salvo::new),
+                    broadside: weapon.broadside,
+                    aimed: false,
+                    due: false,
                 })
                 .collect();
             self.ecs.insert_one(entity, super::components::ExtraWeapons(extras)).expect("entity was just spawned");

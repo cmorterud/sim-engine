@@ -370,6 +370,22 @@ charge fixes it (one every 0.7 s gives +0.77) but then an equal cost of destroye
 torpedo launchers, another cell. The cell now measures four-fifths of the destroyers' cost in
 submarines (`destroyers_beat_submarines_at_cost = 0.8`), pending the user's choice.
 
+**The user's answer (2026-11-25): submarines win.** One destroyer against six T1 submarines
+sinks after about 33 seconds, having killed one submarine and damaged a second; the other five
+survive. The destroyer's torpedo already kills one in about 25 s, so in 33 s it lands about
+1,500, one submarine and a third of a second: that part needed no change. What changed is how
+fast the submarines sink it:
+
+- The anti-torpedo charge goes back to the inspiration's one torpedo every 10 s (PR #6 had set it
+  to one a second, so that destroyers beat submarines). The destroyer then sank in about 43 s.
+- The submarine's torpedo goes from 185 to 235 (its strength over the anchor's, 1.13 of the
+  inspiration's ratio, stays inside the 0.80 to 1.25 band). Measured: 31 to 35 s over three
+  layouts, one submarine lost and one damaged.
+
+The cell turns round: `submarines_beat_destroyers = 0.40`, an equal cost of submarines against
+destroyers alone, replaces `destroyers_beat_submarines` and its 0.8 share, and
+`[kill_times] six_t1_subs_sink_a_destroyer = [29, 37]` pins the fight itself.
+
 ## 11. Two torpedo boats against an unprotected commander, about 60 s
 
 Each boat fires one torpedo every 0.8 s, with about 3 s of flight. In 60 s, the boats fire
@@ -426,6 +442,53 @@ Knock-on effects:
   needs re-running. If it falls short, the SAM's health or cost is the place to make it up, since
   the kill times are fixed.
 - [kills] gains `t3_sam = { t2_gunship = 2, t3_strategic_bomber = 8 }`.
+
+## 13. The battleship's broadside and the domes (added 2026-11-25)
+
+The user's targets, given one after another the same afternoon:
+
+- The battleship outranges a T2 Artillery Installation by 1.30 (3,000 over 2,300: already so),
+  and parked between the two reaches destroys four of them under a T2 dome in about 45 s, never
+  fired on.
+- One battleship volley does exactly what a T2 dome absorbs before it goes down.
+- A T3 extractor dies to one volley (this replaced "in about 16 s", which no volley that every
+  shell of lands could square with a commander in about 26 s: the commander has 2.6 times the
+  health). A commander may take up to about 40 s.
+- Domes come back about 20 s after they fall, at full health. The T2 dome heals its whole health
+  in about 70 s (regeneration = health / 70). The T3 dome heals a little faster a second, on much
+  more health. One cruiser is still stalemated by one T2 dome.
+- One unassisted T3 dome holds off one battleship for about 45 s, and the volley that breaks it
+  destroys the generator.
+
+How they fit:
+
+| | Number | Why |
+|---|---|---|
+| T2 dome | 13,020 health, 186 a second | 186 just over one cruiser's 181.6; 186 × 70 = 13,020 |
+| Battleship volley | 3 × 4,400 = 13,200 | Just over the dome, with its regeneration over the 0.6 s ripple |
+| Battleship reload | 16 s | Under the dome's 20 s: the next volley must land while it is down, or the generator lives and the dome is back |
+| T3 dome | 36,000 health, 200 a second | Survives three volleys, falls on the fourth's second shell; the third shell destroys the 500-health generator |
+
+Measured in the sim: a T3 extractor falls to the first volley's second shell, a commander to the
+second volley in 18.6 s (two volleys: 26 s would need volleys more than 20 s apart), the T2
+dome to the first volley's last shell, the T3 dome in 48.3 s from its first damage with its
+generator a second later, and the shielded artillery in 48.5 s. That last depends on how close
+the installations stand, which the shells' blasts reach across: 17 s packed in a square, 32 s in
+a row, 65 s spread out. The check uses two side by side against the generator's seaward side,
+one off its north side, and one behind it.
+
+The broadside is new in the engine (`WeaponDef::broadside`, on an extra weapon): the main gun
+waits until each broadside gun with a target points at it, and each time it fires, the broadside
+guns fire once each after it, 0.3 s apart, and never on their own. Before, each turret reloaded
+and aimed on its own, so shells landed in ones and twos seconds apart, and the aft turret's first
+shot came 3 s late.
+
+What it costs: the battleship's damage a second goes from 450 to 825. Its strength per cost is
+1.21 of the inspiration's ratio, inside the 0.80 to 1.25 band. The 2026-11-24 rules that set a
+turret against the artillery's damage a second, and each battlecruiser laser at twice a turret,
+are dropped. The T3 dome's 500 a second (item 3) is replaced, so one battleship now breaks a
+coastal T3 position on its own. The T2 dome is 2.6 times as tough as before, which the coastal
+cruisers and the missile launchers' T2 siege are re-checked against.
 
 ## Tests that pin all of this
 

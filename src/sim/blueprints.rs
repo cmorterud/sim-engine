@@ -317,7 +317,15 @@ pub struct WeaponDef {
     pub arc: Option<Fp>,
     /// Fires its shots in volleys rather than one at a time: `None` for one shot a reload.
     pub salvo: Option<SalvoDef>,
+    /// An extra weapon that fires with the main weapon, as one broadside, and never on its own:
+    /// the main weapon waits until every broadside gun with a target points at it, and each time
+    /// it fires, they fire once each, in turn after it, `BROADSIDE_RIPPLE_TICKS` apart, so that a
+    /// battleship's turrets land as one volley at the main weapon's reload.
+    pub broadside: bool,
 }
+
+/// Ticks between one gun of a broadside and the next (`WeaponDef::broadside`).
+pub const BROADSIDE_RIPPLE_TICKS: u32 = 3;
 
 /// A volley (`salvo` in the unit data): `shots` shots spread over the volley's first `ticks`,
 /// shot `i` (from 0) leaving `i * ticks / shots` ticks after the first, rounded down. The weapon's
@@ -625,6 +633,9 @@ struct RawWeapon {
     arc: Option<u32>,
     /// Shots in volleys: how many, over how many ticks from the first.
     salvo: Option<RawSalvo>,
+    /// An extra weapon that fires with the main weapon, as one broadside.
+    #[serde(default)]
+    broadside: bool,
 }
 
 #[derive(Deserialize)]
@@ -1078,6 +1089,7 @@ impl BlueprintDb {
                     setup_ticks: weapon.setup_ticks.unwrap_or(0),
                     arc: weapon.arc.map(|degrees| crate::math::fp::cos_sin_tenths_of_degree(degrees * 10).0),
                     salvo: weapon.salvo.as_ref().map(|salvo| SalvoDef { shots: salvo.shots, ticks: salvo.ticks }),
+                    broadside: weapon.broadside,
                 })
             };
             let weapon = unit.weapon.as_ref().map(parse_weapon).transpose()?;
@@ -1089,6 +1101,12 @@ impl BlueprintDb {
             }
             if !extra_weapons.is_empty() && weapon.is_none() {
                 return Err(context("extra weapons need a main weapon".into()));
+            }
+            if weapon.is_some_and(|weapon| weapon.broadside) {
+                return Err(context("only an extra weapon fires in the main weapon's broadside".into()));
+            }
+            if extra_weapons.iter().any(|extra| extra.broadside && extra.salvo.is_some()) {
+                return Err(context("a weapon in a broadside fires one shot with it, not a volley of its own".into()));
             }
             let death_explosion = match &unit.death_explosion {
                 None => None,

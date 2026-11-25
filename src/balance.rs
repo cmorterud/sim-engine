@@ -1453,11 +1453,10 @@ pub fn derive_domains_report() {
     let mut cells: Vec<Cell> = Vec::new();
     let force = |name: &str, materiel: f64, tier: u8| squadrons(&db, &domain_force(&db, name), materiel, tier, Tactics::AttackMove);
     let squadron_cost = |name: &str, tier: u8| force_materiel(&db, &squadrons(&db, &domain_force(&db, name), 0.0, tier, Tactics::AttackMove), tier);
-    // `share` is the second force's cost over the first's: 1 for an equal cost.
-    let score_cell = |cells: &mut Vec<Cell>, name: &str, field: Field, first: &str, first_squadrons: f64, second: &str, share: f64, at_least: Option<f64>, at_most: Option<f64>| {
+    let score_cell = |cells: &mut Vec<Cell>, name: &str, field: Field, first: &str, first_squadrons: f64, second: &str, at_least: Option<f64>, at_most: Option<f64>| {
         let a = force(first, squadron_cost(first, field.tier) * first_squadrons, field.tier);
         let materiel = force_materiel(&db, &a, field.tier);
-        let b = force(second, materiel * share, field.tier);
+        let b = force(second, materiel, field.tier);
         let result = mirrored_on(&db, field, &a, &b, 1.0);
         let ratio = force_materiel(&db, &b, field.tier) / materiel;
         let met = match (at_least, at_most) {
@@ -1474,16 +1473,15 @@ pub fn derive_domains_report() {
     };
     let number = |key: &str| as_number(&domain_cell(key));
     let water = |tier| Field::new(Ground::Water, tier);
-    score_cell(&mut cells, "T2 fleet against an equal cost of the T2 air force, over water", water(2), "t2_fleet", 2.0, "t2_air_force", 1.0, Some(number("fleet_beats_air_force_t2")), None);
-    score_cell(&mut cells, "T3 fleet against an equal cost of the T3 air force, over water", water(3), "t3_fleet", 1.0, "t3_air_force", 1.0, Some(number("fleet_beats_air_force_t3")), None);
-    score_cell(&mut cells, "Battleship-heavy T3 fleet against an equal cost of the T3 air force, over water", water(3), "t3_battleship_heavy_fleet", 2.0, "t3_air_force", 1.0, None, None);
-    score_cell(&mut cells, "T2 fleet with no anti-air against torpedo bombers", water(2), "t2_fleet_without_anti_air", 4.0, "t2_torpedo_bombers", 1.0, None, Some(number("fleet_without_anti_air_loses_to_torpedo_bombers")));
-    score_cell(&mut cells, "Submarines against a T2 fleet with no anti-submarine weapon", water(2), "t1_submarines", 24.0, "t2_fleet_without_anti_submarine", 1.0, Some(number("submarines_beat_fleet_without_anti_submarine")), None);
-    let hunted = number("destroyers_beat_submarines_at_cost");
-    score_cell(&mut cells, &format!("Destroyers against {:.0}% of their cost in submarines", hunted * 100.0), water(2), "t2_destroyers", 4.0, "t1_submarines", hunted, Some(number("destroyers_beat_submarines")), None);
-    score_cell(&mut cells, "T2 fleet against an equal cost of hovercraft, on water", water(2), "t2_fleet", 2.0, "t2_hovercraft", 1.0, Some(-number("hovercraft_loses_to_fleet")), None);
-    score_cell(&mut cells, "T1 fleet against an equal cost of the T1 air force, over water", water(1), "t1_fleet", 4.0, "t1_air_force", 1.0, None, None);
-    score_cell(&mut cells, "Frigates against an equal cost of T1 bombers, over water", water(1), "t1_frigates", 12.0, "t1_bombers", 1.0, Some(number("frigates_against_t1_bombers_at_least")), None);
+    score_cell(&mut cells, "T2 fleet against an equal cost of the T2 air force, over water", water(2), "t2_fleet", 2.0, "t2_air_force", Some(number("fleet_beats_air_force_t2")), None);
+    score_cell(&mut cells, "T3 fleet against an equal cost of the T3 air force, over water", water(3), "t3_fleet", 1.0, "t3_air_force", Some(number("fleet_beats_air_force_t3")), None);
+    score_cell(&mut cells, "Battleship-heavy T3 fleet against an equal cost of the T3 air force, over water", water(3), "t3_battleship_heavy_fleet", 2.0, "t3_air_force", None, None);
+    score_cell(&mut cells, "T2 fleet with no anti-air against torpedo bombers", water(2), "t2_fleet_without_anti_air", 4.0, "t2_torpedo_bombers", None, Some(number("fleet_without_anti_air_loses_to_torpedo_bombers")));
+    score_cell(&mut cells, "Submarines against a T2 fleet with no anti-submarine weapon", water(2), "t1_submarines", 24.0, "t2_fleet_without_anti_submarine", Some(number("submarines_beat_fleet_without_anti_submarine")), None);
+    score_cell(&mut cells, "Destroyers alone against an equal cost of submarines", water(2), "t2_destroyers", 4.0, "t1_submarines", None, Some(-number("submarines_beat_destroyers")));
+    score_cell(&mut cells, "T2 fleet against an equal cost of hovercraft, on water", water(2), "t2_fleet", 2.0, "t2_hovercraft", Some(-number("hovercraft_loses_to_fleet")), None);
+    score_cell(&mut cells, "T1 fleet against an equal cost of the T1 air force, over water", water(1), "t1_fleet", 4.0, "t1_air_force", None, None);
+    score_cell(&mut cells, "Frigates against an equal cost of T1 bombers, over water", water(1), "t1_frigates", 12.0, "t1_bombers", Some(number("frigates_against_t1_bombers_at_least")), None);
     // Air against land, about even, as at T1.
     {
         let margin = target_number("counters", "even_margin");

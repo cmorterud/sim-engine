@@ -504,6 +504,9 @@ pub struct SimSnapshot {
     pub decoys: Vec<([i32; 3], u32)>,
     /// Missiles built and waiting in the viewer's silos, by silo, sorted by `SimId`.
     pub stocks: Vec<(SimId, u32)>,
+    /// How far open the doors of silos in `units` are, in thousandths, while a launch is under
+    /// way, sorted by `SimId`. Drawing only (`SimWorld::silo_doors`).
+    pub silo_doors: Vec<(SimId, u16)>,
     /// How many units each of the viewer's transports carries, sorted by `SimId`. Everyone's,
     /// for a viewer who sees everything.
     pub cargo: Vec<(SimId, u32)>,
@@ -2539,6 +2542,8 @@ impl SimWorld {
                 continue;
             }
             let stun = stun_weapon.map_or(0, |weapon| weapon.0);
+            // Whether the main weapon fires this tick, which sets off its broadside.
+            let mut main_fired = false;
             let me = grid.entry(index);
             let range = i64::from(combat.range.to_bits());
             let squared_distance = |x: i32, y: i32| {
@@ -2765,6 +2770,9 @@ impl SimWorld {
                     }
                 }
             };
+            // A broadside goes off all at once: the main weapon waits until each of its guns that
+            // has a target points at it (as they did last tick), so that the first volley is whole.
+            let aimed = aimed && extras.as_deref().is_none_or(|extras| extras.0.iter().all(|weapon| !weapon.broadside || weapon.aimed || weapon.target.is_none()));
             // Discharge fires in range, once aimed and reloaded, if the team has the energy stored.
             if let (Some(target), Some(weapon), true) = (discharge_target, discharge.as_mut(), can_fire) {
                 let economy = &mut economies[stats.owner.index()];
@@ -2884,6 +2892,7 @@ impl SimWorld {
                         });
                         economies[stats.owner.index()].energy -= weapon_energy;
                         combat.ticks_until_ready = salvo.as_mut().map_or(reload, |salvo| salvo.fire(reload));
+                        main_fired = true;
                         if let Some(launcher) = launcher.as_mut() {
                             launcher.stock = launcher.stock.saturating_sub(1);
                             if launcher.strategic {
@@ -2938,6 +2947,7 @@ impl SimWorld {
                     });
                     economies[stats.owner.index()].energy -= weapon_energy;
                     combat.ticks_until_ready = salvo.as_mut().map_or(reload, |salvo| salvo.fire(reload));
+                    main_fired = true;
                     if let Some(launcher) = launcher.as_mut() {
                         launcher.stock = launcher.stock.saturating_sub(1);
                         if launcher.strategic {
@@ -2950,7 +2960,15 @@ impl SimWorld {
             // Each extra weapon picks its own target: the ordered one if it can hit it, or else
             // the nearest it can, mobile units first. A ground attack takes over those that hit the ground.
             if let Some(extras) = extras {
+                // A broadside's guns fire only with the main weapon: each time it fires, they are
+                // due once more, in turn after it, a ripple apart, so that they land as one volley.
+                let mut in_turn = 0;
                 for weapon in &mut extras.0 {
+                    if main_fired && weapon.broadside {
+                        in_turn += 1;
+                        weapon.due = true;
+                        weapon.ticks_until_ready = in_turn * super::blueprints::BROADSIDE_RIPPLE_TICKS + 1;
+                    }
                     weapon.ticks_until_ready = weapon.ticks_until_ready.saturating_sub(1);
                     if let Some(salvo) = weapon.salvo.as_mut() {
                         salvo.tick();
@@ -3028,7 +3046,8 @@ impl SimWorld {
                             }
                         },
                     };
-                    if weapon.ticks_until_ready > 0 || !aimed || (me.is_sub && !weapon.torpedo && weapon.missile_height.is_none()) {
+                    weapon.aimed = aimed;
+                    if weapon.ticks_until_ready > 0 || !aimed || (weapon.broadside && !weapon.due) || (me.is_sub && !weapon.torpedo && weapon.missile_height.is_none()) {
                         continue;
                     }
                     let from = raw(gun.0, gun.1, launch_height(muzzle, weapon.torpedo));
@@ -3070,6 +3089,7 @@ impl SimWorld {
                         lobbed: false,
                     });
                     weapon.ticks_until_ready = weapon.fired();
+                    weapon.due = false;
                 }
             }
         }
@@ -4898,6 +4918,10 @@ impl SimWorld {
         upgrading.sort_unstable();
         upgrading.dedup();
         let (stunned, tractor_beams, storms) = self.exotic_views(&units, &seen);
+        // Only silos the viewer sees now: a remembered one shows as it was last seen.
+        let mut silo_doors: Vec<(SimId, u16)> =
+            self.silo_doors().into_iter().filter(|(id, _)| units.binary_search_by_key(id, |unit| unit.id).is_ok_and(|index| !units[index].remembered)).collect();
+        silo_doors.sort_unstable();
         SimSnapshot {
             tick: self.current_tick,
             units,
@@ -4909,6 +4933,7 @@ impl SimWorld {
             interceptions,
             decoys,
             stocks,
+            silo_doors,
             cargo,
             adjacency,
             blips,

@@ -292,3 +292,233 @@ fn a_t2_shield_holds_against_one_cruiser_and_falls_to_two() {
         }
     }
 }
+
+/// Six T1 Attack Submarines, about a destroyer's cost, sink one in about 33 seconds, as the
+/// design owner has it (2026-11-25): it sinks one of them and damages a second, and the other
+/// four come through untouched. Both sides attack-move onto each other.
+#[test]
+fn six_submarines_sink_a_destroyer_and_lose_one() {
+    let mut world = world();
+    let destroyer = place(&mut world, "t2_destroyer", Team::Blue, (3_000, 5_000));
+    let subs: Vec<SimId> = (0..6).map(|index| place(&mut world, "t1_attack_sub", Team::Red, (4_400 + (index % 2) * 60, 4_850 + (index / 2) * 100))).collect();
+    let full = world.unit_health(subs[0]).unwrap();
+    world.advance_tick(&[
+        SimCommand::AttackMove { units: subs.clone(), goal: point(3_000, 5_000) },
+        SimCommand::AttackMove { units: vec![destroyer], goal: point(4_400, 5_000) },
+    ]);
+    let mut first = None;
+    let mut sunk = None;
+    for tick in 0..1_000 {
+        world.advance_tick(&[]);
+        first = first.or((!world.projectiles.is_empty()).then_some(tick));
+        if world.unit_entity(destroyer).is_none() {
+            sunk = first.map(|first| tick - first);
+            break;
+        }
+    }
+    assert_within("six_t1_subs_sink_a_destroyer", sunk);
+    let health: Vec<Option<Fp>> = subs.iter().map(|&sub| world.unit_health(sub)).collect();
+    let lost = health.iter().filter(|health| health.is_none()).count();
+    let damaged = health.iter().filter(|health| health.is_some_and(|health| health < full)).count();
+    assert_eq!((lost, damaged), (1, 1), "the submarines' health after the fight: {health:?}");
+}
+
+/// A battleship parked between its guns' reach and a T2 Artillery Installation's destroys a T2
+/// artillery position, a Shield Generator's dome over four installations, in about 45 seconds
+/// from its first damage, and is never fired on; its first volley takes the dome down, and no
+/// less does (2026-11-25, `[domains.cells]`).
+#[test]
+fn a_battleship_outranges_and_destroys_shielded_t2_artillery() {
+    use sim_engine::sim::components::Shield;
+    let table = targets();
+    let cells = &table["domains"]["cells"];
+    let range = |key: &str| {
+        let range = cells[key].as_array().unwrap_or_else(|| panic!("[domains.cells] {key} is a range"));
+        (number(&range[0]), number(&range[1]))
+    };
+    let db = BlueprintDb::standard();
+    let reach = |key: &str| db.get(db.id(key)).weapon.expect("a gun").range.to_num::<i32>();
+    let (guns, artillery) = (reach("t3_battleship"), reach("t2_artillery"));
+    let (least, most) = range("battleship_over_t2_artillery_reach");
+    let over = f64::from(guns) / f64::from(artillery);
+    assert!((least..=most).contains(&over), "the battleship outranges the artillery by {over:.2}");
+
+    let mut world = world();
+    // The dome's generator's south-west cell; two installations side by side against its seaward
+    // side, one off its north side, and one behind it.
+    let (x, y) = (280, 255);
+    let generator = world.spawn_finished_structure(db.id("shield_generator"), Team::Red, x, y).expect("room for the generator");
+    let mut structures = vec![generator];
+    structures.extend([(x - 1, y), (x - 1, y + 1), (x + 1, y + 5), (x + 5, y + 1)].map(|(x, y)| world.spawn_finished_structure(db.id("t2_artillery"), Team::Red, x, y).expect("room for the artillery")));
+    let middle = (x as i32 * 20 + 30, y as i32 * 20 + 30);
+    let battleship = place(&mut world, "t3_battleship", Team::Blue, (middle.0 - (guns + artillery) / 2, middle.1));
+    let full = world.unit_health(battleship).unwrap();
+    let dome = world.unit_entity(generator).unwrap();
+
+    let mut shells: Vec<SimId> = Vec::new();
+    let (mut landed, mut first_damage, mut volley_landed, mut fired_on) = (0, None, None, false);
+    let mut cleared = None;
+    for tick in 0..2_000 {
+        world.advance_tick(&[]);
+        let from = |team: Team| -> Vec<SimId> {
+            world.projectiles.iter().filter(|&&(_, entity)| world.ecs.get::<&Projectile>(entity).is_ok_and(|projectile| projectile.source_team == team)).map(|&(id, _)| id).collect()
+        };
+        let flying = from(Team::Blue);
+        landed += shells.iter().filter(|shell| !flying.contains(shell)).count();
+        shells = flying;
+        fired_on |= !from(Team::Red).is_empty();
+        let dome_up = world.ecs.get::<&Shield>(dome).is_ok_and(|shield| shield.is_up());
+        if first_damage.is_none() && world.ecs.get::<&Shield>(dome).is_ok_and(|shield| shield.health < shield.max_health) {
+            first_damage = Some(tick);
+        }
+        if volley_landed.is_none() && !dome_up {
+            volley_landed = Some(landed);
+        }
+        if structures.iter().all(|&id| world.unit_entity(id).is_none()) {
+            cleared = first_damage.map(|first| tick - first);
+            break;
+        }
+    }
+    let turrets = db.get(db.id("t3_battleship")).extra_weapons.iter().chain(&db.get(db.id("t3_battleship")).weapon).filter(|weapon| weapon.targets == Targets::Ground).count();
+    assert_eq!(volley_landed, Some(turrets), "shells landed when the dome went down");
+    assert!(!fired_on, "the artillery fired at the battleship");
+    assert_eq!(world.unit_health(battleship), Some(full), "the battleship was hit");
+    let (least, most) = range("battleship_breaks_shielded_t2_artillery");
+    let took = seconds(cleared.expect("the position was not destroyed"));
+    println!("battleship_breaks_shielded_t2_artillery: {took} s");
+    assert!((least..=most).contains(&took), "the position fell in {took} s, not within {least} to {most}");
+}
+
+/// The battleship's shells, in flight and landed: `landed` counts those gone since the last call.
+struct Shells {
+    from: SimId,
+    flying: Vec<SimId>,
+    landed: usize,
+}
+
+impl Shells {
+    fn new(from: SimId) -> Self {
+        Self { from, flying: Vec::new(), landed: 0 }
+    }
+
+    /// After a tick: notes the shells that have landed since the last.
+    fn update(&mut self, world: &SimWorld) {
+        let flying: Vec<SimId> = world.projectiles.iter().filter(|&&(_, entity)| world.ecs.get::<&Projectile>(entity).is_ok_and(|projectile| projectile.source == self.from)).map(|&(id, _)| id).collect();
+        self.landed += self.flying.iter().filter(|shell| !flying.contains(shell)).count();
+        self.flying = flying;
+    }
+}
+
+/// A battleship's guns that fire together as one broadside: its main gun and the extra weapons in
+/// its broadside.
+fn broadside_guns(unit: &Blueprint) -> usize {
+    1 + unit.extra_weapons.iter().filter(|weapon| weapon.broadside).count()
+}
+
+/// Each [broadsides] rule holds in the sim: a battleship offshore destroys each target in its
+/// number of broadsides, every shell landing, and a commander within [kill_times]
+/// battleship_commander_on_land. Its guns fire as one volley, a ripple apart.
+#[test]
+fn a_battleships_broadsides_destroy_an_extractor_in_one_and_a_commander_in_two() {
+    let table = targets();
+    let db = BlueprintDb::standard();
+    let battleship_def = db.get(db.id("t3_battleship"));
+    let guns = broadside_guns(battleship_def);
+    assert_eq!(guns, 3, "the battleship's three turrets fire as one broadside");
+    let rules = table["broadsides"]["t3_battleship"].as_table().expect("[broadsides] t3_battleship").clone();
+    assert!(rules.len() >= 2);
+    for (key, broadsides) in rules {
+        let broadsides = usize::try_from(broadsides.as_integer().expect("a count")).unwrap();
+        let mut world = world();
+        let battleship = place(&mut world, "t3_battleship", Team::Blue, (SHORE_X - 600, 5_000));
+        let at = (SHORE_X + 800, 5_000);
+        if db.get(db.id(&key)).requires_deposit {
+            world.deposits.push((at.0 as u32 / 20, at.1 as u32 / 20));
+        }
+        let victim = target(&mut world, &key, at);
+        let mut shells = Shells::new(battleship);
+        let (mut first, mut took) = (None, None);
+        for tick in 0..1_000 {
+            world.advance_tick(&[]);
+            shells.update(&world);
+            first = first.or((!shells.flying.is_empty()).then_some(tick));
+            if world.unit_entity(victim).is_none() {
+                took = first.map(|first| tick - first);
+                break;
+            }
+        }
+        let took = took.unwrap_or_else(|| panic!("{key} was not destroyed"));
+        let needed = shells.landed.div_ceil(guns);
+        assert_eq!(needed, broadsides, "{key} fell to {} shells, {needed} broadsides, in {} s", shells.landed, seconds(took));
+        if key == "command_rig" {
+            assert_within("battleship_commander_on_land", Some(took));
+        }
+    }
+}
+
+/// One battleship wears down an unassisted T3 Heavy Shield Generator's dome in about 45 seconds
+/// from its first damage, a broadside at a time that the dome cannot heal in time, and the
+/// broadside that breaks the dome destroys the generator (2026-11-25).
+#[test]
+fn a_battleship_breaks_a_t3_shield_and_the_same_broadside_destroys_its_generator() {
+    use sim_engine::sim::components::Shield;
+    let db = BlueprintDb::standard();
+    let reload = db.get(db.id("t3_battleship")).weapon.expect("a main gun").reload_ticks;
+    let mut world = world();
+    let generator = place(&mut world, "t3_heavy_shield", Team::Red, (SHORE_X + 600, 5_000));
+    let battleship = place(&mut world, "t3_battleship", Team::Blue, (SHORE_X - 1_400, 5_000));
+    let dome = world.unit_entity(generator).unwrap();
+    let mut shells = Shells::new(battleship);
+    let (mut first_damage, mut fell, mut destroyed) = (None, None, None);
+    for tick in 0..2_000 {
+        world.advance_tick(&[]);
+        shells.update(&world);
+        if world.unit_entity(generator).is_none() {
+            destroyed = Some(tick);
+            break;
+        }
+        let shield = *world.ecs.get::<&Shield>(dome).unwrap();
+        if first_damage.is_none() && shield.health < shield.max_health {
+            first_damage = Some(tick);
+        }
+        if fell.is_none() && !shield.is_up() {
+            fell = Some(tick);
+        }
+    }
+    let (first_damage, fell, destroyed) = (first_damage.expect("the dome was hit"), fell.expect("the dome fell"), destroyed.expect("the generator was destroyed"));
+    let (least, most) = seconds_range("battleship_breaks_t3_shield");
+    let took = seconds(fell - first_damage);
+    println!("battleship_breaks_t3_shield: {took} s");
+    assert!((least..=most).contains(&took), "the dome fell in {took} s, not within {least} to {most}");
+    assert!(destroyed - fell < reload / 4, "the generator outlived its dome by {} s: the broadside that broke it should carry through", seconds(destroyed - fell));
+}
+
+/// A broadside: the battleship's three turrets fire together, a ripple apart, once each for each
+/// shot of its main gun, and none on its own; the first volley waits until all three point at
+/// their targets (2026-11-25).
+#[test]
+fn a_battleships_turrets_fire_together_a_ripple_apart() {
+    use sim_engine::sim::blueprints::BROADSIDE_RIPPLE_TICKS;
+    let db = BlueprintDb::standard();
+    let reload = db.get(db.id("t3_battleship")).weapon.expect("a main gun").reload_ticks;
+    let mut world = world();
+    let battleship = place(&mut world, "t3_battleship", Team::Blue, (SHORE_X - 600, 5_000));
+    target(&mut world, "command_rig", (SHORE_X + 800, 5_000));
+    let (mut seen, mut fired) = (Vec::<SimId>::new(), Vec::new());
+    for tick in 0..600 {
+        world.advance_tick(&[]);
+        for &(id, entity) in &world.projectiles {
+            if !seen.contains(&id) && world.ecs.get::<&Projectile>(entity).is_ok_and(|projectile| projectile.source == battleship) {
+                seen.push(id);
+                fired.push(tick);
+            }
+        }
+        if fired.len() >= 6 {
+            break;
+        }
+    }
+    assert!(fired.len() >= 6, "only {} shells in 60 s", fired.len());
+    let first = fired[0];
+    let ripple = BROADSIDE_RIPPLE_TICKS;
+    assert_eq!(fired[..6], [first, first + ripple, first + 2 * ripple, first + reload, first + reload + ripple, first + reload + 2 * ripple], "the shells left at {fired:?}");
+}

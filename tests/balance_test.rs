@@ -293,15 +293,10 @@ fn number(value: &toml::Value) -> f64 {
 
 /// `first`, so many squadrons of it, against an equal cost of `second`, on a field.
 fn fight(db: &Arc<BlueprintDb>, field: Field, first: &str, how_many: f64, second: &str) -> f64 {
-    fight_at(db, field, first, how_many, second, 1.0)
-}
-
-/// `fight`, against `share` of the first force's cost in the second.
-fn fight_at(db: &Arc<BlueprintDb>, field: Field, first: &str, how_many: f64, second: &str, share: f64) -> f64 {
     let squadron = domain_force(db, first);
     let one = force_materiel(db, &squadrons(db, &squadron, 0.0, field.tier, Tactics::AttackMove), field.tier);
     let a = squadrons(db, &squadron, one * how_many, field.tier, Tactics::AttackMove);
-    let b = squadrons(db, &domain_force(db, second), force_materiel(db, &a, field.tier) * share, field.tier, Tactics::AttackMove);
+    let b = squadrons(db, &domain_force(db, second), force_materiel(db, &a, field.tier), field.tier, Tactics::AttackMove);
     mirrored_on(db, field, &a, &b, 1.0).score
 }
 
@@ -368,8 +363,8 @@ fn t2_air_and_navy_are_as_strong_per_cost_as_the_inspirations() {
 }
 
 /// `[domains]`: a composed T2 fleet rules the water. It beats an equal cost of the T2 air force,
-/// torpedo bombers need over twice its cost to break it, its destroyers beat four-fifths their
-/// cost of submarines, and hovercraft lose to it.
+/// torpedo bombers need over twice its cost to break it, and hovercraft lose to it. Its
+/// destroyers alone lose to an equal cost of submarines (2026-11-25).
 #[test]
 #[cfg_attr(debug_assertions, ignore = "release only")]
 fn a_t2_fleet_rules_the_water() {
@@ -384,8 +379,8 @@ fn a_t2_fleet_rules_the_water() {
     let multiple = break_even_forces(&db, water, &fleet, &bombers).efficiency;
     let band = domains(&["cells", "torpedo_bombers_to_break_fleet_t2"]).as_array().expect("a band").iter().map(number).collect::<Vec<f64>>();
     assert!((band[0]..=band[1]).contains(&multiple), "torpedo bombers break the T2 fleet at {multiple:.2} times its cost");
-    let hunters = fight_at(&db, water, "t2_destroyers", 4.0, "t1_submarines", cell("destroyers_beat_submarines_at_cost"));
-    assert!(hunters >= cell("destroyers_beat_submarines"), "destroyers score {hunters:+.2} against submarines");
+    let hunters = fight(&db, water, "t2_destroyers", 4.0, "t1_submarines");
+    assert!(-hunters >= cell("submarines_beat_destroyers"), "submarines score {:+.2} against an equal cost of destroyers", -hunters);
     let hovercraft = fight(&db, water, "t2_fleet", 2.0, "t2_hovercraft");
     assert!(-hovercraft <= cell("hovercraft_loses_to_fleet"), "hovercraft score {:+.2} against the T2 fleet", -hovercraft);
 }
@@ -447,8 +442,8 @@ fn a_massed_t3_fleet_is_as_safe_from_the_air_as_it_is_escorted() {
     assert!(heavy <= most, "torpedo bombers break a battleship-heavy fleet at {heavy:.2} times its cost");
 }
 
-/// `[domains]`: two battleships break a coastal T3 position from beyond its reach. One cannot, by
-/// design: the heavy dome heals faster than its guns strike (2026-11-25).
+/// `[domains]`: two battleships break a coastal T3 position from beyond its reach, and so does
+/// one, more slowly: its broadsides wear the heavy dome down faster than it heals (2026-11-25).
 #[test]
 #[cfg_attr(debug_assertions, ignore = "release only")]
 fn battleships_break_a_coastal_t3_position() {
@@ -459,7 +454,7 @@ fn battleships_break_a_coastal_t3_position() {
     let (seconds, losses) = (number(&domains(&["cells", "coastal_seconds_max"])), number(&domains(&["cells", "coastal_losses_max"])));
     assert!(siege.broken && siege.seconds <= seconds && siege.losses <= losses, "{count} battleships against a coastal T3 position: {siege:?}");
     let one = siege_on(&db, Field::new(Ground::Shore, 3), &[Side { count: 1, ..battleships[0] }], T3_POSITION);
-    assert!(!one.broken, "one battleship broke the coastal T3 position through its dome: {one:?}");
+    assert!(one.broken && one.losses <= losses && one.seconds > siege.seconds, "one battleship against a coastal T3 position: {one:?}, against two's {siege:?}");
 }
 
 fn premiums(key: &str) -> toml::Value {

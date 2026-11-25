@@ -89,7 +89,8 @@ fn shells_from_inside_fly_out_and_friendly_shells_fly_in() {
     run(&mut world, 80);
     assert!(world.unit_health(outside).is_none_or(|health| health < outside_full), "a shell from inside should get out");
     assert!(world.unit_health(intruder).is_none_or(|health| health < intruder_full), "a Red dome should not stop Red shells");
-    assert_eq!(shield(&world, generator).health, fp_int(5_000), "a dome is never hit by its own side");
+    let dome = shield(&world, generator);
+    assert_eq!(dome.health, dome.max_health, "a dome is never hit by its own side");
 }
 
 #[test]
@@ -119,9 +120,11 @@ fn a_dome_that_runs_out_collapses_and_comes_back_at_full_strength() {
     run(&mut world, 60);
     assert!(world.unit_health(sheltered).is_none_or(|health| health < full), "with the dome down, shells get through");
 
-    // Nobody shoots it while it recharges, and it is back after 30 seconds.
+    // Nobody shoots it while it recharges, and it is back after its recharge time, 20 seconds.
     world.ecs.get::<&mut Combat>(world.unit_entity(tank).unwrap()).unwrap().range = Fp::ZERO;
-    run(&mut world, 300 - 60 - 2);
+    let recharge = world.blueprints.get(world.blueprints.id("shield_generator")).shield.expect("a dome").recharge_ticks;
+    assert_eq!(recharge, 200, "a dome comes back 20 seconds after it falls (2026-11-25)");
+    run(&mut world, recharge - 60 - 2);
     assert!(!shield(&world, generator).is_up(), "it should still be recharging");
     run(&mut world, 4);
     let back = shield(&world, generator);

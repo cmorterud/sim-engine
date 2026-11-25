@@ -32,8 +32,9 @@ fn main() {
         let pitch = BUTTON + BUTTON_GAP;
         Vec2::new(BUTTON_COLUMNS as f32 * pitch + 12.0, units.len().div_ceil(BUTTON_COLUMNS) as f32 * pitch + 12.0)
     } else {
-        // Bar buttons on top, then the same icons as the map draws them.
-        Vec2::new(COLUMNS as f32 * CELL, rows as f32 * CELL * 2.0 + 20.0)
+        // Bar buttons on top, then the same icons as the map draws them, then the nuclear
+        // marker through its pulse.
+        Vec2::new(COLUMNS as f32 * CELL, rows as f32 * CELL * 2.0 + 20.0 + CELL)
     };
     let ctx = egui::Context::default();
     sim_engine::ui::install_fonts(&ctx);
@@ -68,6 +69,12 @@ fn main() {
                 icons::draw(painter, map_center, icons::map_half(*icon), *icon, (index % 3) as u8 + 1, Color32::from_rgb(80, 150, 255));
             }
             painter.line_segment([Pos2::new(0.0, rows as f32 * CELL + 6.0), Pos2::new(size.x, rows as f32 * CELL + 6.0)], Stroke::new(1.0_f32, Color32::from_gray(60)));
+            for step in 0..4 {
+                let center = Pos2::new(step as f32 * CELL * 1.5 + CELL * 0.75, rows as f32 * CELL * 2.0 + 20.0 + CELL * 0.5);
+                for shape in icons::nuclear_shapes(center, icons::NUCLEAR_RADIUS_PT, step as f32 / 4.0) {
+                    painter.add(shape);
+                }
+            }
         });
     };
     // The first frame loads the fonts; the second is the one drawn.

@@ -227,11 +227,29 @@ out close and why: evidence about the process, not a target.
   heals as fast as one cruiser's missiles strike it, and the T3 dome faster than a battleship's
   guns. Two `[domains]` cells moved with them. One ship can no longer break its tier's coastal
   position, by design, so two are measured (`coastal_ship_count`): two cruisers break the T2 one
-  in 63 seconds and two battleships the T3 one in 80. And six submarines to a destroyer fire
-  faster than its anti-torpedo charge stops, so an equal cost of them now beats destroyers
-  (-0.37); four-fifths of it loses clearly (+0.71), and that is measured instead
-  (`destroyers_beat_submarines_at_cost`). A faster charge would win at an equal cost, but then an
-  equal cost of destroyers breaks T2 torpedo launchers.
+  in 63 seconds and two battleships the T3 one in 80. And submarines now beat destroyers alone,
+  as the user has it: six T1 submarines, about a destroyer's cost, sink one in about 33 seconds,
+  losing one and with a second damaged (`six_t1_subs_sink_a_destroyer`). The destroyer's
+  anti-torpedo charge is back to the inspiration's one torpedo every 10 seconds, from one a second,
+  and the submarine's torpedo is up from 185 to 235, inside its strength band (1.13). The
+  `[domains]` cell turned with it: submarines beat an equal cost of destroyers
+  (`submarines_beat_destroyers`), where destroyers had beaten submarines.
+* 2026-11-25: the battleship and the domes, the user's (`[broadsides]`, `[kill_times]`, and
+  `[domains.cells]`). The battleship's three turrets now fire as one broadside
+  (`WeaponDef::broadside`): the main gun waits until all three point at their targets, and the
+  other two fire once each after it, 0.3 seconds apart. Three shells of 4,400 every 16 seconds,
+  from 3,000 each every 20 on their own, nearly doubling its damage a second (450 to 825; its
+  strength per cost is 1.21 of the inspiration's ratio, inside the band). One broadside destroys a
+  T3 extractor and takes down a T2 dome, exactly; two destroy a commander, in about 19 seconds
+  (the user's 26, then anything up to 40). It outranges a T2 Artillery Installation by 1.30, and
+  from between the two reaches destroys four of them under a dome in about 48 seconds,
+  unanswered, though that hangs on how close they stand (17 to 65 seconds). Domes come back 20
+  seconds after they fall, at full health. The T2 dome heals its health in 70 seconds: 13,020 at
+  186 a second, which still holds off one cruiser. The T3 dome heals a little faster, 200 a
+  second, on 36,000, so more slowly for its size; one battleship breaks it in about 48 seconds,
+  and the broadside that does destroys the generator. That replaces the 2026-11-24 rule that set
+  a turret's damage a second against the artillery's, and each battlecruiser laser at twice a
+  turret's; and one battleship now breaks a coastal T3 position on its own.
 
 ## Order of work
 

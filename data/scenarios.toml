@@ -172,13 +172,12 @@ red = [
 
 [[scenario]]
 id = "navy_destroyers_against_submarines"
-title = "Hunting submarines: destroyers against submarines"
+title = "Hunting submarines: destroyers alone against submarines"
 ground = "water"
-target = "domains.cells.destroyers_beat_submarines"
-blue_over_red = 0.8
-shows = "Destroyers, the fleet's submarine hunters, against four-fifths their cost in Attack Submarines. The destroyers' torpedoes outrange the submarines', and their charges stop most of what comes back: they win clearly. Against a full equal cost, five more submarines, the torpedoes come faster than the charges can stop and the submarines win."
-try = "Attack-move in. Then spread the submarines out and close from several sides at once. Then add five submarines."
-blue = [{ unit = "t1_attack_sub", count = 20, at = [1_400, 2_560], columns = 5 }]
+target = "domains.cells.submarines_beat_destroyers"
+shows = "Destroyers on their own against an equal cost of Attack Submarines, about six to a destroyer. A destroyer's torpedoes outrange the submarines' and sink one in about 25 seconds, but its anti-torpedo charge stops only one torpedo every 10 seconds, so six sink it in about 33, having lost one. The submarines win easily."
+try = "Attack-move in. Then add destroyers two at a time, and see how many it takes to come out even."
+blue = [{ unit = "t1_attack_sub", count = 25, at = [1_400, 2_560], columns = 5 }]
 red = [{ unit = "t2_destroyer", count = 4, at = [3_000, 2_560], columns = 4 }]
 
 [[scenario]]

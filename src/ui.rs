@@ -3651,6 +3651,42 @@ pub fn draw_blips(ctx: &egui::Context, camera: &Camera, blips: &[[i32; 3]], pixe
     }
 }
 
+/// Where each strategic missile in flight is drawn this frame, between the last two ticks, in
+/// world units, for its marker. One just launched is where it is.
+pub fn nuclear_missiles(previous: &[crate::sim::world::ProjectileView], current: &[crate::sim::world::ProjectileView], alpha: f64) -> Vec<[f64; 3]> {
+    let raw = |value: i32| f64::from(value) / 4096.0;
+    current
+        .iter()
+        .filter(|projectile| projectile.kind == crate::sim::world::ProjectileKind::StrategicMissile)
+        .map(|projectile| {
+            let now = [projectile.x, projectile.y, projectile.z];
+            let before = previous.binary_search_by_key(&projectile.id, |before| before.id).map_or(now, |index| [previous[index].x, previous[index].y, previous[index].z]);
+            std::array::from_fn(|axis| raw(before[axis]) + (raw(now[axis]) - raw(before[axis])) * alpha)
+        })
+        .collect()
+}
+
+/// The glowing nuclear marker over each strategic missile in flight (`icons::nuclear_shapes`),
+/// the same size at every zoom, so that one is plain to see from anywhere (2026-11-25).
+pub fn draw_nuclear_missiles(ctx: &egui::Context, camera: &Camera, missiles: &[[f64; 3]], pixels_per_point: f32) {
+    if missiles.is_empty() {
+        return;
+    }
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    let phase = (ctx.input(|input| input.time) * icons::NUCLEAR_PULSES).fract() as f32;
+    for &world in missiles {
+        let Some(pixels) = camera.world_to_screen(world) else {
+            continue;
+        };
+        let center = Pos2::new(pixels[0] as f32 / pixels_per_point, pixels[1] as f32 / pixels_per_point);
+        for shape in icons::nuclear_shapes(center, icons::NUCLEAR_RADIUS_PT, phase) {
+            painter.add(shape);
+        }
+    }
+    // The halo moves while nothing else does.
+    ctx.request_repaint();
+}
+
 /// Flashes a line from each missile defense to the missile it shot down this tick.
 pub fn draw_interceptions(ctx: &egui::Context, camera: &Camera, interceptions: &[[[i32; 3]; 2]], pixels_per_point: f32) {
     let painter = ctx.layer_painter(egui::LayerId::background());

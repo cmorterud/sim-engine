@@ -228,6 +228,9 @@ pub struct Motion {
     /// The ground, for standing structures level on a slope. Without it, a structure stands at
     /// the height of the ground at its middle.
     ground: Option<crate::render::camera::HeightField>,
+    /// Silos with their doors moving, by id: how far open at the last tick and at this one,
+    /// from 0 to 1, sorted.
+    doors: Vec<(SimId, f32, f32)>,
 }
 
 impl Motion {
@@ -299,6 +302,25 @@ impl Motion {
                 *shot = Shot { shell: projectile.id, at: time };
             }
         });
+    }
+
+    /// Notes how far open each silo's doors are, from the last two snapshots' `silo_doors`. A
+    /// silo in neither has them shut.
+    pub fn note_doors(&mut self, previous: &[(SimId, u16)], current: &[(SimId, u16)]) {
+        let open = |list: &[(SimId, u16)], id: SimId| list.binary_search_by_key(&id, |&(id, _)| id).map_or(0.0, |index| f32::from(list[index].1) / 1_000.0);
+        let mut ids: Vec<SimId> = previous.iter().chain(current).map(|&(id, _)| id).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        self.doors = ids.into_iter().map(|id| (id, open(previous, id), open(current, id))).collect();
+    }
+
+    /// How far open a silo's doors are drawn, from 0 to 1, between the last two ticks, easing
+    /// in and out of each move.
+    fn doors(&self, id: SimId, alpha: f64) -> f32 {
+        let Ok(index) = self.doors.binary_search_by_key(&id, |&(id, _, _)| id) else { return 0.0 };
+        let (_, before, now) = self.doors[index];
+        let open = (before + (now - before) * alpha as f32).clamp(0.0, 1.0);
+        open * open * (3.0 - 2.0 * open)
     }
 
     /// How hard a unit's guns are kicking back, from 1 as it fires to 0.
@@ -791,7 +813,8 @@ pub fn build_unit_instances(
         let mut center = interpolate(from, now, alpha);
         // Guns kick back as they fire, and working lights pulse.
         let pulse = if unit.working { (1.0 - WORK_DIP * (0.5 + 0.5 * (time * WORK_PULSES * std::f64::consts::TAU).sin())) as f32 } else { 0.0 };
-        let action = byte(motion.recoil(unit.id).max(pulse));
+        // A silo's action is how far open its doors are.
+        let action = if look.is_some_and(|look| look.shape.has_doors()) { byte(motion.doors(unit.id, alpha)) } else { byte(motion.recoil(unit.id).max(pulse)) };
         // Spinning parts turn with time, each unit a little apart from the next.
         let spin = look.and_then(|look| look.shape.spin_rate()).map_or(0, |rate| byte(((time * f64::from(rate) + f64::from(unit.id.0) * 0.618) % 1.0) as f32));
         let animated = |mut instance: UnitInstanceRaw, phase: u8| {
@@ -1122,6 +1145,10 @@ pub fn dome_instance(shield: &ShieldView, eye: [f64; 3]) -> UnitInstanceRaw {
     let health = f32::from(shield.health_permille) / 1000.0;
     let mut dome = instance(center, [(radius * 2.0) as f32, (radius * 2.0) as f32, height as f32], NORTH, color, NO_ICON, eye);
     dome.color[3] = 0.12 + 0.28 * health;
+    // For its shimmer: a seed of its own from its generator, so that domes side by side do not
+    // shimmer in step, and its health, as its glints come more often as it wears down.
+    let seed = shield.id.0.wrapping_mul(2_654_435_761).to_le_bytes();
+    dome.hull = [seed[0], seed[1], seed[2], byte(health)];
     dome
 }
 
@@ -1616,6 +1643,51 @@ mod tests {
         assert!(halfway > 64 && halfway < 192, "half settled: {halfway}");
         motion.time = RECOIL_SECONDS * 2.0;
         assert_eq!(action(&mut motion), 0, "settled");
+    }
+
+    /// Each dome carries a seed of its own for its shimmer, the same every frame, and its health.
+    #[test]
+    fn every_dome_shimmers_to_a_seed_of_its_own() {
+        let shield = |id: u32, health_permille: u16| ShieldView { id: SimId(id), team: Team::Red, center: [0, 0, 0], radius: 400 << 12, height: 400 << 12, health_permille, up: true, recharging: 0 };
+        let seed = |dome: UnitInstanceRaw| [dome.hull[0], dome.hull[1], dome.hull[2]];
+        let seeds: Vec<[u8; 3]> = (1..=50).map(|id| seed(dome_instance(&shield(id, 1_000), [0.0; 3]))).collect();
+        let mut distinct = seeds.clone();
+        distinct.sort_unstable();
+        distinct.dedup();
+        assert_eq!(distinct.len(), seeds.len(), "no two of fifty neighbours share a seed");
+        assert_eq!(seed(dome_instance(&shield(7, 1_000), [0.0; 3])), seed(dome_instance(&shield(7, 200), [5.0; 3])), "a dome keeps its seed");
+        assert_eq!(dome_instance(&shield(7, 1_000), [0.0; 3]).hull[3], 255);
+        assert_eq!(dome_instance(&shield(7, 0), [0.0; 3]).hull[3], 0);
+    }
+
+    /// A silo's doors open and close with the snapshots' `silo_doors`, eased between ticks, and
+    /// stay shut otherwise; its guns, it has none, never move them.
+    #[test]
+    fn silo_doors_follow_the_launch_and_stay_shut_otherwise() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let mut silo = unit(3, 0);
+        silo.blueprint = db.id("strategic_missile_launcher").0;
+        silo.is_structure = true;
+        let action = |motion: &mut Motion, alpha: f64| {
+            let mut out = InstanceBatches::default();
+            build_unit_instances(&[silo], &[silo], alpha, [0.0; 3], &[], &looks, &[], motion, &mut out);
+            out.shape(Shape::NukeSilo)[0].glow[3]
+        };
+        let mut motion = Motion::new();
+        motion.note_doors(&[], &[]);
+        assert_eq!(action(&mut motion, 0.5), 0, "shut with no launch");
+        // A shot of its own, such as the missile leaving, does not move them.
+        motion.note_shots(&[], &[shell(10, 3)]);
+        assert_eq!(action(&mut motion, 0.5), 0, "no recoil on a silo");
+        motion.note_doors(&[(SimId(3), 400)], &[(SimId(3), 600)]);
+        let (start, middle, end) = (action(&mut motion, 0.0), action(&mut motion, 0.5), action(&mut motion, 1.0));
+        assert!(start < middle && middle < end, "opening between ticks: {start} {middle} {end}");
+        assert_eq!(middle, 128, "half open, half way between");
+        motion.note_doors(&[(SimId(3), 1_000)], &[(SimId(3), 1_000)]);
+        assert_eq!(action(&mut motion, 0.3), 255, "fully open");
+        motion.note_doors(&[(SimId(3), 100)], &[]);
+        assert_eq!(action(&mut motion, 1.0), 0, "shut once the launch is over");
     }
 
     /// Legs swing through a stride as a walker moves, and come back straight when it stops.

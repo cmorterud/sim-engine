@@ -716,6 +716,58 @@ pub fn reach_below(icon: Icon, half: f32, tier: u8) -> f32 {
     }
 }
 
+/// The nuclear marker's radius, in points, at every zoom: well over a unit icon's, so that a
+/// strategic missile in flight is plain to see from anywhere (2026-11-25).
+pub const NUCLEAR_RADIUS_PT: f32 = 14.0;
+/// How many times a second its halo pulses out.
+pub const NUCLEAR_PULSES: f64 = 1.5;
+const NUCLEAR_YELLOW: Color32 = Color32::from_rgb(255, 214, 40);
+const NUCLEAR_GLOW: Color32 = Color32::from_rgb(255, 190, 40);
+const NUCLEAR_INK: Color32 = Color32::from_rgb(18, 16, 10);
+
+/// The nuclear marker, drawn over a strategic missile in flight: the radiation trefoil, dark on
+/// a yellow disc, in a soft glow with rings pulsing out from it. `phase` runs from 0 to 1 through
+/// each pulse.
+pub fn nuclear_shapes(center: Pos2, radius: f32, phase: f32) -> Vec<Shape> {
+    let mut out = Vec::new();
+    // The glow, breathing with the pulse.
+    let breath = 0.5 + 0.5 * (phase * std::f32::consts::TAU).cos();
+    for (reach, alpha) in [(1.9_f32, 0.10_f32), (1.5, 0.16), (1.22, 0.24)] {
+        out.push(Shape::circle_filled(center, radius * reach, NUCLEAR_GLOW.gamma_multiply(alpha * (0.6 + 0.4 * breath))));
+    }
+    // Three rings spreading out and fading, a third of a pulse apart.
+    for ring in 0..3 {
+        let along = (phase + ring as f32 / 3.0).fract();
+        let fade = (1.0 - along) * (1.0 - along);
+        out.push(Shape::circle_stroke(center, radius * (1.1 + 1.3 * along), Stroke::new(2.0_f32, NUCLEAR_GLOW.gamma_multiply(0.7 * fade))));
+    }
+    out.push(Shape::circle_filled(center, radius, NUCLEAR_YELLOW));
+    out.push(Shape::circle_stroke(center, radius, Stroke::new((radius * 0.12).max(1.5), NUCLEAR_INK)));
+    // The trefoil: three blades a sixth of a turn wide, a sixth apart, one pointing down (screen
+    // y grows downward), round a dot, with a ring of yellow between.
+    let mut blades = egui::epaint::Mesh::default();
+    let (inner, outer) = (radius * 0.28, radius * 0.84);
+    const STEPS: u32 = 8;
+    for blade in 0..3 {
+        let middle = std::f32::consts::FRAC_PI_2 + blade as f32 * std::f32::consts::TAU / 3.0;
+        let first = blades.vertices.len() as u32;
+        for step in 0..=STEPS {
+            let angle = middle - std::f32::consts::PI / 6.0 + step as f32 / STEPS as f32 * std::f32::consts::PI / 3.0;
+            let way = Vec2::angled(angle);
+            blades.colored_vertex(center + way * inner, NUCLEAR_INK);
+            blades.colored_vertex(center + way * outer, NUCLEAR_INK);
+        }
+        for step in 0..STEPS {
+            let at = first + step * 2;
+            blades.add_triangle(at, at + 1, at + 2);
+            blades.add_triangle(at + 1, at + 3, at + 2);
+        }
+    }
+    out.push(Shape::mesh(blades));
+    out.push(Shape::circle_filled(center, radius * 0.18, NUCLEAR_INK));
+    out
+}
+
 /// A frame's outline, in shares of `half` from the center, clockwise. The commander's head is
 /// drawn apart.
 #[cfg(test)]
@@ -992,6 +1044,35 @@ fn draw_mark(out: &mut Vec<Shape>, center: Pos2, size: f32, mark: Mark, extra: O
 mod tests {
     use super::*;
     use crate::sim::blueprints::{Blueprint, BlueprintDb, Targets, UnitClass, WeaponKind};
+
+    /// The nuclear marker is larger than any unit's icon, a trefoil of three blades on its disc,
+    /// and its halo pulses: its rings spread and fade through each pulse, and stay within it.
+    #[test]
+    fn the_nuclear_marker_stands_out_and_pulses() {
+        let largest = Icon::ALL.iter().map(|&icon| map_half(icon)).fold(0.0_f32, f32::max);
+        assert!(NUCLEAR_RADIUS_PT >= largest * 1.4, "the marker, {NUCLEAR_RADIUS_PT} across half, is not well over the largest icon's {largest}");
+        let center = Pos2::new(50.0, 50.0);
+        let rings = |phase: f32| -> Vec<(f32, u8)> {
+            nuclear_shapes(center, NUCLEAR_RADIUS_PT, phase)
+                .into_iter()
+                .filter_map(|shape| match shape {
+                    Shape::Circle(circle) if circle.fill == Color32::TRANSPARENT && circle.radius > NUCLEAR_RADIUS_PT => Some((circle.radius, circle.stroke.color.a())),
+                    _ => None,
+                })
+                .collect()
+        };
+        let (early, late) = (rings(0.0), rings(0.2));
+        assert_eq!(early.len(), 3, "three rings");
+        assert!(early.iter().zip(&late).all(|(before, after)| after.0 > before.0 && after.1 <= before.1), "rings spread and fade: {early:?} then {late:?}");
+        assert!(rings(0.99).iter().all(|&(radius, _)| radius <= NUCLEAR_RADIUS_PT * 2.4), "and stay within the halo");
+        let blades = nuclear_shapes(center, NUCLEAR_RADIUS_PT, 0.0).into_iter().find_map(|shape| match shape {
+            Shape::Mesh(mesh) => Some(mesh),
+            _ => None,
+        });
+        let blades = blades.expect("a trefoil");
+        assert_eq!(blades.indices.len(), 3 * 8 * 2 * 3, "three blades");
+        assert!(blades.vertices.iter().all(|vertex| (vertex.pos - center).length() <= NUCLEAR_RADIUS_PT * 0.85), "within the disc");
+    }
 
     #[test]
     fn every_unit_and_structure_has_an_icon_of_its_own_kind() {
