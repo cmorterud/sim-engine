@@ -1475,14 +1475,14 @@ tier = 2
 mass = 240
 energy = 1200
 build_time = 1440
-health = 3129
+health = 2534
 speed = "7.2"
 turn_rate = 60
 turn_radius = 40
 radius = 13
 vision = 415
 movement = "hover"
-weapon = { range = 438, reload_ticks = 16, projectile_speed = 80, damage = "178.8", splash_radius = 10, turn_rate = 90, spread = 4 }
+weapon = { range = 438, reload_ticks = 16, projectile_speed = 80, damage = 145, splash_radius = 10, turn_rate = 90, spread = 4 }
 
 # A fleet escort: a small dome that moves with it, over the ships around it, and an anti-torpedo
 # charge, one torpedo within 600 every 3 seconds (every 6 until 2026-11-24, when torpedo bombers
