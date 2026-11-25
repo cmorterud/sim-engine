@@ -44,7 +44,7 @@ impl Palette {
     /// temperate map's minimap is unchanged and the others follow their land on screen.
     fn of(climate: &Climate) -> Self {
         let shifted = |[r, g, b]: [u8; 3], ours: [f32; 4], temperate: [f32; 4]| {
-            let linear = [r, g, b].map(|channel| from_screen(channel));
+            let linear = [r, g, b].map(from_screen);
             let shifted: [f32; 4] = std::array::from_fn(|channel| if channel < 3 { linear[channel] * ours[channel] / temperate[channel].max(0.001) } else { 0.0 });
             let [r, g, b] = to_screen(shifted);
             Color32::from_rgb(r, g, b)
