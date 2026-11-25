@@ -1197,19 +1197,22 @@ impl AiBrain {
             }
             None
         };
-        // A strategy that favours air or naval factories builds them before more extractors.
+        // A strategy that favours air or naval factories builds them before more extractors, once
+        // it makes the income it builds them at. Before any extractor, a yard stalled the Naval
+        // AI's economy on islands, where a yard is wanted from the start: at five minutes it made
+        // a quarter of Balanced's mass, and it lost every match there to Balanced (2026-11-25).
         match self.skill.favours {
-            Favours::Air => {
+            Favours::Air if mass_income >= self.air(AIR_FACTORY_INCOME) => {
                 if let Some(choice) = air_choice() {
                     return Some(choice);
                 }
             }
-            Favours::Naval => {
+            Favours::Naval if mass_income >= self.naval(NAVAL_FACTORY_INCOME) => {
                 if let Some(choice) = naval_choice() {
                     return Some(choice);
                 }
             }
-            Favours::Economy => {}
+            _ => {}
         }
         if let Some(cell) = self.nearest_deposit(world, forces, position, is_commander, planned) {
             return Some((roster.extractor, cell));
