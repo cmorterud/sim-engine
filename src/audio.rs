@@ -37,24 +37,23 @@ const MAX_PAN: f32 = 0.6;
 /// Below this, a continuous sound is not worked out at all.
 const SILENT_LEVEL: f32 = 1e-4;
 
-/// The builders' beams, and the factories', which are lower and pulse slower.
-const BUILD_GAIN: f32 = 0.023;
-const FACTORY_GAIN: f32 = 0.022;
+/// The builders' beams, and the factories', which are lower.
+const BUILD_GAIN: f32 = 0.019;
+const FACTORY_GAIN: f32 = 0.017;
 const OCEAN_GAIN: f32 = 0.027;
 const SAILING_GAIN: f32 = 0.028;
 const ENGINE_GAIN: f32 = 0.024;
 const AIRCRAFT_GAIN: f32 = 0.018;
 const ALARM_GAIN: f32 = 0.4;
 
-/// A builder's beam sounds about C5, and a factory's a fifth below.
-const BUILD_PITCH: f32 = 523.25;
-const FACTORY_PITCH: f32 = 349.23;
-/// How often a pulse reaches the work along a builder's beam, as it is drawn: five pulses a
-/// beam, each crossing it in 1.1 s (`render::links`). A factory's swells come slower.
-const BUILD_PULSES: f32 = 5.0 / 1.1;
-const FACTORY_PULSES: f32 = 2.2;
-/// How long a beam takes to power up to its pitch, and down again.
-const BEAM_CHARGE_SECONDS: f32 = 0.25;
+/// The band of a builder's beam fizz, in Hz, and a factory's, lower.
+const BUILD_BAND: (f32, f32) = (1_200.0, 3_500.0);
+const FACTORY_BAND: (f32, f32) = (600.0, 1_800.0);
+/// How long a beam takes to fade in, and out: slower than the rest. A beam that rose in pitch as
+/// it started and fell as it stopped was a motor spinning up and down, and sounded like a power
+/// drill (2026-11-24).
+const BEAM_FADE_IN_SECONDS: f32 = 0.25;
+const BEAM_FADE_OUT_SECONDS: f32 = 0.35;
 
 const SELECT_GAIN: f32 = 0.14;
 const SELECT_SECONDS: f32 = 0.12;
@@ -66,9 +65,9 @@ const ALARM_NOTES: u32 = 4;
 /// The continuous sounds, each with a level and a place across the screen.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Bed {
-    /// Builders at work: the soft shimmer of their beams.
+    /// Builders at work: the soft fizz of their beams.
     Build,
-    /// Factories making something: the same beam, lower and slower.
+    /// Factories making something: the same fizz, lower.
     Factory,
     /// The sea, wherever water is in view.
     Ocean,
@@ -295,53 +294,26 @@ impl Aircraft {
     }
 }
 
-/// A building beam: a soft, pure tone with a slow shimmer, from two voices a hair apart, a quiet
-/// octave above, and a light vibrato, over a faint, high sizzle, swelling a little each time a
-/// pulse reaches the work. It glides up to its pitch as the beam powers on, and down as it powers
-/// off, as a laser would, and has nothing sharp in it. A crowd adds a soft voice a fifth above,
-/// which makes it fuller rather than louder.
+/// A building beam: a soft, steady fizz of energy, noise between two pitches with no tone in it at
+/// all, chosen by ear from four candidates (2026-11-24). Tones were tried first, and failed:
+/// chimes did not sound like building; a laser of pure tones stacked into a chord, with a gentle
+/// pulse, was heard as chiming; and one that rose in pitch as it started sounded like a power
+/// drill. With no tone, it can do neither. A crowd adds a little of a band below, which makes it
+/// fuller rather than louder.
 #[derive(Clone, Debug)]
-struct Beam {
-    pitch: f32,
-    pulses: f32,
-    sizzle_level: f32,
-    /// The voice, a hair above it, an octave above it, and a fifth above it.
-    phases: [f32; 4],
-    vibrato: f32,
-    pulse: f32,
-    sizzle: Band,
-    /// How far powered up, from 0 to 1.
-    charge: f32,
-    charging: f32,
+struct Fizz {
+    band: Band,
+    under: Band,
 }
 
-impl Beam {
-    fn new(pitch: f32, pulses: f32, sizzle_level: f32, rate: f32) -> Self {
-        Self {
-            pitch,
-            pulses,
-            sizzle_level,
-            phases: [0.0; 4],
-            vibrato: 0.0,
-            pulse: 0.0,
-            sizzle: Band::new(1_800.0, 3_400.0, rate),
-            charge: 0.0,
-            charging: 1.0 - (-1.0 / (BEAM_CHARGE_SECONDS * rate)).exp(),
-        }
+impl Fizz {
+    fn new((low, high): (f32, f32), rate: f32) -> Self {
+        Self { band: Band::new(low, high, rate), under: Band::new(low * 0.55, high * 0.55, rate) }
     }
 
-    fn voice(&mut self, noise: &mut Noise, playing: bool, busy: f32, rate: f32) -> f32 {
-        self.charge += self.charging * (f32::from(u8::from(playing)) - self.charge);
-        let glide = 0.82 + 0.18 * self.charge;
-        let pitch = self.pitch * glide * (1.0 + 0.004 * sine(advance(&mut self.vibrato, 6.2, rate)));
-        let [voice, beside, octave, fifth] = &mut self.phases;
-        let tone = sine(advance(voice, pitch, rate))
-            + 0.6 * sine(advance(beside, pitch * 1.004, rate))
-            + 0.15 * sine(advance(octave, pitch * 2.0, rate))
-            + 0.3 * busy.clamp(0.0, 1.0) * sine(advance(fifth, pitch * 1.5, rate));
-        let pulse = swell(advance(&mut self.pulse, self.pulses, rate));
-        let sizzle = self.sizzle.run(noise.next()) * (0.6 + 0.4 * pulse);
-        tone * (0.88 + 0.12 * pulse) + self.sizzle_level * sizzle
+    fn voice(&mut self, noise: &mut Noise, busy: f32) -> f32 {
+        let white = noise.next();
+        6.5 * (self.band.run(white) + 0.35 * busy.clamp(0.0, 1.0) * self.under.run(white))
     }
 }
 
@@ -353,8 +325,11 @@ pub struct Synth {
     beds: [BedLevel; BEDS],
     volume: f32,
     noise: Noise,
-    build: Beam,
-    factory: Beam,
+    build: Fizz,
+    factory: Fizz,
+    /// How fast a beam fades in, and out, a sample.
+    beam_rise: f32,
+    beam_fall: f32,
     ocean: Ocean,
     wash: Wash,
     engines: Engines,
@@ -375,8 +350,10 @@ impl Synth {
             beds: [BedLevel::default(); BEDS],
             volume: 0.0,
             noise: Noise(0x9E37_79B9),
-            build: Beam::new(BUILD_PITCH, BUILD_PULSES, 0.6, rate),
-            factory: Beam::new(FACTORY_PITCH, FACTORY_PULSES, 0.25, rate),
+            build: Fizz::new(BUILD_BAND, rate),
+            factory: Fizz::new(FACTORY_BAND, rate),
+            beam_rise: 1.0 - (-1.0 / (BEAM_FADE_IN_SECONDS * rate)).exp(),
+            beam_fall: 1.0 - (-1.0 / (BEAM_FADE_OUT_SECONDS * rate)).exp(),
             ocean: Ocean::new(rate),
             wash: Wash::new(rate),
             engines: Engines::new(rate),
@@ -445,24 +422,22 @@ impl Synth {
         for bed in Bed::ALL {
             let index = bed as usize;
             let (target, now) = (targets.beds[index], &mut self.beds[index]);
-            now.level += self.fade * (target.level - now.level);
+            let fade = match bed {
+                Bed::Build | Bed::Factory if target.level > now.level => self.beam_rise,
+                Bed::Build | Bed::Factory => self.beam_fall,
+                _ => self.fade,
+            };
+            now.level += fade * (target.level - now.level);
             now.pan += self.fade * (target.pan - now.pan);
             now.busy += self.fade * (target.busy - now.busy);
             let (level, pan, busy) = (now.level, now.pan, now.busy);
             if level < SILENT_LEVEL && target.level <= 0.0 {
-                // A beam gone quiet has powered down, and powers up again from the start.
-                match bed {
-                    Bed::Build => self.build.charge = 0.0,
-                    Bed::Factory => self.factory.charge = 0.0,
-                    _ => {}
-                }
                 continue;
             }
-            let playing = target.level > 0.0;
             let noise = &mut self.noise;
             let sound = match bed {
-                Bed::Build => self.build.voice(noise, playing, busy, rate) * BUILD_GAIN,
-                Bed::Factory => self.factory.voice(noise, playing, busy, rate) * FACTORY_GAIN,
+                Bed::Build => self.build.voice(noise, busy) * BUILD_GAIN,
+                Bed::Factory => self.factory.voice(noise, busy) * FACTORY_GAIN,
                 Bed::Ocean => self.ocean.voice(noise, rate) * OCEAN_GAIN,
                 Bed::Sailing => self.wash.voice(noise, rate) * SAILING_GAIN,
                 Bed::Engines => self.engines.voice(noise, rate) * ENGINE_GAIN,
