@@ -4,11 +4,15 @@ name: Soak
 # Validate): hundreds of matches, too heavy to run on a laptop for every change. Here it is
 # split across runners, one shard of seeds each, all running the same release binary.
 on:
-  push:
-    branches: [main]
+  # The full soak, nightly on main's newest commit (2:17 AM Eastern standard time, 3:17 in
+  # summer, since cron keeps UTC), rather than on every push: it took about an hour, and the
+  # website no longer waits for it (pages.yml). A night it fails opens an issue, or adds to the
+  # one open (the alert job).
+  schedule:
+    - cron: "17 7 * * *"
   # A smaller soak for each pull request into main (the plan below): enough matches on every map
   # and team size to catch one that never ends, a replay that differs, or a panic, in a fraction
-  # of the time, but too few to judge a side's lean. The full soak runs once it is merged.
+  # of the time, but too few to judge a side's lean. The full soak plays it that night.
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -58,9 +62,9 @@ jobs:
   # matches, 20 on each bundled map, 10 of each team match, and 5 4v4s, in shards of 20 (10 on
   # Scattered Isles, whose matches run longest): thirteen runners rather than nineteen, since
   # the account runs only so many jobs at once, and smaller shards spent longer waiting for a
-  # runner than playing. A pull request or a push that changes nothing the soak runs (the
-  # drawing, the sound, the interface, the docs) plays no soak at all. A push
-  # to main that changes something the soak runs plays the 200 skirmish
+  # runner than playing. A pull request or a night that changes nothing the soak runs (the
+  # drawing, the sound, the interface, the docs) plays no soak at all. A night on main that
+  # changes something the soak runs plays the 200 skirmish
   # matches of the exit criteria and 120 on each bundled map (Highland, Twin Passes, Saddleback,
   # Stillwater, and Scattered Isles): enough matches that a side winning 60% of them stands out
   # from chance. And 60 2v2s on each of Saddleback, Stillwater, and Scattered Isles, four AIs,
@@ -74,7 +78,7 @@ jobs:
       run: ${{ steps.changes.outputs.run }}
     steps:
       # The merge commit and its first parent, main as it stands, are enough to see what the
-      # pull request changes. A push fetches the commit it is compared with below.
+      # pull request changes. A nightly run fetches the commit it is compared with below.
       - uses: actions/checkout@v7
         if: github.event_name != 'workflow_dispatch'
         with:
@@ -83,10 +87,10 @@ jobs:
       # What the soak runs: the simulation and its arithmetic, the AI, the soak itself, the
       # command line that starts it, the unit and map data, the dependencies, and this workflow.
       # A change that touches none of them cannot change what the soak finds, so it plays no
-      # soak. A pull request is compared with main as it stands. A push to main is compared with
-      # the newest commit on main whose soak passed, played or skipped (a skipped one is, for
-      # the soak, the same as the one it was compared with), so that changes in a commit whose
-      # soak was passed over still get soaked. With no such commit to compare with, or a run by
+      # soak. A pull request is compared with main as it stands. A nightly run is compared with
+      # the newest commit on main whose nightly soak passed, played or skipped (a skipped one is,
+      # for the soak, the same as the one it was compared with), so that a night that failed
+      # leaves its changes to be soaked again. With no such commit to compare with, or a run by
       # hand, it always soaks.
       - id: changes
         env:
@@ -99,7 +103,7 @@ jobs:
           if [ "${{ github.event_name }}" = pull_request ]; then
             base=HEAD^1
           else
-            base=$(gh run list -R "$GITHUB_REPOSITORY" --workflow soak.yml --branch main --event push \
+            base=$(gh run list -R "$GITHUB_REPOSITORY" --workflow soak.yml --branch main --event schedule \
               --status success --limit 1 --json headSha --jq '.[0].headSha // empty')
             echo "Last commit on main whose soak passed: ${base:-none}"
             if [ -z "$base" ] || ! git fetch --depth=1 origin "$base"; then
@@ -119,7 +123,7 @@ jobs:
 
       - id: plan
         env:
-          # A push to main plays the full soak; a pull request the smaller one, in shards of 20,
+          # A nightly run plays the full soak; a pull request the smaller one, in shards of 20,
           # which leave each map and team size on a runner or two.
           SKIRMISH: ${{ inputs.skirmish_matches || (github.event_name == 'pull_request' && '40' || '200') }}
           BUNDLED: ${{ inputs.bundled_matches || (github.event_name == 'pull_request' && '20' || '120') }}
@@ -309,3 +313,28 @@ jobs:
         run: |
           echo "A soak shard failed: see its log."
           exit 1
+
+  # A nightly soak that fails opens an issue naming the commit and the run, which notifies the
+  # repository's watchers, or comments on the one still open, so that failing nights gather in
+  # one place until it is closed. The run's summary page has the failing seeds.
+  alert:
+    name: Report a failed nightly soak
+    needs: [plan, build, soak, summary]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Nightly soak failed"
+          body="The nightly soak failed on $GITHUB_SHA: $RUN_URL. Its summary page has the unfinished seeds and replay mismatches, and each failing shard's log the rest."
+          number=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "in:title \"$title\"" --json number,title \
+            --jq "[.[] | select(.title == \"$title\")][0].number // empty")
+          if [ -n "$number" ]; then
+            gh issue comment "$number" -R "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi
