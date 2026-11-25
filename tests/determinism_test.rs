@@ -527,3 +527,12 @@ fn entity_handles_do_not_affect_results() {
     let (reordered, _) = run(shuffled, 200, 200);
     assert_eq!(clean, reordered);
 }
+
+/// The soak counts a match unfinished past 67 minutes, or past 100 for team matches of three or
+/// more a side, which run longer on the big maps they are played on (2026-11-25).
+#[test]
+fn team_matches_of_three_a_side_or_more_get_longer_before_they_count_unfinished() {
+    use sim_engine::soak::{match_tick_limit, MATCH_TICK_LIMIT, TEAM_MATCH_TICK_LIMIT};
+    assert_eq!((MATCH_TICK_LIMIT, TEAM_MATCH_TICK_LIMIT), (40_000, 60_000));
+    assert_eq!([1, 2, 3, 4].map(match_tick_limit), [40_000, 40_000, 60_000, 60_000]);
+}

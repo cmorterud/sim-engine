@@ -92,8 +92,8 @@ fn strategy_names() -> String {
     Strategy::all().iter().map(|strategy| strategy.id.as_str()).collect::<Vec<_>>().join(", ")
 }
 
-const fn watch_source(seed: u64) -> CommandSource {
-    CommandSource::AiVsAi { seed, ticks: sim_engine::soak::MATCH_TICK_LIMIT }
+const fn watch_source(seed: u64, per_team: usize) -> CommandSource {
+    CommandSource::AiVsAi { seed, ticks: sim_engine::soak::match_tick_limit(per_team) }
 }
 
 /// A map's file name as players see it: `twin_passes` as Twin Passes.
@@ -1258,7 +1258,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
         (Some(seconds), true) => CommandSource::Script { seed, ticks: fast_forward + seconds * 10 },
         (Some(seconds), false) => CommandSource::AiVsAi { seed, ticks: fast_forward + seconds * 10 },
         (None, true) => CommandSource::Player,
-        (None, false) if watching => watch_source(seed),
+        (None, false) if watching => watch_source(seed, map_source.per_team()),
         // In a playtest scenario Red only follows its opening orders.
         (None, false) if scenario_start.is_some() => CommandSource::Player,
         (None, false) => CommandSource::PlayerVsAi { seed, difficulty, strategy },
@@ -1370,6 +1370,9 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     });
     let mut scene_instances = InstanceBatches::default();
     let mut motion = Motion::new();
+    // The waves move on wall time, so that they keep moving while the game is paused and do
+    // not race when it runs fast.
+    let wave_clock = Instant::now();
     // Structures stand level on slopes, on a slab down to the ground.
     motion.set_ground(HeightField::new(map.heights.samples(), map.heights.heights().to_vec(), map.heights.cell_units(), map.heights.units_per_step()));
     let mut effects = Effects::new();
@@ -2145,7 +2148,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                 let state = ui::WatchState { map: &map_name, seed, view: watch_view, speed, paused: game_paused };
                                 ui::watch_bar(ctx, &snapshot, &map.blueprints, &state, &mut range_toggles, &mut actions);
                                 minimap.show(ctx, &camera, &map.heights, f64::from(map.water_level), &snapshot, map.fog_side, &mut actions);
-                                let stopped = snapshot.tick >= sim_engine::soak::MATCH_TICK_LIMIT;
+                                let stopped = snapshot.tick >= sim_engine::soak::match_tick_limit(map_source.per_team());
                                 ui::watch_end_window(ctx, snapshot.match_result, stopped, snapshot.tick, seed, &mut actions);
                             } else if is_match {
                                 ui::world_overlay(ctx, &camera, &snapshot, &selected, &map.blueprints, pixels_per_point);
@@ -2280,7 +2283,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                 UiAction::WatchSeed(next) => {
                                     seed = next;
                                     let speed = session.driver.as_ref().map_or(1, SimDriver::speed);
-                                    session = Session::start(map_source.scenario(seed).with_fog_of_war(fog), watch_source(seed), driver_options);
+                                    session = Session::start(map_source.scenario(seed).with_fog_of_war(fog), watch_source(seed, map_source.per_team()), driver_options);
                                     if let Some(driver) = &session.driver {
                                         driver.set_speed(speed);
                                     }
@@ -2289,7 +2292,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                     attack_alarm = AttackAlarm::default();
                                     control_groups = ControlGroups::default();
                                     order_drag = None;
-                                    let source = if watching { watch_source(seed) } else { CommandSource::PlayerVsAi { seed, difficulty, strategy } };
+                                    let source = if watching { watch_source(seed, map_source.per_team()) } else { CommandSource::PlayerVsAi { seed, difficulty, strategy } };
                                     session = Session::start(map_source.scenario(seed).with_fog_of_war(fog), source, driver_options);
                                     selection.clear();
                                     placing = None;
@@ -2380,7 +2383,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                             camera: &camera,
                             instances: &scene_instances,
                             selection_box: selection.drag_box(),
-                            time: motion.time as f32,
+                            time: wave_clock.elapsed().as_secs_f32(),
                         };
 
                         renderer.begin_ui(&ui_frame);

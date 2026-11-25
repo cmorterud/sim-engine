@@ -319,6 +319,10 @@ pub struct SiegeResult {
 pub type Position = &'static [(&'static str, u32, u32)];
 /// The T2 one: a shield generator over three T2 point defenses.
 pub const T2_POSITION: Position = &[("shield_generator", 127, 127), ("t2_point_defense", 124, 128), ("t2_point_defense", 132, 128), ("t2_point_defense", 128, 124)];
+/// Point defenses alone, three of a tier where the positions above put theirs, for `[premiums]`.
+pub const T1_DEFENSES: Position = &[("t1_point_defense", 124, 128), ("t1_point_defense", 132, 128), ("t1_point_defense", 128, 124)];
+pub const T2_DEFENSES: Position = &[("t2_point_defense", 124, 128), ("t2_point_defense", 132, 128), ("t2_point_defense", 128, 124)];
+pub const T3_DEFENSES: Position = &[("t3_heavy_point_defense", 124, 128), ("t3_heavy_point_defense", 132, 128), ("t3_heavy_point_defense", 128, 124)];
 pub const T3_POSITION: Position = &[("t3_heavy_shield", 127, 127), ("t3_heavy_point_defense", 124, 128), ("t3_heavy_point_defense", 132, 128), ("t3_heavy_point_defense", 128, 124)];
 
 /// The materiel a position costs.
@@ -748,8 +752,10 @@ pub fn t2_land_roles() -> Vec<Role> {
             target: Target::Score("t2_heavy_tank", 0.45),
             ..line.clone()
         },
-        // Tough and amphibious, it holds the front and crosses water. About even with the line
-        // unit for its materiel, a little under, since crossing water is worth something.
+        // Tough and amphibious, it holds the front and crosses water. It pays for crossing water
+        // (`[premiums] hovercraft_over_heavy_tank_on_land`, 2026-11-25): about three-quarters as
+        // strong per materiel as the line unit on land, by break-even, as the inspiration has it.
+        // It was about even, a little under, until then.
         Role {
             unit: "t2_assault_hovercraft",
             role: "assault",
@@ -761,7 +767,7 @@ pub fn t2_land_roles() -> Vec<Role> {
             splash: 10.0,
             radius: 13.0,
             spread: 4.0,
-            target: Target::Score("t2_heavy_tank", -0.08),
+            target: Target::Efficiency("t2_heavy_tank", 0.79),
             ..line.clone()
         },
         // Siege: cruise missiles from far beyond every gun, at whatever stands still. They neither
@@ -1354,6 +1360,26 @@ pub fn purpose_strength(db: &BlueprintDb, key: &str) -> f64 {
     measure(key, Purpose::of_role(key)) / measure("t1_medium_tank", Purpose::Surface)
 }
 
+/// A unit's strength per cost against aircraft at a tier's prices, √(anti-air damage a second ×
+/// health) / cost: how `[premiums] static_anti_air_over_mobile` weighs anti-air.
+pub fn anti_air_strength(db: &BlueprintDb, key: &str, tier: u8) -> f64 {
+    let unit = db.get(db.id(key));
+    let (dps, _) = purpose_weapons(unit, Purpose::Air);
+    (dps * unit.health.to_num::<f64>()).sqrt() / cost_at(unit, tier)
+}
+
+/// Whether three point defenses of a tier hold against `times` their cost in that tier's line
+/// unit attack-moving into them, and the siege, for `[premiums] point_defense_holds_against_line_units`.
+pub fn defenses_against_line(db: &Arc<BlueprintDb>, tier: u8, times: f64) -> SiegeResult {
+    let (line, defenses) = match tier {
+        1 => ("t1_medium_tank", T1_DEFENSES),
+        2 => ("t2_heavy_tank", T2_DEFENSES),
+        _ => ("t3_heavy_walker", T3_DEFENSES),
+    };
+    let attackers = squadrons(db, &[(db.id(line), 1)], position_materiel_at(db, defenses, tier) * times, tier, Tactics::AttackMove);
+    siege_on(db, Field::new(Ground::Land, tier), &attackers, defenses)
+}
+
 /// The materiel a position costs at a tier's prices.
 pub fn position_materiel_at(db: &BlueprintDb, position: Position, tier: u8) -> f64 {
     position.iter().map(|&(key, _, _)| cost_at(db.get(db.id(key)), tier)).sum()
@@ -1366,6 +1392,11 @@ pub fn domain_force(db: &BlueprintDb, name: &str) -> Vec<(BlueprintId, u32)> {
     let mut squadron: Vec<(BlueprintId, u32)> = force.iter().map(|(key, count)| (db.id(key), count.as_integer().expect("a count") as u32)).collect();
     squadron.sort_by_key(|&(unit, _)| unit.0);
     squadron
+}
+
+fn premium(key: &str) -> toml::Value {
+    let table: toml::Table = TARGETS.parse().expect("data/balance_targets.toml is valid");
+    table["premiums"][key].clone()
 }
 
 fn domain_cell(key: &str) -> toml::Value {
@@ -1484,13 +1515,37 @@ pub fn derive_domains_report() {
         let hover = force("t2_hovercraft", 2_400.0, 2);
         let tanks = force("t2_heavy_tanks", force_materiel(&db, &hover, 2), 2);
         let even = break_even_forces(&db, Field::new(Ground::Land, 2), &hover, &tanks);
-        let band = domain_cell("hovercraft_over_heavy_tank_on_land").as_array().expect("a band").iter().map(as_number).collect::<Vec<f64>>();
+        let band = premium("hovercraft_over_heavy_tank_on_land").as_array().expect("a band").iter().map(as_number).collect::<Vec<f64>>();
         cells.push(Cell {
-            name: "Hovercraft on land, strength per materiel over the Heavy Tank's".to_string(),
+            name: "Hovercraft on land, strength per materiel over the Heavy Tank's (amphibious, `[premiums]`)".to_string(),
             target: format!("{:.2}–{:.2}", band[0], band[1]),
             measured: format!("{:.2}", even.efficiency),
             met: Some((band[0]..=band[1]).contains(&even.efficiency)),
         });
+    }
+    // What cannot move is worth more for its cost (`[premiums]`): point defenses against the line
+    // unit of their tier, and static anti-air against mobile.
+    {
+        let times = as_number(&premium("point_defense_holds_against_line_units"));
+        for tier in 1..=3u8 {
+            let result = defenses_against_line(&db, tier, times);
+            cells.push(Cell {
+                name: format!("Three T{tier} point defenses against {times} times their cost in the T{tier} line unit"),
+                target: "hold".to_string(),
+                measured: format!("{} after {:.0} s, the attackers losing {:.0}%", if result.broken { "broken" } else { "held" }, result.seconds, result.losses * 100.0),
+                met: Some(!result.broken),
+            });
+        }
+        let band = premium("static_anti_air_over_mobile").as_array().expect("a band").iter().map(as_number).collect::<Vec<f64>>();
+        for (tier, fixed, mobile) in [(1u8, "t1_aa_turret", "t1_mobile_aa"), (2, "t2_flak", "t2_mobile_flak")] {
+            let ratio = anti_air_strength(&db, fixed, tier) / anti_air_strength(&db, mobile, tier);
+            cells.push(Cell {
+                name: format!("{}'s strength per cost against aircraft over the {}'s", db.get(db.id(fixed)).name, db.get(db.id(mobile)).name),
+                target: format!("{:.2}–{:.2}", band[0], band[1]),
+                measured: format!("{ratio:.2}"),
+                met: Some((band[0]..=band[1]).contains(&ratio)),
+            });
+        }
     }
     // Coastal reach, and breaking a coastal position.
     {
