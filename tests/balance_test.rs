@@ -3,7 +3,8 @@
 use std::sync::Arc;
 
 use sim_engine::balance::{
-    break_even, break_even_forces, domain_force, duel, force_materiel, mirrored, mirrored_on, position_materiel_at, purpose_strength, siege_on, squadrons, Field, Ground, Side, Tactics,
+    anti_air_strength, break_even, break_even_forces, defenses_against_line, domain_force, duel, force_materiel, mirrored, mirrored_on, position_materiel_at, purpose_strength, siege_on,
+    squadrons, Field, Ground, Side, Tactics,
     T1_TORPEDO_POSITION, T2_POSITION, T3_POSITION, TORPEDO_POSITION,
 };
 use sim_engine::sim::blueprints::BlueprintDb;
@@ -450,4 +451,39 @@ fn battleships_break_a_coastal_t3_position() {
     let at_equal_cost = siege.seconds * force_materiel(&db, &battleships, 3) / materiel;
     let (seconds, losses) = (number(&domains(&["cells", "coastal_seconds_max"])), number(&domains(&["cells", "coastal_losses_max"])));
     assert!(siege.broken && at_equal_cost <= seconds && siege.losses <= losses, "battleships against a coastal T3 position: {siege:?}, about {at_equal_cost:.0} s at an equal cost");
+}
+
+fn premiums(key: &str) -> toml::Value {
+    TARGETS.parse::<toml::Table>().expect("data/balance_targets.toml is valid")["premiums"][key].clone()
+}
+
+/// `[premiums]` (2026-11-25): what cannot move is worth more for its cost, so static anti-air is
+/// half again as strong per cost against aircraft as the mobile anti-air of its tier.
+#[test]
+fn static_anti_air_is_worth_more_for_its_cost_than_mobile() {
+    let db = db();
+    let band = premiums("static_anti_air_over_mobile").as_array().expect("a band").iter().map(number).collect::<Vec<f64>>();
+    for (tier, fixed, mobile) in [(1, "t1_aa_turret", "t1_mobile_aa"), (2, "t2_flak", "t2_mobile_flak")] {
+        let ratio = anti_air_strength(&db, fixed, tier) / anti_air_strength(&db, mobile, tier);
+        assert!((band[0]..=band[1]).contains(&ratio), "{fixed} is {ratio:.2} times as strong per cost against aircraft as {mobile}");
+    }
+}
+
+/// `[premiums]`: three point defenses of each tier hold against half again their cost in the line
+/// unit of their tier attack-moving into them; and the hovercraft, which crosses water, is weaker
+/// per materiel than the Heavy Tank on land.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn point_defenses_are_worth_more_and_hovercraft_less_for_their_cost() {
+    let db = db();
+    let times = number(&premiums("point_defense_holds_against_line_units"));
+    for tier in 1..=3 {
+        let siege = defenses_against_line(&db, tier, times);
+        assert!(!siege.broken, "three T{tier} point defenses fell to {times} times their cost in the line unit: {siege:?}");
+    }
+    let hover = squadrons(&db, &domain_force(&db, "t2_hovercraft"), 2_400.0, 2, Tactics::AttackMove);
+    let tanks = squadrons(&db, &domain_force(&db, "t2_heavy_tanks"), force_materiel(&db, &hover, 2), 2, Tactics::AttackMove);
+    let efficiency = break_even_forces(&db, Field::new(Ground::Land, 2), &hover, &tanks).efficiency;
+    let band = premiums("hovercraft_over_heavy_tank_on_land").as_array().expect("a band").iter().map(number).collect::<Vec<f64>>();
+    assert!((band[0]..=band[1]).contains(&efficiency), "the hovercraft is {efficiency:.2} as strong per materiel as the Heavy Tank on land");
 }
