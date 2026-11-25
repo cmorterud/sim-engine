@@ -1932,7 +1932,9 @@ impl AiBrain {
         // and then, and all of them every so often, so that none waits on a target it cannot reach.
         // They once anchored off the water nearest the enemy's start and shelled only what was in
         // range there, and a fleet that ruled the sea took nothing ashore.
-        let going = if world.current_tick.is_multiple_of(FLEET_RETARGET_TICKS) { out_fleet } else if world.current_tick.is_multiple_of(FLEET_IDLE_TICKS) { idle_out } else { Vec::new() };
+        // On the first look in each spell, whatever the brain's pace.
+        let spell = |ticks: u32| world.current_tick % ticks < self.skill.think_interval;
+        let going = if spell(FLEET_RETARGET_TICKS) { out_fleet } else if spell(FLEET_IDLE_TICKS) { idle_out } else { Vec::new() };
         if !going.is_empty() && self.skill.attacks {
             self.send_fleet(world, sightings, &going, enemy_water, commands);
         }
