@@ -191,6 +191,9 @@ out close and why: evidence about the process, not a target.
   hovercraft is three-quarters as strong per materiel as the Heavy Tank on land, from about even
   (health and damage x0.81). The hovercraft was tested first as the cause of Naval losing every
   match to Balanced on the Islands maps; it was not, and Balanced still won every one.
+  Stronger defenses lengthen sieges: a Scattered Isles 4v4 ran to 73 minutes, past the soak's
+  67-minute limit, finishing. Team matches of three or more a side now count as unfinished only
+  past 100 minutes (the user's decision).
 
 ## Order of work
 
