@@ -627,3 +627,37 @@ fn an_easy_ai_builds_and_attacks_but_not_at_once() {
     let first_attack = first_attack.expect("it attacked");
     assert!(first_attack >= 7_200, "it attacked at tick {first_attack}, before twelve minutes");
 }
+
+/// On islands, where a yard is wanted from the start, the Naval AI takes extractors before its
+/// first yard, until it makes the income it builds yards at (2026-11-25): it built the yard first,
+/// before any extractor or generator, and its economy stalled at a quarter of Balanced's.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn a_naval_ai_on_islands_takes_extractors_before_its_first_yard() {
+    use std::sync::Arc;
+    use sim_engine::ai::play_match_with;
+    use sim_engine::ai_strategy::Strategy;
+    use sim_engine::sim::components::Factory;
+    use sim_engine::sim::maps::{generate, Choices, MapSettings};
+    use sim_engine::sim::scenario::MapSource;
+    let choices = Choices { kind: "islands".to_string(), size_km: Some(20), water: Some("lots".to_string()), ..Choices::default() };
+    let map = MapSource::Map(Arc::new(generate(&MapSettings::chosen(&choices).expect("settings"))));
+    let naval = Strategy::named("naval").expect("naval");
+    // Mass a second the Naval AI builds yards at: its naval_income times the base threshold of 20.
+    let threshold = 20.0 * naval.naval_income;
+    let mut first_yard_income: Option<f64> = None;
+    play_match_with(&map, 1, 3_000, [naval, Strategy::balanced()], |world| {
+        if first_yard_income.is_some() {
+            return;
+        }
+        let yard = world.units.iter().any(|&(_, entity)| {
+            let (Ok(stats), Ok(unit)) = (world.ecs.get::<&UnitStats>(entity), world.ecs.get::<&Blueprinted>(entity)) else { return false };
+            stats.team == Team::Blue && world.ecs.get::<&Factory>(entity).is_ok() && world.blueprints.get(unit.0).key.contains("naval")
+        });
+        if yard {
+            first_yard_income = Some((world.economies[Team::Blue.index()].mass_income * 10).to_num::<f64>());
+        }
+    });
+    let income = first_yard_income.expect("a yard within five minutes");
+    assert!(income >= threshold, "the first yard went up at {income:.1} mass a second, under the {threshold:.1} it builds yards at");
+}
