@@ -1239,6 +1239,50 @@ impl Renderer {
         fs::write(path, encode_bmp(&pixels, width, height, width * 4, true))
     }
 
+    /// Draws a scene offscreen `frames` times and returns how long the terrain, units, and water
+    /// took on the graphics card, in milliseconds on average, if the adapter can time them, and
+    /// how long each frame took from start to finish, waited for. For comparing fixed views
+    /// before and after a change (`--landscape-frames`).
+    pub fn time_scene(&mut self, scene: &FrameScene<'_>, frames: u32) -> Option<([f64; 3], f64)> {
+        let timer = GpuTimer::new(&self.device, &self.queue)?;
+        let running = self.gpu_timer.replace(timer);
+        self.prepare(scene);
+        let target = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("timing"),
+            size: wgpu::Extent3d { width: self.config.width, height: self.config.height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: self.config.format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+        // A timer reads every other frame back, so this draws about twice as many, with a limit
+        // for an adapter whose timestamps never arrive.
+        let started = Instant::now();
+        let mut drawn = 0_u32;
+        for _ in 0..frames * 4 + 4 {
+            if self.gpu_timer.as_ref().is_some_and(|timer| timer.frames() >= frames) {
+                break;
+            }
+            let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("timing") });
+            self.encode(&mut encoder, &view, &self.targets);
+            if let Some(timer) = &mut self.gpu_timer {
+                timer.resolve(&mut encoder);
+            }
+            self.queue.submit([encoder.finish()]);
+            if let Some(timer) = &mut self.gpu_timer {
+                timer.after_submit(&self.device);
+            }
+            self.device.poll(wgpu::Maintain::Wait);
+            drawn += 1;
+        }
+        let wall_ms = started.elapsed().as_secs_f64() * 1000.0 / f64::from(drawn.max(1));
+        let timer = std::mem::replace(&mut self.gpu_timer, running)?;
+        timer.averages_ms().map(|averages| (averages, wall_ms))
+    }
+
     /// Draws a scene offscreen and returns its width, height, and pixels, four bytes each in
     /// red, green, blue, alpha order, row by row from the top.
     pub fn capture_rgba(&mut self, scene: &FrameScene<'_>, ui: Option<&UiFrame>) -> (u32, u32, Vec<u8>) {
