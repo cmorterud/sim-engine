@@ -196,7 +196,7 @@ fn every_ships_tactical_missile_defense_mount_is_the_same() {
     let mounts_on = |ship: &str| ships.iter().find(|(key, _)| key == ship).unwrap_or_else(|| panic!("{ship} carries a tactical missile defense")).1.mounts;
     assert_eq!((mounts_on("t2_cruiser"), mounts_on("t3_battleship"), mounts_on("t3_battlecruiser")), (2, 2, 1));
     // One mount's reach, and its own reload.
-    let one = |defense: &sim_engine::sim::blueprints::MissileDefenseDef| (defense.range, defense.reload_ticks * u32::from(defense.mounts));
+    let one = |defense: &sim_engine::sim::blueprints::MissileDefenseDef| (defense.range, defense.reload_ticks);
     let (first, mount) = (&ships[0].0, one(&ships[0].1));
     for (key, defense) in &ships {
         assert_eq!(one(defense), mount, "{key}'s tactical missile defense mount is not {first}'s");

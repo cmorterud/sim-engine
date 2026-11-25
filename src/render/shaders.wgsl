@@ -152,6 +152,7 @@ const SWING: u32 = 512u;
 const RECOIL: u32 = 1024u;
 const FLASH: u32 = 2048u;
 const PULSE: u32 = 4096u;
+const DOOR: u32 = 8192u;
 const TAU: f32 = 6.2831853;
 // How far a leg swings either way, in radians, and how far a gun kicks back, as a share of the unit.
 const SWING_ANGLE: f32 = 0.45;
@@ -224,6 +225,10 @@ fn animate(position: vec3<f32>, normal: vec3<f32>, flags: u32, pivot: vec3<f32>,
     if ((flags & FLASH) != 0u) {
         // Only in the first moments after a shot, and gone to nothing otherwise.
         point = pivot + (point - pivot) * smoothstep(0.55, 0.95, action);
+    }
+    if ((flags & DOOR) != 0u) {
+        // A door's pivot is the way it slides, and how far when fully open.
+        point = point + pivot * action;
     }
     return Animated(point, turned);
 }
@@ -594,6 +599,21 @@ const DOME_RIM_SHARPNESS: f32 = 6.0;
 // A dome fades out as the camera comes close, from this many radii from its center to this many.
 const DOME_FADE_FAR: f32 = 1.5;
 const DOME_FADE_NEAR: f32 = 1.05;
+// Its shimmer (2026-11-25): soft glints of light that fade in and out at spots over it, each on
+// a cycle of its own, then come up somewhere else, and a slow drift in the hexagons' brightness,
+// so that no dome is ever one even texture. How many glints, on high quality and low; how long
+// a glint's cycle may be, in seconds; how tight a spot each is (higher is smaller); how bright
+// on the face, and how much more on the hexagon lines; and how much more often they come on a
+// dome worn to nothing than on a full one.
+const DOME_GLINTS_HIGH: u32 = 6u;
+const DOME_GLINTS_LOW: u32 = 3u;
+const DOME_GLINT_SHORTEST: f32 = 2.0;
+const DOME_GLINT_LONGEST: f32 = 4.0;
+const DOME_GLINT_TIGHTNESS: f32 = 40.0;
+const DOME_GLINT: f32 = 0.5;
+const DOME_GLINT_HEX: f32 = 3.0;
+const DOME_GLINT_WORN: f32 = 1.8;
+const DOME_DRIFT: f32 = 0.25;
 
 struct DomeOutput {
     @builtin(position) clip: vec4<f32>,
@@ -603,7 +623,44 @@ struct DomeOutput {
     // Across the dome from above, from -0.5 to 0.5.
     @location(3) across: vec2<f32>,
     @location(4) @interpolate(flat) fade: f32,
+    // A number of its own, so that domes side by side do not shimmer in step, and how much of
+    // its strength is left, from 0 to 1.
+    @location(5) @interpolate(flat) seed: u32,
+    @location(6) @interpolate(flat) health: f32,
 };
+
+// A well-mixed number from another (the PCG hash).
+fn hash_u32(value: u32) -> u32 {
+    let state = value * 747796405u + 2891336453u;
+    let word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+// A number from 0 to 1 from three others.
+fn hash01(a: u32, b: u32, c: u32) -> f32 {
+    return f32(hash_u32(a ^ hash_u32(b ^ hash_u32(c))) >> 8u) / 16777216.0;
+}
+
+// How bright a dome's glints are where its surface faces `normal`, at `time` seconds: each fades
+// in and out over its cycle, centered on a spot picked anew each cycle from the dome's seed.
+fn dome_glints(normal: vec3<f32>, seed: u32, health: f32, time: f32, count: u32) -> f32 {
+    var total = 0.0;
+    let hurry = mix(DOME_GLINT_WORN, 1.0, health);
+    for (var glint = 0u; glint < count; glint = glint + 1u) {
+        let period = mix(DOME_GLINT_SHORTEST, DOME_GLINT_LONGEST, hash01(seed, glint, 0x51u)) / hurry;
+        let along = time / period + hash01(seed, glint, 0x52u);
+        let cycle = u32(i32(floor(along)) & 0x7fffffff);
+        let phase = fract(along);
+        // Anywhere on the dome above its lowest tenth.
+        let up = mix(0.1, 0.95, hash01(seed, glint * 97u + 1u, cycle));
+        let around = TAU * hash01(seed, glint * 97u + 2u, cycle);
+        let side = sqrt(1.0 - up * up);
+        let spot = vec3<f32>(side * cos(around), side * sin(around), up);
+        let swell = sin(phase * 3.1415927);
+        total = total + swell * swell * exp((dot(normal, spot) - 1.0) * DOME_GLINT_TIGHTNESS);
+    }
+    return total;
+}
 
 // Domes never shrink to dots, and their color's last component is how opaque they are.
 @vertex
@@ -624,6 +681,10 @@ fn vs_dome(
     out.relative = relative;
     out.across = position.xy;
     out.fade = smoothstep(DOME_FADE_NEAR, DOME_FADE_FAR, length(sphere_center) / max(radius, 0.001));
+    // The hull color carries the dome's seed in its first three bytes and its health in its last.
+    let bytes = vec3<u32>(round(instance.hull.rgb * 255.0));
+    out.seed = bytes.x | (bytes.y << 8u) | (bytes.z << 16u);
+    out.health = instance.hull.a;
     return out;
 }
 
@@ -652,8 +713,20 @@ fn fs_dome(input: DomeOutput) -> @location(0) vec4<f32> {
     var hex = 1.0 - smoothstep(0.0, max(blur * 1.2, 0.02), hex_edge_distance(point));
     // Lines closer together than a few pixels would shimmer, so they fade out first.
     hex = hex * (1.0 - smoothstep(0.15, 0.35, blur));
-    let alpha = input.color.a * (DOME_FACE + DOME_HEX * hex + DOME_RIM * rim) * input.fade;
-    return vec4<f32>(input.color.rgb, clamp(alpha, 0.0, 0.8));
+    // The shimmer: glints, and on high quality a slow drift of brightness across the lines.
+    let time = globals.water.x;
+    let high = globals.water.w > 0.5;
+    let glint = min(dome_glints(normal, input.seed, input.health, time, select(DOME_GLINTS_LOW, DOME_GLINTS_HIGH, high)), 1.5);
+    var drift = 0.0;
+    if (high) {
+        let drifting = 0.5 * sin(dot(normal, vec3<f32>(4.1, 2.3, 1.7)) + time * 0.45) + 0.5 * sin(dot(normal, vec3<f32>(-1.9, 3.7, 2.9)) - time * 0.31);
+        drift = DOME_DRIFT * drifting;
+    }
+    hex = hex * (1.0 + drift) * (1.0 + DOME_GLINT_HEX * glint);
+    let alpha = input.color.a * (DOME_FACE + DOME_HEX * hex + DOME_RIM * rim + DOME_GLINT * glint) * input.fade;
+    // Where light runs over it, it is whiter.
+    let color = mix(input.color.rgb, vec3<f32>(1.0), 0.45 * min(glint, 1.0));
+    return vec4<f32>(color, clamp(alpha, 0.0, 0.8));
 }
 
 // ---- Terrain ----

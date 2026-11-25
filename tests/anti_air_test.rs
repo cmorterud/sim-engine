@@ -236,7 +236,10 @@ fn flak_brings_down_gunships() {
 }
 
 /// The SAM is the deterrent to T3 aircraft: one badly damages a strategic bomber in a pass, and
-/// two bring it down. A cruiser, the fleet's anti-air, does about three quarters as much.
+/// two bring it down. A cruiser, the fleet's anti-air, has done more than one SAM since
+/// 2026-11-25: four of its volleys, about seven seconds, destroy a strategic bomber, where a SAM
+/// takes about eleven ([volleys] and [kill_times] in data/balance_targets.toml). It was about
+/// three quarters of a SAM until then.
 #[test]
 fn sams_deter_t3_aircraft_and_cruisers_come_close() {
     let pass = |shooter: &str, count: i64| health_lost(shooter, mass(shooter) * count, "t3_strategic_bomber", Approach::Pass);
@@ -244,5 +247,5 @@ fn sams_deter_t3_aircraft_and_cruisers_come_close() {
     assert!(one >= 0.5, "one SAM took only {:.0}% off a strategic bomber in a pass", one * 100.0);
     assert!(two >= 1.0, "two SAMs took only {:.0}% off a strategic bomber in a pass", two * 100.0);
     let share = cruiser / one;
-    assert!((0.6..=0.9).contains(&share), "a cruiser did {:.0}% of what a SAM does to a strategic bomber in a pass", share * 100.0);
+    assert!((1.1..=1.7).contains(&share), "a cruiser did {:.0}% of what a SAM does to a strategic bomber in a pass", share * 100.0);
 }

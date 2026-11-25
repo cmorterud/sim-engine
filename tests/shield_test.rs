@@ -89,7 +89,8 @@ fn shells_from_inside_fly_out_and_friendly_shells_fly_in() {
     run(&mut world, 80);
     assert!(world.unit_health(outside).is_none_or(|health| health < outside_full), "a shell from inside should get out");
     assert!(world.unit_health(intruder).is_none_or(|health| health < intruder_full), "a Red dome should not stop Red shells");
-    assert_eq!(shield(&world, generator).health, fp_int(5_000), "a dome is never hit by its own side");
+    let dome = shield(&world, generator);
+    assert_eq!(dome.health, dome.max_health, "a dome is never hit by its own side");
 }
 
 #[test]
@@ -119,14 +120,35 @@ fn a_dome_that_runs_out_collapses_and_comes_back_at_full_strength() {
     run(&mut world, 60);
     assert!(world.unit_health(sheltered).is_none_or(|health| health < full), "with the dome down, shells get through");
 
-    // Nobody shoots it while it recharges, and it is back after 30 seconds.
+    // Nobody shoots it while it recharges, and it is back after its recharge time, 20 seconds.
     world.ecs.get::<&mut Combat>(world.unit_entity(tank).unwrap()).unwrap().range = Fp::ZERO;
-    run(&mut world, 300 - 60 - 2);
+    let recharge = world.blueprints.get(world.blueprints.id("shield_generator")).shield.expect("a dome").recharge_ticks;
+    assert_eq!(recharge, 200, "a dome comes back 20 seconds after it falls (2026-11-25)");
+    run(&mut world, recharge - 60 - 2);
     assert!(!shield(&world, generator).is_up(), "it should still be recharging");
     run(&mut world, 4);
     let back = shield(&world, generator);
     assert!(back.is_up());
     assert_eq!(back.health, back.max_health);
+}
+
+/// The domes of the shield generators, the Escort Corvette, the Mobile Shield Generator and the
+/// command rig's two shields all come back 20 seconds after they fall (the design owner's rule,
+/// 2026-11-25). `every_shield_absorbs_regenerates_collapses_and_recharges` checks that each one
+/// does come back after its own time.
+#[test]
+fn the_domes_and_the_commanders_shields_come_back_in_20_seconds() {
+    let db = open_world().blueprints;
+    for key in ["shield_generator", "t3_heavy_shield", "t2_escort_corvette", "t2_mobile_shield"] {
+        let dome = db.get(db.id(key)).shield.unwrap_or_else(|| panic!("{key} has a dome"));
+        assert_eq!(dome.recharge_ticks, 200, "{key}'s dome comes back in 20 seconds");
+    }
+    for key in ["field_shield", "area_shield"] {
+        let enhancement = db.enhancement(db.enhancement_id(key));
+        let dome = enhancement.effects.shield.unwrap_or_else(|| panic!("{key} is a shield"));
+        assert!(enhancement.units.contains(&db.id("command_rig")), "{key} is the command rig's");
+        assert_eq!(dome.recharge_ticks, 200, "{key} comes back in 20 seconds");
+    }
 }
 
 /// A shell dropped straight down onto the overlap of two Red domes, 160 apart.
@@ -185,7 +207,9 @@ fn an_energy_stall_collapses_the_dome_and_pausing_drops_it_without_cost() {
     world.advance_tick(&[SimCommand::SetPaused { units: vec![generator], paused: false }]);
     let view = shield_view(&world, generator);
     assert!(view.up, "resuming puts it straight back up");
-    assert!(shield(&world, generator).health <= health + fp_int(5), "with the health it had");
+    // At most the one tick of healing it gets on coming back up.
+    let healed = shield(&world, generator).regen_per_tick;
+    assert!(shield(&world, generator).health <= health + healed, "with the health it had");
     // 30 energy a second is 3 a tick.
     let before = world.economies[1].energy;
     world.advance_tick(&[]);

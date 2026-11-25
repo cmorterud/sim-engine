@@ -16,6 +16,9 @@ use crate::sim::world::{MatchResult, SimWorld};
 /// The AI decides once per second. Both teams decide on the same tick, from the same world:
 /// a team that always decided later would always be that far behind.
 const THINK_INTERVAL: u32 = 10;
+/// In an energy crisis, a builder stays on a generator bigger than the smallest only if the energy
+/// coming in would finish it in this many ticks (a minute).
+const CRISIS_FINISH_TICKS: u32 = 600;
 const SEARCH_RINGS: i32 = 60;
 const COMMANDER_LEASH_UNITS: i32 = 900;
 const DEFEND_RADIUS_UNITS: i32 = 1_400;
@@ -364,6 +367,9 @@ struct Forces {
     transports: Vec<TransportInfo>,
     /// Idle T1 land combat units, which fit a light transport.
     idle_light_combat: Vec<(SimId, Vec2Fp)>,
+    /// T1 land combat units on their way somewhere, such as new ones walking out to the rally
+    /// point, which will be idle, and fit a light transport, soon.
+    moving_light_combat: usize,
     strategic_launchers: Vec<LauncherInfo>,
     strategic_defenses: Vec<LauncherInfo>,
     /// Cells that are spoken for: planned by a builder on its way, each site's whole footprint.
@@ -894,9 +900,18 @@ impl AiBrain {
                     if builder.tasks.is_empty() && order.kind == OrderKind::Idle && !upgrading {
                         forces.idle_builders.push(IdleBuilder { id, entity, position });
                     }
-                    // In an energy crisis, a builder on anything but a generator is taken off it.
+                    // In an energy crisis, a builder on anything but a generator is taken off it, and
+                    // so is one on a big generator that the energy coming in would take more than
+                    // `CRISIS_FINISH_TICKS` to finish: on Saddleback a commander stayed on a T3
+                    // generator, with 2% of the energy it needed, for the last half hour of a match
+                    // (2026-11-25).
+                    let trickle = world.economies[self.player.index()].energy_income * Res::from_num(CRISIS_FINISH_TICKS);
+                    let finishes = |blueprint: BlueprintId, site: Option<SimId>| {
+                        let progress = site.and_then(|site| world.unit_entity(site)).and_then(|site| world.ecs.get::<&Construction>(site).ok().map(|building| building.progress));
+                        blueprint == roster.generators[0] || world.blueprints.get(blueprint).energy * (Res::ONE - progress.unwrap_or(Res::ZERO)) <= trickle
+                    };
                     let off_generators = !builder.tasks.is_empty()
-                        && !builder.tasks.iter().any(|task| matches!(task, BuildTask::Build { blueprint, .. } if roster.is_generator(*blueprint)));
+                        && !builder.tasks.iter().any(|task| matches!(*task, BuildTask::Build { blueprint, site, .. } if roster.is_generator(blueprint) && finishes(blueprint, site)));
                     if off_generators && !upgrading {
                         forces.busy_builders.push(IdleBuilder { id, entity, position });
                     }
@@ -922,6 +937,9 @@ impl AiBrain {
                         if unit.tier == 1 && finished && world.ecs.get::<&crate::sim::components::Boarding>(entity).is_err() {
                             forces.idle_light_combat.push((id, position));
                         }
+                    }
+                    if order.kind == OrderKind::Move && unit.tier == 1 && finished && world.ecs.get::<&crate::sim::components::Boarding>(entity).is_err() {
+                        forces.moving_light_combat += 1;
                     }
                 }
                 UnitClass::Air if blueprint == roster.light_transport => {
@@ -1596,7 +1614,10 @@ impl AiBrain {
         // A light transport waiting at home with too few idle T1 units to take gets raiders built
         // for it: once factories had moved on to T2, a transport that came late waited forever.
         let transport_waiting = self.drop.is_none() && forces.transports.first().is_some_and(|transport| transport.idle && transport.cargo == 0);
-        let mut drop_squad = if transport_waiting { DROP_SIZE.saturating_sub(forces.idle_light_combat.len()) } else { 0 };
+        // Counting those still walking out of their factories: counting only the idle, each
+        // factory made another while the last walked to the rally point, and on Scattered Isles a
+        // second squad's worth stood at home beside the guard (2026-11-25).
+        let mut drop_squad = if transport_waiting { DROP_SIZE.saturating_sub(forces.idle_light_combat.len() + forces.moving_light_combat) } else { 0 };
         if forces.idle_light_combat.len() >= FEWEST_DROPPED {
             drop_squad = 0;
         }
@@ -2590,6 +2611,12 @@ impl AiBrain {
             return;
         }
         let at = world.ecs.get::<&Position>(entity).expect("units have positions").0.xy();
+        // Not from the seabed, where its gun cannot fire: the order never went off, and two
+        // commanders under the lake each followed an enemy cruiser over it until the time ran
+        // out (2026-11-25).
+        if world.terrain.height_at(at) < world.terrain.water_level() {
+            return;
+        }
         // Only what is already in range, so that a shot never draws the commander forward.
         let Some(reach) = world.ecs.get::<&Combat>(entity).ok().map(|combat| combat.range) else {
             return;

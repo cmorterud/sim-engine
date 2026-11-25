@@ -324,7 +324,7 @@ fn counts(weapon: &WeaponDef, kind: Kind, submerged: bool) -> bool {
 
 /// Damage a tick, every shot landing.
 fn per_tick(weapons: &[WeaponDef]) -> f64 {
-    weapons.iter().map(|weapon| weapon.damage.to_num::<f64>() / f64::from(weapon.reload_ticks.max(1))).sum()
+    weapons.iter().map(|weapon| weapon.damage.to_num::<f64>() * f64::from(weapon.shots_per_reload()) / f64::from(weapon.reload_ticks.max(1))).sum()
 }
 
 /// One damage-a-second case: where the shooter and target start, and whether they move.
@@ -498,7 +498,7 @@ fn every_unit_deals_its_damage_a_second_to_each_kind_of_target() {
                 }
                 let done = f64::from(damage(&world, target) - before);
                 let (low, high) = (per_tick(&sure) * f64::from(window), per_tick(&counted) * f64::from(window));
-                let volley: f64 = counted.iter().map(|weapon| weapon.damage.to_num::<f64>()).sum();
+                let volley: f64 = counted.iter().map(|weapon| weapon.damage.to_num::<f64>() * f64::from(weapon.shots_per_reload())).sum();
                 if done < low * 0.92 - volley || done > high * 1.08 + volley {
                     let seconds = f64::from(window) / 10.0;
                     failures.push(format!("{name}: {:.1} damage a second, expected {:.1} (over {seconds} s)", done / seconds, low / seconds));

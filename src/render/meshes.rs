@@ -462,6 +462,12 @@ impl Shape {
         !matches!(self, Self::Dome | Self::SelectionRing | Self::SelectionBox | Self::Shell | Self::Round | Self::Fireball | Self::Smoke | Self::Wake | Self::Scar | Self::Apron | Self::Beam | Self::Cable)
     }
 
+    /// Whether its action is how far open its doors are, rather than recoil or work: the
+    /// strategic missile silo's, which open for each launch.
+    pub const fn has_doors(self) -> bool {
+        matches!(self, Self::NukeSilo)
+    }
+
     /// How many turns a second the shape's spinning parts make, if it has any.
     pub const fn spin_rate(self) -> Option<f32> {
         match self {
@@ -562,6 +568,9 @@ pub mod motion {
     pub const FLASH: u32 = 1 << 11;
     /// Glows fully only while the unit is at work, and dimly when idle.
     pub const PULSE: u32 = 1 << 12;
+    /// A door leaf, slid by the action, from shut at 0 to its pivot's offset at 1: for a door,
+    /// the pivot is the way it slides and how far, not a point.
+    pub const DOOR: u32 = 1 << 13;
     /// The bits that hold the material.
     pub const MATERIAL_MASK: u32 = 0xff;
     /// How far up the top byte holds how open the vertex is to the sky: 255 for nothing in
@@ -2165,13 +2174,39 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.frustum([0.0, 0.0], [-0.5, -0.25], [0.5, 0.4], 6);
             mesh.missile_defense_mount([0.0, 0.0, -0.25], 0.46);
         }
+        // A launch shaft under two door leaves, which slide apart along their rails for each
+        // launch and close behind the missile (2026-11-25), with warning lights at its corners
+        // and a vent beside it.
         Shape::NukeSilo => {
             mesh.paint(Material::Hull);
-            mesh.block([-0.5, -0.5, -0.5], [0.5, 0.5, 0.1]);
+            mesh.block([-0.49, -0.49, -0.5], [0.49, 0.49, 0.1]);
+            // A band of the team's color round its top, and the rails the leaves run on.
             mesh.paint(Material::Trim);
-            mesh.block([-0.25, -0.25, 0.1], [0.25, 0.25, 0.25]);
+            mesh.block([-0.5, -0.5, -0.06], [0.5, 0.5, 0.06]);
+            for y in [-0.25_f32, 0.21] {
+                mesh.block([-0.46, y, 0.1], [0.46, y + 0.04, 0.13]);
+            }
+            // The shaft's mouth, dark, seen once the leaves are apart.
             mesh.paint(Material::Metal);
-            mesh.frustum([0.3, 0.3], [0.1, 0.5], [0.12, 0.08], 6);
+            mesh.block([-0.2, -0.2, 0.1], [0.2, 0.2, 0.102]);
+            mesh.paint(Material::Glow);
+            for (x, y) in [(-0.17_f32, -0.17_f32), (0.17, -0.17), (0.17, 0.17), (-0.17, 0.17)] {
+                mesh.block([x - 0.02, y - 0.02, 0.1], [x + 0.02, y + 0.02, 0.104]);
+            }
+            // The leaves, each half of the mouth, sliding out over the rails.
+            for side in [-1.0_f32, 1.0] {
+                let (inner, outer) = (0.0_f32, side * 0.21);
+                let (low, high) = (inner.min(outer), inner.max(outer));
+                mesh.moving(motion::DOOR, [side * 0.22, 0.0, 0.0], |mesh| {
+                    mesh.paint(Material::Trim);
+                    mesh.block([low, -0.21, 0.1], [high, 0.21, 0.15]);
+                    mesh.paint(Material::Panel);
+                    let seam = side * 0.03;
+                    mesh.block([seam.min(side * 0.006), -0.17, 0.15], [seam.max(side * 0.006), 0.17, 0.16]);
+                });
+            }
+            mesh.paint(Material::Metal);
+            mesh.frustum([0.36, 0.38], [0.1, 0.36], [0.09, 0.06], 6);
         }
         Shape::StrategicInterceptorSilo => {
             mesh.paint(Material::Hull);

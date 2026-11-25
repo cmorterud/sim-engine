@@ -503,9 +503,16 @@ impl SimWorld {
                     turret: weapon.turn_rate.map(|rate| Turret::mounted(facing, rate, weapon.mount, weapon.aft)),
                     spread: weapon.spread,
                     stun_ticks: weapon.stun_ticks,
+                    salvo: weapon.salvo.map(super::components::Salvo::new),
+                    broadside: weapon.broadside,
+                    aimed: false,
+                    due: false,
                 })
                 .collect();
             self.ecs.insert_one(entity, super::components::ExtraWeapons(extras)).expect("entity was just spawned");
+        }
+        if let Some(salvo) = unit.weapon.and_then(|weapon| weapon.salvo) {
+            self.ecs.insert_one(entity, super::components::Salvo::new(salvo)).expect("entity was just spawned");
         }
         if let Some(weapon) = unit.weapon.filter(|weapon| !weapon.artillery && weapon.spread > Fp::ZERO) {
             self.ecs.insert_one(entity, super::components::Scatter(weapon.spread)).expect("entity was just spawned");
@@ -549,7 +556,7 @@ impl SimWorld {
             self.intel.push((id, entity));
         }
         if let Some(def) = unit.missile_defense {
-            let defense = MissileDefense { strategic: def.strategic, range: def.range, reload_ticks: def.reload_ticks, ticks_until_ready: 0, stock: 0 };
+            let defense = MissileDefense { strategic: def.strategic, range: def.range, reload_ticks: def.reload_ticks, mounts: def.mounts, ticks_until_ready: [0; super::components::MAX_DEFENSE_MOUNTS], stock: 0 };
             self.ecs.insert_one(entity, defense).expect("entity was just spawned");
             self.missile_defenses.push((id, entity));
         }
@@ -2569,11 +2576,22 @@ impl SimWorld {
             for weapon in &extras.0 {
                 hasher.write(&weapon.ticks_until_ready.to_le_bytes());
                 hasher.write(&weapon.target.map_or(u32::MAX, |target| target.0).to_le_bytes());
+                // Only for a weapon that fires volleys, so that checksums from before them hold.
+                if let Some(salvo) = weapon.salvo {
+                    hasher.write(&[1]);
+                    hasher.write(&salvo.fired.to_le_bytes());
+                    hasher.write(&salvo.next_volley.to_le_bytes());
+                }
                 if let Some(turret) = weapon.turret {
                     hasher.write(&turret.facing.x.to_bits().to_le_bytes());
                     hasher.write(&turret.facing.y.to_bits().to_le_bytes());
                 }
             }
+        }
+        if let Ok(salvo) = self.ecs.get::<&super::components::Salvo>(entity) {
+            hasher.write(&[66]);
+            hasher.write(&salvo.fired.to_le_bytes());
+            hasher.write(&salvo.next_volley.to_le_bytes());
         }
         if let Ok(artillery) = self.ecs.get::<&super::components::Artillery>(entity) {
             hasher.write(&[28]);
@@ -2605,7 +2623,11 @@ impl SimWorld {
         if let Ok(defense) = self.ecs.get::<&MissileDefense>(entity) {
             hasher.write(&[17, u8::from(defense.strategic)]);
             hasher.write(&defense.range.to_bits().to_le_bytes());
-            for value in [defense.reload_ticks, defense.ticks_until_ready, defense.stock] {
+            for value in [defense.reload_ticks, defense.ticks_until_ready[0], defense.stock] {
+                hasher.write(&value.to_le_bytes());
+            }
+            // Further mounts only, so that checksums from before each had its own reload hold.
+            for value in &defense.ticks_until_ready[1..usize::from(defense.mounts.max(1))] {
                 hasher.write(&value.to_le_bytes());
             }
         }

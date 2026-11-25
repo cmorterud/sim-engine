@@ -735,45 +735,26 @@ fn a_dome_stops_a_laser_and_rising_ground_blocks_it() {
     assert_eq!((beams, health_of(&world, hidden)), (0, before), "no beam is fired into the island");
 }
 
-/// The battlecruiser out-shoots the battleship up close: each of its two laser cannons does
-/// twice the damage a second of one of the battleship's three turrets, so the two together do
-/// more than the battleship's three, within a shorter reach and with less health.
+/// The big guns at sea (2026-11-25): the battleship's three turrets are one gun three times over,
+/// and fire as one broadside, its main gun and its two broadside guns; the battlecruiser's two
+/// lasers have the shorter reach, on less health. Until then a battleship turret was set by
+/// damage a second against the artillery, and each laser did twice one; the battleship's
+/// broadside is now set by its own targets ([broadsides] and [kill_times]).
 #[test]
-fn each_battlecruiser_laser_does_twice_a_battleship_turrets_damage_a_second() {
+fn the_battleships_turrets_fire_as_one_broadside_and_outrange_the_battlecruisers_lasers() {
     use sim_engine::sim::blueprints::{BlueprintDb, Targets, WeaponDef, WeaponKind};
     let db = BlueprintDb::standard();
     let guns = |key: &str, kind: WeaponKind| -> Vec<WeaponDef> {
         let unit = db.get(db.id(key));
         unit.weapon.iter().chain(&unit.extra_weapons).filter(|weapon| weapon.kind == kind && weapon.targets == Targets::Ground).copied().collect()
     };
-    let a_tick = |weapon: &WeaponDef| weapon.damage.to_num::<f64>() / f64::from(weapon.reload_ticks);
     let (lasers, turrets) = (guns("t3_battlecruiser", WeaponKind::Laser), guns("t3_battleship", WeaponKind::Shell));
     assert_eq!((lasers.len(), turrets.len()), (2, 3));
-    for laser in &lasers {
-        for turret in &turrets {
-            assert!((a_tick(laser) - 2.0 * a_tick(turret)).abs() < 1e-9, "a laser does {} a tick, a battleship turret {}", a_tick(laser), a_tick(turret));
-        }
-    }
-    let total = |weapons: &[WeaponDef]| weapons.iter().map(a_tick).sum::<f64>();
-    assert!(total(&lasers) > total(&turrets));
+    let same = |a: &WeaponDef, b: &WeaponDef| (a.damage, a.reload_ticks, a.range, a.projectile_speed) == (b.damage, b.reload_ticks, b.range, b.projectile_speed);
+    assert!(turrets.iter().all(|turret| same(turret, &turrets[0])), "the battleship's turrets differ: {turrets:?}");
+    assert!(!turrets[0].broadside && turrets[1..].iter().all(|turret| turret.broadside), "the main gun leads, and the other two fire in its broadside");
     let (cruiser, ship) = (db.get(db.id("t3_battlecruiser")), db.get(db.id("t3_battleship")));
     assert!(lasers[0].range < turrets[0].range && cruiser.health < ship.health, "the battlecruiser has the shorter reach and the lower health");
-}
-
-/// How the big guns stand to one another: one of the battleship's three turrets does twice the
-/// damage a second of a T3 Mobile Heavy Artillery piece, and one and a half times that of a T2
-/// Artillery Installation.
-#[test]
-fn a_battleship_turret_does_twice_a_mobile_artillerys_damage_a_second_and_half_again_an_installations() {
-    use sim_engine::sim::blueprints::BlueprintDb;
-    let db = BlueprintDb::standard();
-    let a_tick = |key: &str| {
-        let weapon = db.get(db.id(key)).weapon.unwrap_or_else(|| panic!("{key} has a gun"));
-        weapon.damage.to_num::<f64>() / f64::from(weapon.reload_ticks)
-    };
-    let (turret, mobile, installation) = (a_tick("t3_battleship"), a_tick("t3_mobile_artillery"), a_tick("t2_artillery"));
-    assert!((turret / mobile - 2.0).abs() < 0.02, "a battleship turret does {:.2} times a mobile artillery's damage a second", turret / mobile);
-    assert!((turret / installation - 1.5).abs() < 0.02, "a battleship turret does {:.2} times a T2 artillery installation's damage a second", turret / installation);
 }
 
 /// Every ship's dome stays beneath every aircraft that attacks what is under it, hull and all, so
@@ -849,9 +830,9 @@ fn a_destroyers_torpedoes_start_under_the_water() {
 }
 
 /// An anti-torpedo charge drops a decoy into the water, which an incoming torpedo turns to and
-/// strikes instead of the ship (2026-11-25): a destroyer, whose charge is ready every second, takes
-/// nothing from a submarine's torpedoes, and decoys show in the water; with its charge off, they
-/// hit it.
+/// strikes instead of the ship (2026-11-25): a destroyer, whose charge is ready every 10 seconds,
+/// takes nothing from a submarine's first torpedo, and a decoy shows in the water; with its charge
+/// off, the torpedo hits it.
 #[test]
 fn an_anti_torpedo_charge_lures_torpedoes_onto_decoys() {
     for charged in [true, false] {
@@ -863,13 +844,21 @@ fn an_anti_torpedo_charge_lures_torpedoes_onto_decoys() {
         if !charged {
             world.ecs.get::<&mut sim_engine::sim::components::TorpedoDefense>(entity).unwrap().range = Fp::ZERO;
         }
-        spawn(&mut world, "t1_attack_sub", Team::Red, point(2_500, 1_000));
+        let sub = spawn(&mut world, "t1_attack_sub", Team::Red, point(2_500, 1_000));
         let full = world.unit_health(destroyer).unwrap();
-        let mut decoys_seen = false;
-        for _ in 0..300 {
+        let (mut decoys_seen, mut fired, mut landed) = (false, false, false);
+        // Until the first torpedo has struck something: the charge is ready for it, not the next.
+        for _ in 0..200 {
             world.advance_tick(&[]);
             decoys_seen |= !world.snapshot().decoys.is_empty();
+            let in_flight = world.snapshot().projectiles.iter().any(|projectile| projectile.source == sub);
+            fired |= in_flight;
+            if fired && !in_flight {
+                landed = true;
+                break;
+            }
         }
+        assert!(landed, "the submarine's first torpedo never landed");
         let health = world.unit_health(destroyer).unwrap();
         if charged {
             assert!(decoys_seen, "no decoy was dropped");
