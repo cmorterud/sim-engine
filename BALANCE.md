@@ -193,7 +193,8 @@ out close and why: evidence about the process, not a target.
   match to Balanced on the Islands maps; it was not, and Balanced still won every one.
   Stronger defenses lengthen sieges: a Scattered Isles 4v4 ran to 73 minutes, past the soak's
   67-minute limit, finishing. Team matches of three or more a side now count as unfinished only
-  past 100 minutes (the user's decision).
+  past 100 minutes (the user's decision), and since the fighters were repriced, so do matches on
+  maps 20 km across or more: a mirrored Scattered Isles 1v1 ran to 74 minutes, finishing in a draw.
 * 2026-11-25: the fighters by the inspiration's ratios (`[domains] strength_over_anchor`): the
   Interceptor and Air Superiority Fighter were set by `[air]` rules alone and sat at about half and
   three-quarters of the inspiration's strength per cost against the anchor. They take its price
