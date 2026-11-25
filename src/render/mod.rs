@@ -3,6 +3,7 @@
 #![allow(clippy::disallowed_types)]
 
 pub mod camera;
+pub mod climate;
 pub mod detail;
 pub mod effects;
 mod gpu_timing;

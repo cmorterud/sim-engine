@@ -19,6 +19,7 @@ use sim_engine::input::orders::{
 use sim_engine::input::selection::{group_center, ControlGroups, Selection};
 use sim_engine::math::fp::{Fp, Vec2Fp};
 use sim_engine::render::camera::{Camera, HeightField};
+use sim_engine::render::climate::Climate;
 use sim_engine::render::effects::Effects;
 use sim_engine::icons::ICON_ALTITUDE;
 use sim_engine::render::instances::{self, InstanceBatches, Motion};
@@ -756,6 +757,14 @@ struct MapInfo {
     water_level: f32,
 }
 
+/// The colors a map is drawn in (render/climate.rs), by its name.
+fn climate_of(source: &MapSource) -> Climate {
+    match source {
+        MapSource::Map(map) | MapSource::Teams(map, _) => Climate::for_map(&map.name),
+        MapSource::Skirmish | MapSource::Playtest | MapSource::Scenario(_) => Climate::default(),
+    }
+}
+
 fn read_map(scenario: &Scenario) -> MapInfo {
     let world = &scenario.world;
     let cell = f64::from(TERRAIN_CELL_UNITS);
@@ -1182,6 +1191,7 @@ fn run_landscape(seed: u64, options: &Options, map_source: &MapSource, directory
     const WAVE_TIME: f32 = 10.0;
     let scenario = make_scenario(seed, false, map_source, false);
     let map = read_map(&scenario);
+    let climate = climate_of(map_source);
     if let Err(error) = std::fs::create_dir_all(directory) {
         return cannot_start(&format!("cannot make {}: {error}", directory.display()));
     }
@@ -1190,6 +1200,7 @@ fn run_landscape(seed: u64, options: &Options, map_source: &MapSource, directory
     let size = window.inner_size();
     let mut renderer = Renderer::new(Arc::clone(&window), &map.heights, None);
     renderer.set_water_level(map.water_level);
+    renderer.set_climate(&climate);
     if let Some(quality) = options.quality {
         renderer.set_quality(quality);
     }
@@ -1240,6 +1251,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     // A watcher seeing through one team's eyes starts at its base, as its player would.
     let player_start = scenario.world.starts[if watching { watch_view.unwrap_or(PLAYER_TEAM) } else { PLAYER_TEAM }.index()];
     let map = read_map(&scenario);
+    let climate = climate_of(&map_source);
     let is_match = !battle;
     let autotest_seconds = options.autotest_seconds;
     let fast_forward = options.fast_forward;
@@ -1281,6 +1293,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     let size = window.inner_size();
     let mut renderer = Renderer::new_async(Arc::clone(&window), &map.heights, map.fog_side).await;
     renderer.set_water_level(map.water_level);
+    renderer.set_climate(&climate);
     if let Some(quality) = options.quality {
         renderer.set_quality(quality);
     }
@@ -2148,14 +2161,14 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                 let speed = session.driver.as_ref().map_or(1, SimDriver::speed);
                                 let state = ui::WatchState { map: &map_name, seed, view: watch_view, speed, paused: game_paused };
                                 ui::watch_bar(ctx, &snapshot, &map.blueprints, &state, &mut range_toggles, &mut actions);
-                                minimap.show(ctx, &camera, &map.heights, f64::from(map.water_level), &snapshot, map.fog_side, &mut actions);
+                                minimap.show(ctx, &camera, &map.heights, f64::from(map.water_level), &climate, &snapshot, map.fog_side, &mut actions);
                                 let stopped = snapshot.tick >= sim_engine::soak::match_tick_limit(map_source.per_team(), map_source.map_units());
                                 ui::watch_end_window(ctx, snapshot.match_result, stopped, snapshot.tick, seed, &mut actions);
                             } else if is_match {
                                 ui::world_overlay(ctx, &camera, &snapshot, &selected, &map.blueprints, pixels_per_point);
                                 let sound_label = sound.as_ref().map(|_| sound_settings.label());
                                 ui::resource_bar(ctx, &snapshot, &map.blueprints, &map_name, sound_label.as_deref(), game_paused, &mut range_toggles, &mut actions);
-                                minimap.show(ctx, &camera, &map.heights, f64::from(map.water_level), &snapshot, map.fog_side, &mut actions);
+                                minimap.show(ctx, &camera, &map.heights, f64::from(map.water_level), &climate, &snapshot, map.fog_side, &mut actions);
                                 ui::commander_alert(ctx, attack_alarm.alert_strength());
                                 if let Some((blue, red, tier)) = scenario_start {
                                     ui::scenario_score(ctx, &snapshot, &map.blueprints, [blue, red], tier, fog);

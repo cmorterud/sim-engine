@@ -16,6 +16,7 @@ use super::camera::{Camera, HeightField};
 use super::instances::{InstanceBatches, UnitInstanceRaw};
 use super::meshes::{MeshSet, MeshVertex, Shape};
 use super::gpu_timing::GpuTimer;
+use super::climate::Climate;
 use super::detail::detail_levels;
 use super::land::LandField;
 use super::shore::ShoreField;
@@ -158,6 +159,7 @@ pub struct Renderer {
     unit_pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
     scar_pipeline: wgpu::RenderPipeline,
+    wake_pipeline: wgpu::RenderPipeline,
     terrain_pipeline: wgpu::RenderPipeline,
     box_pipeline: wgpu::RenderPipeline,
     dome_pipeline: wgpu::RenderPipeline,
@@ -165,6 +167,8 @@ pub struct Renderer {
     smoke_pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     globals_buffer: wgpu::Buffer,
+    /// The map's climate's colors (climate.rs).
+    climate_buffer: wgpu::Buffer,
     mesh_vertices: wgpu::Buffer,
     mesh_indices: wgpu::Buffer,
     shape_indices: Vec<std::ops::Range<u32>>,
@@ -260,6 +264,11 @@ impl Renderer {
         log::info!("land map baked in {:.0} ms", started.elapsed().as_secs_f64() * 1000.0);
         self.land_view = rgba_texture(&self.device, &self.queue, "land", &[(land.side() as u32, land.texels())]);
         self.bind_group = make_bind_group(&self.device, &self.bind_group_layout, self);
+    }
+
+    /// Draws land, sea and sky in this climate's colors from the next frame on.
+    pub fn set_climate(&mut self, climate: &Climate) {
+        self.queue.write_buffer(&self.climate_buffer, 0, bytemuck::bytes_of(climate));
     }
 
     /// Draws land and sea at this quality from the next frame on.
@@ -410,6 +419,11 @@ impl Renderer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let climate_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("climate"),
+            contents: bytemuck::bytes_of(&Climate::default()),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("globals"),
             entries: &[
@@ -499,6 +513,17 @@ impl Renderer {
                     },
                     count: None,
                 },
+                // The climate's colors.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 9,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
         let shore_view = r8_texture(&device, &queue, "shore", 1, &[0]);
@@ -523,6 +548,7 @@ impl Renderer {
             layout: &bind_group_layout,
             entries: &bind_group_entries(&Bindings {
                 globals: &globals_buffer,
+                climate: &climate_buffer,
                 heights: &height_view,
                 fog: &fog_view,
                 fog_sampler: &fog_sampler,
@@ -719,6 +745,38 @@ impl Renderer {
             multisample,
             multiview: None,
         });
+        // Ships' wakes: the same flat marks, blended over the water after it is drawn.
+        let wake_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("wakes"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_scar",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<MeshVertex>() as u64,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &mesh_attributes,
+                    },
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<UnitInstanceRaw>() as u64,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &instance_attributes,
+                    },
+                ],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_wake",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &blended_scars,
+            }),
+            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+            depth_stencil: depth(false, wgpu::CompareFunction::Greater),
+            multisample,
+            multiview: None,
+        });
 
         // See-through, so drawn last, tested against the scene but leaving its depth alone.
         let blended = [Some(wgpu::ColorTargetState { format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })];
@@ -849,6 +907,7 @@ impl Renderer {
             unit_pipeline,
             shadow_pipeline,
             scar_pipeline,
+            wake_pipeline,
             terrain_pipeline,
             box_pipeline,
             dome_pipeline,
@@ -856,6 +915,7 @@ impl Renderer {
             smoke_pipeline,
             bind_group,
             globals_buffer,
+            climate_buffer,
             mesh_vertices,
             mesh_indices,
             shape_indices: meshes.ranges,
@@ -1119,6 +1179,13 @@ impl Renderer {
             pass.set_index_buffer(self.mesh_indices.slice(..), wgpu::IndexFormat::Uint32);
         }
         stamp(&mut pass, 3);
+        // Ships' wakes, on the water just drawn: the scars' instances again, of which the wake
+        // shader keeps only the wakes.
+        let scars = &self.shape_instances[Shape::Scar as usize];
+        if !scars.is_empty() && !self.tile_runs.water.is_empty() {
+            pass.set_pipeline(&self.wake_pipeline);
+            pass.draw_indexed(self.shape_indices[Shape::Scar as usize].clone(), 0, scars.clone());
+        }
         let smoke = &self.shape_instances[Shape::Smoke as usize];
         if !smoke.is_empty() {
             pass.set_pipeline(&self.smoke_pipeline);
@@ -1282,6 +1349,7 @@ fn rgba_texture(device: &wgpu::Device, queue: &wgpu::Queue, label: &str, levels:
 /// What the shaders read, in binding order.
 struct Bindings<'a> {
     globals: &'a wgpu::Buffer,
+    climate: &'a wgpu::Buffer,
     heights: &'a wgpu::TextureView,
     fog: &'a wgpu::TextureView,
     fog_sampler: &'a wgpu::Sampler,
@@ -1292,7 +1360,7 @@ struct Bindings<'a> {
     detail: &'a wgpu::TextureView,
 }
 
-fn bind_group_entries<'a>(bindings: &Bindings<'a>) -> [wgpu::BindGroupEntry<'a>; 9] {
+fn bind_group_entries<'a>(bindings: &Bindings<'a>) -> [wgpu::BindGroupEntry<'a>; 10] {
     [
         wgpu::BindGroupEntry { binding: 0, resource: bindings.globals.as_entire_binding() },
         wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(bindings.heights) },
@@ -1303,6 +1371,7 @@ fn bind_group_entries<'a>(bindings: &Bindings<'a>) -> [wgpu::BindGroupEntry<'a>;
         wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::Sampler(bindings.wave_sampler) },
         wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::TextureView(bindings.land) },
         wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::TextureView(bindings.detail) },
+        wgpu::BindGroupEntry { binding: 9, resource: bindings.climate.as_entire_binding() },
     ]
 }
 
@@ -1312,6 +1381,7 @@ fn make_bind_group(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, render
         layout,
         entries: &bind_group_entries(&Bindings {
             globals: &renderer.globals_buffer,
+            climate: &renderer.climate_buffer,
             heights: &renderer.height_view,
             fog: &renderer.fog_view,
             fog_sampler: &renderer.fog_sampler,
