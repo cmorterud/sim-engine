@@ -2169,7 +2169,15 @@ impl SimWorld {
             if stats.team != team || stats.is_structure || self.ecs.get::<&Patrol>(entity).is_ok() {
                 continue;
             }
+            // Only a walk to a place can be moved: an attack, queued or not, goes where its
+            // target goes, and shown with the others it read as a move to the player.
+            let movable = |order: &Order| matches!(order.kind, OrderKind::Move | OrderKind::AttackMove) && !self.flow_field.is_following(order.route);
             let mut add = |task: BuildTask| {
+                if let BuildTask::Walk { order, .. } = task {
+                    if !movable(&order) {
+                        return;
+                    }
+                }
                 if let Some(step) = self.task_step(&task) {
                     stops.push(OrderStopView { unit: id, task, position: [step.x, step.y, step.z] });
                 }
@@ -2184,7 +2192,7 @@ impl SimWorld {
             }
             let order = *self.ecs.get::<&Order>(entity).expect("units have orders");
             // A builder's route only leads to its first task, which is already listed.
-            if tasks == 0 && matches!(order.kind, OrderKind::Move | OrderKind::AttackMove) && !self.flow_field.is_following(order.route) {
+            if tasks == 0 && order.kind != OrderKind::Idle {
                 add(BuildTask::Walk { order, started: true });
             }
             if let Ok(queue) = self.ecs.get::<&OrderQueue>(entity) {
