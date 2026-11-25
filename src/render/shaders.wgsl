@@ -12,7 +12,8 @@ struct Globals {
     selection_box: vec4<f32>,
     // terrain height scale, display scale factor, fog texture coordinates per height sample, water level.
     terrain_scale: vec4<f32>,
-    // the simulation's time in seconds, for waves, then the terrain grid's samples a side.
+    // the simulation's time in seconds, for waves, the terrain grid's samples a side, how strongly
+    // sight is washed pale, then the quality: 0 for low, 1 for high.
     water: vec4<f32>,
 };
 
@@ -566,8 +567,20 @@ fn vs_terrain(@builtin(vertex_index) index: u32) -> TerrainOutput {
     return out;
 }
 
-fn hash2(point: vec2<f32>) -> f32 {
-    return fract(sin(dot(point, vec2<f32>(127.1, 311.7))) * 43758.5453);
+// A number from 0 to 1 for a whole-numbered cell, from integer arithmetic only (a PCG-style
+// hash), so that it is as good at the far side of an 81 km map as at its origin. Until
+// 2026-11-25 it was `fract(sin(dot(cell, (127.1, 311.7))) * 43758.5)`, whose argument to `sin`
+// reached about 10^7 on big maps, where floats are a radian or more apart.
+fn hash2(cell: vec2<f32>) -> f32 {
+    var v = bitcast<vec2<u32>>(vec2<i32>(floor(cell)));
+    v = v * 1664525u + vec2<u32>(1013904223u);
+    v.x = v.x + v.y * 1664525u;
+    v.y = v.y + v.x * 1664525u;
+    v = v ^ (v >> vec2<u32>(16u));
+    v.x = v.x + v.y * 1664525u;
+    v.y = v.y + v.x * 1664525u;
+    v = v ^ (v >> vec2<u32>(16u));
+    return f32(v.x >> 8u) / 16777216.0;
 }
 
 // Smooth noise from 0 to 1, changing over about one unit of `point`, then how fast it changes

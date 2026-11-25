@@ -24,7 +24,7 @@ use sim_engine::icons::ICON_ALTITUDE;
 use sim_engine::render::instances::{self, InstanceBatches, Motion};
 use sim_engine::render::links;
 use sim_engine::render::meshes::Shape;
-use sim_engine::render::pipeline::{FrameScene, Renderer, UiFrame};
+use sim_engine::render::pipeline::{FrameScene, Quality, Renderer, UiFrame};
 use sim_engine::sim::blueprints::{BlueprintDb, BlueprintId};
 use sim_engine::sim::commands::SimCommand;
 use sim_engine::sim::components::{SimId, Team};
@@ -170,6 +170,9 @@ Usage: sim-engine [options]
                        with the mouse turns the camera
   --view <all|blue|red>  With --watch, whose sight to start with (default all)
   --fog <on|off>       Fog of war, for every team and the AI too (default on)
+  --quality <low|high> How much the land and sea draw (default high; low in the browser)
+  --landscape <dir>    Save pictures of the map's land and sea, with no units or interface,
+                       from fixed views picked from its heights, then exit
   --scenario <id>      Play a playtest scenario from data/scenarios.toml: a balance fight,
                        with Blue's units yours and Red's scripted (README, Playtest scenarios)
 
@@ -267,6 +270,11 @@ struct Options {
     no_fog: bool,
     /// Play a playtest scenario from data/scenarios.toml instead of a match.
     scenario: Option<String>,
+    /// How much the land and sea draw, if not the platform's default.
+    quality: Option<Quality>,
+    /// Save pictures of the land and sea here, then exit. Not in the browser.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    landscape_dir: Option<PathBuf>,
 }
 
 /// On or off, for --fog and ?fog=.
@@ -324,6 +332,7 @@ fn parse_options() -> Result<Option<Options>, String> {
     options.view = params.get("view").and_then(|name| parse_view(&name)).flatten();
     options.no_fog = params.get("fog").and_then(|name| parse_switch(&name)) == Some(false);
     options.scenario = params.get("scenario");
+    options.quality = params.get("quality").and_then(|name| Quality::parse(&name));
     Ok(Some(options))
 }
 
@@ -425,6 +434,8 @@ fn parse_options() -> Result<Option<Options>, String> {
             "--watch" => options.watch = true,
             "--view" => options.view = parse_view(&value("--view")?).ok_or("--view needs all, blue, or red")?,
             "--fog" => options.no_fog = !parse_switch(&value("--fog")?).ok_or("--fog needs on or off")?,
+            "--landscape" => options.landscape_dir = Some(PathBuf::from(value("--landscape")?)),
+            "--quality" => options.quality = Some(Quality::parse(&value("--quality")?).ok_or("--quality needs low or high")?),
             "--scenario" => options.scenario = Some(value("--scenario")?),
             "--help" | "-h" => return Err(USAGE.to_string()),
             other => return Err(format!("unknown option {other}\n\n{USAGE}")),
@@ -593,6 +604,11 @@ fn main() {
     }
     if let Some(ticks) = options.headless_ticks {
         run_headless(seed, ticks, options.battle, &map_source, !options.no_fog);
+        return;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(directory) = &options.landscape_dir {
+        run_landscape(seed, &options, &map_source, directory);
         return;
     }
     #[cfg(not(target_arch = "wasm32"))]
@@ -1132,6 +1148,47 @@ fn ground_point(ground: Option<[f64; 2]>, heights: &HeightField) -> Option<[f64;
     ground.map(|ground| [ground[0], ground[1], heights.height_at(ground[0], ground[1])])
 }
 
+/// Saves pictures of the map's land and sea from the views `landscape_views` picks, with no
+/// units, scenery, fog, or interface, and the waves stopped at the same moment each time, so
+/// that pictures from before and after a change to the shaders can be laid side by side.
+#[cfg(not(target_arch = "wasm32"))]
+fn run_landscape(seed: u64, options: &Options, map_source: &MapSource, directory: &std::path::Path) {
+    use sim_engine::render::landscape::landscape_views;
+    /// The moment the waves are stopped at, in seconds.
+    const WAVE_TIME: f32 = 10.0;
+    let scenario = make_scenario(seed, false, map_source, false);
+    let map = read_map(&scenario);
+    if let Err(error) = std::fs::create_dir_all(directory) {
+        return cannot_start(&format!("cannot make {}: {error}", directory.display()));
+    }
+    let event_loop = EventLoop::new().expect("event loop starts");
+    let window = Arc::new(WindowBuilder::new().with_title("sim-engine landscape").with_inner_size(LogicalSize::new(1440.0, 900.0)).build(&event_loop).expect("window opens"));
+    let size = window.inner_size();
+    let mut renderer = Renderer::new(Arc::clone(&window), &map.heights, None);
+    renderer.set_water_level(map.water_level);
+    if let Some(quality) = options.quality {
+        renderer.set_quality(quality);
+    }
+    let instances = InstanceBatches::default();
+    for view in landscape_views(&map.heights, f64::from(map.water_level)) {
+        let mut camera = Camera::new(map.map_units, [f64::from(size.width), f64::from(size.height)]);
+        camera.look_at(view.focus[0], view.focus[1], view.altitude);
+        if view.low_angle {
+            camera.orbit(0.0, -90.0);
+        }
+        // The camera eases onto the ground's height under it.
+        for _ in 0..100 {
+            camera.update(0.1, &map.heights);
+        }
+        let scene = FrameScene { camera: &camera, instances: &instances, selection_box: None, time: WAVE_TIME };
+        let path = directory.join(format!("{}.bmp", view.name));
+        match renderer.capture(&scene, None, &path) {
+            Ok(()) => println!("landscape: {} at ({:.0}, {:.0}), altitude {:.0}", path.display(), view.focus[0], view.focus[1], camera.altitude()),
+            Err(error) => println!("landscape: {} failed: {error}", path.display()),
+        }
+    }
+}
+
 async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     let battle = options.battle;
     // Watching plays the soak's match for the seed, with no player, seen from any side.
@@ -1200,6 +1257,14 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     let size = window.inner_size();
     let mut renderer = Renderer::new_async(Arc::clone(&window), &map.heights, map.fog_side).await;
     renderer.set_water_level(map.water_level);
+    if let Some(quality) = options.quality {
+        renderer.set_quality(quality);
+    }
+    // Timing on the graphics card, for the autotest's report. Not while capturing, which
+    // disturbs frame timing anyway.
+    if autotest.is_some() && options.capture_dir.is_none() {
+        renderer.start_gpu_timing();
+    }
     let mut camera = Camera::new(map.map_units, [f64::from(size.width), f64::from(size.height)]);
     if is_match {
         camera.set_min_altitude(SKIRMISH_MIN_ALTITUDE);
@@ -2313,6 +2378,10 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                             if session.driver.as_ref().is_some_and(SimDriver::is_finished) {
                                 let result = session.driver.take().expect("driver is present").finish();
                                 test.report(result);
+                                match renderer.gpu_timing() {
+                                    Some(([terrain, units, water], frames)) => println!("autotest: gpu ms per frame over {frames} frames: terrain {terrain:.2}, units {units:.2}, water {water:.2}"),
+                                    None => println!("autotest: gpu timing not available on this adapter"),
+                                }
                                 target.exit();
                             }
                         }
