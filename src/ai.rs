@@ -1207,7 +1207,7 @@ impl AiBrain {
                     return Some(choice);
                 }
             }
-            Favours::Naval if mass_income >= self.naval(NAVAL_FACTORY_INCOME) => {
+            Favours::Naval if !energy_lags => {
                 if let Some(choice) = naval_choice() {
                     return Some(choice);
                 }
