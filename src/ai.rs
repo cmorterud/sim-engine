@@ -16,6 +16,9 @@ use crate::sim::world::{MatchResult, SimWorld};
 /// The AI decides once per second. Both teams decide on the same tick, from the same world:
 /// a team that always decided later would always be that far behind.
 const THINK_INTERVAL: u32 = 10;
+/// In an energy crisis, a builder stays on a generator bigger than the smallest only if the energy
+/// coming in would finish it in this many ticks (a minute).
+const CRISIS_FINISH_TICKS: u32 = 600;
 const SEARCH_RINGS: i32 = 60;
 const COMMANDER_LEASH_UNITS: i32 = 900;
 const DEFEND_RADIUS_UNITS: i32 = 1_400;
@@ -898,15 +901,14 @@ impl AiBrain {
                         forces.idle_builders.push(IdleBuilder { id, entity, position });
                     }
                     // In an energy crisis, a builder on anything but a generator is taken off it, and
-                    // so is one on a big generator with more energy still to go into it than the
-                    // smallest costs: on Saddleback a commander stayed on a T3 generator, with 2% of
-                    // the energy it needed, for the last half hour of a match (2026-11-25).
-                    let cheapest = world.blueprints.get(roster.generators[0]).energy;
+                    // so is one on a big generator that the energy coming in would take more than
+                    // `CRISIS_FINISH_TICKS` to finish: on Saddleback a commander stayed on a T3
+                    // generator, with 2% of the energy it needed, for the last half hour of a match
+                    // (2026-11-25).
+                    let trickle = world.economies[self.player.index()].energy_income * Res::from_num(CRISIS_FINISH_TICKS);
                     let finishes = |blueprint: BlueprintId, site: Option<SimId>| {
-                        blueprint == roster.generators[0]
-                            || site.and_then(|site| world.unit_entity(site)).and_then(|site| world.ecs.get::<&Construction>(site).ok().map(|building| building.progress)).is_some_and(|progress| {
-                                world.blueprints.get(blueprint).energy * (Res::ONE - progress) <= cheapest
-                            })
+                        let progress = site.and_then(|site| world.unit_entity(site)).and_then(|site| world.ecs.get::<&Construction>(site).ok().map(|building| building.progress));
+                        blueprint == roster.generators[0] || world.blueprints.get(blueprint).energy * (Res::ONE - progress.unwrap_or(Res::ZERO)) <= trickle
                     };
                     let off_generators = !builder.tasks.is_empty()
                         && !builder.tasks.iter().any(|task| matches!(*task, BuildTask::Build { blueprint, site, .. } if roster.is_generator(blueprint) && finishes(blueprint, site)));
