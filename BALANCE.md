@@ -244,7 +244,9 @@ out close and why: evidence about the process, not a target.
   (the user's 26, then anything up to 40). It outranges a T2 Artillery Installation by 1.30, and
   from between the two reaches destroys four of them under a dome in about 48 seconds,
   unanswered, though that hangs on how close they stand (17 to 65 seconds). Domes come back 20
-  seconds after they fall, at full health. The T2 dome heals its health in 70 seconds: 13,020 at
+  seconds after they fall, at full health: the two shield generators', the Escort Corvette's
+  (from 30) and the Mobile Shield Generator's (from 24), and the command rig's Field Shield (from
+  140) and Area Shield (from 45). The T2 dome heals its health in 70 seconds: 13,020 at
   186 a second, which still holds off one cruiser. The T3 dome heals a little faster, 200 a
   second, on 36,000, so more slowly for its size; one battleship breaks it in about 48 seconds,
   and the broadside that does destroys the generator. That replaces the 2026-11-24 rule that set

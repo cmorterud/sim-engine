@@ -1563,7 +1563,8 @@ vision = 640
 sonar = 720
 movement = "naval"
 torpedo_defense = { range = 600, reload_ticks = 30 }
-shield = { radius = 400, height = 150, health = 4000, regen = 80, recharge_seconds = 30, upkeep = 80 }
+# Back 20 seconds after it falls, as the other domes (the design owner's rule, 2026-11-25; 30 until then).
+shield = { radius = 400, height = 150, health = 4000, regen = 80, recharge_seconds = 20, upkeep = 80 }
 
 # The inspiration's numbers. It builds nuclear missiles as a strategic missile launcher does, on order or one after
 # another, up to three, and fires one only on order. Its cruise missiles it fires on its own at
@@ -1671,7 +1672,8 @@ slot = "systems"
 mass = 2300
 energy = 112500
 build_time = 2100
-shield = { radius = 30, health = 19000, regen = 30, recharge_seconds = 140, upkeep = 250 }
+# Back 20 seconds after it falls, as the other domes (the design owner's rule, 2026-11-25; 140 until then).
+shield = { radius = 30, health = 19000, regen = 30, recharge_seconds = 20, upkeep = 250 }
 
 [[enhancement]]
 id = "area_shield"
@@ -1681,7 +1683,8 @@ slot = "systems"
 mass = 1400
 energy = 40000
 build_time = 1400
-shield = { radius = 200, health = 5000, regen = 60, recharge_seconds = 45, upkeep = 200 }
+# Back 20 seconds after it falls, as the other domes (the design owner's rule, 2026-11-25; 45 until then).
+shield = { radius = 200, health = 5000, regen = 60, recharge_seconds = 20, upkeep = 200 }
 
 [[enhancement]]
 id = "signature_suppression"
@@ -1904,7 +1907,8 @@ turn_rate = 120
 turn_radius = 20
 radius = 8
 vision = 400
-shield = { radius = 170, health = 3000, regen = 55, recharge_seconds = 24, upkeep = 80 }
+# Back 20 seconds after it falls, as the other domes (the design owner's rule, 2026-11-25; 24 until then).
+shield = { radius = 170, health = 3000, regen = 55, recharge_seconds = 20, upkeep = 80 }
 
 [[unit]]
 id = "t2_combat_engineer"

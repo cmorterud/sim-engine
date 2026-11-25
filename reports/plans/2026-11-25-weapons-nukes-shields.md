@@ -490,6 +490,11 @@ are dropped. The T3 dome's 500 a second (item 3) is replaced, so one battleship 
 coastal T3 position on its own. The T2 dome is 2.6 times as tough as before, which the coastal
 cruisers and the missile launchers' T2 siege are re-checked against.
 
+The user's answer (2026-11-25): the other shields come back in 20 s too. The Escort Corvette's
+dome (30 s before), the Mobile Shield Generator's (24 s) and the command rig's Field Shield (140 s)
+and Area Shield (45 s) now come back 20 s after they fall, at full health. The field rig's two
+shields, the Heavy Walker's personal shield and the Heavy Air Transport's keep their own times.
+
 ## Tests that pin all of this
 
 1. **New `[kill_times]` and `[volleys]` sections in `data/balance_targets.toml`**, read by tests

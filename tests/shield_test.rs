@@ -132,6 +132,25 @@ fn a_dome_that_runs_out_collapses_and_comes_back_at_full_strength() {
     assert_eq!(back.health, back.max_health);
 }
 
+/// The domes of the shield generators, the Escort Corvette, the Mobile Shield Generator and the
+/// command rig's two shields all come back 20 seconds after they fall (the design owner's rule,
+/// 2026-11-25). `every_shield_absorbs_regenerates_collapses_and_recharges` checks that each one
+/// does come back after its own time.
+#[test]
+fn the_domes_and_the_commanders_shields_come_back_in_20_seconds() {
+    let db = open_world().blueprints;
+    for key in ["shield_generator", "t3_heavy_shield", "t2_escort_corvette", "t2_mobile_shield"] {
+        let dome = db.get(db.id(key)).shield.unwrap_or_else(|| panic!("{key} has a dome"));
+        assert_eq!(dome.recharge_ticks, 200, "{key}'s dome comes back in 20 seconds");
+    }
+    for key in ["field_shield", "area_shield"] {
+        let enhancement = db.enhancement(db.enhancement_id(key));
+        let dome = enhancement.effects.shield.unwrap_or_else(|| panic!("{key} is a shield"));
+        assert!(enhancement.units.contains(&db.id("command_rig")), "{key} is the command rig's");
+        assert_eq!(dome.recharge_ticks, 200, "{key} comes back in 20 seconds");
+    }
+}
+
 /// A shell dropped straight down onto the overlap of two Red domes, 160 apart.
 fn drop_on_overlap(splash: i32) -> (Fp, Fp) {
     let (mut world, first) = shielded_world();
