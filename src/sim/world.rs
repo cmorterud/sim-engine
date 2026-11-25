@@ -32,9 +32,9 @@ const DECOY_TICKS: u32 = 40;
 /// How far under the water a ship's torpedoes start (2026-11-25).
 const TORPEDO_LAUNCH_DEPTH_UNITS: i32 = 8;
 /// A torpedo leaves at this share of its top speed, about a ship's speed, and reaches its top speed
-/// in this many ticks, a second (2026-11-25).
+/// in this many ticks, two seconds, as the inspiration's do (2026-11-25).
 const TORPEDO_LAUNCH_SHARE: i32 = 3;
-const TORPEDO_SPEED_UP_TICKS: i32 = 10;
+const TORPEDO_SPEED_UP_TICKS: i32 = 20;
 
 const CROWD_SETTLE_RADII: i32 = 30;
 /// The gap between formation spots, in halves of the largest unit's radius.
@@ -3080,7 +3080,7 @@ impl SimWorld {
             if let Some(target) = shot.homing {
                 let distance = sqrt_wide(shot.from.distance_squared(&shot.to));
                 // A torpedo only keeps up with a ship sailing away while it gathers speed, so it is
-                // given that second on top.
+                // given that time on top.
                 let speeding_up = if shot.underwater { TORPEDO_SPEED_UP_TICKS as u32 } else { 0 };
                 let lifetime = (distance / shot.speed.max(Fp::ONE)).to_num::<u32>() * 3 + 10 + speeding_up;
                 let projectile = Projectile {

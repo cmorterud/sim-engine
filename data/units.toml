@@ -1255,7 +1255,7 @@ weapon = { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 475,
 extra_weapons = [
     { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 475, splash_radius = 20, turn_rate = 90, spread = 7 },
     { range = 1200, reload_ticks = 14, projectile_speed = 120, damage = "15.6", targets = "air", turn_rate = 180 },
-    { range = 900, reload_ticks = 40, projectile_speed = 18, damage = 560, targets = "naval" },
+    { range = 900, reload_ticks = 40, projectile_speed = 30, damage = 560, targets = "naval" },
 ]
 
 # Cruise missiles it fires on its own, a gauss cannon, SAMs, and a close-in gun that shoots down
@@ -1356,15 +1356,16 @@ movement = "naval"
 weapon = { kind = "laser", range = 1600, reload_ticks = 20, damage = 600, turn_rate = 60, mount = [0, 27] }
 extra_weapons = [
     { kind = "laser", range = 1600, reload_ticks = 20, damage = 600, turn_rate = 60, mount = [0, -31], aft = true },
-    { range = 1200, reload_ticks = 100, projectile_speed = 18, damage = 200, targets = "naval" },
+    { range = 1200, reload_ticks = 100, projectile_speed = 30, damage = 200, targets = "naval" },
 ]
 missile_defense = { kind = "tactical", range = 620, reload_ticks = 20 }
 
 # Under the sea (GAME_SPECIFICATION.md §10). A submarine sails submerged, where only torpedoes
 # reach it and only sonar finds it. Torpedoes steer to ships and submarines, and hit nothing
-# else. They leave at a third of their top speed, about a ship's, as the inspiration's leave at
-# about their launcher's, and gather speed to 18 over a second: half again the fastest ship's, so
-# that one fleeing can be caught, and a third of a shell's (2026-11-25; they ran at 30 from launch).
+# else. They top out at 30, two and a half times the fastest ship's speed, as the inspiration's top
+# out at two and a half to three times their ships'; they leave at a third of that, about a ship's,
+# as its leave at about their launcher's, and gather speed over two seconds, as its do
+# (2026-11-25: they ran at 30 from launch, then for a day topped out at 18 after one second).
 [[unit]]
 id = "t1_attack_sub"
 name = "Attack Submarine"
@@ -1383,7 +1384,7 @@ radius = 12
 vision = 640
 sonar = 1200
 movement = "submarine"
-weapon = { range = 640, reload_ticks = 40, projectile_speed = 18, damage = 185, targets = "naval" }
+weapon = { range = 640, reload_ticks = 40, projectile_speed = 30, damage = 185, targets = "naval" }
 # The inspiration's deck gun, 25 a second out to 640, which fires only on the surface.
 extra_weapons = [{ range = 640, reload_ticks = 10, projectile_speed = 60, damage = 25, turn_rate = 90 }]
 
@@ -1404,7 +1405,7 @@ radius = 12
 vision = 640
 sonar = 880
 flight = { elevation = 240, turn_rate = 90, break_off = 400, fuel = 600 }
-weapon = { range = 840, reload_ticks = 20, projectile_speed = 18, damage = 189, targets = "naval" }
+weapon = { range = 840, reload_ticks = 20, projectile_speed = 30, damage = 189, targets = "naval" }
 
 [[unit]]
 id = "t1_sonar"
@@ -1456,7 +1457,7 @@ footprint = 1
 on_water = true
 vision = 240
 sonar = 720
-weapon = { range = 1000, reload_ticks = 40, projectile_speed = 18, damage = 454, targets = "naval" }
+weapon = { range = 1000, reload_ticks = 40, projectile_speed = 30, damage = 454, targets = "naval" }
 
 # Four torpedoes a volley, each its own, so that a ship's anti-torpedo charge must stop every one:
 # fired as one, a destroyer's charge stopped them all. Cost, build time, and damage set against the
@@ -1476,7 +1477,7 @@ footprint = 2
 on_water = true
 vision = 400
 sonar = 720
-weapon = { range = 1200, reload_ticks = 10, projectile_speed = 18, damage = 227, targets = "naval" }
+weapon = { range = 1200, reload_ticks = 10, projectile_speed = 30, damage = 227, targets = "naval" }
 
 # Assault: tough, fast, and amphibious, it hovers over land and water alike at the anchor's speed,
 # with the Heavy Tank's range and twice its time to kill. It pays for crossing water: about
@@ -1944,7 +1945,7 @@ sonar = 1440
 movement = "naval"
 # Four-torpedo volleys, and decoys against torpedoes. Cost, build time, health, and damage set
 # against the Medium Tank as the inspiration has its submarine hunter against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t2-air-navy.md).
-weapon = { range = 1100, reload_ticks = 8, projectile_speed = 18, damage = 100, targets = "naval" }
+weapon = { range = 1100, reload_ticks = 8, projectile_speed = 30, damage = 100, targets = "naval" }
 torpedo_defense = { range = 500, reload_ticks = 25 }
 
 # It cannot move, so it is worth more for its cost ([premiums], 2026-11-25): damage two and a half

@@ -173,8 +173,8 @@ fn every_torpedo_defense_stops_torpedoes_as_fast_as_it_reloads() {
         let landed = (taken / torpedo.damage.to_num::<f64>()).round() as usize;
         let fired = stopped + landed;
         // It goes on stopping the torpedoes still running when the submarines stop firing, 500 away,
-        // gathering speed for a second.
-        let running = (500.0 / torpedo.projectile_speed.to_num::<f64>()).ceil() as usize + 10;
+        // gathering speed for two seconds.
+        let running = (500.0 / torpedo.projectile_speed.to_num::<f64>()).ceil() as usize + 20;
         let could = fired.min((firing as usize + running) / defense_def.reload_ticks as usize + 1);
         if fired < 5 {
             failures.push(format!("{}: the submarine fired only {fired} torpedoes", def.key));
