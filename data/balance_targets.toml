@@ -137,6 +137,29 @@ micro_gain = [0.10, 0.25]
 outrange_defense_min = 0.15
 seconds_max = 60
 
+[premiums]
+# A unit pays in strength per cost for what it can do that its counterpart cannot, and is made up
+# for what it cannot do (2026-11-25, the user's rule, everywhere): a defense that cannot move is
+# worth more for its cost than the mobile unit it stands in for, and a unit that crosses water is
+# worth less on land than one that cannot.
+#
+# Immobile: three point defenses of a tier hold against this many times their cost in that tier's
+# line unit attack-moving into them. The line unit trades evenly with itself, so this is the
+# premium. Measured as a fight, since a point defense's reach, which strength per cost leaves out,
+# is most of what it has over the line: by that measure alone the T2 one is a third the Heavy
+# Tank's, yet holds against twice its cost of them. Raised by damage at T3, where health would
+# slow the sieges `[siege]` and `[domains]` time, and by both at T1, which no siege measures.
+point_defense_holds_against_line_units = 1.5
+# Immobile: static anti-air's strength per cost against aircraft, √(anti-air damage a second ×
+# health) / cost, over the mobile anti-air of its tier's (T1 and T2; T3 has no mobile anti-air).
+# Measured by strength, since a mobile group is judged even and a position broken, which do not
+# compare as fights. Both were near 0.6 before, here and in the inspiration.
+static_anti_air_over_mobile = [1.5, 2.0]
+# Amphibious: the hovercraft's strength per materiel over the Heavy Tank's on land, by break-even:
+# it pays for crossing water, as the inspiration's does, about three-quarters as strong for its
+# cost by the inspiration's ratios (0.71 against its line's 0.96). It was about even until today.
+hovercraft_over_heavy_tank_on_land = [0.65, 0.85]
+
 [missiles]
 # Missile launchers do artillery's job, breaking positions from beyond their guns, but artillery
 # is the better unit: missiles fly to where their target was, so they miss anything that keeps
@@ -389,9 +412,8 @@ submarines_beat_fleet_without_anti_submarine = 0.40
 destroyers_beat_submarines = 0.40
 # Air against a land army with a fifth anti-air, at T2: about even, as at T1 ([air]).
 air_force_against_land_army_t2_even = true
-# The hovercraft pays for crossing water: about as strong per materiel as the Heavy Tank on land,
-# by break-even, and losing clearly to an equal cost of a fleet on the water.
-hovercraft_over_heavy_tank_on_land = [0.85, 1.15]
+# The hovercraft loses clearly to an equal cost of a fleet on the water. Its strength on land is
+# in [premiums], with the other capabilities a unit pays for.
 hovercraft_loses_to_fleet = -0.40
 # Ships break coastal bases from T2 up: these outrange the point defense of their tier by at least
 # [siege] outrange_defense_min, and an equal cost of them breaks a coastal position of that tier

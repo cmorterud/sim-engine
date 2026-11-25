@@ -70,7 +70,7 @@ fn every_target_scenario_names_its_target_and_keeps_its_cost() {
         let wanted = scenario.blue_over_red.unwrap_or(1.0);
         assert!((ratio / wanted - 1.0).abs() <= 0.10, "{}: Blue's cost is {ratio:.2} times Red's, not {wanted:.2}", scenario.id);
     }
-    assert!(targeted >= 16, "only {targeted} scenarios play a balance target");
+    assert!(targeted >= 18, "only {targeted} scenarios play a balance target");
 }
 
 /// Played with Blue attack-moving at Red, as a player who does nothing clever would, every
