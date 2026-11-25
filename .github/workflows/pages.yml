@@ -3,12 +3,14 @@ name: Web build
 # Builds the game for the browser and publishes it on GitHub Pages, so that it can be played
 # from a link: https://codymorterud.com/sim-engine/
 #
-# Only once every gate has passed: this starts whenever CI or the soak finishes on main, and
-# publishes only if both passed on the same commit, and that commit is still main's newest, so
-# that a broken build or an older one never replaces what is there.
+# Only once CI has passed: this starts whenever CI finishes on main, and publishes only if it
+# passed, and that commit is still main's newest, so that a broken build or an older one never
+# replaces what is there. The soak does not hold it back: each pull request played its smaller
+# soak before it merged, and the full soak runs nightly on main (soak.yml), where what it finds
+# is rare seeds that stall or replay differently, not a broken page.
 on:
   workflow_run:
-    workflows: [CI, Soak]
+    workflows: [CI]
     types: [completed]
     branches: [main]
   workflow_dispatch:
@@ -48,8 +50,8 @@ jobs:
             echo "$SHA is no longer main's newest commit ($newest)"
             ready=false
           fi
-          for workflow in ci.yml soak.yml; do
-            # Only the runs a push started: a soak started by hand may play only some maps.
+          for workflow in ci.yml; do
+            # Only the runs a push started.
             result=$(gh run list -R "$GITHUB_REPOSITORY" --workflow "$workflow" --commit "$SHA" --event push --json status,conclusion \
               --jq '[.[] | select(.status == "completed")] | .[0].conclusion // "not finished"')
             echo "$workflow on $SHA: $result"
