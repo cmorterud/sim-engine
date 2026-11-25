@@ -765,3 +765,75 @@ fn a_fleet_takes_an_exposed_extractor_before_the_naval_headquarters() {
     }
     assert_eq!(first, Some(extractor), "the cruisers went for {first:?} before the exposed extractor {extractor:?}");
 }
+
+/// A badly hurt factory near the AI's builders is mended: no AI ever repaired anything, and raids
+/// that each left a Naval AI's yards a little weaker sank them all in the end (2026-11-25).
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn the_ai_repairs_a_badly_hurt_factory() {
+    let mut world = scenario::skirmish(11).world;
+    let mut brain = AiBrain::new(Team::Blue, 11, world.starts);
+    for _ in 0..3_000 {
+        let commands = brain.think(&world);
+        world.advance_tick(&commands);
+    }
+    let factory = world
+        .units
+        .iter()
+        .find(|(_, entity)| {
+            world.ecs.get::<&UnitStats>(*entity).is_ok_and(|stats| stats.team == Team::Blue)
+                && world.ecs.get::<&Blueprinted>(*entity).is_ok_and(|unit| world.blueprints.get(unit.0).key.starts_with("land_factory"))
+                && world.ecs.get::<&sim_engine::sim::components::Construction>(*entity).is_err()
+        })
+        .map(|&(id, _)| id)
+        .expect("a finished land factory after five minutes");
+    let full = {
+        let entity = world.unit_entity(factory).unwrap();
+        let mut health = world.ecs.get::<&mut sim_engine::sim::components::Health>(entity).unwrap();
+        health.current = health.max * Fp::from_num(0.3);
+        health.max
+    };
+    let mut ordered = false;
+    for _ in 0..1_200 {
+        let commands = brain.think(&world);
+        ordered |= commands.iter().any(|command| matches!(command, SimCommand::Repair { target, .. } if *target == factory));
+        world.advance_tick(&commands);
+    }
+    assert!(ordered, "no builder was sent to mend the factory");
+    let health = world.unit_health(factory).expect("the factory stands");
+    assert!(health * 3 >= full * 2, "two minutes on, the factory is at {:.0}%", (health / full).to_num::<f64>() * 100.0);
+}
+
+/// Ships at home turn to meet enemy ships in the harbor even when they are busy, as every idle ship
+/// once did: those just setting out sailed on past raiders that sank the yards behind them, and the
+/// Naval AI on Scattered Isles never reached T2 (2026-11-25).
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn ships_at_home_turn_to_meet_raiders_even_when_busy() {
+    use sim_engine::sim::components::{Combat, MoveClass, SimId};
+    let map = scenario::MapSource::Map(std::sync::Arc::new(sim_engine::sim::maps::stillwater()));
+    let mut world = map.scenario(1).world;
+    let mut brain = AiBrain::new(Team::Blue, 1, world.starts);
+    let (blue_home, red_home) = (world.starts[Team::Blue.index()], world.starts[Team::Red.index()]);
+    let toward = (red_home - blue_home).normalized();
+    let water: Vec<Vec2Fp> = (0..2_000).map(|step| blue_home + toward.scaled(fp_int(step * 10))).filter(|&at| world.terrain.passable_for(MoveClass::Naval, at)).collect();
+    assert!(water.len() > 120, "no lake toward Red");
+    let frigate = world.blueprints.id("t1_frigate");
+    let ships: Vec<SimId> = (0..3).map(|index| world.spawn_mobile(frigate, Team::Blue, water[index * 6])).collect();
+    // Raiders a little out into the lake, still on Blue's side, holding fire.
+    let raid_at = water[60];
+    assert!(raid_at.distance_squared(&blue_home) < raid_at.distance_squared(&red_home), "the raid is in Blue's half");
+    for index in 0..3 {
+        let raider = world.spawn_mobile(frigate, Team::Red, raid_at + Vec2Fp::new(fp_int(index * 40), Fp::ZERO));
+        world.ecs.get::<&mut Combat>(world.unit_entity(raider).unwrap()).unwrap().enabled = false;
+    }
+    // The ships at home are busy, sailing back toward the shore.
+    world.advance_tick(&[SimCommand::Move { units: ships.clone(), goal: water[0] }]);
+    let mut met = false;
+    for _ in 0..120 {
+        let commands = brain.think(&world);
+        met |= commands.iter().any(|command| matches!(command, SimCommand::AttackMove { units, goal } if ships.iter().all(|ship| units.contains(ship)) && goal.distance_squared(&raid_at) <= Vec2Fp::new(fp_int(400), Fp::ZERO).distance_squared(&Vec2Fp::ZERO)));
+        world.advance_tick(&commands);
+    }
+    assert!(met, "the busy ships at home were never sent at the raiders");
+}

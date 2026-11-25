@@ -98,6 +98,10 @@ const GUARD_REACH_UNITS: i32 = 600;
 /// them do (2026-11-25).
 const FLEET_RETARGET_TICKS: u32 = 300;
 const FLEET_IDLE_TICKS: u32 = 50;
+/// Enemy ships within this of the raider nearest home count as one raid, and a raid of at least
+/// this many ships that outweighs the ships at home calls the fleet back (2026-11-25).
+const RAID_GATHER_UNITS: i32 = 1_500;
+const RAID_SHIPS: usize = 3;
 /// How far outside a coastal target's defenses the ships that cannot outrange them wait (2026-11-25).
 const STANDOFF_MARGIN_UNITS: i32 = 300;
 /// Fleets set out at this size, growing to the largest.
@@ -112,6 +116,10 @@ const FIRST_FLEET: usize = 4;
 const LARGEST_FLEET: usize = 12;
 /// A structure being built that costs at least this much mass is worth sending idle builders to.
 const BIG_SITE_MASS: i32 = 500;
+/// A builder within this of a badly hurt factory of ours mends it, up to this many to a factory
+/// (2026-11-25).
+const REPAIR_REACH_UNITS: i32 = 2_000;
+const REPAIR_BUILDERS: usize = 2;
 const T3_ENGINEERS: usize = 2;
 /// How far from home the AI goes to build on a geothermal vent.
 const VENT_REACH_UNITS: i32 = 2_500;
@@ -311,6 +319,10 @@ struct Forces {
     extractor_sites: Vec<ExtractorInfo>,
     /// Structures still being built that are worth helping with, and where.
     big_sites: Vec<(SimId, Vec2Fp)>,
+    /// Finished factories of ours that are badly hurt, and where, and how many builders are
+    /// repairing each.
+    damaged_factories: Vec<(SimId, Vec2Fp)>,
+    repairing: std::collections::BTreeMap<SimId, usize>,
     /// Other structures left unfinished, which idle builders finish after the big ones.
     small_sites: Vec<(SimId, Vec2Fp)>,
     /// Whether any engineer can build T2, or T3, structures.
@@ -846,6 +858,12 @@ impl AiBrain {
             if !finished && unit.is_structure() && unit.mass >= Res::from_num(BIG_SITE_MASS) {
                 forces.big_sites.push((id, position));
             }
+            if finished && unit.factory_kind.is_some() {
+                let health = world.ecs.get::<&crate::sim::components::Health>(entity).expect("units have health");
+                if health.current * 3 < health.max * 2 {
+                    forces.damaged_factories.push((id, position));
+                }
+            }
             // Ships and submarines are the fleet's, whatever their class.
             if matches!(stats.move_class, MoveClass::Naval | MoveClass::Submarine) && !unit.is_structure() {
                 forces.naval_units += 1;
@@ -867,6 +885,11 @@ impl AiBrain {
                         forces.builder_tier = forces.builder_tier.max(unit.tier);
                     }
                     let builder = world.ecs.get::<&Builder>(entity).expect("builders have builder parts");
+                    for task in &builder.tasks {
+                        if let BuildTask::Repair { target } = task {
+                            *forces.repairing.entry(*target).or_default() += 1;
+                        }
+                    }
                     let upgrading = world.ecs.get::<&crate::sim::components::Enhancing>(entity).is_ok();
                     if builder.tasks.is_empty() && order.kind == OrderKind::Idle && !upgrading {
                         forces.idle_builders.push(IdleBuilder { id, entity, position });
@@ -1024,6 +1047,7 @@ impl AiBrain {
         // In an energy crisis, one generator at a time, with every other builder helping: a
         // trickle of energy split between many sites finishes none of them.
         let mut crisis_lead: Option<SimId> = None;
+        let mut repairs = forces.repairing.clone();
         for &IdleBuilder { id, entity, position } in &forces.idle_builders {
             let is_commander = forces.commander == Some(id);
             if let Some(lead) = crisis_lead {
@@ -1037,6 +1061,22 @@ impl AiBrain {
                 let unfinished = forces.factories.iter().filter_map(|factory| world.unit_entity(factory.id).and_then(|entity| world.ecs.get::<&Position>(entity).ok().map(|at| (factory.id, at.0.xy()))));
                 if let Some((site, _)) = unfinished.min_by_key(|(site, at)| (at.distance_squared(&position), *site)) {
                     commands.push(SimCommand::Assist { units: vec![id], target: site });
+                    continue;
+                }
+            }
+            // A badly hurt factory nearby is mended before anything new is started, by two builders
+            // at most: no AI ever repaired anything, and raids that each left its yards a little
+            // weaker sank them all in the end (2026-11-25).
+            if !forces.energy_crisis {
+                let reach = fp_int(REPAIR_REACH_UNITS);
+                let hurt = forces
+                    .damaged_factories
+                    .iter()
+                    .filter(|(factory, at)| at.distance_squared(&position) <= wide_mul(reach, reach) && repairs.get(factory).copied().unwrap_or(0) < REPAIR_BUILDERS)
+                    .min_by_key(|(factory, at)| (at.distance_squared(&position), *factory));
+                if let Some(&(factory, _)) = hurt {
+                    *repairs.entry(factory).or_default() += 1;
+                    commands.push(SimCommand::Repair { units: vec![id], target: factory });
                     continue;
                 }
             }
@@ -1929,7 +1969,38 @@ impl AiBrain {
             .filter(|enemy| !enemy.is_air && enemy.position.distance_squared(&self.home) <= wide_mul(reach, reach))
             .filter(|enemy| enemy.is_naval || self.reachable_from_sea(world, enemy.position, guard_reach))
             .min_by_key(|enemy| (enemy.position.distance_squared(&self.home), enemy.id));
-        if let Some(enemy) = threat.filter(|_| !idle_home.is_empty()) {
+        // On the first look in each spell, whatever the brain's pace.
+        let spell = |ticks: u32| world.current_tick % ticks < self.skill.think_interval;
+        // What a ship costs, in mass, to weigh a raid against the ships at home.
+        let worth = |id: SimId| world.unit_entity(id).and_then(|entity| world.ecs.get::<&Blueprinted>(entity).ok()).map_or(Res::ZERO, |unit| world.blueprints.get(unit.0).mass);
+        let mut raided = false;
+        if let Some(enemy) = threat.filter(|enemy| enemy.is_naval && !enemy.is_structure) {
+            // Enemy ships at home: every ship there turns to meet them, busy or not, as every idle
+            // ship once did; those just setting out, or gathering, sailed on past raiders that
+            // sank the yards behind them, and the Naval AI never reached T2 (2026-11-25). And a
+            // raid big enough to outweigh them calls the whole fleet back. A lone raider is left
+            // to the ships at home and the next ones off the line.
+            let around = fp_int(RAID_GATHER_UNITS);
+            let raiders: Vec<SimId> = sightings
+                .iter()
+                .filter(|other| other.is_naval && !other.is_structure && !other.is_air && other.position.distance_squared(&enemy.position) <= wide_mul(around, around))
+                .map(|other| other.id)
+                .collect();
+            let raid = raiders.iter().fold(Res::ZERO, |sum, &id| sum + worth(id));
+            let at_home = home_fleet.iter().fold(Res::ZERO, |sum, &id| sum + worth(id));
+            let recall = raiders.len() >= RAID_SHIPS && raid > at_home && !out_fleet.is_empty();
+            let units = if recall { forces.fleet.clone() } else { home_fleet.clone() };
+            if !units.is_empty() && (spell(FLEET_IDLE_TICKS) || !idle_home.is_empty()) {
+                commands.push(SimCommand::AttackMove { units, goal: enemy.position });
+            }
+            if recall {
+                return;
+            }
+            raided = true;
+        }
+        if raided {
+            // Met above.
+        } else if let Some(enemy) = threat.filter(|_| !idle_home.is_empty()) {
             commands.push(SimCommand::AttackMove { units: idle_home, goal: enemy.position });
         } else if self.skill.attacks && idle_home.len() >= self.fleet_size {
             // The idle ships at home set out in waves, as before. None is held back as a guard:
@@ -1942,8 +2013,6 @@ impl AiBrain {
         // and then, and all of them every so often, so that none waits on a target it cannot reach.
         // They once anchored off the water nearest the enemy's start and shelled only what was in
         // range there, and a fleet that ruled the sea took nothing ashore.
-        // On the first look in each spell, whatever the brain's pace.
-        let spell = |ticks: u32| world.current_tick % ticks < self.skill.think_interval;
         let going = if spell(FLEET_RETARGET_TICKS) { out_fleet } else if spell(FLEET_IDLE_TICKS) { idle_out } else { Vec::new() };
         if !going.is_empty() && self.skill.attacks {
             self.send_fleet(world, sightings, &going, enemy_water, commands);
