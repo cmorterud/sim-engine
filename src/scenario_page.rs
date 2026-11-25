@@ -8,7 +8,7 @@ use std::fmt::Write as _;
 
 use crate::balance::{cost_at, TARGETS};
 use crate::math::fp::Fp;
-use crate::sim::blueprints::BlueprintDb;
+use crate::sim::blueprints::{BlueprintDb, UnitClass};
 use crate::sim::playtest_scenarios::{Group, PlaytestScenario};
 use crate::unit_database::{escape, number, seconds, STYLE};
 
@@ -42,9 +42,19 @@ const EXTRA_STYLE: &str = r#"
 
 /// A group's materiel at a tier's prices, as the balance harness weighs a fight (`cost_at`):
 /// energy valued at the tier's rate, so ships and aircraft, which spend far more energy for
-/// their materiel than land units, are weighed as the harness weighs them.
+/// their materiel than land units, are weighed as the harness weighs them. A silo's is with the
+/// missiles it starts with, which cost far more than it does.
 fn materiel(db: &BlueprintDb, group: &Group, tier: u8) -> f64 {
-    cost_at(db.get(db.id(&group.unit)), tier) * f64::from(group.count)
+    let unit = db.get(db.id(&group.unit));
+    let stocked = stocked(db, group).map_or(0.0, |(missile, stock)| cost_at(db.get(missile), tier) * f64::from(stock));
+    cost_at(unit, tier) * f64::from(group.count) + stocked
+}
+
+/// What a silo's group starts with built, and how many: none for anything else.
+fn stocked(db: &BlueprintDb, group: &Group) -> Option<(crate::sim::blueprints::BlueprintId, u32)> {
+    let stock = group.stock.filter(|&stock| stock > 0)?;
+    let missile = db.get(db.id(&group.unit)).builds.iter().copied().find(|&made| db.get(made).class == UnitClass::Ammo)?;
+    Some((missile, stock))
 }
 
 /// A side's materiel at a tier's prices.
@@ -76,6 +86,9 @@ fn group_item(out: &mut String, db: &BlueprintDb, group: &Group, red: bool, tier
         (true, false, false) => " &middot; holds its ground",
     };
     let mut numbers = vec![format!("{} materiel", number(materiel(db, group, tier), 0))];
+    if let Some((missile, stock)) = stocked(db, group) {
+        numbers.push(format!("{stock} {}s built, of {} it keeps", escape(&db.get(missile).name), unit.max_stock));
+    }
     if let Some(weapon) = unit.weapon {
         numbers.push(format!("reach {}", number(weapon.range.to_num::<f64>(), 0)));
         if weapon.min_range > Fp::ZERO {

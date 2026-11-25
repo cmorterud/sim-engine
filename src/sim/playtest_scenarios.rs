@@ -8,7 +8,7 @@ use crate::math::fp::{fp_int, Vec2Fp};
 
 use super::blueprints::{BlueprintDb, Res};
 use super::commands::SimCommand;
-use super::components::{SimId, Team};
+use super::components::{Launcher, MissileDefense, SimId, Team};
 use super::config::{SimConfig, TerrainStyle};
 use super::grounds::Ground;
 use super::scenario::Scenario;
@@ -68,6 +68,9 @@ pub struct Group {
     /// For a structure: the cell of its south-west corner.
     pub cell: Option<[u32; 2]>,
     pub columns: Option<u32>,
+    /// For a silo: the missiles, or interceptors, it starts with already built, up to what it
+    /// keeps (`max_stock`). None unless it says.
+    pub stock: Option<u32>,
     /// Red's only: "attack" attack-moves at the player's first group; "hold", the default,
     /// stays put.
     pub order: Option<String>,
@@ -141,6 +144,14 @@ impl PlaytestScenario {
                         problems.push(format!("{what}: some of the block stands where it cannot, on {}", self.ground.name()));
                     }
                 }
+                if let Some(stock) = group.stock {
+                    let keeps = db.get(id).max_stock;
+                    if !structure || keeps == 0 {
+                        problems.push(format!("{what}: only a silo starts with missiles in stock"));
+                    } else if stock > keeps {
+                        problems.push(format!("{what}: a stock of {stock}, but it keeps {keeps} at most"));
+                    }
+                }
                 match group.order.as_deref() {
                     None | Some("hold") => {}
                     Some("attack") if side == "red" && !structure => {}
@@ -162,6 +173,9 @@ impl PlaytestScenario {
                 let blueprint = world.blueprints.id(&group.unit);
                 if let Some([cell_x, cell_y]) = group.cell {
                     let id = world.spawn_finished_structure(blueprint, team, cell_x, cell_y).expect("a scenario's structure fits");
+                    if let Some(stock) = group.stock {
+                        set_stock(&mut world, id, stock);
+                    }
                     red_start = red_start.or_else(|| world.unit_position(id).map(|at| at.xy()));
                     continue;
                 }
@@ -190,6 +204,16 @@ impl PlaytestScenario {
         world.prepare_map();
         let opening_commands = if red_attackers.is_empty() { Vec::new() } else { vec![SimCommand::AttackMove { units: red_attackers, goal: blue_start }] };
         Scenario { world, opening_commands }
+    }
+}
+
+/// Fills a silo with missiles, or interceptors, already built.
+fn set_stock(world: &mut SimWorld, id: SimId, stock: u32) {
+    let entity = world.unit_entity(id).expect("it was just spawned");
+    if let Ok(mut launcher) = world.ecs.get::<&mut Launcher>(entity) {
+        launcher.stock = stock;
+    } else if let Ok(mut defense) = world.ecs.get::<&mut MissileDefense>(entity) {
+        defense.stock = stock;
     }
 }
 

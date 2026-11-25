@@ -376,3 +376,154 @@ red = [
     { unit = "t3_heavy_point_defense", cell = [132, 128] },
     { unit = "t3_heavy_point_defense", cell = [128, 124] },
 ]
+
+# Nuclear weapons (2026-11-25): a Strategic Missile Launcher full of missiles against a large T3
+# base, with and without a Strategic Missile Defense. The base is five groups of structures, each
+# far enough from the next that one missile's inner ring, which destroys any structure, takes only
+# one: a full launcher flattens it if every missile lands. The defense stands in the middle group,
+# and its reach covers every group, so it stops each missile on the way, one interceptor each.
+# Red's structures all hold. The launcher fires once for each order: select it and order an attack
+# on the ground, then again once it has reloaded.
+
+[[scenario]]
+id = "nuke_against_a_base"
+title = "Nuclear: a full Strategic Missile Launcher against a large undefended base"
+shows = "What a full launcher does to a base with no strategic missile defense. The base is five groups of T3 structures, far enough apart that each takes a missile of its own, and the launcher holds five. Each missile that lands destroys everything within its inner ring, shields or not, and badly damages what is just outside it."
+try = "Order the launcher to attack the ground in the middle of a group, and watch the warning, the flight, and the blast. Fire all five, one at each group. With fog of war on, send the scout ahead to find the groups first: the heavy point defenses outrange it, so keep it back. Then aim one missile between two groups, to see the outer ring fall short."
+blue = [
+    { unit = "t1_land_scout", count = 1, at = [700, 2_560] },
+    { unit = "strategic_missile_launcher", cell = [10, 127], stock = 5 },
+]
+red = [
+    { unit = "land_factory_t3", cell = [178, 126] },
+    { unit = "power_generator_t3", cell = [188, 126] },
+    { unit = "mass_fabricator_t3", cell = [184, 127] },
+    { unit = "t3_heavy_shield", cell = [184, 131] },
+    { unit = "t3_heavy_point_defense", cell = [182, 123] },
+    { unit = "t3_heavy_point_defense", cell = [188, 123] },
+    { unit = "t3_sam", cell = [185, 136] },
+    { unit = "air_factory_t3", cell = [123, 126] },
+    { unit = "power_generator_t3", cell = [133, 126] },
+    { unit = "mass_fabricator_t3", cell = [129, 127] },
+    { unit = "t3_heavy_shield", cell = [129, 131] },
+    { unit = "t3_heavy_point_defense", cell = [127, 123] },
+    { unit = "t3_heavy_point_defense", cell = [133, 123] },
+    { unit = "t3_sam", cell = [130, 136] },
+    { unit = "land_factory_t3", cell = [233, 126] },
+    { unit = "power_generator_t3", cell = [243, 126] },
+    { unit = "mass_fabricator_t3", cell = [239, 127] },
+    { unit = "t3_heavy_shield", cell = [239, 131] },
+    { unit = "t3_heavy_point_defense", cell = [237, 123] },
+    { unit = "t3_heavy_point_defense", cell = [243, 123] },
+    { unit = "t3_sam", cell = [240, 136] },
+    { unit = "air_factory_t3", cell = [178, 186] },
+    { unit = "power_generator_t3", cell = [188, 186] },
+    { unit = "mass_fabricator_t3", cell = [184, 187] },
+    { unit = "t3_heavy_shield", cell = [184, 191] },
+    { unit = "t3_heavy_point_defense", cell = [182, 183] },
+    { unit = "t3_heavy_point_defense", cell = [188, 183] },
+    { unit = "t3_sam", cell = [185, 196] },
+    { unit = "land_factory_t3", cell = [178, 66] },
+    { unit = "power_generator_t3", cell = [188, 66] },
+    { unit = "mass_fabricator_t3", cell = [184, 67] },
+    { unit = "t3_heavy_shield", cell = [184, 71] },
+    { unit = "t3_heavy_point_defense", cell = [182, 63] },
+    { unit = "t3_heavy_point_defense", cell = [188, 63] },
+    { unit = "t3_sam", cell = [185, 76] },
+]
+
+[[scenario]]
+id = "nuke_against_a_full_defense"
+title = "Nuclear: a full Strategic Missile Launcher against a base with a Strategic Missile Defense"
+shows = "The same base and launcher, with a Strategic Missile Defense in the base's middle group holding as many interceptors as the launcher holds missiles. Its reach covers every group, and it spends an interceptor on each missile that flies into it, wherever the missile is headed, so not one lands."
+try = "Fire all five, at any groups you like, and watch each be shot down well short of the base. Then play the next scenario, where the defense has one interceptor fewer."
+blue = [
+    { unit = "t1_land_scout", count = 1, at = [700, 2_560] },
+    { unit = "strategic_missile_launcher", cell = [10, 127], stock = 5 },
+]
+red = [
+    { unit = "land_factory_t3", cell = [178, 126] },
+    { unit = "power_generator_t3", cell = [188, 126] },
+    { unit = "mass_fabricator_t3", cell = [184, 127] },
+    { unit = "t3_heavy_shield", cell = [184, 131] },
+    { unit = "t3_heavy_point_defense", cell = [182, 123] },
+    { unit = "t3_heavy_point_defense", cell = [188, 123] },
+    { unit = "t3_sam", cell = [185, 136] },
+    { unit = "strategic_missile_defense", cell = [180, 132], stock = 5 },
+    { unit = "air_factory_t3", cell = [123, 126] },
+    { unit = "power_generator_t3", cell = [133, 126] },
+    { unit = "mass_fabricator_t3", cell = [129, 127] },
+    { unit = "t3_heavy_shield", cell = [129, 131] },
+    { unit = "t3_heavy_point_defense", cell = [127, 123] },
+    { unit = "t3_heavy_point_defense", cell = [133, 123] },
+    { unit = "t3_sam", cell = [130, 136] },
+    { unit = "land_factory_t3", cell = [233, 126] },
+    { unit = "power_generator_t3", cell = [243, 126] },
+    { unit = "mass_fabricator_t3", cell = [239, 127] },
+    { unit = "t3_heavy_shield", cell = [239, 131] },
+    { unit = "t3_heavy_point_defense", cell = [237, 123] },
+    { unit = "t3_heavy_point_defense", cell = [243, 123] },
+    { unit = "t3_sam", cell = [240, 136] },
+    { unit = "air_factory_t3", cell = [178, 186] },
+    { unit = "power_generator_t3", cell = [188, 186] },
+    { unit = "mass_fabricator_t3", cell = [184, 187] },
+    { unit = "t3_heavy_shield", cell = [184, 191] },
+    { unit = "t3_heavy_point_defense", cell = [182, 183] },
+    { unit = "t3_heavy_point_defense", cell = [188, 183] },
+    { unit = "t3_sam", cell = [185, 196] },
+    { unit = "land_factory_t3", cell = [178, 66] },
+    { unit = "power_generator_t3", cell = [188, 66] },
+    { unit = "mass_fabricator_t3", cell = [184, 67] },
+    { unit = "t3_heavy_shield", cell = [184, 71] },
+    { unit = "t3_heavy_point_defense", cell = [182, 63] },
+    { unit = "t3_heavy_point_defense", cell = [188, 63] },
+    { unit = "t3_sam", cell = [185, 76] },
+]
+
+[[scenario]]
+id = "nuke_against_a_defense_one_short"
+title = "Nuclear: a full Strategic Missile Launcher against a defense one interceptor short"
+shows = "The same base, with the Strategic Missile Defense holding one interceptor fewer than the launcher holds missiles. It stops the first four, and the fifth lands: a defense must keep up with the launchers aimed at it, missile for missile."
+try = "Fire four and watch them shot down, then choose where the last one lands. Aim it at the middle group, to take the defense with it, or at the group whose loss would hurt most."
+blue = [
+    { unit = "t1_land_scout", count = 1, at = [700, 2_560] },
+    { unit = "strategic_missile_launcher", cell = [10, 127], stock = 5 },
+]
+red = [
+    { unit = "land_factory_t3", cell = [178, 126] },
+    { unit = "power_generator_t3", cell = [188, 126] },
+    { unit = "mass_fabricator_t3", cell = [184, 127] },
+    { unit = "t3_heavy_shield", cell = [184, 131] },
+    { unit = "t3_heavy_point_defense", cell = [182, 123] },
+    { unit = "t3_heavy_point_defense", cell = [188, 123] },
+    { unit = "t3_sam", cell = [185, 136] },
+    { unit = "strategic_missile_defense", cell = [180, 132], stock = 4 },
+    { unit = "air_factory_t3", cell = [123, 126] },
+    { unit = "power_generator_t3", cell = [133, 126] },
+    { unit = "mass_fabricator_t3", cell = [129, 127] },
+    { unit = "t3_heavy_shield", cell = [129, 131] },
+    { unit = "t3_heavy_point_defense", cell = [127, 123] },
+    { unit = "t3_heavy_point_defense", cell = [133, 123] },
+    { unit = "t3_sam", cell = [130, 136] },
+    { unit = "land_factory_t3", cell = [233, 126] },
+    { unit = "power_generator_t3", cell = [243, 126] },
+    { unit = "mass_fabricator_t3", cell = [239, 127] },
+    { unit = "t3_heavy_shield", cell = [239, 131] },
+    { unit = "t3_heavy_point_defense", cell = [237, 123] },
+    { unit = "t3_heavy_point_defense", cell = [243, 123] },
+    { unit = "t3_sam", cell = [240, 136] },
+    { unit = "air_factory_t3", cell = [178, 186] },
+    { unit = "power_generator_t3", cell = [188, 186] },
+    { unit = "mass_fabricator_t3", cell = [184, 187] },
+    { unit = "t3_heavy_shield", cell = [184, 191] },
+    { unit = "t3_heavy_point_defense", cell = [182, 183] },
+    { unit = "t3_heavy_point_defense", cell = [188, 183] },
+    { unit = "t3_sam", cell = [185, 196] },
+    { unit = "land_factory_t3", cell = [178, 66] },
+    { unit = "power_generator_t3", cell = [188, 66] },
+    { unit = "mass_fabricator_t3", cell = [184, 67] },
+    { unit = "t3_heavy_shield", cell = [184, 71] },
+    { unit = "t3_heavy_point_defense", cell = [182, 63] },
+    { unit = "t3_heavy_point_defense", cell = [188, 63] },
+    { unit = "t3_sam", cell = [185, 76] },
+]
