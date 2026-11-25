@@ -19,7 +19,12 @@ fn loudness(samples: &[f32]) -> f32 {
 /// The share of a sound's energy above about 1 kHz, which is what makes it buzz or hiss. The
 /// filter is gentle, so a pure tone of 350 to 600 Hz still measures 0.1 to 0.26.
 fn harshness(samples: &[f32]) -> f32 {
-    let keep = (-TAU * 1_000.0 / RATE).exp();
+    share_above(samples, 1_000.0)
+}
+
+/// The share of a sound's energy above about `cutoff`, through a gentle one-pole filter.
+fn share_above(samples: &[f32], cutoff: f32) -> f32 {
+    let keep = (-TAU * cutoff / RATE).exp();
     let (mut last_in, mut last_out) = (0.0, 0.0);
     let high: Vec<f32> = samples
         .iter()
@@ -96,15 +101,16 @@ fn every_continuous_sound_is_light_and_soft() {
         let (loud, harsh) = (loudness(&samples), harshness(&samples));
         assert!((0.008..0.025).contains(&loud), "{bed:?} at {loud}");
         assert!(peak(&samples) < SELECT_GAIN * 0.8, "{bed:?} peaks at {}", peak(&samples));
-        // The beams are pure tones from 350 to 1050 Hz with a faint, high sizzle; the rest is
-        // noise, softened above its band, and the aircraft's rush the airiest of it.
-        let limit = match bed {
-            Bed::Build | Bed::Factory => 0.35,
-            Bed::Ocean | Bed::Engines => 0.1,
-            Bed::Sailing => 0.3,
-            Bed::Aircraft => 0.4,
+        // The rest is noise, softened above its band, and the aircraft's rush the airiest of it.
+        // The beams' fizz is meant to sit above 1 kHz, so it is held instead to having little
+        // above 6 kHz, where a fizz turns to a hiss.
+        let (share, limit, above) = match bed {
+            Bed::Build | Bed::Factory => (share_above(&samples, 6_000.0), 0.35, "6 kHz"),
+            Bed::Ocean | Bed::Engines => (harsh, 0.1, "1 kHz"),
+            Bed::Sailing => (harsh, 0.3, "1 kHz"),
+            Bed::Aircraft => (harsh, 0.4, "1 kHz"),
         };
-        assert!(harsh < limit, "{bed:?} is {harsh} harsh, over {limit}");
+        assert!(share < limit, "{bed:?} has {share} of its energy above {above}, over {limit}");
         if AMBIENCE.contains(&bed) {
             assert!(loud <= loudness(&beams) * 1.4, "{bed:?} at {loud}, over the beams at {}", loudness(&beams));
         }
@@ -133,45 +139,78 @@ fn each_sound_has_its_own_place_in_the_range() {
     assert!(engines < ocean && ocean < wash && wash < aircraft, "engines {engines}, sea {ocean}, wash {wash}, aircraft {aircraft}");
 }
 
-/// The builders' beam: a steady, soft tone that swells only a little with each pulse, so that it
-/// never pulses like the old factory sound; fuller with more builders but hardly louder; and
-/// lower for factories, so that the two are told apart.
+/// The builders' beam: fuller with more builders but hardly louder, and lower for factories, so
+/// that the two are told apart.
 #[test]
-fn the_build_beam_is_soft_steady_fuller_with_more_builders_and_lower_for_factories() {
+fn the_build_beam_is_fuller_with_more_builders_and_lower_for_factories() {
     let busy = |busy: f32| quiet().with(Bed::Build, BedLevel::new(1.0, 0.0, busy));
     let one = settled(busy(crowd(1.0)), 8.0);
     let ten = settled(busy(crowd(10.0)), 8.0);
-    for (name, samples) in [("one builder", &one), ("ten builders", &ten)] {
-        let rise = abruptness(samples, 0.025);
-        assert!(rise < 0.3, "{name}'s beam rises by {rise} of its level in 25 ms");
-    }
     assert!(loudness(&ten) > loudness(&one) && loudness(&ten) < loudness(&one) * 1.3, "one builder at {}, ten at {}", loudness(&one), loudness(&ten));
     let factories = settled(playing(Bed::Factory, 1.0), 8.0);
     assert!(crossings(&factories) < crossings(&one) * 0.75, "factories {} a second, builders {}", crossings(&factories), crossings(&one));
 }
 
-/// A beam glides up to its pitch as it powers on, as a laser would, rather than starting at it,
-/// and powers on afresh after the work has stopped long enough to go quiet.
+/// The building sound has no tone in it: no frequency stands out from the rest, as one would
+/// with any note in it. Chimes were tried, then a laser of pure tones stacked into a chord, which
+/// was heard as chiming too (2026-11-24); the fizz chosen by ear has none.
 #[test]
-fn the_build_beam_glides_up_as_it_powers_on() {
+fn the_building_sound_has_no_tone_in_it_so_it_can_never_chime() {
+    for (name, bed, band) in [("builders", Bed::Build, BUILD_BAND), ("factories", Bed::Factory, FACTORY_BAND)] {
+        let samples = settled(quiet().with(bed, BedLevel::new(1.0, 0.0, 1.0)), 1.0);
+        // How strongly each of 60 frequencies across the band is present.
+        let strength = |frequency: f32| {
+            let (mut real, mut imaginary) = (0.0_f64, 0.0_f64);
+            for (index, &sample) in samples.iter().enumerate() {
+                let angle = f64::from(TAU * frequency) * index as f64 / f64::from(RATE);
+                real += f64::from(sample) * angle.cos();
+                imaginary += f64::from(sample) * angle.sin();
+            }
+            real.hypot(imaginary)
+        };
+        let mut levels: Vec<f64> = (0..60).map(|step| strength(band.0 + (band.1 - band.0) * step as f32 / 59.0)).collect();
+        levels.sort_by(f64::total_cmp);
+        let (median, loudest) = (levels[30], levels[59]);
+        assert!(loudest < median * 4.0, "{name}: the strongest frequency is {} times the typical one, as a tone would be", loudest / median);
+    }
+}
+
+/// The beam holds steady: from one 50 ms stretch to the next, it never falls below two thirds of
+/// its loudest. A laser's two voices once beat twice a second down to a quarter as loud, which
+/// was heard as chiming (2026-11-24).
+#[test]
+fn the_build_beam_holds_steady_rather_than_swelling() {
+    for (name, targets) in [("builders", playing(Bed::Build, 1.0)), ("a crowd of builders", quiet().with(Bed::Build, BedLevel::new(1.0, 0.0, 1.0))), ("factories", playing(Bed::Factory, 1.0))] {
+        let samples = settled(targets, 4.0);
+        let windows: Vec<f32> = samples.chunks((0.05 * RATE) as usize).map(loudness).collect();
+        let (low, high) = windows.iter().fold((f32::MAX, 0.0_f32), |(low, high), &level| (low.min(level), high.max(level)));
+        assert!(low > high * 0.66, "{name} falls to {} of its loudest", low / high);
+    }
+}
+
+/// A beam starts and stops by fading, over a quarter second in and a third out, never switched on
+/// or off. One that rose in pitch as it started sounded like a power drill (2026-11-24); the fizz
+/// has no pitch to move.
+#[test]
+fn the_build_beam_fades_in_and_out() {
     let mut synth = Synth::new(RATE);
     let on = playing(Bed::Build, 1.0);
-    let opening = render(&mut synth, 0.12, on);
+    let opening = render(&mut synth, 0.3, on);
     render(&mut synth, 1.0, on);
-    let steady = render(&mut synth, 0.12, on);
-    let (rising, settled_pitch) = (crossings(&opening[(0.04 * RATE) as usize..]), crossings(&steady));
-    assert!(rising < settled_pitch * 0.95, "it starts at {rising} crossings a second, settles at {settled_pitch}");
-    render(&mut synth, 1.5, quiet());
-    let again = render(&mut synth, 0.12, on);
-    assert!(crossings(&again[(0.04 * RATE) as usize..]) < settled_pitch * 0.95, "it powers on afresh");
+    let steady = render(&mut synth, 0.3, on);
+    let first = loudness(&opening[..(0.05 * RATE) as usize]);
+    assert!(first < loudness(&steady) * 0.4, "it fades in, at {first} of {} in its first 50 ms", loudness(&steady));
+    let closing = render(&mut synth, 0.3, quiet());
+    let fading = loudness(&closing[(0.1 * RATE) as usize..(0.2 * RATE) as usize]);
+    assert!(fading > loudness(&steady) * 0.2 && fading < loudness(&steady) * 0.9, "it fades out, at {fading} of {} a tenth of a second on", loudness(&steady));
 }
 
 #[test]
 fn the_beam_stops_when_the_work_stops() {
     let mut synth = Synth::new(RATE);
     render(&mut synth, 2.0, playing(Bed::Build, 1.0));
-    let after = render(&mut synth, 2.0, quiet());
-    assert!(peak(&after[(1.0 * RATE) as usize..]) < 1e-4, "it should be silent a second after the work stops");
+    let after = render(&mut synth, 4.0, quiet());
+    assert!(peak(&after[(3.0 * RATE) as usize..]) < 1e-4, "it should be silent three seconds after the work stops");
 }
 
 /// Many sounds at once are together about as loud as one at its fullest, not six times as loud.
@@ -188,11 +227,20 @@ fn many_sounds_together_stay_about_as_loud_as_one() {
 
 #[test]
 fn sounds_fade_in_and_out_without_clicking() {
+    // A click is a step from one sample to the next bigger than the sound ever makes by itself:
+    // starting and stopping must take no bigger steps than playing steadily does. A fizz, high
+    // and quick, steps further than a low rumble, but no further for starting or stopping.
     for bed in Bed::ALL {
         let mut synth = Synth::new(RATE);
-        let mut samples = render(&mut synth, 1.0, playing(bed, 1.0));
-        samples.extend(render(&mut synth, 1.0, quiet()));
-        assert!(biggest_step(&samples) < 0.02, "{bed:?} steps by {}", biggest_step(&samples));
+        let starting = render(&mut synth, 0.1, playing(bed, 1.0));
+        render(&mut synth, 1.0, playing(bed, 1.0));
+        let steady = render(&mut synth, 2.0, playing(bed, 1.0));
+        let stopping = render(&mut synth, 0.5, quiet());
+        let usual = biggest_step(&steady);
+        assert!(usual < 0.04, "{bed:?} steps by {usual} as it plays");
+        for (when, samples) in [("starting", &starting), ("stopping", &stopping)] {
+            assert!(biggest_step(samples) <= usual * 1.1, "{bed:?} steps by {} {when}, against {usual} as it plays", biggest_step(samples));
+        }
     }
 }
 
