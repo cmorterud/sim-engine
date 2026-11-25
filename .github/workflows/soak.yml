@@ -37,13 +37,16 @@ on:
 
 permissions:
   contents: read
+  # To find the last commit on main whose soak passed (the plan job).
+  actions: read
 
-# Every pushed commit gets its whole soak: a newer push waits in line behind the soak running,
-# up to 100 deep, rather than cancelling it. The repository is public, so the runners cost
-# nothing, and no commit goes unsoaked.
+# One soak at a time for each branch, and only its newest commit waits: a newer push takes the
+# place of the one waiting, but never cuts off the soak running. Waiting in line for every
+# commit cost hours when main moved faster than a soak, and only main's newest commit is ever
+# published (pages.yml). A commit left unsoaked this way is still covered, since the next soak
+# plays every change since the last one that passed (the plan job).
 concurrency:
   group: soak-${{ github.ref }}
-  queue: max
 
 env:
   # Kept in step with CI, so that this workflow reuses the release build cache CI saves.
@@ -55,9 +58,9 @@ jobs:
   # matches, 20 on each bundled map, 10 of each team match, and 5 4v4s, in shards of 20 (10 on
   # Scattered Isles, whose matches run longest): thirteen runners rather than nineteen, since
   # the account runs only so many jobs at once, and smaller shards spent longer waiting for a
-  # runner than playing. A pull request that changes nothing
-  # the soak runs (the drawing, the sound, the interface, the docs) plays no soak at all. A push
-  # to main plays the 200 skirmish
+  # runner than playing. A pull request or a push that changes nothing the soak runs (the
+  # drawing, the sound, the interface, the docs) plays no soak at all. A push
+  # to main that changes something the soak runs plays the 200 skirmish
   # matches of the exit criteria and 120 on each bundled map (Highland, Twin Passes, Saddleback,
   # Stillwater, and Scattered Isles): enough matches that a side winning 60% of them stands out
   # from chance. And 60 2v2s on each of Saddleback, Stillwater, and Scattered Isles, four AIs,
@@ -71,30 +74,47 @@ jobs:
       run: ${{ steps.changes.outputs.run }}
     steps:
       # The merge commit and its first parent, main as it stands, are enough to see what the
-      # pull request changes.
+      # pull request changes. A push fetches the commit it is compared with below.
       - uses: actions/checkout@v7
-        if: github.event_name == 'pull_request'
+        if: github.event_name != 'workflow_dispatch'
         with:
           fetch-depth: 2
 
       # What the soak runs: the simulation and its arithmetic, the AI, the soak itself, the
       # command line that starts it, the unit and map data, the dependencies, and this workflow.
-      # A pull request that touches none of them cannot change what the soak finds. A push to
-      # main, or a run by hand, always soaks.
+      # A change that touches none of them cannot change what the soak finds, so it plays no
+      # soak. A pull request is compared with main as it stands. A push to main is compared with
+      # the newest commit on main whose soak passed, played or skipped (a skipped one is, for
+      # the soak, the same as the one it was compared with), so that changes in a commit whose
+      # soak was passed over still get soaked. With no such commit to compare with, or a run by
+      # hand, it always soaks.
       - id: changes
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "${{ github.event_name }}" != pull_request ]; then
+          if [ "${{ github.event_name }}" = workflow_dispatch ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          changed=$(git diff --name-only HEAD^1 HEAD)
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            base=HEAD^1
+          else
+            base=$(gh run list -R "$GITHUB_REPOSITORY" --workflow soak.yml --branch main --event push \
+              --status success --limit 1 --json headSha --jq '.[0].headSha // empty')
+            echo "Last commit on main whose soak passed: ${base:-none}"
+            if [ -z "$base" ] || ! git fetch --depth=1 origin "$base"; then
+              echo "run=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          changed=$(git diff --name-only "$base" HEAD)
           echo "$changed"
           pattern='^(src/sim/|src/math/|src/ai\.rs$|src/ai_strategy\.rs$|src/soak\.rs$|src/lib\.rs$|src/main\.rs$|data/|Cargo\.toml$|Cargo\.lock$|\.github/workflows/soak\.yml$)'
           if echo "$changed" | grep -qE "$pattern"; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "Nothing the soak runs has changed, so this pull request plays no soak." >> "$GITHUB_STEP_SUMMARY"
+            echo "Nothing the soak runs has changed since $base, so this run plays no soak." >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - id: plan
