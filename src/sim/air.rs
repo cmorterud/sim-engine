@@ -8,7 +8,7 @@ use super::config::GRAVITY_RAW;
 use super::spatial::GridEntry;
 use super::terrain::Terrain;
 use super::world::SimWorld;
-use crate::math::fp::{fp_int, wide_mul, Fp, Vec2Fp, Vec3Fp};
+use crate::math::fp::{fp_int, wide_mul, Fp, Vec2Fp, Vec3Fp, FP_FRAC_BITS};
 
 /// Bombs fall at the inspiration's gravity, 4.9 map units a second squared, which is ten times
 /// what shells use here.
@@ -416,9 +416,14 @@ impl SimWorld {
     /// any two closer than their radii and a margin are pushed apart, a third of the overlap a
     /// tick, so that they spread without jittering. In order along x, so only near neighbors are
     /// compared. Divisions round toward zero, so mirror-image pairs move in mirror image.
+    /// Two exactly together part side by side, the lower id to the right of the way it faces,
+    /// which turns with the map as a compass direction does not. They parted along x, the lower
+    /// id to the east on both sides, so that aircraft taking off together from one spot flew in
+    /// one order and their mirror images in the other; once fighters were repriced, a Saddleback
+    /// 3v3 stopped mirroring for it (2026-11-25).
     fn separate_aircraft(&mut self) {
         const MARGIN_RAW: i64 = 4 << 12;
-        let mut flying: Vec<(i64, i64, i64, SimId, hecs::Entity)> = self
+        let mut flying: Vec<(i64, i64, i64, SimId, hecs::Entity, Vec2Fp)> = self
             .aircraft
             .iter()
             .filter_map(|&(id, entity)| {
@@ -428,19 +433,20 @@ impl SimWorld {
                 }
                 let position = self.ecs.get::<&Position>(entity).ok()?.0;
                 let radius = self.ecs.get::<&UnitStats>(entity).ok()?.radius;
-                Some((i64::from(position.x.to_bits()), i64::from(position.y.to_bits()), i64::from(radius.to_bits()), id, entity))
+                let facing = self.ecs.get::<&Turning>(entity).ok()?.facing;
+                Some((i64::from(position.x.to_bits()), i64::from(position.y.to_bits()), i64::from(radius.to_bits()), id, entity, facing))
             })
             .collect();
         if flying.len() < 2 {
             return;
         }
-        flying.sort_unstable_by_key(|&(x, _, _, id, _)| (x, id));
+        flying.sort_unstable_by_key(|&(x, _, _, id, _, _)| (x, id));
         let widest = flying.iter().map(|aircraft| aircraft.2).max().unwrap_or(0);
         let mut pushes = vec![(0_i64, 0_i64); flying.len()];
         for first in 0..flying.len() {
-            let (x, y, radius, id, _) = flying[first];
+            let (x, y, radius, id, _, facing) = flying[first];
             for second in first + 1..flying.len() {
-                let (other_x, other_y, other_radius, other_id, _) = flying[second];
+                let (other_x, other_y, other_radius, other_id, _, other_facing) = flying[second];
                 if other_x - x > radius + widest + MARGIN_RAW {
                     break;
                 }
@@ -453,9 +459,11 @@ impl SimWorld {
                 let distance = (distance_squared as u64).isqrt() as i64;
                 let overlap = contact - distance;
                 let (push_x, push_y) = if distance == 0 {
-                    // Exactly together: apart along a direction from their ids.
-                    let sign = if id < other_id { 1 } else { -1 };
-                    (sign * overlap / 6, 0)
+                    // Exactly together: the lower id to the right of the way it faces.
+                    let (sign, facing) = if id < other_id { (1, facing) } else { (-1, other_facing) };
+                    let (fx, fy) = (i64::from(facing.x.to_bits()), i64::from(facing.y.to_bits()));
+                    let one = 1_i64 << FP_FRAC_BITS;
+                    (sign * fy * overlap / one / 6, -sign * fx * overlap / one / 6)
                 } else {
                     (dx * overlap / distance / 6, dy * overlap / distance / 6)
                 };
@@ -466,7 +474,7 @@ impl SimWorld {
             }
         }
         let max = i64::from(self.terrain.max_coordinate_raw());
-        for (index, &(_, _, _, _, entity)) in flying.iter().enumerate() {
+        for (index, &(_, _, _, _, entity, _)) in flying.iter().enumerate() {
             let (push_x, push_y) = pushes[index];
             if push_x == 0 && push_y == 0 {
                 continue;
