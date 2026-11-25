@@ -897,9 +897,19 @@ impl AiBrain {
                     if builder.tasks.is_empty() && order.kind == OrderKind::Idle && !upgrading {
                         forces.idle_builders.push(IdleBuilder { id, entity, position });
                     }
-                    // In an energy crisis, a builder on anything but a generator is taken off it.
+                    // In an energy crisis, a builder on anything but a generator is taken off it, and
+                    // so is one on a big generator with more energy still to go into it than the
+                    // smallest costs: on Saddleback a commander stayed on a T3 generator, with 2% of
+                    // the energy it needed, for the last half hour of a match (2026-11-25).
+                    let cheapest = world.blueprints.get(roster.generators[0]).energy;
+                    let finishes = |blueprint: BlueprintId, site: Option<SimId>| {
+                        blueprint == roster.generators[0]
+                            || site.and_then(|site| world.unit_entity(site)).and_then(|site| world.ecs.get::<&Construction>(site).ok().map(|building| building.progress)).is_some_and(|progress| {
+                                world.blueprints.get(blueprint).energy * (Res::ONE - progress) <= cheapest
+                            })
+                    };
                     let off_generators = !builder.tasks.is_empty()
-                        && !builder.tasks.iter().any(|task| matches!(task, BuildTask::Build { blueprint, .. } if roster.is_generator(*blueprint)));
+                        && !builder.tasks.iter().any(|task| matches!(*task, BuildTask::Build { blueprint, site, .. } if roster.is_generator(blueprint) && finishes(blueprint, site)));
                     if off_generators && !upgrading {
                         forces.busy_builders.push(IdleBuilder { id, entity, position });
                     }
