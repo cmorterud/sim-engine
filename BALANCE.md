@@ -191,6 +191,15 @@ out close and why: evidence about the process, not a target.
   hovercraft is three-quarters as strong per materiel as the Heavy Tank on land, from about even
   (health and damage x0.81). The hovercraft was tested first as the cause of Naval losing every
   match to Balanced on the Islands maps; it was not, and Balanced still won every one.
+* 2026-11-25: the fighters by the inspiration's ratios (`[domains] strength_over_anchor`): the
+  Interceptor and Air Superiority Fighter were set by `[air]` rules alone and sat at about half and
+  three-quarters of the inspiration's strength per cost against the anchor. They take its price
+  and build time against its T1 tank (and the interceptor its health), keeping the damage those
+  rules fix (the bomber's health comes from the interceptor's; the T3 fighter has ten times it and
+  kills one with a shot) and the T3 fighter's health, which it needs to beat an equal cost of
+  interceptors. A duel of escorted against unescorted strike aircraft was
+  not used as the target: strike aircraft cannot shoot at aircraft, so it is won whatever the
+  fighters cost.
 
 ## Order of work
 
