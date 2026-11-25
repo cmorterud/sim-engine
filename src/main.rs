@@ -2068,6 +2068,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                             ui::reset_build_tiers(&egui_context);
                             last_selected = selection.selected().to_vec();
                         }
+                        let nuclear_missiles = ui::nuclear_missiles(&session.previous.projectiles, &snapshot.projectiles, alpha);
                         let output = egui_context.run(raw_input, |ctx| {
                             ui::release_keyboard_focus(ctx);
                             ui::draw_map_frame(ctx, &camera, &map.heights, pixels_per_point);
@@ -2101,6 +2102,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                 ui::draw_range_outlines(ctx, &camera, &map.heights, &ranges, ui::RingStyle::Labelled, pixels_per_point);
                             }
                             ui::draw_blips(ctx, &camera, &snapshot.blips, pixels_per_point);
+                            ui::draw_nuclear_missiles(ctx, &camera, &nuclear_missiles, pixels_per_point);
                             ui::order_trails(ctx, &camera, &trails, pixels_per_point);
                             match &order_drag {
                                 Some((handle, _)) => {
@@ -2310,6 +2312,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                         scene_instances.clear();
                         motion.time = (f64::from(previous.tick) + alpha) * TICK_DURATION.as_secs_f64();
                         motion.note_shots(&previous.projectiles, &current.projectiles);
+                        motion.note_doors(&previous.silo_doors, &current.silo_doors);
                         motion.note_beams(&current.landed, &current.units, &looks);
                         instances::build_unit_instances(&previous.units, &current.units, alpha, eye, selection.selected(), &looks, &current.work_links, &mut motion, &mut scene_instances);
                         // Explosions, missile trails, and wakes, made from the snapshots alone. The

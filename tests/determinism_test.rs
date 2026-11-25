@@ -311,7 +311,7 @@ fn every_missile_field_changes_the_checksum() {
         ("defense kind", Box::new(move |w, _| { let mut d = w.ecs.get::<&mut MissileDefense>(defense).unwrap(); d.strategic = !d.strategic; })),
         ("defense range", Box::new(move |w, undo| w.ecs.get::<&mut MissileDefense>(defense).unwrap().range += if undo { -bit } else { bit })),
         ("defense reload", Box::new(move |w, undo| { let mut d = w.ecs.get::<&mut MissileDefense>(defense).unwrap(); d.reload_ticks = if undo { d.reload_ticks - 1 } else { d.reload_ticks + 1 }; })),
-        ("defense timer", Box::new(move |w, undo| { let mut d = w.ecs.get::<&mut MissileDefense>(defense).unwrap(); d.ticks_until_ready = if undo { d.ticks_until_ready - 1 } else { d.ticks_until_ready + 1 }; })),
+        ("defense timer", Box::new(move |w, undo| { let mut d = w.ecs.get::<&mut MissileDefense>(defense).unwrap(); d.ticks_until_ready[0] = if undo { d.ticks_until_ready[0] - 1 } else { d.ticks_until_ready[0] + 1 }; })),
         ("defense stock", Box::new(move |w, undo| { let mut d = w.ecs.get::<&mut MissileDefense>(defense).unwrap(); d.stock = if undo { d.stock - 1 } else { d.stock + 1 }; })),
         ("missile target x", Box::new(move |w, undo| w.ecs.get::<&mut Missile>(missile).unwrap().target.x += if undo { -bit } else { bit })),
         ("missile target y", Box::new(move |w, undo| w.ecs.get::<&mut Missile>(missile).unwrap().target.y += if undo { -bit } else { bit })),

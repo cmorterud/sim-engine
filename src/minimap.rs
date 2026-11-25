@@ -16,6 +16,8 @@ use crate::ui::UiAction;
 
 /// The minimap's side, in points.
 pub const MINIMAP_SIZE: f32 = 200.0;
+/// The nuclear marker's radius on the minimap, in points.
+const MINIMAP_NUCLEAR_RADIUS: f32 = 5.0;
 /// The most pixels a side the land's picture has.
 const MOST_PIXELS: usize = 256;
 /// Where the panel below the economy starts, remembered from the last frame.
@@ -187,6 +189,14 @@ impl Minimap {
                     }
                 }
                 painter.add(egui::Shape::mesh(dots));
+                // Strategic missiles in flight, marked as on the map, smaller (2026-11-25).
+                let phase = (ui.input(|input| input.time) * crate::icons::NUCLEAR_PULSES).fract() as f32;
+                for missile in snapshot.projectiles.iter().filter(|projectile| projectile.kind == crate::sim::world::ProjectileKind::StrategicMissile) {
+                    let at = to_minimap(rect, map_size, [raw(missile.x), raw(missile.y)]);
+                    for shape in crate::icons::nuclear_shapes(at, MINIMAP_NUCLEAR_RADIUS, phase) {
+                        painter.add(shape);
+                    }
+                }
                 // The camera's view.
                 let corners: Vec<Pos2> = view_corners(camera, heights).into_iter().map(|point| to_minimap(rect, map_size, point)).collect();
                 if corners.len() >= 3 {

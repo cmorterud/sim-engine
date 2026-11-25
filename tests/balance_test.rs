@@ -363,8 +363,8 @@ fn t2_air_and_navy_are_as_strong_per_cost_as_the_inspirations() {
 }
 
 /// `[domains]`: a composed T2 fleet rules the water. It beats an equal cost of the T2 air force,
-/// torpedo bombers need over twice its cost to break it, its destroyers beat submarines, and
-/// hovercraft lose to it.
+/// torpedo bombers need over twice its cost to break it, and hovercraft lose to it. Its
+/// destroyers alone lose to an equal cost of submarines (2026-11-25).
 #[test]
 #[cfg_attr(debug_assertions, ignore = "release only")]
 fn a_t2_fleet_rules_the_water() {
@@ -380,14 +380,14 @@ fn a_t2_fleet_rules_the_water() {
     let band = domains(&["cells", "torpedo_bombers_to_break_fleet_t2"]).as_array().expect("a band").iter().map(number).collect::<Vec<f64>>();
     assert!((band[0]..=band[1]).contains(&multiple), "torpedo bombers break the T2 fleet at {multiple:.2} times its cost");
     let hunters = fight(&db, water, "t2_destroyers", 4.0, "t1_submarines");
-    assert!(hunters >= cell("destroyers_beat_submarines"), "destroyers score {hunters:+.2} against submarines");
+    assert!(-hunters >= cell("submarines_beat_destroyers"), "submarines score {:+.2} against an equal cost of destroyers", -hunters);
     let hovercraft = fight(&db, water, "t2_fleet", 2.0, "t2_hovercraft");
     assert!(-hovercraft <= cell("hovercraft_loses_to_fleet"), "hovercraft score {:+.2} against the T2 fleet", -hovercraft);
 }
 
-/// `[domains]`: at T2, the AI's air force comes out even with a land army a fifth flak, and an
-/// equal cost of cruisers breaks a coastal position of T2 point defenses under a dome, from beyond
-/// their reach.
+/// `[domains]`: at T2, the AI's air force comes out even with a land army a fifth flak, and two
+/// cruisers break a coastal position of T2 point defenses under a dome, from beyond their reach.
+/// One cannot, by design: the dome heals as fast as its missiles strike (2026-11-25).
 #[test]
 #[cfg_attr(debug_assertions, ignore = "release only")]
 fn t2_air_meets_a_land_army_evenly_and_cruisers_break_a_coastal_position() {
@@ -395,10 +395,13 @@ fn t2_air_meets_a_land_army_evenly_and_cruisers_break_a_coastal_position() {
     let even = fight(&db, Field::new(Ground::Land, 2), "t2_land_army", 4.0, "t2_air_force");
     let margin = sim_engine::balance::target_number("counters", "even_margin");
     assert!(even.abs() <= margin, "a T2 land army a fifth flak scores {even:+.2} against the T2 air force");
-    let cruisers = squadrons(&db, &[(db.id("t2_cruiser"), 1)], position_materiel_at(&db, T2_POSITION, 2), 2, Tactics::AttackMove);
+    let count = number(&domains(&["cells", "coastal_ship_count"])) as u32;
+    let cruisers = [Side { unit: db.id("t2_cruiser"), count, tactics: Tactics::AttackMove }];
     let siege = siege_on(&db, Field::new(Ground::Shore, 2), &cruisers, T2_POSITION);
     let (seconds, losses) = (number(&domains(&["cells", "coastal_seconds_max"])), number(&domains(&["cells", "coastal_losses_max"])));
-    assert!(siege.broken && siege.seconds <= seconds && siege.losses <= losses, "an equal cost of cruisers against a coastal T2 position: {siege:?}");
+    assert!(siege.broken && siege.seconds <= seconds && siege.losses <= losses, "{count} cruisers against a coastal T2 position: {siege:?}");
+    let one = siege_on(&db, Field::new(Ground::Shore, 2), &[Side { count: 1, ..cruisers[0] }], T2_POSITION);
+    assert!(!one.broken, "one cruiser broke the coastal T2 position through its dome: {one:?}");
 }
 
 /// BALANCE.md, T3 air and navy (2026-11-24): the battleship, battlecruiser, and heavy gunship are
@@ -439,18 +442,19 @@ fn a_massed_t3_fleet_is_as_safe_from_the_air_as_it_is_escorted() {
     assert!(heavy <= most, "torpedo bombers break a battleship-heavy fleet at {heavy:.2} times its cost");
 }
 
-/// `[domains]`: battleships break a coastal T3 position from beyond its reach. Whole battleships buy
-/// only near the position's cost, so the time is put at an equal cost, as the report puts it.
+/// `[domains]`: two battleships break a coastal T3 position from beyond its reach, and so does
+/// one, more slowly: its broadsides wear the heavy dome down faster than it heals (2026-11-25).
 #[test]
 #[cfg_attr(debug_assertions, ignore = "release only")]
 fn battleships_break_a_coastal_t3_position() {
     let db = db();
-    let materiel = position_materiel_at(&db, T3_POSITION, 3);
-    let battleships = squadrons(&db, &[(db.id("t3_battleship"), 1)], materiel, 3, Tactics::AttackMove);
+    let count = number(&domains(&["cells", "coastal_ship_count"])) as u32;
+    let battleships = [Side { unit: db.id("t3_battleship"), count, tactics: Tactics::AttackMove }];
     let siege = siege_on(&db, Field::new(Ground::Shore, 3), &battleships, T3_POSITION);
-    let at_equal_cost = siege.seconds * force_materiel(&db, &battleships, 3) / materiel;
     let (seconds, losses) = (number(&domains(&["cells", "coastal_seconds_max"])), number(&domains(&["cells", "coastal_losses_max"])));
-    assert!(siege.broken && at_equal_cost <= seconds && siege.losses <= losses, "battleships against a coastal T3 position: {siege:?}, about {at_equal_cost:.0} s at an equal cost");
+    assert!(siege.broken && siege.seconds <= seconds && siege.losses <= losses, "{count} battleships against a coastal T3 position: {siege:?}");
+    let one = siege_on(&db, Field::new(Ground::Shore, 3), &[Side { count: 1, ..battleships[0] }], T3_POSITION);
+    assert!(one.broken && one.losses <= losses && one.seconds > siege.seconds, "one battleship against a coastal T3 position: {one:?}, against two's {siege:?}");
 }
 
 fn premiums(key: &str) -> toml::Value {

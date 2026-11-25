@@ -634,7 +634,8 @@ impl Effects {
             match projectile.kind {
                 ProjectileKind::TacticalMissile | ProjectileKind::StrategicMissile => {
                     let strategic = projectile.kind == ProjectileKind::StrategicMissile;
-                    let (size, length, flame) = if strategic { (7.0, 20.0, 4.0) } else { (3.0, 9.0, 1.6) };
+                    // A strategic missile's flame is larger, so that it glows (2026-11-25).
+                    let (size, length, flame) = if strategic { (7.0, 20.0, 7.0) } else { (3.0, 9.0, 1.6) };
                     let puff = Puff { shape: Shape::Smoke, at, rise: 1.5, born: time, life: 1.6, size, growth: 1.4, height_share: 1.0, color: TRAIL_FRESH, fade_to: TRAIL_OLD, dense: false };
                     lay(self, projectile.id, at, f64::from(size) * TRAIL_SPACING, puff);
                     // A flame at its tail, brief, the way it has come.

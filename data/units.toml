@@ -214,6 +214,12 @@ weapon = { range = 520, reload_ticks = 3, projectile_speed = 70, damage = 150, t
 
 # A dome that stops enemy shells from outside, while those under it fire out freely
 # (GAME_SPECIFICATION.md §8.1). Tier 2. Upkeep is energy per second while the dome is up.
+# It regenerates a little faster than one cruiser's missiles wear it down (181.6 a second), so
+# that it holds against one cruiser for as long as it is paid for, and falls to two (2026-11-25,
+# reports/plans/2026-11-25-weapons-nukes-shields.md). It heals its whole health in about 70
+# seconds, so its health is 70 times its regeneration, and one battleship broadside takes it
+# down exactly; it comes back 20 seconds after it falls, at full health (the design owner's
+# numbers, 2026-11-25).
 [[unit]]
 id = "shield_generator"
 name = "Shield Generator"
@@ -225,7 +231,7 @@ build_time = 1150
 health = 250
 footprint = 3
 vision = 400
-shield = { radius = 260, health = 5000, regen = 50, recharge_seconds = 30, upkeep = 30 }
+shield = { radius = 260, health = 13020, regen = 186, recharge_seconds = 20, upkeep = 30 }
 
 # Missiles (GAME_SPECIFICATION.md §8). The launchers and defenses are tier 2 and 3: T2 and T3
 # engineers build them, and so does the commander once it has the engineering upgrade. A launcher
@@ -262,7 +268,8 @@ build_time = 2400
 health = 1
 vision = 0
 
-# Shoots down one enemy cruise missile in range each time it reloads.
+# Shoots down one enemy cruise missile in range each time it reloads, every 1.8 seconds, as a
+# ship's mount does.
 [[unit]]
 id = "tactical_missile_defense"
 name = "Tactical Missile Defense"
@@ -274,7 +281,7 @@ build_time = 400
 health = 1000
 footprint = 1
 vision = 400
-missile_defense = { kind = "tactical", range = 620, reload_ticks = 30 }
+missile_defense = { kind = "tactical", range = 620, reload_ticks = 18 }
 
 # Builds nuclear missiles, one at a time, and fires one each time it is ordered to.
 [[unit]]
@@ -292,7 +299,10 @@ build_power = 1500
 builds = ["strategic_missile"]
 max_stock = 5
 # The inspiration's two rings: 70,000 within 30 of its units and 500 within 40, at twenty of ours to one.
-weapon = { range = 20000, reload_ticks = 100, projectile_speed = 25, damage = 500, splash_radius = 800, inner_damage = 70000, inner_radius = 600, kind = "strategic_missile", cruise_height = 500 }
+# Its missile leaves once the silo's doors are open, rises slowly out, climbs straight up to 2,000
+# over the higher of the silo and the target, flies level, and comes straight down, at one speed,
+# with nothing but an interceptor to stop it (2026-11-25).
+weapon = { range = 20000, reload_ticks = 100, projectile_speed = 25, damage = 500, splash_radius = 800, inner_damage = 70000, inner_radius = 600, kind = "strategic_missile", cruise_height = 2000 }
 
 [[unit]]
 id = "strategic_missile"
@@ -725,7 +735,8 @@ tier = 2
 mass = 198
 energy = 3953
 build_time = 1474
-health = 1796
+# One volley of the cruiser's anti-air, and two SAM missiles ([volleys], [kills], 2026-11-25).
+health = 1590
 speed = 27
 radius = 12
 vision = 640
@@ -779,7 +790,9 @@ tier = 3
 mass = 1750
 energy = 180000
 build_time = 12000
-health = 7500
+# A little over four Gunships': four volleys of the cruiser's anti-air, and eight SAM missiles,
+# about 11 seconds of one SAM ([volleys], [kill_times], 2026-11-25).
+health = 6400
 speed = 40
 radius = 16
 vision = 640
@@ -842,8 +855,10 @@ health = 5000
 footprint = 1
 vision = 560
 # The deterrent to T3 aircraft: one badly damages a strategic bomber in a pass, two bring it down.
-# Its missiles steer themselves to their aircraft, as only anti-air missiles do.
-weapon = { range = 1200, reload_ticks = 32, projectile_speed = 90, damage = 2400, splash_radius = 30, targets = "air", turn_rate = 180, homing = true }
+# Its missiles steer themselves to their aircraft, as only anti-air missiles do. It destroys a
+# Strategic Bomber in about 11 seconds, eight missiles, and a Gunship in about 2, two
+# ([kill_times], 2026-11-25).
+weapon = { range = 1200, reload_ticks = 14, projectile_speed = 90, damage = 850, splash_radius = 30, targets = "air", turn_rate = 180, homing = true }
 
 # Two shells a volley in the inspiration, one here, and at 90 for the reason above. Its damage is set by the
 # anti-air share rule at T2, as the T1 mobile anti-air's is at T1: a T2 land army a fifth flak by
@@ -1229,9 +1244,12 @@ builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_escor
 # Two twin gauss cannons, a twin railgun at aircraft, torpedoes, and an anti-torpedo charge.
 # Each twin fires both muzzles at once (the inspiration's MuzzleSalvoDelay of 0). Cost, build time, health,
 # and its guns' damage set against the Medium Tank as the inspiration has its destroyer
-# against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t2-air-navy.md). It is the fleet's hunter of submarines: its torpedoes do six times that ratio's, and its
-# anti-torpedo charge stops one torpedo a second, so that destroyers beat an equal cost of
-# submarines.
+# against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t2-air-navy.md). It is the fleet's hunter of submarines, one at
+# a time: six Attack Submarines, about its cost, sink it in about 33 seconds, having lost one
+# ([kill_times], 2026-11-25). Its guns and torpedoes are set by kill times ([kill_times] in
+# data/balance_targets.toml, 2026-11-25): its guns destroy a commander with no enhancements on
+# land in about 80 seconds; its torpedoes, a submerged Attack Submarine in about 25, and five
+# destroyers' a commander under the water in about 80.
 [[unit]]
 id = "t2_destroyer"
 name = "Destroyer"
@@ -1248,14 +1266,15 @@ radius = 20
 vision = 640
 radar = 800
 sonar = 720
-# An anti-torpedo charge, the inspiration's numbers: it shoots down a torpedo within 600 every 10 seconds.
-torpedo_defense = { range = 600, reload_ticks = 10 }
+# An anti-torpedo charge, the inspiration's numbers: it lures a torpedo within 600 onto a decoy every
+# 10 seconds (once a second from 2026-11-24 to 2026-11-25, when destroyers were to beat submarines).
+torpedo_defense = { range = 600, reload_ticks = 100 }
 movement = "naval"
-weapon = { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 475, splash_radius = 20, turn_rate = 90, spread = 7 }
+weapon = { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 455, splash_radius = 20, turn_rate = 90, spread = 7 }
 extra_weapons = [
-    { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 475, splash_radius = 20, turn_rate = 90, spread = 7 },
+    { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 455, splash_radius = 20, turn_rate = 90, spread = 7 },
     { range = 1200, reload_ticks = 14, projectile_speed = 120, damage = "15.6", targets = "air", turn_rate = 180 },
-    { range = 900, reload_ticks = 40, projectile_speed = 30, damage = 560, targets = "naval" },
+    { range = 900, reload_ticks = 40, projectile_speed = 30, damage = 181, targets = "naval" },
 ]
 
 # Cruise missiles it fires on its own, a gauss cannon, SAMs, and a close-in gun that shoots down
@@ -1284,24 +1303,40 @@ sonar = 2400
 movement = "naval"
 # Cruise missiles climb high and come down on their target, as in the inspiration; they are not direct fire.
 # They fly at the inspiration's top speed for each missile, doubled for ticks: 28 to 40 a tick.
-weapon = { kind = "tactical_missile", automatic = true, range = 3000, reload_ticks = 25, projectile_speed = 32, damage = 454, splash_radius = 40, cruise_height = 400 }
+# Four a volley, a second apart, then six seconds' reload: forty, ten volleys, destroy a
+# commander with no enhancements in about 100 seconds, as one every 2.5 seconds did, at the
+# same damage a second (2026-11-25, reports/plans/2026-11-25-weapons-nukes-shields.md).
+weapon = { kind = "tactical_missile", automatic = true, range = 3000, reload_ticks = 100, projectile_speed = 32, damage = 454, splash_radius = 40, cruise_height = 400, salvo = { shots = 4, ticks = 40 } }
 extra_weapons = [
     { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 233, splash_radius = 40, turn_rate = 90, spread = 10 },
-    # The fleet's anti-air missiles, which steer themselves: about three quarters of a SAM
-    # against T3 aircraft.
-    { range = 1400, reload_ticks = 20, projectile_speed = 90, damage = 1279, splash_radius = 80, targets = "air", turn_rate = 180, homing = true },
+    # The fleet's anti-air missiles, which steer themselves: eight a volley over its first
+    # second, a volley every two, set by how many volleys each aircraft takes ([volleys] in
+    # data/balance_targets.toml, 2026-11-25): one for every T1 aircraft, the Torpedo Bomber and
+    # the Gunship; two for the Fighter-Bomber, Spy Plane and Air Transport; three for the T3
+    # fighter, four for the Strategic Bomber, six for the Heavy Gunship.
+    { range = 1400, reload_ticks = 20, projectile_speed = 90, damage = 200, splash_radius = 80, targets = "air", turn_rate = 180, homing = true, salvo = { shots = 8, ticks = 10 } },
 ]
-# The fleet's tactical missile defense: a mount that stops a missile within 620 every 2 seconds,
-# the same wherever it is carried. The cruiser and the battleship carry two, and the
-# battlecruiser one.
-missile_defense = { kind = "tactical", range = 620, reload_ticks = 20, mounts = 2 }
+# The fleet's tactical missile defense: a mount that stops a missile within 620 every 1.8
+# seconds, the same wherever it is carried, as the T2 structure's (2026-11-25). Each mount is a
+# defense of its own. The cruiser and the battleship carry two, and the battlecruiser one.
+missile_defense = { kind = "tactical", range = 620, reload_ticks = 18, mounts = 2 }
 
-# Three gauss turrets of three shells of 1,000 each, four twin anti-air guns as one (each fires
-# both muzzles at once, 12 a shell, every 1.7 seconds), and two close-in guns, as one.
-# Cost and build time set against the Medium Tank as the inspiration has its battleship against
-# its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t3-air-navy.md); its turrets keep the damage set against T3 artillery, so its
-# health is half again its ratio's, to its strength per cost. Like the inspiration's, it has next
-# to no anti-air and no anti-torpedo charge: its escorts keep aircraft and torpedoes off it.
+# Three gauss turrets, four twin anti-air guns as one (each fires both muzzles at once, 12 a
+# shell, every 1.7 seconds), and two close-in guns, as one. Cost and build time set against the
+# Medium Tank as the inspiration has its battleship against its T1 tank (2026-11-24, [domains],
+# reports/balance/2026-11-24-t3-air-navy.md), and health half again its ratio's. Like the
+# inspiration's, it has next to no anti-air and no anti-torpedo charge: its escorts keep aircraft
+# and torpedoes off it.
+#
+# Its turrets fire as one broadside, every 16 seconds: three shells of 4,400, a ripple apart,
+# 13,200 in all, set by the design owner's targets (2026-11-25, [broadsides] and [kill_times] in
+# data/balance_targets.toml). A volley destroys a T3 extractor and takes down a T2 Shield
+# Generator's dome, exactly; two destroy a commander. It outranges a T2 Artillery Installation by
+# 1.30, and from between the two reaches destroys a shielded position of them in about 45
+# seconds, unanswered; a T3 Heavy Shield Generator holds it off for about 45 seconds, and the
+# volley that breaks the dome destroys the generator. Its volleys come faster than a dome comes
+# back (20 seconds), which is what lets one battleship break a position at all. Until 2026-11-25
+# its turrets fired 3,000 each, every 20 seconds, on their own.
 [[unit]]
 id = "t3_battleship"
 name = "Battleship"
@@ -1319,19 +1354,21 @@ vision = 1000
 radar = 960
 sonar = 400
 movement = "naval"
-# Three turrets, two forward and one aft, each firing from where it sits.
-weapon = { range = 3000, reload_ticks = 200, projectile_speed = 60, damage = 3000, splash_radius = 40, turn_rate = 30, spread = 6, mount = [0, 28] }
+# Three turrets, two forward and one aft, each firing from where it sits, as one broadside.
+weapon = { range = 3000, reload_ticks = 160, projectile_speed = 60, damage = 4400, splash_radius = 40, turn_rate = 30, spread = 6, mount = [0, 28] }
 extra_weapons = [
-    { range = 3000, reload_ticks = 200, projectile_speed = 60, damage = 3000, splash_radius = 40, turn_rate = 30, spread = 6, mount = [0, 10] },
-    { range = 3000, reload_ticks = 200, projectile_speed = 60, damage = 3000, splash_radius = 40, turn_rate = 30, spread = 6, mount = [0, -31], aft = true },
+    { range = 3000, reload_ticks = 160, projectile_speed = 60, damage = 4400, splash_radius = 40, turn_rate = 30, spread = 6, mount = [0, 10], broadside = true },
+    { range = 3000, reload_ticks = 160, projectile_speed = 60, damage = 4400, splash_radius = 40, turn_rate = 30, spread = 6, mount = [0, -31], aft = true, broadside = true },
     { range = 1200, reload_ticks = 17, projectile_speed = 180, damage = 96, targets = "air", turn_rate = 180 },
 ]
-missile_defense = { kind = "tactical", range = 620, reload_ticks = 20, mounts = 2 }
+missile_defense = { kind = "tactical", range = 620, reload_ticks = 18, mounts = 2 }
 
 # A laser cannon forward and one aft, torpedoes, one of the fleet's tactical missile defense
 # mounts, and an anti-torpedo charge. A laser's beam hits the tick it is fired, one target, with no blast.
 # Cost, build time, and health set against the Medium Tank as the inspiration has its
-# battlecruiser against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t3-air-navy.md); its lasers keep twice a turret's damage.
+# battlecruiser against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t3-air-navy.md). Its lasers did twice a battleship
+# turret's damage a second until 2026-11-25, when the battleship's broadside was set by its own
+# targets.
 [[unit]]
 id = "t3_battlecruiser"
 name = "Battlecruiser"
@@ -1358,7 +1395,7 @@ extra_weapons = [
     { kind = "laser", range = 1600, reload_ticks = 20, damage = 600, turn_rate = 60, mount = [0, -31], aft = true },
     { range = 1200, reload_ticks = 100, projectile_speed = 30, damage = 200, targets = "naval" },
 ]
-missile_defense = { kind = "tactical", range = 620, reload_ticks = 20 }
+missile_defense = { kind = "tactical", range = 620, reload_ticks = 18 }
 
 # Under the sea (GAME_SPECIFICATION.md §10). A submarine sails submerged, where only torpedoes
 # reach it and only sonar finds it. Torpedoes steer to ships and submarines, and hit nothing
@@ -1371,8 +1408,9 @@ id = "t1_attack_sub"
 name = "Attack Submarine"
 class = "tank"
 tier = 1
-# Cost, build time, health, and damage against the Medium Tank as the inspiration has its
-# submarine against its T1 tank (2026-11-24, [domains]).
+# Cost, build time, and health against the Medium Tank as the inspiration has its submarine
+# against its T1 tank (2026-11-24, [domains]). Its torpedo, 185 until 2026-11-25, is set so that six
+# of them sink a destroyer in about 33 seconds ([kill_times]), within its strength band.
 mass = 265
 energy = 2122
 build_time = 1187
@@ -1384,7 +1422,7 @@ radius = 12
 vision = 640
 sonar = 1200
 movement = "submarine"
-weapon = { range = 640, reload_ticks = 40, projectile_speed = 30, damage = 185, targets = "naval" }
+weapon = { range = 640, reload_ticks = 40, projectile_speed = 30, damage = 235, targets = "naval" }
 # The inspiration's deck gun, 25 a second out to 640, which fires only on the surface.
 extra_weapons = [{ range = 640, reload_ticks = 10, projectile_speed = 60, damage = 25, turn_rate = 90 }]
 
@@ -1525,7 +1563,8 @@ vision = 640
 sonar = 720
 movement = "naval"
 torpedo_defense = { range = 600, reload_ticks = 30 }
-shield = { radius = 400, height = 150, health = 4000, regen = 80, recharge_seconds = 30, upkeep = 80 }
+# Back 20 seconds after it falls, as the other domes (the design owner's rule, 2026-11-25; 30 until then).
+shield = { radius = 400, height = 150, health = 4000, regen = 80, recharge_seconds = 20, upkeep = 80 }
 
 # The inspiration's numbers. It builds nuclear missiles as a strategic missile launcher does, on order or one after
 # another, up to three, and fires one only on order. Its cruise missiles it fires on its own at
@@ -1549,7 +1588,7 @@ movement = "submarine"
 build_power = 1080
 builds = ["strategic_missile"]
 max_stock = 3
-weapon = { range = 8200, reload_ticks = 100, projectile_speed = 25, damage = 500, splash_radius = 800, inner_damage = 70000, inner_radius = 600, kind = "strategic_missile", cruise_height = 500 }
+weapon = { range = 8200, reload_ticks = 100, projectile_speed = 25, damage = 500, splash_radius = 800, inner_damage = 70000, inner_radius = 600, kind = "strategic_missile", cruise_height = 2000 }
 extra_weapons = [{ kind = "tactical_missile", automatic = true, range = 5120, reload_ticks = 100, projectile_speed = 32, damage = 2000, splash_radius = 60, cruise_height = 60 }]
 
 # Siege: it fires cruise missiles on its own at what is in range, structures first, then what has
@@ -1633,7 +1672,8 @@ slot = "systems"
 mass = 2300
 energy = 112500
 build_time = 2100
-shield = { radius = 30, health = 19000, regen = 30, recharge_seconds = 140, upkeep = 250 }
+# Back 20 seconds after it falls, as the other domes (the design owner's rule, 2026-11-25; 140 until then).
+shield = { radius = 30, health = 19000, regen = 30, recharge_seconds = 20, upkeep = 250 }
 
 [[enhancement]]
 id = "area_shield"
@@ -1643,7 +1683,8 @@ slot = "systems"
 mass = 1400
 energy = 40000
 build_time = 1400
-shield = { radius = 200, health = 5000, regen = 60, recharge_seconds = 45, upkeep = 200 }
+# Back 20 seconds after it falls, as the other domes (the design owner's rule, 2026-11-25; 45 until then).
+shield = { radius = 200, health = 5000, regen = 60, recharge_seconds = 20, upkeep = 200 }
 
 [[enhancement]]
 id = "signature_suppression"
@@ -1866,7 +1907,8 @@ turn_rate = 120
 turn_radius = 20
 radius = 8
 vision = 400
-shield = { radius = 170, health = 3000, regen = 55, recharge_seconds = 24, upkeep = 80 }
+# Back 20 seconds after it falls, as the other domes (the design owner's rule, 2026-11-25; 24 until then).
+shield = { radius = 170, health = 3000, regen = 55, recharge_seconds = 20, upkeep = 80 }
 
 [[unit]]
 id = "t2_combat_engineer"
@@ -1945,7 +1987,9 @@ sonar = 1440
 movement = "naval"
 # Four-torpedo volleys, and decoys against torpedoes. Cost, build time, health, and damage set
 # against the Medium Tank as the inspiration has its submarine hunter against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t2-air-navy.md).
-weapon = { range = 1100, reload_ticks = 8, projectile_speed = 30, damage = 100, targets = "naval" }
+# Two destroy a commander with no enhancements under the water in about 60 seconds
+# ([kill_times], 2026-11-25).
+weapon = { range = 1100, reload_ticks = 8, projectile_speed = 30, damage = 126, targets = "naval" }
 torpedo_defense = { range = 500, reload_ticks = 25 }
 
 # It cannot move, so it is worth more for its cost ([premiums], 2026-11-25): damage two and a half
@@ -1965,6 +2009,11 @@ vision = 480
 # A gatling cannon: 15-round bursts, about 250 damage a second.
 weapon = { range = 1400, reload_ticks = 7, projectile_speed = 64, damage = 438, splash_radius = 20, turn_rate = 90, spread = 4 }
 
+# The T3 dome: a little more regeneration a second than the T2 one, and far more health, so it
+# heals more slowly for its size, in about three minutes. One battleship, unassisted, wears it
+# down in about 45 seconds, a broadside every 16 that it cannot heal in time, and the one that
+# breaks it destroys the generator under it (2026-11-25). Until then it healed 500 a second, faster
+# than a battleship's guns, so that one battleship never broke it.
 [[unit]]
 id = "t3_heavy_shield"
 name = "Heavy Shield Generator"
@@ -1976,7 +2025,7 @@ build_time = 5000
 health = 500
 footprint = 3
 vision = 400
-shield = { radius = 440, health = 17000, regen = 131, recharge_seconds = 23, upkeep = 400 }
+shield = { radius = 440, health = 36000, regen = 200, recharge_seconds = 20, upkeep = 400 }
 
 [[unit]]
 id = "wall"
