@@ -291,8 +291,8 @@ fn a_torpedo_bomber_sinks_a_ship() {
     world.ecs.get::<&mut sim_engine::sim::components::TorpedoDefense>(world.unit_entity(destroyer).unwrap()).unwrap().range = Fp::ZERO;
     let bomber = spawn(&mut world, "t2_torpedo_bomber", Team::Blue, point(1_000, 1_000));
     world.advance_tick(&[SimCommand::Attack { units: vec![bomber], target: destroyer }]);
-    // Five torpedoes of 189 every 10 seconds against 10,231: about eleven runs, as in FAF, where
-    // one torpedo bomber is slow work against a destroyer.
+    // Five torpedoes of 189 every 10 seconds against 10,231: about eleven runs, as in the
+    // inspiration, where one torpedo bomber is slow work against a destroyer.
     let sunk = (0..1_800).any(|_| {
         world.advance_tick(&[]);
         world.unit_health(destroyer).is_none()
@@ -552,8 +552,9 @@ fn a_missile_sub_builds_nuclear_missiles_only_on_order_and_fires_cruise_missiles
     assert!(gone, "its cruise missiles fire on their own, and cost nothing");
     assert_eq!(stock(&world, sub), 0, "no nuclear missile without an order to build one");
     let nuke = world.blueprints.id("strategic_missile");
-    // FAF's missile, 12,000 mass and 1,500,000 energy over 450,000 build time, takes the sub's
-    // 1,080 build power almost seven minutes, so here it builds 20 times as fast, from deep stores.
+    // The inspiration's missile, 12,000 mass and 1,500,000 energy over 450,000 build time, takes
+    // the sub's 1,080 build power almost seven minutes, so here it builds 20 times as fast, from
+    // deep stores.
     {
         let entity = world.unit_entity(sub).unwrap();
         world.ecs.get::<&mut sim_engine::sim::components::Factory>(entity).unwrap().power = fp_int(22_500);

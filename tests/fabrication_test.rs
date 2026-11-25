@@ -1,4 +1,5 @@
-//! Mass fabricators and geothermal plants (GAME_SPECIFICATION.md §3.3-3.4, FAF's numbers).
+//! Mass fabricators and geothermal plants (GAME_SPECIFICATION.md §3.3-3.4, the inspiration's
+//! numbers).
 
 use std::sync::Arc;
 

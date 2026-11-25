@@ -10,7 +10,7 @@ use super::terrain::Terrain;
 use super::world::SimWorld;
 use crate::math::fp::{fp_int, wide_mul, Fp, Vec2Fp, Vec3Fp};
 
-/// Bombs fall at FAF's gravity, 4.9 map units a second squared, which is ten times
+/// Bombs fall at the inspiration's gravity, 4.9 map units a second squared, which is ten times
 /// what shells use here.
 pub const BOMB_GRAVITY: Fp = Fp::from_bits(GRAVITY_RAW * 10);
 
@@ -83,7 +83,7 @@ fn inside_turn(facing: Vec2Fp, offset: Vec2Fp, radius: Fp) -> bool {
 
 /// Below this share of a full tank, a patrolling aircraft goes to refuel.
 const REFUEL_SHARE_PERCENT: u32 = 20;
-/// Ticks of fuel gained each tick on the ground, FAF's recharge rate of 5, and on an
+/// Ticks of fuel gained each tick on the ground, the inspiration's recharge rate of 5, and on an
 /// airfield's pad, 50 times that.
 const LANDED_REFUEL_PER_TICK: u32 = 5;
 const DOCKED_REFUEL_PER_TICK: u32 = LANDED_REFUEL_PER_TICK * 50;

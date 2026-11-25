@@ -573,22 +573,23 @@ const SCATTER_SEED: u64 = 0x5CA7_7E25_0FF5_E7ED;
 
 /// The highest veteran rank.
 pub const MAX_RANK: u8 = 5;
-/// Each rank adds this share of a unit's base health, as FAF's veterancy does: 10% a level.
+/// Each rank adds this share of a unit's base health, as the inspiration's veterancy does: 10% a
+/// level.
 pub(super) const RANK_HEALTH_PERMILLE: i64 = 100;
-/// Reaching a rank heals this share of the unit's base health at once: FAF's default of 10%.
-/// The commander heals more at each level, as its blueprint sets.
+/// Reaching a rank heals this share of the unit's base health at once: the inspiration's default of
+/// 10%. The commander heals more at each level, as its blueprint sets.
 const PROMOTION_HEAL_PERMILLE: i64 = 100;
 const COMMANDER_PROMOTION_HEAL_PERMILLE: [i64; 5] = [100, 200, 300, 400, 500];
-/// FAF's mass a level, as a multiple of the unit's own cost, in thousandths, by tech level: a
-/// rank n unit has destroyed n times that. The commander has its own steps instead.
+/// The inspiration's mass a level, as a multiple of the unit's own cost, in thousandths, by tech
+/// level: a rank n unit has destroyed n times that. The commander has its own steps instead.
 const VET_MASS_PERMILLE_BY_TIER: [i64; 3] = [2_000, 1_500, 1_250];
 const VET_MASS_PERMILLE_SUPPORT: i64 = 2_000;
 const COMMANDER_VET_MASS: [i64; 5] = [1_000, 2_250, 4_000, 6_500, 10_000];
-/// FAF's regeneration a second for each rank, by tech row: T1, T2, T3 and commanders, support
-/// commanders, experimentals. Ships, below experimental, take the row above their tier.
+/// The inspiration's regeneration a second for each rank, by tech row: T1, T2, T3 and commanders,
+/// support commanders, experimentals. Ships, below experimental, take the row above their tier.
 const VET_REGEN_ROWS: [i64; 5] = [1, 3, 6, 9, 25];
 
-/// The mass a unit must have destroyed to reach a rank, FAF's veterancy thresholds.
+/// The mass a unit must have destroyed to reach a rank, the inspiration's veterancy thresholds.
 pub fn vet_threshold(unit: &super::blueprints::Blueprint, rank: u8) -> Res {
     if rank == 0 {
         return Res::ZERO;
@@ -605,7 +606,7 @@ pub fn vet_threshold(unit: &super::blueprints::Blueprint, rank: u8) -> Res {
     unit.mass * i64::from(rank) * permille / 1_000
 }
 
-/// What a veteran of a rank regenerates a second, FAF's flat amounts.
+/// What a veteran of a rank regenerates a second, the inspiration's flat amounts.
 pub fn vet_regen_per_second(unit: &super::blueprints::Blueprint, rank: u8) -> i64 {
     let row = if unit.is_commander() {
         2
@@ -2183,9 +2184,9 @@ impl SimWorld {
     }
 
     /// Gives a unit its share of the mass of an enemy it helped destroy, at most one rank's worth
-    /// at a time as in FAF, and promotes it at FAF's thresholds (`vet_threshold`). Units without
-    /// a blueprint have no mass, so they earn nothing, and nobody earns anything for destroying
-    /// their own side.
+    /// at a time as in the inspiration, and promotes it at the inspiration's thresholds
+    /// (`vet_threshold`). Units without a blueprint have no mass, so they earn nothing, and nobody
+    /// earns anything for destroying their own side.
     fn award_experience(&mut self, killer: SimId, victim_team: Team, mass: Res) {
         let Some((_, entity)) = self.find_unit(killer) else {
             return;
@@ -2228,7 +2229,7 @@ impl SimWorld {
         }
     }
 
-    /// Veterans heal a little every tick, more for each rank, by FAF's flat amounts.
+    /// Veterans heal a little every tick, more for each rank, by the inspiration's flat amounts.
     fn regenerate_veterans(&mut self) {
         for &(_, entity) in &self.veterans {
             let rank = self.ecs.get::<&Veterancy>(entity).map_or(0, |veterancy| veterancy.rank);
@@ -2680,7 +2681,7 @@ impl SimWorld {
             if let (Some(target), Some(weapon), true) = (discharge_target, discharge.as_mut(), can_fire) {
                 let economy = &mut economies[stats.owner.index()];
                 if let Some(entry) = locate(target).filter(|entry| can_engage(entry)) {
-                    // By FAF's rule, nothing is spent until the shell lands.
+                    // By the inspiration's rule, nothing is spent until the shell lands.
                     if aimed && weapon.ticks_until_ready == 0 && economy.energy >= weapon.def.energy_required {
                         let raw = |x: i32, y: i32, z: i32| Vec3Fp::new(Fp::from_bits(x), Fp::from_bits(y), Fp::from_bits(z));
                         shots.push(PendingShot {
@@ -3559,9 +3560,9 @@ impl SimWorld {
 
     }
 
-    /// Works out the Discharge shells that landed this tick, by FAF's rule: each may spend a
-    /// share of the energy in store, split between the team's shells in flight, at so much a
-    /// point of damage, up to its most; of that, it spends only what destroys the toughest enemy
+    /// Works out the Discharge shells that landed this tick, by the inspiration's rule: each may
+    /// spend a share of the energy in store, split between the team's shells in flight, at so much
+    /// a point of damage, up to its most; of that, it spends only what destroys the toughest enemy
     /// unit where it lands, and never less than its least. Against a lone commander, a structure,
     /// or a structure's dome, it does the least, and against a mobile unit's dome, what brings
     /// the dome down. The energy goes when it lands. Its blast hurts only enemies, commanders and
@@ -3696,7 +3697,8 @@ impl SimWorld {
                         .query_one_mut::<(&SimId, &Position, &mut Health, Option<&Blueprinted>, &UnitStats, Option<&Construction>)>(target)
                         .expect("hit entities are live until the end of this step");
                     let was_alive = health.current > Fp::ZERO;
-                    // Each hit counts for no more than the unit's whole health, as in FAF.
+                    // Each hit counts for no more than the unit's whole health, as in the
+                    // inspiration.
                     let counted = damage.min(health.max).max(Fp::ZERO);
                     health.current = health.current.saturating_sub(damage);
                     let dies = was_alive && health.current <= Fp::ZERO;
@@ -3978,9 +3980,9 @@ impl SimWorld {
                 self.economy_dirty = true;
             }
         }
-        // A unit that blew itself up leaves nothing to reclaim. FAF's rules for the rest: 90% of
-        // the mass, less by tech level, less again if it sank, for as much as was built; nothing
-        // from a unit under half built, or from a structure not finished.
+        // A unit that blew itself up leaves nothing to reclaim. The inspiration's rules for the
+        // rest: 90% of the mass, less by tech level, less again if it sank, for as much as was
+        // built; nothing from a unit under half built, or from a structure not finished.
         let wreck = self.ecs.get::<&Blueprinted>(entity).ok().filter(|_| !self.blew_itself_up(entity)).and_then(|blueprint| {
             let built = self.ecs.get::<&Construction>(entity).map_or(Res::ONE, |construction| construction.progress);
             let unit = self.blueprints.get(blueprint.0);

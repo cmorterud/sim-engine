@@ -15,11 +15,11 @@ use crate::math::fp::{sqrt_wide, Fp, Vec2Fp, Vec3Fp};
 /// Ctrl+K gives five seconds to change one's mind.
 pub const SELF_DESTRUCT_TICKS: u32 = 5 * TICKS_PER_SECOND as u32;
 
-/// One of FAF's map units is one of our terrain cells, and its teleport costs are
+/// One of the inspiration's map units is one of our terrain cells, and its teleport costs are
 /// worked out in its units.
 const UNITS_PER_ORIGINAL_UNIT: i64 = super::config::TERRAIN_CELL_UNITS as i64;
 
-/// `distance` to the power 2.1, for a whole number of FAF's units, as its
+/// `distance` to the power 2.1, for a whole number of the inspiration's units, as its
 /// teleport costs use. Worked out in whole numbers, so that every machine agrees: the tenth
 /// root comes from a search, to 1/2048.
 pub fn distance_cost_power(distance: i64) -> i64 {
@@ -42,7 +42,7 @@ pub fn distance_cost_power(distance: i64) -> i64 {
     (distance * distance * low as i64) / 2048
 }
 
-/// What a teleport over this distance costs, and how long it charges, in FAF's
+/// What a teleport over this distance costs, and how long it charges, in the inspiration's
 /// terms: a flat cost plus half the distance to the power 2.1, and a delay plus a
 /// hundred-thousandth of it in seconds, each up to a limit.
 pub fn teleport_cost(teleporter: &TeleporterDef, distance: Fp) -> (Res, u32) {
@@ -495,7 +495,8 @@ mod tests {
         let (near, near_ticks) = teleport_cost(&teleporter, Fp::from_num(100));
         let (far, far_ticks) = teleport_cost(&teleporter, Fp::from_num(10_000));
         assert!(near < far && near_ticks <= far_ticks);
-        // 500 of FAF's units: 100,000 + 0.5 * 500^2.1, and 20 + 0.00001 * 500^2.1 seconds.
+        // 500 of the inspiration's units: 100,000 + 0.5 * 500^2.1, and 20 + 0.00001 * 500^2.1
+        // seconds.
         assert_eq!(far.to_num::<i64>() / 1000, 332);
         assert_eq!(far_ticks, 246);
         assert_eq!(teleport_cost(&teleporter, Fp::ZERO), (Res::from_num(100_000), 200));

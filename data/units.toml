@@ -26,7 +26,7 @@ build_range = 200
 # Its fabrication packs (the enhancements below) unlock the T2 and T3 structures on its list.
 builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "radar", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "stealth_field_generator", "strategic_missile_launcher", "strategic_missile_defense", "rig_yard", "geothermal_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "naval_factory", "t1_aa_turret", "airfield", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "deep_scan_array", "land_factory_t3_support", "air_factory_t3_support", "t2_artillery", "t3_artillery", "naval_factory_t2_support", "naval_factory_t3_support", "t1_sonar", "t1_torpedo_launcher", "t2_sonar", "t2_torpedo_launcher", "wall", "t3_heavy_point_defense", "t3_heavy_shield", "field_workshop"]
 weapon = { range = 440, reload_ticks = 7, projectile_speed = 50, damage = 70, turn_rate = 180 }
-# FAF's Discharge: 7,500 in store to fire; on landing, up to 90% of the store at 6 energy a point,
+# The inspiration's Discharge: 7,500 in store to fire; on landing, up to 90% of the store at 6 energy a point,
 # from 1,250 to 15,000 damage, as much as the toughest enemy there takes; 400 to commanders, 800
 # to structures, a blast of 50, and a look 54 round for the toughest.
 discharge = { energy_required = 7500, energy_share_permille = 900, energy_per_damage = 6, min_damage = 1250, max_damage = 15000, commander_damage = 400, structure_damage = 800, splash_radius = 50, search_radius = 54, reload_ticks = 33 }
@@ -162,7 +162,7 @@ footprint = 1
 vision = 300
 requires_deposit = true
 mass_income = 2
-# FAF's: 2 energy a second to run, and it upgrades in place, at its own build power of 10.
+# The inspiration's: 2 energy a second to run, and it upgrades in place, at its own build power of 10.
 upkeep = 2
 build_power = 10
 upgrades_to = "mass_extractor_t2"
@@ -288,7 +288,7 @@ vision = 560
 build_power = 1500
 builds = ["strategic_missile"]
 max_stock = 5
-# FAF's two rings: 70,000 within 30 of its units and 500 within 40, at twenty of ours to one.
+# The inspiration's two rings: 70,000 within 30 of its units and 500 within 40, at twenty of ours to one.
 weapon = { range = 20000, reload_ticks = 100, projectile_speed = 25, damage = 500, splash_radius = 800, inner_damage = 70000, inner_radius = 600, kind = "strategic_missile", cruise_height = 500 }
 
 [[unit]]
@@ -440,7 +440,7 @@ stealth_field = 480
 jammer = { radius = 620, decoys = 8 }
 upkeep = 25
 
-# Field rigs (GAME_SPECIFICATION.md §2.2), with FAF's numbers for them and the Rig Yard. A field rig is a T3 engineer with heavy armor, a gun,
+# Field rigs (GAME_SPECIFICATION.md §2.2), with the inspiration's numbers for them and the Rig Yard. A field rig is a T3 engineer with heavy armor, a gun,
 # and income of its own, and its death does not end the match.
 adjacency_size = 12
 
@@ -485,7 +485,7 @@ energy_storage = 500
 death_explosion = { damage = 1000, radius = 200 }
 deep_scan = 320
 
-# Mass extractor upgrades, with FAF's numbers. Each is reached only by upgrading the one
+# Mass extractor upgrades, with the inspiration's numbers. Each is reached only by upgrading the one
 # below in place, which keeps making mass at its old rate meanwhile: its cost and build time here
 # are the upgrade's, built at the lower tier's own build power.
 [[unit]]
@@ -521,8 +521,8 @@ requires_deposit = true
 mass_income = 18
 upkeep = 54
 
-# Mass fabrication and geothermal power (GAME_SPECIFICATION.md §3.3-3.4), with FAF's numbers.
-# FAF's fabricators are T2 and T3, and its plant makes 5 generators' worth of energy.
+# Mass fabrication and geothermal power (GAME_SPECIFICATION.md §3.3-3.4), with the inspiration's numbers.
+# The inspiration's fabricators are T2 and T3, and its plant makes 5 generators' worth of energy.
 adjacency = "t3_extractor"
 
 [[unit]]
@@ -573,7 +573,7 @@ mass_income = 16
 upkeep = 1500
 death_explosion = { damage = 5000, radius = 200, only_while_running = true }
 
-# Aircraft (GAME_SPECIFICATION.md §10), with FAF's numbers for its T1 aircraft.
+# Aircraft (GAME_SPECIFICATION.md §10), with the inspiration's numbers for its T1 aircraft.
 # An aircraft's speed is its top air speed. `flight` sets how high it flies, how fast it turns,
 # how far past its target it flies before turning for another pass, and its seconds of fuel.
 adjacency = "t3_fabricator"
@@ -643,7 +643,7 @@ radar = 880
 flight = { elevation = 264, turn_rate = 180, break_off = 640, fuel = 400 }
 weapon = { kind = "bomb", range = 800, reload_ticks = 50, projectile_speed = 20, damage = 410, splash_radius = 29 }
 
-# Two shots a volley in FAF, one shot of twice the damage here.
+# Two shots a volley in the inspiration, one shot of twice the damage here.
 [[unit]]
 id = "t1_aa_turret"
 name = "Anti-Air Turret"
@@ -739,7 +739,7 @@ radar = 1920
 deep_scan = 560
 flight = { elevation = 440, turn_rate = 80, fuel = 1500 }
 
-# Two beams of 250 a second in FAF, one shot of 500 here.
+# Two beams of 250 a second in the inspiration, one shot of 500 here.
 [[unit]]
 id = "t3_air_superiority"
 name = "Air Superiority Fighter"
@@ -798,7 +798,7 @@ weapon = { range = 500, reload_ticks = 4, projectile_speed = 70, damage = 115, s
 extra_weapons = [{ range = 880, reload_ticks = 13, projectile_speed = 90, damage = "18.4", targets = "air" }]
 
 # Flak bursts on an aircraft and hits every enemy aircraft around it. Its shells fly at 90, not
-# FAF's 70, so that they can catch the fastest aircraft, which steer here instead of
+# The inspiration's 70, so that they can catch the fastest aircraft, which steer here instead of
 # being led.
 [[unit]]
 id = "t2_flak"
@@ -815,7 +815,7 @@ vision = 480
 # catches slow aircraft and gunships, and fast T3 aircraft mostly outfly it.
 weapon = { kind = "flak", range = 1000, reload_ticks = 8, projectile_speed = 40, damage = 125, splash_radius = 70, targets = "air", turn_rate = 180, spread = 40 }
 
-# A volley of six missiles of 200 in FAF, one of 1,200 here.
+# A volley of six missiles of 200 in the inspiration, one of 1,200 here.
 [[unit]]
 id = "t3_sam"
 name = "SAM Launcher"
@@ -831,7 +831,7 @@ vision = 560
 # Its missiles steer themselves to their aircraft, as only anti-air missiles do.
 weapon = { range = 1200, reload_ticks = 32, projectile_speed = 90, damage = 2400, splash_radius = 30, targets = "air", turn_rate = 180, homing = true }
 
-# Two shells a volley in FAF, one here, and at 90 for the reason above. Its damage is set by the
+# Two shells a volley in the inspiration, one here, and at 90 for the reason above. Its damage is set by the
 # anti-air share rule at T2, as the T1 mobile anti-air's is at T1: a T2 land army a fifth flak by
 # materiel comes out even with an equal cost of the AI's T2 air force (2026-11-24: 64, from 72).
 [[unit]]
@@ -850,7 +850,7 @@ radius = 10
 vision = 400
 weapon = { kind = "flak", range = 800, reload_ticks = 5, projectile_speed = 40, damage = 64, splash_radius = 80, targets = "air", turn_rate = 180, spread = 60 }
 
-# Support factories (GAME_SPECIFICATION.md §15), as in FAF: T2 and T3 builders
+# Support factories (GAME_SPECIFICATION.md §15), as in the inspiration: T2 and T3 builders
 # build them for less than an upgrade costs, but only while the team has a headquarters, a factory
 # upgraded to that tier, of the same kind. Without one, they build nothing above T1, and a T2
 # support factory cannot upgrade to T3 without a T3 headquarters.
@@ -969,7 +969,7 @@ upkeep = 150
 build_power = 20
 upgrades_to = "deep_scan_array"
 
-# Three shells of 70 a volley in FAF, one of 210 here.
+# Three shells of 70 a volley in the inspiration, one of 210 here.
 [[unit]]
 id = "t2_point_defense"
 name = "Point Defense (T2)"
@@ -1013,7 +1013,7 @@ vision = 300
 energy_storage = 10000
 adjacency = "energy_storage"
 
-# Artillery (GAME_SPECIFICATION.md §7), with FAF's numbers. Artillery cannot hit what is closer
+# Artillery (GAME_SPECIFICATION.md §7), with the inspiration's numbers. Artillery cannot hit what is closer
 # than its min_range, its shells land up to its spread from where they are aimed, and an
 # installation's shot costs energy_per_shot, paid when it fires. Generators beside an installation
 # cut what a shot costs and the time between shots. Since 2026-11-21 their blasts are wide, the T3
@@ -1054,7 +1054,7 @@ weapon = { range = 16500, reload_ticks = 133, projectile_speed = 150, damage = 1
 # (reports/balance/2026-11-21-t3-land.md), and again once shells came down where they were aimed
 # (reports/balance/2026-11-21-artillery-arcs.md). Since its blast went wide, a glass cannon, set
 # by the hits it takes and deals ([kills]): a shell's 859 kills a Medium Tank, and it survives one
-# from another of its kind but not two. FAF-style inaccuracy, a spread of 60, keeps it for clumps.
+# from another of its kind but not two. The inspiration's kind of inaccuracy, a spread of 60, keeps it for clumps.
 [[unit]]
 id = "t3_mobile_artillery"
 name = "Mobile Heavy Artillery"
@@ -1077,7 +1077,7 @@ vision = 1010
 # (For a day its cost was halved to keep that fight; put back on 2026-11-24.)
 weapon = { range = 1680, reload_ticks = 115, projectile_speed = 56, damage = "859.1", splash_radius = 83, turn_rate = 30, artillery = true, min_range = 420, spread = 60, setup_ticks = 10 }
 
-# FAF's fighter-bomber: a carpet of napalm bombs, burning included, as one bomb, and two railguns at
+# The inspiration's fighter-bomber: a carpet of napalm bombs, burning included, as one bomb, and two railguns at
 # aircraft, as one. Cost, build time, health, and damage set against the Medium Tank as the
 # inspiration has its fighter-bomber against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t2-air-navy.md).
 [[unit]]
@@ -1097,7 +1097,7 @@ flight = { elevation = 352, turn_rate = 270, break_off = 400, fuel = 500 }
 weapon = { kind = "bomb", range = 1200, reload_ticks = 100, projectile_speed = 30, damage = 1256, splash_radius = 36 }
 extra_weapons = [{ range = 600, reload_ticks = 10, projectile_speed = 180, damage = 118, targets = "air" }]
 
-# Naval units (GAME_SPECIFICATION.md §10), with FAF's numbers. The naval factory goes on water
+# Naval units (GAME_SPECIFICATION.md §10), with the inspiration's numbers. The naval factory goes on water
 # deep enough for ships, and its ships sail only there.
 [[unit]]
 id = "naval_factory"
@@ -1213,7 +1213,7 @@ on_water = true
 builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_escort_corvette", "t3_battleship", "t3_battlecruiser", "t3_missile_sub", "t2_torpedo_boat"]
 
 # Two twin gauss cannons, a twin railgun at aircraft, torpedoes, and an anti-torpedo charge.
-# Each twin fires both muzzles at once (FAF's MuzzleSalvoDelay of 0). Cost, build time, health,
+# Each twin fires both muzzles at once (the inspiration's MuzzleSalvoDelay of 0). Cost, build time, health,
 # and its guns' damage set against the Medium Tank as the inspiration has its destroyer
 # against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t2-air-navy.md). It is the fleet's hunter of submarines: its torpedoes do six times that ratio's, and its
 # anti-torpedo charge stops one torpedo a second, so that destroyers beat an equal cost of
@@ -1234,7 +1234,7 @@ radius = 20
 vision = 640
 radar = 800
 sonar = 720
-# An anti-torpedo charge, FAF's numbers: it shoots down a torpedo within 600 every 10 seconds.
+# An anti-torpedo charge, the inspiration's numbers: it shoots down a torpedo within 600 every 10 seconds.
 torpedo_defense = { range = 600, reload_ticks = 10 }
 movement = "naval"
 weapon = { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 475, splash_radius = 20, turn_rate = 90, spread = 7 }
@@ -1268,8 +1268,8 @@ vision = 1280
 radar = 3040
 sonar = 2400
 movement = "naval"
-# Cruise missiles climb high and come down on their target, as in FAF; they are not direct fire.
-# They fly at FAF's top speed for each missile, doubled for ticks: 28 to 40 a tick.
+# Cruise missiles climb high and come down on their target, as in the inspiration; they are not direct fire.
+# They fly at the inspiration's top speed for each missile, doubled for ticks: 28 to 40 a tick.
 weapon = { kind = "tactical_missile", automatic = true, range = 3000, reload_ticks = 25, projectile_speed = 32, damage = 454, splash_radius = 40, cruise_height = 400 }
 extra_weapons = [
     { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 233, splash_radius = 40, turn_rate = 90, spread = 10 },
@@ -1348,7 +1348,7 @@ missile_defense = { kind = "tactical", range = 620, reload_ticks = 20 }
 
 # Under the sea (GAME_SPECIFICATION.md §10). A submarine sails submerged, where only torpedoes
 # reach it and only sonar finds it. Torpedoes steer to ships and submarines, and hit nothing
-# else; they run at 30, faster than FAF's launch speed, as they steer here rather than
+# else; they run at 30, faster than the inspiration's launch speed, as they steer here rather than
 # speed up, and slower ones could never catch a ship.
 [[unit]]
 id = "t1_attack_sub"
@@ -1369,10 +1369,10 @@ vision = 640
 sonar = 1200
 movement = "submarine"
 weapon = { range = 640, reload_ticks = 40, projectile_speed = 30, damage = 185, targets = "naval" }
-# FAF's deck gun, 25 a second out to 640, which fires only on the surface.
+# The inspiration's deck gun, 25 a second out to 640, which fires only on the surface.
 extra_weapons = [{ range = 640, reload_ticks = 10, projectile_speed = 60, damage = 25, turn_rate = 90 }]
 
-# Five torpedoes a run, every 10 seconds: FAF's unit database counts its 3 projectiles a fire once,
+# Five torpedoes a run, every 10 seconds: the inspiration's unit database counts its 3 projectiles a fire once,
 # not three times, so 15 a run was three times too many. Cost, build time, health, and damage set
 # against the Medium Tank as the inspiration has its torpedo bomber against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t2-air-navy.md).
 [[unit]]
@@ -1507,7 +1507,7 @@ movement = "naval"
 torpedo_defense = { range = 600, reload_ticks = 30 }
 shield = { radius = 400, health = 4000, regen = 80, recharge_seconds = 30, upkeep = 80 }
 
-# FAF's numbers. It builds nuclear missiles as a strategic missile launcher does, on order or one after
+# The inspiration's numbers. It builds nuclear missiles as a strategic missile launcher does, on order or one after
 # another, up to three, and fires one only on order. Its cruise missiles it fires on its own at
 # whatever is in range, and needs none built. It fires both from under the water.
 [[unit]]
@@ -1552,7 +1552,7 @@ radius = 11
 vision = 650
 weapon = { kind = "tactical_missile", automatic = true, artillery = true, min_range = 259, range = 1295, reload_ticks = 50, projectile_speed = 40, damage = "420.1", splash_radius = 10, cruise_height = 40 }
 
-# Field enhancements (GAME_SPECIFICATION.md §2.1), with FAF's numbers for its
+# Field enhancements (GAME_SPECIFICATION.md §2.1), with the inspiration's numbers for its
 # commander. A commander has three bays, and one enhancement in each: a new one replaces what is
 # there, unless it builds on it. Its effects are totals over the commander's own, not steps.
 [[enhancement]]
@@ -1563,7 +1563,7 @@ slot = "weapons"
 mass = 800
 energy = 24000
 build_time = 800
-# FAF's 30 range for 22, and double the damage.
+# The inspiration's 30 range for 22, and double the damage.
 weapon_range = 600
 weapon_damage = 140
 
@@ -1671,7 +1671,7 @@ mass_income = 14
 energy_income = 2500
 
 # The field rig's enhancements, in §2.1's bays: weapons, fabrication, and systems. Its redeploy
-# and fabricator take FAF's numbers for another faction's, and its engineering drone needs aircraft.
+# and fabricator take the inspiration's numbers for another faction's, and its engineering drone needs aircraft.
 [[enhancement]]
 id = "long_barrel"
 name = "Long Barrel"
@@ -1680,7 +1680,7 @@ slot = "weapons"
 mass = 800
 energy = 30000
 build_time = 3360
-# FAF's 35 range for 25, and a blast of 2.
+# The inspiration's 35 range for 25, and a blast of 2.
 weapon_range = 700
 weapon_splash = 40
 
@@ -1713,7 +1713,7 @@ slot = "systems"
 mass = 600
 energy = 20000
 build_time = 3000
-# FAF's 45 sight and 80 omni.
+# The inspiration's 45 sight and 80 omni.
 vision = 900
 deep_scan = 1600
 
@@ -1770,7 +1770,7 @@ build_time = 8400
 mass_income = 10
 energy_income = 1000
 
-# The rest of the land, naval, and defensive line, from FAF's blueprints with the usual
+# The rest of the land, naval, and defensive line, from the inspiration's blueprints with the usual
 # conversion: distances x20, speeds x2 per tick, build times and health as they are, and salvo
 # weapons as one shot at a time with the same damage a second.
 
@@ -1968,7 +1968,7 @@ footprint = 1
 vision = 40
 
 # Engineering stations: a drone that helps whatever is building, being upgraded, or damaged within
-# reach, on its own. The T3 station, an upgrade of the T2, flies two. FAF's build rates: 20 and 30.
+# reach, on its own. The T3 station, an upgrade of the T2, flies two. The inspiration's build rates: 20 and 30.
 [[unit]]
 id = "field_workshop"
 name = "Field Workshop"

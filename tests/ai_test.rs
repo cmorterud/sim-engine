@@ -249,7 +249,8 @@ fn ai_climbs_the_tech_tree_and_upgrades_its_economy() {
     let mut world = scenario::skirmish(11).world;
     let mut brain = AiBrain::new(Team::Blue, 11, world.starts);
     // 30 minutes, with nobody playing Red, whose commander is kept alive so the match goes on.
-    // FAF's T3 headquarters, at 5,220 mass and 12,000 build time, comes later than ours did.
+    // The inspiration's T3 headquarters, at 5,220 mass and 12,000 build time, comes later than ours
+    // did.
     let (mut loaded, mut dropped) = (false, false);
     for _ in 0..18_000 {
         let commands = brain.think(&world);
