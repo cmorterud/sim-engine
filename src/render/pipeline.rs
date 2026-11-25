@@ -15,6 +15,7 @@ use winit::window::Window;
 use super::camera::{Camera, HeightField};
 use super::instances::{InstanceBatches, UnitInstanceRaw};
 use super::meshes::{MeshSet, MeshVertex, Shape};
+use super::gpu_timing::GpuTimer;
 use super::sight::{Presence, Sight};
 
 /// The most terrain samples a side the grid holds: enough for a 20 km map at full detail.
@@ -53,8 +54,45 @@ struct Globals {
     terrain_grid: [i32; 4],
     selection_box: [f32; 4],
     terrain_scale: [f32; 4],
-    /// The simulation's time in seconds, for waves, then nothing yet.
+    /// The simulation's time in seconds, for waves, the terrain grid's samples a side, how
+    /// strongly sight is washed pale, then the quality: 0 for `Low`, 1 for `High`.
     water: [f32; 4],
+}
+
+/// How much the land and sea shaders draw. `Low` is for weak graphics, such as a laptop's
+/// built-in one in the browser, and `High` for the rest. Both draw the same picture until the
+/// shaders give `Low` cheaper paths.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Quality {
+    Low,
+    High,
+}
+
+impl Quality {
+    /// By name, for --quality and ?quality=.
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "low" => Some(Self::Low),
+            "high" => Some(Self::High),
+            _ => None,
+        }
+    }
+
+    /// `Low` in the browser, which must run on any laptop, and `High` elsewhere.
+    pub const fn default_for_platform() -> Self {
+        if cfg!(target_arch = "wasm32") {
+            Self::Low
+        } else {
+            Self::High
+        }
+    }
+
+    const fn shader_value(self) -> f32 {
+        match self {
+            Self::Low => 0.0,
+            Self::High => 1.0,
+        }
+    }
 }
 
 fn terrain_indices(size: u32) -> Vec<u32> {
@@ -165,6 +203,9 @@ pub struct Renderer {
     egui: egui_wgpu::Renderer,
     draw_box: bool,
     last_acquire: Duration,
+    quality: Quality,
+    /// Timing of the scene's parts on the graphics card, once asked for and if it can.
+    gpu_timer: Option<GpuTimer>,
 }
 
 /// What the scene draws into before it lands in the window: depth, and with more than one
@@ -200,6 +241,29 @@ impl Renderer {
         self.water_level = level;
     }
 
+    /// Draws land and sea at this quality from the next frame on.
+    pub fn set_quality(&mut self, quality: Quality) {
+        self.quality = quality;
+    }
+
+    pub const fn quality(&self) -> Quality {
+        self.quality
+    }
+
+    /// Starts timing the terrain, units, and water on the graphics card, for test runs. Whether
+    /// the adapter can.
+    pub fn start_gpu_timing(&mut self) -> bool {
+        self.gpu_timer = GpuTimer::new(&self.device, &self.queue);
+        self.gpu_timer.is_some()
+    }
+
+    /// The average milliseconds the terrain, units, and water took on the graphics card, in
+    /// that order, and over how many frames, if timing was started and has read any.
+    pub fn gpu_timing(&self) -> Option<([f64; 3], u32)> {
+        let timer = self.gpu_timer.as_ref()?;
+        timer.averages_ms().map(|averages| (averages, timer.frames()))
+    }
+
     /// `fog_side` is the size of the fog of war grid, if the session has fog.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn new(window: Arc<Window>, heights: &HeightField, fog_side: Option<usize>) -> Self {
@@ -228,7 +292,7 @@ impl Renderer {
         let (device, queue) = adapter.request_device(
             &wgpu::DeviceDescriptor {
                 label: Some("device"),
-                required_features: adapter.features() & wgpu::Features::DEPTH32FLOAT_STENCIL8,
+                required_features: adapter.features() & (wgpu::Features::DEPTH32FLOAT_STENCIL8 | GpuTimer::FEATURES),
                 // A browser's GPU may offer less than the native defaults, as WebGL2 does: ask for
                 // what it has, which is more than the game needs.
                 required_limits: if cfg!(target_arch = "wasm32") { adapter.limits() } else { wgpu::Limits::default() },
@@ -720,6 +784,8 @@ impl Renderer {
             egui,
             draw_box: false,
             last_acquire: Duration::ZERO,
+            quality: Quality::default_for_platform(),
+            gpu_timer: None,
         }
     }
 
@@ -825,7 +891,7 @@ impl Renderer {
             terrain_grid: [first[0], first[1], step, self.samples_per_side],
             selection_box,
             terrain_scale: [self.height_scale, self.icon_scale, self.fog_scale, self.water_level],
-            water: [scene.time, self.grid_size as f32, strategic_share(camera.zoom_from_closest()), 0.0],
+            water: [scene.time, self.grid_size as f32, strategic_share(camera.zoom_from_closest()), self.quality.shader_value()],
         };
         self.queue.write_buffer(&self.globals_buffer, 0, bytemuck::bytes_of(&globals));
         // Only what can show in the picture is sent: the rest of the map's units, scenery, and
@@ -883,10 +949,18 @@ impl Renderer {
             occlusion_query_set: None,
         });
         pass.set_bind_group(0, &self.bind_group, &[]);
+        let timer = self.gpu_timer.as_ref();
+        let stamp = |pass: &mut wgpu::RenderPass<'_>, index| {
+            if let Some(timer) = timer {
+                timer.stamp(pass, index);
+            }
+        };
 
+        stamp(&mut pass, 0);
         pass.set_pipeline(&self.terrain_pipeline);
         pass.set_index_buffer(self.terrain_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..self.terrain_index_count, 0, 0..1);
+        stamp(&mut pass, 1);
 
         pass.set_vertex_buffer(0, self.mesh_vertices.slice(..));
         pass.set_vertex_buffer(1, self.instance_buffer.buffer.slice(..));
@@ -921,6 +995,7 @@ impl Renderer {
                 pass.draw_indexed(indices.clone(), 0, instances.clone());
             }
         }
+        stamp(&mut pass, 2);
         // Water over the units, so that what is under it shows through, tinted by its depth.
         if self.water_level > self.lowest_ground {
             pass.set_pipeline(&self.water_pipeline);
@@ -928,6 +1003,7 @@ impl Renderer {
             pass.draw_indexed(0..self.terrain_index_count, 0, 0..1);
             pass.set_index_buffer(self.mesh_indices.slice(..), wgpu::IndexFormat::Uint32);
         }
+        stamp(&mut pass, 3);
         let smoke = &self.shape_instances[Shape::Smoke as usize];
         if !smoke.is_empty() {
             pass.set_pipeline(&self.smoke_pipeline);
@@ -964,8 +1040,14 @@ impl Renderer {
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") });
         self.encode(&mut encoder, &view, &self.targets);
+        if let Some(timer) = &mut self.gpu_timer {
+            timer.resolve(&mut encoder);
+        }
         let extra = ui.map_or_else(Vec::new, |ui| self.encode_ui(&mut encoder, &view, ui));
         self.queue.submit(extra.into_iter().chain([encoder.finish()]));
+        if let Some(timer) = &mut self.gpu_timer {
+            timer.after_submit(&self.device);
+        }
         frame.present();
     }
 
