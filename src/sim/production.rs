@@ -561,6 +561,7 @@ impl SimWorld {
         if let Some(def) = unit.shield {
             let shield = Shield {
                 radius: def.radius,
+                height: def.height,
                 health: def.health,
                 max_health: def.health,
                 regen_per_tick: def.regen_per_tick,
@@ -2606,7 +2607,7 @@ impl SimWorld {
         }
         if let Ok(shield) = self.ecs.get::<&Shield>(entity) {
             hasher.write(&[15]);
-            for value in [shield.radius, shield.health, shield.max_health, shield.regen_per_tick] {
+            for value in [shield.radius, shield.height, shield.health, shield.max_health, shield.regen_per_tick] {
                 hasher.write(&value.to_bits().to_le_bytes());
             }
             hasher.write(&shield.recharging.to_le_bytes());

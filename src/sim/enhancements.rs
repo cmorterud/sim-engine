@@ -225,10 +225,11 @@ impl SimWorld {
         let listed = self.shields.binary_search_by_key(&id, |unit| unit.0);
         match effects.shield {
             Some(def) => {
-                let same = self.ecs.get::<&Shield>(entity).is_ok_and(|shield| shield.radius == def.radius && shield.max_health == def.health && shield.upkeep == def.upkeep);
+                let same = self.ecs.get::<&Shield>(entity).is_ok_and(|shield| shield.radius == def.radius && shield.height == def.height && shield.max_health == def.health && shield.upkeep == def.upkeep);
                 if !same {
                     let shield = Shield {
                         radius: def.radius,
+                        height: def.height,
                         health: def.health,
                         max_health: def.health,
                         regen_per_tick: def.regen_per_tick,

@@ -1896,9 +1896,9 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                     let at = snapshot.plans.partition_point(|plan| plan.id < commander);
                                     snapshot.plans.insert(at, UnitPlanView { id: commander, steps });
                                     // And a shield dome over the commander, at two-thirds strength.
-                                    let radius = map.blueprints.get(map.blueprints.id("shield_generator")).shield.map_or(0, |shield| shield.radius.to_bits());
+                                    let (radius, height) = map.blueprints.get(map.blueprints.id("shield_generator")).shield.map_or((0, 0), |shield| (shield.radius.to_bits(), shield.height.to_bits()));
                                     let ground = z - snapshot.units[index].radius;
-                                    snapshot.shields.push(ShieldView { id: commander, team: PLAYER_TEAM, center: [x, y, ground], radius, health_permille: 660, up: true, recharging: 0 });
+                                    snapshot.shields.push(ShieldView { id: commander, team: PLAYER_TEAM, center: [x, y, ground], radius, height, health_permille: 660, up: true, recharging: 0 });
                                     // Two overlapping radars and a deep scan array, for the coverage outline far out, and
                                     // a few blips beyond them.
                                     let unit = |value: i32| value << 12;

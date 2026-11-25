@@ -195,12 +195,22 @@ pub fn missile_velocity(terrain: &Terrain, from: Vec3Fp, missile: &Missile) -> V
 /// segment that starts outside can enter, which is what lets shells fired from inside a shield
 /// dome fly out. Exact, in integers: the smaller root of |start + t * step - center| = radius.
 pub fn sphere_entry(start: Vec3Fp, step: Vec3Fp, center: [i32; 3], radius: i32) -> Option<i32> {
+    dome_entry(start, step, center, radius, radius)
+}
+
+/// Where a segment first enters a dome around `center`, as `sphere_entry` does a sphere: an
+/// upright ellipsoid `radius` across and `height` high, a sphere when the two are equal, so that a
+/// flattened shield stays beneath aircraft and their fire must come down through it (2026-11-24).
+/// Heights stretched by radius / height make it a sphere of its radius; the stretch rounds toward
+/// zero, the same for a shot and its mirror image, which differ only across.
+pub fn dome_entry(start: Vec3Fp, step: Vec3Fp, center: [i32; 3], radius: i32, height: i32) -> Option<i32> {
+    let stretch = |value: i128| if height == radius { value } else { value * i128::from(radius) / i128::from(height.max(1)) };
     let away = [
         i128::from(start.x.to_bits()) - i128::from(center[0]),
         i128::from(start.y.to_bits()) - i128::from(center[1]),
-        i128::from(start.z.to_bits()) - i128::from(center[2]),
+        stretch(i128::from(start.z.to_bits()) - i128::from(center[2])),
     ];
-    let step = [i128::from(step.x.to_bits()), i128::from(step.y.to_bits()), i128::from(step.z.to_bits())];
+    let step = [i128::from(step.x.to_bits()), i128::from(step.y.to_bits()), stretch(i128::from(step.z.to_bits()))];
     let dot = |a: [i128; 3], b: [i128; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
     let outside = dot(away, away) - i128::from(radius) * i128::from(radius);
     let toward = dot(away, step);
@@ -397,6 +407,20 @@ mod tests {
         // Starting inside never enters, whichever way it goes.
         assert_eq!(sphere_entry(v(90, 0, 0), v(100, 0, 0), center, raw(30)), None);
         assert_eq!(sphere_entry(v(90, 0, 0), v(-100, 0, 0), center, raw(30)), None);
+    }
+
+    #[test]
+    fn a_flattened_dome_is_entered_through_its_lower_top() {
+        let raw = |value: i32| fp_int(value).to_bits();
+        let center = [raw(100), 0, 0];
+        // Straight down from 25 above the middle of a dome 30 across and 10 high: in at 10, halfway
+        // down a step of 30. A sphere of radius 30 would have it start inside, and never enter.
+        assert_eq!(dome_entry(v(100, 0, 25), v(0, 0, -30), center, raw(30), raw(10)), Some(2_048));
+        assert_eq!(dome_entry(v(100, 0, 25), v(0, 0, -30), center, raw(30), raw(30)), None);
+        // Across the water it reaches as far as the sphere does.
+        assert_eq!(dome_entry(v(0, 0, 0), v(100, 0, 0), center, raw(30), raw(10)), sphere_entry(v(0, 0, 0), v(100, 0, 0), center, raw(30)));
+        // Passing over it, above its top, does not enter.
+        assert_eq!(dome_entry(v(0, 0, 12), v(200, 0, 0), center, raw(30), raw(10)), None);
     }
 
     #[test]

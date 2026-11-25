@@ -299,7 +299,8 @@ pub fn item_details(db: &BlueprintDb, blueprint: BlueprintId) -> String {
         lines.push(format!("Stores {} materiel and {} energy", unit.mass_storage.to_num::<i64>(), unit.energy_storage.to_num::<i64>()));
     }
     if let Some(shield) = unit.shield {
-        lines.push(format!("Shield: {} health, radius {}", whole(shield.health), whole(shield.radius)));
+        let height = if shield.height < shield.radius { format!(", height {}", whole(shield.height)) } else { String::new() };
+        lines.push(format!("Shield: {} health, radius {}{height}", whole(shield.health), whole(shield.radius)));
     }
     let mut sensors = vec![format!("vision {}", whole(unit.vision))];
     if unit.radar > Fp::ZERO {
@@ -4592,7 +4593,7 @@ mod tests {
     fn a_shield_says_how_strong_it_is_or_when_it_will_be_back() {
         use crate::sim::components::Team;
         use crate::sim::world::ShieldView;
-        let view = |up: bool, recharging: u32| ShieldView { id: SimId(5), team: Team::Blue, center: [0; 3], radius: 0, health_permille: 640, up, recharging };
+        let view = |up: bool, recharging: u32| ShieldView { id: SimId(5), team: Team::Blue, center: [0; 3], radius: 0, height: 0, health_permille: 640, up, recharging };
         let with = |shield: ShieldView| SimSnapshot { shields: vec![shield], ..SimSnapshot::default() };
         assert_eq!(shield_status(&with(view(true, 0)), SimId(5)).as_deref(), Some("shield 64%"));
         assert_eq!(shield_status(&with(view(false, 291)), SimId(5)).as_deref(), Some("shield down, back in 30 s"));
