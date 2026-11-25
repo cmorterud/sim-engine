@@ -696,7 +696,8 @@ fn fs_terrain(input: TerrainOutput) -> @location(0) vec4<f32> {
     } else {
         // Sand the waves wash over is darker and glossier, up to where the last one reached.
         let inland = -shore_distance(input.world);
-        let reach = 3.0 + 2.5 * (0.5 + 0.5 * sin(time * 0.8 + value_noise(input.world / 40.0) * 6.0));
+        let wander = select(0.5, value_noise(input.world / 40.0), high_quality());
+        let reach = 3.0 + 2.5 * (0.5 + 0.5 * sin(time * 0.8 + wander * 6.0));
         let wet = (1.0 - smoothstep(reach * 0.6, reach, inland)) * (1.0 - steep);
         color = color * mix(1.0, 0.62, wet);
     }
@@ -799,7 +800,9 @@ fn swell_slope(at: vec2<f32>, time: f32, footprint: f32) -> vec2<f32> {
         vec4<f32>(-0.45, 0.89, 24.0, 0.04),
     );
     var slope = vec2<f32>(0.0);
-    for (var index = 0; index < 4; index = index + 1) {
+    // On low quality, the two longest only.
+    let count = select(2, 4, high_quality());
+    for (var index = 0; index < count; index = index + 1) {
         let train = trains[index];
         let wavenumber = 6.2831853 / train.z;
         let speed = sqrt(9.8 * wavenumber);
@@ -820,7 +823,10 @@ fn chop_slope(at: vec2<f32>, time: f32) -> vec2<f32> {
         slope = slope + second * 0.22;
     }
     // Calmer and choppier stretches, so that the texture's repeats do not line up into a grid.
-    return slope * (0.55 + 0.9 * value_noise(at / 170.0 + vec2<f32>(time * 0.01, 0.0)));
+    if (high_quality()) {
+        slope = slope * (0.55 + 0.9 * value_noise(at / 170.0 + vec2<f32>(time * 0.01, 0.0)));
+    }
+    return slope;
 }
 
 @fragment
@@ -832,7 +838,12 @@ fn fs_water(input: WaterOutput) -> @location(0) vec4<f32> {
     let chop = chop_slope(at, time);
     let fog = textureSample(fog_texture, fog_sampler, input.fog_coordinates).r;
     let from_shore = shore_distance(at);
+    // Low quality breaks the foam up with one layer of noise instead of two.
     let breakup = value_noise(at / 7.0 + vec2<f32>(time * 0.12, -time * 0.07));
+    var drift = breakup;
+    if (high_quality()) {
+        drift = value_noise(at / 23.0 + vec2<f32>(-time * 0.05, time * 0.04)) * 0.6 + breakup * 0.4;
+    }
 
     let normal = normalize(vec3<f32>(-(swell_slope(at, time, footprint) + chop), 1.0));
     let to_eye = normalize(-input.relative);
@@ -865,7 +876,7 @@ fn fs_water(input: WaterOutput) -> @location(0) vec4<f32> {
     // little along the coast.
     let wave = fract(from_shore / 16.0 + time * 0.22 + breakup * 0.5);
     let rolling = smoothstep(0.55, 0.9, wave) * (1.0 - smoothstep(0.9, 0.97, wave));
-    let patchy = smoothstep(0.25, 0.75, value_noise(at / 23.0 + vec2<f32>(-time * 0.05, time * 0.04)) * 0.6 + breakup * 0.4);
+    let patchy = smoothstep(0.25, 0.75, drift);
     let bands = rolling * patchy * exp(-from_shore / 12.0) * (1.0 - smoothstep(3.0, 8.0, footprint));
     let foam = clamp(max(lapping * 0.85, bands * 0.6), 0.0, 1.0) * step(0.0, from_shore);
 
