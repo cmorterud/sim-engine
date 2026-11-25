@@ -122,7 +122,9 @@ fn the_named_maps_sides_play_mirror_images_through_the_opening() {
 /// one enemy player's for one team and the other's for the other; and a 3v3 on Saddleback's
 /// where a shot at an aircraft, rounded toward negative infinity as it led its turn and as it
 /// passed its target, hit on one side and missed on the other, and where each player's flow
-/// fields waited behind the others' for a share of one budget.
+/// fields waited behind the others' for a share of one budget. Once fighters were repriced,
+/// Saddleback's 3v3 parted again (2026-11-25), where bombers that took off together from one
+/// spot parted along x, the lowest id furthest east on both sides.
 #[test]
 #[cfg_attr(debug_assertions, ignore = "release only")]
 fn matches_on_the_maps_from_files_play_mirror_images_into_the_first_fights() {
