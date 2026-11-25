@@ -20,13 +20,14 @@ no target relies on an exact tie.
 | 1 | Strategic Bomber health | 7,500 | **6,300** (conflict, see 1.2) |
 | 2 | Cruiser cruise missiles | 454 dmg, one every 2.5 s | **454 dmg × 4 a volley**, one a second, then 6 s reload (10 s cycle) |
 | 3 | Shield Generator (T2) regen | 50 /s | **190 /s** |
+| 3 | Heavy Shield Generator (T3) regen | 131 /s | **500 /s** |
 | 4 | Tactical Missile Defense (structure) | every 3 s | **every 1.8 s** |
 | 4 | Battlecruiser missile defense | 1 mount, every 2 s | 1 mount, **every 1.8 s** |
 | 4 | Battleship missile defense | 2 mounts, every 2 s each | 2 mounts, **every 1.8 s each** |
 | 4 | Cruiser missile defense (not in the ask) | 2 mounts, every 2 s each | 2 mounts, **every 1.8 s each** (one rule for every mount) |
 | 5 | Missile defense targeting | one pooled timer per unit | **one timer per mount**; never two on one missile; always hits (already true, now pinned) |
 | 10 | Destroyer guns | 475 dmg × 2 every 4 s | **455** dmg × 2 every 4 s |
-| 10 | Destroyer torpedoes | 560 dmg every 4 s | **181 against commanders** (see 10.2 for why not against everything) |
+| 10 | Destroyer torpedoes | 560 dmg every 4 s | **181** (a commander in ~79 s by five, a T1 sub in ~27 s by one) |
 | 11 | Torpedo Boat torpedoes | 100 dmg every 0.8 s | **126** dmg every 0.8 s |
 
 ## New engine feature: volleys (salvos)
@@ -153,8 +154,8 @@ above 181.6 holds forever. **Proposed: 190 a second** (5% margin; 19 a tick).
 Conflicts and knock-on effects:
 
 - **The T3 Heavy Shield Generator would regenerate less than the T2.** It has 131 a second
-  against the T2's proposed 190. It needs a decision. Keeping today's ratio (131 / 50 = 2.6×)
-  would put it near 500 a second.
+  against the T2's proposed 190. **Decided 2026-11-25: raise it to 500 a second**, which keeps
+  today's ratio to the T2 (131 / 50 = 2.6×; 190 × 2.6 ≈ 500).
 - Every other weapon that wears down a T2 dome now needs 3.8 times the fire just to outpace
   regen. For example, it takes about 7 T1 Light Artillery (28 a second each) just to stall it.
   The [siege] and [missiles] checks need re-running. Upkeep (30 energy a second) could rise with
@@ -273,13 +274,10 @@ On a fire order, the Strategic Missile Launcher runs `SiloLaunch`:
 - The Strategic Missile Submarine does the same with one small deck hatch (proposed, same
   timings).
 
-**Conflict to settle: "slowly flies out" against "constant speed".** At the nuke's 25 a tick, it
-clears a 60-unit silo in about 3 ticks (0.3 s), which will not read as slow. The choices:
-
-- (a) **Recommended**: a slow lift inside the silo only, at about 3 a tick for 2 s, then the
-  constant 25 for the whole flight.
-- (b) A lower constant speed for the whole flight. At 10 a tick, a 3,400 launch takes about 70 s.
-- (c) Keep 25 throughout and accept a quick exit.
+**"Slowly flies out" against "constant speed".** At the nuke's 25 a tick, it would clear a
+60-unit silo in about 3 ticks (0.3 s), which does not read as slow. **Decided 2026-11-25: a slow
+lift inside the silo only**, at about 3 a tick for 2 s, then the constant 25 for the whole
+flight. The Rising phase above runs at the lift speed.
 
 ## 9. Shield shimmer
 
@@ -318,20 +316,40 @@ That needs 39d < 18,000 ≤ 40d, so 450 ≤ d < 461.5. **Proposed: 455** (from 4
 hit a land unit. A spread of 7 against the commander's radius of 16 means a commander standing
 still takes every shell.
 
-### 10.2 Torpedoes, five destroyers, commander under water, about 80 s
+### 10.2 Torpedoes: five destroyers against a commander in about 80 s, one against a T1 sub in about 25 s
 
-The guns cannot target a seabed walker (already pinned by `target_category_test.rs`). Five
-destroyers fire 5 torpedoes every 4 s, with about 3 s of torpedo flight. Twenty volleys is 100
-torpedoes, about 79 s, and needs 99d < 18,000 ≤ 100d, so **d = 181**.
+The guns cannot target a seabed walker or a submerged submarine (already pinned by
+`target_category_test.rs`). A destroyer fires one torpedo every 4 s, with about 3 s of flight.
 
-**Conflict:** today's torpedo does 560. That is deliberately six times its cost ratio, so that
-destroyers hunt submarines (`destroyers_beat_submarines = 0.40` in [domains]). Cutting it to
-181 (−68%) takes an Attack Submarine (1,163) from 3 torpedoes to 7, and very likely breaks that
-cell.
+Two targets, both on the same torpedo (the second added 2026-11-25):
 
-- **Recommended:** a weapon field `commander_damage`, as the commander's Discharge already has
-  for itself. The destroyer's torpedo does 181 to commanders and 560 to everything else.
-- Alternative: cut the damage outright to 181 and re-tune the destroyer against submarines.
+| Target | Health | Torpedoes | Seconds | Damage d must be |
+|---|---|---|---|---|
+| Commander, five destroyers | 18,000 | 100 (20 volleys of 5) | 19 × 4 + 3 ≈ 79 | 180 to 181.8 |
+| | | 95 (19 volleys) | 18 × 4 + 3 ≈ 75 | 189.5 to 191.4 |
+| T1 Attack Submarine, submerged, one destroyer | 1,163 | 7 | 6 × 4 + 3 ≈ 27 | 166.2 to 193.8 |
+| | | 6 | 5 × 4 + 3 ≈ 23 | 193.9 to 232.6 |
+
+**Both hold with one value. Proposed: 181** (from 560). The commander dies to the 100th
+torpedo at about 79 s (99 × 181 = 17,919; 100 × 181 = 18,100). The submarine dies to the 7th at
+about 27 s (6 × 181 = 1,086; 7 × 181 = 1,267). The 4 s reload means the submarine's time can
+only be about 23 s or about 27 s. 194 would give 23 s for the submarine but 75 s for the
+commander, so 181 sits closer to both targets.
+
+The Attack Submarine has no anti-torpedo charge, so every torpedo lands.
+
+This replaces the earlier idea of a commander-only damage value. The submarine target sets how
+strongly a destroyer hunts submarines, so the [domains] cell `destroyers_beat_submarines = 0.40`
+is now a check rather than what sets the torpedo. A rough estimate says it still holds:
+
+- An equal cost of Attack Submarines is about 6 (by mass, 1,658 / 265).
+- Six submarines fire 1.5 torpedoes a second. The destroyer's anti-torpedo charge decoys one a
+  second, so about 0.5 a second get through, about 93 damage a second.
+- The destroyer kills one submarine about every 27 s. Leaks stop once 4 submarines are left (one
+  torpedo a second, all decoyed).
+- So the destroyer takes about 93 × 27 + 46 × 27 ≈ 3,750 of its 10,231 and wins with over 60%
+  left. The fight takes about 2.5 minutes, against about 1 minute today.
+- PR 3 re-runs the cell in the sim to confirm.
 
 ## 11. Two torpedo boats against an unprotected commander, about 60 s
 
@@ -342,7 +360,8 @@ for a **kill at about 60 s**.
 
 - Side effect: the Torpedo Boat's [domains] strength rises about 12% (√1.26). It sits at 0.32 of
   the anchor within a band of [0.80, 1.25] times that, so re-run [domains].
-- If that pushes it out, use `commander_damage = 126` instead, as in 10.2.
+- If that pushes it out, the band or the boat's cost is the thing to revisit, since the 60 s
+  target is fixed.
 - Separately, the "four-torpedo volleys" comment could become a real `salvo` (4 shots every
   3.2 s gives the same damage per second). That is not needed for the 60 s target, and is left as
   a question.
@@ -364,6 +383,8 @@ for a **kill at about 60 s**.
    cruiser_missiles_commander = [95, 105]
    destroyer_guns_commander_on_land = [75, 85]
    five_destroyers_torpedoes_commander_under_water = [75, 85]
+   # One destroyer's torpedoes against a submerged T1 Attack Submarine.
+   destroyer_torpedoes_t1_sub_submerged = [22, 28]
    two_torpedo_boats_commander_under_water = [55, 65]
    # And the cruiser's anti-air volleys in flight time.
    cruiser_two_volleys_seconds_max = 4
@@ -402,10 +423,10 @@ Each PR is reviewable alone and leaves `main` playable.
    The Gunship and Strategic Bomber health values (Option A, or B if chosen). `[volleys]` filled
    in, the cruiser kill-time sim tests, a [domains] re-run report in `reports/balance/`, and new
    goldens.
-3. **Naval kill times (items 10, 11).** The `commander_damage` weapon field (if chosen), destroyer
-   guns at 455, destroyer torpedoes, Torpedo Boat at 126, the kill-time sim tests, a [domains]
-   re-run, and goldens.
-4. **Shields and missile defense (items 3, 4, 5).** T2 regen at 190 (and the T3 decision),
+3. **Naval kill times (items 10, 11).** Destroyer guns at 455, destroyer torpedoes at 181,
+   Torpedo Boat at 126, the kill-time sim tests (the submarine one too), a [domains] re-run
+   (`destroyers_beat_submarines` above all), and goldens.
+4. **Shields and missile defense (items 3, 4, 5).** T2 regen at 190 and T3 Heavy at 500,
    per-mount timers, 1.8 s everywhere, the no-double-targeting tests, the shield-holds tests, a
    [siege] and [missiles] re-run, and goldens.
 5. **Nuclear flight and silo sequence, sim side (items 6, 8).** `NuclearFlight`, the
@@ -423,12 +444,10 @@ depends on nothing above. PR 6 depends on 5. PR 7 is independent.
 
 1. **Anti-air health conflict (1.2):** Option A (Gunship to 1,590, Strategic Bomber to 6,300) or
    Option B (four units change)? Recommended: A.
-2. **Destroyer torpedoes (10.2):** add `commander_damage` so only commanders take 181, or cut the
-   torpedo for everything? Recommended: `commander_damage`.
-3. **Nuke exit speed (8):** a slow lift in the silo and then a constant speed (recommended), a
-   slower constant speed throughout, or a quick exit?
-4. **T3 Heavy Shield regen (3):** raise it (near 500 a second keeps its ratio to the T2), or
-   leave it below the T2?
+2. ~~Destroyer torpedoes (10.2)~~. Settled 2026-11-25 by the new submarine target: 181 for
+   everything.
+3. ~~Nuke exit speed (8)~~. Settled 2026-11-25: a slow lift in the silo, then constant speed.
+4. ~~T3 Heavy Shield regen (3)~~. Settled 2026-11-25: raise it to 500 a second.
 5. Smaller ones, with defaults the plan uses unless told otherwise: cruiser missile defense also
    at 1.8 s; nuke apex 2,000; silo doors swing (not slide); the submarine's hatch animates too;
    the Torpedo Boat stays one torpedo at a time.
