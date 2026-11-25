@@ -593,6 +593,34 @@ fn aircraft_in_flight_keep_apart() {
     assert!(closest >= radius * 2, "they stay at least their width apart, not {closest}");
 }
 
+/// Aircraft exactly together part side by side, across the way they face, so that a group and
+/// its mirror image through the map's center part in mirror image. They parted along x, the
+/// lowest id furthest east on both sides (2026-11-25): with fighters repriced, five bombers of
+/// a player in a Saddleback 3v3 took off from the one spot they had landed on and spread out in
+/// opposite orders on the two sides, and 200 ticks later a bomber and the one at its image
+/// looked for targets on different ticks and went for different ones.
+#[test]
+fn aircraft_exactly_together_part_in_mirror_image() {
+    let mut world = world();
+    let map = fp_int(world.terrain.map_units());
+    let mirror = |at: Vec2Fp| Vec2Fp::new(map - at.x, map - at.y);
+    let (start, goal) = (point(1_000, 1_500), point(2_200, 900));
+    let blue: Vec<SimId> = (0..5).map(|_| spawn(&mut world, "t1_bomber", Team::Blue, start)).collect();
+    let red: Vec<SimId> = (0..5).map(|_| spawn(&mut world, "t1_bomber", Team::Red, mirror(start))).collect();
+    world.advance_tick(&[SimCommand::Move { units: blue.clone(), goal }, SimCommand::Move { units: red.clone(), goal: mirror(goal) }]);
+    for tick in 0..60 {
+        world.advance_tick(&[]);
+        for (&blue, &red) in blue.iter().zip(&red) {
+            let (at, image) = (world.unit_position(blue).unwrap().xy(), mirror(world.unit_position(red).unwrap().xy()));
+            // A few raw bits, as rounding is not symmetric under negation.
+            let apart = (at.x - image.x).to_bits().abs().max((at.y - image.y).to_bits().abs());
+            assert!(apart <= 16, "tick {tick}: Blue's bomber {} is {apart} raw units from Red's {}'s image", blue.0, red.0);
+        }
+    }
+    let (first, last) = (world.unit_position(blue[0]).unwrap().xy(), world.unit_position(blue[4]).unwrap().xy());
+    assert!(first.distance_squared(&last) > fp_int(400), "they part: {first:?} and {last:?}");
+}
+
 /// A fighter chasing a slower aircraft eases off to its speed once in range behind it, and stays
 /// on its tail, firing, until it is down, rather than flying past it and looping round.
 #[test]

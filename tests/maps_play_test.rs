@@ -21,8 +21,10 @@ fn count(world: &SimWorld, prefix: &str) -> [usize; 2] {
     counts
 }
 
-/// Stillwater, a lake ringed by land: a 1v1 of AIs is won, by armies that go round the lake,
+/// Stillwater, a lake ringed by land: a 1v1 of AIs ends, by armies that go round the lake,
 /// both sides build a naval yard on it and put ships out, and the match replays from its orders.
+/// It ends in a draw since aircraft exactly together part in mirror image (2026-11-25): the two
+/// sides play mirror images to the end, and each commander falls on the tick its image does.
 #[test]
 #[cfg_attr(debug_assertions, ignore = "release only")]
 fn on_stillwater_ais_go_round_the_lake_and_take_to_it() {
@@ -40,7 +42,7 @@ fn on_stillwater_ais_go_round_the_lake_and_take_to_it() {
     });
     assert!(yards.iter().all(|&built| built >= 1), "both sides build a naval yard on the lake: {yards:?}");
     assert!(ships.iter().all(|&afloat| afloat >= 1), "both sides put ships on it: {ships:?}");
-    assert!(matches!(record.result, Some(MatchResult::Winner(_))), "a side wins: {:?} at tick {}", record.result, record.ticks);
+    assert!(matches!(record.result, Some(MatchResult::Winner(_) | MatchResult::Draw)), "the match ends: {:?} at tick {}", record.result, record.ticks);
     assert_eq!(replay_match_on(&map, 1, &record.log), record.checksums, "it replays from its orders");
 }
 
@@ -81,7 +83,7 @@ fn land_army(world: &SimWorld) -> [(usize, usize); 2] {
 /// Scattered Isles has no land route between its home islands, and the AIs play it so: each
 /// keeps only a guard of land units that cannot cross, where it once massed two hundred tanks
 /// that stood at home for the whole match, and goes at the other with ships, aircraft, and
-/// hovercraft. The match is won, and replays from its orders.
+/// hovercraft. The match ends, drawn as Stillwater's is, and replays from its orders.
 #[test]
 #[cfg_attr(debug_assertions, ignore = "release only")]
 fn on_scattered_isles_ais_keep_a_guard_at_home_and_cross_by_sea_and_air() {
@@ -108,7 +110,7 @@ fn on_scattered_isles_ais_keep_a_guard_at_home_and_cross_by_sea_and_air() {
     assert!(crossing.iter().all(|&hovering| hovering >= 10), "both sides send hovercraft: {crossing:?}");
     // The guard is twelve; a squad for a transport and anti-air come on top of it.
     assert!(stranded.iter().all(|&at_home| at_home <= 24), "neither masses an army that cannot cross: {stranded:?}");
-    assert!(matches!(record.result, Some(MatchResult::Winner(_))), "a side wins: {:?} at tick {}", record.result, record.ticks);
+    assert!(matches!(record.result, Some(MatchResult::Winner(_) | MatchResult::Draw)), "the match ends: {:?} at tick {}", record.result, record.ticks);
     assert_eq!(replay_match_on(&map, 1, &record.log), record.checksums, "it replays from its orders");
 }
 
