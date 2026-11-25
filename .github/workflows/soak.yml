@@ -4,11 +4,12 @@ name: Soak
 # Validate): hundreds of matches, too heavy to run on a laptop for every change. Here it is
 # split across runners, one shard of seeds each, all running the same release binary.
 on:
-  # The full soak, nightly on main's newest commit (about midnight Pacific), rather than on every
-  # push: it took about an hour, and the website no longer waits for it (pages.yml). A night it
-  # fails opens an issue, or adds to the one open (the alert job).
+  # The full soak, nightly on main's newest commit (2:17 AM Eastern standard time, 3:17 in
+  # summer, since cron keeps UTC), rather than on every push: it took about an hour, and the
+  # website no longer waits for it (pages.yml). A night it fails opens an issue, or adds to the
+  # one open (the alert job).
   schedule:
-    - cron: "17 8 * * *"
+    - cron: "17 7 * * *"
   # A smaller soak for each pull request into main (the plan below): enough matches on every map
   # and team size to catch one that never ends, a replay that differs, or a panic, in a fraction
   # of the time, but too few to judge a side's lean. The full soak plays it that night.
