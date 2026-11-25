@@ -16,6 +16,8 @@ use super::camera::{Camera, HeightField};
 use super::instances::{InstanceBatches, UnitInstanceRaw};
 use super::meshes::{MeshSet, MeshVertex, Shape};
 use super::gpu_timing::GpuTimer;
+use super::detail::detail_levels;
+use super::land::LandField;
 use super::shore::ShoreField;
 use super::tiles::{tiled_indices, visible_tiles, GridPlacement, HeightRanges, TileRuns};
 use super::waves::wave_levels;
@@ -183,6 +185,8 @@ pub struct Renderer {
     shore_view: wgpu::TextureView,
     wave_view: wgpu::TextureView,
     wave_sampler: wgpu::Sampler,
+    land_view: wgpu::TextureView,
+    detail_view: wgpu::TextureView,
     instance_buffer: InstanceBuffer,
     /// Every shape's instances, one after another, with where each shape's begin and end.
     flat_instances: Vec<UnitInstanceRaw>,
@@ -250,6 +254,11 @@ impl Renderer {
         log::info!("shore field baked in {:.0} ms", started.elapsed().as_secs_f64() * 1000.0);
         let (side, bytes) = shore.map_or((1, vec![0]), |field| (field.side() as u32, field.bytes()));
         self.shore_view = r8_texture(&self.device, &self.queue, "shore", side, &bytes);
+        // How the sun and sky fall on the ground, and where it is damp.
+        let started = Instant::now();
+        let land = LandField::bake(&self.ground, super::land::SUN_DIRECTION, f64::from(level));
+        log::info!("land map baked in {:.0} ms", started.elapsed().as_secs_f64() * 1000.0);
+        self.land_view = rgba_texture(&self.device, &self.queue, "land", &[(land.side() as u32, land.texels())]);
         self.bind_group = make_bind_group(&self.device, &self.bind_group_layout, self);
     }
 
@@ -436,7 +445,7 @@ impl Renderer {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 3,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
@@ -468,29 +477,37 @@ impl Renderer {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                // The land map, sampled with the fog's sampler, and read by units too.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 7,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // The ground's close-up patterns, tiled with the waves' sampler.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 8,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
         let shore_view = r8_texture(&device, &queue, "shore", 1, &[0]);
         let levels = wave_levels();
-        let wave_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("waves"),
-            size: wgpu::Extent3d { width: levels[0].side, height: levels[0].side, depth_or_array_layers: 1 },
-            mip_level_count: levels.len() as u32,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        for (mip_level, level) in levels.iter().enumerate() {
-            queue.write_texture(
-                wgpu::ImageCopyTexture { texture: &wave_texture, mip_level: mip_level as u32, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-                &level.texels,
-                wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(level.side * 4), rows_per_image: Some(level.side) },
-                wgpu::Extent3d { width: level.side, height: level.side, depth_or_array_layers: 1 },
-            );
-        }
-        let wave_view = wave_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let wave_view = rgba_texture(&device, &queue, "waves", &levels.iter().map(|level| (level.side, level.texels.as_slice())).collect::<Vec<_>>());
+        let levels = detail_levels();
+        let detail_view = rgba_texture(&device, &queue, "ground detail", &levels.iter().map(|level| (level.side, level.texels.as_slice())).collect::<Vec<_>>());
+        // Fully lit and open, until the map's own is baked.
+        let land_view = rgba_texture(&device, &queue, "land", &[(1, &[255, 255, 0, 255])]);
         let wave_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("waves"),
             address_mode_u: wgpu::AddressMode::Repeat,
@@ -504,7 +521,17 @@ impl Renderer {
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("globals"),
             layout: &bind_group_layout,
-            entries: &bind_group_entries(&globals_buffer, &height_view, &fog_view, &fog_sampler, &shore_view, &wave_view, &wave_sampler),
+            entries: &bind_group_entries(&Bindings {
+                globals: &globals_buffer,
+                heights: &height_view,
+                fog: &fog_view,
+                fog_sampler: &fog_sampler,
+                shore: &shore_view,
+                waves: &wave_view,
+                wave_sampler: &wave_sampler,
+                land: &land_view,
+                detail: &detail_view,
+            }),
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("scene"),
@@ -844,6 +871,8 @@ impl Renderer {
             shore_view,
             wave_view,
             wave_sampler,
+            land_view,
+            detail_view,
             instance_buffer,
             flat_instances: Vec::new(),
             shape_instances: Vec::with_capacity(Shape::COUNT),
@@ -1225,7 +1254,33 @@ fn r8_texture(device: &wgpu::Device, queue: &wgpu::Queue, label: &str, side: u32
     texture.create_view(&wgpu::TextureViewDescriptor::default())
 }
 
-fn bind_group_entries<'a>(
+/// A four-byte-a-texel texture from its mip levels, largest first, each `(side, texels)`, and its
+/// view.
+fn rgba_texture(device: &wgpu::Device, queue: &wgpu::Queue, label: &str, levels: &[(u32, &[u8])]) -> wgpu::TextureView {
+    let side = levels[0].0;
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d { width: side, height: side, depth_or_array_layers: 1 },
+        mip_level_count: levels.len() as u32,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    for (mip_level, &(side, texels)) in levels.iter().enumerate() {
+        queue.write_texture(
+            wgpu::ImageCopyTexture { texture: &texture, mip_level: mip_level as u32, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            texels,
+            wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(side * 4), rows_per_image: Some(side) },
+            wgpu::Extent3d { width: side, height: side, depth_or_array_layers: 1 },
+        );
+    }
+    texture.create_view(&wgpu::TextureViewDescriptor::default())
+}
+
+/// What the shaders read, in binding order.
+struct Bindings<'a> {
     globals: &'a wgpu::Buffer,
     heights: &'a wgpu::TextureView,
     fog: &'a wgpu::TextureView,
@@ -1233,15 +1288,21 @@ fn bind_group_entries<'a>(
     shore: &'a wgpu::TextureView,
     waves: &'a wgpu::TextureView,
     wave_sampler: &'a wgpu::Sampler,
-) -> [wgpu::BindGroupEntry<'a>; 7] {
+    land: &'a wgpu::TextureView,
+    detail: &'a wgpu::TextureView,
+}
+
+fn bind_group_entries<'a>(bindings: &Bindings<'a>) -> [wgpu::BindGroupEntry<'a>; 9] {
     [
-        wgpu::BindGroupEntry { binding: 0, resource: globals.as_entire_binding() },
-        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(heights) },
-        wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(fog) },
-        wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(fog_sampler) },
-        wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(shore) },
-        wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(waves) },
-        wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::Sampler(wave_sampler) },
+        wgpu::BindGroupEntry { binding: 0, resource: bindings.globals.as_entire_binding() },
+        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(bindings.heights) },
+        wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(bindings.fog) },
+        wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(bindings.fog_sampler) },
+        wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::TextureView(bindings.shore) },
+        wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(bindings.waves) },
+        wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::Sampler(bindings.wave_sampler) },
+        wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::TextureView(bindings.land) },
+        wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::TextureView(bindings.detail) },
     ]
 }
 
@@ -1249,7 +1310,17 @@ fn make_bind_group(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, render
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("globals"),
         layout,
-        entries: &bind_group_entries(&renderer.globals_buffer, &renderer.height_view, &renderer.fog_view, &renderer.fog_sampler, &renderer.shore_view, &renderer.wave_view, &renderer.wave_sampler),
+        entries: &bind_group_entries(&Bindings {
+            globals: &renderer.globals_buffer,
+            heights: &renderer.height_view,
+            fog: &renderer.fog_view,
+            fog_sampler: &renderer.fog_sampler,
+            shore: &renderer.shore_view,
+            waves: &renderer.wave_view,
+            wave_sampler: &renderer.wave_sampler,
+            land: &renderer.land_view,
+            detail: &renderer.detail_view,
+        }),
     })
 }
 

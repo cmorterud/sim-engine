@@ -26,6 +26,12 @@ struct Globals {
 // The small waves' slopes east and north (waves.rs), tiled.
 @group(0) @binding(5) var wave_texture: texture_2d<f32>;
 @group(0) @binding(6) var wave_sampler: sampler;
+// How the light falls on the ground (land.rs): sunlight, openness to the sky, dampness. Sampled
+// with the fog's sampler.
+@group(0) @binding(7) var land_texture: texture_2d<f32>;
+// The ground's close-up patterns (detail.rs): grass, soil, rock, sand. Tiled with the waves'
+// sampler.
+@group(0) @binding(8) var detail_texture: texture_2d<f32>;
 
 // A gentle film curve: colors up to the knee stay as they are, and brighter ones roll off
 // towards white instead of clipping, so that sun glints and foam keep their shape.
@@ -110,6 +116,9 @@ struct UnitOutput {
     @location(4) morph: f32,
     // How open the surface is to the sky, from the mesh: less where parts crowd one another.
     @location(5) openness: f32,
+    // How much sun reaches the unit past the hills, and how open it is to the sky, from the
+    // land map under it: the same for the whole unit.
+    @location(6) land: vec2<f32>,
 };
 
 struct Animated {
@@ -222,6 +231,12 @@ fn vs_unit(
     out.material = kind;
     out.morph = morph;
     out.openness = f32(material >> OPENNESS_SHIFT) / 255.0;
+    // A unit in a hill's shadow is in it too, as is the ground it stands on, and a unit in a
+    // valley sees less of the sky. Aircraft fly above both.
+    let bottom = center - instance.m2.xyz * 0.5;
+    let land = land_at(world_from_relative(bottom.xy));
+    let aloft = smoothstep(UNIT_ALOFT_LOW, UNIT_ALOFT_HIGH, bottom.z - ground_at(bottom.xy));
+    out.land = vec2<f32>(mix(land.r, 1.0, aloft), mix(mix(1.0, land.g, 0.6), 1.0, aloft));
     return out;
 }
 
@@ -232,8 +247,8 @@ fn fs_unit(input: UnitOutput) -> @location(0) vec4<f32> {
     }
     let normal = normalize(input.normal);
     let to_eye = normalize(-input.relative);
-    let sun = max(dot(normal, LIGHT), 0.0);
-    let ambient = mix(GROUND_BOUNCE, SKY, normal.z * 0.5 + 0.5);
+    let sun = max(dot(normal, LIGHT), 0.0) * input.land.x;
+    let ambient = mix(GROUND_BOUNCE, SKY, normal.z * 0.5 + 0.5) * input.land.y;
     // Crowded corners lose most of the sky's light and some of the sun's, which sets parts
     // apart where they meet, as a stylized contact shadow.
     let open = input.openness;
@@ -257,6 +272,11 @@ fn fs_unit(input: UnitOutput) -> @location(0) vec4<f32> {
     let lit = diffuse + vec3<f32>(shine) + rim * mix(input.albedo, vec3<f32>(1.0), 0.5);
     return vec4<f32>(mix(tone(lit), input.albedo, input.morph), 1.0);
 }
+
+// How high above the ground a unit is out of the hills' shadow: partly from the first height,
+// fully from the second.
+const UNIT_ALOFT_LOW: f32 = 8.0;
+const UNIT_ALOFT_HIGH: f32 = 40.0;
 
 // ---- Shadows ----
 
@@ -630,6 +650,29 @@ const DIRT: vec3<f32> = vec3<f32>(0.25, 0.21, 0.14);
 const ROCK: vec3<f32> = vec3<f32>(0.30, 0.28, 0.26);
 const SAND: vec3<f32> = vec3<f32>(0.44, 0.40, 0.29);
 const PEBBLE: vec3<f32> = vec3<f32>(0.29, 0.27, 0.24);
+const GRASS_DRY: vec3<f32> = vec3<f32>(0.31, 0.29, 0.15);
+const GRASS_LUSH: vec3<f32> = vec3<f32>(0.07, 0.15, 0.07);
+const DIRT_DAMP: vec3<f32> = vec3<f32>(0.15, 0.12, 0.08);
+const ROCK_WARM: vec3<f32> = vec3<f32>(0.33, 0.29, 0.24);
+// How strongly the sky and the sun light the ground, so that flat open ground in the sun is
+// about as bright as it was before the sky had a color.
+const GROUND_AMBIENT: f32 = 0.85;
+const GROUND_SUN: f32 = 0.95;
+// World units one copy of the close-up patterns spans.
+const DETAIL_SIZE: f32 = 7.0;
+
+// The land map (land.rs) at a point on the map: sunlight, openness, dampness.
+fn land_at(world: vec2<f32>) -> vec3<f32> {
+    let side = f32(textureDimensions(land_texture).x);
+    let map = f32(globals.terrain_grid.w - 1) * globals.terrain_origin.w;
+    let coordinates = (world / map * (side - 1.0) + 0.5) / side;
+    return textureSampleLevel(land_texture, fog_sampler, coordinates, 0.0).rgb;
+}
+
+// Where a camera-relative point is on the map.
+fn world_from_relative(relative: vec2<f32>) -> vec2<f32> {
+    return relative - globals.terrain_origin.xy + vec2<f32>(globals.terrain_grid.xy) * globals.terrain_origin.w;
+}
 
 @fragment
 fn fs_terrain(input: TerrainOutput) -> @location(0) vec4<f32> {
@@ -650,14 +693,31 @@ fn fs_terrain(input: TerrainOutput) -> @location(0) vec4<f32> {
     // Small bumps break up the light up close.
     let bumps = value_noise_slope(input.world / 4.0).yz / 4.0 * 1.4 + value_noise_slope(input.world / 1.3).yz / 1.3 * 0.2;
     let normal = normalize(smooth_normal + vec3<f32>(-bumps * near, 0.0));
-    let light = 0.42 + 0.66 * max(dot(normal, LIGHT), 0.0);
+    // The same sky and sun as units: the sky's light by how open the ground is to it, and the
+    // sun's where no hill stands in its way.
+    let land = land_at(input.world);
+    let ambient = mix(GROUND_BOUNCE, SKY, normal.z * 0.5 + 0.5) * mix(0.35, 1.0, land.g) * GROUND_AMBIENT;
+    let light = ambient + SUN * max(dot(normal, LIGHT), 0.0) * land.r * GROUND_SUN;
+    // The close-up patterns, faded by their own smaller copies with distance. Low quality
+    // goes without.
+    var detail = vec4<f32>(0.0);
+    if (high_quality()) {
+        detail = textureSample(detail_texture, wave_sampler, input.world / DETAIL_SIZE) - vec4<f32>(0.5);
+    }
 
     // Grass, darker in the lows and drier on the heights, in soft patches with bare dirt here
     // and there, speckled with lighter and darker grass and small stones up close.
     let t = clamp((input.height + 36.0) / 72.0, 0.0, 1.0);
     let patches = value_noise(input.world / 220.0) * 0.5 + value_noise(input.world / 61.0) * 0.3 + value_noise(input.world / 17.0) * 0.2;
     var base = mix(GRASS_LOW, GRASS_HIGH, t) * (0.91 + 0.18 * patches);
-    base = mix(base, DIRT, smoothstep(0.66, 0.82, patches) * 0.3);
+    // Damp ground is lusher and darker, and dry sunny slopes paler and yellower.
+    let damp = land.b;
+    base = mix(base, GRASS_DRY, smoothstep(0.55, 0.95, land.r * (1.0 - damp)) * smoothstep(0.35, 0.75, patches) * 0.35);
+    base = mix(base, GRASS_LUSH, damp * 0.45);
+    let bare = smoothstep(0.66, 0.82, patches) * (0.3 + 0.1 * (1.0 - damp));
+    base = mix(base, mix(DIRT, DIRT_DAMP, damp), bare);
+    let ground_detail = mix(detail.r * 1.3, detail.g * 1.4, min(bare * 2.5, 1.0));
+    base = base * (1.0 + ground_detail * 0.8);
     let speckle = value_noise(input.world / 1.7);
     base = base * (1.0 + (speckle - 0.5) * 0.24 * near);
     let stones = smoothstep(0.88, 0.95, value_noise(input.world / 1.5 + vec2<f32>(17.3, 5.1)));
@@ -667,15 +727,19 @@ fn fs_terrain(input: TerrainOutput) -> @location(0) vec4<f32> {
     let band = fract(strata_coord);
     let layers = mix(0.86, 1.1, smoothstep(0.2, 0.6, band));
     let crack = 1.0 - smoothstep(0.0, max(0.04, strata_width * 1.5), abs(band - 0.9));
-    base = mix(base, ROCK * layers * (1.0 - 0.22 * crack) * (0.9 + 0.2 * patches), steep);
-    // Sand along the shore, a little above the water.
+    let rock_detail = 1.0 + detail.b * 1.1;
+    let rock_tint = mix(ROCK, ROCK_WARM, smoothstep(0.35, 0.65, patches));
+    base = mix(base, rock_tint * layers * (1.0 - 0.22 * crack) * (0.9 + 0.2 * patches) * rock_detail, steep);
+    // Sand along the shore, a little above the water, rippled by the wind.
     let above_water = input.height - globals.terrain_scale.w;
-    base = mix(base, SAND, (1.0 - smoothstep(1.0, 5.0, above_water)) * (1.0 - steep));
+    let sand_detail = 1.0 + detail.a * 0.45;
+    base = mix(base, SAND * sand_detail, (1.0 - smoothstep(1.0, 5.0, above_water)) * (1.0 - steep));
 
     // Hollows and the feet of slopes are darker, crests a little lighter, so that the shape of
     // the land reads from far away.
     let crease = clamp(input.cavity * 2.5, -0.25, 0.45);
-    let hollows = 1.0 - max(crease, 0.0) * 0.55 + max(-crease, 0.0) * 0.35;
+    // The land map's openness darkens broad valleys; this adds the grid's finer creases.
+    let hollows = 1.0 - max(crease, 0.0) * 0.3 + max(-crease, 0.0) * 0.25;
     // Faint height contours give a sense of scale, on gentle ground only: on a cliff they crowd
     // together into stripes.
     let line = (1.0 - clamp(contour / contour_width, 0.0, 1.0)) * (1.0 - steep);

@@ -7,7 +7,7 @@ use glam::{Mat4, Vec3};
 use super::instances::UnitInstanceRaw;
 
 /// The sun's direction, as the shaders have it (`LIGHT`): shadows fall away from it.
-const LIGHT: [f32; 3] = [0.449, -0.249, 0.858];
+pub(super) const LIGHT: [f32; 3] = [0.449, -0.249, 0.858];
 /// Moving parts, such as rotors and legs, swing a little outside their shape's box.
 const REACH_SLACK: f32 = 1.3;
 /// A dot's corner is further from its middle than its side, and its size is rounded up.
