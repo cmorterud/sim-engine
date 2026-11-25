@@ -378,6 +378,16 @@ impl MapSource {
         }
     }
 
+    /// How far the map is across, in units.
+    pub fn map_units(&self) -> i32 {
+        match self {
+            Self::Skirmish => SKIRMISH_MAP_UNITS,
+            Self::Map(map) | Self::Teams(map, _) => map.map_units,
+            Self::Playtest => super::playtest::MAP_UNITS,
+            Self::Scenario(_) => super::playtest_scenarios::MAP_UNITS,
+        }
+    }
+
     pub fn scenario(&self, seed: u64) -> Scenario {
         match self {
             Self::Skirmish => skirmish(seed),

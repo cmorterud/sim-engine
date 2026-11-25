@@ -1706,6 +1706,33 @@ fn patrols_and_attacks_and_follow_orders_have_no_handles() {
     assert!(world.snapshot_for(Some(Team::Red)).order_stops.is_empty());
 }
 
+/// Right-clicking a line of enemies one after another with Shift queued an attack on each, and
+/// each queued attack showed a green "M" handle, so they looked like moves. Only the attack under
+/// way was left out.
+#[test]
+fn queued_attacks_have_no_handles_and_read_as_attacks() {
+    let mut world = test_world();
+    let (bot, engineer_blueprint) = (id(&world, "t1_light_walker"), id(&world, "t1_engineer"));
+    let shooter = world.spawn_mobile(bot, Team::Blue, point(1_000, 1_000));
+    let engineer = world.spawn_mobile(engineer_blueprint, Team::Blue, point(1_000, 1_100));
+    let enemies: Vec<SimId> = (0..4).map(|row| world.spawn_mobile(bot, Team::Red, point(1_600, 900 + row * 60))).collect();
+    let mut commands = vec![SimCommand::Attack { units: vec![shooter, engineer], target: enemies[0] }];
+    commands.extend(enemies[1..].iter().map(|&target| SimCommand::QueueAttack { units: vec![shooter, engineer], target }));
+    world.advance_tick(&commands);
+    run(&mut world, 3);
+    let snapshot = world.snapshot_for(Some(Team::Blue));
+    let plan = snapshot.plans.iter().find(|plan| plan.id == shooter).expect("the shooter has orders");
+    assert_eq!(plan.steps.len(), 4, "one attack under way and three queued");
+    assert!(plan.steps.iter().all(|step| step.kind == PlanStepKind::Attack), "every step is an attack: {:?}", plan.steps);
+    for unit in [shooter, engineer] {
+        assert!(stops_of(&world, unit).is_empty(), "{unit:?} should have no move handles for its attacks");
+    }
+
+    // A move queued after them is still a move, and can still be dragged.
+    world.advance_tick(&[SimCommand::QueueMove { units: vec![shooter], goal: point(1_000, 1_500), attack: false }]);
+    assert_eq!(stops_of(&world, shooter).len(), 1, "only the queued move has a handle");
+}
+
 #[test]
 fn rates_show_real_output_and_what_a_factory_really_spends() {
     let mut world = test_world();

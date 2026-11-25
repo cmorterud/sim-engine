@@ -98,3 +98,45 @@ fn every_scenario_comes_to_a_fight() {
         assert!(end[0] < start[0] || end[1] < start[1], "{}: no fight in three minutes (Blue {:.0} of {:.0}, Red {:.0} of {:.0})", scenario.id, end[0], start[0], end[1], start[1]);
     }
 }
+
+/// The nuclear scenarios play out as they say: with the launcher's five missiles fired one at
+/// each group of the base, the undefended base loses all five groups, the base whose defense
+/// holds as many interceptors as the launcher holds missiles loses none, and the one whose
+/// defense is one short loses exactly one.
+#[test]
+fn the_nuclear_scenarios_land_every_missile_none_and_one() {
+    use sim_engine::math::fp::{fp_int, Vec2Fp};
+    use sim_engine::sim::components::Launcher;
+    // The middle of each group of the base, in world units.
+    const GROUPS: [(i32, i32); 5] = [(3_700, 2_560), (2_600, 2_560), (4_800, 2_560), (3_700, 3_760), (3_700, 1_360)];
+    for (id, groups_lost) in [("nuke_against_a_base", 5), ("nuke_against_a_full_defense", 0), ("nuke_against_a_defense_one_short", 1)] {
+        let scenario = playtest_scenarios::find(id).unwrap_or_else(|| panic!("no scenario {id}"));
+        let mut world = MapSource::Scenario(std::sync::Arc::new(scenario)).scenario(1).with_fog_of_war(false).world;
+        let launcher_key = world.blueprints.id("strategic_missile_launcher").0;
+        let launcher = world.snapshot().units.iter().find(|unit| unit.blueprint == launcher_key).expect("a launcher").id;
+        let stock = |world: &sim_engine::sim::world::SimWorld| world.ecs.get::<&Launcher>(world.unit_entity(launcher).unwrap()).unwrap().stock;
+        assert_eq!(stock(&world), 5, "{id}: the launcher starts full");
+        // Red's structures in each group: within 600 of its middle.
+        let in_group = |world: &sim_engine::sim::world::SimWorld, (x, y): (i32, i32)| {
+            world.snapshot().units.iter().filter(|unit| unit.team == Team::Red && i64::from((unit.x >> 12) - x).pow(2) + i64::from((unit.y >> 12) - y).pow(2) < 600 * 600).count()
+        };
+        assert!(GROUPS.iter().all(|&group| in_group(&world, group) >= 7), "{id}: every group stands");
+        for (fired, &(x, y)) in GROUPS.iter().enumerate() {
+            world.advance_tick(&[SimCommand::AttackGround { units: vec![launcher], point: Vec2Fp::new(fp_int(x), fp_int(y)) }]);
+            for _ in 0..400 {
+                if stock(&world) as usize == 4 - fired {
+                    break;
+                }
+                world.advance_tick(&[]);
+            }
+            assert_eq!(stock(&world) as usize, 4 - fired, "{id}: missile {} was not fired", fired + 1);
+        }
+        // Long enough for the last missile to land, from 4,500 away.
+        for _ in 0..600 {
+            world.advance_tick(&[]);
+        }
+        let lost = GROUPS.iter().filter(|&&group| in_group(&world, group) == 0).count();
+        let hit = GROUPS.iter().filter(|&&group| in_group(&world, group) < 7).count();
+        assert_eq!((lost, hit), (groups_lost, groups_lost), "{id}: groups destroyed and groups touched");
+    }
+}

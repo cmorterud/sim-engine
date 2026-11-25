@@ -14,14 +14,19 @@ use crate::sim::world::MatchResult;
 
 /// Matches running past this many ticks (about 67 minutes) are counted as unfinished.
 pub const MATCH_TICK_LIMIT: u32 = 40_000;
-/// Team matches of three or more a side, on the big maps they are played on, past this many ticks
-/// (100 minutes) instead (2026-11-25): Scattered Isles 4v4s ran to 65 minutes, and one to 73 once
-/// defenses were made worth more for their cost, finishing, where the limit is for stalemates.
+/// Team matches of three or more a side, and any match on a map 20 km across or more, past this
+/// many ticks (100 minutes) instead, the user's decisions (2026-11-25): Scattered Isles 4v4s ran to
+/// 65 minutes, and one to 73 once defenses were made worth more for their cost; and since matches
+/// on mirrored maps play as mirror images, a Scattered Isles 1v1 ran to 74, both finishing, where
+/// the limit is for stalemates.
 pub const TEAM_MATCH_TICK_LIMIT: u32 = 60_000;
+/// Maps this wide or wider, in units, get the longer limit: 20 km.
+pub const BIG_MAP_UNITS: i32 = 20 * 1_024;
 
-/// The ticks past which a match of `per_team` players a side counts as unfinished.
-pub const fn match_tick_limit(per_team: usize) -> u32 {
-    if per_team >= 3 { TEAM_MATCH_TICK_LIMIT } else { MATCH_TICK_LIMIT }
+/// The ticks past which a match of `per_team` players a side, on a map `map_units` across, counts as
+/// unfinished.
+pub const fn match_tick_limit(per_team: usize, map_units: i32) -> u32 {
+    if per_team >= 3 || map_units >= BIG_MAP_UNITS { TEAM_MATCH_TICK_LIMIT } else { MATCH_TICK_LIMIT }
 }
 
 #[derive(Debug)]
@@ -111,7 +116,7 @@ pub fn run_soak(first_seed: u64, count: u64, threads: usize, map: &MapSource, st
                 let mut local_times = Vec::with_capacity(20_000);
                 let mut last = Instant::now();
                 let mut tally = DomainTally::default();
-                let record = play_match_with(&map, seed, match_tick_limit(map.per_team()), strategies, |world| {
+                let record = play_match_with(&map, seed, match_tick_limit(map.per_team(), map.map_units()), strategies, |world| {
                     let now = Instant::now();
                     // Ticks that also compute a checksum would inflate the 99th percentile.
                     if !world.current_tick.is_multiple_of(CHECKSUM_INTERVAL) {

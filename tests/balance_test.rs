@@ -487,3 +487,20 @@ fn point_defenses_are_worth_more_and_hovercraft_less_for_their_cost() {
     let band = premiums("hovercraft_over_heavy_tank_on_land").as_array().expect("a band").iter().map(number).collect::<Vec<f64>>();
     assert!((band[0]..=band[1]).contains(&efficiency), "the hovercraft is {efficiency:.2} as strong per materiel as the Heavy Tank on land");
 }
+
+/// `[domains] strength_over_anchor` (2026-11-25): the fighters are as strong per cost against
+/// aircraft, against the anchor, as the inspiration has its own, within the band, with the damage
+/// `[air]` fixes for them (an interceptor kills a bomber in about ten seconds; the T3 fighter has
+/// nine to eleven times its damage and destroys one with a shot).
+#[test]
+fn fighters_are_as_strong_per_cost_as_the_inspirations() {
+    let db = db();
+    let band = domains(&["strength_band"]).as_array().expect("a band").iter().map(number).collect::<Vec<f64>>();
+    for key in ["t1_interceptor", "t3_air_superiority"] {
+        let ratio = purpose_strength(&db, key) / number(&domains(&["strength_over_anchor", key]));
+        assert!((band[0]..=band[1]).contains(&ratio), "{key} is {ratio:.2} of the inspiration's strength per cost");
+    }
+    let interceptor = db.get(db.id("t1_interceptor"));
+    let fighter = db.get(db.id("t3_air_superiority"));
+    assert!(fighter.weapon.expect("a gun").damage >= interceptor.health, "the T3 fighter destroys an interceptor with a shot");
+}

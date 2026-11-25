@@ -321,13 +321,14 @@ fn an_airfield_facility_refuels_and_repairs_aircraft_for_energy() {
     let pad = world.unit_position(interceptor).unwrap().xy();
     assert!(distance(&world, interceptor, staging_center()) < 40, "on the facility, at {pad:?}");
     let energy = world.economies[0].energy;
-    // 3,000 ticks of fuel at 250 a tick, and 200 health at 50 a tick.
+    // 3,000 ticks of fuel at 250 a tick, and its missing health at 50 a tick, read from its data.
     let left = (0..20).find(|_| {
         world.advance_tick(&[]);
         flight(&world, interceptor).refit.is_none()
     });
     assert!(left.is_some_and(|ticks| ticks <= 13), "done in about 12 ticks: {left:?}");
-    assert_eq!(world.unit_health(interceptor), Some(fp_int(295)));
+    let full = world.blueprints.get(world.blueprints.id("t1_interceptor")).health;
+    assert_eq!(world.unit_health(interceptor), Some(full));
     assert!(energy - world.economies[0].energy >= Res::from_num(12), "repairs cost energy");
     // With nothing to do, it lifts off the pad, flies clear of the facility, and lands beside it.
     run(&mut world, 80);

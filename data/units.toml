@@ -614,15 +614,18 @@ radar = 1280
 flight = { elevation = 308, turn_rate = 80, fuel = 500 }
 
 # Shoots only at aircraft, with guns fixed to its nose: it must face what it shoots.
+# Cost, build time, and health as the inspiration has its interceptor against its T1 tank
+# (2026-11-25, [domains] strength_over_anchor); its damage is kept, since it sets the bomber's
+# health ([air]), and its health stays under the T3 fighter's one shot.
 [[unit]]
 id = "t1_interceptor"
 name = "Interceptor"
 class = "air"
 tier = 1
-mass = 50
-energy = 2250
-build_time = 500
-health = 295
+mass = 37
+energy = 1658
+build_time = 412
+health = 435
 speed = 30
 radius = 10
 vision = 560
@@ -746,14 +749,17 @@ deep_scan = 560
 flight = { elevation = 440, turn_rate = 80, fuel = 1500 }
 
 # Two beams of 250 a second in the inspiration, one shot of 500 here.
+# Cost and build time as the inspiration has its own against its T1 tank (2026-11-25); its damage
+# is kept at ten times the interceptor's, and its health, so that it still beats an equal cost of
+# interceptors ([air.t3_fighter]).
 [[unit]]
 id = "t3_air_superiority"
 name = "Air Superiority Fighter"
 class = "air"
 tier = 3
-mass = 450
-energy = 51200
-build_time = 3840
+mass = 332
+energy = 37718
+build_time = 3164
 # T3 aircraft are tough and fast enough that T1 anti-air barely scratches them and flak mostly
 # misses them; it takes T3 anti-air, cruisers, or massed flak.
 health = 4500
