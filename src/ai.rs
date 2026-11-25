@@ -1202,7 +1202,7 @@ impl AiBrain {
         // AI's economy on islands, where a yard is wanted from the start: at five minutes it made
         // a quarter of Balanced's mass, and it lost every match there to Balanced (2026-11-25).
         match self.skill.favours {
-            Favours::Air if mass_income >= self.air(AIR_FACTORY_INCOME) => {
+            Favours::Air => {
                 if let Some(choice) = air_choice() {
                     return Some(choice);
                 }
