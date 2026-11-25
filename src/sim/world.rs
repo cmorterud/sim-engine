@@ -398,6 +398,22 @@ pub struct BlastView {
     pub radius: i32,
 }
 
+/// A detonation heard across the whole map, seen or not: a strategic missile striking, or a
+/// commander blowing up as it dies. For the sound, which plays it wherever the camera is.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Detonation {
+    pub kind: DetonationKind,
+    /// Where, as raw `Fp` bits.
+    pub x: i32,
+    pub y: i32,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum DetonationKind {
+    StrategicMissile,
+    Commander,
+}
+
 /// What a projectile is, for drawing it.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ProjectileKind {
@@ -540,6 +556,11 @@ pub struct SimSnapshot {
     /// Both teams' economies, Blue's then Red's, for a watcher who sees everything: each the
     /// sum of its players' (`EconomyView::team`). Only in snapshots for no one side.
     pub team_economies: Option<[EconomyView; 2]>,
+    /// The team of each strategic missile launched this tick, seen or not, for the launch
+    /// warning everyone hears.
+    pub strategic_launches: Vec<Team>,
+    /// This tick's detonations heard across the whole map, seen or not.
+    pub detonations: Vec<Detonation>,
     /// Every player of the match, in order, for the score panel.
     pub players: Vec<PlayerView>,
     /// Present when fog of war is on: one byte per cell, for the renderer.
@@ -822,6 +843,9 @@ pub struct SimWorld {
     landed: Vec<ProjectileView>,
     /// Units' blasts as they were destroyed this tick, for drawing. Not part of the game state.
     blasts: Vec<BlastView>,
+    /// Commanders' death blasts this tick, where, as raw `Fp` bits: heard wherever the camera is,
+    /// so kept whether or not anyone sees them. Not part of the game state.
+    commander_blasts: Vec<[i32; 2]>,
     /// Projectiles fired this tick, by id, and where from as raw `Fp` bits: for drawing a new
     /// shell leaving its gun, not where its first tick took it. Not part of the game state.
     launched: Vec<(SimId, [i32; 3])>,
@@ -945,6 +969,7 @@ impl SimWorld {
             dead_projectiles: Vec::new(),
             landed: Vec::new(),
             blasts: Vec::new(),
+            commander_blasts: Vec::new(),
             launched: Vec::new(),
         }
     }
@@ -3674,6 +3699,7 @@ impl SimWorld {
     pub fn step_cleanup(&mut self) {
         self.dead_units.clear();
         self.blasts.clear();
+        self.commander_blasts.clear();
         self.step_exotic();
         let mut kills: Vec<(SimId, Team, Res)> = Vec::new();
         if !self.config.invulnerable_units {
@@ -3743,6 +3769,9 @@ impl SimWorld {
                                 if !blast.only_while_running || running {
                                     self.pending_explosions.push(Explosion { x, y, radius: blast.radius, damage: blast.damage, source: None, stun: 0 });
                                     self.blasts.push(BlastView { team, x, y, radius: blast.radius.to_bits() });
+                                    if self.blueprints.get(blueprint).is_commander() {
+                                        self.commander_blasts.push([x, y]);
+                                    }
                                 }
                             }
                             if let Some(storm) = self.blueprints.get(blueprint).death_storm {
@@ -4372,6 +4401,7 @@ impl SimWorld {
         }
         let mut projectile_query = self.ecs.query::<(&Position, &Projectile, Option<&Discharged>, Option<&Missile>, Option<&super::components::Beam>)>();
         let projectile_view = projectile_query.view();
+        let mut strategic_launches = Vec::new();
         let projectiles = self
             .projectiles
             .iter()
@@ -4382,8 +4412,19 @@ impl SimWorld {
                 if view.from.is_none() {
                     view.from = self.launched.binary_search_by_key(&id, |launch| launch.0).ok().map(|index| self.launched[index].1);
                 }
+                // A strategic launch is heard by everyone, seen or not.
+                if view.kind == ProjectileKind::StrategicMissile && self.launched.binary_search_by_key(&id, |launch| launch.0).is_ok() {
+                    strategic_launches.push(projectile.source_team);
+                }
                 seen(projectile.source_team, view.x, view.y).then_some(view)
             })
+            .collect();
+        let detonations = self
+            .landed
+            .iter()
+            .filter(|view| view.kind == ProjectileKind::StrategicMissile)
+            .map(|view| Detonation { kind: DetonationKind::StrategicMissile, x: view.x, y: view.y })
+            .chain(self.commander_blasts.iter().map(|&[x, y]| Detonation { kind: DetonationKind::Commander, x, y }))
             .collect();
         let landed = self.landed.iter().filter(|view| seen(view.team, view.x, view.y)).copied().collect();
         let blasts = self.blasts.iter().filter(|view| seen(view.team, view.x, view.y)).copied().collect();
@@ -4672,6 +4713,8 @@ impl SimWorld {
             },
             economy,
             team_economies,
+            strategic_launches,
+            detonations,
             players,
             fog,
             match_result: self.match_result,

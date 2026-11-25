@@ -936,6 +936,30 @@ fn sound_check() {
     }
     engine.set_beds(&quiet);
     wait(1);
+    // Then each sound that plays once, the fighting first and the great explosions last.
+    let once = |sound: audio::OneShot| audio::SoundEvent { sound, gain: 1.0, pan: 0.0 };
+    let shots = [
+        ("a light gun", audio::OneShot::Gun(0.1)),
+        ("a heavy gun", audio::OneShot::Gun(0.9)),
+        ("a laser", audio::OneShot::Laser),
+        ("a cruise missile launched", audio::OneShot::Missile),
+        ("a shell striking", audio::OneShot::Impact(0.2)),
+        ("a heavy blast", audio::OneShot::Impact(0.9)),
+        ("a tank destroyed", audio::OneShot::Destroyed(0.3)),
+        ("a large unit destroyed", audio::OneShot::Destroyed(0.9)),
+        ("a strategic missile launched", audio::OneShot::LaunchWarning),
+    ];
+    for (name, sound) in shots {
+        println!("{name}");
+        engine.play(once(sound));
+        wait(2);
+    }
+    println!("a commander blowing up");
+    engine.play(once(audio::OneShot::CommanderExplosion));
+    wait(5);
+    println!("a strategic missile striking");
+    engine.play(once(audio::OneShot::Nuke));
+    wait(11);
     println!("selecting a unit");
     engine.play_select();
     wait(1);
@@ -1264,6 +1288,8 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     let mut sound_settings = SoundSettings::default();
     // How fast each unit in view is moving, for the sound of ships, engines, and aircraft.
     let mut movement = audio::Movement::default();
+    // The snapshot whose one-shot sounds have been played: each is heard once.
+    let mut heard_tick = None;
     // Whether the player has clicked or pressed a key yet, which the browser waits for before it
     // plays any sound.
     let mut sound_unlocked = false;
@@ -1819,8 +1845,23 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                     }
                                 }
                             }
-                            let listener = audio::Listener { zoom: camera.zoom_from_closest(), across: &across, water: audio::water_view(&points) };
+                            // Where a point is across the screen, held to the edges, and whether it is on it.
+                            let point = |x: i32, y: i32, z: Option<i32>| {
+                                let (world_x, world_y) = (raw_to_world(x), raw_to_world(y));
+                                let height = z.map_or_else(|| map.heights.height_at(world_x, world_y), raw_to_world);
+                                camera.world_to_screen([world_x, world_y, height]).map(|at| {
+                                    let on_screen = (0.0..=viewport[0]).contains(&at[0]) && (0.0..=viewport[1]).contains(&at[1]);
+                                    (((at[0] / viewport[0]) * 2.0 - 1.0).clamp(-1.0, 1.0) as f32, on_screen)
+                                })
+                            };
+                            let listener = audio::Listener { zoom: camera.zoom_from_closest(), across: &across, water: audio::water_view(&points), point: &point };
                             sound.set_beds(&audio::scene_levels(&session.current, &movement, &map.blueprints, &listener));
+                            if heard_tick != Some(session.current.tick) {
+                                for event in audio::scene_events(&session.previous, &session.current, &map.blueprints, &listener) {
+                                    sound.play(event);
+                                }
+                                heard_tick = Some(session.current.tick);
+                            }
                             sound.set_volume(sound_settings.volume());
                             if attacked {
                                 sound.play_alarm();

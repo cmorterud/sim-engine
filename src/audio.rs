@@ -1,13 +1,15 @@
 //! Sound, generated in code so that there are no audio files to source. Presentation only:
 //! it reads snapshots and never touches the simulation, so it cannot affect determinism.
 //!
-//! Everything is soft enough to hear all match long, and fades in and out rather than switching.
+//! Everything is soft enough to hear all match long, and fades in and out rather than switching,
+//! but for a commander blowing up and a strategic missile striking, which are meant to be big.
 //! The battlefield is heard as it is seen, close up: the sea, ships under way, engines, aircraft,
 //! and the beams of builders at work, each from where it is across the screen. It is in stereo, but never hard
 //! to one side.
 
 use std::f32::consts::{FRAC_PI_4, TAU};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -16,6 +18,18 @@ use cpal::{FromSample, SampleFormat, SizedSample};
 use crate::sim::blueprints::{BlueprintDb, BlueprintId};
 use crate::sim::components::{MoveClass, SimId};
 use crate::sim::world::{SimSnapshot, UnitView};
+
+mod events;
+mod voices;
+
+pub use events::scene_events;
+pub use voices::{OneShot, SoundEvent};
+
+/// The most one-shot sounds playing at once. When full, the oldest small one gives way.
+const MOST_VOICES: usize = 16;
+/// How fast the rest dips under a great explosion, and comes back after.
+const DIP_SECONDS: f32 = 0.15;
+const RECOVER_SECONDS: f32 = 1.2;
 
 /// How long "commander under attack" stays silent after playing, however often the commander is hit.
 pub const ALARM_COOLDOWN_SECONDS: f64 = 30.0;
@@ -340,6 +354,13 @@ pub struct Synth {
     select_phase: f32,
     select_elapsed: Option<f32>,
     select_serial: u32,
+    /// The one-shot sounds playing, and the seed for the next one's noise.
+    voices: Vec<voices::Voice>,
+    seed: u32,
+    /// How far everything but the great explosions is dipped, from 1, not at all, down.
+    dip: f32,
+    dipping: f32,
+    recovering: f32,
 }
 
 impl Synth {
@@ -364,7 +385,33 @@ impl Synth {
             select_phase: 0.0,
             select_elapsed: None,
             select_serial: 0,
+            voices: Vec::with_capacity(MOST_VOICES),
+            seed: 0x2545_F491,
+            dip: 1.0,
+            dipping: 1.0 - (-1.0 / (DIP_SECONDS * rate)).exp(),
+            recovering: 1.0 - (-1.0 / (RECOVER_SECONDS * rate)).exp(),
         }
+    }
+
+    /// Starts a sound that plays once. With every voice busy, the oldest small sound gives way;
+    /// a great explosion never does.
+    pub fn play(&mut self, event: SoundEvent) {
+        if self.voices.len() >= MOST_VOICES {
+            let oldest = self.voices.iter().enumerate().filter(|(_, voice)| !voice.event.sound.is_great()).max_by(|a, b| a.1.age().total_cmp(&b.1.age())).map(|(index, _)| index);
+            match oldest {
+                Some(index) => {
+                    self.voices.swap_remove(index);
+                }
+                None => return,
+            }
+        }
+        self.seed = self.seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        self.voices.push(voices::Voice::new(event, self.seed, self.rate));
+    }
+
+    /// How many one-shot sounds are playing.
+    pub fn playing(&self) -> usize {
+        self.voices.len()
     }
 
     /// A short, soft blip that rises a little, so that it reads as a response and not a warning.
@@ -451,7 +498,20 @@ impl Synth {
         // each gets quieter as more join, so that a busy scene never piles up into clutter, and
         // the selection cue and the alarm are always heard over it.
         let together = self.beds.iter().map(|bed| bed.level).sum::<f32>().max(1.0).sqrt().recip();
-        let (left, right) = (left * together, right * together);
+        // A great explosion dips everything else for a while, then lets it back.
+        let dip_to = self.voices.iter().filter_map(|voice| voice.event.sound.dips().filter(|&(_, seconds)| voice.age() < seconds).map(|(level, _)| level)).fold(1.0, f32::min);
+        self.dip += if dip_to < self.dip { self.dipping } else { self.recovering } * (dip_to - self.dip);
+        let (mut left, mut right) = (left * together * self.dip, right * together * self.dip);
+        for voice in &mut self.voices {
+            let event = voice.event;
+            // The great explosions and the launch warning are what everything dips for.
+            let dipped = if event.sound.is_great() || event.sound == OneShot::LaunchWarning { 1.0 } else { self.dip };
+            let sound = voice.next() * event.gain * dipped;
+            let (to_left, to_right) = pan_gains(event.pan);
+            left += sound * to_left;
+            right += sound * to_right;
+        }
+        self.voices.retain(|voice| !voice.done());
         let middle = self.alarm_voice(targets.alarm_serial) * ALARM_GAIN + self.select_voice(targets.select_serial) * SELECT_GAIN;
         // Soft clipping, so that everything at once cannot distort harshly.
         [((left + middle) * self.volume).tanh(), ((right + middle) * self.volume).tanh()]
@@ -496,6 +556,8 @@ impl SharedTargets {
 pub struct SoundEngine {
     shared: Arc<SharedTargets>,
     stream: cpal::Stream,
+    /// One-shot sounds, to the audio thread.
+    events: Sender<SoundEvent>,
 }
 
 impl SoundEngine {
@@ -504,18 +566,19 @@ impl SoundEngine {
         let device = cpal::default_host().default_output_device().ok_or("no audio output device")?;
         let config = device.default_output_config().map_err(|error| error.to_string())?;
         let shared = Arc::new(SharedTargets::default());
+        let (events, received) = std::sync::mpsc::channel();
         let format = config.sample_format();
         let config: cpal::StreamConfig = config.into();
         let stream = match format {
-            SampleFormat::F32 => open_stream::<f32>(&device, &config, &shared),
-            SampleFormat::F64 => open_stream::<f64>(&device, &config, &shared),
-            SampleFormat::I16 => open_stream::<i16>(&device, &config, &shared),
-            SampleFormat::I32 => open_stream::<i32>(&device, &config, &shared),
-            SampleFormat::U16 => open_stream::<u16>(&device, &config, &shared),
+            SampleFormat::F32 => open_stream::<f32>(&device, &config, &shared, received),
+            SampleFormat::F64 => open_stream::<f64>(&device, &config, &shared, received),
+            SampleFormat::I16 => open_stream::<i16>(&device, &config, &shared, received),
+            SampleFormat::I32 => open_stream::<i32>(&device, &config, &shared, received),
+            SampleFormat::U16 => open_stream::<u16>(&device, &config, &shared, received),
             other => Err(format!("unsupported sample format {other}")),
         }?;
         stream.play().map_err(|error| error.to_string())?;
-        Ok(Self { shared, stream })
+        Ok(Self { shared, stream, events })
     }
 
     /// Starts the sound again: in the browser, which holds it back until the player clicks or
@@ -547,13 +610,19 @@ impl SoundEngine {
         self.shared.select_serial.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Plays a sound once.
+    pub fn play(&self, event: SoundEvent) {
+        // Only fails if the audio thread has gone, when there is nothing to hear anyway.
+        let _ = self.events.send(event);
+    }
+
     /// How many frames the device has asked for, to confirm that sound is really running.
     pub fn frames_played(&self) -> u64 {
         self.shared.frames_played.load(Ordering::Relaxed)
     }
 }
 
-fn open_stream<T>(device: &cpal::Device, config: &cpal::StreamConfig, shared: &Arc<SharedTargets>) -> Result<cpal::Stream, String>
+fn open_stream<T>(device: &cpal::Device, config: &cpal::StreamConfig, shared: &Arc<SharedTargets>, events: Receiver<SoundEvent>) -> Result<cpal::Stream, String>
 where
     T: SizedSample + FromSample<f32>,
 {
@@ -565,6 +634,10 @@ where
             *config,
             move |output: &mut [T], _: &cpal::OutputCallbackInfo| {
                 let targets = shared.read();
+                // Without waiting: what has not arrived yet starts next time.
+                while let Ok(event) = events.try_recv() {
+                    synth.play(event);
+                }
                 for frame in output.chunks_mut(channels) {
                     let [left, right] = synth.next_frame(&targets);
                     // A single speaker gets both; more than two get the middle on the rest.
@@ -606,6 +679,10 @@ pub struct Listener<'a> {
     pub across: &'a dyn Fn(&UnitView) -> Option<f32>,
     /// The water in view.
     pub water: WaterView,
+    /// Where a point is across the screen, from -1 at the left edge to 1 at the right, held to
+    /// the edges, and whether it is on screen, if it is in front of the camera at all. Raw `Fp`
+    /// bits, and with no height given, on the ground.
+    pub point: &'a dyn Fn(i32, i32, Option<i32>) -> Option<(f32, bool)>,
 }
 
 /// How much of the ground in view is water, from 0 to 1, and where across the screen it lies.
