@@ -11,6 +11,7 @@ on:
       - "src/minimap.rs"
       - ".github/workflows/landscape.yml"
       - "scripts/landscape_pairs.py"
+      - "scripts/landscape_maps.sh"
   workflow_dispatch:
 
 permissions:
@@ -67,9 +68,7 @@ jobs:
       - name: Pictures from this branch
         run: |
           cargo build --locked --release
-          for map in $MAPS; do
-            xvfb-run -a -s "-screen 0 1440x900x24" ./target/release/sim-engine --map "$map" --landscape "pictures/after/$map"
-          done
+          scripts/landscape_maps.sh ./target/release/sim-engine pictures/after $MAPS
 
       # Main's build of the same program, if it has `--landscape` yet.
       - name: Pictures from main
@@ -82,9 +81,7 @@ jobs:
             exit 0
           fi
           CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo build --locked --release
-          for map in $MAPS; do
-            xvfb-run -a -s "-screen 0 1440x900x24" "$GITHUB_WORKSPACE/target/release/sim-engine" --map "$map" --landscape "$GITHUB_WORKSPACE/pictures/before/$map"
-          done
+          "$GITHUB_WORKSPACE/scripts/landscape_maps.sh" "$GITHUB_WORKSPACE/target/release/sim-engine" "$GITHUB_WORKSPACE/pictures/before" $MAPS
 
       - name: Side by side
         if: github.event_name == 'pull_request'
