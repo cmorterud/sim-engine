@@ -268,3 +268,38 @@ fn a_strategic_defense_stops_a_missile_flying_over_it_to_somewhere_else() {
     assert!(run_until(&mut world, 500, |world| !alive(world, far)).is_some(), "out of its range, it should land");
     assert_eq!(world.ecs.get::<&MissileDefense>(world.unit_entity(aside).unwrap()).unwrap().stock, 1);
 }
+
+/// A strategic launch is heard by everyone as a warning, and its strike, and a commander blowing
+/// up as it dies, anywhere on the map: each player's snapshot carries them, seen or not. With fog
+/// of war, Red sees nothing of the Blue silo 3,000 away that fires at it, but hears the launch.
+#[test]
+fn a_strategic_launch_its_strike_and_a_commander_blowing_up_reach_every_player_seen_or_not() {
+    use sim_engine::sim::world::DetonationKind;
+    let (mut world, silo, _, _) = nuclear_standoff();
+    world.config.fog_of_war = true;
+    let rig = world.blueprints.id("command_rig");
+    let commander = world.spawn_mobile(rig, Team::Red, point(3_320, 450));
+    world.advance_tick(&[SimCommand::AttackGround { units: vec![silo], point: ground_zero() }]);
+    let mut launches = Vec::new();
+    let mut struck = Vec::new();
+    for _ in 0..600 {
+        for viewer in [Team::Blue, Team::Red] {
+            let snapshot = world.snapshot_for(Some(viewer));
+            if viewer == Team::Red && !snapshot.strategic_launches.is_empty() {
+                assert!(snapshot.projectiles.iter().all(|shot| shot.kind != sim_engine::sim::world::ProjectileKind::StrategicMissile), "Red should not see the missile leave its silo");
+            }
+            launches.extend(snapshot.strategic_launches.iter().map(|&team| (viewer, team)));
+            struck.extend(snapshot.detonations.iter().map(|detonation| (viewer, detonation.kind)));
+        }
+        if !alive(&world, commander) && struck.iter().any(|(_, kind)| *kind == DetonationKind::Commander) {
+            break;
+        }
+        world.advance_tick(&[]);
+    }
+    assert_eq!(launches, [(Team::Blue, Team::Blue), (Team::Red, Team::Blue)], "one launch, heard by both players");
+    for viewer in [Team::Blue, Team::Red] {
+        let kinds: Vec<DetonationKind> = struck.iter().filter(|(seen_by, _)| *seen_by == viewer).map(|(_, kind)| *kind).collect();
+        assert_eq!(kinds.iter().filter(|kind| **kind == DetonationKind::StrategicMissile).count(), 1, "{viewer:?} hears one strike: {kinds:?}");
+        assert_eq!(kinds.iter().filter(|kind| **kind == DetonationKind::Commander).count(), 1, "{viewer:?} hears the commander blow up: {kinds:?}");
+    }
+}

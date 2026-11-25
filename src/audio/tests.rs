@@ -1,6 +1,6 @@
 use super::*;
-use crate::sim::components::Team;
-use crate::sim::world::{FactoryView, WorkLinkView};
+use crate::sim::components::{Team, WreckKind};
+use crate::sim::world::{BlastView, Detonation, DetonationKind, FactoryView, ProjectileKind, ProjectileView, WorkLinkView, WreckView};
 
 const RATE: f32 = 48_000.0;
 
@@ -365,7 +365,7 @@ fn scene(db: &BlueprintDb) -> SimSnapshot {
 
 /// Hears a scene, everything on screen at the middle, unless `across` says otherwise.
 fn hear(snapshot: &SimSnapshot, movement: &Movement, db: &BlueprintDb, zoom: f64, water: WaterView, across: &dyn Fn(&UnitView) -> Option<f32>) -> [BedLevel; BEDS] {
-    scene_levels(snapshot, movement, db, &Listener { zoom, across, water })
+    scene_levels(snapshot, movement, db, &Listener { zoom, across, water, point: &|_, _, _| Some((0.0, true)) })
 }
 
 fn everywhere(_: &UnitView) -> Option<f32> {
@@ -580,4 +580,198 @@ fn a_real_device_keeps_asking_for_samples() {
     engine.set_volume(0.0);
     std::thread::sleep(std::time::Duration::from_millis(500));
     assert!(engine.frames_played() > 1_000, "only {} frames", engine.frames_played());
+}
+
+/// A sound played once on its own, as loud as it gets, and a little after.
+fn once(sound: OneShot) -> Vec<f32> {
+    let mut synth = Synth::new(RATE);
+    render(&mut synth, 0.2, quiet());
+    synth.play(SoundEvent { sound, gain: 1.0, pan: 0.0 });
+    render(&mut synth, sound.seconds() + 0.5, quiet())
+}
+
+const FIGHTING: [OneShot; 8] = [OneShot::Gun(0.1), OneShot::Gun(0.9), OneShot::Laser, OneShot::Missile, OneShot::Impact(0.1), OneShot::Impact(0.9), OneShot::Destroyed(0.2), OneShot::Destroyed(0.9)];
+
+/// Every sound that plays once is struck softly, never switched on, so that none clicks in: its
+/// first 2 ms are under half its peak. And it ends when it should, and stays ended.
+#[test]
+fn every_one_shot_sound_is_struck_softly_and_ends() {
+    for sound in FIGHTING.into_iter().chain([OneShot::CommanderExplosion, OneShot::Nuke, OneShot::LaunchWarning]) {
+        let samples = once(sound);
+        let top = peak(&samples);
+        let start = samples.iter().position(|sample| sample.abs() > 1e-4).expect("it plays");
+        let opening = peak(&samples[start..start + (0.002 * RATE) as usize]);
+        assert!(opening < top * 0.5, "{sound:?} starts at {} of its peak within 2 ms", opening / top);
+        assert!(samples.iter().all(|sample| sample.abs() <= 1.0), "{sound:?} goes past full");
+        let ended = (start as f32 / RATE + sound.seconds()) * RATE;
+        assert!(peak(&samples[ended as usize..]) < 1e-4, "{sound:?} goes on past its {} s", sound.seconds());
+    }
+}
+
+/// The fighting is light: soft thumps, puffs, and dull bursts, no louder than the selection cue,
+/// with little energy above 1 kHz, but for the laser's soft "fsss" and the missile's whoosh.
+#[test]
+fn the_fighting_is_light_and_soft() {
+    for sound in FIGHTING {
+        let samples = once(sound);
+        let (top, harsh) = (peak(&samples), harshness(&samples));
+        let (most, harshest) = match sound {
+            OneShot::Gun(_) | OneShot::Laser | OneShot::Missile => (SELECT_GAIN, 0.4),
+            _ => (SELECT_GAIN * 1.3, 0.15),
+        };
+        assert!(top < most, "{sound:?} peaks at {top}, over {most}");
+        assert!(harsh < harshest, "{sound:?} is {harsh} harsh, over {harshest}");
+    }
+}
+
+/// A heavier gun, a bigger blast, and a bigger unit destroyed sound lower, last longer, and are a
+/// little louder, so that a battle's weight is heard.
+#[test]
+fn heavier_guns_and_bigger_blasts_are_lower_longer_and_louder() {
+    for (light, heavy) in [(OneShot::Gun(0.1), OneShot::Gun(0.9)), (OneShot::Impact(0.1), OneShot::Impact(0.9)), (OneShot::Destroyed(0.2), OneShot::Destroyed(0.9))] {
+        let (small, big) = (once(light), once(heavy));
+        assert!(heavy.seconds() > light.seconds(), "{heavy:?} lasts longer than {light:?}");
+        assert!(peak(&big) > peak(&small), "{heavy:?} at {}, {light:?} at {}", peak(&big), peak(&small));
+        let opening = |samples: &[f32]| crossings(&samples[(0.2 * RATE) as usize..(0.35 * RATE) as usize]);
+        assert!(opening(&big) < opening(&small), "{heavy:?} at {} crossings a second, {light:?} at {}", opening(&big), opening(&small));
+    }
+}
+
+/// A commander blowing up and a strategic missile striking are the loudest sounds there are, but
+/// still never past full, and they dip everything else while they last, then let it back.
+#[test]
+fn the_great_explosions_are_the_loudest_never_clip_and_dip_the_rest() {
+    let loudest_fighting = FIGHTING.iter().map(|&sound| peak(&once(sound))).fold(0.0, f32::max);
+    for (sound, dipped_to, back_by) in [(OneShot::CommanderExplosion, 0.5, 5.5), (OneShot::Nuke, 0.35, 9.5)] {
+        assert!(peak(&once(sound)) > loudest_fighting * 3.0, "{sound:?} is the loudest");
+        let mut synth = Synth::new(RATE);
+        let sea = quiet().with(Bed::Ocean, BedLevel::new(1.0, 0.0, 0.0));
+        render(&mut synth, 1.0, sea);
+        synth.play(SoundEvent { sound, gain: 1.0, pan: 0.0 });
+        render(&mut synth, 1.0, sea);
+        assert!(synth.dip < dipped_to, "{sound:?} dips the rest to {}", synth.dip);
+        render(&mut synth, back_by - 1.0, sea);
+        assert!(synth.dip > 0.9, "{sound:?} lets the rest back, at {} after {back_by} s", synth.dip);
+    }
+    // The nuke's rumble outlasts its roar: still heard eight seconds on.
+    let nuke = once(OneShot::Nuke);
+    let late = loudness(&nuke[(8.2 * RATE) as usize..(8.7 * RATE) as usize]);
+    assert!(late > loudness(&nuke) * 0.05, "the rumble is gone by eight seconds, at {late}");
+}
+
+/// The launch warning: two low notes, three times, soft and warm, and well under the alarm.
+#[test]
+fn the_launch_warning_is_low_soft_and_plays_once() {
+    let warning = once(OneShot::LaunchWarning);
+    let start = warning.iter().position(|sample| sample.abs() > 1e-4).expect("it plays");
+    let note = &warning[start + (0.05 * RATE) as usize..start + (0.3 * RATE) as usize];
+    assert!(crossings(note) < 2.0 * 260.0, "it is low, at {} crossings a second", crossings(note));
+    let mut synth = Synth::new(RATE);
+    let alarm = render(&mut synth, 1.0, SoundTargets { alarm_serial: 1, ..quiet() });
+    assert!(peak(&warning) < peak(&alarm) * 0.6, "the warning at {}, the alarm at {}", peak(&warning), peak(&alarm));
+}
+
+/// With every voice busy, the oldest small sound gives way to a new one; a great explosion never
+/// does, and however much fires at once, the sound never goes past full.
+#[test]
+fn a_full_set_of_voices_drops_the_oldest_small_sound_never_a_great_one() {
+    let mut synth = Synth::new(RATE);
+    synth.play(SoundEvent { sound: OneShot::Nuke, gain: 1.0, pan: 0.0 });
+    let mut samples = Vec::new();
+    for index in 0..60 {
+        synth.play(SoundEvent { sound: OneShot::Impact(0.9), gain: 1.0, pan: (index % 3) as f32 - 1.0 });
+        samples.extend(render(&mut synth, 0.01, quiet()));
+        assert!(synth.playing() <= MOST_VOICES);
+    }
+    assert!(synth.voices.iter().any(|voice| voice.event.sound == OneShot::Nuke), "the nuke plays on");
+    assert!(samples.iter().all(|sample| sample.abs() <= 1.0));
+}
+
+#[test]
+fn a_sound_played_once_comes_from_its_side_of_the_screen() {
+    let mut synth = Synth::new(RATE);
+    synth.play(SoundEvent { sound: OneShot::Impact(0.5), gain: 1.0, pan: -1.0 });
+    let (left, right) = render_stereo(&mut synth, 0.6, quiet());
+    assert!(loudness(&left) > loudness(&right) * 1.8, "left {}, right {}", loudness(&left), loudness(&right));
+}
+
+fn shell(id: u32, source: u32, x: i32, from: Option<[i32; 3]>, kind: ProjectileKind) -> ProjectileView {
+    ProjectileView { id: SimId(id), team: Team::Red, x, y: 0, z: 0, kind, source: SimId(source), from, splash: 0 }
+}
+
+/// Hears the events between two snapshots, with what is on screen and how far zoomed out.
+fn events_between(previous: &SimSnapshot, current: &SimSnapshot, zoom: f64, on_screen: bool) -> Vec<SoundEvent> {
+    let db = BlueprintDb::standard();
+    let point = move |x: i32, _: i32, _: Option<i32>| Some(((x as f32 / 4096.0 / 100.0).clamp(-1.0, 1.0), on_screen));
+    scene_events(previous, current, &db, &Listener { zoom, across: &everywhere, water: WaterView::default(), point: &point })
+}
+
+fn ticks() -> (SimSnapshot, SimSnapshot) {
+    (SimSnapshot { tick: 1, ..SimSnapshot::default() }, SimSnapshot { tick: 2, ..SimSnapshot::default() })
+}
+
+/// A gun fired, a missile launched, a laser striking, and a shell striking are heard when on
+/// screen and zoomed in, and not otherwise; each once, for the snapshot that first shows it.
+#[test]
+fn the_fighting_is_heard_on_screen_and_zoomed_in_once_each() {
+    let (previous, mut current) = ticks();
+    current.projectiles = vec![shell(10, 1, 0, Some([0, 0, 0]), ProjectileKind::Shell), shell(11, 1, 0, Some([0, 0, 0]), ProjectileKind::TacticalMissile)];
+    current.landed = vec![shell(12, 1, 0, Some([0, 0, 0]), ProjectileKind::Beam), ProjectileView { splash: 100 * 4096, ..shell(13, 1, 0, None, ProjectileKind::Shell) }];
+    let heard: Vec<OneShot> = events_between(&previous, &current, 0.0, true).iter().map(|event| event.sound).collect();
+    assert!(matches!(heard.as_slice(), [OneShot::Gun(_), OneShot::Laser, OneShot::Missile, OneShot::Impact(_)]), "{heard:?}");
+    assert!(events_between(&previous, &current, 0.0, false).is_empty(), "off screen");
+    assert!(events_between(&previous, &current, 0.5, true).is_empty(), "zoomed out");
+    assert!(events_between(&current, &current, 0.0, true).is_empty(), "the same snapshot is heard once");
+    // A shell already in flight is not fired again.
+    let mut later = current.clone();
+    later.tick = 3;
+    later.landed.clear();
+    assert!(events_between(&current, &later, 0.0, true).is_empty(), "{:?}", events_between(&current, &later, 0.0, true));
+}
+
+/// A unit gone since the snapshot before is heard destroyed only if it left debris: one that
+/// only went out of sight leaves none.
+#[test]
+fn a_unit_is_heard_destroyed_only_if_it_left_debris() {
+    let db = BlueprintDb::standard();
+    let tank = db.id("t1_engineer").0;
+    let (mut previous, mut current) = ticks();
+    previous.units = vec![view(5, tank, 0, 1000)];
+    assert!(events_between(&previous, &current, 0.0, true).is_empty(), "out of sight is not destroyed");
+    current.wrecks = vec![WreckView { id: SimId(90), x: 0, y: 0, z: 0, radius: 4096, mass: 10, energy: 0, kind: WreckKind::Debris }];
+    let heard = events_between(&previous, &current, 0.0, true);
+    assert!(matches!(heard.as_slice(), [SoundEvent { sound: OneShot::Destroyed(_), .. }]), "{heard:?}");
+    // A blast as it dies is heard too.
+    let (previous, mut current) = ticks();
+    current.blasts = vec![BlastView { team: Team::Red, x: 0, y: 0, radius: 200 * 4096 }];
+    assert!(matches!(events_between(&previous, &current, 0.0, true).as_slice(), [SoundEvent { sound: OneShot::Destroyed(_), .. }]));
+}
+
+/// A big battle is heard as a rumble of fire, not a barrage: only a few of each kind start for a
+/// snapshot, the rest heard as those few a little louder.
+#[test]
+fn a_big_battle_starts_only_a_few_of_each_sound_at_once() {
+    let (previous, mut current) = ticks();
+    current.projectiles = (0..30).map(|index| shell(100 + index, 1, index as i32 * 4096, Some([index as i32 * 4096, 0, 0]), ProjectileKind::Shell)).collect();
+    let heard = events_between(&previous, &current, 0.0, true);
+    assert!(heard.len() <= 4, "{} guns start at once", heard.len());
+    assert!(heard.iter().all(|event| event.gain > 1.0 - 1e-6 || event.gain > 0.99), "the few stand for the rest, at {:?}", heard.iter().map(|event| event.gain).collect::<Vec<_>>());
+}
+
+/// A commander blowing up and a strategic missile striking are heard wherever the camera is,
+/// softer off screen, and a strategic launch anywhere sounds the warning, even zoomed all the way
+/// out with nothing in view.
+#[test]
+fn the_great_explosions_and_the_launch_warning_are_heard_everywhere() {
+    let (previous, mut current) = ticks();
+    current.detonations = vec![Detonation { kind: DetonationKind::Commander, x: 0, y: 0 }, Detonation { kind: DetonationKind::StrategicMissile, x: 0, y: 0 }];
+    current.strategic_launches = vec![Team::Red];
+    // Zoomed all the way out, and off screen.
+    let heard = events_between(&previous, &current, 1.0, false);
+    let gain = |sound: OneShot| heard.iter().find(|event| event.sound == sound).map(|event| event.gain);
+    assert!(gain(OneShot::CommanderExplosion).is_some_and(|gain| gain > 0.2 && gain < 0.6), "{heard:?}");
+    assert!(gain(OneShot::Nuke).is_some_and(|gain| gain > 0.2 && gain < 0.6), "{heard:?}");
+    assert_eq!(gain(OneShot::LaunchWarning), Some(1.0));
+    let in_view = events_between(&previous, &current, 1.0, true);
+    assert!(in_view.iter().filter(|event| event.sound.is_great()).all(|event| event.gain == 1.0), "in full on screen: {in_view:?}");
 }
