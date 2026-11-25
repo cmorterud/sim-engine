@@ -207,6 +207,9 @@ wide = ["t2_artillery", "t3_artillery", "t3_mobile_artillery", "t3_strategic_bom
 t1_bomber = { t1_medium_tank = 2, t1_mobile_aa = 2 }
 t3_strategic_bomber = { t3_heavy_walker = 1, t3_siege_walker = 3, t3_mobile_artillery = 1, t2_artillery = 2, command_rig = 4 }
 tactical_missile_launcher = { field_rig = 2, command_rig = 2 }
+# The T3 SAM: two missiles bring down a Gunship, and eight a Strategic Bomber (2026-11-25), which
+# [kill_times] times.
+t3_sam = { t2_gunship = 2, t3_strategic_bomber = 8 }
 # Mobile Heavy Artillery is a glass cannon: it survives one shell from another of its kind, but not
 # two, and one shell kills a Medium Tank. Its shell keeps the damage the arcs pass gave it, 859, and
 # its spread, 60, makes it inaccurate, as heavy artillery is in the inspiration, so that it is for
@@ -220,6 +223,32 @@ t3_mobile_artillery = { t3_mobile_artillery = 2, t1_medium_tank = 1 }
 t3_artillery_kills_every_t3_land_unit = true
 t3_artillery_spread = [150, 200]
 t2_artillery_spread = [40, 60]
+
+[volleys]
+# Volleys of a unit's anti-air, all its shots at one aircraft, to destroy each aircraft at its base
+# health, with no veterancy (2026-11-25, the design owner's numbers;
+# reports/plans/2026-11-25-weapons-nukes-shields.md). The cruiser's, a volley every two seconds:
+# one for every T1 aircraft, the Torpedo Bomber and the Gunship; two, in under four seconds, for
+# the Fighter-Bomber, the Spy Plane and the Air Transport; three for the T3 fighter; four for the
+# Strategic Bomber; six, in under twelve seconds, for the Heavy Gunship. The Gunship's and the
+# Strategic Bomber's health were set by it, the bomber a little over four Gunships'.
+t2_cruiser = { t1_air_scout = 1, t1_interceptor = 1, t1_bomber = 1, t1_light_transport = 1, t2_torpedo_bomber = 1, t2_gunship = 1, t2_fighter_bomber = 2, t3_spy_plane = 2, t2_transport = 2, t3_air_superiority = 3, t3_strategic_bomber = 4, t3_heavy_gunship = 6 }
+
+[kill_times]
+# Seconds for these attackers, alone, to destroy one target that holds still and does not fire
+# back, timed from the first shot (2026-11-25, the design owner's numbers): a commander with no
+# enhancements, on land or walking the seabed; a submerged T1 Attack Submarine; and aircraft
+# hanging in the air. Each is "about" its number: a reload's width either side.
+cruiser_missiles_commander_on_land = [95, 105]
+destroyer_guns_commander_on_land = [75, 85]
+five_destroyers_torpedoes_commander_under_water = [75, 85]
+destroyer_torpedoes_t1_sub_submerged = [22, 28]
+two_torpedo_boats_commander_under_water = [55, 65]
+sam_t2_gunship = [1.5, 3.0]
+sam_t3_strategic_bomber = [9.5, 12.5]
+# The cruiser's anti-air, its volleys timed by tests/kill_times_test.rs.
+cruiser_two_volleys_seconds_max = 4
+cruiser_six_volleys_seconds_max = 12
 
 [air]
 # Air against land (2026-11-21). T1 air is set by these rules and [kills], one number each, not by
@@ -411,22 +440,32 @@ battleship_heavy_fleet_breaks_to_torpedo_bombers_at_most = 1.0
 # frigate's railgun is set by this (2026-11-24, and again once aircraft obeyed orders over open sea).
 frigates_against_t1_bombers_at_least = -0.15
 # Skipping the counter loses. A fleet with no anti-air loses to torpedo bombers; one with no
-# anti-submarine weapon loses to submarines, which lose to destroyers.
+# anti-submarine weapon loses to submarines, which lose to destroyers: destroyers score at least
+# destroyers_beat_submarines against destroyers_beat_submarines_at_cost of their cost in
+# submarines. That was an equal cost until 2026-11-25, when the destroyer's torpedo was set to
+# destroy a submerged Attack Submarine in about 25 seconds ([kill_times]): six submarines to a
+# destroyer then fire faster than its anti-torpedo charge can stop, and an equal cost of them wins
+# (-0.37), though four-fifths of it loses clearly (+0.71).
 fleet_without_anti_air_loses_to_torpedo_bombers = -0.40
 submarines_beat_fleet_without_anti_submarine = 0.40
 destroyers_beat_submarines = 0.40
+destroyers_beat_submarines_at_cost = 0.8
 # Air against a land army with a fifth anti-air, at T2: about even, as at T1 ([air]).
 air_force_against_land_army_t2_even = true
 # The hovercraft loses clearly to an equal cost of a fleet on the water. Its strength on land is
 # in [premiums], with the other capabilities a unit pays for.
 hovercraft_loses_to_fleet = -0.40
 # Ships break coastal bases from T2 up: these outrange the point defense of their tier by at least
-# [siege] outrange_defense_min, and an equal cost of them breaks a coastal position of that tier
-# within coastal_seconds_max, losing at most coastal_losses_max. Slower than artillery's
+# [siege] outrange_defense_min, and coastal_ship_count of them break a coastal position of that
+# tier within coastal_seconds_max, losing at most coastal_losses_max. Slower than artillery's
 # [siege] seconds_max, which is for guns that take fire while they shell: ships shell from beyond
-# the defenses' reach and lose nothing, so their pace is all that is left to set, and within their
-# strength_band a cruiser's comes to about a minute and a half (2026-11-24).
+# the defenses' reach and lose nothing, so their pace is all that is left to set (2026-11-24).
+# Two ships, not an equal cost, since 2026-11-25: the T2 dome heals as fast as one cruiser's
+# missiles strike it, and the T3 dome faster than one battleship's guns, so one ship never breaks
+# the position by design (reports/plans/2026-11-25-weapons-nukes-shields.md, item 3), and whole
+# ships at an equal cost come to one.
 coastal_ships = { t2_cruiser = "t2_point_defense", t3_battleship = "t3_heavy_point_defense" }
+coastal_ship_count = 2
 coastal_seconds_max = 120
 coastal_losses_max = 0.10
 # Torpedo launchers and a counter-fleet are the answer: an equal cost of destroyers closing on

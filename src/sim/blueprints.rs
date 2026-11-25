@@ -315,6 +315,33 @@ pub struct WeaponDef {
     /// ahead, as the cosine of the half-angle (`arc` in the unit data, in degrees). None for one
     /// that fires in any direction.
     pub arc: Option<Fp>,
+    /// Fires its shots in volleys rather than one at a time: `None` for one shot a reload.
+    pub salvo: Option<SalvoDef>,
+}
+
+/// A volley (`salvo` in the unit data): `shots` shots spread over the volley's first `ticks`,
+/// shot `i` (from 0) leaving `i * ticks / shots` ticks after the first, rounded down. The weapon's
+/// `reload_ticks` is from the start of one volley to the start of the next, so a cruiser that
+/// fires four missiles a second apart and reloads for six seconds has `reload_ticks = 100` and
+/// `salvo = { shots = 4, ticks = 40 }`.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct SalvoDef {
+    pub shots: u32,
+    pub ticks: u32,
+}
+
+impl SalvoDef {
+    /// Ticks after the volley's first shot that shot `index` leaves.
+    pub const fn offset(&self, index: u32) -> u32 {
+        index * self.ticks / self.shots
+    }
+}
+
+impl WeaponDef {
+    /// Shots each reload: a volley's, or one.
+    pub fn shots_per_reload(&self) -> u32 {
+        self.salvo.map_or(1, |salvo| salvo.shots)
+    }
 }
 
 /// A storm a unit leaves where it is destroyed (GAME_SPECIFICATION.md §12), that roams on its
@@ -336,11 +363,11 @@ pub struct MissileDefenseDef {
     /// builds. Tactical ones stop cruise missiles, one at a time, as often as they reload.
     pub strategic: bool,
     pub range: Fp,
-    /// How often it stops a missile, with all its mounts together: each mount reloads in
-    /// `reload_ticks * mounts`.
+    /// How often each mount stops a missile.
     pub reload_ticks: u32,
-    /// How many mounts it has, each the same as every other unit's: a battleship carries two
-    /// where a battlecruiser carries one, and so stops missiles twice as often.
+    /// How many mounts it has, each the same as every other unit's and each a defense of its
+    /// own, with its own reload: a battleship carries two where a battlecruiser carries one, and
+    /// so stops missiles twice as often, two at once if they come together.
     pub mounts: u8,
 }
 
@@ -596,6 +623,15 @@ struct RawWeapon {
     setup_ticks: Option<u32>,
     /// Degrees either side of the nose a fixed gun fires within.
     arc: Option<u32>,
+    /// Shots in volleys: how many, over how many ticks from the first.
+    salvo: Option<RawSalvo>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawSalvo {
+    shots: u32,
+    ticks: u32,
 }
 
 #[derive(Deserialize)]
@@ -982,6 +1018,11 @@ impl BlueprintDb {
                 if weapon.arc.is_some_and(|degrees| !(1..=90).contains(&degrees)) {
                     return Err(context("a fixed gun's arc is from 1 to 90 degrees either side of the nose".into()));
                 }
+                if let Some(salvo) = &weapon.salvo {
+                    if salvo.shots < 2 || salvo.ticks < salvo.shots || salvo.ticks >= weapon.reload_ticks {
+                        return Err(context("a salvo has at least two shots, at least a tick apart, and ends before its reload_ticks are up".into()));
+                    }
+                }
                 let mount = match &weapon.mount {
                     None => [Fp::ZERO; 2],
                     Some([right, forward]) => [right.fp().map_err(context)?, forward.fp().map_err(context)?],
@@ -1036,6 +1077,7 @@ impl BlueprintDb {
                     aft: weapon.aft,
                     setup_ticks: weapon.setup_ticks.unwrap_or(0),
                     arc: weapon.arc.map(|degrees| crate::math::fp::cos_sin_tenths_of_degree(degrees * 10).0),
+                    salvo: weapon.salvo.as_ref().map(|salvo| SalvoDef { shots: salvo.shots, ticks: salvo.ticks }),
                 })
             };
             let weapon = unit.weapon.as_ref().map(parse_weapon).transpose()?;
@@ -1074,8 +1116,8 @@ impl BlueprintDb {
             let shield = unit.shield.as_ref().map(parse_shield).transpose().map_err(context)?;
             let missile_defense = match &unit.missile_defense {
                 None => None,
-                Some(defense) if defense.mounts == Some(0) || defense.reload_ticks.unwrap_or(0) % u32::from(defense.mounts.unwrap_or(1).max(1)) != 0 => {
-                    return Err(context("a missile defense has at least one mount, and its reload_ticks divide evenly among them".into()));
+                Some(defense) if defense.mounts.is_some_and(|mounts| mounts == 0 || usize::from(mounts) > super::components::MAX_DEFENSE_MOUNTS) => {
+                    return Err(context(format!("a missile defense has from one to {} mounts", super::components::MAX_DEFENSE_MOUNTS)));
                 }
                 Some(defense) => Some(MissileDefenseDef {
                     strategic: match defense.kind.as_str() {
@@ -1084,7 +1126,7 @@ impl BlueprintDb {
                         other => return Err(context(format!("unknown missile defense {other:?}"))),
                     },
                     range: defense.range.fp().map_err(context)?,
-                    reload_ticks: defense.reload_ticks.unwrap_or(0) / u32::from(defense.mounts.unwrap_or(1)),
+                    reload_ticks: defense.reload_ticks.unwrap_or(0),
                     mounts: defense.mounts.unwrap_or(1),
                 }),
             };

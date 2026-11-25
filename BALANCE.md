@@ -217,6 +217,21 @@ out close and why: evidence about the process, not a target.
   destroying it outright, still one torpedo each reload. Every `[domains]` target holds: the
   torpedo bombers it takes to break a fleet are 2.1 times its cost for T2 and 2.2 for T3 (the band
   is 2 to 5), and a battleship-heavy fleet breaks to 0.52 of its cost.
+* 2026-11-25: kill times, the user's (`[kill_times]` and `[volleys]`,
+  `reports/plans/2026-11-25-weapons-nukes-shields.md`). The cruiser fires its anti-air eight
+  missiles a volley and its cruise missiles four, and each aircraft takes a set number of volleys
+  (Gunship health 1,590 and Strategic Bomber 6,400 to fit). The T3 SAM destroys a Strategic Bomber
+  in about 11 seconds and a Gunship in about 2. The destroyer's guns destroy a commander on land in
+  about 80 seconds, and its torpedo a submerged Attack Submarine in about 25 and, five of them, a
+  commander under the water in about 80; two torpedo boats destroy one in about 60. The T2 dome
+  heals as fast as one cruiser's missiles strike it, and the T3 dome faster than a battleship's
+  guns. Two `[domains]` cells moved with them. One ship can no longer break its tier's coastal
+  position, by design, so two are measured (`coastal_ship_count`): two cruisers break the T2 one
+  in 63 seconds and two battleships the T3 one in 80. And six submarines to a destroyer fire
+  faster than its anti-torpedo charge stops, so an equal cost of them now beats destroyers
+  (-0.37); four-fifths of it loses clearly (+0.71), and that is measured instead
+  (`destroyers_beat_submarines_at_cost`). A faster charge would win at an equal cost, but then an
+  equal cost of destroyers breaks T2 torpedo launchers.
 
 ## Order of work
 

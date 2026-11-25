@@ -175,9 +175,10 @@ id = "navy_destroyers_against_submarines"
 title = "Hunting submarines: destroyers against submarines"
 ground = "water"
 target = "domains.cells.destroyers_beat_submarines"
-shows = "Destroyers, the fleet's submarine hunters, against an equal cost of Attack Submarines. The destroyers' torpedoes outrange the submarines', and their charges stop some of what comes back: they win."
-try = "Attack-move in. Then spread the submarines out and close from several sides at once."
-blue = [{ unit = "t1_attack_sub", count = 25, at = [1_400, 2_560], columns = 5 }]
+blue_over_red = 0.8
+shows = "Destroyers, the fleet's submarine hunters, against four-fifths their cost in Attack Submarines. The destroyers' torpedoes outrange the submarines', and their charges stop most of what comes back: they win clearly. Against a full equal cost, five more submarines, the torpedoes come faster than the charges can stop and the submarines win."
+try = "Attack-move in. Then spread the submarines out and close from several sides at once. Then add five submarines."
+blue = [{ unit = "t1_attack_sub", count = 20, at = [1_400, 2_560], columns = 5 }]
 red = [{ unit = "t2_destroyer", count = 4, at = [3_000, 2_560], columns = 4 }]
 
 [[scenario]]
@@ -196,13 +197,13 @@ red = [
 
 [[scenario]]
 id = "navy_cruiser_against_a_coast"
-title = "From the sea: a Cruiser against a coastal T2 position"
+title = "From the sea: two Cruisers against a coastal T2 position"
 ground = "shore"
 target = "domains.cells.coastal_seconds_max"
-blue_over_red = 0.67
-shows = "A Cruiser at sea against point defenses under a shield, ashore. Its cruise missiles outrange the point defenses three times over, so it breaks the position without loss. One cruiser is two-thirds of the position's cost, as the harness buys whole ships, so an equal cost would be quicker still. Inland, beyond its reach, is safe from ships: that is navy's limit."
-try = "Attack-move at the position and time it. Then sail in within the point defenses' reach."
-blue = [{ unit = "t2_cruiser", count = 1, at = [600, 2_560] }]
+blue_over_red = 1.34
+shows = "Two Cruisers at sea against point defenses under a shield, ashore. Their cruise missiles outrange the point defenses three times over, so they break the position without loss, in about a minute. It takes two: the shield heals as fast as one cruiser's missiles strike it, so one alone never gets through. Inland, beyond their reach, is safe from ships: that is navy's limit."
+try = "Attack-move at the position and time it. Then send one cruiser alone and watch the shield hold. Then sail in within the point defenses' reach."
+blue = [{ unit = "t2_cruiser", count = 2, at = [600, 2_560], columns = 2 }]
 red = [
     { unit = "shield_generator", cell = [127, 127] },
     { unit = "t2_point_defense", cell = [124, 128] },
@@ -303,13 +304,13 @@ red = [
 
 [[scenario]]
 id = "navy_battleship_against_a_coast"
-title = "From the sea at T3: a Battleship against a coastal T3 position"
+title = "From the sea at T3: two Battleships against a coastal T3 position"
 ground = "shore"
 target = "domains.cells.coastal_seconds_max"
-blue_over_red = 0.70
-shows = "A Battleship at sea against heavy point defenses under a heavy shield, ashore. It outranges them twice over and breaks the position without loss. One battleship is seven-tenths of the position's cost, as the harness buys whole ships, so an equal cost would be quicker."
-try = "Attack-move at the position and time it. Then sail in within the heavy point defenses' reach."
-blue = [{ unit = "t3_battleship", count = 1, at = [600, 2_560] }]
+blue_over_red = 1.40
+shows = "Two Battleships at sea against heavy point defenses under a heavy shield, ashore. They outrange them twice over and break the position without loss, in under a minute and a half. It takes two: the heavy shield heals faster than one battleship's guns strike it."
+try = "Attack-move at the position and time it. Then send one battleship alone and watch the shield hold. Then sail in within the heavy point defenses' reach."
+blue = [{ unit = "t3_battleship", count = 2, at = [600, 2_560], columns = 2 }]
 red = [
     { unit = "t3_heavy_shield", cell = [127, 127] },
     { unit = "t3_heavy_point_defense", cell = [124, 128] },

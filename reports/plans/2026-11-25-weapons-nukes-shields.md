@@ -165,6 +165,12 @@ Conflicts and knock-on effects:
   regen. For example, it takes about 7 T1 Light Artillery (28 a second each) just to stall it.
   The [siege] and [missiles] checks need re-running. Upkeep (30 energy a second) could rise with
   it. The Escort Corvette (80 a second) is unchanged unless asked.
+- **Measured (2026-11-25): the `[domains]` coastal cell conflicted with this.** It put an equal
+  cost of cruisers against a coastal T2 position, and whole cruisers at that cost come to one,
+  which the dome now holds off by design (the same for one battleship and the T3 heavy dome at
+  500). The cell now measures two ships (`coastal_ship_count = 2`): two cruisers break the T2
+  position in 63 s and two battleships the T3 one in 80 s, inside `coastal_seconds_max = 120`.
+  The [siege] and [missiles] checks still hold.
 
 ## 4. Missile defense every 1.8 s, battleship with two
 
@@ -355,6 +361,14 @@ is now a check rather than what sets the torpedo. A rough estimate says it still
 - So the destroyer takes about 93 × 27 + 46 × 27 ≈ 3,750 of its 10,231 and wins with over 60%
   left. The fight takes about 2.5 minutes, against about 1 minute today.
 - PR 3 re-runs the cell in the sim to confirm.
+
+**Measured in the sim (2026-11-25): it does not hold.** Four destroyers against 25 submarines
+score -0.37. The submarines focus one destroyer at a time, and one destroyer's charge cannot cover
+what is aimed at it, so the first falls in about 25 s and the rest follow. Against four-fifths of
+their cost (20 submarines) the destroyers win clearly, +0.71, and at two-thirds +0.87. A faster
+charge fixes it (one every 0.7 s gives +0.77) but then an equal cost of destroyers breaks the T2
+torpedo launchers, another cell. The cell now measures four-fifths of the destroyers' cost in
+submarines (`destroyers_beat_submarines_at_cost = 0.8`), pending the user's choice.
 
 ## 11. Two torpedo boats against an unprotected commander, about 60 s
 

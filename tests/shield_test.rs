@@ -185,7 +185,9 @@ fn an_energy_stall_collapses_the_dome_and_pausing_drops_it_without_cost() {
     world.advance_tick(&[SimCommand::SetPaused { units: vec![generator], paused: false }]);
     let view = shield_view(&world, generator);
     assert!(view.up, "resuming puts it straight back up");
-    assert!(shield(&world, generator).health <= health + fp_int(5), "with the health it had");
+    // At most the one tick of healing it gets on coming back up.
+    let healed = shield(&world, generator).regen_per_tick;
+    assert!(shield(&world, generator).health <= health + healed, "with the health it had");
     // 30 energy a second is 3 a tick.
     let before = world.economies[1].energy;
     world.advance_tick(&[]);

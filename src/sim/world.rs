@@ -661,6 +661,7 @@ pub fn vet_regen_per_second(unit: &super::blueprints::Blueprint, rank: u8) -> i6
     VET_REGEN_ROWS[row] * i64::from(rank)
 }
 
+#[derive(Copy, Clone)]
 struct PendingShot {
     source: SimId,
     team: Team,
@@ -692,6 +693,34 @@ struct PendingShot {
     /// An artillery shell, lobbed in a high arc to come down on where it was aimed
     /// (GAME_SPECIFICATION.md §7, Artillery).
     lobbed: bool,
+}
+
+/// A nuclear missile on its way out of a silo or a submarine's hatch (2026-11-25): the doors
+/// open over `SILO_DOOR_TICKS`, the missile rises out once they are open, and they close behind
+/// it. `ticks` counts from the order.
+#[derive(Copy, Clone)]
+struct SiloLaunch {
+    shot: PendingShot,
+    ticks: u32,
+}
+
+/// How long a silo's doors take to open, and to close.
+pub const SILO_DOOR_TICKS: u32 = 30;
+/// How long they stay open once the missile is on its way, for it to rise clear: its lift, at its
+/// lift speed, and a little more.
+pub const SILO_OPEN_TICKS: u32 = 25;
+/// A launch from the order until the doors are closed again.
+pub const SILO_SEQUENCE_TICKS: u32 = SILO_DOOR_TICKS * 2 + SILO_OPEN_TICKS;
+
+/// How far open a silo's doors are, from 0 to `SILO_DOOR_TICKS`, this many ticks into a launch.
+pub const fn silo_doors_open(ticks: u32) -> u32 {
+    if ticks <= SILO_DOOR_TICKS {
+        ticks
+    } else if ticks <= SILO_DOOR_TICKS + SILO_OPEN_TICKS {
+        SILO_DOOR_TICKS
+    } else {
+        SILO_SEQUENCE_TICKS.saturating_sub(ticks)
+    }
 }
 
 /// What a launcher gives the missile it fires.
@@ -810,6 +839,8 @@ pub struct SimWorld {
     pub known_structures: [Vec<KnownStructure>; 2],
     /// Missiles shot down this tick, from where to where. Only for drawing, so not in the checksum.
     interceptions: Vec<[[i32; 3]; 2]>,
+    /// Nuclear missiles on their way out of their silos, in the order they were fired. Hashed.
+    silo_launches: Vec<SiloLaunch>,
     /// Torpedo decoys in the water, and the tick each sinks. Only for drawing: what they do is in
     /// the torpedoes they lure (`Homing::lure`).
     decoys: Vec<([i32; 3], u32)>,
@@ -965,6 +996,7 @@ impl SimWorld {
             detected: [Vec::new(), Vec::new()],
             known_structures: [Vec::new(), Vec::new()],
             interceptions: Vec::new(),
+            silo_launches: Vec::new(),
             decoys: Vec::new(),
             formations: BTreeMap::new(),
             commanders: vec![None, None],
@@ -2476,16 +2508,19 @@ impl SimWorld {
             Option<&super::components::Adjacency>,
             Option<&mut super::components::ExtraWeapons>,
             Option<&super::components::Torpedo>,
-            (Option<&super::components::TractorBeam>, Option<&super::components::StunWeapon>, &Order, Option<&Builder>, Option<&super::components::Scatter>, (Option<&mut super::components::Setup>, &Velocity, Option<&super::components::NoseGun>)),
+            (Option<&super::components::TractorBeam>, Option<&super::components::StunWeapon>, &Order, Option<&Builder>, Option<&super::components::Scatter>, (Option<&mut super::components::Setup>, &Velocity, Option<&super::components::NoseGun>, Option<&mut super::components::Salvo>)),
         )>();
         let mut view = query.view();
         let disabled = &self.disabled;
         let grabs = &mut self.pending_grabs;
         grabs.clear();
         for (index, &(id, entity)) in units.iter().enumerate() {
-            let (stats, combat, turret, turning, mut discharge, discharge_order, mut launcher, anti_air, bomb_bay, flight, artillery, adjacency, extras, torpedo, (tractor, stun_weapon, order, builder, scatter, (setup, velocity, nose_gun))) =
+            let (stats, combat, turret, turning, mut discharge, discharge_order, mut launcher, anti_air, bomb_bay, flight, artillery, adjacency, extras, torpedo, (tractor, stun_weapon, order, builder, scatter, (setup, velocity, nose_gun, mut salvo))) =
                 view.get_mut(entity).expect("unit list only holds live units");
             combat.ticks_until_ready = combat.ticks_until_ready.saturating_sub(1);
+            if let Some(salvo) = salvo.as_mut() {
+                salvo.tick();
+            }
             // Artillery that sets up counts down only while it stands still. Its velocity is its
             // own steering, eased, so a unit coming to a stop is moving until it is below an
             // eighth of its speed, and a push from a neighbour does not pack it up.
@@ -2848,7 +2883,7 @@ impl SimWorld {
                             lobbed: artillery.is_some() && missile.is_none(),
                         });
                         economies[stats.owner.index()].energy -= weapon_energy;
-                        combat.ticks_until_ready = reload;
+                        combat.ticks_until_ready = salvo.as_mut().map_or(reload, |salvo| salvo.fire(reload));
                         if let Some(launcher) = launcher.as_mut() {
                             launcher.stock = launcher.stock.saturating_sub(1);
                             if launcher.strategic {
@@ -2902,7 +2937,7 @@ impl SimWorld {
                         lobbed: artillery.is_some() && missile.is_none(),
                     });
                     economies[stats.owner.index()].energy -= weapon_energy;
-                    combat.ticks_until_ready = reload;
+                    combat.ticks_until_ready = salvo.as_mut().map_or(reload, |salvo| salvo.fire(reload));
                     if let Some(launcher) = launcher.as_mut() {
                         launcher.stock = launcher.stock.saturating_sub(1);
                         if launcher.strategic {
@@ -2917,6 +2952,9 @@ impl SimWorld {
             if let Some(extras) = extras {
                 for weapon in &mut extras.0 {
                     weapon.ticks_until_ready = weapon.ticks_until_ready.saturating_sub(1);
+                    if let Some(salvo) = weapon.salvo.as_mut() {
+                        salvo.tick();
+                    }
                     let reach = i64::from(weapon.range.to_bits());
                     let usable = |entry: &super::spatial::GridEntry| {
                         let within = reach + i64::from(entry.radius);
@@ -3031,7 +3069,7 @@ impl SimWorld {
                         flak: fused && weapon.flak,
                         lobbed: false,
                     });
-                    weapon.ticks_until_ready = weapon.reload_ticks;
+                    weapon.ticks_until_ready = weapon.fired();
                 }
             }
         }
@@ -3053,7 +3091,13 @@ impl SimWorld {
             self.set_order(id, Order::IDLE);
         }
         let friendly_fire = self.config.friendly_fire;
+        self.step_silo_launches();
         for shot in std::mem::take(&mut self.pending_shots) {
+            // A nuclear missile waits for its silo's doors to open.
+            if shot.missile.is_some_and(|missile| missile.strategic) {
+                self.silo_launches.push(SiloLaunch { shot, ticks: 0 });
+                continue;
+            }
             if let Some(MissileShot { cruise_height, strategic, inner_radius, inner_damage }) = shot.missile {
                 // Plenty of time for the climb, the cruise, and the dive, and it never hits a friend.
                 let distance = sqrt_wide((shot.to - shot.from).xy().length_squared());
@@ -3262,10 +3306,66 @@ impl SimWorld {
             .collect()
     }
 
+    /// Steps the nuclear launches under way: once a silo's doors are open, its missile rises out,
+    /// if the silo still stands; the launch is over once they have closed again.
+    fn step_silo_launches(&mut self) {
+        if self.silo_launches.is_empty() {
+            return;
+        }
+        let mut leaving = Vec::new();
+        self.silo_launches.retain_mut(|launch| {
+            launch.ticks += 1;
+            if launch.ticks == SILO_DOOR_TICKS {
+                leaving.push(launch.shot);
+            }
+            launch.ticks < SILO_SEQUENCE_TICKS
+        });
+        for shot in leaving {
+            if self.find_unit(shot.source).is_some() {
+                self.launch_nuclear_missile(shot);
+            }
+        }
+    }
+
+    /// A nuclear missile leaves its silo, from inside it, on its flight to the ground at its
+    /// target (`NuclearFlight`).
+    fn launch_nuclear_missile(&mut self, shot: PendingShot) {
+        let missile = shot.missile.expect("a nuclear missile");
+        let ground = |at: Vec2Fp| self.terrain.height_at(at);
+        // From the floor of the silo, or a submarine's hatch under the water.
+        let floor = shot.from.z.min(ground(shot.from.xy()).max(self.terrain.water_level()));
+        let start = Vec3Fp::new(shot.from.x, shot.from.y, floor);
+        let target = Vec3Fp::new(shot.to.x, shot.to.y, ground(shot.to.xy()));
+        let flight = super::components::NuclearFlight::new(start, target, missile.cruise_height + target.z.max(start.z), shot.speed);
+        let lift = super::components::NUCLEAR_LIFT_UNITS as u32 / super::components::NUCLEAR_LIFT_SPEED.to_num::<u32>();
+        let lifetime = (flight.length() / shot.speed.max(Fp::ONE)).to_num::<u32>() + lift + 20;
+        let projectile = Projectile {
+            velocity: Vec3Fp::ZERO,
+            damage: shot.damage,
+            source: shot.source,
+            source_team: shot.team,
+            lifetime_ticks: lifetime,
+            splash_radius: shot.splash,
+            allied_safe_ticks: lifetime,
+        };
+        let id = self.spawn_projectile(start, projectile);
+        let entity = self.projectiles.last().filter(|last| last.0 == id).expect("just spawned").1;
+        let marker = Missile { target: target.xy(), speed: shot.speed, cruise_height: missile.cruise_height, strategic: true, inner_radius: missile.inner_radius, inner_damage: missile.inner_damage };
+        self.ecs.insert(entity, (marker, flight)).expect("just spawned");
+        self.missiles.push((id, entity));
+    }
+
+    /// How far open each silo's doors are, by launcher, in thousandths, while a launch is under way.
+    pub fn silo_doors(&self) -> Vec<(SimId, u16)> {
+        self.silo_launches.iter().map(|launch| (launch.shot.source, (silo_doors_open(launch.ticks) * 1_000 / SILO_DOOR_TICKS) as u16)).collect()
+    }
+
     /// Missile defenses that are ready shoot down enemy missiles in range, before anything
-    /// moves. A tactical defense destroys the nearest cruise missile, then reloads. A strategic
-    /// one spends an interceptor on a nuclear missile that is in its range and heading for
-    /// somewhere in its range. Defenses go in `SimId` order, and no missile is shot down twice.
+    /// moves. Each mount of a tactical defense is a defense of its own: one that is ready
+    /// destroys the nearest cruise missile, then reloads. A strategic one spends an interceptor
+    /// on a nuclear missile that is in its range. Defenses and their mounts go in `SimId` order,
+    /// and each takes only a missile no other has taken: no missile is ever aimed at twice, and
+    /// every one aimed at is destroyed, at once.
     /// Returns the missiles destroyed, sorted by `SimId`.
     /// Anti-torpedo charges that are ready each drop a decoy into the water for the nearest enemy
     /// torpedo within range, in `SimId` order, and no torpedo twice: it turns to the decoy and
@@ -3331,10 +3431,19 @@ impl SimWorld {
         for index in 0..self.missile_defenses.len() {
             let entity = self.missile_defenses[index].1;
             let mut defense = *self.ecs.get::<&MissileDefense>(entity).expect("defense list only holds defenses");
-            defense.ticks_until_ready = defense.ticks_until_ready.saturating_sub(1);
+            let mounts = usize::from(defense.mounts.max(1));
+            for timer in &mut defense.ticks_until_ready[..mounts] {
+                *timer = timer.saturating_sub(1);
+            }
             let working = self.ecs.get::<&Construction>(entity).is_err();
-            let ready = if defense.strategic { defense.stock > 0 } else { defense.ticks_until_ready == 0 };
-            if working && ready && !self.missiles.is_empty() {
+            // Each mount is a defense of its own: each that is ready takes the nearest missile
+            // that no defense has taken yet this tick. A strategic defense has one, which fires
+            // while it has interceptors.
+            for mount in 0..mounts {
+                let ready = if defense.strategic { defense.stock > 0 } else { defense.ticks_until_ready[mount] == 0 };
+                if !working || !ready || self.missiles.is_empty() {
+                    continue;
+                }
                 let here = self.ecs.get::<&Position>(entity).expect("units have positions").0;
                 let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team;
                 let range = i128::from(defense.range.to_bits());
@@ -3361,15 +3470,17 @@ impl SimWorld {
                         best = Some((distance, id, at));
                     }
                 }
-                if let Some((_, id, at)) = best {
-                    destroyed.push(id);
-                    self.interceptions.push([[here.x.to_bits(), here.y.to_bits(), here.z.to_bits()], [at.x.to_bits(), at.y.to_bits(), at.z.to_bits()]]);
-                    if defense.strategic {
-                        defense.stock -= 1;
-                    } else {
-                        defense.ticks_until_ready = defense.reload_ticks;
-                    }
+                let Some((_, id, at)) = best else {
+                    // Nothing in reach for this mount, so nothing for the others either.
+                    break;
+                };
+                destroyed.push(id);
+                self.interceptions.push([[here.x.to_bits(), here.y.to_bits(), here.z.to_bits()], [at.x.to_bits(), at.y.to_bits(), at.z.to_bits()]]);
+                if defense.strategic {
+                    defense.stock -= 1;
+                    break;
                 }
+                defense.ticks_until_ready[mount] = defense.reload_ticks;
             }
             *self.ecs.get::<&mut MissileDefense>(entity).expect("defense list only holds defenses") = defense;
         }
@@ -3402,16 +3513,35 @@ impl SimWorld {
         self.pending_stuns.clear();
         let units = &self.units;
         let stuns = &mut self.pending_stuns;
-        let mut query = self.ecs.query_mut::<(&mut Position, &mut Projectile, Option<&Discharged>, Option<&Missile>, Option<&mut Homing>, Option<&Falling>, Option<&Stunning>, Option<&super::components::Fused>, Option<&super::components::Lobbed>)>();
+        let mut query = self.ecs.query_mut::<(&mut Position, &mut Projectile, Option<&Discharged>, Option<&Missile>, Option<&mut Homing>, Option<&Falling>, Option<&Stunning>, Option<&super::components::Fused>, (Option<&super::components::Lobbed>, Option<&mut super::components::NuclearFlight>))>();
         let mut view = query.view();
         for &(id, entity) in &self.projectiles {
             if shot_down.binary_search(&id).is_ok() {
                 dead.push(id);
                 continue;
             }
-            let (position, projectile, discharged, missile, homing, falling, stunning, fused, lobbed) = view.get_mut(entity).expect("projectile list only holds live projectiles");
+            let (position, projectile, discharged, missile, homing, falling, stunning, fused, (lobbed, nuclear)) = view.get_mut(entity).expect("projectile list only holds live projectiles");
             let stun = stunning.map_or(0, |stunning| stunning.0);
             let start = position.0;
+            // A nuclear missile flies its own path, and nothing on the way stops it, shields and
+            // units included. It bursts on the ground at its target.
+            if let Some(flight) = nuclear {
+                flight.travelled += flight.step();
+                let end = flight.position_at(flight.travelled);
+                projectile.velocity = end - start;
+                position.0 = end;
+                projectile.lifetime_ticks = projectile.lifetime_ticks.saturating_sub(1);
+                if flight.travelled >= flight.length() {
+                    position.0 = flight.target;
+                    let blast = Explosion { x: flight.target.x.to_bits(), y: flight.target.y.to_bits(), radius: projectile.splash_radius, damage: projectile.damage, source: Some(projectile.source), stun };
+                    explosions.push(blast);
+                    if let Some(missile) = missile.filter(|missile| missile.inner_radius > Fp::ZERO) {
+                        explosions.push(Explosion { radius: missile.inner_radius, damage: missile.inner_damage, stun: 0, ..blast });
+                    }
+                    dead.push(id);
+                }
+                continue;
+            }
             // A shell at an aircraft that does not steer flies straight on to where it was aimed.
             // Flak bursts there, hitting every enemy aircraft within its blast; a gun's shell hits
             // the nearest aircraft it reaches there, if any.
@@ -4226,6 +4356,16 @@ impl SimWorld {
             hasher.write(&id.0.to_le_bytes());
             self.hash_projectile(entity, &mut hasher);
         }
+        // Nothing is written without a launch under way, so that checksums from before hold.
+        if !self.silo_launches.is_empty() {
+            hasher.write(&[0x51]);
+            for launch in &self.silo_launches {
+                hasher.write(&launch.shot.source.0.to_le_bytes());
+                hasher.write(&launch.ticks.to_le_bytes());
+                write_vec3(&mut hasher, launch.shot.from);
+                write_vec3(&mut hasher, launch.shot.to);
+            }
+        }
         hasher.write(&(self.wrecks.len() as u64).to_le_bytes());
         for &(id, entity) in &self.wrecks {
             hasher.write(&id.0.to_le_bytes());
@@ -4361,6 +4501,14 @@ impl SimWorld {
         if let Ok(stunning) = self.ecs.get::<&Stunning>(entity) {
             hasher.write(&[5]);
             hasher.write(&stunning.0.to_le_bytes());
+        }
+        if let Ok(flight) = self.ecs.get::<&super::components::NuclearFlight>(entity) {
+            hasher.write(&[7]);
+            write_fp(hasher, flight.travelled);
+            write_fp(hasher, flight.apex);
+            write_fp(hasher, flight.turn);
+            write_vec3(hasher, flight.start);
+            write_vec3(hasher, flight.target);
         }
         // Last, so that nothing is written for a shell.
         if let Ok(missile) = self.ecs.get::<&Missile>(entity) {

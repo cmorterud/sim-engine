@@ -247,7 +247,7 @@ fn what_it_is(unit: &Blueprint) -> String {
 
 /// What a weapon does, a second, against one target.
 fn damage_per_second(weapon: &WeaponDef) -> f64 {
-    fp(weapon.damage) * PER_SECOND / f64::from(weapon.reload_ticks.max(1))
+    fp(weapon.damage) * f64::from(weapon.shots_per_reload()) * PER_SECOND / f64::from(weapon.reload_ticks.max(1))
 }
 
 /// A weapon's stats, as labelled values, leaving out what it does not have.
@@ -278,7 +278,13 @@ fn weapon_stats(weapon: &WeaponDef) -> Vec<(&'static str, String)> {
         }
         .to_string(),
     );
-    add("Damage", format!("{} every {}", number(fp(weapon.damage), 0), seconds(weapon.reload_ticks)));
+    match weapon.salvo {
+        Some(salvo) => add(
+            "Damage",
+            format!("{} a shot, {} shots over {}, a volley every {}", number(fp(weapon.damage), 0), salvo.shots, seconds(salvo.ticks), seconds(weapon.reload_ticks)),
+        ),
+        None => add("Damage", format!("{} every {}", number(fp(weapon.damage), 0), seconds(weapon.reload_ticks))),
+    }
     add("Damage a second", number(damage_per_second(weapon), 1));
     add("Range", number(fp(weapon.range), 0));
     if weapon.min_range > Fp::ZERO {

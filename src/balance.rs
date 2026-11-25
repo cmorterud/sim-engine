@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use crate::math::fp::{fp_int, Fp, Vec2Fp};
-use crate::sim::blueprints::{Blueprint, BlueprintDb, BlueprintId, TICKS_PER_SECOND};
+use crate::sim::blueprints::{Blueprint, BlueprintDb, BlueprintId, WeaponDef, TICKS_PER_SECOND};
 use crate::sim::commands::SimCommand;
 use crate::sim::blueprints::Res;
 use crate::sim::components::{Blueprinted, Health, SimId, Team};
@@ -228,6 +228,12 @@ fn micro(world: &SimWorld, ids: &[SimId], enemies: &[SimId], home: i32, orders: 
 /// (`cost_at`).
 pub fn cost(unit: &Blueprint) -> f64 {
     cost_at(unit, 1)
+}
+
+/// A weapon's damage a second, with every shot of a volley, from start of volley to start of
+/// volley.
+pub fn damage_per_second(weapon: &WeaponDef) -> f64 {
+    weapon.damage.to_num::<f64>() * f64::from(weapon.shots_per_reload()) * TICKS_PER_SECOND as f64 / f64::from(weapon.reload_ticks.max(1))
 }
 
 /// What a unit costs in a fight at this tier, in the materiel of a land unit of the same price:
@@ -499,7 +505,7 @@ pub fn break_even(db: &Arc<BlueprintDb>, a: BlueprintId, b: BlueprintId, materie
 /// A unit's own numbers, for reports.
 pub fn describe(blueprint: &Blueprint) -> String {
     let weapon = blueprint.weapon.as_ref();
-    let dps = weapon.map_or(0.0, |weapon| weapon.damage.to_num::<f64>() * 10.0 / f64::from(weapon.reload_ticks.max(1)));
+    let dps = weapon.map_or(0.0, damage_per_second);
     let range = weapon.map_or(0.0, |weapon| weapon.range.to_num::<f64>());
     let health = blueprint.health.to_num::<f64>();
     format!(
@@ -652,7 +658,7 @@ pub fn target_number(section: &str, key: &str) -> f64 {
 pub fn strength_of(db: &BlueprintDb, anchor: &Anchor, key: &str) -> f64 {
     let unit = db.get(db.id(key));
     let weapon = unit.weapon.unwrap_or_else(|| panic!("{key} has a weapon"));
-    let dps = weapon.damage.to_num::<f64>() * TICKS_PER_SECOND as f64 / f64::from(weapon.reload_ticks.max(1));
+    let dps = damage_per_second(&weapon);
     (unit.health.to_num::<f64>() * dps).sqrt() / cost(unit) / anchor.efficiency()
 }
 
@@ -1238,7 +1244,7 @@ pub fn derive_t1_air(base: &BlueprintDb) -> BlueprintDb {
     });
     // The bomber: so many seconds of one interceptor's gun.
     let interceptor = db.get(db.id("t1_interceptor")).weapon.expect("interceptors have a gun");
-    let interceptor_dps = interceptor.damage.to_num::<f64>() * TICKS_PER_SECOND as f64 / f64::from(interceptor.reload_ticks.max(1));
+    let interceptor_dps = damage_per_second(&interceptor);
     let bomber_health = (interceptor_dps * target_number("air", "interceptor_seconds_per_bomber_t1")).round();
     db = db.with_unit(bomber, |unit| unit.health = Fp::from_num(bomber_health));
     // Mobile Anti-Air's gun: an escorted army's score against bombers rises with it.
@@ -1344,7 +1350,7 @@ impl Purpose {
 /// A unit's damage a second, and longest reach, with all its weapons for a purpose.
 pub fn purpose_weapons(unit: &Blueprint, purpose: Purpose) -> (f64, f64) {
     unit.weapon.iter().chain(&unit.extra_weapons).filter(|weapon| Purpose::of(weapon.targets)[purpose.index()]).fold((0.0, 0.0), |(dps, reach), weapon| {
-        let per_second = weapon.damage.to_num::<f64>() * TICKS_PER_SECOND as f64 / f64::from(weapon.reload_ticks.max(1));
+        let per_second = damage_per_second(weapon);
         (dps + per_second, reach.max(weapon.range.to_num::<f64>()))
     })
 }
@@ -1447,10 +1453,11 @@ pub fn derive_domains_report() {
     let mut cells: Vec<Cell> = Vec::new();
     let force = |name: &str, materiel: f64, tier: u8| squadrons(&db, &domain_force(&db, name), materiel, tier, Tactics::AttackMove);
     let squadron_cost = |name: &str, tier: u8| force_materiel(&db, &squadrons(&db, &domain_force(&db, name), 0.0, tier, Tactics::AttackMove), tier);
-    let score_cell = |cells: &mut Vec<Cell>, name: &str, field: Field, first: &str, first_squadrons: f64, second: &str, at_least: Option<f64>, at_most: Option<f64>| {
+    // `share` is the second force's cost over the first's: 1 for an equal cost.
+    let score_cell = |cells: &mut Vec<Cell>, name: &str, field: Field, first: &str, first_squadrons: f64, second: &str, share: f64, at_least: Option<f64>, at_most: Option<f64>| {
         let a = force(first, squadron_cost(first, field.tier) * first_squadrons, field.tier);
         let materiel = force_materiel(&db, &a, field.tier);
-        let b = force(second, materiel, field.tier);
+        let b = force(second, materiel * share, field.tier);
         let result = mirrored_on(&db, field, &a, &b, 1.0);
         let ratio = force_materiel(&db, &b, field.tier) / materiel;
         let met = match (at_least, at_most) {
@@ -1467,15 +1474,16 @@ pub fn derive_domains_report() {
     };
     let number = |key: &str| as_number(&domain_cell(key));
     let water = |tier| Field::new(Ground::Water, tier);
-    score_cell(&mut cells, "T2 fleet against an equal cost of the T2 air force, over water", water(2), "t2_fleet", 2.0, "t2_air_force", Some(number("fleet_beats_air_force_t2")), None);
-    score_cell(&mut cells, "T3 fleet against an equal cost of the T3 air force, over water", water(3), "t3_fleet", 1.0, "t3_air_force", Some(number("fleet_beats_air_force_t3")), None);
-    score_cell(&mut cells, "Battleship-heavy T3 fleet against an equal cost of the T3 air force, over water", water(3), "t3_battleship_heavy_fleet", 2.0, "t3_air_force", None, None);
-    score_cell(&mut cells, "T2 fleet with no anti-air against torpedo bombers", water(2), "t2_fleet_without_anti_air", 4.0, "t2_torpedo_bombers", None, Some(number("fleet_without_anti_air_loses_to_torpedo_bombers")));
-    score_cell(&mut cells, "Submarines against a T2 fleet with no anti-submarine weapon", water(2), "t1_submarines", 24.0, "t2_fleet_without_anti_submarine", Some(number("submarines_beat_fleet_without_anti_submarine")), None);
-    score_cell(&mut cells, "Destroyers against submarines", water(2), "t2_destroyers", 4.0, "t1_submarines", Some(number("destroyers_beat_submarines")), None);
-    score_cell(&mut cells, "T2 fleet against an equal cost of hovercraft, on water", water(2), "t2_fleet", 2.0, "t2_hovercraft", Some(-number("hovercraft_loses_to_fleet")), None);
-    score_cell(&mut cells, "T1 fleet against an equal cost of the T1 air force, over water", water(1), "t1_fleet", 4.0, "t1_air_force", None, None);
-    score_cell(&mut cells, "Frigates against an equal cost of T1 bombers, over water", water(1), "t1_frigates", 12.0, "t1_bombers", Some(number("frigates_against_t1_bombers_at_least")), None);
+    score_cell(&mut cells, "T2 fleet against an equal cost of the T2 air force, over water", water(2), "t2_fleet", 2.0, "t2_air_force", 1.0, Some(number("fleet_beats_air_force_t2")), None);
+    score_cell(&mut cells, "T3 fleet against an equal cost of the T3 air force, over water", water(3), "t3_fleet", 1.0, "t3_air_force", 1.0, Some(number("fleet_beats_air_force_t3")), None);
+    score_cell(&mut cells, "Battleship-heavy T3 fleet against an equal cost of the T3 air force, over water", water(3), "t3_battleship_heavy_fleet", 2.0, "t3_air_force", 1.0, None, None);
+    score_cell(&mut cells, "T2 fleet with no anti-air against torpedo bombers", water(2), "t2_fleet_without_anti_air", 4.0, "t2_torpedo_bombers", 1.0, None, Some(number("fleet_without_anti_air_loses_to_torpedo_bombers")));
+    score_cell(&mut cells, "Submarines against a T2 fleet with no anti-submarine weapon", water(2), "t1_submarines", 24.0, "t2_fleet_without_anti_submarine", 1.0, Some(number("submarines_beat_fleet_without_anti_submarine")), None);
+    let hunted = number("destroyers_beat_submarines_at_cost");
+    score_cell(&mut cells, &format!("Destroyers against {:.0}% of their cost in submarines", hunted * 100.0), water(2), "t2_destroyers", 4.0, "t1_submarines", hunted, Some(number("destroyers_beat_submarines")), None);
+    score_cell(&mut cells, "T2 fleet against an equal cost of hovercraft, on water", water(2), "t2_fleet", 2.0, "t2_hovercraft", 1.0, Some(-number("hovercraft_loses_to_fleet")), None);
+    score_cell(&mut cells, "T1 fleet against an equal cost of the T1 air force, over water", water(1), "t1_fleet", 4.0, "t1_air_force", 1.0, None, None);
+    score_cell(&mut cells, "Frigates against an equal cost of T1 bombers, over water", water(1), "t1_frigates", 12.0, "t1_bombers", 1.0, Some(number("frigates_against_t1_bombers_at_least")), None);
     // Air against land, about even, as at T1.
     {
         let margin = target_number("counters", "even_margin");
@@ -1568,18 +1576,17 @@ pub fn derive_domains_report() {
             });
             let tier = db.get(db.id(ship)).tier;
             let position = if tier >= 3 { T3_POSITION } else { T2_POSITION };
-            let materiel = position_materiel_at(&db, position, tier);
-            let attackers = squadrons(&db, &[(db.id(ship), 1)], materiel, tier, Tactics::AttackMove);
+            // A count of ships, not an equal cost: one never breaks its tier's dome, by design
+            // (2026-11-25), and whole ships at an equal cost come to one.
+            let count = number("coastal_ship_count") as u32;
+            let attackers = [Side { unit: db.id(ship), count, tactics: Tactics::AttackMove }];
             let result = siege_on(&db, Field::new(Ground::Shore, tier), &attackers, position);
-            // Whole ships buy only near the position's cost, and a siege's length goes about as the
-            // inverse of the guns on it, so the time is put at an equal cost by their ratio.
-            let bought = force_materiel(&db, &attackers, tier) / materiel;
-            let at_equal_cost = result.seconds * bought;
+            let bought = force_materiel(&db, &attackers, tier) / position_materiel_at(&db, position, tier);
             cells.push(Cell {
-                name: format!("An equal cost of the {} breaks a coastal position of its tier", db.get(db.id(ship)).name),
+                name: format!("{count} of the {} break a coastal position of its tier", db.get(db.id(ship)).name),
                 target: format!("within {seconds_max:.0} s, losing at most {:.0}%", losses_max * 100.0),
-                measured: format!("{} in {:.0} s by {:.2} times its cost, about {at_equal_cost:.0} s at an equal cost, losing {:.0}%", if result.broken { "broken" } else { "not broken" }, result.seconds, bought, result.losses * 100.0),
-                met: Some(result.broken && at_equal_cost <= seconds_max && result.losses <= losses_max),
+                measured: format!("{} in {:.0} s, at {bought:.2} times its cost, losing {:.0}%", if result.broken { "broken" } else { "not broken" }, result.seconds, result.losses * 100.0),
+                met: Some(result.broken && result.seconds <= seconds_max && result.losses <= losses_max),
             });
         }
         for (tier, ship, position, cell, label) in [

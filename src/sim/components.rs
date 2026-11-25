@@ -354,6 +354,51 @@ impl Flight {
     }
 }
 
+/// A weapon that fires in volleys (`WeaponDef::salvo`): where it is in its volley. A unit's main
+/// weapon carries it as a component, an extra weapon in its own `salvo`. Between shots the weapon
+/// waits on its usual `ticks_until_ready`, which `fire` sets.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Salvo {
+    pub def: super::blueprints::SalvoDef,
+    /// Shots fired so far in this volley: 0 between volleys.
+    pub fired: u32,
+    /// Ticks until the next volley may start, from this one's first shot.
+    pub next_volley: u32,
+}
+
+impl Salvo {
+    pub const fn new(def: super::blueprints::SalvoDef) -> Self {
+        Self { def, fired: 0, next_volley: 0 }
+    }
+
+    /// A tick passes, before the weapon may fire. A volley whose reload is up is over, even with
+    /// shots left in it, as when it had nothing to shoot at for a while: the next shot starts a
+    /// new one.
+    pub fn tick(&mut self) {
+        self.next_volley = self.next_volley.saturating_sub(1);
+        if self.next_volley == 0 {
+            self.fired = 0;
+        }
+    }
+
+    /// It fires a shot, with this reload from the start of one volley to the next. Returns the
+    /// ticks until it may fire again: to the volley's next shot, or, after its last, to the next
+    /// volley.
+    pub fn fire(&mut self, reload: u32) -> u32 {
+        if self.fired == 0 {
+            self.next_volley = reload;
+        }
+        let at = self.def.offset(self.fired);
+        self.fired += 1;
+        if self.fired >= self.def.shots {
+            self.fired = 0;
+            self.next_volley
+        } else {
+            self.def.offset(self.fired) - at
+        }
+    }
+}
+
 /// A unit's weapons beyond its main one, such as a battleship's other guns or a bomber's anti-air
 /// guns. Each picks its own targets, among what it can hit, reloads on its own, and has its own turret.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -383,6 +428,18 @@ pub struct ExtraWeapon {
     pub spread: Fp,
     /// What it hits is stunned this many ticks.
     pub stun_ticks: u32,
+    /// Fires in volleys, and where it is in its volley.
+    pub salvo: Option<Salvo>,
+}
+
+impl ExtraWeapon {
+    /// Ticks until it may fire again after the shot it just fired.
+    pub fn fired(&mut self) -> u32 {
+        match self.salvo.as_mut() {
+            Some(salvo) => salvo.fire(self.reload_ticks),
+            None => self.reload_ticks,
+        }
+    }
 }
 
 /// An artillery piece's weapon (GAME_SPECIFICATION.md §7): it cannot hit what is too close,
@@ -692,14 +749,20 @@ pub struct Launcher {
     pub automatic: bool,
 }
 
+/// The most tactical missile defense mounts one unit carries.
+pub const MAX_DEFENSE_MOUNTS: usize = 4;
+
 /// A defense that destroys enemy missiles in flight.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct MissileDefense {
     /// Stops nuclear missiles, one interceptor each. Otherwise stops cruise missiles.
     pub strategic: bool,
     pub range: Fp,
+    /// Each mount's.
     pub reload_ticks: u32,
-    pub ticks_until_ready: u32,
+    /// Each mount is a defense of its own, with its own reload: these are the first `mounts`.
+    pub mounts: u8,
+    pub ticks_until_ready: [u32; MAX_DEFENSE_MOUNTS],
     /// Interceptors built and waiting. Only strategic defenses use it.
     pub stock: u32,
 }
@@ -724,6 +787,124 @@ pub struct Missile {
     /// A nuclear blast's inner ring, on top of the projectile's own damage and splash. Zero for none.
     pub inner_radius: Fp,
     pub inner_damage: Fp,
+}
+
+/// A nuclear missile's flight (2026-11-25): a slow lift out of its silo, then, at one constant
+/// speed along its path, straight up to `apex`, a quarter turn to level, level flight there to
+/// over its target, a quarter turn down, and straight down onto the ground there. Nothing stops
+/// it on the way, shields and units included: only a strategic interceptor.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct NuclearFlight {
+    /// Where it starts, inside its silo.
+    pub start: Vec3Fp,
+    /// The ground it strikes.
+    pub target: Vec3Fp,
+    /// The height of its level flight.
+    pub apex: Fp,
+    /// The radius of its two turns.
+    pub turn: Fp,
+    /// How far it has come along its path.
+    pub travelled: Fp,
+    /// Its speed along its path, after the lift.
+    pub speed: Fp,
+}
+
+/// How far a nuclear missile rises out of its silo before it speeds up, and how fast.
+pub const NUCLEAR_LIFT_UNITS: i32 = 60;
+pub const NUCLEAR_LIFT_SPEED: Fp = Fp::from_bits(3 << crate::math::fp::FP_FRAC_BITS);
+/// The radius of a nuclear missile's turns, at most: less over a target closer than two of it.
+pub const NUCLEAR_TURN_UNITS: i32 = 300;
+
+/// A right angle, in radians, with 24 fractional bits.
+const HALF_PI_BITS: i64 = 26_353_589;
+
+impl NuclearFlight {
+    pub fn new(start: Vec3Fp, target: Vec3Fp, apex: Fp, speed: Fp) -> Self {
+        let across = (target.xy() - start.xy()).length_squared();
+        let distance = crate::math::fp::sqrt_wide(across);
+        let lift_top = start.z + crate::math::fp::fp_int(NUCLEAR_LIFT_UNITS);
+        // It climbs at least a turn above the top of its lift and the ground it strikes.
+        let turn = crate::math::fp::fp_int(NUCLEAR_TURN_UNITS).min(distance / 2);
+        let apex = apex.max(lift_top + turn).max(target.z + turn);
+        Self { start, target, apex, turn, travelled: Fp::ZERO, speed }
+    }
+
+    fn lift_top(&self) -> Fp {
+        self.start.z + crate::math::fp::fp_int(NUCLEAR_LIFT_UNITS)
+    }
+
+    fn quarter_turn(&self) -> Fp {
+        Fp::from_bits(((i64::from(self.turn.to_bits()) * HALF_PI_BITS) >> 24) as i32)
+    }
+
+    fn across(&self) -> Fp {
+        crate::math::fp::sqrt_wide((self.target.xy() - self.start.xy()).length_squared())
+    }
+
+    /// The lengths of its legs: the lift, the climb, the first turn, level flight, the second
+    /// turn, and the dive.
+    fn legs(&self) -> [Fp; 6] {
+        let lift = crate::math::fp::fp_int(NUCLEAR_LIFT_UNITS);
+        let climb = (self.apex - self.turn - self.lift_top()).max(Fp::ZERO);
+        let arc = self.quarter_turn();
+        let level = (self.across() - self.turn * 2).max(Fp::ZERO);
+        let dive = (self.apex - self.turn - self.target.z).max(Fp::ZERO);
+        [lift, climb, arc, level, arc, dive]
+    }
+
+    /// The whole length of its path.
+    pub fn length(&self) -> Fp {
+        self.legs().iter().fold(Fp::ZERO, |sum, leg| sum + *leg)
+    }
+
+    /// How far it goes this tick: slowly while it rises out of its silo, then at its speed.
+    pub fn step(&self) -> Fp {
+        if self.travelled < crate::math::fp::fp_int(NUCLEAR_LIFT_UNITS) { NUCLEAR_LIFT_SPEED } else { self.speed }
+    }
+
+    /// Where it is, this far along its path.
+    pub fn position_at(&self, travelled: Fp) -> Vec3Fp {
+        let [lift, climb, arc, level, _, _] = self.legs();
+        let way = (self.target.xy() - self.start.xy()).normalized();
+        let flat = |along: Fp, z: Fp| {
+            let at = self.start.xy() + way.scaled(along);
+            Vec3Fp::new(at.x, at.y, z)
+        };
+        let angle = |along: Fp| {
+            if self.turn <= Fp::ZERO {
+                return crate::math::fp::FpWide::ZERO;
+            }
+            let bits = (i64::from(along.to_bits()) << 24) / i64::from(self.turn.to_bits());
+            crate::math::fp::FpWide::from_bits(bits.clamp(0, HALF_PI_BITS))
+        };
+        let mut left = travelled.max(Fp::ZERO);
+        if left <= lift {
+            return Vec3Fp::new(self.start.x, self.start.y, self.start.z + left);
+        }
+        left -= lift;
+        let bottom = self.apex - self.turn;
+        if left <= climb {
+            return Vec3Fp::new(self.start.x, self.start.y, self.lift_top() + left);
+        }
+        left -= climb;
+        if left <= arc {
+            // Round a center a turn out from the climb and a turn below the apex.
+            let (cos, sin) = crate::math::fp::cos_sin_radians(angle(left));
+            return flat(self.turn - self.turn * cos, bottom + self.turn * sin);
+        }
+        left -= arc;
+        if left <= level {
+            return flat(self.turn + left, self.apex);
+        }
+        left -= level;
+        let over = self.across();
+        if left <= arc {
+            let (cos, sin) = crate::math::fp::cos_sin_radians(angle(left));
+            return flat(over - self.turn + self.turn * sin, bottom + self.turn * cos);
+        }
+        left -= arc;
+        Vec3Fp::new(self.target.x, self.target.y, (bottom - left).max(self.target.z))
+    }
 }
 
 /// An upgrade in place, to the blueprint the unit's own one upgrades to. A commander stands
