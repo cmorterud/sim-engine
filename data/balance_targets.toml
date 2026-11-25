@@ -350,6 +350,11 @@ t2_gunship = 0.62
 t2_torpedo_bomber = 0.55
 t2_fighter_bomber = 0.45
 t3_heavy_gunship = 0.38
+# The fighters (2026-11-25), by their anti-air: they had been set by [air] rules alone, which fix
+# their damage and the interceptor's health ceiling, and sat at about half and three-quarters of
+# these. Priced and built as the inspiration has them; their damage is kept for those rules.
+t1_interceptor = 0.31
+t3_air_superiority = 0.76
 # The mobile flak is not here: like the T1 mobile anti-air, it is set by the anti-air share rule
 # (air_force_against_land_army_t2_even), not by a ratio.
 
