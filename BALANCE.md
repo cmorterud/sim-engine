@@ -194,6 +194,15 @@ out close and why: evidence about the process, not a target.
   Stronger defenses lengthen sieges: a Scattered Isles 4v4 ran to 73 minutes, past the soak's
   67-minute limit, finishing. Team matches of three or more a side now count as unfinished only
   past 100 minutes (the user's decision).
+* 2026-11-25: the fighters by the inspiration's ratios (`[domains] strength_over_anchor`): the
+  Interceptor and Air Superiority Fighter were set by `[air]` rules alone and sat at about half and
+  three-quarters of the inspiration's strength per cost against the anchor. They take its price
+  and build time against its T1 tank (and the interceptor its health), keeping the damage those
+  rules fix (the bomber's health comes from the interceptor's; the T3 fighter has ten times it and
+  kills one with a shot) and the T3 fighter's health, which it needs to beat an equal cost of
+  interceptors. A duel of escorted against unescorted strike aircraft was
+  not used as the target: strike aircraft cannot shoot at aircraft, so it is won whatever the
+  fighters cost.
 
 ## Order of work
 
