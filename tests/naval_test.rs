@@ -881,8 +881,8 @@ fn an_anti_torpedo_charge_lures_torpedoes_onto_decoys() {
     }
 }
 
-/// A torpedo leaves at about a ship's speed, a third of its top speed, gathers speed to it over a
-/// second, as the inspiration's do, and steers all the way (2026-11-25): it catches a frigate, the
+/// A torpedo leaves at about a ship's speed, a third of its top speed, gathers speed to it over two
+/// seconds, as the inspiration's do, and steers all the way (2026-11-25): it catches a frigate, the
 /// fastest ship, sailing straight away at full speed from the edge of a submarine's range.
 #[test]
 fn a_torpedo_speeds_up_after_launch_and_runs_down_a_fleeing_frigate() {
@@ -918,9 +918,10 @@ fn a_torpedo_speeds_up_after_launch_and_runs_down_a_fleeing_frigate() {
         }
     }
     let (_, speeds, _) = first.expect("the submarine fired no torpedo");
-    assert!(speeds.len() > 12, "the torpedo ran only {} ticks", speeds.len());
+    assert!(speeds.len() > 22, "the torpedo ran only {} ticks", speeds.len());
     assert!(speeds[0] < top * 0.6, "it left at {:.1}, near its top speed {top}", speeds[0]);
-    assert!((speeds[10] - top).abs() < 0.5, "a second on, it ran at {:.1}, not {top}: {speeds:.1?}", speeds[10]);
+    assert!(speeds[10] < top - 1.0, "a second on, it already ran at {:.1}, its top speed: {speeds:.1?}", speeds[10]);
+    assert!((speeds[20] - top).abs() < 0.5, "two seconds on, it ran at {:.1}, not {top}: {speeds:.1?}", speeds[20]);
     assert!(world.unit_health(frigate).unwrap() < full, "the torpedoes never caught the frigate");
 }
 
