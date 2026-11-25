@@ -182,6 +182,18 @@ out close and why: evidence about the process, not a target.
   fleet took more escorts (12 cruisers, 4 destroyers, 4 corvettes), and torpedo bombers break a T2
   fleet at 2.03 times its cost, not 2.45. The T1 and T2 navy reports' fights over open sea predate
   this.
+* 2026-11-25: what a unit can do that its counterpart cannot, it pays for in strength per cost
+  (`[premiums]`, the user's rule, everywhere). Immobile defenses are worth more: three point
+  defenses of a tier hold against half again their cost in its line unit (T1 health and damage
+  three times, T3 damage two and a half times; T2 already held), and static anti-air is half again
+  as strong per cost against aircraft as mobile (mostly in health, so that fast T3 aircraft still
+  pass over T1 and T2 anti-air, as `[kills]` has it). Amphibious units are worth less: the
+  hovercraft is three-quarters as strong per materiel as the Heavy Tank on land, from about even
+  (health and damage x0.81). The hovercraft was tested first as the cause of Naval losing every
+  match to Balanced on the Islands maps; it was not, and Balanced still won every one.
+  Stronger defenses lengthen sieges: a Scattered Isles 4v4 ran to 73 minutes, past the soak's
+  67-minute limit, finishing. Team matches of three or more a side now count as unfinished only
+  past 100 minutes (the user's decision).
 
 ## Order of work
 

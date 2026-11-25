@@ -340,8 +340,39 @@ red = [
 id = "hover_against_heavy_tanks"
 title = "Hovercraft on land: Assault Hovercraft against Heavy Tanks"
 ground = "land"
-target = "domains.cells.hovercraft_over_heavy_tank_on_land"
-shows = "On land, the hovercraft is about as strong for its cost as the Heavy Tank: it pays for crossing water at sea, not here."
+target = "premiums.hovercraft_over_heavy_tank_on_land"
+shows = "On land, the hovercraft is about three-quarters as strong for its cost as the Heavy Tank: it pays for being able to cross water, so on land, where the tank can go too, it should lose an even fight."
 try = "Fight it straight, then use the hovercraft's speed to flank."
 blue = [{ unit = "t2_assault_hovercraft", count = 10, at = [1_400, 2_560] }]
 red = [{ unit = "t2_heavy_tank", count = 20, at = [3_200, 2_560], columns = 10, order = "attack" }]
+
+# What cannot move is worth more for its cost (`[premiums]`, 2026-11-25): point defenses hold
+# against half again their cost in the line unit of their tier.
+
+[[scenario]]
+id = "defense_t1_point_defenses_against_tanks"
+title = "Immobile: three T1 point defenses against half again their cost in tanks"
+target = "premiums.point_defense_holds_against_line_units"
+blue_over_red = 1.5
+shows = "A point defense cannot move, so it is worth more for its cost than the tank it stands in for. Three of them hold against half again their cost in Medium Tanks attack-moving in: the tanks are cut down before they break them."
+try = "Attack-move in, then try spreading out and rushing one point defense from the side. It should take about twice their cost in tanks to break them."
+blue = [{ unit = "t1_medium_tank", count = 37, at = [1_000, 2_560], columns = 8 }]
+red = [
+    { unit = "t1_point_defense", cell = [124, 128] },
+    { unit = "t1_point_defense", cell = [132, 128] },
+    { unit = "t1_point_defense", cell = [128, 124] },
+]
+
+[[scenario]]
+id = "defense_t3_point_defenses_against_walkers"
+title = "Immobile: three T3 point defenses against half again their cost in Heavy Walkers"
+target = "premiums.point_defense_holds_against_line_units"
+blue_over_red = 1.5
+shows = "Three heavy point defenses hold against half again their cost in Heavy Walkers walking into them. Artillery, which outranges them, is still what breaks them: see the T3 siege."
+try = "Attack-move in, then try closing from several sides at once."
+blue = [{ unit = "t3_heavy_walker", count = 26, at = [1_000, 2_560], columns = 7 }]
+red = [
+    { unit = "t3_heavy_point_defense", cell = [124, 128] },
+    { unit = "t3_heavy_point_defense", cell = [132, 128] },
+    { unit = "t3_heavy_point_defense", cell = [128, 124] },
+]
