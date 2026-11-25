@@ -775,3 +775,50 @@ fn a_battleship_turret_does_twice_a_mobile_artillerys_damage_a_second_and_half_a
     assert!((turret / mobile - 2.0).abs() < 0.02, "a battleship turret does {:.2} times a mobile artillery's damage a second", turret / mobile);
     assert!((turret / installation - 1.5).abs() < 0.02, "a battleship turret does {:.2} times a T2 artillery installation's damage a second", turret / installation);
 }
+
+/// Every ship's dome stays beneath every aircraft that attacks what is under it, hull and all, so
+/// that none flies inside a dome and fires from under it: its fire must come down through the dome
+/// (2026-11-24). Read from the data, for every such ship and aircraft.
+#[test]
+fn ships_domes_stay_beneath_the_aircraft_that_attack_them() {
+    use sim_engine::sim::blueprints::{BlueprintDb, Targets};
+    use sim_engine::sim::components::MoveClass;
+    let db = BlueprintDb::standard();
+    let attacks_below = |unit: &sim_engine::sim::blueprints::Blueprint| unit.weapon.iter().chain(&unit.extra_weapons).any(|weapon| weapon.targets != Targets::Air);
+    let mut checked = 0;
+    for ship in db.iter().filter(|unit| unit.move_class() == MoveClass::Naval) {
+        let Some(dome) = ship.shield else { continue };
+        for aircraft in db.iter().filter(|unit| attacks_below(unit)) {
+            let Some(flight) = aircraft.flight else { continue };
+            assert!(flight.elevation - aircraft.radius > dome.height, "{} flies at {}, inside {}'s dome {} high", aircraft.key, flight.elevation, ship.key, dome.height);
+            checked += 1;
+        }
+    }
+    assert!(checked >= 5, "only {checked} pairs checked");
+}
+
+/// A gunship that hovers over a destroyer under an escort corvette's dome, as gunships hover over
+/// what they attack, fires down into the dome, which takes it all, and not into the destroyer: the
+/// dome once rose to its full radius, over the gunship, which fired from inside it.
+#[test]
+fn a_gunship_over_a_corvettes_dome_fires_into_the_dome() {
+    let mut world = lake_world();
+    let corvette = spawn(&mut world, "t2_escort_corvette", Team::Blue, point(2_000, 1_000));
+    let destroyer = spawn(&mut world, "t2_destroyer", Team::Blue, point(2_080, 1_000));
+    // The fleet holds its anti-air, so that the gunship lives to keep firing.
+    for id in [corvette, destroyer] {
+        let entity = world.unit_entity(id).unwrap();
+        if let Ok(mut extra) = world.ecs.get::<&mut sim_engine::sim::components::ExtraWeapons>(entity) {
+            extra.0.clear();
+        }
+        world.ecs.get::<&mut sim_engine::sim::components::Combat>(entity).unwrap().enabled = false;
+    }
+    let gunship = spawn(&mut world, "t2_gunship", Team::Red, point(1_700, 1_000));
+    world.advance_tick(&[SimCommand::Attack { units: vec![gunship], target: destroyer }]);
+    let full = world.unit_health(destroyer).unwrap();
+    let dome = |world: &SimWorld| world.ecs.get::<&sim_engine::sim::components::Shield>(world.unit_entity(corvette).unwrap()).unwrap().health;
+    let before = dome(&world);
+    run_ticks(&mut world, 300);
+    assert!(dome(&world) < before, "the gunship's fire should strike the dome");
+    assert_eq!(world.unit_health(destroyer), Some(full), "and none of it reach the destroyer");
+}

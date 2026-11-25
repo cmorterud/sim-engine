@@ -5,7 +5,7 @@ use twox_hash::XxHash64;
 
 use super::blueprints::{BlueprintDb, Res, UnitClass};
 use super::air::{bomb_lands_on, BOMB_GRAVITY};
-use super::combat::{entry_hit, firing_solution_within, missile_velocity, probe_terrain, shot_is_clear, sphere_entry, GRAVITY};
+use super::combat::{dome_entry, entry_hit, firing_solution_within, missile_velocity, probe_terrain, shot_is_clear, GRAVITY};
 use super::commands::SimCommand;
 use super::components::{BuildTask, AntiAir, Artillery, BombBay, Falling, Flight, Homing,
     Blueprinted, Builder, Combat, Construction, Factory, Footprint, Health, MoveClass, Order, OrderKind, OrderQueue, Patrol,
@@ -416,9 +416,11 @@ pub struct ShieldView {
     /// The generator.
     pub id: SimId,
     pub team: Team,
-    /// The middle of the dome, on the ground.
+    /// The middle of the dome, on the ground, or for a ship's on the water.
     pub center: [i32; 3],
     pub radius: i32,
+    /// How high it rises at its middle: its radius, unless flattened.
+    pub height: i32,
     pub health_permille: u16,
     /// Whether the dome is standing. Not while it recharges, is paused, or is still being built.
     pub up: bool,
@@ -450,6 +452,8 @@ struct Dome {
     team: Team,
     center: [i32; 3],
     radius: i32,
+    /// How high it rises at its middle: its radius, unless flattened.
+    height: i32,
 }
 
 /// A copy of the state the renderer needs from one tick, sorted by `SimId`.
@@ -3200,7 +3204,7 @@ impl SimWorld {
                 // A ship's dome sits on the water.
                 let floor = if stats.move_class == MoveClass::Naval { self.terrain.height_at(base).max(self.terrain.water_level()) } else { self.terrain.height_at(base) };
                 let center = [base.x.to_bits(), base.y.to_bits(), floor.to_bits()];
-                Some(Dome { id, team, center, radius: shield.radius.to_bits() })
+                Some(Dome { id, team, center, radius: shield.radius.to_bits(), height: shield.height.to_bits() })
             })
             .collect()
     }
@@ -3476,7 +3480,7 @@ impl SimWorld {
                 .enumerate()
                 // A nuclear missile is not stopped by shields.
                 .filter(|(_, dome)| dome.team != projectile.source_team && !strategic)
-                .filter_map(|(index, dome)| sphere_entry(start, step, dome.center, dome.radius).map(|along| (along, index)))
+                .filter_map(|(index, dome)| dome_entry(start, step, dome.center, dome.radius, dome.height).map(|along| (along, index)))
                 .min();
             let first = |along: i32| best.is_none_or(|unit| along <= unit.0) && probe.hit.is_none_or(|ground| along <= ground);
             // Parts of the step are divided out, rounding toward zero, rather than shifted, so that
@@ -3504,7 +3508,9 @@ impl SimWorld {
                     let point = [i128::from(start.x.to_bits()) + part(step.x), i128::from(start.y.to_bits()) + part(step.y), i128::from(start.z.to_bits()) + part(step.z)];
                     for (index, dome) in domes.iter().enumerate() {
                         let reach = i128::from(dome.radius) + i128::from(projectile.splash_radius.to_bits());
-                        let (dx, dy, dz) = (point[0] - i128::from(dome.center[0]), point[1] - i128::from(dome.center[1]), point[2] - i128::from(dome.center[2]));
+                        // Heights stretched as `dome_entry` stretches them, for a flattened dome.
+                        let dz = (point[2] - i128::from(dome.center[2])) * i128::from(dome.radius) / i128::from(dome.height.max(1));
+                        let (dx, dy) = (point[0] - i128::from(dome.center[0]), point[1] - i128::from(dome.center[1]));
                         if index != struck && dome.team != projectile.source_team && dx * dx + dy * dy + dz * dz <= reach * reach {
                             shield_hits.push((dome.id, damage));
                         }
@@ -4414,7 +4420,10 @@ impl SimWorld {
             .filter_map(|&(id, entity)| {
                 let shield = self.ecs.get::<&Shield>(entity).ok()?;
                 let base = self.ecs.get::<&Position>(entity).ok()?.0.xy();
-                let team = self.ecs.get::<&UnitStats>(entity).ok()?.team;
+                let stats = *self.ecs.get::<&UnitStats>(entity).ok()?;
+                let team = stats.team;
+                // Drawn where it stands: a ship's on the water, as `standing_domes` has it.
+                let floor = if stats.move_class == MoveClass::Naval { self.terrain.height_at(base).max(self.terrain.water_level()) } else { self.terrain.height_at(base) };
                 let (x, y) = (base.x.to_bits(), base.y.to_bits());
                 if !seen(team, x, y) {
                     return None;
@@ -4423,8 +4432,9 @@ impl SimWorld {
                 Some(ShieldView {
                     id,
                     team,
-                    center: [x, y, self.terrain.height_at(base).to_bits()],
+                    center: [x, y, floor.to_bits()],
                     radius: shield.radius.to_bits(),
+                    height: shield.height.to_bits(),
                     health_permille: permille(i64::from(shield.health.to_bits()), i64::from(shield.max_health.to_bits())),
                     up: switched_on && shield.is_up() && !self.is_disabled(id),
                     recharging: shield.recharging,

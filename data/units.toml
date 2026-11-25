@@ -1487,7 +1487,10 @@ weapon = { range = 438, reload_ticks = 16, projectile_speed = 80, damage = "178.
 # A fleet escort: a small dome that moves with it, over the ships around it, and an anti-torpedo
 # charge, one torpedo within 600 every 3 seconds (every 6 until 2026-11-24, when torpedo bombers
 # broke a fleet at a little over twice its cost and this gave a margin). Sturdier and cheaper than a dome boat alone would
-# be, since it sails with the fleet rather than behind it. This game's own numbers.
+# be, since it sails with the fleet rather than behind it. This game's own numbers. Its dome is
+# flattened, 150 high over its 400 across (2026-11-24): a half sphere rose to 400, over the
+# heights every attacking aircraft flies at, gunships lowest at 198, so they flew inside it and
+# fired from under it. Now their fire must come down through it.
 [[unit]]
 id = "t2_escort_corvette"
 name = "Escort Corvette"
@@ -1505,7 +1508,7 @@ vision = 640
 sonar = 720
 movement = "naval"
 torpedo_defense = { range = 600, reload_ticks = 30 }
-shield = { radius = 400, health = 4000, regen = 80, recharge_seconds = 30, upkeep = 80 }
+shield = { radius = 400, height = 150, health = 4000, regen = 80, recharge_seconds = 30, upkeep = 80 }
 
 # The inspiration's numbers. It builds nuclear missiles as a strategic missile launcher does, on order or one after
 # another, up to three, and fires one only on order. Its cruise missiles it fires on its own at

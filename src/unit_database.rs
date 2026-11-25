@@ -185,7 +185,8 @@ fn stats(unit: &Blueprint, db: &BlueprintDb) -> Vec<(&'static str, String)> {
         add("Adjacency", format!("gives its neighbors the {} bonus", words(&format!("{giver:?}"))));
     }
     if let Some(shield) = unit.shield {
-        add("Shield", format!("{} health, radius {}", number(fp(shield.health), 0), number(fp(shield.radius), 0)));
+        let height = if shield.height < shield.radius { format!(", height {}", number(fp(shield.height), 0)) } else { String::new() };
+        add("Shield", format!("{} health, radius {}{height}", number(fp(shield.health), 0), number(fp(shield.radius), 0)));
         add("Shield regeneration", format!("{} a second", number(fp(shield.regen_per_tick) * PER_SECOND, 1)));
         add("Shield recharge", format!("{} after it collapses", seconds(shield.recharge_ticks)));
         if shield.upkeep > Res::ZERO {
