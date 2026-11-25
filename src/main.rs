@@ -2077,6 +2077,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                             ui::pending_build_outlines(ctx, &camera, &pending, pixels_per_point);
                             ui::distant_selection_markers(ctx, &camera, &snapshot, &selected, pixels_per_point);
                             ui::draw_interceptions(ctx, &camera, &snapshot.interceptions, pixels_per_point);
+                            ui::draw_decoys(ctx, &camera, &snapshot.decoys, pixels_per_point);
                             ui::draw_teleports(ctx, &camera, &map.heights, &snapshot.teleports, pixels_per_point);
                             ui::draw_exotic(ctx, &camera, &map.heights, &snapshot, pixels_per_point);
                             // The kinds of range toggled on, for all the viewer's units.

@@ -24,6 +24,18 @@ use crate::math::rect::RectFp;
 use crate::math::rng::SimRng;
 
 /// How far from a goal, in unit radii, a moving unit can settle against a crowd.
+/// How far off a ship's side, toward the torpedo, an anti-torpedo charge drops its decoy, how deep,
+/// and how long the decoy is drawn, in ticks (2026-11-25).
+const DECOY_OUT_UNITS: i32 = 120;
+const DECOY_DEPTH_UNITS: i32 = 6;
+const DECOY_TICKS: u32 = 40;
+/// How far under the water a ship's torpedoes start (2026-11-25).
+const TORPEDO_LAUNCH_DEPTH_UNITS: i32 = 8;
+/// A torpedo leaves at this share of its top speed, about a ship's speed, and reaches its top speed
+/// in this many ticks, a second (2026-11-25).
+const TORPEDO_LAUNCH_SHARE: i32 = 3;
+const TORPEDO_SPEED_UP_TICKS: i32 = 10;
+
 const CROWD_SETTLE_RADII: i32 = 30;
 /// The gap between formation spots, in halves of the largest unit's radius.
 const FORMATION_SPACING_RADII: i32 = 5;
@@ -487,6 +499,9 @@ pub struct SimSnapshot {
     pub shields: Vec<ShieldView>,
     /// Missiles shot down this tick: from the defense that fired, to the missile.
     pub interceptions: Vec<[[i32; 3]; 2]>,
+    /// Torpedo decoys in the water the viewer can see, where anti-torpedo charges dropped them, and
+    /// the tick each sinks.
+    pub decoys: Vec<([i32; 3], u32)>,
     /// Missiles built and waiting in the viewer's silos, by silo, sorted by `SimId`.
     pub stocks: Vec<(SimId, u32)>,
     /// How many units each of the viewer's transports carries, sorted by `SimId`. Everyone's,
@@ -795,6 +810,9 @@ pub struct SimWorld {
     pub known_structures: [Vec<KnownStructure>; 2],
     /// Missiles shot down this tick, from where to where. Only for drawing, so not in the checksum.
     interceptions: Vec<[[i32; 3]; 2]>,
+    /// Torpedo decoys in the water, and the tick each sinks. Only for drawing: what they do is in
+    /// the torpedoes they lure (`Homing::lure`).
+    decoys: Vec<([i32; 3], u32)>,
     /// Groups on a formation move, by the route they share.
     pub formations: BTreeMap<u32, Travel>,
     /// By player.
@@ -947,6 +965,7 @@ impl SimWorld {
             detected: [Vec::new(), Vec::new()],
             known_structures: [Vec::new(), Vec::new()],
             interceptions: Vec::new(),
+            decoys: Vec::new(),
             formations: BTreeMap::new(),
             commanders: vec![None, None],
             eliminated: vec![false, false],
@@ -2494,6 +2513,11 @@ impl SimWorld {
             // Guns sit on top of a unit, not in its middle, which lets a ship fire over a bank and
             // a tank over a low rise.
             let muzzle = me.z.saturating_add(me.radius);
+            // A ship, a surfaced submarine, or a launcher lets its torpedoes go just under the water,
+            // as a submarine does, not from its guns' height: from the deck they flew to the water
+            // as shells, and were drawn so (2026-11-25). Torpedo bombers drop theirs from the air.
+            let water_launch = (terrain.water_level() - fp_int(TORPEDO_LAUNCH_DEPTH_UNITS)).to_bits();
+            let launch_height = |muzzle: i32, torpedo: bool| if torpedo && !me.is_air { muzzle.min(water_launch) } else { muzzle };
             // How far off a target is for its weapons' reach: across the ground, and for an
             // aircraft in flight, up to it as well, so that what flies higher is out of reach sooner.
             let reach_distance = |entry: &super::spatial::GridEntry| {
@@ -2772,7 +2796,7 @@ impl SimWorld {
             if combat.ticks_until_ready == 0 && aimed && gun_free && loaded && charged && can_fire && set_up {
                 if let Some(target) = combat.target {
                     let entry = locate(target).expect("target was just validated or found");
-                    let (from, to) = (raw(gun.0, gun.1, muzzle), raw(entry.x, entry.y, entry.z));
+                    let (from, to) = (raw(gun.0, gun.1, launch_height(muzzle, torpedo)), raw(entry.x, entry.y, entry.z));
                     // Missiles at aircraft steer themselves to them; guns' and flak's shells fly
                     // straight to where the aircraft will be.
                     let fused = entry.is_air && !guided && !torpedo;
@@ -2844,7 +2868,7 @@ impl SimWorld {
                 if !in_reach {
                     (combat.line_blocked, combat.closing) = (false, None);
                 }
-                let from = raw(gun.0, gun.1, muzzle);
+                let from = raw(gun.0, gun.1, launch_height(muzzle, torpedo));
                 let to = Vec3Fp::new(spot.x, spot.y, terrain.height_at(spot) - GROUND_AIM_DEPTH);
                 // A shell that would come down on a rise in between, or short on a slope, is not
                 // fired: the unit walks closer. Bombs, missiles and artillery go over.
@@ -2969,7 +2993,7 @@ impl SimWorld {
                     if weapon.ticks_until_ready > 0 || !aimed || (me.is_sub && !weapon.torpedo && weapon.missile_height.is_none()) {
                         continue;
                     }
-                    let from = raw(gun.0, gun.1, muzzle);
+                    let from = raw(gun.0, gun.1, launch_height(muzzle, weapon.torpedo));
                     let (to, homing) = match (spot, target) {
                         (Some(spot), _) => (Vec3Fp::new(spot.x, spot.y, terrain.height_at(spot) - GROUND_AIM_DEPTH), None),
                         (None, Some(entry)) => (raw(entry.x, entry.y, entry.z), ((entry.is_air && weapon.homing) || weapon.torpedo).then_some(entry.id)),
@@ -3055,7 +3079,10 @@ impl SimWorld {
             }
             if let Some(target) = shot.homing {
                 let distance = sqrt_wide(shot.from.distance_squared(&shot.to));
-                let lifetime = (distance / shot.speed.max(Fp::ONE)).to_num::<u32>() * 3 + 10;
+                // A torpedo only keeps up with a ship sailing away while it gathers speed, so it is
+                // given that second on top.
+                let speeding_up = if shot.underwater { TORPEDO_SPEED_UP_TICKS as u32 } else { 0 };
+                let lifetime = (distance / shot.speed.max(Fp::ONE)).to_num::<u32>() * 3 + 10 + speeding_up;
                 let projectile = Projectile {
                     velocity: Vec3Fp::ZERO,
                     damage: shot.damage,
@@ -3067,7 +3094,8 @@ impl SimWorld {
                 };
                 let id = self.spawn_projectile(shot.from, projectile);
                 let entity = self.projectiles.last().filter(|last| last.0 == id).expect("just spawned").1;
-                self.ecs.insert_one(entity, Homing { target, speed: shot.speed, underwater: shot.underwater }).expect("just spawned");
+                let speed = if shot.underwater { shot.speed / fp_int(TORPEDO_LAUNCH_SHARE) } else { shot.speed };
+                self.ecs.insert_one(entity, Homing { target, speed, top_speed: shot.speed, underwater: shot.underwater, lure: None }).expect("just spawned");
                 if shot.stun > 0 {
                     self.ecs.insert_one(entity, Stunning(shot.stun)).expect("just spawned");
                 }
@@ -3239,14 +3267,19 @@ impl SimWorld {
     /// one spends an interceptor on a nuclear missile that is in its range and heading for
     /// somewhere in its range. Defenses go in `SimId` order, and no missile is shot down twice.
     /// Returns the missiles destroyed, sorted by `SimId`.
-    /// Anti-torpedo charges that are ready each destroy the nearest enemy torpedo within range,
-    /// in `SimId` order, and no torpedo twice. Returns the torpedoes destroyed.
+    /// Anti-torpedo charges that are ready each drop a decoy into the water for the nearest enemy
+    /// torpedo within range, in `SimId` order, and no torpedo twice: it turns to the decoy and
+    /// strikes it instead of its target. They once destroyed the torpedo outright, drawn as a shot
+    /// over the water (2026-11-25, the user's call). A charge still stops one torpedo each time it
+    /// reloads. Returns the torpedoes destroyed outright, which is none now.
     fn intercept_torpedoes(&mut self) -> Vec<SimId> {
         // The missile defenses' step clears the last tick's interceptions, if there are any.
         if self.missile_defenses.is_empty() {
             self.interceptions.clear();
         }
-        let mut destroyed: Vec<SimId> = Vec::new();
+        let tick = self.current_tick;
+        self.decoys.retain(|&(_, sinks)| sinks > tick);
+        let mut lured: Vec<(SimId, hecs::Entity, Vec3Fp)> = Vec::new();
         for index in 0..self.torpedo_defenses.len() {
             let entity = self.torpedo_defenses[index].1;
             let mut defense = *self.ecs.get::<&super::components::TorpedoDefense>(entity).expect("defense list only holds defenses");
@@ -3255,29 +3288,41 @@ impl SimWorld {
                 let here = self.ecs.get::<&Position>(entity).expect("units have positions").0;
                 let team = self.ecs.get::<&UnitStats>(entity).expect("units have stats").team;
                 let range = i64::from(defense.range.to_bits());
-                let mut best: Option<(i64, SimId, Vec3Fp)> = None;
+                let mut best: Option<(i64, SimId, hecs::Entity, Vec3Fp)> = None;
                 for &(id, torpedo) in &self.projectiles {
-                    let underwater = self.ecs.get::<&Homing>(torpedo).is_ok_and(|homing| homing.underwater);
+                    // A torpedo already turned to a decoy is spent for this.
+                    let free = self.ecs.get::<&Homing>(torpedo).is_ok_and(|homing| homing.underwater && homing.lure.is_none());
                     let enemy = self.ecs.get::<&Projectile>(torpedo).is_ok_and(|projectile| projectile.source_team != team);
-                    if !underwater || !enemy || destroyed.contains(&id) {
+                    if !free || !enemy || lured.iter().any(|&(other, _, _)| other == id) {
                         continue;
                     }
                     let at = self.ecs.get::<&Position>(torpedo).expect("projectiles have positions").0;
                     let (dx, dy) = (i64::from(at.x.to_bits() - here.x.to_bits()), i64::from(at.y.to_bits() - here.y.to_bits()));
                     let distance = dx * dx + dy * dy;
-                    if distance <= range * range && best.is_none_or(|(closest, _, _)| distance < closest) {
-                        best = Some((distance, id, at));
+                    if distance <= range * range && best.is_none_or(|(closest, ..)| distance < closest) {
+                        best = Some((distance, id, torpedo, at));
                     }
                 }
-                if let Some((_, id, at)) = best {
-                    destroyed.push(id);
-                    self.interceptions.push([[here.x.to_bits(), here.y.to_bits(), here.z.to_bits()], [at.x.to_bits(), at.y.to_bits(), at.z.to_bits()]]);
+                if let Some((distance, id, torpedo, at)) = best {
+                    // In the water toward the torpedo, a little off the ship's side, or halfway to
+                    // it if it is closer than that.
+                    let toward = at.xy() - here.xy();
+                    let out = fp_int(DECOY_OUT_UNITS).min(Fp::from_bits((distance.isqrt() / 2) as i32));
+                    let spot = here.xy() + toward.normalized().scaled(out);
+                    let decoy = Vec3Fp::new(spot.x, spot.y, self.terrain.water_level() - fp_int(DECOY_DEPTH_UNITS));
+                    lured.push((id, torpedo, decoy));
+                    self.decoys.push(([decoy.x.to_bits(), decoy.y.to_bits(), decoy.z.to_bits()], tick + DECOY_TICKS));
                     defense.ticks_until_ready = defense.reload_ticks;
                 }
             }
             *self.ecs.get::<&mut super::components::TorpedoDefense>(entity).expect("defense list only holds defenses") = defense;
         }
-        destroyed
+        for (_, torpedo, decoy) in lured {
+            if let Ok(mut homing) = self.ecs.get::<&mut Homing>(torpedo) {
+                homing.lure = Some(decoy);
+            }
+        }
+        Vec::new()
     }
 
     fn intercept_missiles(&mut self) -> Vec<SimId> {
@@ -3357,7 +3402,7 @@ impl SimWorld {
         self.pending_stuns.clear();
         let units = &self.units;
         let stuns = &mut self.pending_stuns;
-        let mut query = self.ecs.query_mut::<(&mut Position, &mut Projectile, Option<&Discharged>, Option<&Missile>, Option<&Homing>, Option<&Falling>, Option<&Stunning>, Option<&super::components::Fused>, Option<&super::components::Lobbed>)>();
+        let mut query = self.ecs.query_mut::<(&mut Position, &mut Projectile, Option<&Discharged>, Option<&Missile>, Option<&mut Homing>, Option<&Falling>, Option<&Stunning>, Option<&super::components::Fused>, Option<&super::components::Lobbed>)>();
         let mut view = query.view();
         for &(id, entity) in &self.projectiles {
             if shot_down.binary_search(&id).is_ok() {
@@ -3407,6 +3452,25 @@ impl SimWorld {
             // A shot at an aircraft flies to it and hits only it. With the aircraft gone, it is spent.
             if let Some(homing) = homing {
                 projectile.lifetime_ticks = projectile.lifetime_ticks.saturating_sub(1);
+                if homing.speed < homing.top_speed {
+                    let gain = (homing.top_speed - homing.top_speed / fp_int(TORPEDO_LAUNCH_SHARE)) / fp_int(TORPEDO_SPEED_UP_TICKS);
+                    homing.speed = (homing.speed + gain).min(homing.top_speed);
+                }
+                // A torpedo turned to a decoy runs to it and strikes it, and hits nothing.
+                if let Some(decoy) = homing.lure {
+                    let distance = sqrt_wide(start.distance_squared(&decoy));
+                    if distance <= homing.speed {
+                        position.0 = decoy;
+                        dead.push(id);
+                        continue;
+                    }
+                    projectile.velocity = (decoy - start).scaled(homing.speed / distance);
+                    position.0 = start + projectile.velocity;
+                    if projectile.lifetime_ticks == 0 {
+                        dead.push(id);
+                    }
+                    continue;
+                }
                 let target = units.binary_search_by_key(&homing.target, |unit| unit.0).ok().map(|index| grid.entry(index));
                 // Nor can it hit an aircraft that has landed.
                 // A torpedo reaches only what is on or under the water.
@@ -3414,7 +3478,11 @@ impl SimWorld {
                     dead.push(id);
                     continue;
                 };
-                let aim = Vec3Fp::new(Fp::from_bits(target.x), Fp::from_bits(target.y), Fp::from_bits(target.z));
+                let mut aim = Vec3Fp::new(Fp::from_bits(target.x), Fp::from_bits(target.y), Fp::from_bits(target.z));
+                // A torpedo stays under the water: at a ship, it runs for the hull below the waterline.
+                if homing.underwater {
+                    aim.z = aim.z.min(terrain.water_level() - fp_int(TORPEDO_LAUNCH_DEPTH_UNITS));
+                }
                 let distance = sqrt_wide(start.distance_squared(&aim));
                 if distance <= homing.speed + Fp::from_bits(target.radius) {
                     position.0 = aim;
@@ -4274,6 +4342,13 @@ impl SimWorld {
             write_fp(hasher, homing.speed);
             if homing.underwater {
                 hasher.write(&[1]);
+                write_fp(hasher, homing.top_speed);
+                if let Some(lure) = homing.lure {
+                    hasher.write(&[2]);
+                    write_fp(hasher, lure.x);
+                    write_fp(hasher, lure.y);
+                    write_fp(hasher, lure.z);
+                }
             }
         }
         if self.ecs.get::<&Falling>(entity).is_ok() {
@@ -4494,6 +4569,7 @@ impl SimWorld {
             })
             .collect();
         let interceptions = self.interceptions.iter().copied().filter(|[from, to]| viewer.is_none_or(|viewer| seen(viewer.enemy(), from[0], from[1]) || seen(viewer.enemy(), to[0], to[1]))).collect();
+        let decoys = self.decoys.iter().copied().filter(|(at, _)| viewer.is_none_or(|viewer| seen(viewer.enemy(), at[0], at[1]))).collect();
         let cargo = self
             .transports
             .iter()
@@ -4683,6 +4759,7 @@ impl SimWorld {
             wrecks,
             shields,
             interceptions,
+            decoys,
             stocks,
             cargo,
             adjacency,
