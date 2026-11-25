@@ -8,6 +8,7 @@ use egui::{Align2, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
 use crate::hud;
 use crate::render::camera::{Camera, HeightField};
+use crate::render::climate::{to_screen, Climate, TEMPERATE};
 use crate::render::land::{LandField, SUN_DIRECTION};
 use crate::render::pipeline::FOG_CELL_UNITS;
 use crate::sim::components::Team;
@@ -25,21 +26,62 @@ const BELOW_ECONOMY: &str = "below economy";
 /// Where the panel below the minimap starts, remembered from the last frame.
 const BELOW_MINIMAP: &str = "below minimap";
 
-const DEEP: Color32 = Color32::from_rgb(22, 52, 78);
-const SHALLOW: Color32 = Color32::from_rgb(52, 108, 128);
-const SAND: Color32 = Color32::from_rgb(170, 158, 116);
-const LOW: Color32 = Color32::from_rgb(78, 104, 52);
 /// How much steeper slopes are lit than they are, so that hills stand out at this size.
 const RELIEF: f64 = 3.5;
-const LUSH: Color32 = Color32::from_rgb(58, 92, 46);
-const HIGH: Color32 = Color32::from_rgb(132, 132, 82);
-const ROCK: Color32 = Color32::from_rgb(118, 112, 104);
+
+/// The minimap's colors, from the map's climate, as the screen shows them.
+struct Palette {
+    deep: Color32,
+    shallow: Color32,
+    sand: Color32,
+    low: Color32,
+    lush: Color32,
+    high: Color32,
+    rock: Color32,
+}
+
+impl Palette {
+    /// The temperate climate's colors, as the minimap has always drawn them, shifted for other
+    /// climates by how much each of theirs differs from the temperate one in light, so that a
+    /// temperate map's minimap is unchanged and the others follow their land on screen.
+    fn of(climate: &Climate) -> Self {
+        let shifted = |[r, g, b]: [u8; 3], ours: [f32; 4], temperate: [f32; 4]| {
+            let linear = [r, g, b].map(from_screen);
+            let shifted: [f32; 4] = std::array::from_fn(|channel| if channel < 3 { linear[channel] * ours[channel] / temperate[channel].max(0.001) } else { 0.0 });
+            let [r, g, b] = to_screen(shifted);
+            Color32::from_rgb(r, g, b)
+        };
+        Self {
+            deep: shifted([22, 52, 78], climate.water_deep, TEMPERATE.water_deep),
+            shallow: shifted([52, 108, 128], shallow_water(climate), shallow_water(&TEMPERATE)),
+            sand: shifted([170, 158, 116], climate.sand, TEMPERATE.sand),
+            low: shifted([78, 104, 52], climate.grass_low, TEMPERATE.grass_low),
+            lush: shifted([58, 92, 46], climate.grass_lush, TEMPERATE.grass_lush),
+            high: shifted([132, 132, 82], climate.grass_high, TEMPERATE.grass_high),
+            rock: shifted([118, 112, 104], climate.rock, TEMPERATE.rock),
+        }
+    }
+}
+
+/// Shallow water's color in light: sand seen through a few units of it, over deep water.
+fn shallow_water(climate: &Climate) -> [f32; 4] {
+    let through: [f32; 4] = std::array::from_fn(|channel| (-climate.absorption[channel] * 12.0).exp());
+    let clear = (through[0] + through[1] + through[2]) / 3.0;
+    std::array::from_fn(|channel| climate.sand[channel] * through[channel] + climate.water_deep[channel] * (1.0 - clear))
+}
+
+/// A screen color's channel, from 0 to 255, in linear light.
+fn from_screen(channel: u8) -> f32 {
+    let encoded = f32::from(channel) / 255.0;
+    if encoded <= 0.040_45 { encoded / 12.92 } else { ((encoded + 0.055) / 1.055).powf(2.4) }
+}
 
 /// The land seen from above, `side` pixels a side, row by row from the map's top edge: water
 /// darker with depth, grass from low to high and lusher where it is damp, sand along the shore,
 /// rock where it is steep, and lit by the same sun as the land on screen, with the hills'
 /// shadows (render/land.rs), so that hills stand out the same way in both.
-pub fn land_colors(heights: &HeightField, water_level: f64, side: usize) -> Vec<Color32> {
+pub fn land_colors(heights: &HeightField, water_level: f64, climate: &Climate, side: usize) -> Vec<Color32> {
+    let palette = Palette::of(climate);
     let size = (heights.samples() - 1) as f64 * heights.cell_units();
     let step = size / side as f64;
     let at = |x: f64, y: f64| heights.height_at(x.clamp(0.0, size), y.clamp(0.0, size));
@@ -67,13 +109,13 @@ pub fn land_colors(heights: &HeightField, water_level: f64, side: usize) -> Vec<
             // Flat open ground in the sun stays as bright as before.
             let light = (0.45 * (0.5 + 0.5 * texel(1)) + 0.75 * facing * texel(0)).clamp(0.4, 1.35) / (0.45 + 0.75 * sun[2] as f32);
             let color = if height < water_level {
-                hud::lerp_color(SHALLOW, DEEP, ((water_level - height) / 60.0) as f32)
+                hud::lerp_color(palette.shallow, palette.deep, ((water_level - height) / 60.0) as f32)
             } else {
                 let rise = ((height - water_level.max(lowest)) / span) as f32;
-                let grass = hud::lerp_color(hud::lerp_color(LOW, HIGH, rise), LUSH, texel(2) * 0.5);
+                let grass = hud::lerp_color(hud::lerp_color(palette.low, palette.high, rise), palette.lush, texel(2) * 0.5);
                 let shore = if height - water_level < 4.0 { 1.0 - ((height - water_level) / 4.0) as f32 } else { 0.0 };
-                let ground = hud::lerp_color(grass, SAND, shore * 0.8);
-                hud::lerp_color(ground, ROCK, ((slope - 0.35) / 0.4).clamp(0.0, 1.0))
+                let ground = hud::lerp_color(grass, palette.sand, shore * 0.8);
+                hud::lerp_color(ground, palette.rock, ((slope - 0.35) / 0.4).clamp(0.0, 1.0))
             };
             let lit = |channel: u8| (f32::from(channel) * light).clamp(0.0, 255.0) as u8;
             colors.push(Color32::from_rgb(lit(color.r()), lit(color.g()), lit(color.b())));
@@ -127,11 +169,11 @@ impl Minimap {
     /// Draws the minimap under the economy panel. `fog_side` is the size of the fog grid, if the
     /// match has fog. Returns nothing; a click or drag on it asks to move the camera.
     #[allow(clippy::too_many_arguments)]
-    pub fn show(&mut self, ctx: &egui::Context, camera: &Camera, heights: &HeightField, water_level: f64, snapshot: &SimSnapshot, fog_side: Option<usize>, actions: &mut Vec<UiAction>) {
+    pub fn show(&mut self, ctx: &egui::Context, camera: &Camera, heights: &HeightField, water_level: f64, climate: &Climate, snapshot: &SimSnapshot, fog_side: Option<usize>, actions: &mut Vec<UiAction>) {
         let map_size = (heights.samples() - 1) as f64 * heights.cell_units();
         let land = self.land.get_or_insert_with(|| {
             let side = (heights.samples() - 1).clamp(16, MOST_PIXELS);
-            let image = egui::ColorImage { size: [side, side], pixels: land_colors(heights, water_level, side) };
+            let image = egui::ColorImage { size: [side, side], pixels: land_colors(heights, water_level, climate, side) };
             ctx.load_texture("minimap land", image, egui::TextureOptions::LINEAR)
         });
         let land_id = land.id();
@@ -237,6 +279,15 @@ pub fn below_minimap(ctx: &egui::Context) -> Option<f32> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_temperate_map_keeps_the_minimap_colors_it_always_had() {
+        let palette = Palette::of(&TEMPERATE);
+        assert_eq!(palette.deep, Color32::from_rgb(22, 52, 78));
+        assert_eq!(palette.shallow, Color32::from_rgb(52, 108, 128));
+        assert_eq!(palette.high, Color32::from_rgb(132, 132, 82));
+        assert_eq!(palette.rock, Color32::from_rgb(118, 112, 104));
+    }
+
     fn bowl() -> HeightField {
         // A 33-sample map, 20 units a cell, low in the middle and high at the edges, in steps of
         // a quarter of a unit.
@@ -254,7 +305,7 @@ mod tests {
     fn the_land_picture_shows_water_in_the_lows_and_grass_above() {
         let heights = bowl();
         let side = 32;
-        let colors = land_colors(&heights, 0.0, side);
+        let colors = land_colors(&heights, 0.0, &Climate::default(), side);
         assert_eq!(colors.len(), side * side);
         let middle = colors[side / 2 * side + side / 2];
         let edge = colors[side / 2 * side + 1];
@@ -290,7 +341,7 @@ mod tests {
         let mut actions = Vec::new();
         for events in [vec![], vec![egui::Event::PointerMoved(at)], vec![press(true)], vec![press(false)], vec![]] {
             let input = egui::RawInput { screen_rect: Some(screen), events, ..egui::RawInput::default() };
-            let _ = ctx.run(input, |ctx| minimap.show(ctx, &camera, &heights, 0.0, &snapshot, None, &mut actions));
+            let _ = ctx.run(input, |ctx| minimap.show(ctx, &camera, &heights, 0.0, &Climate::default(), &snapshot, None, &mut actions));
         }
         actions
     }

@@ -146,6 +146,37 @@ impl Scar {
     }
 }
 
+/// The most stretches of wake kept at once, how long each lasts, in seconds, the last part
+/// fading, and how far apart they are laid, as a share of the ship's width.
+const MAX_WAKES: usize = 1_500;
+const WAKE_LIFE: f64 = 10.0;
+const WAKE_FADE: f64 = 7.0;
+const WAKE_STRETCH_SPACING: f64 = 0.45;
+/// How fast a wake widens, for each unit a second the ship makes, which is also how much wider it
+/// is for each unit behind the ship; the shaders' `WAKE_SPREAD` is the same: a ship's wake opens out at
+/// about 14 degrees either side of its course, whatever its speed (2 tan 14°).
+const WAKE_SPREAD: f64 = 0.5;
+
+/// A stretch of the foam a ship leaves behind it on the water, flat on the surface, spreading
+/// as it ages so that together they open out into a V.
+#[derive(Copy, Clone, Debug, PartialEq)]
+struct WakeStretch {
+    at: [f64; 3],
+    width: f32,
+    length: f32,
+    heading: [f32; 2],
+    born: f64,
+    /// How fast the ship was going, in units a second, which sets how fast it widens.
+    speed: f32,
+}
+
+impl WakeStretch {
+    /// How strongly it shows at `time`, from 0 to 1.
+    fn strength(&self, time: f64) -> f32 {
+        (((WAKE_LIFE - (time - self.born)) / WAKE_FADE).clamp(0.0, 1.0)) as f32
+    }
+}
+
 /// A stretch of the marks a tracked vehicle leaves behind it on the ground.
 #[derive(Copy, Clone, Debug, PartialEq)]
 struct Track {
@@ -171,6 +202,9 @@ pub struct Effects {
     puffs: VecDeque<Puff>,
     scars: VecDeque<Scar>,
     tracks: VecDeque<Track>,
+    wake_stretches: VecDeque<WakeStretch>,
+    /// Where each ship last left a stretch of wake, and when it was last seen.
+    wake_ends: Vec<(SimId, [f64; 3], f64, [f64; 2])>,
     /// Which unit each wreck seen made was, and which way it faced, by wreck, sorted by wreck:
     /// wrecks are drawn as the burnt-out shell of what they were.
     wreck_origins: Vec<(SimId, u16, [f32; 2])>,
@@ -681,9 +715,11 @@ impl Effects {
                 }
                 let (dx, dy) = (f64::from(unit.x - before.x), f64::from(unit.y - before.y));
                 let length = dx.hypot(dy);
+                // Churned water at the stern, brief; the wake behind it is laid flat on the
+                // water (`lay_wakes`).
                 let stern = [center[0] - dx / length * radius * 0.9, center[1] - dy / length * radius * 0.9, water + 0.3];
                 let size = (radius * 0.7) as f32;
-                let puff = Puff { shape: Shape::Wake, at: stern, rise: 0.0, born: time, life: 2.8, size, growth: 2.2, height_share: 0.08, color: FOAM, fade_to: FOAM_OLD, dense: false };
+                let puff = Puff { shape: Shape::Wake, at: stern, rise: 0.0, born: time, life: 0.9, size: size * 0.8, growth: 1.4, height_share: 0.08, color: FOAM, fade_to: FOAM_OLD, dense: false };
                 lay(self, unit.id, stern, radius * 2.0 * WAKE_SPACING, puff);
                 // And spray thrown up at the bow, brief and small, kept apart from the wake.
                 let bow = [center[0] + dx / length * radius * 0.85, center[1] + dy / length * radius * 0.85, water + 0.6];
@@ -693,6 +729,61 @@ impl Effects {
         }
         self.trail_ends = next_ends;
         self.lay_tracks(previous, current, alpha, looks, water, time);
+        if let Some(water) = water {
+            self.lay_wakes(previous, current, alpha, looks, water, time);
+        }
+    }
+
+    /// Lays stretches of wake behind ships on the surface, as far as each has moved since the
+    /// last frame.
+    fn lay_wakes(&mut self, previous: &SimSnapshot, current: &SimSnapshot, alpha: f64, looks: &[UnitLook], water: f64, time: f64) {
+        let mut ends = std::mem::take(&mut self.wake_ends);
+        ends.sort_unstable_by_key(|end| end.0);
+        let mut next_ends = Vec::with_capacity(ends.len());
+        merge_by_id(&previous.units, &current.units, |unit| unit.id, |before, unit| {
+            let Some(before) = before else { return };
+            if !looks.get(usize::from(unit.blueprint)).is_some_and(|look| look.shape.leaves_wake()) {
+                return;
+            }
+            let radius = f64::from(unit.radius) * RAW_TO_WORLD;
+            let at: [f64; 3] = std::array::from_fn(|axis| {
+                let (from, to) = ([before.x, before.y, before.z][axis], [unit.x, unit.y, unit.z][axis]);
+                (f64::from(from) + (f64::from(to) - f64::from(from)) * alpha) * RAW_TO_WORLD
+            });
+            // Only on the surface: a submarine below leaves none.
+            if at[2] - radius > water + 1.0 || at[2] < water {
+                return;
+            }
+            let width = radius * 1.4;
+            let spacing = width * WAKE_STRETCH_SPACING;
+            let found = ends.binary_search_by_key(&unit.id, |end| end.0).ok().map(|index| ends[index]);
+            let last = found.map_or(at, |end| end.1);
+            // How fast it is going, from where it was when last seen.
+            let speed = found.filter(|end| time > end.2).map_or(0.0, |end| (at[0] - end.3[0]).hypot(at[1] - end.3[1]) / (time - end.2));
+            let (dx, dy) = (at[0] - last[0], at[1] - last[1]);
+            let distance = dx.hypot(dy);
+            let mut end = last;
+            if distance > spacing * 40.0 {
+                // Out of view, or new: start afresh.
+                end = at;
+            } else if distance >= spacing {
+                let heading = [(dx / distance) as f32, (dy / distance) as f32];
+                for step in 1..=(distance / spacing) as usize {
+                    let share = step as f64 * spacing / distance;
+                    let spot = [last[0] + dx * share, last[1] + dy * share, water];
+                    if self.wake_stretches.len() >= MAX_WAKES {
+                        self.wake_stretches.pop_front();
+                    }
+                    // Born when the ship passed that spot, so that each stretch has spread a
+                    // little more than the one ahead of it, and their edges line up.
+                    let born = if speed > 0.0 { time - (distance - step as f64 * spacing) / speed } else { time };
+                    self.wake_stretches.push_back(WakeStretch { at: spot, width: width as f32, length: (spacing * 1.8) as f32, heading, born, speed: speed as f32 });
+                    end = spot;
+                }
+            }
+            next_ends.push((unit.id, end, time, [at[0], at[1]]));
+        });
+        self.wake_ends = next_ends;
     }
 
     /// Lays track marks behind tracked vehicles on the ground, as far as each has moved since
@@ -748,6 +839,7 @@ impl Effects {
         self.puffs.retain(|puff| time - puff.born < puff.life && puff.born - time < 10.0);
         self.scars.retain(|scar| time - scar.born < SCAR_LIFE && scar.born - time < 10.0);
         self.tracks.retain(|track| time - track.born < TRACK_LIFE && track.born - time < 10.0);
+        self.wake_stretches.retain(|wake| time - wake.born < WAKE_LIFE && wake.born - time < 10.0);
         self.beams.retain(|beam| time - beam.born < LASER_LIFE && beam.born - time < 10.0);
         for beam in &self.beams {
             let age = ((time - beam.born) / LASER_LIFE).clamp(0.0, 1.0) as f32;
@@ -764,6 +856,16 @@ impl Effects {
             // The shader reads a scar's look from its color: tracks are its third kind.
             let look = [2.0, track.strength(time), 0.0];
             out.push(Shape::Scar, painted(track.at, [track.width, track.length, 1.0], track.heading, look, look, look, 0.0, eye));
+        }
+        for wake in &self.wake_stretches {
+            // Drawn after the water, by the shader's fourth kind of scar: how strongly it
+            // shows, and how far it has spread, from 0 when new to 1 at the end of its life.
+            let age = (time - wake.born).max(0.0);
+            let look = [3.0, wake.strength(time), (age / WAKE_LIFE) as f32];
+            // Drawn wider by how much the wake spreads along its length, which the shader takes
+            // back off towards the ship.
+            let width = wake.width + (age * WAKE_SPREAD) as f32 * wake.speed + WAKE_SPREAD as f32 * wake.length * 0.5;
+            out.push(Shape::Scar, painted(wake.at, [width, wake.length, 1.0], wake.heading, look, look, look, 0.0, eye));
         }
         for scar in &self.scars {
             let strength = scar.strength(time);
@@ -1084,6 +1186,47 @@ mod tests {
         assert!(gone.is_empty(), "gone");
         assert!(marks("t2_heavy_tank", 0).0.is_empty(), "a tank standing still leaves none");
         assert!(marks("t1_light_walker", 30).0.is_empty(), "a walker leaves none");
+    }
+
+    /// A ship under way on the surface leaves a wake behind it on the water that spreads and
+    /// fades; a ship on land (no water) or a submarine below leaves none.
+    #[test]
+    fn ships_on_the_surface_leave_a_spreading_wake_that_fades() {
+        use crate::sim::blueprints::BlueprintDb;
+        let db = BlueprintDb::standard();
+        let looks = crate::render::instances::unit_looks(&db);
+        let wakes = |water: Option<f64>, depth: i32| {
+            let mut effects = Effects::new();
+            let mut start = unit(1);
+            start.blueprint = db.id("t1_frigate").0;
+            start.z = 4096 * depth;
+            let mut before = snapshot(1);
+            before.units = vec![start];
+            let mut after = snapshot(2);
+            let mut moved = start;
+            moved.x += 4096 * 30;
+            after.units = vec![moved];
+            effects.trail(&before, &before, 0.0, &looks, water, 0.0);
+            effects.trail(&before, &after, 1.0, &looks, water, 0.1);
+            let stretches = |effects: &mut Effects, time: f64| {
+                let mut out = InstanceBatches::default();
+                effects.build(time, [0.0; 3], &mut out);
+                out.shape(Shape::Scar).iter().filter(|instance| instance.color[0] > 2.5).map(|instance| (instance.color[1], instance.model_matrix[0][0].hypot(instance.model_matrix[0][1]))).collect::<Vec<(f32, f32)>>()
+            };
+            (stretches(&mut effects, 0.2), stretches(&mut effects, WAKE_LIFE - WAKE_FADE * 0.5), stretches(&mut effects, WAKE_LIFE + 1.0))
+        };
+        let (fresh, fading, gone) = wakes(Some(3.0), 3);
+        assert!(fresh.len() >= 2 && fresh.iter().all(|(strength, _)| *strength > 0.99), "a fresh wake behind a frigate: {fresh:?}");
+        assert!(fading.iter().all(|(strength, _)| *strength < 0.6), "fading: {fading:?}");
+        assert!(fading[0].1 > fresh[0].1 * 2.0, "it spreads: {} then {}", fresh[0].1, fading[0].1);
+        assert!(gone.is_empty(), "gone");
+        assert!(wakes(None, 3).0.is_empty(), "no water, no wake");
+        assert!(wakes(Some(3.0), -20).0.is_empty(), "deep under the water, no wake");
+    }
+
+    #[test]
+    fn the_shaders_spread_wakes_as_the_effects_do() {
+        assert!(include_str!("shaders.wgsl").contains(&format!("const WAKE_SPREAD: f32 = {WAKE_SPREAD:?};")));
     }
 
     /// Lands a shell fired by a unit of `key`, as the weapon fires it, onto ground at height 0 or,

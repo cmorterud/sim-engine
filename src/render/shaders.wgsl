@@ -33,6 +33,76 @@ struct Globals {
 // sampler.
 @group(0) @binding(8) var detail_texture: texture_2d<f32>;
 
+// The map's climate (climate.rs): the colors of its ground, water and sky, in linear light.
+struct Climate {
+    grass_low: vec4<f32>,
+    grass_high: vec4<f32>,
+    grass_dry: vec4<f32>,
+    grass_lush: vec4<f32>,
+    // Bare earth, and how much more of the ground is bare than in the temperate climate.
+    dirt: vec4<f32>,
+    dirt_damp: vec4<f32>,
+    rock: vec4<f32>,
+    rock_warm: vec4<f32>,
+    sand: vec4<f32>,
+    pebble: vec4<f32>,
+    // Light from the open sky above and from the ground below, and from the sun.
+    sky: vec4<f32>,
+    ground_bounce: vec4<f32>,
+    sun: vec4<f32>,
+    // How much of each color water takes away per unit of depth.
+    absorption: vec4<f32>,
+    water_deep: vec4<f32>,
+    // The sky the water reflects, at the horizon and overhead.
+    sky_horizon: vec4<f32>,
+    sky_zenith: vec4<f32>,
+    // The haze far off in low views, and how thick it is.
+    haze: vec4<f32>,
+};
+@group(0) @binding(9) var<uniform> climate: Climate;
+
+// The wind, which the clouds drift with and which runs across the grass: from the
+// south-west, along the long swells.
+const WIND: vec2<f32> = vec2<f32>(0.83, 0.55);
+// How far across a cloud's shadow is, in world units, how fast clouds drift, in units a
+// second, and how much of the sun's light a cloud takes away.
+const CLOUD_SIZE: f32 = 520.0;
+const CLOUD_SPEED: f32 = 9.0;
+const CLOUD_SHADE: f32 = 0.38;
+// Cloud shadows fade out between these camera heights, so that far zoom stays quiet.
+const CLOUD_FADE_NEAR: f32 = 2500.0;
+const CLOUD_FADE_FAR: f32 = 7000.0;
+
+// How much of the sun's light reaches a point on the map past the clouds: 1 in the clear,
+// down to 1 - CLOUD_SHADE under a cloud.
+fn cloud_light(world: vec2<f32>) -> f32 {
+    let shown = 1.0 - smoothstep(CLOUD_FADE_NEAR, CLOUD_FADE_FAR, globals.terrain_origin.z);
+    if (shown <= 0.0) {
+        return 1.0;
+    }
+    let at = (world - WIND * globals.water.x * CLOUD_SPEED) / CLOUD_SIZE;
+    var cover = value_noise(at);
+    if (high_quality()) {
+        cover = cover * 0.65 + value_noise(at * 2.3 + vec2<f32>(17.0, 5.0)) * 0.35;
+    }
+    return 1.0 - CLOUD_SHADE * smoothstep(0.5, 0.72, cover) * shown;
+}
+
+// How far off haze begins, how far beyond that it thickens over, in world units, and how much
+// of the color it takes at most.
+const HAZE_START: f32 = 1800.0;
+const HAZE_DISTANCE: f32 = 7000.0;
+const HAZE_MOST: f32 = 0.45;
+
+// A color seen at camera-relative `relative`, through the haze: only looking low across the
+// land, never from above, so that it gives orbit views depth and leaves the top-down view clear.
+fn hazed(color: vec3<f32>, relative: vec3<f32>) -> vec3<f32> {
+    let distance = length(relative);
+    let down = -relative.z / max(distance, 0.001);
+    let amount = (1.0 - exp(-max(distance - HAZE_START, 0.0) / HAZE_DISTANCE)) * (1.0 - smoothstep(0.2, 0.55, down)) * HAZE_MOST * climate.haze.w;
+    return mix(color, climate.haze.rgb, clamp(amount, 0.0, 0.8));
+}
+
 // A gentle film curve: colors up to the knee stay as they are, and brighter ones roll off
 // towards white instead of clipping, so that sun glints and foam keep their shape.
 const TONE_KNEE: f32 = 0.6;
@@ -92,10 +162,6 @@ const FLASH_COLOR: vec3<f32> = vec3<f32>(1.0, 0.75, 0.3);
 const IDLE_GLOW: f32 = 0.3;
 // Dark gunmetal, the same for every unit.
 const GUNMETAL: vec3<f32> = vec3<f32>(0.20, 0.21, 0.23);
-// Light from the open sky above and from the ground below, and from the sun.
-const SKY: vec3<f32> = vec3<f32>(0.42, 0.45, 0.52);
-const GROUND_BOUNCE: vec3<f32> = vec3<f32>(0.20, 0.19, 0.16);
-const SUN: vec3<f32> = vec3<f32>(0.80, 0.77, 0.70);
 
 struct InstanceInput {
     @location(2) m0: vec4<f32>,
@@ -241,7 +307,7 @@ fn vs_unit(
     let bottom = center - instance.m2.xyz * 0.5;
     let land = land_at(world_from_relative(bottom.xy));
     let aloft = smoothstep(UNIT_ALOFT_LOW, UNIT_ALOFT_HIGH, bottom.z - ground_at(bottom.xy));
-    out.land = vec2<f32>(mix(land.r, 1.0, aloft), mix(mix(1.0, land.g, 0.6), 1.0, aloft));
+    out.land = vec2<f32>(mix(land.r, 1.0, aloft) * cloud_light(world_from_relative(center.xy)), mix(mix(1.0, land.g, 0.6), 1.0, aloft));
     return out;
 }
 
@@ -253,11 +319,11 @@ fn fs_unit(input: UnitOutput) -> @location(0) vec4<f32> {
     let normal = normalize(input.normal);
     let to_eye = normalize(-input.relative);
     let sun = max(dot(normal, LIGHT), 0.0) * input.land.x;
-    let ambient = mix(GROUND_BOUNCE, SKY, normal.z * 0.5 + 0.5) * input.land.y;
+    let ambient = mix(climate.ground_bounce.rgb, climate.sky.rgb, normal.z * 0.5 + 0.5) * input.land.y;
     // Crowded corners lose most of the sky's light and some of the sun's, which sets parts
     // apart where they meet, as a stylized contact shadow.
     let open = input.openness;
-    var diffuse = input.albedo * (ambient * open + SUN * sun * mix(1.0, open, SUN_OCCLUSION));
+    var diffuse = input.albedo * (ambient * open + climate.sun.rgb * sun * mix(1.0, open, SUN_OCCLUSION));
     // Metal shines sharply, paint softly.
     var shininess = 20.0;
     var strength = 0.18;
@@ -275,7 +341,7 @@ fn fs_unit(input: UnitOutput) -> @location(0) vec4<f32> {
     let rim_strength = mix(RIM_NEAR, RIM_FAR, smoothstep(RIM_NEAR_DISTANCE, RIM_FAR_DISTANCE, length(input.relative)));
     let rim = pow(1.0 - max(dot(normal, to_eye), 0.0), 3.0) * rim_strength;
     let lit = diffuse + vec3<f32>(shine) + rim * mix(input.albedo, vec3<f32>(1.0), 0.5);
-    return vec4<f32>(mix(tone(lit), input.albedo, input.morph), 1.0);
+    return vec4<f32>(mix(tone(hazed(lit, input.relative)), input.albedo, input.morph), 1.0);
 }
 
 // How high above the ground a unit is out of the hills' shadow: partly from the first height,
@@ -373,6 +439,10 @@ struct ScarOutput {
     // A crater (1) or a scorch mark (0), how strongly it shows, and a number that varies its shape.
     @location(1) @interpolate(flat) look: vec3<f32>,
     @location(2) fog_coordinates: vec2<f32>,
+    // Where it is on the map.
+    @location(3) world: vec2<f32>,
+    // How wide and long it is, in world units.
+    @location(4) @interpolate(flat) size: vec2<f32>,
 };
 
 // How dark fresh track marks are, as the share of the ground they cover.
@@ -397,12 +467,18 @@ fn vs_scar(
     out.look = instance.color.rgb;
     let sample = (flat - globals.terrain_origin.xy) / globals.terrain_origin.w + vec2<f32>(globals.terrain_grid.xy);
     out.fog_coordinates = sample * globals.terrain_scale.z;
+    out.world = world_from_relative(flat);
+    out.size = vec2<f32>(length(instance.m0.xy), length(instance.m1.xy));
     return out;
 }
 
 @fragment
 fn fs_scar(input: ScarOutput) -> @location(0) vec4<f32> {
     let sight = 0.18 + 0.82 * textureSample(fog_texture, fog_sampler, input.fog_coordinates).r;
+    // Wakes, the fourth kind, are drawn over the water instead, by fs_wake.
+    if (input.look.x > 2.5) {
+        discard;
+    }
     let seed = input.look.z * 37.0;
     // A ragged edge, never quite round.
     let ragged = (value_noise(input.across * 2.5 + vec2<f32>(seed, seed * 0.7)) - 0.5) * 0.3;
@@ -433,6 +509,43 @@ fn fs_scar(input: ScarOutput) -> @location(0) vec4<f32> {
         alpha = max(bowl * 0.72, max(rim * 0.4, spatter));
     }
     return vec4<f32>(color * sight, alpha * input.look.y);
+}
+
+// How wide each arm of foam in a ship's wake is when new, in world units, and how much wider
+// the wake gets for each unit behind the ship, as the effects set it (`WAKE_SPREAD`).
+const WAKE_ARM: f32 = 12.0;
+const WAKE_SPREAD: f32 = 0.5;
+
+// A ship's wake, laid flat on the water after it is drawn: two thin arms of foam along its
+// edges, which open out into a V as the stretches behind the ship spread, and churned water
+// down the middle that settles first. Its look is the fourth kind of scar, how strongly it
+// shows, and how far through its life it is.
+@fragment
+fn fs_wake(input: ScarOutput) -> @location(0) vec4<f32> {
+    let fog = textureSample(fog_texture, fog_sampler, input.fog_coordinates).r;
+    if (input.look.x < 2.5) {
+        discard;
+    }
+    let age = input.look.z;
+    // Each stretch is drawn wider than the wake is where it lies, and narrows towards the ship,
+    // as the wake does, so that the edges of one stretch meet those of the next in a straight
+    // line instead of a step.
+    let ahead = input.across.y * 0.5 * input.size.y;
+    let width = input.size.x - WAKE_SPREAD * (0.5 * input.size.y + ahead);
+    let side = abs(input.across.x) * input.size.x / max(width, 0.001);
+    // The arms are foam a few units wide along either edge, however far the wake has spread,
+    // widening a little as they break up.
+    let from_edge = (1.0 - side) * width * 0.5;
+    let arm = WAKE_ARM * (1.0 + age);
+    let arms = smoothstep(0.0, arm * 0.25, from_edge) * (1.0 - smoothstep(arm * 0.35, arm, from_edge));
+    let middle = (1.0 - smoothstep(0.1, 0.4, side)) * (1.0 - smoothstep(0.0, 0.12, age));
+    // Stretches overlap and fade at either end, so that they join into one trail.
+    let along = 1.0 - smoothstep(0.5, 1.0, abs(input.across.y));
+    let broken = smoothstep(0.25, 0.75, value_noise(input.world / 7.0 + vec2<f32>(age * 6.0, 0.0)) * 0.7 + value_noise(input.world / 2.5) * 0.3);
+    let alpha = (arms * 0.65 * (1.0 - age * 0.6) + middle * 0.55) * mix(0.35, 1.0, broken) * along * input.look.y;
+    let sight = 0.18 + 0.82 * fog;
+    let lit = FOAM_COLOR * mix(1.0, cloud_light(input.world), 0.5) * sight;
+    return vec4<f32>(tone(strategic_sight(lit, fog, input.fog_coordinates)), alpha);
 }
 
 // ---- Smoke ----
@@ -467,8 +580,8 @@ fn vs_smoke(
 @fragment
 fn fs_smoke(input: SmokeOutput) -> @location(0) vec4<f32> {
     let normal = normalize(input.normal);
-    let ambient = mix(GROUND_BOUNCE, SKY, normal.z * 0.5 + 0.5);
-    let lit = input.albedo * (ambient + SUN * 0.8 * max(dot(normal, LIGHT), 0.0));
+    let ambient = mix(climate.ground_bounce.rgb, climate.sky.rgb, normal.z * 0.5 + 0.5);
+    let lit = input.albedo * (ambient + climate.sun.rgb * 0.8 * max(dot(normal, LIGHT), 0.0));
     // Thinner towards its edges, as a cloud is, so that its facets do not show.
     let facing = abs(dot(normal, normalize(-input.relative)));
     return vec4<f32>(lit, input.opacity * smoothstep(0.05, 0.6, facing));
@@ -716,21 +829,12 @@ fn value_noise(point: vec2<f32>) -> f32 {
     return value_noise_slope(point).x;
 }
 
-// Ground colors, in linear light.
-const GRASS_LOW: vec3<f32> = vec3<f32>(0.10, 0.17, 0.09);
-const GRASS_HIGH: vec3<f32> = vec3<f32>(0.24, 0.27, 0.14);
-const DIRT: vec3<f32> = vec3<f32>(0.25, 0.21, 0.14);
-const ROCK: vec3<f32> = vec3<f32>(0.30, 0.28, 0.26);
-const SAND: vec3<f32> = vec3<f32>(0.44, 0.40, 0.29);
-const PEBBLE: vec3<f32> = vec3<f32>(0.29, 0.27, 0.24);
-const GRASS_DRY: vec3<f32> = vec3<f32>(0.31, 0.29, 0.15);
-const GRASS_LUSH: vec3<f32> = vec3<f32>(0.07, 0.15, 0.07);
-const DIRT_DAMP: vec3<f32> = vec3<f32>(0.15, 0.12, 0.08);
-const ROCK_WARM: vec3<f32> = vec3<f32>(0.33, 0.29, 0.24);
 // How strongly the sky and the sun light the ground, so that flat open ground in the sun is
 // about as bright as it was before the sky had a color.
 const GROUND_AMBIENT: f32 = 0.85;
 const GROUND_SUN: f32 = 0.95;
+// How much the wind's bands lighten and darken the grass.
+const GRASS_WIND: f32 = 0.16;
 // World units one copy of the close-up patterns spans.
 const DETAIL_SIZE: f32 = 7.0;
 
@@ -769,8 +873,8 @@ fn fs_terrain(input: TerrainOutput) -> @location(0) vec4<f32> {
     // The same sky and sun as units: the sky's light by how open the ground is to it, and the
     // sun's where no hill stands in its way.
     let land = land_at(input.world);
-    let ambient = mix(GROUND_BOUNCE, SKY, normal.z * 0.5 + 0.5) * mix(0.35, 1.0, land.g) * GROUND_AMBIENT;
-    let light = ambient + SUN * max(dot(normal, LIGHT), 0.0) * land.r * GROUND_SUN;
+    let ambient = mix(climate.ground_bounce.rgb, climate.sky.rgb, normal.z * 0.5 + 0.5) * mix(0.35, 1.0, land.g) * GROUND_AMBIENT;
+    let light = ambient + climate.sun.rgb * max(dot(normal, LIGHT), 0.0) * land.r * cloud_light(input.world) * GROUND_SUN;
     // The close-up patterns, faded by their own smaller copies with distance. Low quality
     // goes without.
     var detail = vec4<f32>(0.0);
@@ -782,31 +886,42 @@ fn fs_terrain(input: TerrainOutput) -> @location(0) vec4<f32> {
     // and there, speckled with lighter and darker grass and small stones up close.
     let t = clamp((input.height + 36.0) / 72.0, 0.0, 1.0);
     let patches = value_noise(input.world / 220.0) * 0.5 + value_noise(input.world / 61.0) * 0.3 + value_noise(input.world / 17.0) * 0.2;
-    var base = mix(GRASS_LOW, GRASS_HIGH, t) * (0.91 + 0.18 * patches);
+    var base = mix(climate.grass_low.rgb, climate.grass_high.rgb, t) * (0.91 + 0.18 * patches);
     // Damp ground is lusher and darker, and dry sunny slopes paler and yellower.
     let damp = land.b;
-    base = mix(base, GRASS_DRY, smoothstep(0.55, 0.95, land.r * (1.0 - damp)) * smoothstep(0.35, 0.75, patches) * 0.35);
-    base = mix(base, GRASS_LUSH, damp * 0.45);
-    let bare = smoothstep(0.66, 0.82, patches) * (0.3 + 0.1 * (1.0 - damp));
-    base = mix(base, mix(DIRT, DIRT_DAMP, damp), bare);
+    base = mix(base, climate.grass_dry.rgb, smoothstep(0.55, 0.95, land.r * (1.0 - damp)) * smoothstep(0.35, 0.75, patches) * 0.35);
+    base = mix(base, climate.grass_lush.rgb, damp * 0.45);
+    // More of the ground is bare in some climates (dirt's last component), in broad patches.
+    let barren = climate.dirt.w * smoothstep(0.3, 0.6, patches) * (1.0 - damp * 0.6);
+    let bare = max(smoothstep(0.66, 0.82, patches) * (0.3 + 0.1 * (1.0 - damp)), barren);
+    base = mix(base, mix(climate.dirt.rgb, climate.dirt_damp.rgb, damp), bare);
     let ground_detail = mix(detail.r * 1.3, detail.g * 1.4, min(bare * 2.5, 1.0));
     base = base * (1.0 + ground_detail * 0.8);
     let speckle = value_noise(input.world / 1.7);
     base = base * (1.0 + (speckle - 0.5) * 0.24 * near);
+    // Wind running across the grass: long, soft bands of lighter and darker grass, drawn out
+    // across the wind and moving with it, from close up to the middle distance.
+    if (high_quality()) {
+        let along = dot(input.world, WIND);
+        let across = dot(input.world, vec2<f32>(-WIND.y, WIND.x));
+        let gust = value_noise(vec2<f32>(along / 28.0 - globals.water.x * 0.3, across / 90.0));
+        let windswept = 1.0 - smoothstep(0.6, 2.5, footprint);
+        base = base * (1.0 + (gust - 0.5) * GRASS_WIND * windswept);
+    }
     let stones = smoothstep(0.88, 0.95, value_noise(input.world / 1.5 + vec2<f32>(17.3, 5.1)));
-    base = mix(base, PEBBLE, stones * near * 0.55);
+    base = mix(base, climate.pebble.rgb, stones * near * 0.55);
     // Rock where it is steep, in layers of lighter and darker stone with dark cracks between.
     let steep = smoothstep(0.18, 0.42, 1.0 - smooth_normal.z);
     let band = fract(strata_coord);
     let layers = mix(0.86, 1.1, smoothstep(0.2, 0.6, band));
     let crack = 1.0 - smoothstep(0.0, max(0.04, strata_width * 1.5), abs(band - 0.9));
     let rock_detail = 1.0 + detail.b * 1.1;
-    let rock_tint = mix(ROCK, ROCK_WARM, smoothstep(0.35, 0.65, patches));
+    let rock_tint = mix(climate.rock.rgb, climate.rock_warm.rgb, smoothstep(0.35, 0.65, patches));
     base = mix(base, rock_tint * layers * (1.0 - 0.22 * crack) * (0.9 + 0.2 * patches) * rock_detail, steep);
     // Sand along the shore, a little above the water, rippled by the wind.
     let above_water = input.height - globals.terrain_scale.w;
     let sand_detail = 1.0 + detail.a * 0.45;
-    base = mix(base, SAND * sand_detail, (1.0 - smoothstep(1.0, 5.0, above_water)) * (1.0 - steep));
+    base = mix(base, climate.sand.rgb * sand_detail, (1.0 - smoothstep(1.0, 5.0, above_water)) * (1.0 - steep));
 
     // Hollows and the feet of slopes are darker, crests a little lighter, so that the shape of
     // the land reads from far away.
@@ -828,7 +943,7 @@ fn fs_terrain(input: TerrainOutput) -> @location(0) vec4<f32> {
         // Rippling light on the shallow seabed, close up only.
         if (high_quality()) {
             let caustic = caustics(input.world, time);
-            color = color + SUN * caustic * 0.5 * exp(-depth / 4.0) * smoothstep(0.0, 0.6, depth) * near;
+            color = color + climate.sun.rgb * caustic * 0.5 * exp(-depth / 4.0) * smoothstep(0.0, 0.6, depth) * near;
         }
     } else {
         // Sand the waves wash over is darker and glossier, up to where the last one reached.
@@ -838,7 +953,7 @@ fn fs_terrain(input: TerrainOutput) -> @location(0) vec4<f32> {
         let wet = (1.0 - smoothstep(reach * 0.6, reach, inland)) * (1.0 - steep);
         color = color * mix(1.0, 0.62, wet);
     }
-    return vec4<f32>(tone(strategic_sight(color * sight, fog, input.fog_coordinates)), 1.0);
+    return vec4<f32>(tone(hazed(strategic_sight(color * sight, fog, input.fog_coordinates), input.relative)), 1.0);
 }
 
 // How far, in world units, a point on the map is from the water's edge: positive out to sea,
@@ -853,10 +968,8 @@ fn shore_distance(world: vec2<f32>) -> f32 {
 }
 
 // How much light of each color gets down through water this deep and back up again.
-const WATER_ABSORPTION: vec3<f32> = vec3<f32>(0.16, 0.055, 0.035);
-
 fn water_transmittance(depth: f32) -> vec3<f32> {
-    return exp(-WATER_ABSORPTION * 2.0 * max(depth, 0.0));
+    return exp(-climate.absorption.rgb * 2.0 * max(depth, 0.0));
 }
 
 // Light focused by the waves into a moving net on the seabed: bright where two drifting
@@ -899,11 +1012,6 @@ struct WaterOutput {
     @location(3) fog_coordinates: vec2<f32>,
 };
 
-// The color of deep water, lit from within by the light it scatters back.
-const WATER_DEEP: vec3<f32> = vec3<f32>(0.02, 0.085, 0.15);
-// The sky the water reflects, at the horizon and overhead.
-const SKY_HORIZON: vec3<f32> = vec3<f32>(0.60, 0.68, 0.76);
-const SKY_ZENITH: vec3<f32> = vec3<f32>(0.22, 0.38, 0.62);
 const FOAM_COLOR: vec3<f32> = vec3<f32>(0.85, 0.90, 0.92);
 // Where the water's glints come from: the bright sky ahead of the camera, which looks north,
 // low over the horizon, rather than the sun, which is behind it, so that they show in the
@@ -994,7 +1102,7 @@ fn fs_water(input: WaterOutput) -> @location(0) vec4<f32> {
 
     // The sky, mirrored more at a glancing angle.
     let mirrored = reflect(-to_eye, normal);
-    let sky = mix(SKY_HORIZON, SKY_ZENITH, sqrt(clamp(mirrored.z, 0.0, 1.0)));
+    let sky = mix(climate.sky_horizon.rgb, climate.sky_zenith.rgb, sqrt(clamp(mirrored.z, 0.0, 1.0)));
     let fresnel = 0.03 + 0.97 * pow(1.0 - facing, 5.0);
 
     // Glints of the bright sky, sharp close up and a soft sheen further out, where one pixel
@@ -1018,7 +1126,10 @@ fn fs_water(input: WaterOutput) -> @location(0) vec4<f32> {
     let foam = clamp(max(lapping * 0.85, bands * 0.6), 0.0, 1.0) * step(0.0, from_shore);
 
     // Colors premultiplied by how much they cover.
-    var color = WATER_DEEP * cover * (1.0 - fresnel) + sky * fresnel + GLINT_COLOR * glint;
+    // Under a cloud's shadow the water is duller: less light scattered up from within, and fewer
+    // glints.
+    let clouded = cloud_light(at);
+    var color = climate.water_deep.rgb * cover * (1.0 - fresnel) * clouded + sky * fresnel * mix(1.0, clouded, 0.5) + GLINT_COLOR * glint * clouded;
     var alpha = 1.0 - (1.0 - cover) * (1.0 - fresnel);
     color = mix(color, FOAM_COLOR, foam);
     alpha = mix(alpha, 1.0, foam);
@@ -1026,7 +1137,7 @@ fn fs_water(input: WaterOutput) -> @location(0) vec4<f32> {
     // Sight and the film curve work on the color as it looks, before it is multiplied again.
     let sight = 0.18 + 0.82 * fog;
     let shown = color / max(alpha, 0.001) * sight;
-    return vec4<f32>(tone(strategic_sight(shown, fog, input.fog_coordinates)) * alpha, alpha);
+    return vec4<f32>(tone(hazed(strategic_sight(shown, fog, input.fog_coordinates), input.relative)) * alpha, alpha);
 }
 
 // ---- Selection box ----
