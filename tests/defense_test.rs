@@ -130,7 +130,7 @@ fn every_strategic_defense_stops_a_nuclear_missile() {
 }
 
 #[test]
-fn every_torpedo_defense_destroys_torpedoes_as_fast_as_it_reloads() {
+fn every_torpedo_defense_stops_torpedoes_as_fast_as_it_reloads() {
     let db = world().blueprints;
     let mut failures = Vec::new();
     let mut checked = 0;
@@ -154,9 +154,10 @@ fn every_torpedo_defense_destroys_torpedoes_as_fast_as_it_reloads() {
                 world.advance_tick(&[]);
             }
         }
-        // A torpedo shot down the tick it is fired is never seen in flight, so the ones stopped are
-        // counted from the interceptions, and those that got through from the damage.
-        let mut stopped = 0;
+        // The defense drops a decoy for each torpedo it stops, which the torpedo turns to: the ones
+        // stopped are counted from the decoys as they appear, since a torpedo close by strikes its
+        // decoy the tick it turns, and those that got through from the damage.
+        let mut decoys = std::collections::BTreeSet::new();
         let firing = 1_000;
         for tick in 0..firing + 200 {
             if tick == firing {
@@ -165,12 +166,16 @@ fn every_torpedo_defense_destroys_torpedoes_as_fast_as_it_reloads() {
                 }
             }
             world.advance_tick(&[]);
-            stopped += world.snapshot().interceptions.len();
+            decoys.extend(world.snapshot().decoys);
         }
+        let stopped = decoys.len();
         let taken = (fp_int(400_000) - world.unit_health(target).unwrap()).to_num::<f64>();
         let landed = (taken / torpedo.damage.to_num::<f64>()).round() as usize;
         let fired = stopped + landed;
-        let could = fired.min(firing as usize / defense_def.reload_ticks as usize + 1);
+        // It goes on stopping the torpedoes still running when the submarines stop firing, 500 away,
+        // gathering speed for a second.
+        let running = (500.0 / torpedo.projectile_speed.to_num::<f64>()).ceil() as usize + 10;
+        let could = fired.min((firing as usize + running) / defense_def.reload_ticks as usize + 1);
         if fired < 5 {
             failures.push(format!("{}: the submarine fired only {fired} torpedoes", def.key));
         } else if (stopped as f64) < could as f64 * 0.8 || stopped > could + 1 {

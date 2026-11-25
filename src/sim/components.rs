@@ -465,9 +465,16 @@ pub struct BombBay;
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Homing {
     pub target: SimId,
+    /// How far it runs this tick. A torpedo leaves at a third of its top speed and gathers speed to
+    /// it over a second, as the inspiration's do (2026-11-25); a shot at an aircraft flies at its
+    /// top speed from the first.
     pub speed: Fp,
+    pub top_speed: Fp,
     /// A torpedo, which can only hit what is on or under the water.
     pub underwater: bool,
+    /// A decoy an anti-torpedo charge dropped into the water, which a torpedo turns to and strikes
+    /// instead of its target, harmlessly (2026-11-25).
+    pub lure: Option<Vec3Fp>,
 }
 
 /// A falling bomb. Bombs fall at the inspiration's gravity, which is stronger than that of shells.
