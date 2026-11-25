@@ -10,4 +10,7 @@ pub mod landscape;
 pub mod links;
 pub mod meshes;
 pub mod pipeline;
+pub mod shore;
 mod sight;
+pub mod tiles;
+pub mod waves;

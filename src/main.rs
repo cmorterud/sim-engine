@@ -1344,6 +1344,9 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     });
     let mut scene_instances = InstanceBatches::default();
     let mut motion = Motion::new();
+    // The waves move on wall time, so that they keep moving while the game is paused and do
+    // not race when it runs fast.
+    let wave_clock = Instant::now();
     // Structures stand level on slopes, on a slab down to the ground.
     motion.set_ground(HeightField::new(map.heights.samples(), map.heights.heights().to_vec(), map.heights.cell_units(), map.heights.units_per_step()));
     let mut effects = Effects::new();
@@ -2339,7 +2342,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                             camera: &camera,
                             instances: &scene_instances,
                             selection_box: selection.drag_box(),
-                            time: motion.time as f32,
+                            time: wave_clock.elapsed().as_secs_f32(),
                         };
 
                         renderer.begin_ui(&ui_frame);

@@ -12,8 +12,8 @@ struct Globals {
     selection_box: vec4<f32>,
     // terrain height scale, display scale factor, fog texture coordinates per height sample, water level.
     terrain_scale: vec4<f32>,
-    // the simulation's time in seconds, for waves, the terrain grid's samples a side, how strongly
-    // sight is washed pale, then the quality: 0 for low, 1 for high.
+    // seconds of wall time, for waves, the terrain grid's samples a side, how strongly sight is
+    // washed pale, then the quality: 0 for low, 1 for high.
     water: vec4<f32>,
 };
 
@@ -21,6 +21,25 @@ struct Globals {
 @group(0) @binding(1) var heights: texture_2d<i32>;
 @group(0) @binding(2) var fog_texture: texture_2d<f32>;
 @group(0) @binding(3) var fog_sampler: sampler;
+// How far each point is from the water's edge (shore.rs), sampled with the fog's sampler.
+@group(0) @binding(4) var shore_texture: texture_2d<f32>;
+// The small waves' slopes east and north (waves.rs), tiled.
+@group(0) @binding(5) var wave_texture: texture_2d<f32>;
+@group(0) @binding(6) var wave_sampler: sampler;
+
+// A gentle film curve: colors up to the knee stay as they are, and brighter ones roll off
+// towards white instead of clipping, so that sun glints and foam keep their shape.
+const TONE_KNEE: f32 = 0.6;
+
+fn tone(color: vec3<f32>) -> vec3<f32> {
+    let over = max(color - vec3<f32>(TONE_KNEE), vec3<f32>(0.0));
+    let rolled = vec3<f32>(TONE_KNEE) + (1.0 - TONE_KNEE) * (vec3<f32>(1.0) - exp(-over / (1.0 - TONE_KNEE)));
+    return select(color, rolled, color > vec3<f32>(TONE_KNEE));
+}
+
+fn high_quality() -> bool {
+    return globals.water.w > 0.5;
+}
 
 // Where the sun shines from: high, from the east-south-east, a little behind the camera,
 // which looks north, so that the faces of units and buildings that face it are lit, not only
@@ -236,7 +255,7 @@ fn fs_unit(input: UnitOutput) -> @location(0) vec4<f32> {
     let rim_strength = mix(RIM_NEAR, RIM_FAR, smoothstep(RIM_NEAR_DISTANCE, RIM_FAR_DISTANCE, length(input.relative)));
     let rim = pow(1.0 - max(dot(normal, to_eye), 0.0), 3.0) * rim_strength;
     let lit = diffuse + vec3<f32>(shine) + rim * mix(input.albedo, vec3<f32>(1.0), 0.5);
-    return vec4<f32>(mix(lit, input.albedo, input.morph), 1.0);
+    return vec4<f32>(mix(tone(lit), input.albedo, input.morph), 1.0);
 }
 
 // ---- Shadows ----
@@ -661,12 +680,53 @@ fn fs_terrain(input: TerrainOutput) -> @location(0) vec4<f32> {
     // together into stripes.
     let line = (1.0 - clamp(contour / contour_width, 0.0, 1.0)) * (1.0 - steep);
     var color = base * light * hollows * (1.0 - 0.07 * line);
-    // Under water the ground darkens with depth. The water's surface is drawn over it.
+    let time = globals.water.x;
     let depth = -above_water;
     if (depth > 0.0) {
-        color = color * mix(0.85, 0.35, clamp(depth / 60.0, 0.0, 1.0));
+        // Under water, light that comes down to the seabed and back up loses its reds first.
+        // The water's surface, drawn over it, takes away the rest by how much is lost on the
+        // whole, so here only the hue shifts.
+        let through = water_transmittance(depth);
+        color = color * through / max(dot(through, vec3<f32>(1.0 / 3.0)), 0.05);
+        // Rippling light on the shallow seabed, close up only.
+        if (high_quality()) {
+            let caustic = caustics(input.world, time);
+            color = color + SUN * caustic * 0.5 * exp(-depth / 4.0) * smoothstep(0.0, 0.6, depth) * near;
+        }
+    } else {
+        // Sand the waves wash over is darker and glossier, up to where the last one reached.
+        let inland = -shore_distance(input.world);
+        let reach = 3.0 + 2.5 * (0.5 + 0.5 * sin(time * 0.8 + value_noise(input.world / 40.0) * 6.0));
+        let wet = (1.0 - smoothstep(reach * 0.6, reach, inland)) * (1.0 - steep);
+        color = color * mix(1.0, 0.62, wet);
     }
-    return vec4<f32>(strategic_sight(color * sight, fog, input.fog_coordinates), 1.0);
+    return vec4<f32>(tone(strategic_sight(color * sight, fog, input.fog_coordinates)), 1.0);
+}
+
+// How far, in world units, a point on the map is from the water's edge: positive out to sea,
+// negative inland, up to the shore field's range either way.
+const SHORE_RANGE: f32 = 128.0;
+
+fn shore_distance(world: vec2<f32>) -> f32 {
+    let side = f32(textureDimensions(shore_texture).x);
+    let map = f32(globals.terrain_grid.w - 1) * globals.terrain_origin.w;
+    let coordinates = (world / map * (side - 1.0) + 0.5) / side;
+    return (textureSampleLevel(shore_texture, fog_sampler, coordinates, 0.0).r * 2.0 - 1.0) * SHORE_RANGE;
+}
+
+// How much light of each color gets down through water this deep and back up again.
+const WATER_ABSORPTION: vec3<f32> = vec3<f32>(0.16, 0.055, 0.035);
+
+fn water_transmittance(depth: f32) -> vec3<f32> {
+    return exp(-WATER_ABSORPTION * 2.0 * max(depth, 0.0));
+}
+
+// Light focused by the waves into a moving net on the seabed: bright where two drifting
+// layers of noise agree.
+fn caustics(world: vec2<f32>, time: f32) -> f32 {
+    let a = value_noise(world / 6.0 + vec2<f32>(time * 0.31, time * 0.17));
+    let b = value_noise(world / 7.5 - vec2<f32>(time * 0.23, -time * 0.29));
+    return pow(1.0 - abs(a - b), 10.0);
 }
 
 // What is in sight gets a pale wash, fullest when zoomed out, so that the viewer's vision reads
@@ -701,10 +761,17 @@ struct WaterOutput {
     @location(3) fog_coordinates: vec2<f32>,
 };
 
-const WATER_SHALLOW: vec3<f32> = vec3<f32>(0.07, 0.24, 0.30);
-const WATER_DEEP: vec3<f32> = vec3<f32>(0.02, 0.09, 0.18);
-const WATER_SKY: vec3<f32> = vec3<f32>(0.42, 0.52, 0.62);
+// The color of deep water, lit from within by the light it scatters back.
+const WATER_DEEP: vec3<f32> = vec3<f32>(0.02, 0.085, 0.15);
+// The sky the water reflects, at the horizon and overhead.
+const SKY_HORIZON: vec3<f32> = vec3<f32>(0.60, 0.68, 0.76);
+const SKY_ZENITH: vec3<f32> = vec3<f32>(0.22, 0.38, 0.62);
 const FOAM_COLOR: vec3<f32> = vec3<f32>(0.85, 0.90, 0.92);
+// Where the water's glints come from: the bright sky ahead of the camera, which looks north,
+// low over the horizon, rather than the sun, which is behind it, so that they show in the
+// usual view.
+const GLINT_LIGHT: vec3<f32> = vec3<f32>(-0.20, 0.80, 0.565);
+const GLINT_COLOR: vec3<f32> = vec3<f32>(1.0, 0.96, 0.88);
 
 @vertex
 fn vs_water(@builtin(vertex_index) index: u32) -> WaterOutput {
@@ -721,38 +788,97 @@ fn vs_water(@builtin(vertex_index) index: u32) -> WaterOutput {
     return out;
 }
 
+// The slope of the long swells, east and north: four trains of waves, each as fast as deep
+// water carries waves of its length, fading out once they are too small on screen to see.
+fn swell_slope(at: vec2<f32>, time: f32, footprint: f32) -> vec2<f32> {
+    // Direction (east, north), then length in world units and steepness.
+    var trains = array<vec4<f32>, 4>(
+        vec4<f32>(0.83, 0.55, 95.0, 0.07),
+        vec4<f32>(0.37, 0.93, 61.0, 0.06),
+        vec4<f32>(0.98, -0.20, 38.0, 0.05),
+        vec4<f32>(-0.45, 0.89, 24.0, 0.04),
+    );
+    var slope = vec2<f32>(0.0);
+    for (var index = 0; index < 4; index = index + 1) {
+        let train = trains[index];
+        let wavenumber = 6.2831853 / train.z;
+        let speed = sqrt(9.8 * wavenumber);
+        let phase = dot(train.xy, at) * wavenumber - speed * time;
+        let shown = 1.0 - smoothstep(train.z / 12.0, train.z / 4.0, footprint);
+        slope = slope + train.xy * train.w * cos(phase) * shown;
+    }
+    return slope;
+}
+
+// The small waves' slope, from two copies of their texture drifting across each other.
+fn chop_slope(at: vec2<f32>, time: f32) -> vec2<f32> {
+    let first = textureSample(wave_texture, wave_sampler, at / 52.0 + vec2<f32>(0.011, 0.017) * time).rg * 2.0 - 1.0;
+    var slope = first * 0.32;
+    if (high_quality()) {
+        let turned = vec2<f32>(at.x * 0.8 - at.y * 0.6, at.x * 0.6 + at.y * 0.8);
+        let second = textureSample(wave_texture, wave_sampler, turned / 19.0 - vec2<f32>(0.02, 0.031) * time).rg * 2.0 - 1.0;
+        slope = slope + second * 0.22;
+    }
+    // Calmer and choppier stretches, so that the texture's repeats do not line up into a grid.
+    return slope * (0.55 + 0.9 * value_noise(at / 170.0 + vec2<f32>(time * 0.01, 0.0)));
+}
+
 @fragment
 fn fs_water(input: WaterOutput) -> @location(0) vec4<f32> {
     let time = globals.water.x;
     let at = input.world;
-    // Swells: three trains of gentle waves crossing, which tilt the surface a little as they pass.
-    let k1 = vec2<f32>(0.021, 0.013);
-    let k2 = vec2<f32>(-0.017, 0.026);
-    let k3 = vec2<f32>(0.05, -0.034);
-    let tilt = k1 * 3.0 * cos(dot(at, k1) + time * 1.3) + k2 * 2.5 * cos(dot(at, k2) + time * 1.7) + k3 * 1.0 * cos(dot(at, k3) + time * 2.3);
-    let normal = normalize(vec3<f32>(-tilt, 1.0));
-    let to_eye = normalize(-input.relative);
-    // Darker and less clear the deeper it is.
-    let depth = max(input.depth, 0.0);
-    let deep = 1.0 - exp(-depth / 30.0);
-    var color = mix(WATER_SHALLOW, WATER_DEEP, deep);
-    // The sky shows in it, more at a glancing angle.
-    let fresnel = pow(1.0 - max(dot(normal, to_eye), 0.0), 4.0);
-    color = mix(color, WATER_SKY, fresnel * 0.45);
-    // A gentle shimmer drifting across it, with the odd sparkle. The fine layer fades out
-    // before it is small enough on screen to shimmer for the wrong reason.
-    let fine = 1.0 - smoothstep(0.3, 1.0, length(fwidth(at / 7.0)));
-    let shimmer = value_noise(at / 18.0 + vec2<f32>(time * 0.4, time * 0.15)) * 0.6 + value_noise(at / 7.0 - vec2<f32>(time * 0.25, time * 0.5)) * 0.4 * fine + 0.2 * (1.0 - fine);
-    color = color * (0.92 + 0.16 * shimmer) + vec3<f32>(0.9, 0.9, 0.85) * smoothstep(0.75, 0.92, shimmer) * 0.08;
-    // Foam where it laps against the shore.
-    let ripple = value_noise(at / 9.0 + vec2<f32>(time * 0.3, time * 0.2));
-    let edge = 1.0 - smoothstep(0.0, 3.5, depth);
-    let foam = edge * smoothstep(0.35, 0.6, ripple + edge * 0.4);
-    color = mix(color, FOAM_COLOR, foam * 0.8);
-    let alpha = clamp(mix(0.35, 0.9, deep) + foam * 0.5 + fresnel * 0.2, 0.0, 0.95);
+    // Everything here that needs screen-space derivatives or textures comes first.
+    let footprint = length(fwidth(at));
+    let chop = chop_slope(at, time);
     let fog = textureSample(fog_texture, fog_sampler, input.fog_coordinates).r;
+    let from_shore = shore_distance(at);
+    let breakup = value_noise(at / 7.0 + vec2<f32>(time * 0.12, -time * 0.07));
+
+    let normal = normalize(vec3<f32>(-(swell_slope(at, time, footprint) + chop), 1.0));
+    let to_eye = normalize(-input.relative);
+    let facing = max(dot(normal, to_eye), 0.0);
+
+    // What comes up from below: deep water's own color, more of it the less light gets
+    // through. The seabed, drawn already, shows through the rest.
+    let depth = max(input.depth, 0.0);
+    let through = dot(water_transmittance(depth), vec3<f32>(1.0 / 3.0));
+    let cover = clamp(1.0 - through, 0.0, 0.97);
+
+    // The sky, mirrored more at a glancing angle.
+    let mirrored = reflect(-to_eye, normal);
+    let sky = mix(SKY_HORIZON, SKY_ZENITH, sqrt(clamp(mirrored.z, 0.0, 1.0)));
+    let fresnel = 0.03 + 0.97 * pow(1.0 - facing, 5.0);
+
+    // Glints of the bright sky, sharp close up and a soft sheen further out, where one pixel
+    // covers many waves.
+    let roughness = clamp(0.1 + footprint * 0.025, 0.1, 0.55);
+    let halfway = normalize(GLINT_LIGHT + to_eye);
+    let rough2 = roughness * roughness;
+    let spread = dot(normal, halfway) * dot(normal, halfway) * (rough2 - 1.0) + 1.0;
+    let glint = min(rough2 / (3.14159 * spread * spread) * max(dot(normal, GLINT_LIGHT), 0.0) * fresnel * 0.3, 2.0);
+
+    // Foam: a thin line lapping at the edge, and bands that roll in towards the beach and fade
+    // further out, both broken up. Fine foam fades out when it is too small on screen to keep.
+    let edge_width = max(2.5, footprint * 1.5);
+    let lapping = 1.0 - smoothstep(0.0, edge_width * (0.8 + 0.6 * breakup), from_shore);
+    // Each band has a sharp front towards the beach and trails off behind it, and wanders a
+    // little along the coast.
+    let wave = fract(from_shore / 16.0 + time * 0.22 + breakup * 0.5);
+    let rolling = smoothstep(0.55, 0.9, wave) * (1.0 - smoothstep(0.9, 0.97, wave));
+    let patchy = smoothstep(0.25, 0.75, value_noise(at / 23.0 + vec2<f32>(-time * 0.05, time * 0.04)) * 0.6 + breakup * 0.4);
+    let bands = rolling * patchy * exp(-from_shore / 12.0) * (1.0 - smoothstep(3.0, 8.0, footprint));
+    let foam = clamp(max(lapping * 0.85, bands * 0.6), 0.0, 1.0) * step(0.0, from_shore);
+
+    // Colors premultiplied by how much they cover.
+    var color = WATER_DEEP * cover * (1.0 - fresnel) + sky * fresnel + GLINT_COLOR * glint;
+    var alpha = 1.0 - (1.0 - cover) * (1.0 - fresnel);
+    color = mix(color, FOAM_COLOR, foam);
+    alpha = mix(alpha, 1.0, foam);
+
+    // Sight and the film curve work on the color as it looks, before it is multiplied again.
     let sight = 0.18 + 0.82 * fog;
-    return vec4<f32>(strategic_sight(color * sight, fog, input.fog_coordinates), alpha);
+    let shown = color / max(alpha, 0.001) * sight;
+    return vec4<f32>(tone(strategic_sight(shown, fog, input.fog_coordinates)) * alpha, alpha);
 }
 
 // ---- Selection box ----
