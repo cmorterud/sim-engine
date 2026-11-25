@@ -3,9 +3,11 @@
 #![allow(clippy::disallowed_types)]
 
 pub mod camera;
+pub mod detail;
 pub mod effects;
 mod gpu_timing;
 pub mod instances;
+pub mod land;
 pub mod landscape;
 pub mod links;
 pub mod meshes;

@@ -8,6 +8,7 @@ use egui::{Align2, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
 use crate::hud;
 use crate::render::camera::{Camera, HeightField};
+use crate::render::land::{LandField, SUN_DIRECTION};
 use crate::render::pipeline::FOG_CELL_UNITS;
 use crate::sim::components::Team;
 use crate::sim::world::SimSnapshot;
@@ -26,12 +27,16 @@ const DEEP: Color32 = Color32::from_rgb(22, 52, 78);
 const SHALLOW: Color32 = Color32::from_rgb(52, 108, 128);
 const SAND: Color32 = Color32::from_rgb(170, 158, 116);
 const LOW: Color32 = Color32::from_rgb(78, 104, 52);
+/// How much steeper slopes are lit than they are, so that hills stand out at this size.
+const RELIEF: f64 = 3.5;
+const LUSH: Color32 = Color32::from_rgb(58, 92, 46);
 const HIGH: Color32 = Color32::from_rgb(132, 132, 82);
 const ROCK: Color32 = Color32::from_rgb(118, 112, 104);
 
 /// The land seen from above, `side` pixels a side, row by row from the map's top edge: water
-/// darker with depth, grass from low to high, sand along the shore, rock where it is steep, and
-/// lit from the top left so that hills stand out.
+/// darker with depth, grass from low to high and lusher where it is damp, sand along the shore,
+/// rock where it is steep, and lit by the same sun as the land on screen, with the hills'
+/// shadows (render/land.rs), so that hills stand out the same way in both.
 pub fn land_colors(heights: &HeightField, water_level: f64, side: usize) -> Vec<Color32> {
     let size = (heights.samples() - 1) as f64 * heights.cell_units();
     let step = size / side as f64;
@@ -41,6 +46,8 @@ pub fn land_colors(heights: &HeightField, water_level: f64, side: usize) -> Vec<
         (lo.min(height), hi.max(height))
     });
     let span = (highest - water_level.max(lowest)).max(1.0);
+    let land = LandField::bake_sized(heights, SUN_DIRECTION, water_level, side);
+    let sun = SUN_DIRECTION.map(f64::from);
     let mut colors = Vec::with_capacity(side * side);
     // North, the way the camera looks, is up, as on the screen: the top row is the far edge.
     for row in 0..side {
@@ -49,13 +56,19 @@ pub fn land_colors(heights: &HeightField, water_level: f64, side: usize) -> Vec<
             let height = at(x, y);
             let (east, south) = (at(x + step, y) - at(x - step, y), at(x, y - step) - at(x, y + step));
             let slope = (east.hypot(south) / (2.0 * step)) as f32;
-            // Light from the top left: slopes facing it are lighter.
-            let light = (1.0 - ((east + south) / (2.0 * step)) as f32 * 1.6).clamp(0.55, 1.35);
+            // Lit by the sun, where no hill shades it, and by the sky, as far as it is open.
+            // The slopes are steepened, since a pixel here spans many height samples and the
+            // hills would otherwise read flat.
+            let normal = [-east / (2.0 * step) * RELIEF, south / (2.0 * step) * RELIEF, 1.0];
+            let facing = ((normal[0] * sun[0] + normal[1] * sun[1] + normal[2] * sun[2]) / (normal[0].hypot(normal[1]).hypot(1.0))).max(0.0) as f32;
+            let texel = |channel: usize| f32::from(land.channel(column.min(side - 1), side - 1 - row, channel)) / 255.0;
+            // Flat open ground in the sun stays as bright as before.
+            let light = (0.45 * (0.5 + 0.5 * texel(1)) + 0.75 * facing * texel(0)).clamp(0.4, 1.35) / (0.45 + 0.75 * sun[2] as f32);
             let color = if height < water_level {
                 hud::lerp_color(SHALLOW, DEEP, ((water_level - height) / 60.0) as f32)
             } else {
                 let rise = ((height - water_level.max(lowest)) / span) as f32;
-                let grass = hud::lerp_color(LOW, HIGH, rise);
+                let grass = hud::lerp_color(hud::lerp_color(LOW, HIGH, rise), LUSH, texel(2) * 0.5);
                 let shore = if height - water_level < 4.0 { 1.0 - ((height - water_level) / 4.0) as f32 } else { 0.0 };
                 let ground = hud::lerp_color(grass, SAND, shore * 0.8);
                 hud::lerp_color(ground, ROCK, ((slope - 0.35) / 0.4).clamp(0.0, 1.0))
