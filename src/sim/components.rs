@@ -646,6 +646,8 @@ pub struct VetDamage {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Shield {
     pub radius: Fp,
+    /// How high the dome rises at its middle (`ShieldDef::height`).
+    pub height: Fp,
     pub health: Fp,
     pub max_health: Fp,
     pub regen_per_tick: Fp,

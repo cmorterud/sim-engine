@@ -1111,15 +1111,16 @@ pub fn scenery_instance(kind: WreckKind, center: [f64; 3], radius: f64, eye: [f6
 /// which fades as the shield wears down. Use with `Shape::Dome`, in its own see-through pass.
 pub fn dome_instance(shield: &ShieldView, eye: [f64; 3]) -> UnitInstanceRaw {
     let radius = f64::from(shield.radius) * RAW_TO_WORLD;
+    let height = f64::from(shield.height) * RAW_TO_WORLD;
     let ground = f64::from(shield.center[2]) * RAW_TO_WORLD;
-    let center = [f64::from(shield.center[0]) * RAW_TO_WORLD, f64::from(shield.center[1]) * RAW_TO_WORLD, ground + radius * 0.5];
+    let center = [f64::from(shield.center[0]) * RAW_TO_WORLD, f64::from(shield.center[1]) * RAW_TO_WORLD, ground + height * 0.5];
     let team = match shield.team {
         Team::Blue => BLUE,
         Team::Red => RED,
     };
     let color: [f32; 3] = std::array::from_fn(|channel| team[channel] * 0.5 + 0.5);
     let health = f32::from(shield.health_permille) / 1000.0;
-    let mut dome = instance(center, [(radius * 2.0) as f32, (radius * 2.0) as f32, radius as f32], NORTH, color, NO_ICON, eye);
+    let mut dome = instance(center, [(radius * 2.0) as f32, (radius * 2.0) as f32, height as f32], NORTH, color, NO_ICON, eye);
     dome.color[3] = 0.12 + 0.28 * health;
     dome
 }

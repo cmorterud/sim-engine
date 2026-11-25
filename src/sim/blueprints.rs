@@ -378,6 +378,9 @@ pub struct DischargeDef {
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct ShieldDef {
     pub radius: Fp,
+    /// How high the dome rises at its middle: its radius, a half sphere, unless the data has it
+    /// lower, a dome flattened beneath the aircraft that attack what it covers (2026-11-24).
+    pub height: Fp,
     pub health: Fp,
     pub regen_per_tick: Fp,
     /// How long a dome that has collapsed stays down before it comes back at full strength.
@@ -675,6 +678,8 @@ struct RawDischarge {
 #[serde(deny_unknown_fields)]
 struct RawShield {
     radius: Number,
+    /// Its radius unless given.
+    height: Option<Number>,
     health: Number,
     /// Health per second.
     regen: Number,
@@ -839,8 +844,14 @@ pub struct BlueprintDb {
 }
 
 fn parse_shield(shield: &RawShield) -> Result<ShieldDef, String> {
+    let radius = shield.radius.fp()?;
+    let height = shield.height.as_ref().map(Number::fp).transpose()?.unwrap_or(radius);
+    if height <= Fp::ZERO || height > radius {
+        return Err("a shield's height is above zero and no more than its radius".to_string());
+    }
     Ok(ShieldDef {
-        radius: shield.radius.fp()?,
+        radius,
+        height,
         health: shield.health.fp()?,
         regen_per_tick: shield.regen.fp()? / TICKS_PER_SECOND as i32,
         recharge_ticks: shield.recharge_seconds * TICKS_PER_SECOND as u32,
