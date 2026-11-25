@@ -743,3 +743,25 @@ fn a_fleet_does_not_close_on_a_target_whose_defenses_outrange_it() {
     }
     assert!(ordered, "the frigates were given no orders, so nothing was tested");
 }
+
+/// A player's order (the user's, 2026-11-25): exposed materiel extractors before the naval
+/// headquarters, and that before the base. An extractor on the deposit nearest the yard, in the
+/// cruisers' reach, is shelled first.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn a_fleet_takes_an_exposed_extractor_before_the_naval_headquarters() {
+    let (mut world, mut brain, yard) = fleet_off_an_enemy_yard("t2_cruiser", 4, 1_500, false);
+    let yard_at = world.unit_position(yard).unwrap().xy();
+    let key = world.blueprints.id("mass_extractor");
+    let center = |&(x, y): &(u32, u32)| Vec2Fp::new(fp_int(x as i32 * 20 + 10), fp_int(y as i32 * 20 + 10));
+    let mut deposits = world.deposits.clone();
+    deposits.sort_by_key(|deposit| (center(deposit).distance_squared(&yard_at), *deposit));
+    let extractor = deposits.iter().find_map(|&(x, y)| world.spawn_finished_structure(key, Team::Red, x, y)).expect("an extractor on a deposit");
+    let mut first = None;
+    for _ in 0..400 {
+        let commands = brain.think(&world);
+        first = first.or_else(|| commands.iter().find_map(|command| if let SimCommand::Attack { target, .. } = command { Some(*target) } else { None }));
+        world.advance_tick(&commands);
+    }
+    assert_eq!(first, Some(extractor), "the cruisers went for {first:?} before the exposed extractor {extractor:?}");
+}

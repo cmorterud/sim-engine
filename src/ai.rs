@@ -1745,19 +1745,29 @@ impl AiBrain {
         steps != u16::MAX && i64::from(steps) * i64::from(TERRAIN_CELL_UNITS) * 3 / 2 + i64::from(TERRAIN_CELL_UNITS) <= reach.to_num::<i64>()
     }
 
-    /// The enemy structure a fleet at `from` goes for, with guns that reach `reach`: one on the
-    /// water first, a yard or a launcher, which make and sink ships; then the nearest it can hit
-    /// from the sea. Only where it outranges every known defense that could fire back: frigates
-    /// that closed on yards under torpedo launchers were sunk for nothing, and a Naval AI that had
-    /// won on an islands map lost there every time (2026-11-25). Walls are left alone.
+    /// The enemy structure a fleet at `from` goes for, with guns that reach `reach`, in the order
+    /// a player would (the user's, 2026-11-25): exposed materiel extractors first, which cruisers
+    /// reach far inland; then the naval headquarters, the yard the rest upgrade from; then the
+    /// other yards and launchers; then the base. Of each kind, the nearest. Only where it outranges
+    /// every known defense that could fire back: frigates that closed on yards under torpedo
+    /// launchers were sunk for nothing, and a Naval AI that had won on an islands map lost there
+    /// every time (2026-11-25). Walls are left alone.
     fn coastal_target<'a>(&self, world: &SimWorld, sightings: &'a [Sighting], from: Vec2Fp, reach: Fp) -> Option<&'a Sighting> {
-        let wall = |id: SimId| world.unit_entity(id).and_then(|entity| world.ecs.get::<&Blueprinted>(entity).ok().map(|unit| world.blueprints.get(unit.0).key.starts_with("wall"))).unwrap_or(false);
+        let blueprint = |id: SimId| world.unit_entity(id).and_then(|entity| world.ecs.get::<&Blueprinted>(entity).ok().map(|unit| world.blueprints.get(unit.0)));
+        // 0 an extractor, 1 the naval headquarters, 2 anything else on the water, 3 the base.
+        let order = |enemy: &Sighting| match blueprint(enemy.id) {
+            Some(unit) if unit.key.starts_with("mass_extractor") => 0,
+            Some(unit) if unit.factory_kind == Some(FactoryKind::Naval) && !unit.support => 1,
+            _ if enemy.is_naval => 2,
+            _ => 3,
+        };
+        let wall = |id: SimId| blueprint(id).is_some_and(|unit| unit.key.starts_with("wall"));
         sightings
             .iter()
             .filter(|enemy| enemy.is_structure && !enemy.is_air && !wall(enemy.id))
             .filter(|enemy| self.reachable_from_sea(world, enemy.position, reach))
             .filter(|enemy| defended_reach(world, sightings, enemy.position) < reach)
-            .min_by_key(|enemy| (!enemy.is_naval, enemy.position.distance_squared(&from), enemy.id))
+            .min_by_key(|enemy| (order(enemy), enemy.position.distance_squared(&from), enemy.id))
     }
 
     /// Whether land units can walk from home to the enemy's start, over the ground alone: walls
