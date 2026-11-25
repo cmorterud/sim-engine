@@ -3419,18 +3419,29 @@ impl SimWorld {
                 if distance <= homing.speed + Fp::from_bits(target.radius) {
                     position.0 = aim;
                     if projectile.splash_radius > Fp::ZERO {
-                        // Flak bursts, and hits every enemy aircraft around it.
+                        // Flak bursts, and hits every enemy aircraft around it. A torpedo with a
+                        // blast hits every enemy ship and submarine around it, and nothing else.
                         let reach = i64::from(projectile.splash_radius.to_bits());
                         let (x, y) = (target.x, target.y);
                         let damage = projectile.damage;
                         let source = projectile.source;
-                        grid.for_each_candidate(Some(projectile.source_team.enemy()), Layer::Air, x, y, projectile.splash_radius.to_bits() + max_mobile, |other| {
+                        let underwater = homing.underwater;
+                        let mut burst = |other: &super::spatial::GridEntry| {
                             let (dx, dy) = (i64::from(other.x - x), i64::from(other.y - y));
                             let within = reach + i64::from(other.radius);
-                            if dx * dx + dy * dy <= within * within {
+                            let reached = if underwater { other.is_sub || other.is_naval } else { other.is_air };
+                            if reached && dx * dx + dy * dy <= within * within {
                                 hits.push((other.entity, damage, Some(source)));
                             }
-                        });
+                        };
+                        let search = projectile.splash_radius.to_bits() + max_mobile;
+                        let enemy = Some(projectile.source_team.enemy());
+                        if underwater {
+                            grid.for_each_candidate(enemy, Layer::Mobile, x, y, search, &mut burst);
+                            grid.for_each_candidate(enemy, Layer::Sub, x, y, search, &mut burst);
+                        } else {
+                            grid.for_each_candidate(enemy, Layer::Air, x, y, search, &mut burst);
+                        }
                     } else {
                         hits.push((target.entity, projectile.damage, Some(projectile.source)));
                         if stun > 0 {
