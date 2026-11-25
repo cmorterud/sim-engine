@@ -661,3 +661,179 @@ fn a_naval_ai_on_islands_takes_extractors_before_its_first_yard() {
     let income = first_yard_income.expect("a yard within five minutes");
     assert!(income >= threshold, "the first yard went up at {income:.1} mass a second, under the {threshold:.1} it builds yards at");
 }
+
+/// Ships on Stillwater's lake near the enemy's start, out on the attack, `distance` from an enemy
+/// yard on the water, and, if asked, a torpedo launcher beside the yard. A spotter shows Blue the
+/// yard and the launcher, should fog of war hide them, and sails home before the AI looks.
+fn fleet_off_an_enemy_yard(ship: &str, ships: usize, distance: i32, launcher: bool) -> (SimWorld, AiBrain, sim_engine::sim::components::SimId) {
+    use sim_engine::math::fp::wide_mul;
+    use sim_engine::sim::components::MoveClass;
+    let map = scenario::MapSource::Map(std::sync::Arc::new(sim_engine::sim::maps::stillwater()));
+    let mut world = map.scenario(1).world;
+    let brain = AiBrain::new(Team::Blue, 1, world.starts);
+    let (blue_home, red_home) = (world.starts[Team::Blue.index()], world.starts[Team::Red.index()]);
+    let yard_key = world.blueprints.id("naval_factory");
+    let cells = world.terrain.cells_per_side() as u32;
+    let center = |&(x, y): &(u32, u32)| Vec2Fp::new(fp_int(x as i32 * 20 + 10), fp_int(y as i32 * 20 + 10));
+    let mut sites: Vec<(u32, u32)> = (0..cells).flat_map(|y| (0..cells).map(move |x| (x, y))).filter(|&(x, y)| world.terrain.cell_is_navigable(x, y) && world.can_place(yard_key, x, y)).collect();
+    sites.sort_by_key(|site| (center(site).distance_squared(&red_home), *site));
+    let (x, y) = sites[0];
+    let yard = world.spawn_finished_structure(yard_key, Team::Red, x, y).expect("a yard on the lake");
+    let yard_at = world.unit_position(yard).unwrap().xy();
+    if launcher {
+        let key = world.blueprints.id("t1_torpedo_launcher");
+        let spot = sites.iter().copied().find(|&(lx, ly)| (lx as i32 - x as i32).abs() >= 7 && center(&(lx, ly)).distance_squared(&yard_at) <= wide_mul(fp_int(400), fp_int(400)) && world.can_place(key, lx, ly)).expect("room for a launcher");
+        world.spawn_finished_structure(key, Team::Red, spot.0, spot.1).expect("a launcher on the lake");
+    }
+    // The nearest water to `at` a ship can float on, toward Blue's side.
+    let toward = (blue_home - yard_at).normalized();
+    let afloat = |world: &SimWorld, from: i32| (from..from + 200).map(|step| yard_at + toward.scaled(fp_int(step * 10))).find(|&at| world.terrain.passable_for(MoveClass::Naval, at)).expect("water toward Blue");
+    let spotter = world.spawn_mobile(world.blueprints.id("t2_cruiser"), Team::Blue, afloat(&world, 20));
+    world.ecs.get::<&mut sim_engine::sim::components::Combat>(world.unit_entity(spotter).unwrap()).unwrap().enabled = false;
+    for _ in 0..5 {
+        world.advance_tick(&[]);
+    }
+    // Then sails home, as far as it goes: one ship at home sets out on nothing.
+    let home_water = (0..1_000).map(|step| blue_home + (yard_at - blue_home).normalized().scaled(fp_int(step * 10))).find(|&at| world.terrain.passable_for(MoveClass::Naval, at)).expect("water on Blue's side");
+    let height = world.unit_position(spotter).unwrap().z;
+    world.ecs.get::<&mut sim_engine::sim::components::Position>(world.unit_entity(spotter).unwrap()).unwrap().0 = sim_engine::math::fp::Vec3Fp::new(home_water.x, home_water.y, height);
+    for _ in 0..3 {
+        world.advance_tick(&[]);
+    }
+
+    let key = world.blueprints.id(ship);
+    for index in 0..ships {
+        let at = afloat(&world, distance / 10 + index as i32 * 6);
+        assert!(at.distance_squared(&red_home) < at.distance_squared(&blue_home), "the ships are out on the attack");
+        let id = world.spawn_mobile(key, Team::Blue, at);
+        // Holding fire, so that they cannot take the yard on their own before the AI looks: only
+        // its orders are tested.
+        world.ecs.get::<&mut sim_engine::sim::components::Combat>(world.unit_entity(id).unwrap()).unwrap().enabled = false;
+    }
+    (world, brain, yard)
+}
+
+/// A fleet out on the attack goes for an enemy yard it can reach from the sea, rather than anchoring
+/// off the water nearest the enemy's start, as fleets once did (2026-11-25).
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn a_fleet_out_on_the_attack_goes_for_an_enemy_yard_it_can_reach() {
+    let (mut world, mut brain, yard) = fleet_off_an_enemy_yard("t2_cruiser", 4, 1_500, false);
+    let mut attacked = false;
+    for _ in 0..400 {
+        let commands = brain.think(&world);
+        attacked |= commands.iter().any(|command| matches!(command, SimCommand::Attack { target, .. } if *target == yard));
+        world.advance_tick(&commands);
+    }
+    assert!(attacked, "the cruisers were never sent at the yard");
+}
+
+/// But not where a defense outranges it: frigates sent at a yard under a torpedo launcher, which
+/// outranges their guns, were sunk for nothing (2026-11-25). They are sent somewhere else.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn a_fleet_does_not_close_on_a_target_whose_defenses_outrange_it() {
+    let (mut world, mut brain, yard) = fleet_off_an_enemy_yard("t1_frigate", 4, 1_600, true);
+    let mut ordered = false;
+    for tick in 0..400 {
+        let commands = brain.think(&world);
+        assert!(!commands.iter().any(|command| matches!(command, SimCommand::Attack { target, .. } if *target == yard)), "frigates were sent at the yard under the launcher at tick {tick}");
+        ordered |= commands.iter().any(|command| matches!(command, SimCommand::AttackMove { units, .. } if units.len() >= 4));
+        world.advance_tick(&commands);
+    }
+    assert!(ordered, "the frigates were given no orders, so nothing was tested");
+}
+
+/// A player's order (the user's, 2026-11-25): exposed materiel extractors before the naval
+/// headquarters, and that before the base. An extractor on the deposit nearest the yard, in the
+/// cruisers' reach, is shelled first.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn a_fleet_takes_an_exposed_extractor_before_the_naval_headquarters() {
+    let (mut world, mut brain, yard) = fleet_off_an_enemy_yard("t2_cruiser", 4, 1_500, false);
+    let yard_at = world.unit_position(yard).unwrap().xy();
+    let key = world.blueprints.id("mass_extractor");
+    let center = |&(x, y): &(u32, u32)| Vec2Fp::new(fp_int(x as i32 * 20 + 10), fp_int(y as i32 * 20 + 10));
+    let mut deposits = world.deposits.clone();
+    deposits.sort_by_key(|deposit| (center(deposit).distance_squared(&yard_at), *deposit));
+    let extractor = deposits.iter().find_map(|&(x, y)| world.spawn_finished_structure(key, Team::Red, x, y)).expect("an extractor on a deposit");
+    let mut first = None;
+    for _ in 0..400 {
+        let commands = brain.think(&world);
+        first = first.or_else(|| commands.iter().find_map(|command| if let SimCommand::Attack { target, .. } = command { Some(*target) } else { None }));
+        world.advance_tick(&commands);
+    }
+    assert_eq!(first, Some(extractor), "the cruisers went for {first:?} before the exposed extractor {extractor:?}");
+}
+
+/// A badly hurt factory near the AI's builders is mended: no AI ever repaired anything, and raids
+/// that each left a Naval AI's yards a little weaker sank them all in the end (2026-11-25).
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn the_ai_repairs_a_badly_hurt_factory() {
+    let mut world = scenario::skirmish(11).world;
+    let mut brain = AiBrain::new(Team::Blue, 11, world.starts);
+    for _ in 0..3_000 {
+        let commands = brain.think(&world);
+        world.advance_tick(&commands);
+    }
+    let factory = world
+        .units
+        .iter()
+        .find(|(_, entity)| {
+            world.ecs.get::<&UnitStats>(*entity).is_ok_and(|stats| stats.team == Team::Blue)
+                && world.ecs.get::<&Blueprinted>(*entity).is_ok_and(|unit| world.blueprints.get(unit.0).key.starts_with("land_factory"))
+                && world.ecs.get::<&sim_engine::sim::components::Construction>(*entity).is_err()
+        })
+        .map(|&(id, _)| id)
+        .expect("a finished land factory after five minutes");
+    let full = {
+        let entity = world.unit_entity(factory).unwrap();
+        let mut health = world.ecs.get::<&mut sim_engine::sim::components::Health>(entity).unwrap();
+        health.current = health.max * Fp::from_num(0.3);
+        health.max
+    };
+    let mut ordered = false;
+    for _ in 0..1_200 {
+        let commands = brain.think(&world);
+        ordered |= commands.iter().any(|command| matches!(command, SimCommand::Repair { target, .. } if *target == factory));
+        world.advance_tick(&commands);
+    }
+    assert!(ordered, "no builder was sent to mend the factory");
+    let health = world.unit_health(factory).expect("the factory stands");
+    assert!(health * 3 >= full * 2, "two minutes on, the factory is at {:.0}%", (health / full).to_num::<f64>() * 100.0);
+}
+
+/// Ships at home turn to meet enemy ships in the harbor even when they are busy, as every idle ship
+/// once did: those just setting out sailed on past raiders that sank the yards behind them, and the
+/// Naval AI on Scattered Isles never reached T2 (2026-11-25).
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn ships_at_home_turn_to_meet_raiders_even_when_busy() {
+    use sim_engine::sim::components::{Combat, MoveClass, SimId};
+    let map = scenario::MapSource::Map(std::sync::Arc::new(sim_engine::sim::maps::stillwater()));
+    let mut world = map.scenario(1).world;
+    let mut brain = AiBrain::new(Team::Blue, 1, world.starts);
+    let (blue_home, red_home) = (world.starts[Team::Blue.index()], world.starts[Team::Red.index()]);
+    let toward = (red_home - blue_home).normalized();
+    let water: Vec<Vec2Fp> = (0..2_000).map(|step| blue_home + toward.scaled(fp_int(step * 10))).filter(|&at| world.terrain.passable_for(MoveClass::Naval, at)).collect();
+    assert!(water.len() > 120, "no lake toward Red");
+    let frigate = world.blueprints.id("t1_frigate");
+    let ships: Vec<SimId> = (0..3).map(|index| world.spawn_mobile(frigate, Team::Blue, water[index * 6])).collect();
+    // Raiders a little out into the lake, still on Blue's side, holding fire.
+    let raid_at = water[60];
+    assert!(raid_at.distance_squared(&blue_home) < raid_at.distance_squared(&red_home), "the raid is in Blue's half");
+    for index in 0..3 {
+        let raider = world.spawn_mobile(frigate, Team::Red, raid_at + Vec2Fp::new(fp_int(index * 40), Fp::ZERO));
+        world.ecs.get::<&mut Combat>(world.unit_entity(raider).unwrap()).unwrap().enabled = false;
+    }
+    // The ships at home are busy, sailing back toward the shore.
+    world.advance_tick(&[SimCommand::Move { units: ships.clone(), goal: water[0] }]);
+    let mut met = false;
+    for _ in 0..120 {
+        let commands = brain.think(&world);
+        met |= commands.iter().any(|command| matches!(command, SimCommand::AttackMove { units, goal } if ships.iter().all(|ship| units.contains(ship)) && goal.distance_squared(&raid_at) <= Vec2Fp::new(fp_int(400), Fp::ZERO).distance_squared(&Vec2Fp::ZERO)));
+        world.advance_tick(&commands);
+    }
+    assert!(met, "the busy ships at home were never sent at the raiders");
+}

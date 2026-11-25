@@ -6,7 +6,7 @@
 use crate::math::fp::{fp_int, sqrt_wide, wide_mul, Fp, FpWide, Vec2Fp};
 use crate::ai_strategy::Strategy;
 use crate::math::rng::SimRng;
-use crate::sim::blueprints::{BlueprintId, FactoryKind, Res, UnitClass};
+use crate::sim::blueprints::{BlueprintId, FactoryKind, Res, Targets, UnitClass};
 use crate::sim::commands::SimCommand;
 use crate::sim::components::{PlayerId, Blueprinted, BuildTask, Builder, Combat, Construction, Factory, Launcher, MoveClass, Order, OrderKind, Position, SimId, Team, UnitStats, Upgrading};
 use crate::sim::config::TERRAIN_CELL_UNITS;
@@ -92,6 +92,18 @@ const NAVAL_T2_INCOME: i64 = 30;
 const NAVAL_T3_INCOME: i64 = 70;
 /// How far from home it looks for water deep enough for a naval factory.
 const NAVAL_REACH_UNITS: i32 = 7_000;
+/// The least reach the fleet's guard is counted as having, for raiders near home (2026-11-25).
+const GUARD_REACH_UNITS: i32 = 600;
+/// How often ships out on the attack all take a fresh coastal target, and how often the idle among
+/// them do (2026-11-25).
+const FLEET_RETARGET_TICKS: u32 = 300;
+const FLEET_IDLE_TICKS: u32 = 50;
+/// Enemy ships within this of the raider nearest home count as one raid, and a raid of at least
+/// this many ships that outweighs the ships at home calls the fleet back (2026-11-25).
+const RAID_GATHER_UNITS: i32 = 1_500;
+const RAID_SHIPS: usize = 3;
+/// How far outside a coastal target's defenses the ships that cannot outrange them wait (2026-11-25).
+const STANDOFF_MARGIN_UNITS: i32 = 300;
 /// Fleets set out at this size, growing to the largest.
 /// With no land route to the enemy, the most land units that cannot cross water it keeps, to
 /// guard home: the rest of what it makes goes into ships, aircraft, and hovercraft.
@@ -104,6 +116,10 @@ const FIRST_FLEET: usize = 4;
 const LARGEST_FLEET: usize = 12;
 /// A structure being built that costs at least this much mass is worth sending idle builders to.
 const BIG_SITE_MASS: i32 = 500;
+/// A builder within this of a badly hurt factory of ours mends it, up to this many to a factory
+/// (2026-11-25).
+const REPAIR_REACH_UNITS: i32 = 2_000;
+const REPAIR_BUILDERS: usize = 2;
 const T3_ENGINEERS: usize = 2;
 /// How far from home the AI goes to build on a geothermal vent.
 const VENT_REACH_UNITS: i32 = 2_500;
@@ -303,6 +319,10 @@ struct Forces {
     extractor_sites: Vec<ExtractorInfo>,
     /// Structures still being built that are worth helping with, and where.
     big_sites: Vec<(SimId, Vec2Fp)>,
+    /// Finished factories of ours that are badly hurt, and where, and how many builders are
+    /// repairing each.
+    damaged_factories: Vec<(SimId, Vec2Fp)>,
+    repairing: std::collections::BTreeMap<SimId, usize>,
     /// Other structures left unfinished, which idle builders finish after the big ones.
     small_sites: Vec<(SimId, Vec2Fp)>,
     /// Whether any engineer can build T2, or T3, structures.
@@ -655,6 +675,10 @@ pub struct AiBrain {
 struct NavalPlan {
     sites: Vec<(u32, u32)>,
     enemy_water: Option<Vec2Fp>,
+    /// For each cell, how many cells it is from water the fleet can sail to, a diagonal step
+    /// counting as one: what the fleet can hit from the sea (2026-11-25). The same whichever
+    /// order it is worked out in, so that mirror-image teams get mirror-image maps.
+    sea_distance: Vec<u16>,
 }
 
 impl AiBrain {
@@ -834,6 +858,12 @@ impl AiBrain {
             if !finished && unit.is_structure() && unit.mass >= Res::from_num(BIG_SITE_MASS) {
                 forces.big_sites.push((id, position));
             }
+            if finished && unit.factory_kind.is_some() {
+                let health = world.ecs.get::<&crate::sim::components::Health>(entity).expect("units have health");
+                if health.current * 3 < health.max * 2 {
+                    forces.damaged_factories.push((id, position));
+                }
+            }
             // Ships and submarines are the fleet's, whatever their class.
             if matches!(stats.move_class, MoveClass::Naval | MoveClass::Submarine) && !unit.is_structure() {
                 forces.naval_units += 1;
@@ -855,6 +885,11 @@ impl AiBrain {
                         forces.builder_tier = forces.builder_tier.max(unit.tier);
                     }
                     let builder = world.ecs.get::<&Builder>(entity).expect("builders have builder parts");
+                    for task in &builder.tasks {
+                        if let BuildTask::Repair { target } = task {
+                            *forces.repairing.entry(*target).or_default() += 1;
+                        }
+                    }
                     let upgrading = world.ecs.get::<&crate::sim::components::Enhancing>(entity).is_ok();
                     if builder.tasks.is_empty() && order.kind == OrderKind::Idle && !upgrading {
                         forces.idle_builders.push(IdleBuilder { id, entity, position });
@@ -1012,6 +1047,7 @@ impl AiBrain {
         // In an energy crisis, one generator at a time, with every other builder helping: a
         // trickle of energy split between many sites finishes none of them.
         let mut crisis_lead: Option<SimId> = None;
+        let mut repairs = forces.repairing.clone();
         for &IdleBuilder { id, entity, position } in &forces.idle_builders {
             let is_commander = forces.commander == Some(id);
             if let Some(lead) = crisis_lead {
@@ -1025,6 +1061,22 @@ impl AiBrain {
                 let unfinished = forces.factories.iter().filter_map(|factory| world.unit_entity(factory.id).and_then(|entity| world.ecs.get::<&Position>(entity).ok().map(|at| (factory.id, at.0.xy()))));
                 if let Some((site, _)) = unfinished.min_by_key(|(site, at)| (at.distance_squared(&position), *site)) {
                     commands.push(SimCommand::Assist { units: vec![id], target: site });
+                    continue;
+                }
+            }
+            // A badly hurt factory nearby is mended before anything new is started, by two builders
+            // at most: no AI ever repaired anything, and raids that each left its yards a little
+            // weaker sank them all in the end (2026-11-25).
+            if !forces.energy_crisis {
+                let reach = fp_int(REPAIR_REACH_UNITS);
+                let hurt = forces
+                    .damaged_factories
+                    .iter()
+                    .filter(|(factory, at)| at.distance_squared(&position) <= wide_mul(reach, reach) && repairs.get(factory).copied().unwrap_or(0) < REPAIR_BUILDERS)
+                    .min_by_key(|(factory, at)| (at.distance_squared(&position), *factory));
+                if let Some(&(factory, _)) = hurt {
+                    *repairs.entry(factory).or_default() += 1;
+                    commands.push(SimCommand::Repair { units: vec![id], target: factory });
                     continue;
                 }
             }
@@ -1659,7 +1711,7 @@ impl AiBrain {
     /// mirrored spots. Nothing, on a map without water.
     fn plan_naval(&self, world: &SimWorld) -> NavalPlan {
         if !world.terrain.has_water() {
-            return NavalPlan { sites: Vec::new(), enemy_water: None };
+            return NavalPlan { sites: Vec::new(), enemy_water: None, sea_distance: Vec::new() };
         }
         let factory = self.roster().naval_factory;
         let size = footprint(world, factory);
@@ -1667,7 +1719,7 @@ impl AiBrain {
         let plan_cell = |cell: (u32, u32), size: i32| self.flip_site(world, cell_i32(cell), size);
         let navigable = || (0..cells).flat_map(|y| (0..cells).map(move |x| (x, y))).filter(|&(x, y)| world.terrain.cell_is_navigable(x, y));
         let Some(enemy_water) = navigable().min_by_key(|&cell| (cell_center(cell).distance_squared(&self.enemy_home), plan_cell(cell, 1))) else {
-            return NavalPlan { sites: Vec::new(), enemy_water: None };
+            return NavalPlan { sites: Vec::new(), enemy_water: None, sea_distance: Vec::new() };
         };
         // Every cell ships can sail to from there.
         let index = |(x, y): (u32, u32)| (y * cells + x) as usize;
@@ -1679,6 +1731,25 @@ impl AiBrain {
                 if world.terrain.cell_is_navigable(next.0, next.1) && !sailed[index(next)] {
                     sailed[index(next)] = true;
                     queue.push_back(next);
+                }
+            }
+        }
+        // How far every cell is from that water, outward from all of it at once.
+        let mut sea_distance = vec![u16::MAX; (cells * cells) as usize];
+        let mut queue: std::collections::VecDeque<usize> = sailed.iter().enumerate().filter(|&(_, &sea)| sea).map(|(at, _)| at).collect();
+        for &at in &queue {
+            sea_distance[at] = 0;
+        }
+        while let Some(at) = queue.pop_front() {
+            let (x, y) = ((at as u32 % cells) as i32, (at as u32 / cells) as i32);
+            for (dx, dy) in [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
+                let (nx, ny) = (x + dx, y + dy);
+                if (0..cells as i32).contains(&nx) && (0..cells as i32).contains(&ny) {
+                    let next = (ny as u32 * cells + nx as u32) as usize;
+                    if sea_distance[next] == u16::MAX {
+                        sea_distance[next] = sea_distance[at] + 1;
+                        queue.push_back(next);
+                    }
                 }
             }
         }
@@ -1699,7 +1770,44 @@ impl AiBrain {
             }
         }
         sites.sort_unstable();
-        NavalPlan { sites: sites.into_iter().map(|(_, _, cell)| cell).collect(), enemy_water: Some(cell_center(enemy_water)) }
+        NavalPlan { sites: sites.into_iter().map(|(_, _, cell)| cell).collect(), enemy_water: Some(cell_center(enemy_water)), sea_distance }
+    }
+
+    /// Whether guns that reach `reach` can hit something at `at` from water the fleet can sail to:
+    /// a diagonal step taken at its longest, and a cell's breadth more, so that nothing counted in
+    /// reach is out of it.
+    fn reachable_from_sea(&self, world: &SimWorld, at: Vec2Fp, reach: Fp) -> bool {
+        let Some(plan) = self.naval_plan.as_ref().filter(|plan| !plan.sea_distance.is_empty()) else {
+            return false;
+        };
+        let (x, y) = world.terrain.unit_cell_of(at);
+        let steps = plan.sea_distance[y * world.terrain.cells_per_side() + x];
+        steps != u16::MAX && i64::from(steps) * i64::from(TERRAIN_CELL_UNITS) * 3 / 2 + i64::from(TERRAIN_CELL_UNITS) <= reach.to_num::<i64>()
+    }
+
+    /// The enemy structure a fleet at `from` goes for, with guns that reach `reach`, in the order
+    /// a player would (the user's, 2026-11-25): exposed materiel extractors first, which cruisers
+    /// reach far inland; then the naval headquarters, the yard the rest upgrade from; then the
+    /// other yards and launchers; then the base. Of each kind, the nearest. Only where it outranges
+    /// every known defense that could fire back: frigates that closed on yards under torpedo
+    /// launchers were sunk for nothing, and a Naval AI that had won on an islands map lost there
+    /// every time (2026-11-25). Walls are left alone.
+    fn coastal_target<'a>(&self, world: &SimWorld, sightings: &'a [Sighting], from: Vec2Fp, reach: Fp) -> Option<&'a Sighting> {
+        let blueprint = |id: SimId| world.unit_entity(id).and_then(|entity| world.ecs.get::<&Blueprinted>(entity).ok().map(|unit| world.blueprints.get(unit.0)));
+        // 0 an extractor, 1 the naval headquarters, 2 anything else on the water, 3 the base.
+        let order = |enemy: &Sighting| match blueprint(enemy.id) {
+            Some(unit) if unit.key.starts_with("mass_extractor") => 0,
+            Some(unit) if unit.factory_kind == Some(FactoryKind::Naval) && !unit.support => 1,
+            _ if enemy.is_naval => 2,
+            _ => 3,
+        };
+        let wall = |id: SimId| blueprint(id).is_some_and(|unit| unit.key.starts_with("wall"));
+        sightings
+            .iter()
+            .filter(|enemy| enemy.is_structure && !enemy.is_air && !wall(enemy.id))
+            .filter(|enemy| self.reachable_from_sea(world, enemy.position, reach))
+            .filter(|enemy| defended_reach(world, sightings, enemy.position) < reach)
+            .min_by_key(|enemy| (order(enemy), enemy.position.distance_squared(&from), enemy.id))
     }
 
     /// Whether land units can walk from home to the enemy's start, over the ground alone: walls
@@ -1841,29 +1949,109 @@ impl AiBrain {
                 return;
             }
         }
-        if forces.idle_naval.is_empty() {
-            return;
-        }
-        let Some(plan) = self.naval_plan.as_ref() else {
+        let Some(enemy_water) = self.naval_plan.as_ref().map(|plan| plan.enemy_water) else {
             return;
         };
+        let position = |id: SimId| world.unit_position(id).map(|at| at.xy());
+        // Out on the attack: nearer the enemy's start than its own.
+        let out = |id: &SimId| position(*id).is_some_and(|at| at.distance_squared(&self.enemy_home) < at.distance_squared(&self.home));
+        let (out_fleet, home_fleet): (Vec<SimId>, Vec<SimId>) = forces.fleet.iter().copied().partition(out);
+        let idle_home: Vec<SimId> = forces.idle_naval.iter().copied().filter(|id| !out(id)).collect();
+        let idle_out: Vec<SimId> = forces.idle_naval.iter().copied().filter(out).collect();
+
+        // Raiders near home that the fleet can hit from the sea, ships or not: hovercraft landing
+        // on its shore took a Naval AI's yards and base while its fleet held the enemy's sea
+        // (2026-11-25). Idle ships at home meet them, and those out keep on.
+        let guard_reach = fleet_reach(world, &home_fleet).max(fp_int(GUARD_REACH_UNITS));
         let reach = fp_int(NAVAL_REACH_UNITS);
         let threat = sightings
             .iter()
-            .filter(|enemy| enemy.is_naval && enemy.position.distance_squared(&self.home) <= wide_mul(reach, reach))
+            .filter(|enemy| !enemy.is_air && enemy.position.distance_squared(&self.home) <= wide_mul(reach, reach))
+            .filter(|enemy| enemy.is_naval || self.reachable_from_sea(world, enemy.position, guard_reach))
             .min_by_key(|enemy| (enemy.position.distance_squared(&self.home), enemy.id));
-        if let Some(enemy) = threat {
-            commands.push(SimCommand::AttackMove { units: forces.idle_naval.clone(), goal: enemy.position });
+        // On the first look in each spell, whatever the brain's pace.
+        let spell = |ticks: u32| world.current_tick % ticks < self.skill.think_interval;
+        // What a ship costs, in mass, to weigh a raid against the ships at home.
+        let worth = |id: SimId| world.unit_entity(id).and_then(|entity| world.ecs.get::<&Blueprinted>(entity).ok()).map_or(Res::ZERO, |unit| world.blueprints.get(unit.0).mass);
+        let mut raided = false;
+        if let Some(enemy) = threat.filter(|enemy| enemy.is_naval && !enemy.is_structure) {
+            // Enemy ships at home: every ship there turns to meet them, busy or not, as every idle
+            // ship once did; those just setting out, or gathering, sailed on past raiders that
+            // sank the yards behind them, and the Naval AI never reached T2 (2026-11-25). And a
+            // raid big enough to outweigh them calls the whole fleet back. A lone raider is left
+            // to the ships at home and the next ones off the line.
+            let around = fp_int(RAID_GATHER_UNITS);
+            let raiders: Vec<SimId> = sightings
+                .iter()
+                .filter(|other| other.is_naval && !other.is_structure && !other.is_air && other.position.distance_squared(&enemy.position) <= wide_mul(around, around))
+                .map(|other| other.id)
+                .collect();
+            let raid = raiders.iter().fold(Res::ZERO, |sum, &id| sum + worth(id));
+            let at_home = home_fleet.iter().fold(Res::ZERO, |sum, &id| sum + worth(id));
+            let recall = raiders.len() >= RAID_SHIPS && raid > at_home && !out_fleet.is_empty();
+            let units = if recall { forces.fleet.clone() } else { home_fleet.clone() };
+            if !units.is_empty() && (spell(FLEET_IDLE_TICKS) || !idle_home.is_empty()) {
+                commands.push(SimCommand::AttackMove { units, goal: enemy.position });
+            }
+            if recall {
+                return;
+            }
+            raided = true;
+        }
+        if raided {
+            // Met above.
+        } else if let Some(enemy) = threat.filter(|_| !idle_home.is_empty()) {
+            commands.push(SimCommand::AttackMove { units: idle_home, goal: enemy.position });
+        } else if self.skill.attacks && idle_home.len() >= self.fleet_size {
+            // The idle ships at home set out in waves, as before. None is held back as a guard:
+            // new ships come to the yards anyway and meet raiders from there, and a quarter of a
+            // small fleet held home lost the rest of it its fights at sea (2026-11-25).
+            self.send_fleet(world, sightings, &idle_home, enemy_water, commands);
+            self.fleet_size = (self.fleet_size + 2).min(LARGEST_FLEET);
+        }
+        // Ships out on the attack go for coastal targets, one after another: the idle at once, now
+        // and then, and all of them every so often, so that none waits on a target it cannot reach.
+        // They once anchored off the water nearest the enemy's start and shelled only what was in
+        // range there, and a fleet that ruled the sea took nothing ashore.
+        let going = if spell(FLEET_RETARGET_TICKS) { out_fleet } else if spell(FLEET_IDLE_TICKS) { idle_out } else { Vec::new() };
+        if !going.is_empty() && self.skill.attacks {
+            self.send_fleet(world, sightings, &going, enemy_water, commands);
+        }
+    }
+
+    /// Sends ships at the best coastal target from where they are, each armed one closing to its
+    /// own reach, and the rest with them; or, with none known yet, to the water nearest the enemy's
+    /// start, which shows them its shore.
+    fn send_fleet(&self, world: &SimWorld, sightings: &[Sighting], ships: &[SimId], enemy_water: Option<Vec2Fp>, commands: &mut Vec<SimCommand>) {
+        let positions: Vec<Vec2Fp> = ships.iter().filter_map(|&id| world.unit_position(id).map(|at| at.xy())).collect();
+        if positions.is_empty() {
             return;
         }
-        if forces.idle_naval.len() < self.fleet_size || !self.skill.attacks {
-            return;
+        let count = positions.len() as i32;
+        let sum = positions.iter().fold((0_i64, 0_i64), |(x, y), at| (x + i64::from(at.x.to_bits()), y + i64::from(at.y.to_bits())));
+        let middle = Vec2Fp::new(Fp::from_bits((sum.0 / i64::from(count)) as i32), Fp::from_bits((sum.1 / i64::from(count)) as i32));
+        match self.coastal_target(world, sightings, middle, fleet_reach(world, ships)) {
+            Some(target) => {
+                // Those that outrange its defenses close to their own reach and fire; the rest wait
+                // just outside the defenses' reach, toward where the fleet is.
+                let defended = defended_reach(world, sightings, target.position);
+                let (shooters, escorts): (Vec<SimId>, Vec<SimId>) = ships.iter().copied().partition(|&id| defended == Fp::ZERO || fleet_reach(world, &[id]) > defended);
+                if !escorts.is_empty() {
+                    let away = (middle - target.position).normalized();
+                    let standoff = target.position + away.scaled(defended + fp_int(STANDOFF_MARGIN_UNITS));
+                    commands.push(SimCommand::AttackMove { units: escorts, goal: standoff });
+                }
+                if !shooters.is_empty() {
+                    commands.push(SimCommand::AttackMove { units: shooters.clone(), goal: target.position });
+                    commands.push(SimCommand::Attack { units: shooters, target: target.id });
+                }
+            }
+            None => {
+                if let Some(goal) = enemy_water {
+                    commands.push(SimCommand::AttackMove { units: ships.to_vec(), goal });
+                }
+            }
         }
-        let Some(goal) = plan.enemy_water else {
-            return;
-        };
-        commands.push(SimCommand::AttackMove { units: forces.idle_naval.clone(), goal });
-        self.fleet_size = (self.fleet_size + 2).min(LARGEST_FLEET);
     }
 
     /// In a crisis, pauses its extractors, factories, and everything with upkeep, such as shields
@@ -2646,4 +2834,36 @@ pub fn replay_match_on(map: &MapSource, seed: u64, log: &CommandLog) -> Vec<u64>
     }
     checksums.push(world.compute_checksum());
     checksums
+}
+
+/// The longest reach of the ships' guns at what stands on the ground or the water, not torpedoes
+/// or anti-air (2026-11-25).
+fn fleet_reach(world: &SimWorld, ships: &[SimId]) -> Fp {
+    ships
+        .iter()
+        .filter_map(|&id| world.unit_entity(id))
+        .filter_map(|entity| world.ecs.get::<&Blueprinted>(entity).ok().map(|unit| unit.0))
+        .flat_map(|blueprint| {
+            let unit = world.blueprints.get(blueprint);
+            unit.weapon.into_iter().chain(unit.extra_weapons.iter().copied()).filter(|weapon| matches!(weapon.targets, Targets::Ground | Targets::Both)).map(|weapon| weapon.range)
+        })
+        .max()
+        .unwrap_or(Fp::ZERO)
+}
+
+/// The longest reach of the known enemy defenses that could fire on ships off `at`: structures with
+/// a gun or torpedoes that reach that far, from where they stand (2026-11-25). A fleet must outrange
+/// them to shell `at` without reply.
+fn defended_reach(world: &SimWorld, sightings: &[Sighting], at: Vec2Fp) -> Fp {
+    sightings
+        .iter()
+        .filter(|enemy| enemy.is_structure)
+        .filter_map(|enemy| {
+            let entity = world.unit_entity(enemy.id)?;
+            let unit = world.blueprints.get(world.ecs.get::<&Blueprinted>(entity).ok()?.0);
+            let range = unit.weapon.into_iter().chain(unit.extra_weapons.iter().copied()).filter(|weapon| !matches!(weapon.targets, Targets::Air)).map(|weapon| weapon.range).max()?;
+            (enemy.position.distance_squared(&at) <= wide_mul(range, range)).then_some(range)
+        })
+        .max()
+        .unwrap_or(Fp::ZERO)
 }
