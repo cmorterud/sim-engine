@@ -98,6 +98,8 @@ const GUARD_REACH_UNITS: i32 = 600;
 /// them do (2026-11-25).
 const FLEET_RETARGET_TICKS: u32 = 300;
 const FLEET_IDLE_TICKS: u32 = 50;
+/// How far outside a coastal target's defenses the ships that cannot outrange them wait (2026-11-25).
+const STANDOFF_MARGIN_UNITS: i32 = 300;
 /// Fleets set out at this size, growing to the largest.
 /// With no land route to the enemy, the most land units that cannot cross water it keeps, to
 /// guard home: the rest of what it makes goes into ships, aircraft, and hovercraft.
@@ -1745,13 +1747,16 @@ impl AiBrain {
 
     /// The enemy structure a fleet at `from` goes for, with guns that reach `reach`: one on the
     /// water first, a yard or a launcher, which make and sink ships; then the nearest it can hit
-    /// from the sea. Walls are left alone: shelling them wins nothing.
+    /// from the sea. Only where it outranges every known defense that could fire back: frigates
+    /// that closed on yards under torpedo launchers were sunk for nothing, and a Naval AI that had
+    /// won on an islands map lost there every time (2026-11-25). Walls are left alone.
     fn coastal_target<'a>(&self, world: &SimWorld, sightings: &'a [Sighting], from: Vec2Fp, reach: Fp) -> Option<&'a Sighting> {
         let wall = |id: SimId| world.unit_entity(id).and_then(|entity| world.ecs.get::<&Blueprinted>(entity).ok().map(|unit| world.blueprints.get(unit.0).key.starts_with("wall"))).unwrap_or(false);
         sightings
             .iter()
             .filter(|enemy| enemy.is_structure && !enemy.is_air && !wall(enemy.id))
             .filter(|enemy| self.reachable_from_sea(world, enemy.position, reach))
+            .filter(|enemy| defended_reach(world, sightings, enemy.position) < reach)
             .min_by_key(|enemy| (!enemy.is_naval, enemy.position.distance_squared(&from), enemy.id))
     }
 
@@ -1906,7 +1911,7 @@ impl AiBrain {
 
         // Raiders near home that the fleet can hit from the sea, ships or not: hovercraft landing
         // on its shore took a Naval AI's yards and base while its fleet held the enemy's sea
-        // (2026-11-25). Ships at home meet them, and those out keep on.
+        // (2026-11-25). Idle ships at home meet them, and those out keep on.
         let guard_reach = fleet_reach(world, &home_fleet).max(fp_int(GUARD_REACH_UNITS));
         let reach = fp_int(NAVAL_REACH_UNITS);
         let threat = sightings
@@ -1916,17 +1921,12 @@ impl AiBrain {
             .min_by_key(|enemy| (enemy.position.distance_squared(&self.home), enemy.id));
         if let Some(enemy) = threat.filter(|_| !idle_home.is_empty()) {
             commands.push(SimCommand::AttackMove { units: idle_home, goal: enemy.position });
-        } else if self.skill.attacks {
-            // A guard stays home, a quarter of the fleet, the idle ships nearest it; the rest set
-            // out in waves, as before.
-            let mut leaving = idle_home;
-            leaving.sort_by_key(|&id| (position(id).map_or(FpWide::ZERO, |at| at.distance_squared(&self.home)), id));
-            let guard = (forces.fleet.len() / 4).saturating_sub(home_fleet.len() - leaving.len()).min(leaving.len());
-            let leaving = leaving.split_off(guard);
-            if leaving.len() >= self.fleet_size {
-                self.send_fleet(world, sightings, &leaving, enemy_water, commands);
-                self.fleet_size = (self.fleet_size + 2).min(LARGEST_FLEET);
-            }
+        } else if self.skill.attacks && idle_home.len() >= self.fleet_size {
+            // The idle ships at home set out in waves, as before. None is held back as a guard:
+            // new ships come to the yards anyway and meet raiders from there, and a quarter of a
+            // small fleet held home lost the rest of it its fights at sea (2026-11-25).
+            self.send_fleet(world, sightings, &idle_home, enemy_water, commands);
+            self.fleet_size = (self.fleet_size + 2).min(LARGEST_FLEET);
         }
         // Ships out on the attack go for coastal targets, one after another: the idle at once, now
         // and then, and all of them every so often, so that none waits on a target it cannot reach.
@@ -1951,8 +1951,19 @@ impl AiBrain {
         let middle = Vec2Fp::new(Fp::from_bits((sum.0 / i64::from(count)) as i32), Fp::from_bits((sum.1 / i64::from(count)) as i32));
         match self.coastal_target(world, sightings, middle, fleet_reach(world, ships)) {
             Some(target) => {
-                commands.push(SimCommand::AttackMove { units: ships.to_vec(), goal: target.position });
-                commands.push(SimCommand::Attack { units: ships.to_vec(), target: target.id });
+                // Those that outrange its defenses close to their own reach and fire; the rest wait
+                // just outside the defenses' reach, toward where the fleet is.
+                let defended = defended_reach(world, sightings, target.position);
+                let (shooters, escorts): (Vec<SimId>, Vec<SimId>) = ships.iter().copied().partition(|&id| defended == Fp::ZERO || fleet_reach(world, &[id]) > defended);
+                if !escorts.is_empty() {
+                    let away = (middle - target.position).normalized();
+                    let standoff = target.position + away.scaled(defended + fp_int(STANDOFF_MARGIN_UNITS));
+                    commands.push(SimCommand::AttackMove { units: escorts, goal: standoff });
+                }
+                if !shooters.is_empty() {
+                    commands.push(SimCommand::AttackMove { units: shooters.clone(), goal: target.position });
+                    commands.push(SimCommand::Attack { units: shooters, target: target.id });
+                }
             }
             None => {
                 if let Some(goal) = enemy_water {
@@ -2754,6 +2765,23 @@ fn fleet_reach(world: &SimWorld, ships: &[SimId]) -> Fp {
         .flat_map(|blueprint| {
             let unit = world.blueprints.get(blueprint);
             unit.weapon.into_iter().chain(unit.extra_weapons.iter().copied()).filter(|weapon| matches!(weapon.targets, Targets::Ground | Targets::Both)).map(|weapon| weapon.range)
+        })
+        .max()
+        .unwrap_or(Fp::ZERO)
+}
+
+/// The longest reach of the known enemy defenses that could fire on ships off `at`: structures with
+/// a gun or torpedoes that reach that far, from where they stand (2026-11-25). A fleet must outrange
+/// them to shell `at` without reply.
+fn defended_reach(world: &SimWorld, sightings: &[Sighting], at: Vec2Fp) -> Fp {
+    sightings
+        .iter()
+        .filter(|enemy| enemy.is_structure)
+        .filter_map(|enemy| {
+            let entity = world.unit_entity(enemy.id)?;
+            let unit = world.blueprints.get(world.ecs.get::<&Blueprinted>(entity).ok()?.0);
+            let range = unit.weapon.into_iter().chain(unit.extra_weapons.iter().copied()).filter(|weapon| !matches!(weapon.targets, Targets::Air)).map(|weapon| weapon.range).max()?;
+            (enemy.position.distance_squared(&at) <= wide_mul(range, range)).then_some(range)
         })
         .max()
         .unwrap_or(Fp::ZERO)
