@@ -1,7 +1,7 @@
 # Plan: cruiser volleys, naval kill times, missile defense, nuclear flight, shields
 
 2026-11-25. A plan only: no unit data or code changes yet. It covers eleven asks from the design
-owner, in their order, then splits the work into pull requests.
+owner, in their order, and a twelfth added in review (the T3 SAM), then splits the work into pull requests.
 
 All numbers below come from `data/units.toml` on `main` at 629556f. The sim runs at 10 ticks a
 second. There is no armor system, so a hit takes its damage straight off health (or off a
@@ -16,8 +16,8 @@ no target relies on an exact tie.
 | Item | Unit / weapon | Now | Proposed |
 |---|---|---|---|
 | 1 | Cruiser anti-air missiles | 1,279 dmg, one every 2 s, splash 80 | **200 dmg × 8 a volley**, fired over ~1 s, a volley every 2 s, splash 80 kept |
-| 1 | Gunship (T2) health | 1,796 | **1,590** (conflict, see 1.2) |
-| 1 | Strategic Bomber health | 7,500 | **6,300** (conflict, see 1.2) |
+| 1 | Gunship (T2) health | 1,796 | **1,590** (decided, see 1.2) |
+| 1 | Strategic Bomber health | 7,500 | **6,300** (decided, see 1.2) |
 | 2 | Cruiser cruise missiles | 454 dmg, one every 2.5 s | **454 dmg × 4 a volley**, one a second, then 6 s reload (10 s cycle) |
 | 3 | Shield Generator (T2) regen | 50 /s | **190 /s** |
 | 3 | Heavy Shield Generator (T3) regen | 131 /s | **500 /s** |
@@ -29,6 +29,7 @@ no target relies on an exact tie.
 | 10 | Destroyer guns | 475 dmg × 2 every 4 s | **455** dmg × 2 every 4 s |
 | 10 | Destroyer torpedoes | 560 dmg every 4 s | **181** (a commander in ~79 s by five, a T1 sub in ~27 s by one) |
 | 11 | Torpedo Boat torpedoes | 100 dmg every 0.8 s | **126** dmg every 0.8 s |
+| 12 | SAM Launcher (T3) | 2,400 dmg every 3.2 s | **850** dmg every **1.4 s** |
 
 ## New engine feature: volleys (salvos)
 
@@ -95,7 +96,7 @@ No single V satisfies every row above. Three pairs conflict:
 
 Health has to change for some units. The fewest changes is two:
 
-**Option A (recommended): V = 1,600 (200 a missile). Lower two health values.**
+**Option A (decided 2026-11-25): V = 1,600 (200 a missile). Lower two health values.**
 
 - Gunship 1,796 → **1,590** (−11%), so one volley kills it.
 - Strategic Bomber 7,500 → **6,300** (−16%), so four volleys kill it (4,800 < 6,300 ≤ 6,400).
@@ -119,9 +120,7 @@ Option A touches fewer units and keeps the per-missile number round.
   `torpedo_bombers_to_break_fleet_*` with its upper end of 5.0) need re-running.
 - The Gunship's [domains] strength (√(dps × health) per cost) drops about 6%. The Strategic
   Bomber's drops about 8%. Both need to stay inside `strength_band` [0.80, 1.25].
-- The SAM Launcher's comment says "one badly damages a strategic bomber in a pass, two bring it
-  down". At 2,400 a missile, the bomber goes from 4 hits to 3. That is still "two launchers",
-  but the comment and any test of it should be checked.
+- The SAM Launcher now has targets of its own against both of these aircraft (item 12).
 - Not in the ask: the T3 Heavy Air Transport (4,500 health plus a 3,000 shield) takes 5 volleys.
 
 ## 2. Cruiser cruise missiles: 4 over 4 s, then 6 s reload, a commander in about 100 s
@@ -366,6 +365,48 @@ for a **kill at about 60 s**.
   3.2 s gives the same damage per second). That is not needed for the 60 s target, and is left as
   a question.
 
+## 12. T3 SAM Launcher: a Strategic Bomber in about 11 s, a Gunship in about 2 s
+
+Added in review on 2026-11-25, against the decided health values (Strategic Bomber 6,300,
+Gunship 1,590). The SAM's missile flies 90 a tick and steers itself, so it reaches an aircraft in
+range in about 1 s. With n hits and a reload of R seconds, the kill time is (n − 1) × R + 1.
+
+**Today's SAM (2,400 every 3.2 s) misses both targets.** The Gunship falls to 1 hit in about 1 s.
+The Strategic Bomber falls to 3 hits in about 7.4 s.
+
+**Clash with a short reload.** Two seconds for the Gunship leaves about 1 s of reload. With
+R = 1 s, the bomber's 11 s would need 11 hits against the Gunship's 2. But the bomber has only
+3.96 times the Gunship's health, so with 2 hits for the Gunship it can take at most 8. A longer
+reload resolves it:
+
+| Target | Health | Hits | Time with R = 1.4 s | Damage d must be |
+|---|---|---|---|---|
+| Gunship (T2) | 1,590 | 2 | 1.4 + 1 ≈ 2.4 s | 795 to 1,589 |
+| Strategic Bomber (T3) | 6,300 | 8 | 7 × 1.4 + 1 ≈ 10.8 s | 787.5 to 899 |
+
+**Proposed: 850 damage every 14 ticks (1.4 s).**
+- Gunship: 850 is short and 1,700 kills, so 2 hits, about 2.4 s at full range and about 2 s
+  closer in.
+- Bomber: 5,950 is short and 6,800 kills, so 8 hits, about 10.8 s.
+
+The other way is one hit for the Gunship (1,800 every 3.3 s, 4 hits on the bomber, about 11 s).
+That kills a Gunship in about 1 to 1.3 s, which is half the asked time, so it is not proposed.
+
+Knock-on effects:
+
+- The SAM's damage per second falls from 750 to 607 (−19%). Against the new bomber's health,
+  today's SAM would have killed it in 7.4 s, so the 11 s target makes the SAM slower against
+  bombers on purpose.
+- The SAM's comment, "one badly damages a strategic bomber in a pass, two bring it down", still
+  holds. At 400 a second, a bomber crossing the SAM's 1,200 reach is in range for about 6 s. In
+  that time one SAM lands about 5 hits (4,250 of 6,300), and two SAMs land about 10, which kills
+  it.
+- Splash 30 and homing stay. `[premiums] static_anti_air_over_mobile` [1.5, 2.0] counts static
+  anti-air's strength per cost, and a 19% cut in damage per second could push it below 1.5. It
+  needs re-running. If it falls short, the SAM's health or cost is the place to make it up, since
+  the kill times are fixed.
+- [kills] gains `t3_sam = { t2_gunship = 2, t3_strategic_bomber = 8 }`.
+
 ## Tests that pin all of this
 
 1. **New `[kill_times]` and `[volleys]` sections in `data/balance_targets.toml`**, read by tests
@@ -389,6 +430,9 @@ for a **kill at about 60 s**.
    # And the cruiser's anti-air volleys in flight time.
    cruiser_two_volleys_seconds_max = 4
    cruiser_six_volleys_seconds_max = 12
+   # The T3 SAM Launcher against one aircraft held in its range.
+   sam_t2_gunship = [1.5, 3.0]
+   sam_t3_strategic_bomber = [9.5, 12.5]
    ```
 
 2. **Arithmetic tests** (fast, no sim): every [volleys] entry holds exactly,
@@ -419,8 +463,9 @@ Each PR is reviewable alone and leaves `main` playable.
 1. **Volleys in the engine.** The `salvo` field, its schedule, retargeting mid-volley, damage per
    second in `balance.rs` counting shots, and the checksum. No unit uses it yet. Includes the
    arithmetic test harness and the `[kill_times]` / `[volleys]` loaders (empty).
-2. **Cruiser rework (items 1, 2).** Both cruiser weapons onto volleys. Anti-air at 200 a missile.
-   The Gunship and Strategic Bomber health values (Option A, or B if chosen). `[volleys]` filled
+2. **Cruiser and anti-air rework (items 1, 2, 12).** Both cruiser weapons onto volleys. Anti-air
+   at 200 a missile. The SAM at 850 every 1.4 s, with its [kills] rule and kill-time tests.
+   The Gunship and Strategic Bomber health values (Option A). `[volleys]` filled
    in, the cruiser kill-time sim tests, a [domains] re-run report in `reports/balance/`, and new
    goldens.
 3. **Naval kill times (items 10, 11).** Destroyer guns at 455, destroyer torpedoes at 181,
@@ -442,8 +487,11 @@ depends on nothing above. PR 6 depends on 5. PR 7 is independent.
 
 ## Questions to settle before code
 
-1. **Anti-air health conflict (1.2):** Option A (Gunship to 1,590, Strategic Bomber to 6,300) or
-   Option B (four units change)? Recommended: A.
+The four big ones are settled. Only the small defaults in 5 remain.
+
+
+1. ~~Anti-air health conflict (1.2)~~. Settled 2026-11-25: Option A (Gunship 1,590, Strategic
+   Bomber 6,300, 200 a missile).
 2. ~~Destroyer torpedoes (10.2)~~. Settled 2026-11-25 by the new submarine target: 181 for
    everything.
 3. ~~Nuke exit speed (8)~~. Settled 2026-11-25: a slow lift in the silo, then constant speed.
