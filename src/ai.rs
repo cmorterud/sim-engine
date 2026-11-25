@@ -1764,7 +1764,13 @@ impl AiBrain {
                 let into = world.blueprints.get(into);
                 // A fleet first: a factory that only upgrades puts nothing on the water.
                 let (income, fleet) = if into.tier == 2 { (self.tech(NAVAL_T2_INCOME), 3) } else { (self.tech(NAVAL_T3_INCOME), 6) };
-                world.support_allowed(self.team, into.id) && energy_income >= mass_income * 12 && mass_income >= income && forces.naval_units >= fleet
+                // Energy for ships, twelve a second for each of mass, up to what an upgrade itself
+                // draws, as land factories have it (2026-11-25): a growing economy's mass outran
+                // twelve times its energy for good, and the Naval AI's yards stayed T1 all match on
+                // Scattered Isles while its mass passed a thousand a second.
+                let energy_to_spare = economy.satisfaction >= Res::ONE || economy.energy >= economy.energy_capacity / 2;
+                let energy_ready = energy_to_spare && energy_income >= (mass_income * 12).min(UPGRADE_ENERGY_INCOME);
+                world.support_allowed(self.team, into.id) && energy_ready && mass_income >= income && forces.naval_units >= fleet
             });
             let item = match upgrade.filter(|_| !upgrade_under_way) {
                 Some(into) => {

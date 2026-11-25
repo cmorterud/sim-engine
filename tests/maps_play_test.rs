@@ -164,3 +164,30 @@ fn team_matches_on_scattered_isles_put_each_team_on_its_own_island() {
         assert_eq!(sides, [[per_team, 0], [0, per_team]], "{per_team} a side: Blue's commanders are in the west and Red's in the east");
     }
 }
+
+/// On Scattered Isles the Naval AI's yards go on to T2 as its economy grows (2026-11-25): they
+/// waited for twelve times as much energy income as mass, which a growing economy's mass outran
+/// for good, and its yards stayed T1 all match while its mass passed a thousand a second.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn on_scattered_isles_the_naval_ais_yards_reach_t2() {
+    use sim_engine::ai::play_match_with;
+    use sim_engine::ai_strategy::Strategy;
+    use sim_engine::sim::components::{MoveClass, Team};
+    let map = MapSource::Map(Arc::new(scattered_isles()));
+    let mut upgraded = None;
+    play_match_with(&map, 1, 18_000, [Strategy::named("naval").expect("naval"), Strategy::balanced()], |world| {
+        if upgraded.is_some() || !world.current_tick.is_multiple_of(100) {
+            return;
+        }
+        let fielded = world.units.iter().any(|&(_, entity)| {
+            let (Ok(stats), Ok(unit)) = (world.ecs.get::<&UnitStats>(entity), world.ecs.get::<&Blueprinted>(entity)) else { return false };
+            let unit = world.blueprints.get(unit.0);
+            stats.team == Team::Blue && !unit.is_structure() && unit.tier >= 2 && matches!(unit.move_class(), MoveClass::Naval | MoveClass::Submarine)
+        });
+        if fielded {
+            upgraded = Some(world.current_tick);
+        }
+    });
+    assert!(upgraded.is_some(), "the Naval AI fielded no T2 ship in thirty minutes");
+}
