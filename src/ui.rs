@@ -3669,6 +3669,21 @@ pub fn draw_interceptions(ctx: &egui::Context, camera: &Camera, interceptions: &
     }
 }
 
+/// Torpedo decoys in the water: a small float, and a ring of disturbed water round it, where an
+/// anti-torpedo charge dropped one for a torpedo to strike instead of its ship (2026-11-25).
+pub fn draw_decoys(ctx: &egui::Context, camera: &Camera, decoys: &[([i32; 3], u32)], pixels_per_point: f32) {
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    for &(at, _) in decoys {
+        let world = [f64::from(at[0]) / 4096.0, f64::from(at[1]) / 4096.0, f64::from(at[2]) / 4096.0];
+        let Some(pixels) = camera.world_to_screen(world) else {
+            continue;
+        };
+        let center = Pos2::new(pixels[0] as f32 / pixels_per_point, pixels[1] as f32 / pixels_per_point);
+        painter.circle_stroke(center, 9.0, Stroke::new(1.5_f32, Color32::from_rgba_unmultiplied(220, 240, 255, 140)));
+        painter.circle_filled(center, 3.5, Color32::from_rgb(255, 200, 80));
+    }
+}
+
 /// Tractor beams, from each holder to what it holds, and the storms roaming the battlefield
 /// (GAME_SPECIFICATION.md §12).
 pub fn draw_exotic(ctx: &egui::Context, camera: &Camera, heights: &crate::render::camera::HeightField, snapshot: &SimSnapshot, pixels_per_point: f32) {

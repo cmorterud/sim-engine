@@ -204,6 +204,17 @@ out close and why: evidence about the process, not a target.
   interceptors. A duel of escorted against unescorted strike aircraft was
   not used as the target: strike aircraft cannot shoot at aircraft, so it is won whatever the
   fighters cost.
+* 2026-11-25: torpedoes, from playtesting. Every torpedo now has a top speed of 18, half again the
+  fastest ship's and a third of a shell's (it was 30). It leaves at a third of that, about a
+  ship's speed, as the inspiration's leave at about their launcher's, and gathers speed over a
+  second. Ships, submarines, and launchers fire theirs from just under the water, not from their
+  guns' height; torpedoes keep under the water as they home. A torpedo bomber's still homes from
+  the bomber straight onto its ship (the user's call: one falling from the bomber's height was
+  carried past the ship). Anti-torpedo charges drop a decoy into the water that the torpedo
+  strikes instead of destroying it outright, still one torpedo each reload. Every `[domains]`
+  target still holds. The torpedo bombers it takes to break a fleet rose, with the slower
+  torpedoes, from 2.0 to 3.1 times its cost for T2 and 2.9 for T3 (the band is 2 to 5); a
+  battleship-heavy fleet still breaks to 0.75 of its cost.
 
 ## Order of work
 

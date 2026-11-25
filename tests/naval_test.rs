@@ -822,3 +822,135 @@ fn a_gunship_over_a_corvettes_dome_fires_into_the_dome() {
     assert!(dome(&world) < before, "the gunship's fire should strike the dome");
     assert_eq!(world.unit_health(destroyer), Some(full), "and none of it reach the destroyer");
 }
+
+/// A destroyer's torpedoes go into the water at once, as a submarine's do, not from its guns'
+/// height: from the deck they flew to the water as shells, and were drawn so (2026-11-25).
+#[test]
+fn a_destroyers_torpedoes_start_under_the_water() {
+    let mut world = lake_world();
+    let destroyer = spawn(&mut world, "t2_destroyer", Team::Blue, point(2_000, 1_000));
+    let sub = spawn(&mut world, "t1_attack_sub", Team::Red, point(2_700, 1_000));
+    world.ecs.get::<&mut sim_engine::sim::components::Combat>(world.unit_entity(sub).unwrap()).unwrap().enabled = false;
+    let water = world.terrain.water_level();
+    let mut launched = 0;
+    for _ in 0..200 {
+        world.advance_tick(&[]);
+        for &(_, entity) in &world.projectiles {
+            let torpedo = world.ecs.get::<&sim_engine::sim::components::Homing>(entity).is_ok_and(|homing| homing.underwater);
+            let ours = world.ecs.get::<&sim_engine::sim::components::Projectile>(entity).is_ok_and(|projectile| projectile.source == destroyer);
+            if torpedo && ours {
+                let z = world.ecs.get::<&sim_engine::sim::components::Position>(entity).unwrap().0.z;
+                assert!(z < water, "a torpedo at {} above the water at {}", z.to_num::<f64>(), water.to_num::<f64>());
+                launched += 1;
+            }
+        }
+    }
+    assert!(launched > 0, "the destroyer fired no torpedoes, so nothing was tested");
+}
+
+/// An anti-torpedo charge drops a decoy into the water, which an incoming torpedo turns to and
+/// strikes instead of the ship (2026-11-25): a destroyer, whose charge is ready every second, takes
+/// nothing from a submarine's torpedoes, and decoys show in the water; with its charge off, they
+/// hit it.
+#[test]
+fn an_anti_torpedo_charge_lures_torpedoes_onto_decoys() {
+    for charged in [true, false] {
+        let mut world = lake_world();
+        let destroyer = spawn(&mut world, "t2_destroyer", Team::Blue, point(2_000, 1_000));
+        let entity = world.unit_entity(destroyer).unwrap();
+        world.ecs.get::<&mut sim_engine::sim::components::Combat>(entity).unwrap().enabled = false;
+        world.ecs.get::<&mut sim_engine::sim::components::ExtraWeapons>(entity).unwrap().0.clear();
+        if !charged {
+            world.ecs.get::<&mut sim_engine::sim::components::TorpedoDefense>(entity).unwrap().range = Fp::ZERO;
+        }
+        spawn(&mut world, "t1_attack_sub", Team::Red, point(2_500, 1_000));
+        let full = world.unit_health(destroyer).unwrap();
+        let mut decoys_seen = false;
+        for _ in 0..300 {
+            world.advance_tick(&[]);
+            decoys_seen |= !world.snapshot().decoys.is_empty();
+        }
+        let health = world.unit_health(destroyer).unwrap();
+        if charged {
+            assert!(decoys_seen, "no decoy was dropped");
+            assert_eq!(health, full, "a torpedo reached the destroyer past its charge");
+        } else {
+            assert!(!decoys_seen, "a decoy with the charge off");
+            assert!(health < full, "with its charge off, the torpedoes should hit the destroyer");
+        }
+    }
+}
+
+/// A torpedo leaves at about a ship's speed, a third of its top speed, gathers speed to it over a
+/// second, as the inspiration's do, and steers all the way (2026-11-25): it catches a frigate, the
+/// fastest ship, sailing straight away at full speed from the edge of a submarine's range.
+#[test]
+fn a_torpedo_speeds_up_after_launch_and_runs_down_a_fleeing_frigate() {
+    let mut world = lake_world();
+    let sub = spawn(&mut world, "t1_attack_sub", Team::Red, point(1_800, 600));
+    let frigate = spawn(&mut world, "t1_frigate", Team::Blue, point(1_800, 900));
+    for id in [sub, frigate] {
+        world.ecs.get::<&mut sim_engine::sim::components::Combat>(world.unit_entity(id).unwrap()).unwrap().enabled = false;
+    }
+    let def = world.blueprints.get(world.blueprints.id("t1_attack_sub"));
+    let (top, range) = (def.weapon.unwrap().projectile_speed.to_num::<f64>(), def.weapon.unwrap().range.to_num::<f64>());
+    world.advance_tick(&[SimCommand::Move { units: vec![frigate], goal: point(1_800, 4_900) }]);
+    // At full speed, and just inside the submarine's range, before it may fire.
+    let gap = |world: &SimWorld| world.unit_position(frigate).unwrap().xy().distance_squared(&world.unit_position(sub).unwrap().xy()).to_num::<f64>().sqrt();
+    while gap(&world) < range - 40.0 {
+        world.advance_tick(&[]);
+    }
+    world.ecs.get::<&mut sim_engine::sim::components::Combat>(world.unit_entity(sub).unwrap()).unwrap().enabled = true;
+    let full = world.unit_health(frigate).unwrap();
+    let mut first: Option<(SimId, Vec<f64>, (f64, f64))> = None;
+    for _ in 0..200 {
+        world.advance_tick(&[]);
+        if let Some((id, speeds, last)) = &mut first {
+            if let Some(&(_, entity)) = world.projectiles.iter().find(|(other, _)| other == id) {
+                let at = world.ecs.get::<&sim_engine::sim::components::Position>(entity).unwrap().0;
+                let (x, y) = (at.x.to_num::<f64>(), at.y.to_num::<f64>());
+                speeds.push(((x - last.0).powi(2) + (y - last.1).powi(2)).sqrt());
+                *last = (x, y);
+            }
+        } else if let Some(&(id, entity)) = world.projectiles.iter().find(|&&(_, entity)| world.ecs.get::<&sim_engine::sim::components::Homing>(entity).is_ok_and(|homing| homing.underwater)) {
+            let at = world.ecs.get::<&sim_engine::sim::components::Position>(entity).unwrap().0;
+            first = Some((id, Vec::new(), (at.x.to_num::<f64>(), at.y.to_num::<f64>())));
+        }
+    }
+    let (_, speeds, _) = first.expect("the submarine fired no torpedo");
+    assert!(speeds.len() > 12, "the torpedo ran only {} ticks", speeds.len());
+    assert!(speeds[0] < top * 0.6, "it left at {:.1}, near its top speed {top}", speeds[0]);
+    assert!((speeds[10] - top).abs() < 0.5, "a second on, it ran at {:.1}, not {top}: {speeds:.1?}", speeds[10]);
+    assert!(world.unit_health(frigate).unwrap() < full, "the torpedoes never caught the frigate");
+}
+
+/// A torpedo bomber's torpedo homes from the bomber straight down onto its ship, closing on it every
+/// tick, and does not fall into the water to run in from there (the user's call, 2026-11-25: a
+/// fall from the bomber's height carried it past the ship).
+#[test]
+fn a_torpedo_bombers_torpedo_comes_down_on_its_ship() {
+    let mut world = lake_world();
+    let destroyer = spawn(&mut world, "t2_destroyer", Team::Red, point(2_000, 1_000));
+    let entity = world.unit_entity(destroyer).unwrap();
+    world.ecs.get::<&mut sim_engine::sim::components::ExtraWeapons>(entity).unwrap().0.clear();
+    world.ecs.get::<&mut sim_engine::sim::components::TorpedoDefense>(entity).unwrap().range = Fp::ZERO;
+    let bomber = spawn(&mut world, "t2_torpedo_bomber", Team::Blue, point(1_000, 1_000));
+    world.advance_tick(&[SimCommand::Attack { units: vec![bomber], target: destroyer }]);
+    let full = world.unit_health(destroyer).unwrap();
+    let mut first: Option<SimId> = None;
+    let mut gaps: Vec<f64> = Vec::new();
+    for _ in 0..600 {
+        world.advance_tick(&[]);
+        if first.is_none() {
+            first = world.projectiles.iter().find(|&&(_, entity)| world.ecs.get::<&sim_engine::sim::components::Homing>(entity).is_ok_and(|homing| homing.underwater)).map(|&(id, _)| id);
+        }
+        let Some(id) = first else { continue };
+        let Some(&(_, entity)) = world.projectiles.iter().find(|(other, _)| *other == id) else { break };
+        let at = world.ecs.get::<&sim_engine::sim::components::Position>(entity).unwrap().0;
+        let ship = world.unit_position(destroyer).unwrap();
+        gaps.push(at.distance_squared(&ship).to_num::<f64>().sqrt());
+    }
+    assert!(gaps.len() > 2, "no torpedo was dropped");
+    assert!(gaps.windows(2).all(|pair| pair[1] < pair[0]), "it did not close on the ship every tick: {gaps:.0?}");
+    assert!(world.unit_health(destroyer).unwrap() < full, "the torpedo never hit");
+}
