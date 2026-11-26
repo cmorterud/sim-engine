@@ -1392,8 +1392,8 @@ tier = 3
 mass = 5128
 energy = 43956
 build_time = 20677
-health = 34421
-speed = "10.2"
+health = 31516
+speed = "10.8"
 turn_rate = 35
 turn_radius = 80
 radius = 40
@@ -1402,11 +1402,17 @@ radar = 960
 sonar = 400
 torpedo_defense = { range = 600, reload_ticks = 100 }
 movement = "naval"
-# Two lasers, 610 every 2 seconds each, reaching half the battleship's: health, damage and reach
-# from the navy T3 time to kill (2026-11-26, reports/plans/2026-11-26-derived-stats.md).
-weapon = { kind = "laser", range = 1498, reload_ticks = 20, damage = 610, turn_rate = 60, mount = [0, 27] }
+# Two lasers, 1,304 every 2 seconds each: each does twice a battleship turret's damage a second
+# (652 against 326), the design owner's rule (2026-11-24, kept 2026-11-26), so the two out-shoot
+# the battleship inside their reach. It sails half again the battleship's top speed (10.8 against
+# 7.2, the design owner's, 2026-11-26), and its reach is the navy T3 line's at that speed. Its
+# lasers hit the tick they fire and cannot be dodged, which the ability price list prices at 0.34
+# (a fleet dodging each shot escapes 44% of shells at 60); its health, 31,516, is what is left of
+# its cost once its damage, reach, speed, and lasers are paid for
+# (reports/plans/2026-11-26-derived-stats.md).
+weapon = { kind = "laser", range = 1586, reload_ticks = 20, damage = 1304, turn_rate = 60, mount = [0, 27] }
 extra_weapons = [
-    { kind = "laser", range = 1498, reload_ticks = 20, damage = 610, turn_rate = 60, mount = [0, -31], aft = true },
+    { kind = "laser", range = 1586, reload_ticks = 20, damage = 1304, turn_rate = 60, mount = [0, -31], aft = true },
     { range = 1200, reload_ticks = 100, projectile_speed = 30, damage = 200, targets = "naval" },
 ]
 missile_defense = { kind = "tactical", range = 620, reload_ticks = 18 }

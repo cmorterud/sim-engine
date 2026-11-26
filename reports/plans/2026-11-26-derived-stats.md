@@ -64,3 +64,19 @@ Land line units are unchanged: the model reproduces them within rounding.
 - The Mobile Heavy Artillery's reload (11.5 s), from a rule retired 2026-11-25.
 - The destroyer's torpedo reach (900), and the escort corvette's shield and charge: step 3.
 - Costs, through the ability price list (step 3).
+
+## Battlecruiser: lasers priced (2026-11-26)
+
+The ability price list (step 3, in progress) prices a weapon that cannot be dodged by the damage
+shells lose to dodging. Its guns fired as shells at 60 against a T3 fleet that turns back 0.3
+seconds after each shell leaves lose 44% of their damage, weighted by cost (battleship 16%,
+battlecruiser 35%, cruiser 42%, destroyer 79%, corvette 65%), so the lasers' premium is
+√(1 ÷ 0.56) − 1 = 0.34. With today's stats the price list put it at about 3,830 against its 5,302,
+so it keeps its cost and its strength rises 1.4×: health 34,421 → 48,189, each laser 610 → 854.
+
+Then the design owner's rules on top (2026-11-26): each laser does at least twice a battleship
+turret's damage a second (652 against 326, so 1,304 every 2 seconds), and it sails half again the
+battleship's top speed (10.8). Its reach is the navy T3 line's at that speed, 1,586. At its cost of
+5,302, the price list leaves health of 31,516: it out-shoots the battleship up close (1,304 a
+second against 978) with about a third of its health. It already turns faster (35 against 27,
+radius 80 against 100).
