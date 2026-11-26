@@ -6,8 +6,8 @@ name: Soak
 on:
   # The full soak, nightly on main's newest commit (2:17 AM Eastern standard time, 3:17 in
   # summer, since cron keeps UTC), rather than on every push: it took about an hour, and the
-  # website no longer waits for it (pages.yml). A night it fails opens an issue, or adds to the
-  # one open (the alert job).
+  # website no longer waits for it (pages.yml). A night it fails tells the repository's owner
+  # (the alert job).
   schedule:
     - cron: "17 7 * * *"
   # A smaller soak for each pull request into main (the plan below): enough matches on every map
@@ -38,6 +38,10 @@ on:
       first_seed:
         description: "The first seed: more matches on fresh seeds, for a side-bias question"
         default: "1"
+      alert:
+        description: "If it fails, report it as a failed night would, to check that the alert arrives"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -267,7 +271,7 @@ jobs:
       # that did not match, per map. Fails if any shard failed.
       - name: Summarize
         run: |
-          python3 - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          python3 - <<'EOF' > summary.md
           import glob, re
           totals = {}
           for path in sorted(glob.glob("soak-*/soak.txt")):
@@ -306,7 +310,14 @@ jobs:
               share = f"{100 * t[0] / decided:.1f}%" if decided else "-"
               print(f"| {key} | {t[0]} | {t[1]} | {share} | {p_value(t[0], t[1]):.3f} | {t[2]} | {t[3]} | {t[4]} | {', '.join(t[5])} | {', '.join(t[6])} |")
           EOF
-          cat "$GITHUB_STEP_SUMMARY"
+          tee -a "$GITHUB_STEP_SUMMARY" < summary.md
+
+      # For the alert, which puts the table in the notification itself.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: summary-table
+          path: summary.md
+          retention-days: 14
 
       - name: Fail if any shard failed
         if: needs.soak.result != 'success'
@@ -314,27 +325,61 @@ jobs:
           echo "A soak shard failed: see its log."
           exit 1
 
-  # A nightly soak that fails opens an issue naming the commit and the run, which notifies the
-  # repository's watchers, or comments on the one still open, so that failing nights gather in
-  # one place until it is closed. The run's summary page has the failing seeds.
+  # A nightly soak that fails tells the repository's owner: which jobs failed, and the summary's
+  # table, so that the failing seeds are in the notification itself. With issues turned on, it
+  # opens an issue, which notifies the repository's watchers, or comments on the one still open,
+  # so that failing nights gather in one place until it is closed. With issues turned off, as they
+  # are here, it comments on the commit it soaked instead, mentioning the owner, which notifies
+  # them as an issue would: the first night that failed (2026-11-25) could only try to open an
+  # issue, and nobody heard. If neither can be posted, this job fails.
   alert:
     name: Report a failed nightly soak
     needs: [plan, build, soak, summary]
-    if: failure() && github.event_name == 'schedule'
+    if: failure() && (github.event_name == 'schedule' || inputs.alert)
     runs-on: ubuntu-latest
     permissions:
+      # To name the jobs that failed.
+      actions: read
+      # A commit comment needs only read access to the code.
+      contents: read
       issues: write
     steps:
+      # The summary's table, if the soak got that far.
+      - uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: summary-table
+
       - env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          OWNER: ${{ github.repository_owner }}
         run: |
           title="Nightly soak failed"
-          body="The nightly soak failed on $GITHUB_SHA: $RUN_URL. Its summary page has the unfinished seeds and replay mismatches, and each failing shard's log the rest."
-          number=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "in:title \"$title\"" --json number,title \
-            --jq "[.[] | select(.title == \"$title\")][0].number // empty")
-          if [ -n "$number" ]; then
-            gh issue comment "$number" -R "$GITHUB_REPOSITORY" --body "$body"
-          else
-            gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          failed=$(gh run view "$GITHUB_RUN_ID" -R "$GITHUB_REPOSITORY" --json jobs \
+            --jq '[.jobs[] | select(.conclusion == "failure") | .name] | join(", ")') || failed=""
+          {
+            echo "@$OWNER The nightly soak failed on $GITHUB_SHA: $RUN_URL"
+            echo
+            echo "Failed: ${failed:-see the run}."
+            echo
+            if [ -s summary.md ]; then
+              cat summary.md
+            else
+              echo "The soak did not get as far as its summary; the run's failing job has the reason."
+            fi
+          } > body.md
+          posted=""
+          if [ "$(gh api "repos/$GITHUB_REPOSITORY" --jq .has_issues)" = true ]; then
+            number=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "in:title \"$title\"" --json number,title \
+              --jq "[.[] | select(.title == \"$title\")][0].number // empty") || number=""
+            if [ -n "$number" ]; then
+              posted=$(gh issue comment "$number" -R "$GITHUB_REPOSITORY" --body-file body.md) || posted=""
+            else
+              posted=$(gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body-file body.md) || posted=""
+            fi
           fi
+          if [ -z "$posted" ]; then
+            posted=$(gh api -X POST "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/comments" -F body=@body.md --jq .html_url)
+          fi
+          echo "Reported at $posted" | tee -a "$GITHUB_STEP_SUMMARY"
