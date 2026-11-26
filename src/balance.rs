@@ -1479,6 +1479,7 @@ pub fn derive_domains_report() {
     score_cell(&mut cells, "T2 fleet with no anti-air against torpedo bombers", water(2), "t2_fleet_without_anti_air", 4.0, "t2_torpedo_bombers", None, Some(number("fleet_without_anti_air_loses_to_torpedo_bombers")));
     score_cell(&mut cells, "Submarines against a T2 fleet with no anti-submarine weapon", water(2), "t1_submarines", 24.0, "t2_fleet_without_anti_submarine", Some(number("submarines_beat_fleet_without_anti_submarine")), None);
     score_cell(&mut cells, "Destroyers alone against an equal cost of submarines", water(2), "t2_destroyers", 4.0, "t1_submarines", None, Some(-number("submarines_beat_destroyers")));
+    score_cell(&mut cells, "Torpedo Boats against an equal cost of submarines", water(2), "t2_torpedo_boats", 4.0, "t1_submarines", Some(number("torpedo_boats_beat_submarines")), None);
     score_cell(&mut cells, "T2 fleet against an equal cost of hovercraft, on water", water(2), "t2_fleet", 2.0, "t2_hovercraft", Some(-number("hovercraft_loses_to_fleet")), None);
     score_cell(&mut cells, "T1 fleet against an equal cost of the T1 air force, over water", water(1), "t1_fleet", 4.0, "t1_air_force", None, None);
     score_cell(&mut cells, "Frigates against an equal cost of T1 bombers, over water", water(1), "t1_frigates", 12.0, "t1_bombers", Some(number("frigates_against_t1_bombers_at_least")), None);

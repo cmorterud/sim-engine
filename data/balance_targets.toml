@@ -386,18 +386,20 @@ t1_share_after_15_min = 0.15
 strength_band = [0.80, 1.25]
 
 [domains.strength_over_anchor]
+# The navy's by the ability price list's costs (2026-11-26, [price_list]): the submarine, destroyer,
+# cruiser, battleship and battlecruiser are their strength per cost at those costs.
 t1_frigate = 0.57
-t1_attack_sub = 0.24
+t1_attack_sub = 0.21
 t1_torpedo_launcher = 0.45
 t2_torpedo_launcher = 0.64
-t2_destroyer = 0.33
-t2_cruiser = 0.20
+t2_destroyer = 0.36
+t2_cruiser = 0.18
 t2_torpedo_boat = 0.32
-t3_battleship = 0.40
+t3_battleship = 0.47
 # The battlecruiser by the ability price list (2026-11-26), not the inspiration's 0.25: its
 # lasers at twice a battleship turret's damage a second, its cost paying for lasers that cannot
 # be dodged (reports/plans/2026-11-26-derived-stats.md).
-t3_battlecruiser = 0.43
+t3_battlecruiser = 0.48
 t2_gunship = 0.62
 t2_torpedo_bomber = 0.55
 t2_fighter_bomber = 0.45
@@ -433,6 +435,7 @@ t3_air_force = { t3_air_superiority = 3, t3_heavy_gunship = 4 }
 t2_torpedo_bombers = { t2_torpedo_bomber = 1 }
 t1_submarines = { t1_attack_sub = 1 }
 t2_destroyers = { t2_destroyer = 1 }
+t2_torpedo_boats = { t2_torpedo_boat = 1 }
 t1_frigates = { t1_frigate = 1 }
 t1_bombers = { t1_bomber = 1 }
 t2_hovercraft = { t2_assault_hovercraft = 1 }
@@ -462,6 +465,11 @@ battleship_heavy_fleet_breaks_to_torpedo_bombers_at_most = 1.0
 # within [counters] even_margin, so that early ships are not shut down by cheaper aircraft. The
 # frigate's railgun is set by this (2026-11-24, and again once aircraft obeyed orders over open sea).
 frigates_against_t1_bombers_at_least = -0.15
+# The sub hunter is a hard counter (2026-11-26): Torpedo Boats beat an equal cost of submarines,
+# keeping at least [counters] winner_survivors. The ability price list averages a unit over an
+# enemy mix, half ships and half submarines, which undervalues a counter, so this duel holds the
+# Torpedo Boat's cost at 819 against the list's 634 (the design owner's call, 2026-11-26).
+torpedo_boats_beat_submarines = 0.40
 # Skipping the counter loses. A fleet with no anti-air loses to torpedo bombers; one with no
 # anti-submarine weapon loses to submarines. And submarines beat an equal cost of destroyers
 # alone: the destroyer hunts one submarine at a time, in about 25 seconds, while six of them sink
@@ -543,3 +551,41 @@ cruiser_min_range_share = 0.15
 aircraft_gun_over_anti_air = 0.7
 # The battleship's broadside every 13.5 seconds, the model's damage a second in faster volleys.
 battleship_broadside_seconds = 13.5
+
+[price_list]
+# Step 3 of the model (2026-11-26): what a unit costs, from what it can do.
+# reports/plans/2026-11-26-ability-price-list.md works each unit through it.
+#
+#   cost = sum over jobs of sqrt(health x damage a second at the job) / sigma_job
+#   sigma_job = anchor x tier efficiency x domain base / (1 + the job's prices)
+#
+# A job is a kind of target: surface, air, or submerged. Separate weapons firing at once each do
+# their own job; one weapon that can hit several kinds counts once, at its best job, with a
+# flexibility price. The anchor is the Medium Tank's strength per cost.
+anchor_strength_per_cost = 2.806
+tier_efficiency = [1.0, 1.0, 1.0]
+# The navy's base, solved by holding the T2 fleet (two destroyers, two cruisers) at its cost. Air's
+# is not set yet: its prices for flight and air-to-air fights are missing, so air keeps its costs.
+domain_base = { land = 1.0, navy = 0.691 }
+# Reach past the line's: x = c (r / r_line - 1), price x h / (1 - x h), h about 1 for shells and
+# 0 for missiles. Short of it: -c (1 - r / r_line) (v_line / v). Speed: speed_share (1 - v_line / v).
+speed_share = 0.3
+# Splash: sqrt(n) - 1, n the damage one shot does across a standing or marching formation over its
+# listed damage, measured.
+# Undodgeable weapons: sqrt(1 / (1 - d)) - 1, d the cost-weighted share of shell damage the
+# standard T3 fleet dodges, turning back 0.3 s after each shell leaves: 0.44, so 0.34.
+undodgeable = 0.34
+# Out of cannons' reach (submerged): sqrt(1 / (1 - f)) - 1, f the share of its tier's fleet's
+# anti-ship damage that cannot reach it. The T1 fleet for this is two frigates and two submarines,
+# f 0.63, so 0.65. A submarine's deck gun fires only on the surface and pays no premium.
+submerged_t1 = 0.65
+# A weapon with more than one kind of target: sqrt(1 / the largest share of the enemy mix a
+# single-target weapon could hit) - 1. A navy is taken as half ships, half submarines, so a torpedo
+# pays sqrt(2) - 1.
+torpedo_flexibility = 0.41
+# Torpedo decoys: as undodgeable, d the share of a submarine group's damage they stop, measured.
+# The sub hunter's decoys fire 3x as often as the destroyer's (its torpedoes do 3x the damage
+# a second): 33% stopped, so 0.22.
+torpedo_boat_decoys = 0.22
+# A sensor pays only for what it sees past its own vision, at the price per area of the cheapest
+# building that has it: (range^2 - vision^2) / building range^2 x building cost.

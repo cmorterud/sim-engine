@@ -327,6 +327,17 @@ fn frigates_hold_off_t1_bombers_and_lose_to_t1_torpedo_launchers() {
     assert!(!siege.broken, "an equal cost of frigates broke the T1 torpedo launchers: {siege:?}");
 }
 
+/// `[domains] torpedo_boats_beat_submarines`: the sub hunter is a hard counter, beating an equal
+/// cost of submarines (2026-11-26).
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn torpedo_boats_beat_an_equal_cost_of_submarines() {
+    let db = db();
+    let score = fight(&db, Field::new(Ground::Water, 2), "t2_torpedo_boats", 4.0, "t1_submarines");
+    let least = number(&domains(&["cells", "torpedo_boats_beat_submarines"]));
+    assert!(score >= least, "Torpedo Boats score {score:+.2} against an equal cost of submarines, under {least:+.2}");
+}
+
 /// `[domains]`, cells met before any naval pass that must stay met: skipping the counter loses (a
 /// fleet with no anti-air to torpedo bombers, one with no anti-submarine weapon to submarines),
 /// destroyers do not break T2 torpedo launchers, and cruisers and battleships outrange the point
