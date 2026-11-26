@@ -251,16 +251,17 @@ destroyer_guns_commander_on_land = [75, 85]
 five_destroyers_torpedoes_commander_under_water = [75, 85]
 destroyer_torpedoes_t1_sub_submerged = [22, 28]
 two_torpedo_boats_commander_under_water = [55, 65]
-# Six T1 Attack Submarines, about a destroyer's cost, attack-moving onto one, sink it in about 33
-# seconds: it kills one and damages a second, and the other five come through (2026-11-25). Timed
-# from the first shot to the destroyer's sinking, by tests/kill_times_test.rs.
-six_t1_subs_sink_a_destroyer = [29, 37]
-# A battleship's two broadsides destroy a commander on land in about 20 seconds: they are 16
-# seconds apart, which the T2 artillery position sets ([domains.cells]). The design owner's 26,
+# Six T1 Attack Submarines, about a destroyer's cost, attack-moving onto one, sink it in about 39
+# seconds (33 until 2026-11-26, when the destroyer took the navy line's health and the
+# submarine's health was kept, the design owner's pick). Timed from the first shot to the
+# destroyer's sinking, by tests/kill_times_test.rs.
+six_t1_subs_sink_a_destroyer = [34, 44]
+# A battleship's two broadsides destroy a commander on land in about 16 seconds: they are 13.5
+# seconds apart, which [model] sets (2026-11-26; 16 until then). The design owner's 26,
 # then anything up to 40 (2026-11-25).
 battleship_commander_on_land = [15, 40]
 # One battleship breaks an unassisted T3 Heavy Shield Generator's dome in about 45 seconds from
-# its first damage, a broadside every 16 that the dome cannot heal in time; the broadside that
+# its first damage, a broadside every 13.5 that the dome cannot heal in time; the broadside that
 # breaks it destroys the generator (2026-11-25).
 battleship_breaks_t3_shield = [40, 52]
 sam_t2_gunship = [1.5, 3.0]
@@ -501,3 +502,41 @@ battleship_breaks_shielded_t2_artillery = [40, 50]
 # torpedo launchers does not break them; and at T1, frigates closing on T1 torpedo launchers.
 destroyers_break_torpedo_launchers = false
 frigates_break_t1_torpedo_launchers = false
+
+[model]
+# The model every stat not pinned above is derived from (2026-11-26, the design owner's rule: no
+# number borrowed or fitted, and no exceptions). reports/plans/2026-11-26-derived-stats.md works
+# each unit through it.
+#
+# Time to kill, health over damage a second, between equal groups of the same unit:
+# base x tier x domain x role.
+time_to_kill_base_seconds = 14
+time_to_kill_tier = [1.0, 1.15, 1.3]
+time_to_kill_domain = { land = 1.0, navy = 3.0, air_to_air = 0.65 }
+# Roles, as a factor on the line's time to kill and its closing share. The destroyer is the navy
+# line, measured on its guns, its torpedo a sub-hunting ability; the frigate a brawler; the
+# torpedo boat the sub hunter archetype; the cruiser and the escort corvette support.
+role_time_to_kill = { line = 1.0, sub_hunter = 0.4 }
+# Reach: closing share x speed x time to kill. Navy closes at 0.57 of land's share.
+closing_share_land = [0.35, 0.44, 0.47]
+closing_share_navy_over_land = 0.57
+closing_share_role = { brawler = 0.12, sub_hunter = 0.35 }
+# Base speeds: land, and navy at about 85 seconds to cross 10 km.
+speed_land = 72
+speed_navy = 120.5
+# Strength split while costs wait for the ability price list: health = S x sqrt(T), damage a
+# second = S / sqrt(T), with S = sqrt(health x damage a second) kept.
+#
+# Defense window: artillery reaches 1.7, 3 and 3 times its tier's line reach; a point defense
+# reaches the artillery's over 1.2, and outranges its tier's direct fire by at least 15%.
+artillery_over_line = [1.7, 3.0, 3.0]
+point_defense_under_artillery = 1.2
+point_defense_over_direct_fire_min = 1.15
+# A missile reaches twice the cannon of its role; a missile cruiser's least range is 15% of its
+# reach. A cannon cruiser, in other factions, reaches half the missile cruiser's.
+missile_over_cannon = 2.0
+cruiser_min_range_share = 0.15
+# An aircraft's gun at ground targets reaches 0.7 of its tier's anti-air (T3: the Mobile Flak).
+aircraft_gun_over_anti_air = 0.7
+# The battleship's broadside every 13.5 seconds, the model's damage a second in faster volleys.
+battleship_broadside_seconds = 13.5

@@ -398,7 +398,7 @@ fn a_commander_on_an_attack_move_under_the_water_walks_on_past_what_it_cannot_sh
 fn a_submarine_surfaces_to_use_its_deck_gun_and_can_be_shelled_there_until_it_dives() {
     // Near the shore, with a Red light bot on the beach.
     let mut world = lake_world();
-    let sub = spawn(&mut world, "t1_attack_sub", Team::Blue, point(1_700, 1_000));
+    let sub = spawn(&mut world, "t1_attack_sub", Team::Blue, point(1_600, 1_000));
     let bot = spawn(&mut world, "t1_light_walker", Team::Red, point(1_250, 1_000));
     world.ecs.get::<&mut sim_engine::sim::components::Combat>(world.unit_entity(bot).unwrap()).unwrap().range = Fp::ZERO;
     let bot_health = world.unit_health(bot).unwrap();
@@ -844,7 +844,7 @@ fn an_anti_torpedo_charge_lures_torpedoes_onto_decoys() {
         if !charged {
             world.ecs.get::<&mut sim_engine::sim::components::TorpedoDefense>(entity).unwrap().range = Fp::ZERO;
         }
-        let sub = spawn(&mut world, "t1_attack_sub", Team::Red, point(2_500, 1_000));
+        let sub = spawn(&mut world, "t1_attack_sub", Team::Red, point(2_350, 1_000));
         let full = world.unit_health(destroyer).unwrap();
         let (mut decoys_seen, mut fired, mut landed) = (false, false, false);
         // Until the first torpedo has struck something: the charge is ready for it, not the next.

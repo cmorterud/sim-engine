@@ -252,6 +252,16 @@ out close and why: evidence about the process, not a target.
   and the broadside that does destroys the generator. That replaces the 2026-11-24 rule that set
   a turret's damage a second against the artillery's, and each battlecruiser laser at twice a
   turret's; and one battleship now breaks a coastal T3 position on its own.
+* 2026-11-26: stats derived from a model, the user's rule (`[model]`,
+  `reports/plans/2026-11-26-derived-stats.md`): no number borrowed or fitted, and no exceptions.
+  Time to kill = 14 s × tier × domain × role, and reach = closing share × speed × time to kill,
+  with health and damage split from it at today's strength until an ability price list sets
+  cost. Land is unchanged. Navy closes at 0.57 of land's share: the destroyer is the navy line
+  (measured on its guns, its torpedo a sub-hunting ability), the frigate a brawler, the torpedo
+  boat the sub hunter archetype, the cruiser support. A defense window places artillery and point
+  defenses; missiles reach twice their role's cannon; aircraft guns 0.7 of their tier's
+  anti-air. The battleship broadsides every 13.5 seconds, and six submarines now take about 39
+  seconds to sink a destroyer.
 
 ## Order of work
 

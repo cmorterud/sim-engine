@@ -198,7 +198,8 @@ adjacency = "mass_storage"
 
 # It cannot move, so it is worth more for its cost than the tank it stands in for ([premiums],
 # 2026-11-25): health and damage three times their earlier, so that three hold against half again
-# their cost in Medium Tanks.
+# their cost in Medium Tanks. Its reach sits a fifth inside T1 artillery's, which is 1.7 times the
+# Medium Tank's ([ranges] defense window, 2026-11-26).
 [[unit]]
 id = "t1_point_defense"
 name = "Point Defense"
@@ -210,7 +211,7 @@ build_time = 250
 health = 3900
 footprint = 1
 vision = 480
-weapon = { range = 520, reload_ticks = 3, projectile_speed = 70, damage = 150, turn_rate = 120 }
+weapon = { range = 496, reload_ticks = 3, projectile_speed = 70, damage = 150, turn_rate = 120 }
 
 # A dome that stops enemy shells from outside, while those under it fire out freely
 # (GAME_SPECIFICATION.md §8.1). Tier 2. Upkeep is energy per second while the dome is up.
@@ -725,6 +726,7 @@ builds = ["t1_air_scout", "t1_interceptor", "t1_bomber", "t2_gunship", "t2_fight
 
 # Hovers over what it attacks and fires down on it. Cost, build time, health, and damage set
 # against the Medium Tank as the inspiration has its gunship against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t2-air-navy.md).
+# Its gun reaches 0.7 of the T1 Mobile Anti-Air's, so that it cannot outrange its counter ([ranges], 2026-11-26).
 factory_kind = "air"
 
 [[unit]]
@@ -741,7 +743,7 @@ speed = 27
 radius = 12
 vision = 640
 flight = { elevation = 198, turn_rate = 90, fuel = 400, hovers = true }
-weapon = { range = 440, reload_ticks = 3, projectile_speed = 160, damage = "22.6", spread = 4 }
+weapon = { range = 448, reload_ticks = 3, projectile_speed = 160, damage = "22.6", spread = 4 }
 
 [[unit]]
 id = "t3_spy_plane"
@@ -805,6 +807,7 @@ extra_weapons = [{ range = 880, reload_ticks = 7, projectile_speed = 90, damage 
 # With an anti-air gun.
 # Cost, build time, health, and damage set against the Medium Tank as the inspiration has its
 # heavy gunship against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t3-air-navy.md).
+# Its gun reaches 0.7 of the Mobile Flak's, the farthest-reaching mobile anti-air ([ranges], 2026-11-26).
 [[unit]]
 id = "t3_heavy_gunship"
 name = "Heavy Gunship"
@@ -818,13 +821,11 @@ speed = 20
 radius = 16
 vision = 640
 flight = { elevation = 198, turn_rate = 60, fuel = 800, hovers = true }
-weapon = { range = 500, reload_ticks = 4, projectile_speed = 70, damage = 115, spread = 6 }
+weapon = { range = 560, reload_ticks = 4, projectile_speed = 70, damage = 115, spread = 6 }
 # Its railgun, two shots of 8 every 1.3 seconds, as one.
 extra_weapons = [{ range = 880, reload_ticks = 13, projectile_speed = 90, damage = "18.4", targets = "air" }]
 
-# Flak bursts on an aircraft and hits every enemy aircraft around it. Its shells fly at 90, not
-# The inspiration's 70, so that they can catch the fastest aircraft, which steer here instead of
-# being led.
+# Flak bursts on an aircraft and hits every enemy aircraft around it.
 # Static anti-air is worth more for its cost than mobile ([premiums], 2026-11-25): half again as
 # strong per cost against aircraft, mostly in health (2,590 to 11,600; damage 125 to 145).
 [[unit]]
@@ -842,7 +843,7 @@ vision = 480
 # catches slow aircraft and gunships, and fast T3 aircraft mostly outfly it.
 weapon = { kind = "flak", range = 1000, reload_ticks = 8, projectile_speed = 40, damage = 145, splash_radius = 70, targets = "air", turn_rate = 180, spread = 40 }
 
-# A volley of six missiles of 200 in the inspiration, one of 1,200 here.
+# One missile of 850 every 1.4 seconds, set by [kill_times] and [kills] (2026-11-25).
 [[unit]]
 id = "t3_sam"
 name = "SAM Launcher"
@@ -854,13 +855,12 @@ build_time = 1400
 health = 5000
 footprint = 1
 vision = 560
-# The deterrent to T3 aircraft: one badly damages a strategic bomber in a pass, two bring it down.
-# Its missiles steer themselves to their aircraft, as only anti-air missiles do. It destroys a
+# The deterrent to T3 aircraft. Its missiles steer themselves to their aircraft, as only anti-air missiles do. It destroys a
 # Strategic Bomber in about 11 seconds, eight missiles, and a Gunship in about 2, two
 # ([kill_times], 2026-11-25).
 weapon = { range = 1200, reload_ticks = 14, projectile_speed = 90, damage = 850, splash_radius = 30, targets = "air", turn_rate = 180, homing = true }
 
-# Two shells a volley in the inspiration, one here, and at 90 for the reason above. Its damage is set by the
+# Two shells a volley in the inspiration, one here, slow, as the Flak Cannon's. Its damage is set by the
 # anti-air share rule at T2, as the T1 mobile anti-air's is at T1: a T2 land army a fifth flak by
 # materiel comes out even with an equal cost of the AI's T2 air force (2026-11-24: 64, from 72).
 [[unit]]
@@ -998,7 +998,8 @@ upkeep = 150
 build_power = 20
 upgrades_to = "deep_scan_array"
 
-# Three shells of 70 a volley in the inspiration, one of 210 here.
+# Three shells of 70 a volley in the inspiration, one of 210 here. Its reach sits a fifth inside
+# T2 artillery's, three times the Heavy Tank's ([ranges] defense window, 2026-11-26).
 [[unit]]
 id = "t2_point_defense"
 name = "Point Defense (T2)"
@@ -1010,7 +1011,7 @@ build_time = 675
 health = 2250
 footprint = 1
 vision = 560
-weapon = { range = 1000, reload_ticks = 17, projectile_speed = 70, damage = 210, splash_radius = 40, turn_rate = 120, spread = 2 }
+weapon = { range = 1095, reload_ticks = 17, projectile_speed = 70, damage = 210, splash_radius = 40, turn_rate = 120, spread = 2 }
 
 # Aircraft land on its four pads to refuel at 50 times the rate on the ground, and are repaired
 # for energy. A T2 aircraft takes two pads, and a T3 one all four.
@@ -1075,7 +1076,8 @@ adjacency_size = 16
 vision = 560
 weapon = { range = 16500, reload_ticks = 133, projectile_speed = 150, damage = 11500, splash_radius = 83, turn_rate = 3, artillery = true, min_range = 3000, spread = 175, energy_per_shot = 16000 }
 
-# Artillery: it outranges the T3 heavy point defense by a fifth, so that it shells defenses
+# Artillery: it reaches three times the Heavy Walker's range and outranges the T3 heavy point
+# defense by a fifth ([ranges] defense window, 2026-11-26), so that it shells defenses
 # without reply, bursts over about one formation spacing, and cannot hit what is inside a quarter
 # of its reach. Priced to beat line units that attack-move into it, as at T1. It sets up for a
 # second before it fires, and any move packs it up, so it shells positions, its own defended or
@@ -1098,13 +1100,13 @@ turn_rate = 75
 turn_radius = 20
 radius = 12
 vision = 1010
-# It fires every 11.5 seconds, so that one of the battleship's three turrets does twice its damage
-# a second, and one and a half times a T2 Artillery Installation's (2026-11-24; it fired every 6
-# seconds before, out-shooting the installation). The shell is as it was, and kills what it did.
+# It fires every 11.5 seconds. That came from a rule retired on 2026-11-25 (a battleship turret at
+# twice its damage a second), and is to be derived from its time to kill in the next pass
+# (reports/plans/2026-11-26-derived-stats.md). The shell is as it was, and kills what it did.
 # At this rate it no longer wins a walk-in fight against bunched Medium Tanks of its cost, and is
 # not meant to: it is a siege piece, dearer than the line walker, that loses to what reaches it.
 # (For a day its cost was halved to keep that fight; put back on 2026-11-24.)
-weapon = { range = 1680, reload_ticks = 115, projectile_speed = 56, damage = "859.1", splash_radius = 83, turn_rate = 30, artillery = true, min_range = 420, spread = 60, setup_ticks = 10 }
+weapon = { range = 1575, reload_ticks = 115, projectile_speed = 56, damage = "859.1", splash_radius = 83, turn_rate = 30, artillery = true, min_range = 394, spread = 60, setup_ticks = 10 }
 
 # The inspiration's fighter-bomber: a carpet of napalm bombs, burning included, as one bomb, and two railguns at
 # aircraft, as one. Cost, build time, health, and damage set against the Medium Tank as the
@@ -1151,6 +1153,9 @@ upgrades_to = "naval_factory_t2"
 # does about twice what that ratio gives (13.9), so that frigates hold their own against an equal
 # cost of T1 bombers: navy is strong at sea ([domains]). It did half again (20.8) until aircraft
 # were made to obey orders over open sea (reports/balance/2026-11-24-t3-air-navy.md).
+# Since 2026-11-26 a brawler (reports/plans/2026-11-26-derived-stats.md): health and gun from the
+# navy T1 time to kill, 42 seconds, and a short reach, its closing share 0.12, so that it stays far
+# below the destroyer.
 [[unit]]
 id = "t1_frigate"
 name = "Frigate"
@@ -1159,7 +1164,7 @@ tier = 1
 mass = 203
 energy = 2026
 build_time = 1133
-health = 2984
+health = 2949
 speed = 12
 turn_rate = 60
 turn_radius = 40
@@ -1168,7 +1173,7 @@ vision = 640
 radar = 1600
 sonar = 320
 movement = "naval"
-weapon = { range = 560, reload_ticks = 17, projectile_speed = 60, damage = 118, splash_radius = 20, turn_rate = 120, spread = 4 }
+weapon = { range = 607, reload_ticks = 17, projectile_speed = 60, damage = 119, splash_radius = 20, turn_rate = 120, spread = 4 }
 extra_weapons = [{ range = 960, reload_ticks = 10, projectile_speed = 90, damage = 27, targets = "air", turn_rate = 180 }]
 
 # T2 and T3 naval factories: headquarters by upgrade, and support factories for T2 and T3
@@ -1244,9 +1249,11 @@ builds = ["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_escor
 # Two twin gauss cannons, a twin railgun at aircraft, torpedoes, and an anti-torpedo charge.
 # Each twin fires both muzzles at once (the inspiration's MuzzleSalvoDelay of 0). Cost, build time, health,
 # and its guns' damage set against the Medium Tank as the inspiration has its destroyer
-# against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t2-air-navy.md). It is the fleet's hunter of submarines, one at
-# a time: six Attack Submarines, about its cost, sink it in about 33 seconds, having lost one
-# ([kill_times], 2026-11-25). Its guns and torpedoes are set by kill times ([kill_times] in
+# against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t2-air-navy.md). Since
+# 2026-11-26 it is the navy line archetype (reports/plans/2026-11-26-derived-stats.md): health,
+# speed and gun reach come from the navy T2 time to kill measured on its guns, and its torpedo is a
+# sub-hunting ability. Six Attack Submarines, about its cost, sink it in about 39 seconds
+# ([kill_times]). Its guns and torpedoes are set by kill times ([kill_times] in
 # data/balance_targets.toml, 2026-11-25): its guns destroy a commander with no enhancements on
 # land in about 80 seconds; its torpedoes, a submerged Attack Submarine in about 25, and five
 # destroyers' a commander under the water in about 80.
@@ -1258,8 +1265,8 @@ tier = 2
 mass = 1658
 energy = 11050
 build_time = 8241
-health = 10231
-speed = 11
+health = 10990
+speed = "10.4"
 turn_rate = 55
 turn_radius = 60
 radius = 20
@@ -1270,11 +1277,11 @@ sonar = 720
 # 10 seconds (once a second from 2026-11-24 to 2026-11-25, when destroyers were to beat submarines).
 torpedo_defense = { range = 600, reload_ticks = 100 }
 movement = "naval"
-weapon = { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 455, splash_radius = 20, turn_rate = 90, spread = 7 }
+weapon = { range = 1255, reload_ticks = 40, projectile_speed = 60, damage = 455, splash_radius = 20, turn_rate = 90, spread = 7 }
 extra_weapons = [
-    { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 455, splash_radius = 20, turn_rate = 90, spread = 7 },
+    { range = 1255, reload_ticks = 40, projectile_speed = 60, damage = 455, splash_radius = 20, turn_rate = 90, spread = 7 },
     { range = 1200, reload_ticks = 14, projectile_speed = 120, damage = "15.6", targets = "air", turn_rate = 180 },
-    { range = 900, reload_ticks = 40, projectile_speed = 30, damage = 181, targets = "naval" },
+    { range = 900, reload_ticks = 40, projectile_speed = 30, damage = 190, targets = "naval" },
 ]
 
 # Cruise missiles it fires on its own, a gauss cannon, SAMs, and a close-in gun that shoots down
@@ -1283,7 +1290,9 @@ extra_weapons = [
 # that it breaks a coastal position within coastal_seconds_max. It is the fleet's anti-air: its
 # SAMs burst over massed aircraft, a blast of 80 like the mobile flak's, so that a composed fleet
 # beats an equal cost of aircraft over water and torpedo bombers need over twice its cost to break
-# it ([domains]; with a blast of 6 it lost to them at -0.62).
+# it ([domains]; with a blast of 6 it lost to them at -0.62). Since 2026-11-26 it is the support
+# archetype (reports/plans/2026-11-26-derived-stats.md): hull health from the support role, and
+# its missiles reach twice a cannon cruiser's line reach (1,493), with a least range of 15% of that.
 [[unit]]
 id = "t2_cruiser"
 name = "Cruiser"
@@ -1292,7 +1301,7 @@ tier = 2
 mass = 1473
 energy = 13260
 build_time = 6592
-health = 4358
+health = 4404
 speed = 9
 turn_rate = 40
 turn_radius = 60
@@ -1306,9 +1315,9 @@ movement = "naval"
 # Four a volley, a second apart, then six seconds' reload: forty, ten volleys, destroy a
 # commander with no enhancements in about 100 seconds, as one every 2.5 seconds did, at the
 # same damage a second (2026-11-25, reports/plans/2026-11-25-weapons-nukes-shields.md).
-weapon = { kind = "tactical_missile", automatic = true, range = 3000, reload_ticks = 100, projectile_speed = 32, damage = 454, splash_radius = 40, cruise_height = 400, salvo = { shots = 4, ticks = 40 } }
+weapon = { kind = "tactical_missile", automatic = true, artillery = true, min_range = 448, range = 2986, reload_ticks = 100, projectile_speed = 32, damage = 450, splash_radius = 40, cruise_height = 400, salvo = { shots = 4, ticks = 40 } }
 extra_weapons = [
-    { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 233, splash_radius = 40, turn_rate = 90, spread = 10 },
+    { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 226, splash_radius = 40, turn_rate = 90, spread = 10 },
     # The fleet's anti-air missiles, which steer themselves: eight a volley over its first
     # second, a volley every two, set by how many volleys each aircraft takes ([volleys] in
     # data/balance_targets.toml, 2026-11-25): one for every T1 aircraft, the Torpedo Bomber and
@@ -1324,11 +1333,13 @@ missile_defense = { kind = "tactical", range = 620, reload_ticks = 18, mounts = 
 # Three gauss turrets, four twin anti-air guns as one (each fires both muzzles at once, 12 a
 # shell, every 1.7 seconds), and two close-in guns, as one. Cost and build time set against the
 # Medium Tank as the inspiration has its battleship against its T1 tank (2026-11-24, [domains],
-# reports/balance/2026-11-24-t3-air-navy.md), and health half again its ratio's. Like the
+# reports/balance/2026-11-24-t3-air-navy.md). Health, speed and reach from the navy T3 time to
+# kill (2026-11-26, reports/plans/2026-11-26-derived-stats.md). Like the
 # inspiration's, it has next to no anti-air and no anti-torpedo charge: its escorts keep aircraft
 # and torpedoes off it.
 #
-# Its turrets fire as one broadside, every 16 seconds: three shells of 4,400, a ripple apart,
+# Its turrets fire as one broadside, every 13.5 seconds (16 until 2026-11-26, sped up so that the
+# model's damage a second goes into faster volleys): three shells of 4,400, a ripple apart,
 # 13,200 in all, set by the design owner's targets (2026-11-25, [broadsides] and [kill_times] in
 # data/balance_targets.toml). A volley destroys a T3 extractor and takes down a T2 Shield
 # Generator's dome, exactly; two destroy a commander. It outranges a T2 Artillery Installation by
@@ -1345,8 +1356,8 @@ tier = 3
 mass = 6842
 energy = 42423
 build_time = 24423
-health = 107000
-speed = "5.5"
+health = 90314
+speed = "7.2"
 turn_rate = 27
 turn_radius = 100
 radius = 46
@@ -1359,10 +1370,10 @@ movement = "naval"
 # the design owner's ask): from the edge of its reach they fly about 2.7 seconds, which a
 # commander that turns back as the broadside goes up only just walks out of; any closer, they hit.
 # They flew flat at 600 a second until then, slow enough to walk out of from half its reach.
-weapon = { range = 3000, reload_ticks = 160, projectile_speed = 110, damage = 4400, splash_radius = 40, turn_rate = 30, spread = 6, lobbed = true, mount = [0, 28] }
+weapon = { range = 2990, reload_ticks = 135, projectile_speed = 110, damage = 4400, splash_radius = 40, turn_rate = 30, spread = 6, lobbed = true, mount = [0, 28] }
 extra_weapons = [
-    { range = 3000, reload_ticks = 160, projectile_speed = 110, damage = 4400, splash_radius = 40, turn_rate = 30, spread = 6, lobbed = true, mount = [0, 10], broadside = true },
-    { range = 3000, reload_ticks = 160, projectile_speed = 110, damage = 4400, splash_radius = 40, turn_rate = 30, spread = 6, lobbed = true, mount = [0, -31], aft = true, broadside = true },
+    { range = 2990, reload_ticks = 135, projectile_speed = 110, damage = 4400, splash_radius = 40, turn_rate = 30, spread = 6, lobbed = true, mount = [0, 10], broadside = true },
+    { range = 2990, reload_ticks = 135, projectile_speed = 110, damage = 4400, splash_radius = 40, turn_rate = 30, spread = 6, lobbed = true, mount = [0, -31], aft = true, broadside = true },
     { range = 1200, reload_ticks = 17, projectile_speed = 180, damage = 96, targets = "air", turn_rate = 180 },
 ]
 missile_defense = { kind = "tactical", range = 620, reload_ticks = 18, mounts = 2 }
@@ -1381,8 +1392,8 @@ tier = 3
 mass = 5128
 energy = 43956
 build_time = 20677
-health = 35000
-speed = "8.5"
+health = 34421
+speed = "10.2"
 turn_rate = 35
 turn_radius = 80
 radius = 40
@@ -1391,12 +1402,11 @@ radar = 960
 sonar = 400
 torpedo_defense = { range = 600, reload_ticks = 100 }
 movement = "naval"
-# Each laser does twice the damage a second of one of the battleship's three turrets (600 every
-# 2 seconds against 3,000 every 20), so the two together out-shoot the battleship, 600 a second
-# to 450, inside a little over half its reach and with half its health.
-weapon = { kind = "laser", range = 1600, reload_ticks = 20, damage = 600, turn_rate = 60, mount = [0, 27] }
+# Two lasers, 610 every 2 seconds each, reaching half the battleship's: health, damage and reach
+# from the navy T3 time to kill (2026-11-26, reports/plans/2026-11-26-derived-stats.md).
+weapon = { kind = "laser", range = 1498, reload_ticks = 20, damage = 610, turn_rate = 60, mount = [0, 27] }
 extra_weapons = [
-    { kind = "laser", range = 1600, reload_ticks = 20, damage = 600, turn_rate = 60, mount = [0, -31], aft = true },
+    { kind = "laser", range = 1498, reload_ticks = 20, damage = 610, turn_rate = 60, mount = [0, -31], aft = true },
     { range = 1200, reload_ticks = 100, projectile_speed = 30, damage = 200, targets = "naval" },
 ]
 missile_defense = { kind = "tactical", range = 620, reload_ticks = 18 }
@@ -1413,12 +1423,13 @@ name = "Attack Submarine"
 class = "tank"
 tier = 1
 # Cost, build time, and health against the Medium Tank as the inspiration has its submarine
-# against its T1 tank (2026-11-24, [domains]). Its torpedo, 185 until 2026-11-25, is set so that six
-# of them sink a destroyer in about 33 seconds ([kill_times]), within its strength band.
+# against its T1 tank (2026-11-24, [domains]). Its torpedo and reach come from the navy T1 time to
+# kill (2026-11-26, reports/plans/2026-11-26-derived-stats.md): six of them sink a destroyer in
+# about 39 seconds ([kill_times]).
 mass = 265
 energy = 2122
 build_time = 1187
-health = 1163
+health = 1279
 speed = 12
 turn_rate = 80
 turn_radius = 30
@@ -1426,9 +1437,9 @@ radius = 12
 vision = 640
 sonar = 1200
 movement = "submarine"
-weapon = { range = 640, reload_ticks = 40, projectile_speed = 30, damage = 235, targets = "naval" }
+weapon = { range = 404, reload_ticks = 40, projectile_speed = 30, damage = 214, targets = "naval" }
 # The inspiration's deck gun, 25 a second out to 640, which fires only on the surface.
-extra_weapons = [{ range = 640, reload_ticks = 10, projectile_speed = 60, damage = 25, turn_rate = 90 }]
+extra_weapons = [{ range = 404, reload_ticks = 10, projectile_speed = 60, damage = 23, turn_rate = 90 }]
 
 # Five torpedoes a run, every 10 seconds: the inspiration's unit database counts its 3 projectiles a fire once,
 # not three times, so 15 a run was three times too many. Cost, build time, health, and damage set
@@ -1613,7 +1624,7 @@ turn_rate = 90
 turn_radius = 20
 radius = 11
 vision = 650
-weapon = { kind = "tactical_missile", automatic = true, artillery = true, min_range = 259, range = 1295, reload_ticks = 50, projectile_speed = 40, damage = "420.1", splash_radius = 10, cruise_height = 40 }
+weapon = { kind = "tactical_missile", automatic = true, artillery = true, min_range = 263, range = 1314, reload_ticks = 50, projectile_speed = 40, damage = "420.1", splash_radius = 10, cruise_height = 40 }
 
 # Field enhancements (GAME_SPECIFICATION.md §2.1), with the inspiration's numbers for its
 # commander. A commander has three bays, and one enhancement in each: a new one replaces what is
@@ -1981,7 +1992,7 @@ tier = 2
 mass = 796
 energy = 6365
 build_time = 3565
-health = 2800
+health = 3040
 speed = 12
 turn_rate = 100
 turn_radius = 40
@@ -1989,11 +2000,14 @@ radius = 15
 vision = 640
 sonar = 1440
 movement = "naval"
-# Four-torpedo volleys, and decoys against torpedoes. Cost, build time, health, and damage set
-# against the Medium Tank as the inspiration has its submarine hunter against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t2-air-navy.md).
+# Torpedoes and decoys against torpedoes. Cost and build time set against the Medium Tank as the
+# inspiration has its submarine hunter against its T1 tank (2026-11-24, [domains],
+# reports/balance/2026-11-24-t2-air-navy.md). Since 2026-11-26 it is the sub hunter archetype: health
+# and reach from 0.4 times the navy T2 time to kill and a closing share of 0.35
+# (reports/plans/2026-11-26-derived-stats.md).
 # Two destroy a commander with no enhancements under the water in about 60 seconds
 # ([kill_times], 2026-11-25).
-weapon = { range = 1100, reload_ticks = 8, projectile_speed = 30, damage = 126, targets = "naval" }
+weapon = { range = 814, reload_ticks = 8, projectile_speed = 30, damage = 126, targets = "naval" }
 torpedo_defense = { range = 500, reload_ticks = 25 }
 
 # It cannot move, so it is worth more for its cost ([premiums], 2026-11-25): damage two and a half
@@ -2010,12 +2024,13 @@ build_time = 2000
 health = 6500
 footprint = 1
 vision = 480
-# A gatling cannon: 15-round bursts, about 250 damage a second.
-weapon = { range = 1400, reload_ticks = 7, projectile_speed = 64, damage = 438, splash_radius = 20, turn_rate = 90, spread = 4 }
+# A gatling cannon, about 626 damage a second. Its reach is the T3 defense window's: the Mobile
+# Heavy Artillery's divided by 1.2 (2026-11-26, reports/plans/2026-11-26-derived-stats.md).
+weapon = { range = 1313, reload_ticks = 7, projectile_speed = 64, damage = 438, splash_radius = 20, turn_rate = 90, spread = 4 }
 
 # The T3 dome: a little more regeneration a second than the T2 one, and far more health, so it
 # heals more slowly for its size, in about three minutes. One battleship, unassisted, wears it
-# down in about 45 seconds, a broadside every 16 that it cannot heal in time, and the one that
+# down in about 45 seconds, a broadside every 13.5 that it cannot heal in time, and the one that
 # breaks it destroys the generator under it (2026-11-25). Until then it healed 500 a second, faster
 # than a battleship's guns, so that one battleship never broke it.
 [[unit]]

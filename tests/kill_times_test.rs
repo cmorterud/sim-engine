@@ -530,9 +530,9 @@ fn a_battleships_turrets_fire_together_a_ripple_apart() {
 /// turns back 0.3 seconds after each broadside's first shell leaves, as a player would on seeing it.
 #[test]
 fn a_microed_commander_only_just_walks_out_of_a_battleships_broadsides_at_its_full_reach() {
-    let reach = fp_int(3_000);
+    let reach = fp_int(2_990);
     let db = BlueprintDb::standard();
-    assert!(db.get(db.id("t3_battleship")).weapon.is_some_and(|weapon| weapon.lobbed && weapon.range == reach), "the battleship lobs its shells to 3,000");
+    assert!(db.get(db.id("t3_battleship")).weapon.is_some_and(|weapon| weapon.lobbed && weapon.range == reach), "the battleship lobs its shells to 2,990");
     let survives_from = |range: i32| {
         let mut world = world();
         let ship = place(&mut world, "t3_battleship", Team::Blue, (SHORE_X - 600, 5_000));
@@ -561,7 +561,7 @@ fn a_microed_commander_only_just_walks_out_of_a_battleships_broadsides_at_its_fu
         }
         (true, fired)
     };
-    let (survived, fired) = survives_from(2_990);
+    let (survived, fired) = survives_from(2_980);
     assert!(survived && fired >= 15, "from the edge of its reach the commander walked out of {fired} shells: {survived}");
     let (survived, fired) = survives_from(2_200);
     assert!(!survived, "from 2,200 the commander walked out of all {fired} shells");
