@@ -15,6 +15,7 @@ use winit::window::Window;
 use super::camera::{Camera, HeightField};
 use super::instances::{InstanceBatches, UnitInstanceRaw};
 use super::meshes::{MeshSet, MeshVertex, Shape};
+use super::bloom::{self, Bloom};
 use super::gpu_timing::GpuTimer;
 use super::climate::Climate;
 use super::detail::detail_levels;
@@ -69,6 +70,9 @@ struct Globals {
     /// detail), how near the water's edge the ground stays at full detail and how far each level
     /// after that is, and 1 if the shore limits the detail at all.
     lod: [f32; 4],
+    /// Bloom (bloom.rs): 1 while the scene is drawn untoned into bloom's bright target, then
+    /// how much brighter glowing parts are drawn.
+    post: [f32; 4],
 }
 
 /// How much the land and sea shaders draw. `Low` is for weak graphics, such as a laptop's
@@ -162,17 +166,17 @@ pub struct Renderer {
     depth_format: wgpu::TextureFormat,
     samples: u32,
     targets: SceneTargets,
-    unit_pipeline: wgpu::RenderPipeline,
-    shadow_pipeline: wgpu::RenderPipeline,
-    scar_pipeline: wgpu::RenderPipeline,
-    wake_pipeline: wgpu::RenderPipeline,
-    terrain_pipeline: wgpu::RenderPipeline,
-    /// The same for blocks drawn coarser, lit from the relief field at each pixel.
-    far_terrain_pipeline: wgpu::RenderPipeline,
-    box_pipeline: wgpu::RenderPipeline,
-    dome_pipeline: wgpu::RenderPipeline,
-    water_pipeline: wgpu::RenderPipeline,
-    smoke_pipeline: wgpu::RenderPipeline,
+    /// The scene's pipelines for the window, and for bloom's bright target once bloom is on.
+    pipelines: ScenePipelines,
+    /// Bloom and the scene's pipelines for its bright target, once it has been turned on, and
+    /// whether it is on.
+    bloom: Option<(Bloom, ScenePipelines)>,
+    bloom_on: bool,
+    /// Whether the adapter can draw bloom's bright target (bloom.rs, `supported`).
+    bloom_supported: bool,
+    /// What the scene's pipelines are made from, kept to make bloom's when it is turned on.
+    scene_layout: wgpu::PipelineLayout,
+    shader: wgpu::ShaderModule,
     bind_group: wgpu::BindGroup,
     globals_buffer: wgpu::Buffer,
     /// The map's climate's colors (climate.rs).
@@ -300,6 +304,37 @@ impl Renderer {
         self.quality
     }
 
+    /// Turns bloom on or off from the next frame on. Whether it is on: never where the adapter
+    /// cannot draw its bright target.
+    pub fn set_bloom(&mut self, on: bool) -> bool {
+        if !on || !self.bloom_supported {
+            if on {
+                log::warn!("bloom is not available: the graphics adapter cannot draw into {:?}", bloom::HDR_FORMAT);
+            }
+            self.bloom_on = false;
+            return false;
+        }
+        if self.bloom.is_none() {
+            let started = Instant::now();
+            let effect = Bloom::new(&self.device, self.config.format, self.config.width, self.config.height, self.samples);
+            let multisample = wgpu::MultisampleState { count: self.samples, ..Default::default() };
+            let pipelines = ScenePipelines::new(&self.device, &self.scene_layout, &self.shader, bloom::HDR_FORMAT, self.depth_format, multisample);
+            log::info!("bloom set up in {:.0} ms", started.elapsed().as_secs_f64() * 1000.0);
+            self.bloom = Some((effect, pipelines));
+        }
+        self.bloom_on = true;
+        true
+    }
+
+    pub const fn bloom(&self) -> bool {
+        self.bloom_on
+    }
+
+    /// Bloom and its pipelines, while it is on.
+    fn active_bloom(&self) -> Option<&(Bloom, ScenePipelines)> {
+        self.bloom.as_ref().filter(|_| self.bloom_on)
+    }
+
     /// Starts timing the terrain, units, and water on the graphics card, for test runs. Whether
     /// the adapter can.
     pub fn start_gpu_timing(&mut self) -> bool {
@@ -377,6 +412,7 @@ impl Renderer {
         let supports = |format| adapter.get_texture_format_features(format).flags.sample_count_supported(MSAA_SAMPLES);
         let msaa_samples = if supports(format) && supports(depth_format) { MSAA_SAMPLES } else { 1 };
         let multisample = wgpu::MultisampleState { count: msaa_samples, ..Default::default() };
+        let bloom_supported = bloom::supported(&adapter, msaa_samples);
 
         // The height map, read directly in the vertex shader.
         let samples = heights.samples() as u32;
@@ -660,314 +696,7 @@ impl Renderer {
         });
         let shader = device.create_shader_module(wgpu::include_wgsl!("shaders.wgsl"));
 
-        let depth = |write: bool, compare| {
-            Some(wgpu::DepthStencilState {
-                format: depth_format,
-                depth_write_enabled: write,
-                depth_compare: compare,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            })
-        };
-        let targets = [Some(wgpu::ColorTargetState {
-            format,
-            blend: None,
-            write_mask: wgpu::ColorWrites::ALL,
-        })];
-
-        let mesh_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 9 => Uint32, 10 => Float32x3];
-        let instance_attributes = wgpu::vertex_attr_array![
-            2 => Float32x4, 3 => Float32x4, 4 => Float32x4, 5 => Float32x4, 6 => Float32x4, 7 => Unorm8x4, 8 => Unorm8x4
-        ];
-        let unit_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("units"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_unit",
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[
-                    wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<MeshVertex>() as u64,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &mesh_attributes,
-                    },
-                    wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<UnitInstanceRaw>() as u64,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &instance_attributes,
-                    },
-                ],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_unit",
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &targets,
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: depth(true, wgpu::CompareFunction::Greater),
-            multisample,
-            multiview: None,
-        });
-        let terrain = |label, fragment| {
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(label),
-                layout: Some(&layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: "vs_terrain",
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    buffers: &[],
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: fragment,
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    targets: &targets,
-                }),
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: depth(true, wgpu::CompareFunction::Greater),
-                multisample,
-                multiview: None,
-            })
-        };
-        let terrain_pipeline = terrain("terrain", "fs_terrain");
-        let far_terrain_pipeline = terrain("far terrain", "fs_terrain_far");
-        let box_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("selection box"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_box",
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_box",
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &targets,
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: depth(false, wgpu::CompareFunction::Always),
-            multisample,
-            multiview: None,
-        });
-
-        // Shadows darken the ground already drawn, each pixel only once however many shapes
-        // cover it: the first to reach a pixel marks it in the stencil, and the rest skip it.
-        let darken = [Some(wgpu::ColorTargetState {
-            format,
-            blend: Some(wgpu::BlendState {
-                color: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::Zero, dst_factor: wgpu::BlendFactor::Src, operation: wgpu::BlendOperation::Add },
-                alpha: wgpu::BlendComponent::REPLACE,
-            }),
-            write_mask: wgpu::ColorWrites::COLOR,
-        })];
-        let once = wgpu::StencilFaceState {
-            compare: wgpu::CompareFunction::Equal,
-            fail_op: wgpu::StencilOperation::Keep,
-            depth_fail_op: wgpu::StencilOperation::Keep,
-            pass_op: wgpu::StencilOperation::IncrementClamp,
-        };
-        let shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("shadows"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_shadow",
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[
-                    wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<MeshVertex>() as u64,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &mesh_attributes,
-                    },
-                    wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<UnitInstanceRaw>() as u64,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &instance_attributes,
-                    },
-                ],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_shadow",
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &darken,
-            }),
-            // Flattened onto the ground, a shape's faces overlap both ways up.
-            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: depth_format,
-                depth_write_enabled: false,
-                depth_compare: wgpu::CompareFunction::Greater,
-                stencil: wgpu::StencilState { front: once, back: once, read_mask: 0xff, write_mask: 0xff },
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample,
-            multiview: None,
-        });
-
-        // Craters and scorch marks, blended onto the ground before the shadows fall on them.
-        let blended_scars = [Some(wgpu::ColorTargetState { format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::COLOR })];
-        let scar_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("battle scars"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_scar",
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[
-                    wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<MeshVertex>() as u64,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &mesh_attributes,
-                    },
-                    wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<UnitInstanceRaw>() as u64,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &instance_attributes,
-                    },
-                ],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_scar",
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &blended_scars,
-            }),
-            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
-            depth_stencil: depth(false, wgpu::CompareFunction::Greater),
-            multisample,
-            multiview: None,
-        });
-        // Ships' wakes: the same flat marks, blended over the water after it is drawn.
-        let wake_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("wakes"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_scar",
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[
-                    wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<MeshVertex>() as u64,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &mesh_attributes,
-                    },
-                    wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<UnitInstanceRaw>() as u64,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &instance_attributes,
-                    },
-                ],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_wake",
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &blended_scars,
-            }),
-            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
-            depth_stencil: depth(false, wgpu::CompareFunction::Greater),
-            multisample,
-            multiview: None,
-        });
-
-        // See-through, so drawn last, tested against the scene but leaving its depth alone.
-        let blended = [Some(wgpu::ColorTargetState { format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })];
-        let dome_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("shield domes"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_dome",
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[
-                    wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<MeshVertex>() as u64,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &mesh_attributes,
-                    },
-                    wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<UnitInstanceRaw>() as u64,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &instance_attributes,
-                    },
-                ],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_dome",
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &blended,
-            }),
-            // Only the near side, so that the far side does not haze over what is inside.
-            primitive: wgpu::PrimitiveState { cull_mode: Some(wgpu::Face::Back), ..Default::default() },
-            depth_stencil: depth(false, wgpu::CompareFunction::Greater),
-            multisample,
-            multiview: None,
-        });
-
-        // The water's surface: the terrain grid again, flat at the water's height, see-through,
-        // and hidden wherever the ground stands above it.
-        let water_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("water"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_water",
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_water",
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                // The water's color comes already multiplied by how much it covers, so that its
-                // sun glints add light over the seabed instead of hiding it.
-                targets: &[Some(wgpu::ColorTargetState { format, blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })],
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: depth(false, wgpu::CompareFunction::Greater),
-            multisample,
-            multiview: None,
-        });
-
-        // Smoke: lit like the units, but see-through, over everything solid.
-        let smoke_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("smoke"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_smoke",
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[
-                    wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<MeshVertex>() as u64,
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &mesh_attributes,
-                    },
-                    wgpu::VertexBufferLayout {
-                        array_stride: std::mem::size_of::<UnitInstanceRaw>() as u64,
-                        step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &instance_attributes,
-                    },
-                ],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_smoke",
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &blended,
-            }),
-            primitive: wgpu::PrimitiveState { cull_mode: Some(wgpu::Face::Back), ..Default::default() },
-            depth_stencil: depth(false, wgpu::CompareFunction::Greater),
-            multisample,
-            multiview: None,
-        });
+        let scene_pipelines = ScenePipelines::new(&device, &layout, &shader, format, depth_format, multisample);
 
         let meshes = MeshSet::build();
         let mesh_vertices = device.create_buffer_init(&BufferInitDescriptor {
@@ -997,16 +726,12 @@ impl Renderer {
             depth_format,
             samples: msaa_samples,
             targets,
-            unit_pipeline,
-            shadow_pipeline,
-            scar_pipeline,
-            wake_pipeline,
-            terrain_pipeline,
-            far_terrain_pipeline,
-            box_pipeline,
-            dome_pipeline,
-            water_pipeline,
-            smoke_pipeline,
+            pipelines: scene_pipelines,
+            bloom: None,
+            bloom_on: false,
+            bloom_supported,
+            scene_layout: layout,
+            shader,
             bind_group,
             globals_buffer,
             climate_buffer,
@@ -1115,6 +840,9 @@ impl Renderer {
         self.config.height = height;
         self.surface.configure(&self.device, &self.config);
         self.targets = SceneTargets::new(&self.device, width, height, self.config.format, self.depth_format, self.samples);
+        if let Some((effect, _)) = &mut self.bloom {
+            effect.resize(&self.device, width, height);
+        }
     }
 
     fn prepare(&mut self, scene: &FrameScene<'_>) {
@@ -1166,6 +894,7 @@ impl Renderer {
             terrain_scale: [self.height_scale, self.icon_scale, self.fog_scale, self.water_level],
             water: [scene.time, self.grid_size as f32, strategic_share(camera.zoom_from_closest()), self.quality.shader_value()],
             lod: [screen_per_error as f32, coast_margin as f32, coast_step as f32, if self.coast_levels.is_some() { 1.0 } else { 0.0 }],
+            post: if self.bloom_on { [1.0, bloom::EMISSIVE_GAIN, 0.0, 0.0] } else { [0.0, 1.0, 0.0, 0.0] },
         };
         self.queue.write_buffer(&self.globals_buffer, 0, bytemuck::bytes_of(&globals));
         let placement = GridPlacement { first, step, size: self.grid_size, cell_units: self.cell_units, height_scale: f64::from(self.height_scale) };
@@ -1211,12 +940,26 @@ impl Renderer {
         self.instance_buffer.write(&self.device, &self.queue, &self.flat_instances);
     }
 
-    fn encode(&self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView, scene_targets: &SceneTargets) {
-        // With several samples per pixel, they are averaged into the target as the pass ends.
-        let (view, resolve_target, store) = match &scene_targets.color {
-            Some(color) => (color, Some(target), wgpu::StoreOp::Discard),
-            None => (target, None, wgpu::StoreOp::Store),
-        };
+    /// Draws the scene into `target`: directly, or with bloom on, into bloom's bright target,
+    /// and from there with its glow.
+    fn encode(&self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView) {
+        match self.active_bloom() {
+            Some((effect, pipelines)) => {
+                let (view, resolve_target) = effect.scene_attachment();
+                self.encode_scene(encoder, view, resolve_target, pipelines);
+                effect.encode(encoder, target);
+            }
+            None => match &self.targets.color {
+                Some(color) => self.encode_scene(encoder, color, Some(target), &self.pipelines),
+                None => self.encode_scene(encoder, target, None, &self.pipelines),
+            },
+        }
+    }
+
+    /// Draws the scene into `view` with `pipelines`, made for its format. With several samples
+    /// per pixel, they are averaged into `resolve_target` as the pass ends.
+    fn encode_scene(&self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, resolve_target: Option<&wgpu::TextureView>, pipelines: &ScenePipelines) {
+        let store = if resolve_target.is_some() { wgpu::StoreOp::Discard } else { wgpu::StoreOp::Store };
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("scene"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1225,7 +968,7 @@ impl Renderer {
                 ops: wgpu::Operations { load: wgpu::LoadOp::Clear(BACKGROUND), store },
             })],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &scene_targets.depth,
+                view: &self.targets.depth,
                 // Reversed Z: the far plane is 0.
                 depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0.0), store: wgpu::StoreOp::Discard }),
                 stencil_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0), store: wgpu::StoreOp::Discard }),
@@ -1242,13 +985,13 @@ impl Renderer {
         };
 
         stamp(&mut pass, 0);
-        pass.set_pipeline(&self.terrain_pipeline);
+        pass.set_pipeline(&pipelines.terrain);
         pass.set_index_buffer(self.terrain_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         for run in &self.block_plan.terrain {
             pass.draw_indexed(run.clone(), 0, 0..1);
         }
         if !self.block_plan.far_terrain.is_empty() {
-            pass.set_pipeline(&self.far_terrain_pipeline);
+            pass.set_pipeline(&pipelines.far_terrain);
             for run in &self.block_plan.far_terrain {
                 pass.draw_indexed(run.clone(), 0, 0..1);
             }
@@ -1261,11 +1004,11 @@ impl Renderer {
         // Battle scars go on the bare ground, under the shadows.
         let scars = &self.shape_instances[Shape::Scar as usize];
         if !scars.is_empty() {
-            pass.set_pipeline(&self.scar_pipeline);
+            pass.set_pipeline(&pipelines.scar);
             pass.draw_indexed(self.shape_indices[Shape::Scar as usize].clone(), 0, scars.clone());
         }
         // Shadows go on the bare ground, before the units that cast them stand over them.
-        pass.set_pipeline(&self.shadow_pipeline);
+        pass.set_pipeline(&pipelines.shadow);
         pass.set_stencil_reference(0);
         for ((indices, instances), shape) in self.shape_indices.iter().zip(&self.shape_instances).zip(Shape::ALL) {
             if !instances.is_empty() && shape.casts_shadow() {
@@ -1277,7 +1020,7 @@ impl Renderer {
                 pass.draw_indexed(indices.clone(), 0, instances.clone());
             }
         }
-        pass.set_pipeline(&self.unit_pipeline);
+        pass.set_pipeline(&pipelines.unit);
         for ((indices, instances), shape) in self.shape_indices.iter().zip(&self.shape_instances).zip(Shape::ALL) {
             if !instances.is_empty() && !matches!(shape, Shape::Dome | Shape::Scar | Shape::Smoke) {
                 pass.draw_indexed(indices.clone(), 0, instances.clone());
@@ -1292,7 +1035,7 @@ impl Renderer {
         // Water over the units, so that what is under it shows through, tinted by its depth.
         // Only over the blocks in the picture with ground under the water.
         if !self.block_plan.water.is_empty() {
-            pass.set_pipeline(&self.water_pipeline);
+            pass.set_pipeline(&pipelines.water);
             pass.set_index_buffer(self.terrain_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
             for run in &self.block_plan.water {
                 pass.draw_indexed(run.clone(), 0, 0..1);
@@ -1304,22 +1047,22 @@ impl Renderer {
         // shader keeps only the wakes.
         let scars = &self.shape_instances[Shape::Scar as usize];
         if !scars.is_empty() && !self.block_plan.water.is_empty() {
-            pass.set_pipeline(&self.wake_pipeline);
+            pass.set_pipeline(&pipelines.wake);
             pass.draw_indexed(self.shape_indices[Shape::Scar as usize].clone(), 0, scars.clone());
         }
         let smoke = &self.shape_instances[Shape::Smoke as usize];
         if !smoke.is_empty() {
-            pass.set_pipeline(&self.smoke_pipeline);
+            pass.set_pipeline(&pipelines.smoke);
             pass.draw_indexed(self.shape_indices[Shape::Smoke as usize].clone(), 0, smoke.clone());
         }
         let domes = &self.shape_instances[Shape::Dome as usize];
         if !domes.is_empty() {
-            pass.set_pipeline(&self.dome_pipeline);
+            pass.set_pipeline(&pipelines.dome);
             pass.draw_indexed(self.shape_indices[Shape::Dome as usize].clone(), 0, domes.clone());
         }
 
         if self.draw_box {
-            pass.set_pipeline(&self.box_pipeline);
+            pass.set_pipeline(&pipelines.selection_box);
             pass.draw(0..24, 0..1);
         }
     }
@@ -1342,7 +1085,7 @@ impl Renderer {
         };
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("frame") });
-        self.encode(&mut encoder, &view, &self.targets);
+        self.encode(&mut encoder, &view);
         if let Some(timer) = &mut self.gpu_timer {
             timer.resolve(&mut encoder);
         }
@@ -1388,7 +1131,7 @@ impl Renderer {
                 break;
             }
             let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("timing") });
-            self.encode(&mut encoder, &view, &self.targets);
+            self.encode(&mut encoder, &view);
             if let Some(timer) = &mut self.gpu_timer {
                 timer.resolve(&mut encoder);
             }
@@ -1429,7 +1172,7 @@ impl Renderer {
         });
         let view = target.create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("capture") });
-        self.encode(&mut encoder, &view, &self.targets);
+        self.encode(&mut encoder, &view);
         let extra = ui.map_or_else(Vec::new, |ui| self.encode_ui(&mut encoder, &view, ui));
         encoder.copy_texture_to_buffer(
             target.as_image_copy(),
@@ -1460,6 +1203,348 @@ impl Renderer {
         }
         readback.unmap();
         (width, height, pixels)
+    }
+}
+
+/// The scene's pipelines, for drawing into a target of one format: the window's, or the
+/// bright one that bloom spreads light from (bloom.rs).
+struct ScenePipelines {
+    unit: wgpu::RenderPipeline,
+    shadow: wgpu::RenderPipeline,
+    scar: wgpu::RenderPipeline,
+    wake: wgpu::RenderPipeline,
+    terrain: wgpu::RenderPipeline,
+    /// The same for blocks drawn coarser, lit from the relief field at each pixel.
+    far_terrain: wgpu::RenderPipeline,
+    selection_box: wgpu::RenderPipeline,
+    dome: wgpu::RenderPipeline,
+    water: wgpu::RenderPipeline,
+    smoke: wgpu::RenderPipeline,
+}
+
+impl ScenePipelines {
+    fn new(device: &wgpu::Device, layout: &wgpu::PipelineLayout, shader: &wgpu::ShaderModule, format: wgpu::TextureFormat, depth_format: wgpu::TextureFormat, multisample: wgpu::MultisampleState) -> Self {
+        let depth = |write: bool, compare| {
+            Some(wgpu::DepthStencilState {
+                format: depth_format,
+                depth_write_enabled: write,
+                depth_compare: compare,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            })
+        };
+        let targets = [Some(wgpu::ColorTargetState {
+            format,
+            blend: None,
+            write_mask: wgpu::ColorWrites::ALL,
+        })];
+
+        let mesh_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 9 => Uint32, 10 => Float32x3];
+        let instance_attributes = wgpu::vertex_attr_array![
+            2 => Float32x4, 3 => Float32x4, 4 => Float32x4, 5 => Float32x4, 6 => Float32x4, 7 => Unorm8x4, 8 => Unorm8x4
+        ];
+        let unit_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("units"),
+            layout: Some(layout),
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: "vs_unit",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<MeshVertex>() as u64,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &mesh_attributes,
+                    },
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<UnitInstanceRaw>() as u64,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &instance_attributes,
+                    },
+                ],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: "fs_unit",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &targets,
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: depth(true, wgpu::CompareFunction::Greater),
+            multisample,
+            multiview: None,
+        });
+        let terrain = |label, fragment| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(layout),
+                vertex: wgpu::VertexState {
+                    module: shader,
+                    entry_point: "vs_terrain",
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: shader,
+                    entry_point: fragment,
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &targets,
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: depth(true, wgpu::CompareFunction::Greater),
+                multisample,
+                multiview: None,
+            })
+        };
+        let terrain_pipeline = terrain("terrain", "fs_terrain");
+        let far_terrain_pipeline = terrain("far terrain", "fs_terrain_far");
+        let box_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("selection box"),
+            layout: Some(layout),
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: "vs_box",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: "fs_box",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &targets,
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: depth(false, wgpu::CompareFunction::Always),
+            multisample,
+            multiview: None,
+        });
+
+        // Shadows darken the ground already drawn, each pixel only once however many shapes
+        // cover it: the first to reach a pixel marks it in the stencil, and the rest skip it.
+        let darken = [Some(wgpu::ColorTargetState {
+            format,
+            blend: Some(wgpu::BlendState {
+                color: wgpu::BlendComponent { src_factor: wgpu::BlendFactor::Zero, dst_factor: wgpu::BlendFactor::Src, operation: wgpu::BlendOperation::Add },
+                alpha: wgpu::BlendComponent::REPLACE,
+            }),
+            write_mask: wgpu::ColorWrites::COLOR,
+        })];
+        let once = wgpu::StencilFaceState {
+            compare: wgpu::CompareFunction::Equal,
+            fail_op: wgpu::StencilOperation::Keep,
+            depth_fail_op: wgpu::StencilOperation::Keep,
+            pass_op: wgpu::StencilOperation::IncrementClamp,
+        };
+        let shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("shadows"),
+            layout: Some(layout),
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: "vs_shadow",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<MeshVertex>() as u64,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &mesh_attributes,
+                    },
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<UnitInstanceRaw>() as u64,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &instance_attributes,
+                    },
+                ],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: "fs_shadow",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &darken,
+            }),
+            // Flattened onto the ground, a shape's faces overlap both ways up.
+            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: depth_format,
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Greater,
+                stencil: wgpu::StencilState { front: once, back: once, read_mask: 0xff, write_mask: 0xff },
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample,
+            multiview: None,
+        });
+
+        // Craters and scorch marks, blended onto the ground before the shadows fall on them.
+        let blended_scars = [Some(wgpu::ColorTargetState { format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::COLOR })];
+        let scar_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("battle scars"),
+            layout: Some(layout),
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: "vs_scar",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<MeshVertex>() as u64,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &mesh_attributes,
+                    },
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<UnitInstanceRaw>() as u64,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &instance_attributes,
+                    },
+                ],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: "fs_scar",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &blended_scars,
+            }),
+            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+            depth_stencil: depth(false, wgpu::CompareFunction::Greater),
+            multisample,
+            multiview: None,
+        });
+        // Ships' wakes: the same flat marks, blended over the water after it is drawn.
+        let wake_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("wakes"),
+            layout: Some(layout),
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: "vs_scar",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<MeshVertex>() as u64,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &mesh_attributes,
+                    },
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<UnitInstanceRaw>() as u64,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &instance_attributes,
+                    },
+                ],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: "fs_wake",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &blended_scars,
+            }),
+            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+            depth_stencil: depth(false, wgpu::CompareFunction::Greater),
+            multisample,
+            multiview: None,
+        });
+
+        // See-through, so drawn last, tested against the scene but leaving its depth alone.
+        let blended = [Some(wgpu::ColorTargetState { format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })];
+        let dome_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("shield domes"),
+            layout: Some(layout),
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: "vs_dome",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<MeshVertex>() as u64,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &mesh_attributes,
+                    },
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<UnitInstanceRaw>() as u64,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &instance_attributes,
+                    },
+                ],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: "fs_dome",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &blended,
+            }),
+            // Only the near side, so that the far side does not haze over what is inside.
+            primitive: wgpu::PrimitiveState { cull_mode: Some(wgpu::Face::Back), ..Default::default() },
+            depth_stencil: depth(false, wgpu::CompareFunction::Greater),
+            multisample,
+            multiview: None,
+        });
+
+        // The water's surface: the terrain grid again, flat at the water's height, see-through,
+        // and hidden wherever the ground stands above it.
+        let water_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("water"),
+            layout: Some(layout),
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: "vs_water",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: "fs_water",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                // The water's color comes already multiplied by how much it covers, so that its
+                // sun glints add light over the seabed instead of hiding it.
+                targets: &[Some(wgpu::ColorTargetState { format, blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })],
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: depth(false, wgpu::CompareFunction::Greater),
+            multisample,
+            multiview: None,
+        });
+
+        // Smoke: lit like the units, but see-through, over everything solid.
+        let smoke_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("smoke"),
+            layout: Some(layout),
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: "vs_smoke",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<MeshVertex>() as u64,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &mesh_attributes,
+                    },
+                    wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<UnitInstanceRaw>() as u64,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &instance_attributes,
+                    },
+                ],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: "fs_smoke",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &blended,
+            }),
+            primitive: wgpu::PrimitiveState { cull_mode: Some(wgpu::Face::Back), ..Default::default() },
+            depth_stencil: depth(false, wgpu::CompareFunction::Greater),
+            multisample,
+            multiview: None,
+        });
+
+        Self {
+            unit: unit_pipeline,
+            shadow: shadow_pipeline,
+            scar: scar_pipeline,
+            wake: wake_pipeline,
+            terrain: terrain_pipeline,
+            far_terrain: far_terrain_pipeline,
+            selection_box: box_pipeline,
+            dome: dome_pipeline,
+            water: water_pipeline,
+            smoke: smoke_pipeline,
+        }
     }
 }
 
