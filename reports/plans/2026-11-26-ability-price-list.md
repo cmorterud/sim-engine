@@ -66,12 +66,12 @@ equal-cost fight that held its cost: its anti-air destroys one in about 21 secon
 from 27), and six sink it in two passes and lose none, which its health of 2,949 meets (between
 six bombs, 2,460, and twelve). Its cost is then the list's.
 
-Stats are unchanged. The Torpedo Boat's decoys fire every 3.3 s at 600 (were 2.5 s at 500): three
+Other stats are unchanged. The Torpedo Boat's decoys fire every 3.3 s at 600 (were 2.5 s at 500): three
 times the destroyer's, as its torpedoes do three times the destroyer's damage a second.
 
 ## Held, with reasons
 
-- **Torpedo Boat, 819** (list: 634). The list averages a unit over an enemy mix, which undervalues a
+- **Torpedo Boat, 819** (list: 676 after the radar rule, 634 before). The list averages a unit over an enemy mix, which undervalues a
   hard counter. A new cell holds it instead: Torpedo Boats beat an equal cost of submarines
   (`torpedo_boats_beat_submarines`). Pricing counters by the duel they win is a follow-up.
 - **Light Artillery (+23%), Mobile Missile Launcher (+29%)**: counters held by the land solver's
