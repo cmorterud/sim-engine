@@ -1482,7 +1482,7 @@ pub fn derive_domains_report() {
     score_cell(&mut cells, "Torpedo Boats against an equal cost of submarines", water(2), "t2_torpedo_boats", 4.0, "t1_submarines", Some(number("torpedo_boats_beat_submarines")), None);
     score_cell(&mut cells, "T2 fleet against an equal cost of hovercraft, on water", water(2), "t2_fleet", 2.0, "t2_hovercraft", Some(-number("hovercraft_loses_to_fleet")), None);
     score_cell(&mut cells, "T1 fleet against an equal cost of the T1 air force, over water", water(1), "t1_fleet", 4.0, "t1_air_force", None, None);
-    score_cell(&mut cells, "Frigates against an equal cost of T1 bombers, over water", water(1), "t1_frigates", 12.0, "t1_bombers", Some(number("frigates_against_t1_bombers_at_least")), None);
+    score_cell(&mut cells, "Frigates against an equal cost of T1 bombers, over water", water(1), "t1_frigates", 12.0, "t1_bombers", None, None);
     // Air against land, about even, as at T1.
     {
         let margin = target_number("counters", "even_margin");

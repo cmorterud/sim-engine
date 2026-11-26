@@ -31,7 +31,10 @@ Mass, energy and build time scale together when a cost moves.
 | Torpedo decoys (sub hunter) | as undodgeable, 33% of a sub group's damage stopped: 0.22 |
 | Sensors | (range² − vision²) / building range² × building cost |
 
-The domain base for the navy, 0.691, holds the T2 fleet (two destroyers, two cruisers) at its cost.
+The domain base for the navy, 0.648, holds the T2 fleet (two destroyers, two cruisers) at its cost.
+A ship's radar is shared by its tier's standard fleet's radar ships, whose cover overlaps, so it
+pays the area price over their number (2026-11-26): the Frigate's 65 falls to 22, the Cruiser's
+about 260 to 70.
 
 ## Measured
 
@@ -48,11 +51,20 @@ The domain base for the navy, 0.691, holds the T2 fleet (two destroyers, two cru
 
 | Unit | Cost before | After | |
 | --- | --- | --- | --- |
-| Attack Submarine | 345 | 386 | +12% |
-| Destroyer | 1,684 | 1,530 | −9% |
-| Cruiser | 1,529 | 1,684 | +10% |
-| Battleship | 6,920 | 5,905 | −15% |
-| Battlecruiser | 5,302 | 4,785 | −10% |
+| Frigate | 304 | 398 | +31% |
+| Attack Submarine | 345 | 411 | +19% |
+| Destroyer | 1,684 | 1,625 | −3% |
+| Cruiser | 1,529 | 1,588 | +4% |
+| Battleship | 6,920 | 6,298 | −9% |
+| Battlecruiser | 5,302 | 5,097 | −4% |
+
+(First pass, PR #44: sub 386, destroyer 1,530, cruiser 1,684, battleship 5,905, battlecruiser
+4,785. The radar overlap rule moved the navy base from 0.691 to 0.648.)
+
+The Frigate is set by the design owner's rule against T1 bombers (2026-11-26), in place of an
+equal-cost fight that held its cost: its anti-air destroys one in about 21 seconds (23.8 a second,
+from 27), and six sink it in two passes and lose none, which its health of 2,949 meets (between
+six bombs, 2,460, and twelve). Its cost is then the list's.
 
 Stats are unchanged. The Torpedo Boat's decoys fire every 3.3 s at 600 (were 2.5 s at 500): three
 times the destroyer's, as its torpedoes do three times the destroyer's damage a second.
@@ -62,8 +74,8 @@ times the destroyer's, as its torpedoes do three times the destroyer's damage a 
 - **Torpedo Boat, 819** (list: 634). The list averages a unit over an enemy mix, which undervalues a
   hard counter. A new cell holds it instead: Torpedo Boats beat an equal cost of submarines
   (`torpedo_boats_beat_submarines`). Pricing counters by the duel they win is a follow-up.
-- **Frigate (+40%), Light Artillery (+23%), Mobile Missile Launcher (+29%)**: each moves more than
-  20%, so something is likely unpriced, as the torpedoes' second target was. Kept until found.
+- **Light Artillery (+23%), Mobile Missile Launcher (+29%)**: counters held by the land solver's
+  targets; the list charges reach in every matchup, which pays only against the line.
 - **Land**: within about 10% (Light Walker −10%, scout +5%, Siege Walker −9%), costs the land
   solver's targets pin. The list is a check on them here.
 - **Air**: swings of −63% to +78% mean flight itself (only anti-air reaches a plane) and air-to-air

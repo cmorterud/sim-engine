@@ -264,6 +264,12 @@ battleship_commander_on_land = [15, 40]
 # its first damage, a broadside every 13.5 that the dome cannot heal in time; the broadside that
 # breaks it destroys the generator (2026-11-25).
 battleship_breaks_t3_shield = [40, 52]
+# The frigate against T1 bombers (2026-11-26, the design owner's rule, in place of an equal-cost
+# fight that held its cost): its anti-air destroys one in about 21 seconds, and six of them sink it
+# in two passes and lose none. They set its anti-air (23.8 a second against a bomber's 500) and
+# check its health (between six bombs and twelve); its cost is then the price list's.
+frigate_anti_air_t1_bomber = [20, 22]
+six_t1_bombers_sink_a_frigate_passes = 2
 sam_t2_gunship = [1.5, 3.0]
 sam_t3_strategic_bomber = [9.5, 12.5]
 # The cruiser's anti-air, its volleys timed by tests/kill_times_test.rs.
@@ -388,18 +394,18 @@ strength_band = [0.80, 1.25]
 [domains.strength_over_anchor]
 # The navy's by the ability price list's costs (2026-11-26, [price_list]): the submarine, destroyer,
 # cruiser, battleship and battlecruiser are their strength per cost at those costs.
-t1_frigate = 0.57
-t1_attack_sub = 0.21
+t1_frigate = 0.44
+t1_attack_sub = 0.20
 t1_torpedo_launcher = 0.45
 t2_torpedo_launcher = 0.64
-t2_destroyer = 0.36
-t2_cruiser = 0.18
+t2_destroyer = 0.34
+t2_cruiser = 0.19
 t2_torpedo_boat = 0.32
-t3_battleship = 0.47
+t3_battleship = 0.44
 # The battlecruiser by the ability price list (2026-11-26), not the inspiration's 0.25: its
 # lasers at twice a battleship turret's damage a second, its cost paying for lasers that cannot
 # be dodged (reports/plans/2026-11-26-derived-stats.md).
-t3_battlecruiser = 0.48
+t3_battlecruiser = 0.45
 t2_gunship = 0.62
 t2_torpedo_bomber = 0.55
 t2_fighter_bomber = 0.45
@@ -461,10 +467,9 @@ torpedo_bombers_to_break_fleet_t3 = [2.0, 5.0]
 # And capital ships without their escorts are torpedo bombers' prey: a battleship-heavy fleet
 # breaks to at most its own cost of them. That is the counterplay to skimping on escorts.
 battleship_heavy_fleet_breaks_to_torpedo_bombers_at_most = 1.0
-# At T1, frigates hold their own against an equal cost of T1 bombers over water: at least even,
-# within [counters] even_margin, so that early ships are not shut down by cheaper aircraft. The
-# frigate's railgun is set by this (2026-11-24, and again once aircraft obeyed orders over open sea).
-frigates_against_t1_bombers_at_least = -0.15
+# The frigate against T1 bombers is set by [kill_times] (2026-11-26): one bomber in about 21
+# seconds, six sink it in two passes. An equal cost of them, which held it here until then, is
+# shown by the balance report, not held.
 # The sub hunter is a hard counter (2026-11-26): Torpedo Boats beat an equal cost of submarines,
 # keeping at least [counters] winner_survivors. The ability price list averages a unit over an
 # enemy mix, half ships and half submarines, which undervalues a counter, so this duel holds the
@@ -566,7 +571,7 @@ anchor_strength_per_cost = 2.806
 tier_efficiency = [1.0, 1.0, 1.0]
 # The navy's base, solved by holding the T2 fleet (two destroyers, two cruisers) at its cost. Air's
 # is not set yet: its prices for flight and air-to-air fights are missing, so air keeps its costs.
-domain_base = { land = 1.0, navy = 0.691 }
+domain_base = { land = 1.0, navy = 0.648 }
 # Reach past the line's: x = c (r / r_line - 1), price x h / (1 - x h), h about 1 for shells and
 # 0 for missiles. Short of it: -c (1 - r / r_line) (v_line / v). Speed: speed_share (1 - v_line / v).
 speed_share = 0.3
@@ -588,4 +593,6 @@ torpedo_flexibility = 0.41
 # a second): 33% stopped, so 0.22.
 torpedo_boat_decoys = 0.22
 # A sensor pays only for what it sees past its own vision, at the price per area of the cheapest
-# building that has it: (range^2 - vision^2) / building range^2 x building cost.
+# building that has it: (range^2 - vision^2) / building range^2 x building cost. A ship's radar is
+# shared by the radar ships of its tier's standard fleet, whose cover overlaps, so it pays that
+# over their number (2026-11-26).

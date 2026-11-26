@@ -313,15 +313,12 @@ fn t1_navy_is_as_strong_per_cost_as_the_inspirations() {
     }
 }
 
-/// `[domains]`: frigates hold their own against an equal cost of T1 bombers over water, and an
-/// equal cost of them closing on T1 torpedo launchers does not break them.
+/// `[domains]`: an equal cost of frigates closing on T1 torpedo launchers does not break them.
+/// Frigates against T1 bombers are set by `[kill_times]` (tests/kill_times_test.rs).
 #[test]
 #[cfg_attr(debug_assertions, ignore = "release only")]
-fn frigates_hold_off_t1_bombers_and_lose_to_t1_torpedo_launchers() {
+fn frigates_lose_to_t1_torpedo_launchers() {
     let db = db();
-    let score = fight(&db, Field::new(Ground::Water, 1), "t1_frigates", 12.0, "t1_bombers");
-    let least = number(&domains(&["cells", "frigates_against_t1_bombers_at_least"]));
-    assert!(score >= least, "frigates score {score:+.2} against T1 bombers, under {least:+.2}");
     let frigates = squadrons(&db, &[(db.id("t1_frigate"), 1)], position_materiel_at(&db, T1_TORPEDO_POSITION, 1), 1, Tactics::AttackMove);
     let siege = siege_on(&db, Field::new(Ground::Shore, 1), &frigates, T1_TORPEDO_POSITION);
     assert!(!siege.broken, "an equal cost of frigates broke the T1 torpedo launchers: {siege:?}");
