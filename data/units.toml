@@ -1516,7 +1516,8 @@ weapon = { range = 1000, reload_ticks = 40, projectile_speed = 30, damage = 454,
 # fired as one, a destroyer's charge stopped them all. Cost, build time, and damage set against the
 # Medium Tank as the inspiration has its T2 torpedo launcher against its T1 tank (2026-11-24, [domains], reports/balance/2026-11-24-t2-air-navy.md), and its health a little past
 # that ratio (8,991), within [domains] strength_band, so that an equal cost of destroyers closing
-# on it loses.
+# on it loses. Its reach is the defense window's floor (2026-11-26): 15% past the destroyer's guns,
+# 1,255, as every defense must outrange its tier's direct fire by at least that.
 [[unit]]
 id = "t2_torpedo_launcher"
 name = "Torpedo Launcher (T2)"
@@ -1530,7 +1531,7 @@ footprint = 2
 on_water = true
 vision = 400
 sonar = 720
-weapon = { range = 1200, reload_ticks = 10, projectile_speed = 30, damage = 227, targets = "naval" }
+weapon = { range = 1443, reload_ticks = 10, projectile_speed = 30, damage = 227, targets = "naval" }
 
 # Assault: tough, fast, and amphibious, it hovers over land and water alike at the anchor's speed,
 # with the Heavy Tank's range and twice its time to kill. It pays for crossing water: about

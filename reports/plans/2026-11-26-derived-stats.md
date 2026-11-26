@@ -40,6 +40,7 @@ Archetypes shared across factions: destroyer (navy line), sub hunter (torpedo bo
 | Battleship | health / speed / reach / broadside | 107,000 / 5.5 / 3,000 / 16 s | 90,314 / 7.2 / 2,990 / 13.5 s |
 | T1 / T2 Point Defense | reach | 520 / 1,000 | 496 / 1,095 |
 | Heavy Point Defense | reach | 1,400 | 1,313 |
+| T2 Torpedo Launcher | reach | 1,200 | 1,443 (window floor: 1.15 × destroyer guns) |
 | Mobile Heavy Artillery | reach / least | 1,680 / 420 | 1,575 / 394 |
 | Mobile Missile Launcher | reach / least | 1,295 / 259 | 1,314 / 263 |
 | Gunship / Heavy Gunship | reach | 440 / 500 | 448 / 560 |
@@ -57,6 +58,8 @@ Land line units are unchanged: the model reproduces them within rounding.
   [15, 40]. The T3 dome still breaks in about 41 seconds, inside [40, 52].
 
 ## Still to derive
+
+- The T1 Torpedo Launcher's reach (1,000) meets the window floor (698) but is not derived from it.
 
 - The Mobile Heavy Artillery's reload (11.5 s), from a rule retired 2026-11-25.
 - The destroyer's torpedo reach (900), and the escort corvette's shield and charge: step 3.
