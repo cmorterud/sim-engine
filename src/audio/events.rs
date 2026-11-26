@@ -80,7 +80,7 @@ pub fn scene_events(previous: &SimSnapshot, current: &SimSnapshot, blueprints: &
                 OneShot::Gun((0.15 + 0.22 * f32::from(tier.saturating_sub(1)) + units_of(projectile.splash) / 200.0).clamp(0.0, 1.0))
             }
             ProjectileKind::Discharge => OneShot::Gun(0.9),
-            ProjectileKind::TacticalMissile => OneShot::Missile,
+            ProjectileKind::TacticalMissile | ProjectileKind::Interceptor => OneShot::Missile,
             // A strategic launch is heard everywhere as a warning, below.
             ProjectileKind::StrategicMissile | ProjectileKind::Beam => continue,
         };

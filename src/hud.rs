@@ -215,6 +215,8 @@ pub enum Glyph {
     Surface,
     /// Which ranges to outline on the map.
     Ranges,
+    /// Fire missiles on order.
+    Launch,
 }
 
 /// Draws a glyph inside `rect`. Each order has its own shape as well as its own color, so that
@@ -344,6 +346,20 @@ pub fn draw_glyph(painter: &egui::Painter, rect: Rect, glyph: Glyph) {
             let tip = at(0.0, to);
             let back = if glyph == Glyph::Dive { -0.35 } else { 0.35 };
             painter.add(Shape::line(vec![at(-0.35, to + back), tip, at(0.35, to + back)], line(blue)));
+        }
+        Glyph::Launch => {
+            // A missile climbing to the upper right, on a plume of flame.
+            let orange = Color32::from_rgb(255, 150, 60);
+            let along = Vec2::new(1.0, -1.0).normalized();
+            let side = along.rot90();
+            let (tail, nose) = (c - along * r * 0.75, c + along * r * 0.7);
+            let half = r * 0.2;
+            painter.add(Shape::convex_polygon(vec![tail + side * half, nose + side * half, nose - side * half, tail - side * half], Color32::from_rgb(220, 226, 234), Stroke::NONE));
+            painter.add(Shape::convex_polygon(vec![nose + side * half, nose + along * r * 0.4, nose - side * half], red, Stroke::NONE));
+            for flank in [1.0, -1.0] {
+                painter.add(Shape::convex_polygon(vec![tail + side * half * flank, tail + along * r * 0.35 + side * half * flank, tail - along * r * 0.1 + side * r * 0.5 * flank], red, Stroke::NONE));
+            }
+            painter.add(Shape::convex_polygon(vec![tail + side * half * 0.8, tail - side * half * 0.8, tail - along * r * 0.55], orange, Stroke::NONE));
         }
         Glyph::Ranges => {
             // Two overlapping rings round their centers, as range outlines on the ground.

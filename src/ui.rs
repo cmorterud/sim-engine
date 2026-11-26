@@ -77,6 +77,8 @@ pub enum ArmedOrder {
     Capture,
     /// Not on a letter: Ctrl+U, for transports with something on board.
     Unload,
+    /// L, shared with Discharge, for missile launchers, structures as well as the submarine.
+    Launch,
 }
 
 impl ArmedOrder {
@@ -94,6 +96,7 @@ impl ArmedOrder {
             Self::Teleport => 'T',
             Self::Capture => 'C',
             Self::Unload => 'U',
+            Self::Launch => hotkeys::LAUNCH,
         }
     }
 
@@ -109,6 +112,7 @@ impl ArmedOrder {
             Self::Teleport => "Teleport",
             Self::Capture => "Capture",
             Self::Unload => "Unload",
+            Self::Launch => "Launch",
         }
     }
 
@@ -124,6 +128,7 @@ impl ArmedOrder {
             Self::Teleport => "Charge up, standing still, and jump to a spot you can see or have on radar. Costs a great deal of energy, more the farther it goes, and aborts if the energy runs out. Lands on enemy units destroy them.",
             Self::Capture => "Take over an enemy unit or structure, in half its build time at your builders' build power, for its energy cost. Stopping starts it over. Commanders cannot be captured.",
             Self::Unload => "Fly there and set down everything on board around the spot. To load, select land units and right-click the transport.",
+            Self::Launch => "Fire stowed missiles at an enemy or a spot on the ground, from the selected launchers that reach it. A strategic missile goes once for each order; a tactical launcher keeps firing at its target until it is gone or given another order. Right-clicking an enemy launches too.",
         }
     }
 
@@ -140,6 +145,7 @@ impl ArmedOrder {
             Self::Teleport => "Teleport: left-click open ground you can see or have on radar. Right-click or Esc to cancel.",
             Self::Capture => "Capture: left-click an enemy unit or structure. Right-click or Esc to cancel.",
             Self::Unload => "Unload: left-click where to set the cargo down. Right-click or Esc to cancel.",
+            Self::Launch => "Launch: left-click an enemy or a spot on the ground. Right-click or Esc to cancel.",
         }
     }
 }
@@ -569,6 +575,20 @@ pub fn has_discharge(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintD
         .any(|unit| unit.blueprint != u16::MAX && db.get(BlueprintId(unit.blueprint)).discharge.is_some())
 }
 
+/// The selected units that fire missiles only on order: the tactical and strategic missile
+/// launchers and the missile submarine.
+pub fn launchers(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb) -> Vec<SimId> {
+    selected.iter().copied().filter(|id| find_unit(snapshot, *id).is_some_and(|unit| crate::input::orders::is_launcher(unit, db))).collect()
+}
+
+/// How many missiles these launchers have stowed, and how many they hold together.
+pub fn missiles_stowed(snapshot: &SimSnapshot, launchers: &[SimId], db: &BlueprintDb) -> (u32, u32) {
+    launchers.iter().filter_map(|id| find_unit(snapshot, *id)).fold((0, 0), |(stowed, room), unit| {
+        let stock = snapshot.stocks.iter().find(|(silo, _)| *silo == unit.id).map_or(0, |&(_, stock)| stock);
+        (stowed + stock, room + db.get(BlueprintId(unit.blueprint)).max_stock)
+    })
+}
+
 /// A shield generator's dome, in words: how strong it is, or how long until it is back.
 pub fn shield_status(snapshot: &SimSnapshot, id: SimId) -> Option<String> {
     let shield = snapshot.shields.iter().find(|shield| shield.id == id)?;
@@ -599,7 +619,7 @@ pub fn stock_status(snapshot: &SimSnapshot, id: SimId, db: &BlueprintDb) -> Opti
     let unit = find_unit(snapshot, id)?;
     let blueprint = db.get(BlueprintId(unit.blueprint));
     let word = if blueprint.missile_defense.is_some() { "interceptor" } else { "missile" };
-    Some(format!("{stock} {word}{} ready", if stock == 1 { "" } else { "s" }))
+    Some(format!("{stock}/{} {word}s stowed", blueprint.max_stock))
 }
 
 /// The selected transports with anything on board.
@@ -634,6 +654,8 @@ struct OrderOffers {
     teleport: bool,
     capture: bool,
     unload: bool,
+    /// Missile launchers are selected, which take L from Discharge.
+    launch: bool,
 }
 
 /// The size of the order and toggle buttons, in points.
@@ -664,25 +686,28 @@ const fn order_glyph(order: ArmedOrder) -> Glyph {
         ArmedOrder::Teleport => Glyph::Teleport,
         ArmedOrder::Capture => Glyph::Capture,
         ArmedOrder::Unload => Glyph::Unload,
+        ArmedOrder::Launch => Glyph::Launch,
     }
 }
 
 /// The unit orders, as glyph buttons: the armed one lit.
 fn unit_order_buttons(ui: &mut egui::Ui, armed: Option<ArmedOrder>, offers: &OrderOffers, actions: &mut Vec<UiAction>) {
-    let OrderOffers { discharge, weapons, teleport, capture, unload } = *offers;
+    let OrderOffers { discharge, weapons, teleport, capture, unload, launch } = *offers;
     let offered = |order: &ArmedOrder| match order {
         ArmedOrder::Discharge => discharge,
         ArmedOrder::AttackGround => weapons,
         _ => true,
     };
     let mut arm = |ui: &mut egui::Ui, order: ArmedOrder, key: &str| {
-        let hint = format!("[{key}] {}\n{}", order.name(), order.description());
+        let hint = if key.is_empty() { format!("{}\n{}", order.name(), order.description()) } else { format!("[{key}] {}\n{}", order.name(), order.description()) };
         if glyph_button(ui, order_glyph(order), key, armed == Some(order), &hint).clicked() {
             actions.push(UiAction::Arm(order));
         }
     };
     for order in ArmedOrder::ALL.into_iter().filter(offered) {
-        arm(ui, order, &order.letter().to_string());
+        // L launches when there are missiles to launch.
+        let key = if order == ArmedOrder::Discharge && launch { String::new() } else { order.letter().to_string() };
+        arm(ui, order, &key);
     }
     if capture {
         arm(ui, ArmedOrder::Capture, "^C");
@@ -695,6 +720,25 @@ fn unit_order_buttons(ui: &mut egui::Ui, armed: Option<ArmedOrder>, offers: &Ord
     }
     if glyph_button(ui, Glyph::Stop, &hotkeys::STOP.to_string(), false, &format!("[{}] Stop\nDrop all orders.", hotkeys::STOP)).clicked() {
         actions.push(UiAction::Stop);
+    }
+}
+
+/// The Launch button: a missile, its key, and the missiles stowed out of how many fit, which
+/// turns dim with none stowed.
+fn launch_button(ui: &mut egui::Ui, armed: Option<ArmedOrder>, (stowed, room): (u32, u32), actions: &mut Vec<UiAction>) {
+    let order = ArmedOrder::Launch;
+    let key = order.letter().to_string();
+    let hint = format!("[{key}] {}: {stowed} of {room} missiles stowed\n{}", order.name(), order.description());
+    let count = format!("{stowed}/{room}");
+    let response = hud::square_button(ui, Vec2::splat(ORDER_BUTTON), armed == Some(order), true, |painter, rect| {
+        hud::draw_glyph(painter, rect.shrink(2.0), Glyph::Launch);
+        let bold = |size: f32| FontId::new(size, egui::FontFamily::Name(BOLD.into()));
+        let color = if stowed > 0 { Color32::WHITE } else { Color32::from_gray(150) };
+        hud::outlined_text(painter, rect.left_top() + Vec2::new(0.0, -1.0), Align2::LEFT_TOP, &count, bold(9.0), color);
+        hud::outlined_text(painter, rect.right_bottom() + Vec2::new(-1.0, 1.0), Align2::RIGHT_BOTTOM, &key, bold(12.0), Color32::WHITE);
+    });
+    if response.on_hover_text(bold_keys(&hint)).clicked() {
+        actions.push(UiAction::Arm(order));
     }
 }
 
@@ -976,6 +1020,10 @@ pub fn hotkey_action(snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintD
     // O switches things off and on: it pauses what can be paused, or else toggles a cloak.
     if letter == hotkeys::PAUSE {
         return pause_action(snapshot, selected, db).or_else(|| cloak_action(snapshot, selected));
+    }
+    // Missile launchers, structures too, take L before the commander's Discharge.
+    if letter == hotkeys::LAUNCH && !launchers(snapshot, selected, db).is_empty() {
+        return Some(UiAction::Arm(ArmedOrder::Launch));
     }
     if has_mobile_units(snapshot, selected) {
         match letter {
@@ -2498,6 +2546,7 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
         ui.allocate_ui_at_rect(orders.shrink2(Vec2::new(10.0, 10.0)), |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = Vec2::splat(4.0);
+                let launching = launchers(snapshot, selected, db);
                 if has_mobile_units(snapshot, selected) {
                     let offers = OrderOffers {
                         discharge: has_discharge(snapshot, selected, db),
@@ -2505,8 +2554,12 @@ pub fn command_panel(ctx: &egui::Context, snapshot: &SimSnapshot, selected: &[Si
                         teleport: !teleporters(snapshot, selected, db).is_empty(),
                         capture: has_mobile_builders(snapshot, selected, db),
                         unload: !loaded_transports(snapshot, selected).is_empty(),
+                        launch: !launching.is_empty(),
                     };
                     unit_order_buttons(ui, armed, &offers, actions);
+                }
+                if !launching.is_empty() {
+                    launch_button(ui, armed, missiles_stowed(snapshot, &launching, db), actions);
                 }
                 toggle_buttons(ui, snapshot, selected, db, menu.as_ref(), actions);
             });
@@ -2903,6 +2956,35 @@ pub fn watch_end_window(ctx: &egui::Context, result: Option<MatchResult>, stoppe
 }
 
 /// A small floating reminder that the next click will attack-move.
+/// The red target drawn in place of the pointer, wherever a click attacks or launches.
+pub fn draw_target_pointer(ctx: &egui::Context) {
+    let Some(at) = ctx.pointer_hover_pos() else {
+        return;
+    };
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("target pointer")));
+    for shape in target_pointer_shapes(at) {
+        painter.add(shape);
+    }
+}
+
+/// The red target: a ring with four ticks across it and a dot in the middle, each over a dark
+/// outline so that it shows on snow and sea alike.
+pub fn target_pointer_shapes(at: Pos2) -> Vec<egui::Shape> {
+    const RING: f32 = 12.0;
+    let red = Color32::from_rgb(255, 40, 30);
+    let dark = Color32::from_black_alpha(210);
+    let mut out = Vec::new();
+    for (color, width) in [(dark, 4.4_f32), (red, 2.2)] {
+        out.push(egui::Shape::circle_stroke(at, RING, Stroke::new(width, color)));
+        for direction in [Vec2::X, -Vec2::X, Vec2::Y, -Vec2::Y] {
+            out.push(egui::Shape::line_segment([at + direction * (RING - 6.0), at + direction * (RING + 6.0)], Stroke::new(width, color)));
+        }
+    }
+    out.push(egui::Shape::circle_filled(at, 2.8, dark));
+    out.push(egui::Shape::circle_filled(at, 1.8, red));
+    out
+}
+
 pub fn armed_order_hint(ctx: &egui::Context, order: ArmedOrder) {
     egui::Area::new(egui::Id::new("armed order hint"))
         .anchor(Align2::CENTER_TOP, Vec2::new(0.0, 62.0))
@@ -4934,7 +5016,7 @@ mod tests {
     fn clicking_an_order_button_arms_it_and_the_armed_order_stays_lit() {
         let ctx = egui::Context::default();
         install_fonts(&ctx);
-        let offers = OrderOffers { discharge: false, weapons: true, teleport: false, capture: false, unload: false };
+        let offers = OrderOffers { discharge: false, weapons: true, teleport: false, capture: false, unload: false, launch: false };
         let at = egui::pos2(8.0 + ORDER_BUTTON / 2.0, 8.0 + ORDER_BUTTON / 2.0);
         let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
         let mut actions = Vec::new();
@@ -5557,6 +5639,33 @@ mod tests {
         assert_eq!(hotkey_action(&current, &[SimId(10)], &db, 'L', BuildTiers::default(), None), Some(UiAction::Arm(ArmedOrder::Discharge)));
         assert_eq!(hotkey_action(&current, &[SimId(10), SimId(12)], &db, 'L', BuildTiers::default(), None), Some(UiAction::Arm(ArmedOrder::Discharge)));
         assert_eq!(hotkey_action(&current, &[SimId(11), SimId(12)], &db, 'L', BuildTiers::default(), None), None, "engineers and bots have none");
+    }
+
+    /// L launches with any missile launcher selected, structure or submarine, before the
+    /// commander's Discharge, and the button counts the missiles stowed out of how many fit.
+    #[test]
+    fn l_launches_from_missile_launchers_and_counts_what_they_have_stowed() {
+        let db = BlueprintDb::standard();
+        let mut silo = unit(20, 0.0);
+        silo.blueprint = db.id("strategic_missile_launcher").0;
+        silo.is_structure = true;
+        let mut tactical = unit(21, 50.0);
+        tactical.blueprint = db.id("tactical_missile_launcher").0;
+        tactical.is_structure = true;
+        let mut sub = unit(22, 100.0);
+        sub.blueprint = db.id("t3_missile_sub").0;
+        let mut commander = unit(23, 150.0);
+        commander.blueprint = db.id("command_rig").0;
+        let mut current = snapshot(vec![silo, tactical, sub, commander], vec![]);
+        current.stocks = vec![(SimId(20), 2), (SimId(21), 6), (SimId(22), 0)];
+        let launch = Some(UiAction::Arm(ArmedOrder::Launch));
+        for selected in [&[SimId(20)][..], &[SimId(21)], &[SimId(22)], &[SimId(22), SimId(23)]] {
+            assert_eq!(hotkey_action(&current, selected, &db, 'L', BuildTiers::default(), None), launch, "{selected:?}");
+        }
+        assert_eq!(hotkey_action(&current, &[SimId(23)], &db, 'L', BuildTiers::default(), None), Some(UiAction::Arm(ArmedOrder::Discharge)), "the commander alone discharges");
+        assert_eq!(missiles_stowed(&current, &[SimId(20)], &db), (2, 5));
+        assert_eq!(missiles_stowed(&current, &launchers(&current, &[SimId(20), SimId(21), SimId(22), SimId(23)], &db), &db), (8, 14), "5 + 6 + 3, the commander none");
+        assert_eq!(stock_status(&current, SimId(20), &db).as_deref(), Some("2/5 missiles stowed"));
     }
 
     #[test]
