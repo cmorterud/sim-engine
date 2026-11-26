@@ -107,6 +107,38 @@ and a few ratios between roles (`reports/balance/2026-11-24-inspiration-ratios.m
 ratios are recorded, in `[domains] strength_over_anchor`, as a reference for feel; no file, value,
 or unit's numbers were taken.
 
+## What was studied, and how, 2026-11-26
+
+sim-engine is meant to play like *Forged Alliance*, and it has very similar mechanics and the same
+rough unit types: tiers, shields, artillery, a navy from frigates to battleships. Besides the
+author's recollection of playing it, two things of the original's were looked at:
+
+* **Its interface**, for how a large-scale RTS presents building, orders, and the economy. The
+  interface here is this game's own code and look; none of the original's art, icons, or layout
+  files were used.
+* **Its balance**, through its unit data (see Balance targets, above): roughly the ratios between
+  units, which became targets, after which this game's own units, priced by its own cost model,
+  had their numbers adjusted until they approximately meet those ratios. The ratios are a
+  reference for feel; the values are this game's own.
+
+No assets, code, or text came from it: no models, textures, sounds, music, maps, interface art,
+unit descriptions, or scripts.
+
+On 2026-11-25, Claude, working on balance, also read parts of FAF's game code in the `FAForever/fa`
+repository to learn how some mechanics behave: how weapons fire their racks and salvos, how
+damage over time is dealt, how a shield absorbs shells and lets the rest of a volley through
+once it breaks, and how torpedoes speed up after launch. Only descriptions of that behavior were
+kept, in Claude's own words; no code was copied or ported. One change rests on it: torpedoes
+here leave at about a ship's speed and top out at two and a half times the fastest ship's after
+two seconds (pull request #30, BALANCE.md), a ratio to ship speed, with this game's own values.
+The rest went into calculations in conversation, not into the game.
+
+Later that day the author decided that the original's repository is not to be read again, for
+code or blueprints, and that the blueprint copies saved outside this repository for the ratio work
+are not to be used either. The three blueprint files downloaded that day were deleted. Future
+balance work goes from the targets already recorded, this game's own duels and soaks, and
+playtesting.
+
 ## Names
 
 Replaced on 2026-11-15, in display names, ids, code, tests, and documentation:
