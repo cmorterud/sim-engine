@@ -528,6 +528,37 @@ fn a_fighter_bomber_carpets_the_ground_and_fights_aircraft() {
     assert!(generators.iter().all(|&id| world.unit_health(id).is_none()), "1,600 within 60 takes both");
 }
 
+/// A fighter-bomber after an aircraft flies as a fighter, on its tail within its gun's reach,
+/// rather than out on bombing passes: its bomb is for the ground, and its gun reaches 600.
+#[test]
+fn a_fighter_bomber_fights_an_aircraft_from_its_tail() {
+    use sim_engine::sim::components::Health;
+    let mut world = world();
+    let generator = world.spawn_finished_structure(world.blueprints.id("power_generator"), Team::Blue, 150, 125).unwrap();
+    let bomber = spawn(&mut world, "t1_bomber", Team::Red, point(4_000, 2_500));
+    world.advance_tick(&[SimCommand::Attack { units: vec![bomber], target: generator }]);
+    run(&mut world, 60);
+    let fighter_bomber = spawn(&mut world, "t2_fighter_bomber", Team::Blue, point(1_500, 2_500));
+    world.advance_tick(&[SimCommand::Attack { units: vec![fighter_bomber], target: bomber }]);
+    let full = Fp::from_num(30_000);
+    let (mut dealt, mut ticks, mut farthest) = (0.0f64, 0u32, 0i64);
+    for _ in 0..600 {
+        for id in [generator, bomber] {
+            world.ecs.get::<&mut Health>(world.unit_entity(id).unwrap()).unwrap().current = full;
+        }
+        world.advance_tick(&[]);
+        let lost = (full - world.ecs.get::<&Health>(world.unit_entity(bomber).unwrap()).unwrap().current).to_num::<f64>();
+        if lost > 0.0 || ticks > 0 {
+            dealt += lost;
+            ticks += 1;
+            farthest = farthest.max(distance(&world, fighter_bomber, world.unit_position(bomber).unwrap().xy()));
+        }
+    }
+    let per_second = dealt / (f64::from(ticks) / 10.0);
+    assert!(per_second > 0.9 * 174.0, "it lands nearly all of its 174 a second: {per_second:.0}");
+    assert!(farthest <= 600, "and keeps within its gun's reach once firing: {farthest}");
+}
+
 /// On an attack-move, a bomber keeps to the target it picks, pass after pass, as if told to
 /// attack it, instead of bombing whatever is nearest after each pass, and moves on only once it
 /// is destroyed. Moving targets, under fog, slip out of range and sight between passes.
