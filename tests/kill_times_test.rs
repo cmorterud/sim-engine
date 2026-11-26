@@ -232,6 +232,25 @@ fn a_sam_launcher_destroys_a_gunship_and_a_strategic_bomber_in_time() {
     }
 }
 
+/// Aircraft against aircraft hanging in the air, and the heavy gunship against a commander on
+/// land, each alone, in about the design owner's times (2026-11-26).
+#[test]
+fn aircraft_destroy_their_targets_in_time() {
+    for (name, shooter, prey) in [
+        ("t3_fighter_strategic_bomber", "t3_air_superiority", "t3_strategic_bomber"),
+        ("t3_fighter_t3_fighter", "t3_air_superiority", "t3_air_superiority"),
+        ("t3_fighter_heavy_gunship", "t3_air_superiority", "t3_heavy_gunship"),
+        ("fighter_bomber_interceptor", "t2_fighter_bomber", "t1_interceptor"),
+        ("heavy_gunship_commander_on_land", "t3_heavy_gunship", "command_rig"),
+    ] {
+        let mut world = world();
+        let target = target(&mut world, prey, (7_600, 5_000));
+        let plane = place(&mut world, shooter, Team::Blue, (6_400, 5_000));
+        world.advance_tick(&[SimCommand::Attack { units: vec![plane], target }]);
+        assert_within(name, ticks_to_kill(&mut world, &[plane], target, 2_000));
+    }
+}
+
 /// A frigate's anti-air destroys one T1 bomber hanging in the air in about 21 seconds
 /// (2026-11-26, the design owner's number).
 #[test]

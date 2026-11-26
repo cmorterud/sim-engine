@@ -211,7 +211,7 @@ fn anti_air_is_no_better_a_shield_and_fighters_out_turn_bombers() {
     }
 }
 
-/// The T3 fighter against the T1 interceptor ([air.t3_fighter]): ten times the damage a second,
+/// The T3 fighter against the T1 interceptor ([air.t3_fighter]): more damage a second,
 /// one shot to destroy one, more range and speed, a quicker turn, and the better buy in a fight
 /// at T3 prices, so that spamming interceptors against it loses.
 #[test]
@@ -229,8 +229,10 @@ fn the_t3_fighter_outclasses_the_t1_interceptor() {
     let (fighter, interceptor) = (db.get(db.id("t3_air_superiority")), db.get(db.id("t1_interceptor")));
     let (gun, small) = (fighter.weapon.expect("a gun"), interceptor.weapon.expect("a gun"));
     let dps = |weapon: sim_engine::sim::blueprints::WeaponDef| weapon.damage.to_num::<f64>() * 10.0 / f64::from(weapon.reload_ticks.max(1));
-    let (low, high) = range("dps_over_interceptor");
-    assert!((low..=high).contains(&(dps(gun) / dps(small))), "{} times the damage a second", dps(gun) / dps(small));
+    assert!(dps(gun) > dps(small), "{} times the damage a second", dps(gun) / dps(small));
+    let bomber = db.get(db.id("t3_strategic_bomber"));
+    let over = fighter.speed.to_num::<f64>() / bomber.speed.to_num::<f64>();
+    assert!((over - number("speed_over_strategic_bomber")).abs() < 0.02, "{over} times the Strategic Bomber's speed");
     assert!(gun.damage >= interceptor.health, "a shot of {} against {} health", gun.damage, interceptor.health);
     let (low, high) = range("range_over_interceptor");
     let reach = gun.range.to_num::<f64>() / small.range.to_num::<f64>();

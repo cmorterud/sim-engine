@@ -487,8 +487,10 @@ fn sam_launchers_and_air_superiority_fighters_down_heavy_aircraft() {
     assert!(world.unit_health(bomber).is_none(), "one shot of 500 against 215");
 }
 
+/// The Strategic Bomber has no anti-air (2026-11-26, the design owner's rule): a scout on its tail
+/// is left alone while its bomb takes the generator.
 #[test]
-fn a_strategic_bomber_bombs_with_its_main_weapon_and_shoots_aircraft_with_its_guns() {
+fn a_strategic_bomber_bombs_with_its_main_weapon_and_has_no_guns() {
     let mut world = world();
     let generator = world.spawn_finished_structure(world.blueprints.id("power_generator"), Team::Red, 150, 125).unwrap();
     let bomber = spawn(&mut world, "t3_strategic_bomber", Team::Blue, point(1_000, 1_000));
@@ -496,7 +498,7 @@ fn a_strategic_bomber_bombs_with_its_main_weapon_and_shoots_aircraft_with_its_gu
     world.advance_tick(&[SimCommand::Follow { units: vec![scout], target: bomber }]);
     world.advance_tick(&[SimCommand::Attack { units: vec![bomber], target: generator }]);
     run(&mut world, 600);
-    assert!(world.unit_health(scout).is_none(), "its guns should down the scout on its tail");
+    assert!(world.unit_health(scout).is_some(), "it has no guns to down the scout on its tail");
     assert!(world.unit_health(generator).is_none(), "while its bomb takes the generator");
 }
 

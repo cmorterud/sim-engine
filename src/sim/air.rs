@@ -318,6 +318,23 @@ impl SimWorld {
                     away.clamp(top_speed / 2, top_speed)
                 })
             });
+            // A point inside its turn at full speed it reaches by easing off just enough to turn
+            // onto it, rather than fly on and loop round, as long as that is no slower than half
+            // its own: tighter still, it flies on at full speed. A turn it can make at full speed
+            // it makes at full speed. Not while a bomber breaks off, which flies on on purpose, nor
+            // against another aircraft: slowing in a dogfight helps the nimbler, cheaper plane, so a
+            // fighter keeps to its tailing speed (2026-11-26).
+            let air_target = chasing.and_then(locate).is_some_and(|entry| entry.is_air);
+            let turning_in = heading_for.filter(|_| !air_target && !flight.hovers && !flight.breaking_off && !hold && !landing).and_then(|point| {
+                let offset = point - here;
+                let facing = turning.facing;
+                (offset != Vec2Fp::ZERO && inside_turn(facing, offset, turn_radius(top_speed, turning.max_turn))).then_some(())?;
+                let across = (facing.x * offset.y - facing.y * offset.x).abs();
+                // The circle through it that leaves along its heading, d² / 2·across.
+                let fits = Fp::from_bits(i32::try_from((wide_mul(offset.x, offset.x) + wide_mul(offset.y, offset.y)).to_bits() / (2 * i64::from(across.to_bits().max(1)))).unwrap_or(i32::MAX));
+                let speed = fits.saturating_mul(turning.max_turn);
+                (speed >= top_speed / 2).then_some(speed.min(top_speed))
+            });
             let down = |value: Fp, full: Fp, floor: Fp| (value - full / LANDING_TICKS).max(floor);
             let up = |value: Fp, full: Fp, ceiling: Fp| if value > ceiling { down(value, full, ceiling) } else { (value + full / LANDING_TICKS).min(ceiling) };
             if landing {
@@ -327,7 +344,7 @@ impl SimWorld {
                 flight.speed = down(flight.speed, stats.max_speed, Fp::ZERO);
                 flight.altitude = up(flight.altitude, flight.elevation, height);
             } else {
-                flight.speed = up(flight.speed, stats.max_speed, tailing.unwrap_or(top_speed));
+                flight.speed = up(flight.speed, stats.max_speed, tailing.unwrap_or(top_speed).min(turning_in.unwrap_or(top_speed)));
                 flight.altitude = up(flight.altitude, flight.elevation, height);
             }
             // Flying burns fuel, and on the ground it slowly comes back.
@@ -376,8 +393,9 @@ impl SimWorld {
                         let half = break_off / 2;
                         flight.breaking_off = behind && distance_squared < wide_mul(half, half);
                     }
-                    // A gunship can turn on the spot, so nothing is out of its reach.
-                    let unreachable = !flight.hovers && inside_turn(facing, offset, radius);
+                    // A gunship can turn on the spot, so nothing is out of its reach. Easing off
+                    // to turn in, it turns as tight as its speed allows.
+                    let unreachable = !flight.hovers && inside_turn(facing, offset, if turning_in.is_some() { turn_radius(speed, turning.max_turn) } else { radius });
                     if flight.breaking_off || offset == Vec2Fp::ZERO || unreachable {
                         facing
                     } else {
