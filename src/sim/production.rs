@@ -507,6 +507,7 @@ impl SimWorld {
                     broadside: weapon.broadside,
                     aimed: false,
                     due: false,
+                    lobbed: weapon.lobbed,
                 })
                 .collect();
             self.ecs.insert_one(entity, super::components::ExtraWeapons(extras)).expect("entity was just spawned");
@@ -523,6 +524,9 @@ impl SimWorld {
             if weapon.setup_ticks > 0 {
                 self.ecs.insert_one(entity, super::components::Setup::packed(weapon.setup_ticks)).expect("entity was just spawned");
             }
+        }
+        if unit.weapon.is_some_and(|weapon| weapon.lobbed && !weapon.artillery) {
+            self.ecs.insert_one(entity, super::components::HighArc).expect("entity was just spawned");
         }
         if let Some(arc) = unit.weapon.and_then(|weapon| weapon.arc) {
             self.ecs.insert_one(entity, super::components::NoseGun(arc)).expect("entity was just spawned");

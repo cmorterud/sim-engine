@@ -302,7 +302,8 @@ fn weapon_stats(weapon: &WeaponDef) -> Vec<(&'static str, String)> {
     if weapon.kind == WeaponKind::Laser {
         add("Shot speed", "hits at once".to_string());
     } else if weapon.projectile_speed > Fp::ZERO {
-        add("Shot speed", format!("{} a second", number(fp(weapon.projectile_speed) * PER_SECOND, 0)));
+        let arc = if weapon.lobbed { ", in a high arc" } else { "" };
+        add("Shot speed", format!("{} a second{arc}", number(fp(weapon.projectile_speed) * PER_SECOND, 0)));
     }
     add("Turret", weapon.turn_rate.map_or_else(|| "fires any way at once".to_string(), |rate| format!("turns {rate}° a second")));
     if weapon.spread > Fp::ZERO {

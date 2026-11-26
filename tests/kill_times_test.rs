@@ -522,3 +522,47 @@ fn a_battleships_turrets_fire_together_a_ripple_apart() {
     let ripple = BROADSIDE_RIPPLE_TICKS;
     assert_eq!(fired[..6], [first, first + ripple, first + 2 * ripple, first + reload, first + reload + ripple, first + reload + 2 * ripple], "the shells left at {fired:?}");
 }
+
+/// A battleship's shells go up in a high arc and fly just fast enough that a commander that
+/// turns back each time a broadside goes up only just walks out of them from the edge of the
+/// battleship's reach, and is destroyed from any nearer (2026-11-26, the design owner's ask).
+/// The commander walks up and down across the line of fire, as a player keeps one moving, and
+/// turns back 0.3 seconds after each broadside's first shell leaves, as a player would on seeing it.
+#[test]
+fn a_microed_commander_only_just_walks_out_of_a_battleships_broadsides_at_its_full_reach() {
+    let reach = fp_int(3_000);
+    let db = BlueprintDb::standard();
+    assert!(db.get(db.id("t3_battleship")).weapon.is_some_and(|weapon| weapon.lobbed && weapon.range == reach), "the battleship lobs its shells to 3,000");
+    let survives_from = |range: i32| {
+        let mut world = world();
+        let ship = place(&mut world, "t3_battleship", Team::Blue, (SHORE_X - 600, 5_000));
+        let x = SHORE_X - 600 + range;
+        let commander = place(&mut world, "command_rig", Team::Red, (x, 4_400));
+        world.ecs.get::<&mut Combat>(world.unit_entity(commander).unwrap()).unwrap().enabled = false;
+        let walk = |up: bool| SimCommand::Move { units: vec![commander], goal: point(x, if up { 5_600 } else { 4_400 }) };
+        let (mut up, mut commands, mut flying, mut turn_at, mut fired) = (true, vec![walk(true)], Vec::<SimId>::new(), None, 0);
+        for tick in 0..1_200 {
+            world.advance_tick(&commands);
+            commands.clear();
+            let Some(at) = world.unit_position(commander) else { return (false, fired) };
+            let shells: Vec<SimId> = world.projectiles.iter().filter(|&&(_, entity)| world.ecs.get::<&Projectile>(entity).is_ok_and(|shell| shell.source == ship)).map(|&(id, _)| id).collect();
+            let new = shells.iter().filter(|shell| !flying.contains(shell)).count();
+            if new > 0 && new == shells.len() {
+                turn_at = turn_at.or(Some(tick + 3));
+            }
+            fired += new;
+            flying = shells;
+            let end = (up && at.y >= fp_int(5_550)) || (!up && at.y <= fp_int(4_450));
+            if end || turn_at == Some(tick) {
+                up = !up;
+                commands.push(walk(up));
+                turn_at = turn_at.filter(|&due| due != tick);
+            }
+        }
+        (true, fired)
+    };
+    let (survived, fired) = survives_from(2_990);
+    assert!(survived && fired >= 15, "from the edge of its reach the commander walked out of {fired} shells: {survived}");
+    let (survived, fired) = survives_from(2_200);
+    assert!(!survived, "from 2,200 the commander walked out of all {fired} shells");
+}

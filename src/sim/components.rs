@@ -436,6 +436,8 @@ pub struct ExtraWeapon {
     pub aimed: bool,
     /// A broadside gun is due to fire once each time the main weapon fires, and only then.
     pub due: bool,
+    /// Its shells go up in a high arc (`WeaponDef::lobbed`).
+    pub lobbed: bool,
 }
 
 impl ExtraWeapon {
@@ -548,6 +550,11 @@ pub struct Falling;
 /// (`combat::lobbed_solution`).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Lobbed(pub Fp);
+
+/// A main gun that is not artillery but lobs its shells in a high arc, as a battleship's does
+/// (`WeaponDef::lobbed`). Fixed from the blueprint, so not hashed.
+#[derive(Copy, Clone, Debug)]
+pub struct HighArc;
 
 /// Turns a unit vector towards another by at most `turn` radians, the short way round.
 /// Exactly behind has no shorter side, so it turns the positive way.
