@@ -17,6 +17,11 @@ use crate::ui::UiAction;
 
 /// The minimap's side, in points.
 pub const MINIMAP_SIZE: f32 = 200.0;
+/// How many squares the grid over the minimap has a side, lettered A–H across the top and
+/// numbered 1–8 down the left, so that a spot on the map can be named.
+pub const GRID_SQUARES: usize = 8;
+/// The room for the grid's letters and numbers along the minimap's top and left, in points.
+pub const GRID_LABEL: f32 = 12.0;
 /// The nuclear marker's radius on the minimap, in points.
 const MINIMAP_NUCLEAR_RADIUS: f32 = 5.0;
 /// The most pixels a side the land's picture has.
@@ -154,6 +159,41 @@ pub fn view_corners(camera: &Camera, heights: &HeightField) -> Vec<[f64; 2]> {
     corners
 }
 
+/// A grid square's name, by its column and row from the minimap's top left: "A1" to "H8".
+pub fn grid_square_name(column: usize, row: usize) -> String {
+    format!("{}{}", char::from(b'A' + column as u8), row + 1)
+}
+
+/// The grid square of a world point, by column and row from the minimap's top left. North is
+/// up, so the map's far edge is row 1.
+pub fn grid_square(map_size: f64, point: [f64; 2]) -> (usize, usize) {
+    let square = |value: f64| ((value / map_size * GRID_SQUARES as f64).floor().max(0.0) as usize).min(GRID_SQUARES - 1);
+    (square(point[0]), GRID_SQUARES - 1 - square(point[1]))
+}
+
+/// The grid's letters across the top of the minimap and numbers down its left.
+fn draw_grid_labels(painter: &egui::Painter, map: Rect) {
+    let step = map.width() / GRID_SQUARES as f32;
+    let font = egui::FontId::proportional(9.5);
+    for index in 0..GRID_SQUARES {
+        let middle = (index as f32 + 0.5) * step;
+        let letter = grid_square_name(index, 0)[..1].to_string();
+        painter.text(Pos2::new(map.left() + middle, map.top() - GRID_LABEL / 2.0 - 1.0), Align2::CENTER_CENTER, letter, font.clone(), hud::DIM_TEXT);
+        painter.text(Pos2::new(map.left() - GRID_LABEL / 2.0 - 1.0, map.top() + middle), Align2::CENTER_CENTER, (index + 1).to_string(), font.clone(), hud::DIM_TEXT);
+    }
+}
+
+/// Faint lines between the grid's squares, over the land and under the units.
+fn draw_grid_lines(painter: &egui::Painter, map: Rect) {
+    let step = map.width() / GRID_SQUARES as f32;
+    let stroke = Stroke::new(1.0_f32, Color32::from_white_alpha(28));
+    for index in 1..GRID_SQUARES {
+        let offset = index as f32 * step;
+        painter.line_segment([Pos2::new(map.left() + offset, map.top()), Pos2::new(map.left() + offset, map.bottom())], stroke);
+        painter.line_segment([Pos2::new(map.left(), map.top() + offset), Pos2::new(map.right(), map.top() + offset)], stroke);
+    }
+}
+
 /// How bright a remembered enemy structure's square is, against one in sight.
 const REMEMBERED_DIM: f32 = 0.55;
 
@@ -195,7 +235,10 @@ impl Minimap {
         let top = ctx.data(|data| data.get_temp::<f32>(egui::Id::new(BELOW_ECONOMY))).unwrap_or(96.0);
         let area = egui::Area::new(egui::Id::new("minimap")).anchor(Align2::LEFT_TOP, Vec2::new(4.0, top)).show(ctx, |ui| {
             hud::framed(ui, Vec2::new(8.0, 8.0), |ui| {
-                let (rect, response) = ui.allocate_exact_size(Vec2::splat(MINIMAP_SIZE), Sense::click_and_drag());
+                let (outer, _) = ui.allocate_exact_size(Vec2::splat(MINIMAP_SIZE + GRID_LABEL), Sense::hover());
+                let rect = Rect::from_min_size(outer.min + Vec2::splat(GRID_LABEL), Vec2::splat(MINIMAP_SIZE));
+                let response = ui.interact(rect, egui::Id::new("minimap map"), Sense::click_and_drag());
+                draw_grid_labels(ui.painter(), rect);
                 let painter = ui.painter_at(rect);
                 painter.image(land_id, rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
                 if let Some((fog, side)) = fog {
@@ -204,6 +247,7 @@ impl Minimap {
                     // Its first row is the map's near edge, at the bottom.
                     painter.image(fog, rect, Rect::from_min_max(Pos2::new(0.0, reach), Pos2::new(reach, 0.0)), Color32::WHITE);
                 }
+                draw_grid_lines(&painter, rect);
                 let raw = |value: i32| f64::from(value) / 4096.0;
                 // Every dot in one mesh: a battle has thousands, and shapes one by one cost
                 // more to lay out than the rest of the interface.
@@ -334,8 +378,9 @@ mod tests {
         let snapshot = SimSnapshot::default();
         let ctx = egui::Context::default();
         let mut minimap = Minimap::default();
-        // The panel sits at (4, 96), and the map starts inside its 8 point margin.
-        let at = Pos2::new(12.0 + MINIMAP_SIZE / 2.0, 104.0 + MINIMAP_SIZE / 2.0);
+        // The panel sits at (4, 96), and the map starts inside its 8 point margin, past the
+        // grid's letters and numbers.
+        let at = Pos2::new(12.0 + GRID_LABEL + MINIMAP_SIZE / 2.0, 104.0 + GRID_LABEL + MINIMAP_SIZE / 2.0);
         let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000.0, 800.0));
         let press = |pressed| egui::Event::PointerButton { pos: at, button, pressed, modifiers: egui::Modifiers::NONE };
         let mut actions = Vec::new();
@@ -351,6 +396,18 @@ mod tests {
         let left = click_middle(egui::PointerButton::Primary);
         assert!(!left.is_empty() && left.iter().all(|action| *action == UiAction::CenterCamera([320, 320])), "{left:?}");
         assert_eq!(click_middle(egui::PointerButton::Secondary), [UiAction::MinimapOrder([320, 320])]);
+    }
+
+    #[test]
+    fn grid_squares_are_lettered_across_and_numbered_down_from_the_top_left() {
+        let size = 1000.0;
+        // North is up: the map's far edge, high y, is row 1.
+        assert_eq!(grid_square(size, [0.0, size]), (0, 0));
+        assert_eq!(grid_square_name(0, 0), "A1");
+        assert_eq!(grid_square(size, [size, 0.0]), (GRID_SQUARES - 1, GRID_SQUARES - 1));
+        assert_eq!(grid_square_name(7, 7), "H8");
+        assert_eq!(grid_square(size, [380.0, 620.0]), (3, 3));
+        assert_eq!(grid_square(size, [-5.0, 2000.0]), (0, 0), "points past the edge fall in the edge squares");
     }
 
     #[test]

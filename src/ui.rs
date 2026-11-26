@@ -2169,6 +2169,59 @@ fn score_line(ui: &mut egui::Ui, line: &ScoreLine, actions: &mut Vec<UiAction>) 
     }
 }
 
+/// How wide the score panel is while playing: narrower than the watch bar's, as it shows only
+/// each side's income and army, with no column headings.
+const SLIM_WIDTH: f32 = 236.0;
+
+/// Where the income and the army end in a line of the slim score panel, from its left.
+const SLIM_COLUMNS: [f32; 2] = [176.0, SLIM_WIDTH];
+
+/// The most characters of a map's name the slim score panel shows before cutting it short.
+const MAP_NAME_CHARACTERS: usize = 20;
+
+/// A map's name, cut short with an ellipsis if it would crowd the clock in the score panel.
+pub fn short_map_name(name: &str) -> String {
+    if name.chars().count() <= MAP_NAME_CHARACTERS {
+        return name.to_string();
+    }
+    let kept: String = name.chars().take(MAP_NAME_CHARACTERS - 1).collect();
+    format!("{}…", kept.trim_end())
+}
+
+/// The income of a score line as the slim panel shows it: "+12/s", or "?" when unknown.
+pub fn slim_income(income: &str) -> String {
+    if income == "?" { income.to_string() } else { format!("{income}/s") }
+}
+
+/// A line of the score panel while playing: the side's color and name, then its materiel income
+/// and its army's worth. How the match ended, once it has, follows the name. A player's line is
+/// set in under their team's, and one that can take the camera to their base does so on a click.
+fn slim_line(ui: &mut egui::Ui, line: &ScoreLine, actions: &mut Vec<UiAction>) {
+    let sense = if line.jump.is_some() { egui::Sense::click() } else { egui::Sense::hover() };
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(SLIM_WIDTH, 17.0), sense);
+    let painter = ui.painter();
+    if line.jump.is_some() && response.hovered() {
+        painter.rect_filled(rect, 2.0, hud::GLOW.gamma_multiply(0.16));
+    }
+    let indent = if line.player { 12.0 } else { 0.0 };
+    let swatch = Rect::from_center_size(Pos2::new(rect.left() + 6.0 + indent, rect.center().y), Vec2::splat(if line.player { 7.0 } else { 9.0 }));
+    painter.rect(swatch, 1.0, line.color, Stroke::new(1.0_f32, Color32::from_black_alpha(160)));
+    let font = if line.player { FontId::proportional(12.5) } else { FontId::proportional(13.0) };
+    let name = painter.text(Pos2::new(rect.left() + 16.0 + indent, rect.center().y), Align2::LEFT_CENTER, &line.name, font, hud::TEXT);
+    if line.state.0 != "Playing" {
+        painter.text(Pos2::new(name.right() + 6.0, rect.center().y), Align2::LEFT_CENTER, &line.state.0, FontId::proportional(11.5), line.state.1);
+    }
+    painter.text(Pos2::new(rect.left() + SLIM_COLUMNS[0], rect.center().y), Align2::RIGHT_CENTER, slim_income(&line.figures[1]), FontId::proportional(12.0), hud::DIM_TEXT);
+    painter.text(Pos2::new(rect.left() + SLIM_COLUMNS[1], rect.center().y), Align2::RIGHT_CENTER, &line.figures[2], FontId::proportional(12.0), hud::TEXT);
+    let hint = "Materiel income a second, and the materiel its mobile units in sight cost.";
+    let response = response.on_hover_text(if line.jump.is_some() { format!("{hint}\nClick to look at their base.") } else { hint.to_string() });
+    if let Some(at) = line.jump {
+        if response.clicked() {
+            actions.push(UiAction::CenterCamera(at));
+        }
+    }
+}
+
 /// The score panel's column headings, over the figures of `score_row`.
 fn score_columns(ui: &mut egui::Ui) {
     let (rect, response) = ui.allocate_exact_size(Vec2::new(SCORE_WIDTH, 14.0), egui::Sense::hover());
@@ -2194,9 +2247,9 @@ fn team_figures(snapshot: &SimSnapshot, team: Team, db: &BlueprintDb, income: Op
     [units.len().to_string(), income.map_or_else(|| "?".to_string(), |income| format!("+{income}")), hud::compact(army)]
 }
 
-/// The score panel's first line: the clock, and on the right `right`.
-fn score_header(ui: &mut egui::Ui, tick: u32, right: &str) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(SCORE_WIDTH, 18.0), egui::Sense::hover());
+/// The score panel's first line, `width` wide: the clock, and on the right `right`.
+fn score_header(ui: &mut egui::Ui, width: f32, tick: u32, right: &str) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 18.0), egui::Sense::hover());
     let painter = ui.painter();
     painter.circle_stroke(Pos2::new(rect.left() + 6.0, rect.center().y), 5.5, Stroke::new(1.4_f32, hud::CLOCK));
     painter.line_segment([Pos2::new(rect.left() + 6.0, rect.center().y), Pos2::new(rect.left() + 6.0, rect.center().y - 3.5)], Stroke::new(1.4_f32, hud::CLOCK));
@@ -2204,9 +2257,9 @@ fn score_header(ui: &mut egui::Ui, tick: u32, right: &str) {
     painter.text(Pos2::new(rect.right(), rect.center().y), Align2::RIGHT_CENTER, right, FontId::proportional(12.0), hud::DIM_TEXT);
 }
 
-/// A thin line across a panel.
-fn panel_rule(ui: &mut egui::Ui) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(SCORE_WIDTH, 5.0), egui::Sense::hover());
+/// A thin line across a panel, `width` wide.
+fn panel_rule(ui: &mut egui::Ui, width: f32) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 5.0), egui::Sense::hover());
     ui.painter().line_segment([rect.left_center(), rect.right_center()], Stroke::new(1.0_f32, hud::RIM.gamma_multiply(0.5)));
 }
 
@@ -2252,21 +2305,20 @@ pub fn resource_bar(ctx: &egui::Context, snapshot: &SimSnapshot, db: &BlueprintD
         ui.spacing_mut().item_spacing.y = 2.0;
         // The person's own units: in a team match, not their allies'.
         let mine = snapshot.players.first().map_or_else(|| snapshot.units.iter().filter(|unit| unit.team == Team::Blue && unit.blueprint != u16::MAX).count(), |you| you.units as usize);
-        score_header(ui, snapshot.tick, &format!("{mine} units"));
-        panel_rule(ui);
-        score_columns(ui);
-        if snapshot.players.len() > 2 {
-            for line in team_match_lines(&snapshot.players, snapshot.match_result, false) {
-                score_line(ui, &line, actions);
-            }
+        score_header(ui, SLIM_WIDTH, snapshot.tick, &format!("{} · {mine} units", short_map_name(map)));
+        panel_rule(ui, SLIM_WIDTH);
+        let lines = if snapshot.players.len() > 2 {
+            team_match_lines(&snapshot.players, snapshot.match_result, false)
         } else {
-            score_row(ui, BLUE, "Blue (you)", team_figures(snapshot, Team::Blue, db, Some(snapshot.economy.mass_income)), team_state(snapshot.match_result, Team::Blue));
-            score_row(ui, RED, "Red (AI)", team_figures(snapshot, Team::Red, db, None), team_state(snapshot.match_result, Team::Red));
+            let line = |team: Team, name: &str, income: Option<i64>| {
+                let (state, color) = team_state(snapshot.match_result, team);
+                ScoreLine { color: team_color(team), name: name.to_string(), figures: team_figures(snapshot, team, db, income), state: (state.to_string(), color), player: false, jump: None }
+            };
+            vec![line(Team::Blue, "Blue (you)", Some(snapshot.economy.mass_income)), line(Team::Red, "Red (AI)", None)]
+        };
+        for line in &lines {
+            slim_line(ui, line, actions);
         }
-        panel_rule(ui);
-        ui.vertical_centered(|ui| {
-            ui.label(egui::RichText::new(format!("Map: {map}")).size(12.0).color(hud::DIM_TEXT));
-        });
     });
     note_score_bottom(ctx, score.bottom());
 }
@@ -2895,8 +2947,8 @@ pub fn watch_bar(ctx: &egui::Context, snapshot: &SimSnapshot, db: &BlueprintDb, 
     });
     let ((), score) = hud::panel_rect(ctx, "score", Align2::RIGHT_TOP, Vec2::new(-4.0, 4.0), |ui| {
         ui.spacing_mut().item_spacing.y = 2.0;
-        score_header(ui, snapshot.tick, &format!("{}x", state.speed));
-        panel_rule(ui);
+        score_header(ui, SCORE_WIDTH, snapshot.tick, &format!("{}x", state.speed));
+        panel_rule(ui, SCORE_WIDTH);
         score_columns(ui);
         if snapshot.players.len() > 2 {
             for line in team_match_lines(&snapshot.players, snapshot.match_result, true) {
@@ -2913,7 +2965,7 @@ pub fn watch_bar(ctx: &egui::Context, snapshot: &SimSnapshot, db: &BlueprintDb, 
                 score_row(ui, team_color(team), &format!("{} (AI)", team_name(team)), figures, team_state(snapshot.match_result, team));
             }
         }
-        panel_rule(ui);
+        panel_rule(ui, SCORE_WIDTH);
         ui.label(egui::RichText::new("Observer").strong().color(Color32::from_rgb(255, 170, 60)));
         ui.vertical_centered(|ui| {
             ui.label(egui::RichText::new(format!("Map: {}   seed {}", state.map, state.seed)).size(12.0).color(hud::DIM_TEXT))
@@ -2967,17 +3019,25 @@ pub fn draw_target_pointer(ctx: &egui::Context) {
     }
 }
 
-/// The red target: a ring with four ticks across it and a dot in the middle, each over a dark
-/// outline so that it shows on snow and sea alike.
+/// Half the side of the red target's square of corner brackets, in points.
+const TARGET_HALF: f32 = 13.0;
+/// How long each arm of a corner bracket is, in points.
+const TARGET_ARM: f32 = 7.0;
+
+/// The red target: four corner brackets round the spot, short ticks pointing in from each side,
+/// and a dot in the middle, each over a dark outline so that it shows on snow and sea alike.
 pub fn target_pointer_shapes(at: Pos2) -> Vec<egui::Shape> {
-    const RING: f32 = 12.0;
-    let red = Color32::from_rgb(255, 40, 30);
+    let red = Color32::from_rgb(255, 64, 50);
     let dark = Color32::from_black_alpha(210);
     let mut out = Vec::new();
     for (color, width) in [(dark, 4.4_f32), (red, 2.2)] {
-        out.push(egui::Shape::circle_stroke(at, RING, Stroke::new(width, color)));
+        let stroke = Stroke::new(width, color);
+        for (x, y) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+            let corner = at + Vec2::new(x, y) * TARGET_HALF;
+            out.push(egui::Shape::line(vec![corner - Vec2::new(0.0, y * TARGET_ARM), corner, corner - Vec2::new(x * TARGET_ARM, 0.0)], stroke));
+        }
         for direction in [Vec2::X, -Vec2::X, Vec2::Y, -Vec2::Y] {
-            out.push(egui::Shape::line_segment([at + direction * (RING - 6.0), at + direction * (RING + 6.0)], Stroke::new(width, color)));
+            out.push(egui::Shape::line_segment([at + direction * (TARGET_HALF - 7.0), at + direction * (TARGET_HALF - 2.0)], Stroke::new(width * 0.8, color)));
         }
     }
     out.push(egui::Shape::circle_filled(at, 2.8, dark));
@@ -4186,6 +4246,34 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_target_pointer_is_four_corner_brackets_round_the_spot() {
+        let at = Pos2::new(100.0, 50.0);
+        let shapes = target_pointer_shapes(at);
+        let corners: Vec<Pos2> = shapes
+            .iter()
+            .filter_map(|shape| match shape {
+                egui::Shape::Path(path) if path.points.len() == 3 => Some(path.points[1]),
+                _ => None,
+            })
+            .collect();
+        // Two passes, the dark outline and the red over it, each with four brackets.
+        assert_eq!(corners.len(), 8);
+        for corner in corners {
+            assert!(((corner.x - at.x).abs() - TARGET_HALF).abs() < 0.01 && ((corner.y - at.y).abs() - TARGET_HALF).abs() < 0.01, "each bracket's corner sits on the square round the spot");
+        }
+        assert!(!shapes.iter().any(|shape| matches!(shape, egui::Shape::Circle(circle) if circle.radius > 4.0)), "no ring");
+    }
+
+    #[test]
+    fn the_slim_score_panel_shows_income_a_second() {
+        assert_eq!(slim_income("+12"), "+12/s");
+        assert_eq!(slim_income("?"), "?");
+        assert_eq!(short_map_name("Highland"), "Highland");
+        let long = short_map_name("Nuclear: a full Strategic Missile Launcher against a large undefended base");
+        assert!(long.ends_with('…') && long.chars().count() <= MAP_NAME_CHARACTERS, "{long}");
+    }
+
     use super::*;
     use crate::sim::world::{BuildQueueView, FactoryView, OrderStopView, PlanStep, UnitPlanView, UnitSpendingView};
 

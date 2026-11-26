@@ -1,4 +1,5 @@
-//! The look of the in-game interface: framed panels with chamfered corners, square buttons, and
+//! The look of the in-game interface: plain square panels with a steel rim and a brass line along
+//! their top, square buttons, and
 //! the vector glyphs drawn on order buttons. `ui` lays the panels out; this only paints.
 #![allow(clippy::disallowed_types)]
 
@@ -9,46 +10,24 @@ use egui::epaint::{Mesh, PathShape};
 use egui::{Align2, Color32, FontId, Pos2, Rect, Response, Sense, Shape, Stroke, Ui, Vec2};
 
 /// The dark fill behind every panel.
-pub const PANEL_FILL: Color32 = Color32::from_rgba_premultiplied(12, 15, 20, 236);
-/// The panel's lighter top, which fades into the fill.
-const PANEL_TOP: Color32 = Color32::from_rgba_premultiplied(30, 37, 46, 240);
-/// The steel rim around panels.How
-pub const RIM: Color32 = Color32::from_rgb(118, 134, 150);
-/// The thin glowing line inside the rim, and what hovered or chosen things light up with.
-pub const GLOW: Color32 = Color32::from_rgb(96, 206, 255);
+pub const PANEL_FILL: Color32 = Color32::from_rgba_premultiplied(19, 22, 20, 238);
+/// The steel rim around panels.
+pub const RIM: Color32 = Color32::from_rgb(95, 101, 93);
+/// The brass line along the top of every panel, and what hovered or chosen things light up with.
+pub const GLOW: Color32 = Color32::from_rgb(209, 165, 78);
 /// Ordinary text on panels.
-pub const TEXT: Color32 = Color32::from_rgb(214, 224, 234);
+pub const TEXT: Color32 = Color32::from_rgb(220, 223, 214);
 /// Text that matters less: labels, capacities.
-pub const DIM_TEXT: Color32 = Color32::from_rgb(140, 154, 168);
+pub const DIM_TEXT: Color32 = Color32::from_rgb(157, 162, 150);
 /// The clock and other figures that read as system status.
-pub const CLOCK: Color32 = Color32::from_rgb(110, 210, 255);
+pub const CLOCK: Color32 = Color32::from_rgb(220, 223, 214);
 pub const MASS: Color32 = Color32::from_rgb(132, 214, 92);
 pub const ENERGY: Color32 = Color32::from_rgb(250, 186, 70);
 pub const GAIN: Color32 = Color32::from_rgb(196, 234, 120);
 pub const LOSS: Color32 = Color32::from_rgb(255, 92, 76);
-/// Button faces, top and bottom of their gradient.
-const FACE_TOP: Color32 = Color32::from_rgb(40, 49, 60);
-const FACE_BOTTOM: Color32 = Color32::from_rgb(17, 21, 27);
-const FACE_EDGE: Color32 = Color32::from_rgb(70, 84, 98);
-
-/// How much each corner of a panel is cut off, in points.
-const CHAMFER: f32 = 9.0;
-
-/// The outline of a rectangle with its corners cut off.
-fn chamfered(rect: Rect, cut: f32) -> Vec<Pos2> {
-    let cut = cut.min(rect.width() / 3.0).min(rect.height() / 3.0);
-    let (l, r, t, b) = (rect.left(), rect.right(), rect.top(), rect.bottom());
-    vec![
-        Pos2::new(l + cut, t),
-        Pos2::new(r - cut, t),
-        Pos2::new(r, t + cut),
-        Pos2::new(r, b - cut),
-        Pos2::new(r - cut, b),
-        Pos2::new(l + cut, b),
-        Pos2::new(l, b - cut),
-        Pos2::new(l, t + cut),
-    ]
-}
+/// Button faces, plain, and their edge.
+const FACE: Color32 = Color32::from_rgb(34, 39, 34);
+const FACE_EDGE: Color32 = Color32::from_rgb(60, 66, 59);
 
 /// A convex polygon filled with a vertical gradient, `top` at its top edge and `bottom` at its
 /// bottom.
@@ -75,24 +54,20 @@ pub fn lerp_color(from: Color32, to: Color32, share: f32) -> Color32 {
     Color32::from_rgba_premultiplied(mix(from.r(), to.r()), mix(from.g(), to.g()), mix(from.b(), to.b()), mix(from.a(), to.a()))
 }
 
-/// A panel's frame: the dark gradient body, the steel rim, a glowing line just inside it, and
-/// small lights at the cut corners.
+/// How thick the brass line along a panel's top is, in points.
+const TOP_LINE: f32 = 2.0;
+
+/// A panel's frame: a soft shadow, the dark body with square corners, a steel rim, and a brass
+/// line along the top.
 pub fn panel_shapes(rect: Rect) -> Vec<Shape> {
-    let outline = chamfered(rect, CHAMFER);
-    let inner = chamfered(rect.shrink(3.0), CHAMFER - 1.5);
-    let mut shapes = vec![
+    let top = Rect::from_min_max(rect.left_top(), Pos2::new(rect.right(), rect.top() + TOP_LINE));
+    vec![
         // A soft shadow, so that panels lift off busy terrain.
-        Shape::convex_polygon(chamfered(rect.expand(2.0).translate(Vec2::new(0.0, 2.0)), CHAMFER + 1.0), Color32::from_black_alpha(90), Stroke::NONE),
-        gradient_polygon(&outline, PANEL_TOP, PANEL_FILL),
-        Shape::Path(PathShape::closed_line(outline.clone(), Stroke::new(2.0_f32, RIM))),
-        Shape::Path(PathShape::closed_line(inner, Stroke::new(1.0_f32, GLOW.gamma_multiply(0.35)))),
-    ];
-    // A short bright stroke along each cut corner.
-    for index in (0..outline.len()).step_by(2) {
-        let (from, to) = (outline[(index + outline.len() - 1) % outline.len()], outline[index]);
-        shapes.push(Shape::line_segment([from, to], Stroke::new(2.5_f32, GLOW.gamma_multiply(0.85))));
-    }
-    shapes
+        Shape::rect_filled(rect.expand(1.0).translate(Vec2::new(0.0, 2.0)), 3.0, Color32::from_black_alpha(80)),
+        Shape::rect_filled(rect, 2.0, PANEL_FILL),
+        Shape::rect_stroke(rect, 2.0, Stroke::new(1.0_f32, RIM)),
+        Shape::rect_filled(top, egui::Rounding { nw: 2.0, ne: 2.0, sw: 0.0, se: 0.0 }, GLOW),
+    ]
 }
 
 /// Paints a panel's frame behind whatever `add` lays out, with room around it.
@@ -114,27 +89,26 @@ pub fn panel_rect<R>(ctx: &egui::Context, id: &str, anchor: Align2, offset: Vec2
     (shown.inner, shown.response.rect)
 }
 
-/// The face of a square button: a gradient, lit along its rim when hovered and filled with the
-/// glow when chosen. Disabled buttons are dimmed.
+/// The face of a square button: flat, its edge lit brass when hovered, and tinted brass with a
+/// brass edge when chosen. Disabled buttons are dimmed.
 pub fn face_shapes(rect: Rect, hovered: bool, chosen: bool, enabled: bool) -> Vec<Shape> {
-    let outline = chamfered(rect, 4.0);
-    let (top, bottom) = if chosen {
-        (Color32::from_rgb(40, 104, 140), Color32::from_rgb(16, 46, 66))
+    let fill = if chosen {
+        Color32::from_rgb(64, 54, 32)
     } else if hovered && enabled {
-        (Color32::from_rgb(52, 66, 82), Color32::from_rgb(22, 28, 36))
+        Color32::from_rgb(44, 49, 43)
     } else {
-        (FACE_TOP, FACE_BOTTOM)
+        FACE
     };
-    let rim = if chosen {
+    let edge = if chosen {
         GLOW
     } else if hovered && enabled {
-        GLOW.gamma_multiply(0.8)
+        GLOW.gamma_multiply(0.75)
     } else {
         FACE_EDGE
     };
-    let mut shapes = vec![gradient_polygon(&outline, top, bottom), Shape::Path(PathShape::closed_line(outline, Stroke::new(if chosen { 1.8_f32 } else { 1.2 }, rim)))];
+    let mut shapes = vec![Shape::rect_filled(rect, 2.0, fill), Shape::rect_stroke(rect, 2.0, Stroke::new(if chosen { 1.6_f32 } else { 1.0 }, edge))];
     if !enabled {
-        shapes.push(Shape::convex_polygon(chamfered(rect, 4.0), Color32::from_black_alpha(120), Stroke::NONE));
+        shapes.push(Shape::rect_filled(rect, 2.0, Color32::from_black_alpha(120)));
     }
     shapes
 }
@@ -179,12 +153,12 @@ pub fn hatched(painter: &egui::Painter, rect: Rect, fill: Color32, stripe: Color
 
 /// A thin bar that fills from the left, with a dark track.
 pub fn meter(painter: &egui::Painter, rect: Rect, share: f32, color: Color32) {
-    painter.rect_filled(rect, 1.5, Color32::from_rgb(8, 10, 13));
+    painter.rect_filled(rect, 1.5, Color32::from_rgb(9, 11, 9));
     let filled = Rect::from_min_size(rect.min, Vec2::new(rect.width() * share.clamp(0.0, 1.0), rect.height()));
     if filled.width() > 0.5 {
         painter.add(gradient_polygon(&[filled.left_top(), filled.right_top(), filled.right_bottom(), filled.left_bottom()], lerp_color(color, Color32::WHITE, 0.35), color.gamma_multiply(0.75)));
     }
-    painter.rect_stroke(rect, 1.5, Stroke::new(1.0_f32, Color32::from_rgb(52, 62, 74)));
+    painter.rect_stroke(rect, 1.5, Stroke::new(1.0_f32, Color32::from_rgb(52, 58, 51)));
 }
 
 /// What an order or toggle button shows.
@@ -415,27 +389,27 @@ pub fn apply_visuals(style: &mut egui::Style) {
     let visuals = &mut style.visuals;
     *visuals = egui::Visuals::dark();
     visuals.override_text_color = None;
-    visuals.window_fill = Color32::from_rgba_premultiplied(14, 18, 24, 244);
-    visuals.panel_fill = Color32::from_rgba_premultiplied(14, 18, 24, 236);
+    visuals.window_fill = Color32::from_rgba_premultiplied(19, 22, 20, 244);
+    visuals.panel_fill = Color32::from_rgba_premultiplied(19, 22, 20, 236);
     visuals.window_stroke = Stroke::new(1.5_f32, RIM);
     visuals.window_rounding = egui::Rounding::same(3.0);
     visuals.menu_rounding = egui::Rounding::same(3.0);
-    visuals.extreme_bg_color = Color32::from_rgb(8, 10, 13);
-    visuals.selection.bg_fill = Color32::from_rgb(32, 92, 128);
+    visuals.extreme_bg_color = Color32::from_rgb(9, 11, 9);
+    visuals.selection.bg_fill = Color32::from_rgb(86, 70, 36);
     visuals.selection.stroke = Stroke::new(1.0_f32, GLOW);
     visuals.hyperlink_color = CLOCK;
     let widgets = &mut visuals.widgets;
     widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, TEXT);
-    widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(50, 60, 72));
-    widgets.inactive.weak_bg_fill = Color32::from_rgb(30, 37, 46);
-    widgets.inactive.bg_fill = Color32::from_rgb(30, 37, 46);
+    widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(46, 52, 45));
+    widgets.inactive.weak_bg_fill = Color32::from_rgb(34, 39, 34);
+    widgets.inactive.bg_fill = Color32::from_rgb(34, 39, 34);
     widgets.inactive.bg_stroke = Stroke::new(1.0_f32, FACE_EDGE);
     widgets.inactive.fg_stroke = Stroke::new(1.0_f32, TEXT);
-    widgets.hovered.weak_bg_fill = Color32::from_rgb(42, 58, 74);
-    widgets.hovered.bg_fill = Color32::from_rgb(42, 58, 74);
+    widgets.hovered.weak_bg_fill = Color32::from_rgb(44, 49, 43);
+    widgets.hovered.bg_fill = Color32::from_rgb(44, 49, 43);
     widgets.hovered.bg_stroke = Stroke::new(1.2_f32, GLOW.gamma_multiply(0.8));
-    widgets.active.weak_bg_fill = Color32::from_rgb(32, 92, 128);
-    widgets.active.bg_fill = Color32::from_rgb(32, 92, 128);
+    widgets.active.weak_bg_fill = Color32::from_rgb(64, 54, 32);
+    widgets.active.bg_fill = Color32::from_rgb(64, 54, 32);
     widgets.active.bg_stroke = Stroke::new(1.5_f32, GLOW);
     for state in [&mut widgets.noninteractive, &mut widgets.inactive, &mut widgets.hovered, &mut widgets.active, &mut widgets.open] {
         state.rounding = egui::Rounding::same(2.0);
@@ -682,11 +656,17 @@ mod tests {
     }
 
     #[test]
-    fn a_panel_is_framed_on_all_sides_with_its_corners_cut() {
+    fn a_panel_is_square_with_a_rim_and_a_brass_line_along_its_top() {
         let rect = Rect::from_min_size(Pos2::new(10.0, 20.0), Vec2::new(200.0, 60.0));
-        let outline = chamfered(rect, CHAMFER);
-        assert_eq!(outline.len(), 8);
-        assert!(outline.iter().all(|point| rect.expand(0.01).contains(*point)));
-        assert!(!outline.contains(&rect.left_top()), "the corners are cut");
+        let shapes = panel_shapes(rect);
+        let rims = shapes.iter().filter(|shape| matches!(shape, Shape::Rect(rect_shape) if rect_shape.rect == rect && rect_shape.stroke.color == RIM)).count();
+        assert_eq!(rims, 1, "one steel rim round the whole panel");
+        let top = shapes.iter().find_map(|shape| match shape {
+            Shape::Rect(rect_shape) if rect_shape.fill == GLOW => Some(rect_shape.rect),
+            _ => None,
+        });
+        let top = top.expect("a brass line");
+        assert_eq!((top.left(), top.right(), top.top()), (rect.left(), rect.right(), rect.top()), "it runs along the whole top edge");
+        assert!(top.height() <= 3.0, "and is thin");
     }
 }
