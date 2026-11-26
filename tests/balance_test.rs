@@ -212,8 +212,8 @@ fn anti_air_is_no_better_a_shield_and_fighters_out_turn_bombers() {
 }
 
 /// The T3 fighter against the T1 interceptor ([air.t3_fighter]): more damage a second,
-/// one shot to destroy one, more range and speed, a quicker turn, and the better buy in a fight
-/// at T3 prices, so that spamming interceptors against it loses.
+/// one shot to destroy one, more range and speed, a quicker turn. An equal cost of interceptors
+/// may beat it (the design owner, 2026-11-26), so that fight is reported, not held.
 #[test]
 fn the_t3_fighter_outclasses_the_t1_interceptor() {
     use sim_engine::balance::{bought_at, cost_at};
@@ -240,7 +240,10 @@ fn the_t3_fighter_outclasses_the_t1_interceptor() {
     assert!(fighter.speed > interceptor.speed, "faster");
     let turn = |unit: &sim_engine::sim::blueprints::Blueprint| f64::from(unit.flight.expect("flies").turn_rate);
     assert!(turn(fighter) >= turn(interceptor) * number("turn_over_interceptor"), "turns at {}", turn(fighter));
-    assert!(gun.arc.is_none(), "its guns fire off its nose");
+    // Its guns fire off its nose, within 40 degrees of straight ahead (the design owner,
+    // 2026-11-26), wider than the interceptor's 30.
+    let (cone, narrow) = (gun.arc.expect("a gun on its nose"), small.arc.expect("a gun on its nose"));
+    assert!(cone < narrow, "a cone as wide as the cosine {cone}");
     // It eases off slower than the interceptor to turn tighter; the T1 bomber never eases off,
     // and the Strategic Bomber only slightly (the design owner, 2026-11-26).
     let slowest = |unit: &sim_engine::sim::blueprints::Blueprint| unit.flight.expect("flies").min_speed;
@@ -250,7 +253,9 @@ fn the_t3_fighter_outclasses_the_t1_interceptor() {
     assert!(slowest(bomber) < bomber.speed && slowest(bomber) >= bomber.speed * 4 / 5, "the Strategic Bomber eases off to {}", slowest(bomber));
     let materiel = 6.0 * cost_at(fighter, 3);
     let fight = mirrored(&db, bought_at(&db, "t3_air_superiority", materiel, 3), bought_at(&db, "t1_interceptor", materiel, 3), 1.0);
-    assert!(fight.score >= number("beats_interceptors_by"), "six fighters score {} against as much in interceptors", fight.score);
+    // It may lose to as much in interceptors (the design owner, 2026-11-26: the cheaper plane
+    // must be worth its cost), so the fight is only reported.
+    println!("six fighters score {:+.2} against as much in interceptors", fight.score);
 }
 
 /// The sea grounds (2026-11-24, for fights between domains) are as fair as the land: equal fleets

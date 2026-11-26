@@ -783,10 +783,13 @@ vision = 640
 # Eases off slower than the interceptor (15), to turn tighter (the design owner, 2026-11-26):
 # a quarter of its top speed.
 flight = { elevation = 352, turn_rate = 340, break_off = 300, fuel = 1000, min_speed = 13 }
-# Its gun destroys a Strategic Bomber in about 10 seconds, so 640 a second, and another T3 fighter
-# in about 5, so health 3,520 (five and a half shots: the first lands at once); it flies 30% faster than the Strategic Bomber (2026-11-26, the
-# design owner's rules, [kill_times] and [air]).
-weapon = { range = 600, reload_ticks = 10, projectile_speed = 180, damage = 640, targets = "air" }
+# Its gun destroys a Strategic Bomber in about 10 seconds and another T3 fighter in about 5, so
+# health 3,520; it flies 30% faster than the Strategic Bomber (2026-11-26, the design owner's
+# rules, [kill_times] and [air]). It fires within 40 degrees of its nose (the design owner,
+# 2026-11-26), so on a target holding still it lands a shot about every 2 seconds, between passes,
+# and its damage is what makes the kill times at that rate: 1,070, 8.7 s on a Strategic Bomber
+# (6 shots), 4.7 s on a T3 fighter and 14.7 s on a Heavy Gunship.
+weapon = { range = 600, reload_ticks = 10, projectile_speed = 180, damage = 1070, targets = "air", arc = 40 }
 
 # One great bomb a pass, and anti-air guns: the T3 snipe weapon, its bomb set by the hits it takes
 # to destroy what it is for, and its blast wide ([kills], [splash] in data/balance_targets.toml).
