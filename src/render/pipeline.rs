@@ -20,7 +20,8 @@ use super::climate::Climate;
 use super::detail::detail_levels;
 use super::land::LandField;
 use super::shore::ShoreField;
-use super::tiles::{tiled_indices, visible_tiles, GridPlacement, HeightRanges, TileRuns};
+use super::relief::relief_levels;
+use super::tiles::{block_indices, coast_levels, coast_reach, plan_blocks, strays, BlockLayout, BlockPlan, GridPlacement, HeightRanges, Lod, Strays, LOD_ERROR_PIXELS};
 use super::waves::wave_levels;
 use super::sight::{Presence, Sight};
 
@@ -63,6 +64,11 @@ struct Globals {
     /// The simulation's time in seconds, for waves, the terrain grid's samples a side, how
     /// strongly sight is washed pale, then the quality: 0 for `Low`, 1 for `High`.
     water: [f32; 4],
+    /// The terrain's level of detail (tiles.rs): the pixels on screen a unit of height covers
+    /// at a unit's distance, over the pixels the ground may stray by (0 to draw it all at full
+    /// detail), how near the water's edge the ground stays at full detail and how far each level
+    /// after that is, and 1 if the shore limits the detail at all.
+    lod: [f32; 4],
 }
 
 /// How much the land and sea shaders draw. `Low` is for weak graphics, such as a laptop's
@@ -161,6 +167,8 @@ pub struct Renderer {
     scar_pipeline: wgpu::RenderPipeline,
     wake_pipeline: wgpu::RenderPipeline,
     terrain_pipeline: wgpu::RenderPipeline,
+    /// The same for blocks drawn coarser, lit from the relief field at each pixel.
+    far_terrain_pipeline: wgpu::RenderPipeline,
     box_pipeline: wgpu::RenderPipeline,
     dome_pipeline: wgpu::RenderPipeline,
     water_pipeline: wgpu::RenderPipeline,
@@ -175,12 +183,21 @@ pub struct Renderer {
     /// Each shape's far model, drawn in its place once it is small on screen.
     far_indices: Vec<std::ops::Range<u32>>,
     terrain_index_buffer: wgpu::Buffer,
-    /// Where each tile's triangles begin and end in the terrain's indices.
-    tile_indices: Vec<std::ops::Range<u32>>,
-    /// The lowest and highest ground in blocks of the map, for which tiles to draw.
+    /// Where each block's triangles begin and end in the terrain's indices, at each level.
+    block_layout: BlockLayout,
+    /// The lowest and highest ground in blocks of the map, for which blocks to draw.
     height_ranges: HeightRanges,
-    /// The tiles to draw this frame, for the terrain and for the water.
-    tile_runs: TileRuns,
+    /// The blocks to draw this frame, for the terrain and for the water, and their levels.
+    block_plan: BlockPlan,
+    /// Each block's level this frame, one byte each, for the shaders.
+    block_level_texture: wgpu::Texture,
+    block_level_view: wgpu::TextureView,
+    /// For each block, the lowest level the shore allows, if there is water (tiles.rs).
+    coast_levels: Option<Vec<f64>>,
+    /// How far each block's ground strays when drawn coarser, if the grid covers every sample
+    /// (tiles.rs), and the same for the shaders, read smoothly between the blocks' middles.
+    strays: Option<Strays>,
+    stray_view: wgpu::TextureView,
     /// What the shaders read, kept to rebuild their bindings when the shore field changes.
     bind_group_layout: wgpu::BindGroupLayout,
     height_view: wgpu::TextureView,
@@ -191,6 +208,7 @@ pub struct Renderer {
     wave_sampler: wgpu::Sampler,
     land_view: wgpu::TextureView,
     detail_view: wgpu::TextureView,
+    relief_view: wgpu::TextureView,
     instance_buffer: InstanceBuffer,
     /// Every shape's instances, one after another, with where each shape's begin and end.
     flat_instances: Vec<UnitInstanceRaw>,
@@ -256,6 +274,8 @@ impl Renderer {
         let started = Instant::now();
         let shore = ShoreField::bake(&self.ground, f64::from(level));
         log::info!("shore field baked in {:.0} ms", started.elapsed().as_secs_f64() * 1000.0);
+        // Only a grid of every sample is drawn coarser far away (`prepare`).
+        self.coast_levels = shore.as_ref().filter(|_| self.grid_size as i32 >= self.samples_per_side).and_then(|field| coast_levels(field, self.ground.samples(), self.cell_units));
         let (side, bytes) = shore.map_or((1, vec![0]), |field| (field.side() as u32, field.bytes()));
         self.shore_view = r8_texture(&self.device, &self.queue, "shore", side, &bytes);
         // How the sun and sky fall on the ground, and where it is damp.
@@ -396,10 +416,13 @@ impl Renderer {
             view_formats: &[],
         });
         let fog_view = fog_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        // Blending between sizes, for the relief field's smaller copies; the other textures
+        // sampled with it have one size.
         let fog_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("fog of war"),
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             ..Default::default()
@@ -463,10 +486,11 @@ impl Renderer {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
-                // The shore field, sampled with the fog's sampler.
+                // The shore field, sampled with the fog's sampler, and read by the terrain's
+                // vertices for their level of detail.
                 wgpu::BindGroupLayoutEntry {
                     binding: 4,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2,
@@ -524,6 +548,40 @@ impl Renderer {
                     },
                     count: None,
                 },
+                // The ground's slopes, creases and height, sampled with the fog's sampler.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 10,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // Each terrain block's level of detail this frame.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 11,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Uint,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // How far each block's ground strays when drawn coarser, sampled with the fog's
+                // sampler.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 12,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
         let shore_view = r8_texture(&device, &queue, "shore", 1, &[0]);
@@ -533,6 +591,39 @@ impl Renderer {
         let detail_view = rgba_texture(&device, &queue, "ground detail", &levels.iter().map(|level| (level.side, level.texels.as_slice())).collect::<Vec<_>>());
         // Fully lit and open, until the map's own is baked.
         let land_view = rgba_texture(&device, &queue, "land", &[(1, &[255, 255, 0, 255])]);
+        let started = Instant::now();
+        let relief = relief_levels(heights);
+        log::info!("relief field baked in {:.0} ms", started.elapsed().as_secs_f64() * 1000.0);
+        let relief_view = half_float_texture(&device, &queue, "relief", &relief.iter().map(|level| (level.side, level.texels.as_slice())).collect::<Vec<_>>());
+        // As many samples a side as the map has, so that the ground, and the shore where the
+        // water meets it, can be drawn at full detail at every zoom. A coarser grid zoomed out
+        // drew a curving coast as straight lines, which changed shape as the camera came down;
+        // the far blocks that are drawn coarser now keep away from the shore (tiles.rs).
+        let grid_size = (heights.samples() as u32).clamp(2, MAX_TERRAIN_GRID);
+        let (grid_indices, block_layout) = block_indices(grid_size);
+        let blocks = block_layout.blocks();
+        let block_level_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("block levels"),
+            size: wgpu::Extent3d { width: blocks, height: blocks, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Uint,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let block_level_view = block_level_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        // Only a grid of every sample is drawn coarser far away (`prepare`).
+        let started = Instant::now();
+        let strays = (grid_size as usize >= heights.samples()).then(|| strays(heights.heights(), heights.samples(), heights.units_per_step()));
+        log::info!("terrain strays worked out in {:.0} ms", started.elapsed().as_secs_f64() * 1000.0);
+        let stray_view = match &strays {
+            Some(strays) => {
+                debug_assert_eq!(strays.bound.len(), (blocks * blocks) as usize);
+                half_float_r_texture(&device, &queue, "terrain strays", blocks, &strays.field)
+            }
+            None => half_float_r_texture(&device, &queue, "terrain strays", 1, &[0]),
+        };
         let wave_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("waves"),
             address_mode_u: wgpu::AddressMode::Repeat,
@@ -557,6 +648,9 @@ impl Renderer {
                 wave_sampler: &wave_sampler,
                 land: &land_view,
                 detail: &detail_view,
+                relief: &relief_view,
+                block_levels: &block_level_view,
+                strays: &stray_view,
             }),
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -616,26 +710,30 @@ impl Renderer {
             multisample,
             multiview: None,
         });
-        let terrain_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("terrain"),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: "vs_terrain",
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: "fs_terrain",
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &targets,
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: depth(true, wgpu::CompareFunction::Greater),
-            multisample,
-            multiview: None,
-        });
+        let terrain = |label, fragment| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: "vs_terrain",
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: fragment,
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &targets,
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: depth(true, wgpu::CompareFunction::Greater),
+                multisample,
+                multiview: None,
+            })
+        };
+        let terrain_pipeline = terrain("terrain", "fs_terrain");
+        let far_terrain_pipeline = terrain("far terrain", "fs_terrain_far");
         let box_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("selection box"),
             layout: Some(&layout),
@@ -882,11 +980,6 @@ impl Renderer {
             contents: bytemuck::cast_slice(&meshes.indices),
             usage: wgpu::BufferUsages::INDEX,
         });
-        // As many samples a side as the map has, so that the ground, and the shore where the
-        // water meets it, is drawn at full detail at every zoom. A coarser grid zoomed out drew
-        // a curving coast as straight lines, which changed shape as the camera came down.
-        let grid_size = (heights.samples() as u32).clamp(2, MAX_TERRAIN_GRID);
-        let (grid_indices, tile_indices) = tiled_indices(grid_size);
         let terrain_index_buffer = device.create_buffer_init(&BufferInitDescriptor {
             label: Some("terrain indices"),
             contents: bytemuck::cast_slice(&grid_indices),
@@ -909,6 +1002,7 @@ impl Renderer {
             scar_pipeline,
             wake_pipeline,
             terrain_pipeline,
+            far_terrain_pipeline,
             box_pipeline,
             dome_pipeline,
             water_pipeline,
@@ -921,8 +1015,13 @@ impl Renderer {
             shape_indices: meshes.ranges,
             far_indices: meshes.far_ranges,
             terrain_index_buffer,
-            tile_runs: TileRuns { terrain: Vec::new(), water: Vec::new() },
-            tile_indices,
+            block_plan: BlockPlan::default(),
+            block_layout,
+            block_level_texture,
+            block_level_view,
+            coast_levels: None,
+            strays,
+            stray_view,
             height_ranges,
             bind_group_layout,
             height_view,
@@ -933,6 +1032,7 @@ impl Renderer {
             wave_sampler,
             land_view,
             detail_view,
+            relief_view,
             instance_buffer,
             flat_instances: Vec::new(),
             shape_instances: Vec::with_capacity(Shape::COUNT),
@@ -1039,6 +1139,12 @@ impl Renderer {
             ([snapped(center(focus[0])), snapped(center(focus[1]))], step)
         };
 
+        // Blocks are drawn coarser where the grid covers every sample, as far as their ground
+        // then strays by no more than `LOD_ERROR_PIXELS` on screen.
+        let lod_reach = coast_reach(self.cell_units).filter(|_| step == 1 && self.strays.is_some());
+        let screen_per_error = if lod_reach.is_some() { camera.screen_scale() / LOD_ERROR_PIXELS } else { 0.0 };
+        let (coast_margin, coast_step) = lod_reach.unwrap_or((0.0, 1.0));
+
         let selection_box = scene.selection_box.map_or([0.0; 4], |(min, max)| {
             let x = |value: f64| (value / viewport[0] * 2.0 - 1.0) as f32;
             let y = |value: f64| (1.0 - value / viewport[1] * 2.0) as f32;
@@ -1059,11 +1165,20 @@ impl Renderer {
             selection_box,
             terrain_scale: [self.height_scale, self.icon_scale, self.fog_scale, self.water_level],
             water: [scene.time, self.grid_size as f32, strategic_share(camera.zoom_from_closest()), self.quality.shader_value()],
+            lod: [screen_per_error as f32, coast_margin as f32, coast_step as f32, if self.coast_levels.is_some() { 1.0 } else { 0.0 }],
         };
         self.queue.write_buffer(&self.globals_buffer, 0, bytemuck::bytes_of(&globals));
         let placement = GridPlacement { first, step, size: self.grid_size, cell_units: self.cell_units, height_scale: f64::from(self.height_scale) };
         let water_level = if self.water_level > self.lowest_ground { f64::from(self.water_level) } else { f64::NEG_INFINITY };
-        self.tile_runs = visible_tiles(&placement, &self.height_ranges, &self.tile_indices, camera.view_projection(), eye, water_level);
+        let lod = Lod { screen_per_error, strays: self.strays.as_ref().filter(|_| lod_reach.is_some()), coast: self.coast_levels.as_deref() };
+        self.block_plan = plan_blocks(&placement, &self.height_ranges, &self.block_layout, camera.view_projection(), eye, water_level, &lod);
+        let blocks = self.block_layout.blocks();
+        self.queue.write_texture(
+            self.block_level_texture.as_image_copy(),
+            &self.block_plan.levels,
+            wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(blocks), rows_per_image: Some(blocks) },
+            wgpu::Extent3d { width: blocks, height: blocks, depth_or_array_layers: 1 },
+        );
         // Only what can show in the picture is sent: the rest of the map's units, scenery, and
         // effects would be worked through by the graphics card and then thrown away.
         let sight = Sight::new(camera.view_projection(), viewport[1] as f32, self.icon_scale);
@@ -1129,8 +1244,14 @@ impl Renderer {
         stamp(&mut pass, 0);
         pass.set_pipeline(&self.terrain_pipeline);
         pass.set_index_buffer(self.terrain_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-        for run in &self.tile_runs.terrain {
+        for run in &self.block_plan.terrain {
             pass.draw_indexed(run.clone(), 0, 0..1);
+        }
+        if !self.block_plan.far_terrain.is_empty() {
+            pass.set_pipeline(&self.far_terrain_pipeline);
+            for run in &self.block_plan.far_terrain {
+                pass.draw_indexed(run.clone(), 0, 0..1);
+            }
         }
         stamp(&mut pass, 1);
 
@@ -1169,11 +1290,11 @@ impl Renderer {
         }
         stamp(&mut pass, 2);
         // Water over the units, so that what is under it shows through, tinted by its depth.
-        // Only over the tiles in the picture with ground under the water.
-        if !self.tile_runs.water.is_empty() {
+        // Only over the blocks in the picture with ground under the water.
+        if !self.block_plan.water.is_empty() {
             pass.set_pipeline(&self.water_pipeline);
             pass.set_index_buffer(self.terrain_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
-            for run in &self.tile_runs.water {
+            for run in &self.block_plan.water {
                 pass.draw_indexed(run.clone(), 0, 0..1);
             }
             pass.set_index_buffer(self.mesh_indices.slice(..), wgpu::IndexFormat::Uint32);
@@ -1182,7 +1303,7 @@ impl Renderer {
         // Ships' wakes, on the water just drawn: the scars' instances again, of which the wake
         // shader keeps only the wakes.
         let scars = &self.shape_instances[Shape::Scar as usize];
-        if !scars.is_empty() && !self.tile_runs.water.is_empty() {
+        if !scars.is_empty() && !self.block_plan.water.is_empty() {
             pass.set_pipeline(&self.wake_pipeline);
             pass.draw_indexed(self.shape_indices[Shape::Scar as usize].clone(), 0, scars.clone());
         }
@@ -1390,6 +1511,48 @@ fn rgba_texture(device: &wgpu::Device, queue: &wgpu::Queue, label: &str, levels:
     texture.create_view(&wgpu::TextureViewDescriptor::default())
 }
 
+/// A texture of four half floats a texel from its mip levels, largest first, each `(side,
+/// texels)`, and its view.
+fn half_float_texture(device: &wgpu::Device, queue: &wgpu::Queue, label: &str, levels: &[(u32, &[u16])]) -> wgpu::TextureView {
+    let side = levels[0].0;
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d { width: side, height: side, depth_or_array_layers: 1 },
+        mip_level_count: levels.len() as u32,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba16Float,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    for (mip_level, &(side, texels)) in levels.iter().enumerate() {
+        queue.write_texture(
+            wgpu::ImageCopyTexture { texture: &texture, mip_level: mip_level as u32, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            bytemuck::cast_slice(texels),
+            wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(side * 8), rows_per_image: Some(side) },
+            wgpu::Extent3d { width: side, height: side, depth_or_array_layers: 1 },
+        );
+    }
+    texture.create_view(&wgpu::TextureViewDescriptor::default())
+}
+
+/// A texture of one half float a texel, `side` a side, and its view.
+fn half_float_r_texture(device: &wgpu::Device, queue: &wgpu::Queue, label: &str, side: u32, texels: &[u16]) -> wgpu::TextureView {
+    let size = wgpu::Extent3d { width: side, height: side, depth_or_array_layers: 1 };
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::R16Float,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(texture.as_image_copy(), bytemuck::cast_slice(texels), wgpu::ImageDataLayout { offset: 0, bytes_per_row: Some(side * 2), rows_per_image: Some(side) }, size);
+    texture.create_view(&wgpu::TextureViewDescriptor::default())
+}
+
 /// What the shaders read, in binding order.
 struct Bindings<'a> {
     globals: &'a wgpu::Buffer,
@@ -1402,9 +1565,12 @@ struct Bindings<'a> {
     wave_sampler: &'a wgpu::Sampler,
     land: &'a wgpu::TextureView,
     detail: &'a wgpu::TextureView,
+    relief: &'a wgpu::TextureView,
+    block_levels: &'a wgpu::TextureView,
+    strays: &'a wgpu::TextureView,
 }
 
-fn bind_group_entries<'a>(bindings: &Bindings<'a>) -> [wgpu::BindGroupEntry<'a>; 10] {
+fn bind_group_entries<'a>(bindings: &Bindings<'a>) -> [wgpu::BindGroupEntry<'a>; 13] {
     [
         wgpu::BindGroupEntry { binding: 0, resource: bindings.globals.as_entire_binding() },
         wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(bindings.heights) },
@@ -1416,6 +1582,9 @@ fn bind_group_entries<'a>(bindings: &Bindings<'a>) -> [wgpu::BindGroupEntry<'a>;
         wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::TextureView(bindings.land) },
         wgpu::BindGroupEntry { binding: 8, resource: wgpu::BindingResource::TextureView(bindings.detail) },
         wgpu::BindGroupEntry { binding: 9, resource: bindings.climate.as_entire_binding() },
+        wgpu::BindGroupEntry { binding: 10, resource: wgpu::BindingResource::TextureView(bindings.relief) },
+        wgpu::BindGroupEntry { binding: 11, resource: wgpu::BindingResource::TextureView(bindings.block_levels) },
+        wgpu::BindGroupEntry { binding: 12, resource: wgpu::BindingResource::TextureView(bindings.strays) },
     ]
 }
 
@@ -1434,6 +1603,9 @@ fn make_bind_group(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, render
             wave_sampler: &renderer.wave_sampler,
             land: &renderer.land_view,
             detail: &renderer.detail_view,
+            relief: &renderer.relief_view,
+            block_levels: &renderer.block_level_view,
+            strays: &renderer.stray_view,
         }),
     })
 }
@@ -1472,6 +1644,25 @@ fn encode_bmp(pixels: &[u8], width: u32, height: u32, stride: u32, rgba_input: b
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The shaders compile, as the graphics device would compile them, so that a mistake in them
+    /// fails here rather than only when the game starts.
+    #[test]
+    fn the_shaders_compile() {
+        let module = naga::front::wgsl::parse_str(include_str!("shaders.wgsl")).unwrap_or_else(|error| panic!("{}", error.emit_to_string(include_str!("shaders.wgsl"))));
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty())
+            .validate(&module)
+            .unwrap_or_else(|error| panic!("{}", error.emit_to_string(include_str!("shaders.wgsl"))));
+    }
+
+    /// The uniforms are laid out as the shaders read them.
+    #[test]
+    fn the_globals_match_the_shaders() {
+        let module = naga::front::wgsl::parse_str(include_str!("shaders.wgsl")).expect("the shaders parse");
+        let globals = module.types.iter().find(|(_, ty)| ty.name.as_deref() == Some("Globals")).expect("the shaders have Globals").1;
+        let naga::TypeInner::Struct { span, .. } = globals.inner else { panic!("Globals is a struct") };
+        assert_eq!(span as usize, std::mem::size_of::<Globals>());
+    }
 
     /// A part is drawn from its far model from where the shader begins to turn it into its dot,
     /// and one that never becomes a dot, such as a foundation, never is.

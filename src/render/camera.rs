@@ -118,6 +118,13 @@ impl Camera {
         self.viewport
     }
 
+    /// Pixels on screen for each unit of length a unit away, near the middle of the picture:
+    /// something `size` across `distance` away looks about `size / distance * screen_scale()`
+    /// pixels across.
+    pub fn screen_scale(&self) -> f64 {
+        self.viewport[1] / (2.0 * (f64::from(VERTICAL_FOV_DEGREES).to_radians() * 0.5).tan())
+    }
+
     pub fn set_viewport(&mut self, viewport: [f64; 2]) {
         self.viewport = viewport;
     }

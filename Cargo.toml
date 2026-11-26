@@ -59,6 +59,8 @@ getrandom = { version = "0.2", features = ["js"] }
 
 [dev-dependencies]
 criterion = "0.5"
+# The shader compiler wgpu uses, to check the shaders in tests without a graphics card.
+naga = { version = "0.20", features = ["wgsl-in"] }
 
 [[bench]]
 name = "sim_benchmark"
