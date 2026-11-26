@@ -232,6 +232,42 @@ fn a_sam_launcher_destroys_a_gunship_and_a_strategic_bomber_in_time() {
     }
 }
 
+/// A frigate's anti-air destroys one T1 bomber hanging in the air in about 21 seconds
+/// (2026-11-26, the design owner's number).
+#[test]
+fn a_frigates_anti_air_destroys_a_t1_bomber_in_time() {
+    let mut world = world();
+    let bomber = target(&mut world, "t1_bomber", (3_700, 5_000));
+    let frigate = place(&mut world, "t1_frigate", Team::Blue, (3_000, 5_000));
+    assert_within("frigate_anti_air_t1_bomber", ticks_to_kill(&mut world, &[frigate], bomber, 600));
+}
+
+/// Six T1 bombers sink a frigate that fires back in two passes and lose none (2026-11-26, the
+/// design owner's rule): it outlives one pass's six bombs and not two passes' twelve.
+#[test]
+fn six_t1_bombers_sink_a_frigate_in_two_passes_and_lose_none() {
+    let mut world = world();
+    let frigate = place(&mut world, "t1_frigate", Team::Blue, (3_000, 5_000));
+    let bombers: Vec<SimId> = (0..6).map(|index| place(&mut world, "t1_bomber", Team::Red, (4_600, 4_850 + index * 60))).collect();
+    world.advance_tick(&[SimCommand::Attack { units: bombers.clone(), target: frigate }]);
+    let (mut seen, mut bombs, mut sunk) = (Vec::<SimId>::new(), 0usize, false);
+    for _ in 0..1_200 {
+        world.advance_tick(&[]);
+        let now: Vec<SimId> = world.projectiles.iter().filter(|&&(_, entity)| world.ecs.get::<&Projectile>(entity).is_ok_and(|projectile| bombers.contains(&projectile.source))).map(|&(id, _)| id).collect();
+        bombs += now.iter().filter(|id| !seen.contains(id)).count();
+        seen = now;
+        if world.unit_entity(frigate).is_none() {
+            sunk = true;
+            break;
+        }
+    }
+    assert!(sunk, "six T1 bombers did not sink the frigate ({bombs} bombs)");
+    let passes = number(&targets()["kill_times"]["six_t1_bombers_sink_a_frigate_passes"]) as usize;
+    assert!(bombs > 6 * (passes - 1) && bombs <= 6 * passes, "the frigate sank to {bombs} bombs, not in {passes} passes of six");
+    let lost = bombers.iter().filter(|&&bomber| world.unit_entity(bomber).is_none()).count();
+    assert_eq!(lost, 0, "the frigate shot down {lost} bombers");
+}
+
 /// The cruiser's anti-air destroys each aircraft in [volleys] in its number of volleys, two
 /// seconds apart: never before that volley has started, and within its last missile's flight
 /// after. Two volleys take under four seconds, and six under twelve.

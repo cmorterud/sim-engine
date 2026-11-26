@@ -1161,9 +1161,11 @@ id = "t1_frigate"
 name = "Frigate"
 class = "tank"
 tier = 1
-mass = 203
-energy = 2026
-build_time = 1133
+# Cost by the ability price list (2026-11-26): 304 to 398, once its cost was no longer held by an
+# equal-cost fight with bombers (reports/plans/2026-11-26-ability-price-list.md).
+mass = 266
+energy = 2652
+build_time = 1483
 health = 2949
 speed = 12
 turn_rate = 60
@@ -1174,7 +1176,7 @@ radar = 1600
 sonar = 320
 movement = "naval"
 weapon = { range = 607, reload_ticks = 17, projectile_speed = 60, damage = 119, splash_radius = 20, turn_rate = 120, spread = 4 }
-extra_weapons = [{ range = 960, reload_ticks = 10, projectile_speed = 90, damage = 27, targets = "air", turn_rate = 180 }]
+extra_weapons = [{ range = 960, reload_ticks = 10, projectile_speed = 90, damage = "23.8", targets = "air", turn_rate = 180 }]
 
 # T2 and T3 naval factories: headquarters by upgrade, and support factories for T2 and T3
 # builders, as for land and air.
@@ -1262,10 +1264,10 @@ id = "t2_destroyer"
 name = "Destroyer"
 class = "tank"
 tier = 2
-# Cost by the ability price list (2026-11-26): 1,684 to 1,530 (reports/plans/2026-11-26-ability-price-list.md).
-mass = 1506
-energy = 10038
-build_time = 7486
+# Cost by the ability price list (2026-11-26): 1,684 to 1,625 (reports/plans/2026-11-26-ability-price-list.md).
+mass = 1600
+energy = 10661
+build_time = 7951
 health = 10990
 speed = "10.4"
 turn_rate = 55
@@ -1299,10 +1301,10 @@ id = "t2_cruiser"
 name = "Cruiser"
 class = "tank"
 tier = 2
-# Cost by the ability price list (2026-11-26): 1,529 to 1,684 (reports/plans/2026-11-26-ability-price-list.md).
-mass = 1622
-energy = 14603
-build_time = 7260
+# Cost by the ability price list (2026-11-26): 1,529 to 1,588 (reports/plans/2026-11-26-ability-price-list.md).
+mass = 1530
+energy = 13771
+build_time = 6846
 health = 4404
 speed = 9
 turn_rate = 40
@@ -1355,10 +1357,10 @@ id = "t3_battleship"
 name = "Battleship"
 class = "tank"
 tier = 3
-# Cost by the ability price list (2026-11-26): 6,920 to 5,905 (reports/plans/2026-11-26-ability-price-list.md).
-mass = 5838
-energy = 36199
-build_time = 20840
+# Cost by the ability price list (2026-11-26): 6,920 to 6,298 (reports/plans/2026-11-26-ability-price-list.md).
+mass = 6227
+energy = 38608
+build_time = 22227
 health = 90314
 speed = "7.2"
 turn_rate = 27
@@ -1392,11 +1394,11 @@ id = "t3_battlecruiser"
 name = "Battlecruiser"
 class = "tank"
 tier = 3
-# Cost by the ability price list (2026-11-26): 5,302 to 4,785, the navy base solved at 0.691
+# Cost by the ability price list (2026-11-26): 5,302 to 5,097, the navy base solved at 0.648
 # (reports/plans/2026-11-26-ability-price-list.md).
-mass = 4628
-energy = 39667
-build_time = 18659
+mass = 4930
+energy = 42253
+build_time = 19876
 health = 31516
 speed = "10.8"
 turn_rate = 35
@@ -1437,11 +1439,11 @@ tier = 1
 # against its T1 tank (2026-11-24, [domains]). Its torpedo and reach come from the navy T1 time to
 # kill (2026-11-26, reports/plans/2026-11-26-derived-stats.md): six of them sink a destroyer in
 # about 39 seconds ([kill_times]).
-# Cost by the ability price list (2026-11-26): 345 to 386, its torpedo counted once with the
+# Cost by the ability price list (2026-11-26): 345 to 411, its torpedo counted once with the
 # flexibility price, submerged out of cannons' reach (reports/plans/2026-11-26-ability-price-list.md).
-mass = 297
-energy = 2376
-build_time = 1329
+mass = 316
+energy = 2530
+build_time = 1415
 health = 1279
 speed = 12
 turn_rate = 80

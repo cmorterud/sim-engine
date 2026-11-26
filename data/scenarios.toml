@@ -161,8 +161,8 @@ id = "navy_submarines_against_cruisers"
 title = "Skipping anti-submarine: submarines against cruisers and corvettes"
 ground = "water"
 target = "domains.cells.submarines_beat_fleet_without_anti_submarine"
-blue_over_red = 0.86
-shows = "Attack Submarines against cruisers and shield corvettes, a fleet with nothing that reaches under the water. The submarines win without loss, though slowly. The harness's count of submarines is a little under the fleet's cost."
+blue_over_red = 1.00
+shows = "Attack Submarines against cruisers and shield corvettes, a fleet with nothing that reaches under the water. The submarines win without loss, though slowly. The submarines are about the fleet's cost."
 try = "Attack-move in. Then go for the corvettes first, and see whether it is any faster."
 blue = [{ unit = "t1_attack_sub", count = 24, at = [1_400, 2_560], columns = 6 }]
 red = [
@@ -232,7 +232,7 @@ ground = "shore"
 target = "domains.cells.frigates_break_t1_torpedo_launchers"
 shows = "Frigates against about an equal cost of T1 torpedo launchers. Frigates cannot hurt anything under the water from range, and the launchers sink them as they close."
 try = "Attack-move in, then try to rush one launcher with every frigate at once."
-blue = [{ unit = "t1_frigate", count = 4, at = [600, 2_560], columns = 4 }]
+blue = [{ unit = "t1_frigate", count = 3, at = [600, 2_560], columns = 3 }]
 red = [
     { unit = "t1_torpedo_launcher", cell = [107, 124] },
     { unit = "t1_torpedo_launcher", cell = [107, 131] },
@@ -241,13 +241,14 @@ red = [
 
 [[scenario]]
 id = "navy_frigates_against_t1_bombers"
-title = "T1 at sea: Frigates against T1 bombers"
+title = "T1 at sea: six T1 bombers against a Frigate"
 ground = "water"
-target = "domains.cells.frigates_against_t1_bombers_at_least"
-shows = "Frigates hold their own against an equal cost of Attack Bombers over the water, so that early ships are not shut down by cheaper aircraft: about even, the frigates' anti-air set for it."
-try = "Bomb them in one pass. Then come in from several sides at once."
-blue = [{ unit = "t1_bomber", count = 15, at = [600, 2_560] }]
-red = [{ unit = "t1_frigate", count = 12, at = [3_000, 2_560], columns = 6 }]
+target = "kill_times.six_t1_bombers_sink_a_frigate_passes"
+blue_over_red = 3.77
+shows = "Six Attack Bombers sink a Frigate in two passes and lose none: it outlives one pass's six bombs, not two. Its anti-air needs about 21 seconds for one bomber, so a lone frigate is prey, and frigates are safe from bombers only in numbers or under an air force."
+try = "Bring two or three frigates together, and count the passes it takes."
+blue = [{ unit = "t1_bomber", count = 6, at = [600, 2_560] }]
+red = [{ unit = "t1_frigate", count = 1, at = [3_000, 2_560] }]
 
 [[scenario]]
 id = "navy_t3_fleet_against_air"
