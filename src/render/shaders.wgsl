@@ -15,6 +15,11 @@ struct Globals {
     // seconds of wall time, for waves, the terrain grid's samples a side, how strongly sight is
     // washed pale, then the quality: 0 for low, 1 for high.
     water: vec4<f32>,
+    // The terrain's level of detail (tiles.rs): how far away a full-detail cell shrinks to a few
+    // pixels on screen (0 for full detail everywhere), how near the water's edge the ground
+    // stays at full detail and how far each coarser level after that is, and 1 if the shore
+    // limits the detail at all.
+    lod: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -32,6 +37,14 @@ struct Globals {
 // The ground's close-up patterns (detail.rs): grass, soil, rock, sand. Tiled with the waves'
 // sampler.
 @group(0) @binding(8) var detail_texture: texture_2d<f32>;
+// The ground's slopes east and north, its creases and its height (relief.rs), with smaller
+// copies for the far distance. Sampled with the fog's sampler.
+@group(0) @binding(10) var relief_texture: texture_2d<f32>;
+// Each block of the terrain grid's level of detail this frame (tiles.rs).
+@group(0) @binding(11) var block_levels: texture_2d<u32>;
+// How far each block's ground strays from its true heights when drawn coarser, per step of
+// detail, a texel a block at its middle (tiles.rs). Sampled with the fog's sampler.
+@group(0) @binding(12) var stray_texture: texture_2d<f32>;
 
 // The map's climate (climate.rs): the colors of its ground, water and sky, in linear light.
 struct Climate {
@@ -385,6 +398,26 @@ fn ground_at(relative: vec2<f32>) -> f32 {
     return max(height, globals.terrain_scale.w) - globals.terrain_origin.z;
 }
 
+// The same, on the ground as the terrain draws it this frame, coarser far away, for what is
+// laid on it: shadows and scars.
+fn drawn_ground_at(relative: vec2<f32>) -> f32 {
+    let size = i32(globals.water.y);
+    let grid = (relative - globals.terrain_origin.xy) / (globals.terrain_origin.w * f32(globals.terrain_grid.z));
+    let cell = clamp(vec2<i32>(floor(grid)), vec2<i32>(0, 0), vec2<i32>(size - 2, size - 2));
+    let along = clamp(grid - vec2<f32>(cell), vec2<f32>(0.0), vec2<f32>(1.0));
+    let b = drawn_height(cell + vec2<i32>(1, 0));
+    let c = drawn_height(cell + vec2<i32>(0, 1));
+    var height = 0.0;
+    if (along.x + along.y <= 1.0) {
+        let a = drawn_height(cell);
+        height = a + (b - a) * along.x + (c - a) * along.y;
+    } else {
+        let d = drawn_height(cell + vec2<i32>(1, 1));
+        height = d + (c - d) * (1.0 - along.x) + (b - d) * (1.0 - along.y);
+    }
+    return max(height, globals.terrain_scale.w) - globals.terrain_origin.z;
+}
+
 struct ShadowOutput {
     @builtin(position) clip: vec4<f32>,
     @location(0) darkness: f32,
@@ -419,7 +452,7 @@ fn vs_shadow(
     let point = (model * vec4<f32>(animate(position, normal, material, pivot, instance).position, 1.0)).xyz;
     let ground = ground_at(center.xy);
     let flat = point.xy - LIGHT.xy / LIGHT.z * max(point.z - ground, 0.0);
-    out.clip = globals.view_proj * vec4<f32>(flat, ground_at(flat) + SHADOW_LIFT, 1.0);
+    out.clip = globals.view_proj * vec4<f32>(flat, drawn_ground_at(flat) + SHADOW_LIFT, 1.0);
     let height = clamp((center.z - ground) / HIGH_SHADOW_HEIGHT, 0.0, 1.0);
     out.darkness = SHADOW_DARKNESS * (1.0 - morph) * mix(1.0, HIGH_SHADOW, height);
     return out;
@@ -462,7 +495,7 @@ fn vs_scar(
     let model = mat4x4<f32>(instance.m0, instance.m1, instance.m2, instance.m3);
     let flat = (model * vec4<f32>(position, 1.0)).xy;
     var out: ScarOutput;
-    out.clip = globals.view_proj * vec4<f32>(flat, ground_at(flat) + SCAR_LIFT, 1.0);
+    out.clip = globals.view_proj * vec4<f32>(flat, drawn_ground_at(flat) + SCAR_LIFT, 1.0);
     out.across = position.xy * 2.0;
     out.look = instance.color.rgb;
     let sample = (flat - globals.terrain_origin.xy) / globals.terrain_origin.w + vec2<f32>(globals.terrain_grid.xy);
@@ -734,15 +767,15 @@ fn fs_dome(input: DomeOutput) -> @location(0) vec4<f32> {
 struct TerrainOutput {
     @builtin(position) clip: vec4<f32>,
     @location(0) relative: vec3<f32>,
+    // The ground's true height, for the colors that follow it: where the ground is drawn
+    // coarser, its drawn height strays from it.
     @location(1) height: f32,
     @location(2) fog_coordinates: vec2<f32>,
     // Where it is on the map, for patterns that stay put as the camera moves.
     @location(3) world: vec2<f32>,
-    // The ground's smooth normal, from the height map around the vertex.
-    @location(4) normal: vec3<f32>,
-    // How far the ground around rises above it, per unit of distance: above 0 in hollows and
-    // creases, below 0 on ridges and crests.
-    @location(5) cavity: f32,
+    // The ground's normal, then how far the ground around rises above it: above 0 in hollows
+    // and creases, below 0 on ridges and crests (`surface_of`).
+    @location(4) surface: vec4<f32>,
 };
 
 // A grid vertex of the terrain, for a grid index: which height sample it stands on, and where.
@@ -762,33 +795,157 @@ fn grid_point(index: u32) -> GridPoint {
     return GridPoint(sample, vec2<f32>(sample - first) * globals.terrain_origin.w);
 }
 
-// How far the ground `reach` samples around rises above `height`, on average, per unit of distance.
-fn rise_around(sample: vec2<i32>, reach: i32, height: f32) -> f32 {
-    let around = terrain_sample(sample + vec2<i32>(reach, 0)) + terrain_sample(sample - vec2<i32>(reach, 0))
-        + terrain_sample(sample + vec2<i32>(0, reach)) + terrain_sample(sample - vec2<i32>(0, reach));
-    return (around * 0.25 - height) / (f32(reach) * globals.terrain_origin.w);
+// ---- Level of detail (tiles.rs) ----
+
+// Grid cells a side in a block, and the coarsest level: a vertex every 2^4 samples.
+const BLOCK_CELLS: i32 = 16;
+const MAX_LEVEL: f32 = 4.0;
+
+// A level of detail with its steps held: whole levels hold for the first half of each step and
+// blend to the next over the second. As `shaped_level` in tiles.rs.
+fn shaped_level(raw: f32) -> f32 {
+    if (raw <= 0.0) {
+        return 0.0;
+    }
+    let whole = floor(raw);
+    return min(whole + clamp((raw - whole) * 2.0 - 1.0, 0.0, 1.0), MAX_LEVEL);
+}
+
+// The height sample a grid vertex stands on.
+fn grid_sample(grid: vec2<i32>) -> vec2<i32> {
+    let last = globals.terrain_grid.w - 1;
+    return clamp(globals.terrain_grid.xy + grid * globals.terrain_grid.z, vec2<i32>(0, 0), vec2<i32>(last, last));
+}
+
+// How coarse the ground is drawn at a grid vertex standing `height` high: 0 for every sample,
+// rising by one each time the distance from the eye doubles past where the ground would stray
+// from its true heights by `LOD_ERROR_PIXELS` on screen at the next level, and held down near
+// the water's edge, so that the coast keeps its shape. As `plan_blocks` in tiles.rs.
+fn vertex_level(grid: vec2<i32>, height: f32) -> f32 {
+    if (globals.lod.x <= 0.0) {
+        return 0.0;
+    }
+    let sample = grid_sample(grid);
+    let relative = vec3<f32>(vec2<f32>(sample - globals.terrain_grid.xy) * globals.terrain_origin.w + globals.terrain_origin.xy, height - globals.terrain_origin.z);
+    let blocks = f32(textureDimensions(stray_texture).x);
+    let strays = textureSampleLevel(stray_texture, fog_sampler, vec2<f32>(grid) / (f32(BLOCK_CELLS) * blocks), 0.0).r;
+    var raw = log2(max(length(relative), 0.001) / max(globals.lod.x * strays, 0.001));
+    if (raw <= 0.0) {
+        return 0.0;
+    }
+    if (globals.lod.w > 0.0) {
+        let from_edge = abs(shore_distance(vec2<f32>(sample) * globals.terrain_origin.w));
+        raw = min(raw, (from_edge - globals.lod.y) / globals.lod.z);
+    }
+    return shaped_level(raw);
+}
+
+// The height at a grid vertex of the ground drawn at `level`, a vertex every 2^level samples:
+// on the coarser grid's triangles, split as the full grid's are, so that the finer cells laid
+// on it match it.
+fn level_height(grid: vec2<i32>, level: i32) -> f32 {
+    if (level == 0) {
+        return terrain_sample(grid_sample(grid));
+    }
+    let spacing = 1i << u32(level);
+    let corner = (grid / spacing) * spacing;
+    let along = vec2<f32>(grid - corner) / f32(spacing);
+    let b = terrain_sample(grid_sample(corner + vec2<i32>(spacing, 0)));
+    let c = terrain_sample(grid_sample(corner + vec2<i32>(0, spacing)));
+    if (along.x + along.y <= 1.0) {
+        let a = terrain_sample(grid_sample(corner));
+        return a + (b - a) * along.x + (c - a) * along.y;
+    }
+    let d = terrain_sample(grid_sample(corner + vec2<i32>(spacing, spacing)));
+    return d + (c - d) * (1.0 - along.x) + (b - d) * (1.0 - along.y);
+}
+
+// The ground at a grid vertex as its level of detail has it: its height, blended smoothly
+// towards each coarser level's as the camera draws away, so that nothing pops when a block
+// changes level, then the level. It depends only on where the vertex is, so every block that
+// draws it agrees.
+fn level_of_detail(grid: vec2<i32>) -> vec2<f32> {
+    var height = terrain_sample(grid_sample(grid));
+    let level = vertex_level(grid, height);
+    if (level > 0.0) {
+        let whole = i32(floor(level));
+        let blend = level - f32(whole);
+        height = level_height(grid, whole);
+        if (blend > 0.0) {
+            height = mix(height, level_height(grid, whole + 1), blend);
+        }
+    }
+    return vec2<f32>(height, level);
+}
+
+fn block_level(block: vec2<i32>) -> i32 {
+    return i32(textureLoad(block_levels, block, 0).r);
+}
+
+// The ground as the terrain draws it at a grid vertex: its height, then its level of detail.
+// Along an edge between two blocks, the coarser block has fewer vertices: those the finer one
+// has between them are laid on the straight line between its, so that no crack opens between
+// the two.
+fn drawn_vertex(grid: vec2<i32>) -> vec2<f32> {
+    let on_edge = (grid % vec2<i32>(BLOCK_CELLS)) == vec2<i32>(0, 0);
+    if (on_edge.x != on_edge.y) {
+        // Across the edge, and along it.
+        let across = select(1, 0, on_edge.x);
+        let along = 1 - across;
+        let blocks = textureDimensions(block_levels).x;
+        var block = grid / BLOCK_CELLS;
+        var level = 0;
+        if (block[across] < i32(blocks)) {
+            level = block_level(block);
+        }
+        block[across] = block[across] - 1;
+        if (block[across] >= 0) {
+            level = max(level, block_level(block));
+        }
+        let spacing = 1i << u32(level);
+        let offset = grid[along] % spacing;
+        if (offset != 0) {
+            var first = grid;
+            first[along] = grid[along] - offset;
+            var second = first;
+            second[along] = first[along] + spacing;
+            return mix(level_of_detail(first), level_of_detail(second), f32(offset) / f32(spacing));
+        }
+    }
+    return level_of_detail(grid);
+}
+
+fn drawn_height(grid: vec2<i32>) -> f32 {
+    return drawn_vertex(grid).x;
+}
+
+// The ground's slopes, creases and height (relief.rs) at a point on the map, from the relief
+// field's copy `level` sizes down.
+fn relief_at(world: vec2<f32>, level: f32) -> vec4<f32> {
+    return textureSampleLevel(relief_texture, fog_sampler, map_coordinates(world, textureDimensions(relief_texture).x), level);
+}
+
+// The ground's normal from a texel of the relief field, then its creases, for the light.
+// Vertices pass the normal on, as they always have: blending normals across a triangle shades a
+// cliff's foot and brow otherwise than blending slopes would.
+fn surface_of(relief: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(normalize(vec3<f32>(-relief.xy, 1.0)), relief.z);
 }
 
 @vertex
 fn vs_terrain(@builtin(vertex_index) index: u32) -> TerrainOutput {
     let point = grid_point(index);
-    let height = terrain_sample(point.sample);
-    let relative = vec3<f32>(globals.terrain_origin.xy + point.offset, height - globals.terrain_origin.z);
-    // The slope across the neighbouring samples, at the grid's own spacing.
-    let step = globals.terrain_grid.z;
-    let spacing = f32(step) * globals.terrain_origin.w;
-    let across = terrain_sample(point.sample + vec2<i32>(step, 0)) - terrain_sample(point.sample - vec2<i32>(step, 0));
-    let along = terrain_sample(point.sample + vec2<i32>(0, step)) - terrain_sample(point.sample - vec2<i32>(0, step));
-
+    let size = u32(globals.water.y);
+    let ground = drawn_vertex(vec2<i32>(i32(index % size), i32(index / size)));
+    let relative = vec3<f32>(globals.terrain_origin.xy + point.offset, ground.x - globals.terrain_origin.z);
     var out: TerrainOutput;
     out.clip = globals.view_proj * vec4<f32>(relative, 1.0);
     out.relative = relative;
-    out.height = height;
+    out.height = terrain_sample(point.sample);
     out.fog_coordinates = vec2<f32>(point.sample) * globals.terrain_scale.z;
     out.world = vec2<f32>(point.sample) * globals.terrain_origin.w;
-    out.normal = normalize(vec3<f32>(-across / (2.0 * spacing), -along / (2.0 * spacing), 1.0));
-    // Fine creases and broad valleys both.
-    out.cavity = rise_around(point.sample, step, height) * 0.4 + rise_around(point.sample, step * 3, height) * 0.6;
+    // The field's texels lie on the samples, so this is the slope and creases at the sample.
+    out.surface = surface_of(relief_at(out.world, 0.0));
     return out;
 }
 
@@ -838,6 +995,13 @@ const GRASS_WIND: f32 = 0.16;
 // World units one copy of the close-up patterns spans.
 const DETAIL_SIZE: f32 = 7.0;
 
+// Where a point on the map is in a texture `side` texels a side whose first and last texels lie
+// on the map's edges.
+fn map_coordinates(world: vec2<f32>, side: u32) -> vec2<f32> {
+    let map = f32(globals.terrain_grid.w - 1) * globals.terrain_origin.w;
+    return (world / map * (f32(side) - 1.0) + 0.5) / f32(side);
+}
+
 // The land map (land.rs) at a point on the map: sunlight, openness, dampness.
 fn land_at(world: vec2<f32>) -> vec3<f32> {
     let side = f32(textureDimensions(land_texture).x);
@@ -851,19 +1015,85 @@ fn world_from_relative(relative: vec2<f32>) -> vec2<f32> {
     return relative - globals.terrain_origin.xy + vec2<f32>(globals.terrain_grid.xy) * globals.terrain_origin.w;
 }
 
+// The ground in blocks drawn at full detail, lit and colored from its vertices, which stand on
+// every sample, so that it is just as the full grid draws it, even as they morph towards the
+// next level's heights.
 @fragment
 fn fs_terrain(input: TerrainOutput) -> @location(0) vec4<f32> {
+    return shade_terrain(input, input.surface, input.height);
+}
+
+// The ground in blocks drawn coarser (tiles.rs), whose vertices are too far apart to light and
+// color it by: a cliff a cell wide would vanish between them. The light and the height for
+// colors come from the relief field at each pixel instead, which does not change with the grid,
+// so nothing pops when a block changes level. While its texels are over half a pixel across,
+// it is laid on the full-detail grid's triangles, just as that grid's vertices would light it;
+// beyond, it comes from the field's copy whose texels are about half a pixel across, so that it
+// does not shimmer.
+@fragment
+fn fs_terrain_far(input: TerrainOutput) -> @location(0) vec4<f32> {
+    // Across the screen's narrower footprint, so that ground seen at a slant stays sharp.
+    let across = min(length(dpdx(input.world)), length(dpdy(input.world)));
+    let level = log2(across / relief_spacing()) - 1.0;
+    var ground: Ground;
+    if (level <= 0.0) {
+        ground = ground_on_grid(input.world);
+    } else {
+        let relief = relief_at(input.world, level);
+        ground = Ground(surface_of(relief), relief.w);
+        if (level < 1.0) {
+            let grid = ground_on_grid(input.world);
+            ground = Ground(mix(grid.surface, ground.surface, level), mix(grid.height, ground.height, level));
+        }
+    }
+    return shade_terrain(input, ground.surface, ground.height);
+}
+
+// The ground for the light and colors: its normal and creases (`surface_of`), and its height.
+struct Ground {
+    surface: vec4<f32>,
+    height: f32,
+};
+
+// World units between the relief field's texels.
+fn relief_spacing() -> f32 {
+    return f32(globals.terrain_grid.w - 1) * globals.terrain_origin.w / f32(textureDimensions(relief_texture).x - 1u);
+}
+
+// The ground at a point on the map as the full-detail grid draws it: from the relief field's
+// texels at its triangle's corners, as the grid's vertices take them, across the triangle.
+fn ground_on_grid(world: vec2<f32>) -> Ground {
+    let last = i32(textureDimensions(relief_texture).x) - 2;
+    let grid = world / relief_spacing();
+    let cell = clamp(vec2<i32>(floor(grid)), vec2<i32>(0, 0), vec2<i32>(last, last));
+    let along = clamp(grid - vec2<f32>(cell), vec2<f32>(0.0), vec2<f32>(1.0));
+    let b = textureLoad(relief_texture, cell + vec2<i32>(1, 0), 0);
+    let c = textureLoad(relief_texture, cell + vec2<i32>(0, 1), 0);
+    let sb = surface_of(b);
+    let sc = surface_of(c);
+    if (along.x + along.y <= 1.0) {
+        let a = textureLoad(relief_texture, cell, 0);
+        let sa = surface_of(a);
+        return Ground(sa + (sb - sa) * along.x + (sc - sa) * along.y, a.w + (b.w - a.w) * along.x + (c.w - a.w) * along.y);
+    }
+    let d = textureLoad(relief_texture, cell + vec2<i32>(1, 1), 0);
+    let sd = surface_of(d);
+    return Ground(sd + (sc - sd) * (1.0 - along.x) + (sb - sd) * (1.0 - along.y), d.w + (c.w - d.w) * (1.0 - along.x) + (b.w - d.w) * (1.0 - along.y));
+}
+
+// The ground's color, lit by its `surface` (`surface_of`), standing `height` high.
+fn shade_terrain(input: TerrainOutput, surface: vec4<f32>, height: f32) -> vec4<f32> {
     // Everything here that needs screen-space derivatives or the fog texture comes first,
     // before any of it depends on the ground.
     let fog = textureSample(fog_texture, fog_sampler, input.fog_coordinates).r;
     let sight = 0.18 + 0.82 * fog;
     let footprint = length(fwidth(input.world));
-    let contour = abs(fract(input.height / 8.0) - 0.5);
-    let contour_width = max(fwidth(input.height / 8.0), 0.0001);
-    let strata_coord = input.height / 9.0 + value_noise(input.world / 45.0) * 1.8;
+    let contour = abs(fract(height / 8.0) - 0.5);
+    let contour_width = max(fwidth(height / 8.0), 0.0001);
+    let strata_coord = height / 9.0 + value_noise(input.world / 45.0) * 1.8;
     let strata_width = fwidth(strata_coord);
 
-    let smooth_normal = normalize(input.normal);
+    let smooth_normal = normalize(surface.xyz);
     // How much close-up detail shows: all of it when a pixel covers well under a unit of
     // ground, none by the time it covers a unit and a half.
     let near = 1.0 - smoothstep(0.25, 1.5, footprint);
@@ -884,7 +1114,7 @@ fn fs_terrain(input: TerrainOutput) -> @location(0) vec4<f32> {
 
     // Grass, darker in the lows and drier on the heights, in soft patches with bare dirt here
     // and there, speckled with lighter and darker grass and small stones up close.
-    let t = clamp((input.height + 36.0) / 72.0, 0.0, 1.0);
+    let t = clamp((height + 36.0) / 72.0, 0.0, 1.0);
     let patches = value_noise(input.world / 220.0) * 0.5 + value_noise(input.world / 61.0) * 0.3 + value_noise(input.world / 17.0) * 0.2;
     var base = mix(climate.grass_low.rgb, climate.grass_high.rgb, t) * (0.91 + 0.18 * patches);
     // Damp ground is lusher and darker, and dry sunny slopes paler and yellower.
@@ -919,13 +1149,13 @@ fn fs_terrain(input: TerrainOutput) -> @location(0) vec4<f32> {
     let rock_tint = mix(climate.rock.rgb, climate.rock_warm.rgb, smoothstep(0.35, 0.65, patches));
     base = mix(base, rock_tint * layers * (1.0 - 0.22 * crack) * (0.9 + 0.2 * patches) * rock_detail, steep);
     // Sand along the shore, a little above the water, rippled by the wind.
-    let above_water = input.height - globals.terrain_scale.w;
+    let above_water = height - globals.terrain_scale.w;
     let sand_detail = 1.0 + detail.a * 0.45;
     base = mix(base, climate.sand.rgb * sand_detail, (1.0 - smoothstep(1.0, 5.0, above_water)) * (1.0 - steep));
 
     // Hollows and the feet of slopes are darker, crests a little lighter, so that the shape of
     // the land reads from far away.
-    let crease = clamp(input.cavity * 2.5, -0.25, 0.45);
+    let crease = clamp(surface.w * 2.5, -0.25, 0.45);
     // The land map's openness darkens broad valleys; this adds the grid's finer creases.
     let hollows = 1.0 - max(crease, 0.0) * 0.3 + max(-crease, 0.0) * 0.25;
     // Faint height contours give a sense of scale, on gentle ground only: on a cliff they crowd
@@ -1022,7 +1252,9 @@ const GLINT_COLOR: vec3<f32> = vec3<f32>(1.0, 0.96, 0.88);
 @vertex
 fn vs_water(@builtin(vertex_index) index: u32) -> WaterOutput {
     let point = grid_point(index);
-    let ground = f32(textureLoad(heights, point.sample, 0).r) * globals.terrain_scale.x;
+    let size = u32(globals.water.y);
+    // How deep the water is over the ground as the terrain draws it, coarser far away.
+    let ground = drawn_height(vec2<i32>(i32(index % size), i32(index / size)));
     let level = globals.terrain_scale.w;
     let relative = vec3<f32>(globals.terrain_origin.xy + point.offset, level - globals.terrain_origin.z);
     var out: WaterOutput;

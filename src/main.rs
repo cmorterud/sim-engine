@@ -174,6 +174,8 @@ Usage: sim-engine [options]
   --quality <low|high> How much the land and sea draw (default high; low in the browser)
   --landscape <dir>    Save pictures of the map's land and sea, with no units or interface,
                        from fixed views picked from its heights, then exit
+  --landscape-frames <n>  With --landscape, also draw each view n more times and print how
+                       long the land and sea took on the graphics card, where it can tell
   --scenario <id>      Play a playtest scenario from data/scenarios.toml: a balance fight,
                        with Blue's units yours and Red's scripted (README, Playtest scenarios)
 
@@ -276,6 +278,9 @@ struct Options {
     /// Save pictures of the land and sea here, then exit. Not in the browser.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     landscape_dir: Option<PathBuf>,
+    /// With `landscape_dir`, how many more times to draw each view to time it.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    landscape_frames: u32,
 }
 
 /// On or off, for --fog and ?fog=.
@@ -436,6 +441,7 @@ fn parse_options() -> Result<Option<Options>, String> {
             "--view" => options.view = parse_view(&value("--view")?).ok_or("--view needs all, blue, or red")?,
             "--fog" => options.no_fog = !parse_switch(&value("--fog")?).ok_or("--fog needs on or off")?,
             "--landscape" => options.landscape_dir = Some(PathBuf::from(value("--landscape")?)),
+            "--landscape-frames" => options.landscape_frames = number("--landscape-frames", value("--landscape-frames")?)? as u32,
             "--quality" => options.quality = Some(Quality::parse(&value("--quality")?).ok_or("--quality needs low or high")?),
             "--scenario" => options.scenario = Some(value("--scenario")?),
             "--help" | "-h" => return Err(USAGE.to_string()),
@@ -1220,6 +1226,12 @@ fn run_landscape(seed: u64, options: &Options, map_source: &MapSource, directory
         match renderer.capture(&scene, None, &path) {
             Ok(()) => println!("landscape: {} at ({:.0}, {:.0}), altitude {:.0}", path.display(), view.focus[0], view.focus[1], camera.altitude()),
             Err(error) => println!("landscape: {} failed: {error}", path.display()),
+        }
+        if options.landscape_frames > 0 {
+            match renderer.time_scene(&scene, options.landscape_frames) {
+                Some(([terrain, _, water], wall)) => println!("landscape: {} gpu ms per frame: terrain {terrain:.2}, water {water:.2}; whole frame {wall:.2}", view.name),
+                None => println!("landscape: {} gpu timing not available on this adapter", view.name),
+            }
         }
     }
 }

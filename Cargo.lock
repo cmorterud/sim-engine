@@ -2461,6 +2461,7 @@ dependencies = [
  "glam",
  "hecs",
  "log",
+ "naga",
  "png",
  "pollster",
  "serde",

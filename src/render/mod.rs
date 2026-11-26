@@ -13,6 +13,7 @@ pub mod landscape;
 pub mod links;
 pub mod meshes;
 pub mod pipeline;
+pub mod relief;
 pub mod shore;
 mod sight;
 pub mod tiles;
