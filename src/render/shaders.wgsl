@@ -20,6 +20,9 @@ struct Globals {
     // stays at full detail and how far each coarser level after that is, and 1 if the shore
     // limits the detail at all.
     lod: vec4<f32>,
+    // Bloom (bloom.rs): 1 while the scene is drawn untoned into bloom's bright target, which
+    // tones it after its glow is added, then how much brighter glowing parts are drawn.
+    post: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -120,10 +123,31 @@ fn hazed(color: vec3<f32>, relative: vec3<f32>) -> vec3<f32> {
 // towards white instead of clipping, so that sun glints and foam keep their shape.
 const TONE_KNEE: f32 = 0.6;
 
-fn tone(color: vec3<f32>) -> vec3<f32> {
+fn film_tone(color: vec3<f32>) -> vec3<f32> {
     let over = max(color - vec3<f32>(TONE_KNEE), vec3<f32>(0.0));
     let rolled = vec3<f32>(TONE_KNEE) + (1.0 - TONE_KNEE) * (vec3<f32>(1.0) - exp(-over / (1.0 - TONE_KNEE)));
     return select(color, rolled, color > vec3<f32>(TONE_KNEE));
+}
+
+// The film curve, unless bloom tones the scene after adding its glow.
+fn tone(color: vec3<f32>) -> vec3<f32> {
+    if (globals.post.x > 0.5) {
+        return color;
+    }
+    return film_tone(color);
+}
+
+// A color meant to show on screen as it is, such as a far unit's dot: with bloom on, the film
+// curve undone, so that bloom's toning gives it back. Up to just under where it would glow.
+const ON_SCREEN_MOST: f32 = 0.85;
+
+fn on_screen(color: vec3<f32>) -> vec3<f32> {
+    if (globals.post.x < 0.5) {
+        return color;
+    }
+    let shown = min(color, vec3<f32>(ON_SCREEN_MOST));
+    let over = -(1.0 - TONE_KNEE) * log(vec3<f32>(1.0) - (shown - vec3<f32>(TONE_KNEE)) / (1.0 - TONE_KNEE));
+    return select(shown, vec3<f32>(TONE_KNEE) + over, shown > vec3<f32>(TONE_KNEE));
 }
 
 fn high_quality() -> bool {
@@ -327,7 +351,12 @@ fn vs_unit(
 @fragment
 fn fs_unit(input: UnitOutput) -> @location(0) vec4<f32> {
     if (input.material == GLOW || input.morph >= 1.0) {
-        return vec4<f32>(input.albedo, 1.0);
+        // With bloom on, glowing parts shine past white and glow, until they turn into dots.
+        if (input.morph >= 1.0) {
+            return vec4<f32>(on_screen(input.albedo), 1.0);
+        }
+        let gain = select(1.0, mix(globals.post.y, 1.0, input.morph), globals.post.x > 0.5);
+        return vec4<f32>(input.albedo * gain, 1.0);
     }
     let normal = normalize(input.normal);
     let to_eye = normalize(-input.relative);
@@ -354,7 +383,7 @@ fn fs_unit(input: UnitOutput) -> @location(0) vec4<f32> {
     let rim_strength = mix(RIM_NEAR, RIM_FAR, smoothstep(RIM_NEAR_DISTANCE, RIM_FAR_DISTANCE, length(input.relative)));
     let rim = pow(1.0 - max(dot(normal, to_eye), 0.0), 3.0) * rim_strength;
     let lit = diffuse + vec3<f32>(shine) + rim * mix(input.albedo, vec3<f32>(1.0), 0.5);
-    return vec4<f32>(mix(tone(hazed(lit, input.relative)), input.albedo, input.morph), 1.0);
+    return vec4<f32>(mix(tone(hazed(lit, input.relative)), on_screen(input.albedo), input.morph), 1.0);
 }
 
 // How high above the ground a unit is out of the hills' shadow: partly from the first height,
@@ -1434,5 +1463,5 @@ fn vs_box(@builtin(vertex_index) index: u32) -> @builtin(position) vec4<f32> {
 
 @fragment
 fn fs_box() -> @location(0) vec4<f32> {
-    return vec4<f32>(0.55, 1.0, 0.55, 1.0);
+    return vec4<f32>(on_screen(vec3<f32>(0.55, 1.0, 0.55)), 1.0);
 }

@@ -177,6 +177,10 @@ Usage: sim-engine [options]
   --view <all|blue|red>  With --watch, whose sight to start with (default all)
   --fog <on|off>       Fog of war, for every team and the AI too (default on)
   --quality <low|high> How much the land and sea draw (default high; low in the browser)
+  --bloom <on|off|both>     A soft glow around the brightest light: sun glints, fire, engine
+                       lights. Costs the graphics card more (default off). F8 in the game.
+                       --bloom both saves each picture of --landscape or --capture twice,
+                       without it and with it (as name_bloom.bmp)
   --landscape <dir>    Save pictures of the map's land and sea, with no units or interface,
                        from fixed views picked from its heights, then exit
   --landscape-frames <n>  With --landscape, also draw each view n more times and print how
@@ -230,6 +234,7 @@ Controls:
                        S energy, D defenses and anti-air, A artillery and missiles,
                        Z radar and sonar, C shields and missile defense, V support
   N                    Mute or unmute
+  F8                   Bloom on or off
   - and =              Sound quieter and louder
   Space                Tap: jump to your commander. Hold and move the mouse:
                        turn the camera round the middle of the view; let go
@@ -285,6 +290,10 @@ struct Options {
     scenario: Option<String>,
     /// How much the land and sea draw, if not the platform's default.
     quality: Option<Quality>,
+    /// Draw with bloom, which is off unless asked for (render/bloom.rs).
+    bloom: bool,
+    /// Save each picture twice, without bloom and with it, for comparing (--bloom both).
+    bloom_both: bool,
     /// Save pictures of the land and sea here, then exit. Not in the browser.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     landscape_dir: Option<PathBuf>,
@@ -349,6 +358,7 @@ fn parse_options() -> Result<Option<Options>, String> {
     options.no_fog = params.get("fog").and_then(|name| parse_switch(&name)) == Some(false);
     options.scenario = params.get("scenario");
     options.quality = params.get("quality").and_then(|name| Quality::parse(&name));
+    options.bloom = params.get("bloom").and_then(|name| parse_switch(&name)) == Some(true);
     Ok(Some(options))
 }
 
@@ -457,6 +467,10 @@ fn parse_options() -> Result<Option<Options>, String> {
             }
             "--watch" => options.watch = true,
             "--view" => options.view = parse_view(&value("--view")?).ok_or("--view needs all, blue, or red")?,
+            "--bloom" => match value("--bloom")?.as_str() {
+                "both" => (options.bloom, options.bloom_both) = (true, true),
+                name => options.bloom = parse_switch(name).ok_or("--bloom needs on, off, or both")?,
+            },
             "--fog" => options.no_fog = !parse_switch(&value("--fog")?).ok_or("--fog needs on or off")?,
             "--landscape" => options.landscape_dir = Some(PathBuf::from(value("--landscape")?)),
             "--landscape-frames" => options.landscape_frames = number("--landscape-frames", value("--landscape-frames")?)? as u32,
@@ -919,6 +933,21 @@ fn commander_of(snapshot: &SimSnapshot, blueprints: &BlueprintDb) -> Option<SimI
 }
 
 /// Puts an order that was dragged where the cursor is now, if the normal rules allow it there.
+/// Saves a picture of the scene to `path`, and with `both`, once without bloom there and once
+/// with it beside it, named with _bloom, leaving bloom on.
+fn capture(renderer: &mut Renderer, scene: &FrameScene<'_>, ui: Option<&UiFrame>, path: &std::path::Path, both: bool) -> std::io::Result<()> {
+    if !both {
+        return renderer.capture(scene, ui, path);
+    }
+    renderer.set_bloom(false);
+    renderer.capture(scene, ui, path)?;
+    if !renderer.set_bloom(true) {
+        return Ok(());
+    }
+    let stem = path.file_stem().map_or_else(String::new, |stem| stem.to_string_lossy().into_owned());
+    renderer.capture(scene, ui, &path.with_file_name(format!("{stem}_bloom.bmp")))
+}
+
 fn drop_order(session: &Session, selection: &Selection, camera: &Camera, map: &MapInfo, feedback: &mut OrderFeedback, handle: &OrderHandle, pixels_per_point: f64) {
     let cursor = selection.cursor();
     let ground = camera.screen_to_ground(cursor, &map.heights);
@@ -1239,6 +1268,9 @@ fn run_landscape(seed: u64, options: &Options, map_source: &MapSource, directory
     if let Some(quality) = options.quality {
         renderer.set_quality(quality);
     }
+    if options.bloom {
+        renderer.set_bloom(true);
+    }
     let instances = InstanceBatches::default();
     for view in landscape_views(&map.heights, f64::from(map.water_level)) {
         let mut camera = Camera::new(map.map_units, [f64::from(size.width), f64::from(size.height)]);
@@ -1252,7 +1284,7 @@ fn run_landscape(seed: u64, options: &Options, map_source: &MapSource, directory
         }
         let scene = FrameScene { camera: &camera, instances: &instances, selection_box: None, time: WAVE_TIME };
         let path = directory.join(format!("{}.bmp", view.name));
-        match renderer.capture(&scene, None, &path) {
+        match capture(&mut renderer, &scene, None, &path, options.bloom_both) {
             Ok(()) => println!("landscape: {} at ({:.0}, {:.0}), altitude {:.0}", path.display(), view.focus[0], view.focus[1], camera.altitude()),
             Err(error) => println!("landscape: {} failed: {error}", path.display()),
         }
@@ -1337,6 +1369,9 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     renderer.set_climate(&climate);
     if let Some(quality) = options.quality {
         renderer.set_quality(quality);
+    }
+    if options.bloom {
+        renderer.set_bloom(true);
     }
     // Timing on the graphics card, for the autotest's report. Not while capturing, which
     // disturbs frame timing anyway.
@@ -1846,6 +1881,16 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                     feedback.show_orders(std::slice::from_ref(&order), None, &map.blueprints, "");
                                     session.send(order);
                                 }
+                            }
+                            PhysicalKey::Code(KeyCode::F8) if pressed && !event.repeat => {
+                                let wanted = !renderer.bloom();
+                                let on = renderer.set_bloom(wanted);
+                                let text = match (wanted, on) {
+                                    (true, true) => "Bloom on",
+                                    (true, false) => "Bloom is not available on this graphics card",
+                                    _ => "Bloom off",
+                                };
+                                feedback.set_label(MarkerKind::Move, text.to_string());
                             }
                             // N builds what is in its slot of the build bar shown, and mutes otherwise.
                             PhysicalKey::Code(KeyCode::KeyN) if pressed && !event.repeat && !command_held => {
@@ -2461,7 +2506,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                     let path = directory.join(name);
                                     // A fixed view is of the world alone, without the interface.
                                     let ui = if test.look_at.is_some() { None } else { Some(&ui_frame) };
-                                    match renderer.capture(&scene, ui, &path) {
+                                    match capture(&mut renderer, &scene, ui, &path, options.bloom_both) {
                                         Ok(()) => println!(
                                             "captured {} at altitude {:.0}, {} units, {} projectiles",
                                             path.display(), camera.altitude(), session.current.units.len(), session.current.projectiles.len()

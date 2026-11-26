@@ -6,6 +6,7 @@ pub mod camera;
 pub mod climate;
 pub mod detail;
 pub mod effects;
+pub mod bloom;
 mod gpu_timing;
 pub mod instances;
 pub mod land;
