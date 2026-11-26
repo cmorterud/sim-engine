@@ -14,7 +14,7 @@ use sim_engine::audio::{self, AttackAlarm, SoundEngine, SoundSettings};
 use sim_engine::input::feedback::{MarkerKind, OrderFeedback};
 use sim_engine::input::hotkeys;
 use sim_engine::input::orders::{
-    assist_orders, attack_ground_orders, capture_orders, deposit_position, formation_commands, free_deposits, site_position, line_cells, mobile_units, move_orders, discharge_orders, pending_builds, queued_commands, PendingBuild, placement_cell, placement_is_valid, placement_target, right_click_orders, PlacementMap, RightClick,
+    assist_orders, attack_ground_orders, capture_orders, launch_orders, deposit_position, formation_commands, free_deposits, site_position, line_cells, mobile_units, move_orders, discharge_orders, pending_builds, queued_commands, PendingBuild, placement_cell, placement_is_valid, placement_target, right_click_orders, PlacementMap, RightClick,
 };
 use sim_engine::input::selection::{group_center, ControlGroups, Selection};
 use sim_engine::math::fp::{Fp, Vec2Fp};
@@ -212,6 +212,9 @@ Controls:
   P + right-click      Hold P: the first right-click patrols, the rest add points
   X                    Stop
   L, then left-click   Discharge an enemy with the commander
+  L, then left-click   With missile launchers: launch at an enemy or a spot on the ground.
+                       The button shows the missiles stowed and how many fit, as 2/5.
+                       Right-clicking an enemy launches too
   O                    Pause or resume the selected factories and construction sites,
                        or switch a cloak on and off
   Ctrl + C, then click Capture an enemy unit or structure with the selected builders.
@@ -1564,6 +1567,12 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                             }
                                         }
                                     }
+                                    // With Shift, it stays armed for another launch.
+                                    ArmedOrder::Launch => {
+                                        if issue_planned_orders(&session, &selection, &camera, &map, &mut feedback, false, false, false, "Click an enemy or the ground within the launchers' reach", launch_orders) && !shift_held {
+                                            armed = None;
+                                        }
+                                    }
                                     ArmedOrder::Capture => {
                                         if issue_planned_orders(&session, &selection, &camera, &map, &mut feedback, false, shift_held, false, "Click an enemy unit or structure to capture", capture_orders) && !shift_held {
                                             armed = None;
@@ -2177,8 +2186,12 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                             if (armed.is_some() || placing.is_some()) && order_drag.is_none() {
                                 ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
                             }
+                            // A red target for the pointer, wherever a click fires: armed to launch or
+                            // attack the ground, or a right-click that attacks or launches, below.
+                            let mut target_pointer = matches!(armed, Some(ArmedOrder::Launch | ArmedOrder::AttackGround)) && order_drag.is_none() && !ctx.is_pointer_over_area();
                             // Over an enemy, in sight or on radar, the pointer says what a right-click
-                            // does: an attack, if any selected unit can hit it, or not, if none can.
+                            // does: an attack or a launch, if it gives one, or not allowed, if nothing
+                            // selected can reach it or hit it.
                             if armed.is_none() && placing.is_none() && order_drag.is_none() && hovered_handle.is_none() && !selected.is_empty() && !watching && !ctx.is_pointer_over_area() {
                                 let click = RightClick {
                                     selected: &selected,
@@ -2194,13 +2207,15 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                     surfaced: &snapshot.surfaced,
                                     water: map.water(),
                                 };
-                                if let Some(hovered) = sim_engine::input::orders::hovered_enemy(&click) {
-                                    let kind = match hovered {
-                                        sim_engine::input::orders::Hovered::Unit(_, kind) | sim_engine::input::orders::Hovered::Contact(_, _, kind) => kind,
-                                    };
-                                    let icon = if sim_engine::input::orders::selection_reaches(&click, kind) { egui::CursorIcon::Crosshair } else { egui::CursorIcon::NotAllowed };
-                                    ctx.set_cursor_icon(icon);
+                                match sim_engine::input::orders::right_click_target(&click) {
+                                    Some(sim_engine::input::orders::PointerTarget::Attack | sim_engine::input::orders::PointerTarget::Launch) => target_pointer = true,
+                                    Some(sim_engine::input::orders::PointerTarget::OutOfReach) => ctx.set_cursor_icon(egui::CursorIcon::NotAllowed),
+                                    None => {}
                                 }
+                            }
+                            if target_pointer {
+                                ctx.set_cursor_icon(egui::CursorIcon::None);
+                                ui::draw_target_pointer(ctx);
                             }
                             if watching {
                                 ui::world_overlay(ctx, &camera, &snapshot, &selected, &map.blueprints, pixels_per_point);

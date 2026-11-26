@@ -452,6 +452,9 @@ pub enum ProjectileKind {
     Discharge,
     TacticalMissile,
     StrategicMissile,
+    /// A strategic missile defense's interceptor, flying up to meet a nuclear missile: drawn as
+    /// a large, bright missile with a thick trail, so that it can be followed.
+    Interceptor,
     /// A laser's beam, drawn as a line from `from`, its muzzle, to where it struck.
     Beam,
 }
@@ -716,6 +719,62 @@ struct PendingShot {
     lobbed: bool,
 }
 
+/// How long a strategic defense's interceptor flies to meet its nuclear missile, at most, in
+/// ticks: less if the missile would strike sooner.
+pub const INTERCEPTOR_FLIGHT_TICKS: u32 = 30;
+/// How far above its defense an interceptor leaves from.
+const INTERCEPTOR_LAUNCH_HEIGHT_UNITS: i32 = 12;
+/// How wide an interceptor's burst is drawn, in world units.
+const INTERCEPTOR_BURST_UNITS: i32 = 40;
+
+/// A strategic defense's interceptor, flying to the nuclear missile it was fired at. Where they
+/// meet is worked out at launch from the missile's path, which is fixed, so it never misses: on
+/// the tick it arrives, the missile is destroyed, even if the defense is gone by then.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+struct Interceptor {
+    id: SimId,
+    team: Team,
+    /// The defense that fired it.
+    source: SimId,
+    from: Vec3Fp,
+    meet: Vec3Fp,
+    /// The nuclear missile.
+    target: SimId,
+    launched: u32,
+    arrives: u32,
+}
+
+impl Interceptor {
+    /// Where it is on this tick: from its defense to the meeting, picking up speed as it goes.
+    fn position(&self, tick: u32) -> Vec3Fp {
+        let flight = i64::from((self.arrives - self.launched).max(1));
+        let flown = i64::from(tick.saturating_sub(self.launched)).min(flight);
+        // A share that starts at half speed and ends at one and a half: s = (t + t²) / 2.
+        let share = |from: Fp, to: Fp| {
+            let gap = i64::from(to.to_bits()) - i64::from(from.to_bits());
+            let along = gap * (flown * flight + flown * flown) / (2 * flight * flight);
+            Fp::from_bits((i64::from(from.to_bits()) + along) as i32)
+        };
+        Vec3Fp::new(share(self.from.x, self.meet.x), share(self.from.y, self.meet.y), share(self.from.z, self.meet.z))
+    }
+
+    fn view(&self, tick: u32) -> ProjectileView {
+        let at = self.position(tick);
+        let bits = |point: Vec3Fp| [point.x.to_bits(), point.y.to_bits(), point.z.to_bits()];
+        ProjectileView {
+            id: self.id,
+            team: self.team,
+            x: at.x.to_bits(),
+            y: at.y.to_bits(),
+            z: at.z.to_bits(),
+            kind: ProjectileKind::Interceptor,
+            source: self.source,
+            from: (tick == self.launched + 1).then(|| bits(self.from)),
+            splash: fp_int(INTERCEPTOR_BURST_UNITS).to_bits(),
+        }
+    }
+}
+
 /// A nuclear missile on its way out of a silo or a submarine's hatch (2026-11-25): the doors
 /// open over `SILO_DOOR_TICKS`, the missile rises out once they are open, and they close behind
 /// it. `ticks` counts from the order.
@@ -862,6 +921,11 @@ pub struct SimWorld {
     pub known_structures: [Vec<KnownStructure>; 2],
     /// Missiles shot down this tick, from where to where. Only for drawing, so not in the checksum.
     interceptions: Vec<[[i32; 3]; 2]>,
+    /// Strategic interceptors in flight, in the order they were fired, which is `SimId` order.
+    interceptors: Vec<Interceptor>,
+    /// Missiles shot down this tick, sorted by `SimId`: a nuclear one strikes nothing, and so is
+    /// not `landed`.
+    shot_down: Vec<SimId>,
     /// Nuclear missiles on their way out of their silos, in the order they were fired. Hashed.
     silo_launches: Vec<SiloLaunch>,
     /// Torpedo decoys in the water, and the tick each sinks. Only for drawing: what they do is in
@@ -1022,6 +1086,8 @@ impl SimWorld {
             detected: [Vec::new(), Vec::new()],
             known_structures: [Vec::new(), Vec::new()],
             interceptions: Vec::new(),
+            interceptors: Vec::new(),
+            shot_down: Vec::new(),
             silo_launches: Vec::new(),
             decoys: Vec::new(),
             formations: BTreeMap::new(),
@@ -3426,7 +3492,7 @@ impl SimWorld {
     /// reloads. Returns the torpedoes destroyed outright, which is none now.
     fn intercept_torpedoes(&mut self) -> Vec<SimId> {
         // The missile defenses' step clears the last tick's interceptions, if there are any.
-        if self.missile_defenses.is_empty() {
+        if self.missile_defenses.is_empty() && self.interceptors.is_empty() {
             self.interceptions.clear();
         }
         let tick = self.current_tick;
@@ -3480,6 +3546,23 @@ impl SimWorld {
     fn intercept_missiles(&mut self) -> Vec<SimId> {
         self.interceptions.clear();
         let mut destroyed: Vec<SimId> = Vec::new();
+        // Interceptors that reach their missile this tick destroy it, with a flash where they meet.
+        let tick = self.current_tick;
+        let mut arrived = Vec::new();
+        self.interceptors.retain(|interceptor| {
+            let here = interceptor.arrives <= tick;
+            if here {
+                arrived.push(*interceptor);
+            }
+            !here
+        });
+        for interceptor in arrived {
+            if self.missiles.iter().any(|&(id, _)| id == interceptor.target) && !destroyed.contains(&interceptor.target) {
+                destroyed.push(interceptor.target);
+            }
+            let meet = [interceptor.meet.x.to_bits(), interceptor.meet.y.to_bits(), interceptor.meet.z.to_bits()];
+            self.interceptions.push([meet, meet]);
+        }
         for index in 0..self.missile_defenses.len() {
             let entity = self.missile_defenses[index].1;
             let mut defense = *self.ecs.get::<&MissileDefense>(entity).expect("defense list only holds defenses");
@@ -3511,7 +3594,8 @@ impl SimWorld {
                         continue;
                     };
                     let at = position.0;
-                    if missile.strategic != defense.strategic || projectile.source_team == team || destroyed.contains(&id) {
+                    let chased = self.interceptors.iter().any(|interceptor| interceptor.target == id);
+                    if missile.strategic != defense.strategic || projectile.source_team == team || destroyed.contains(&id) || chased {
                         continue;
                     }
                     let (dx, dy, dz) = (at.x.to_bits() - here.x.to_bits(), at.y.to_bits() - here.y.to_bits(), at.z.to_bits() - here.z.to_bits());
@@ -3526,12 +3610,40 @@ impl SimWorld {
                     // Nothing in reach for this mount, so nothing for the others either.
                     break;
                 };
-                destroyed.push(id);
-                self.interceptions.push([[here.x.to_bits(), here.y.to_bits(), here.z.to_bits()], [at.x.to_bits(), at.y.to_bits(), at.z.to_bits()]]);
                 if defense.strategic {
                     defense.stock -= 1;
+                    // It fires an interceptor, to meet the missile further along its path before
+                    // it strikes; one that would strike this very tick is destroyed at once.
+                    let flight = self.missiles.iter().find(|missile| missile.0 == id).and_then(|missile| self.ecs.get::<&super::components::NuclearFlight>(missile.1).ok().map(|flight| *flight));
+                    let meeting = flight.and_then(|mut flight| {
+                        let mut moves_left = 0u32;
+                        let mut ahead = flight;
+                        while ahead.travelled < ahead.length() {
+                            ahead.travelled += ahead.step();
+                            moves_left += 1;
+                        }
+                        let ticks = INTERCEPTOR_FLIGHT_TICKS.min(moves_left.saturating_sub(1));
+                        for _ in 0..ticks {
+                            flight.travelled += flight.step();
+                        }
+                        (ticks > 0).then(|| (ticks, flight.position_at(flight.travelled)))
+                    });
+                    match meeting {
+                        Some((ticks, meet)) => {
+                            let from = Vec3Fp::new(here.x, here.y, here.z + fp_int(INTERCEPTOR_LAUNCH_HEIGHT_UNITS));
+                            let source = self.missile_defenses[index].0;
+                            let interceptor = Interceptor { id: self.next_id(), team, source, from, meet, target: id, launched: tick, arrives: tick + ticks };
+                            self.interceptors.push(interceptor);
+                        }
+                        None => {
+                            destroyed.push(id);
+                            self.interceptions.push([[here.x.to_bits(), here.y.to_bits(), here.z.to_bits()], [at.x.to_bits(), at.y.to_bits(), at.z.to_bits()]]);
+                        }
+                    }
                     break;
                 }
+                destroyed.push(id);
+                self.interceptions.push([[here.x.to_bits(), here.y.to_bits(), here.z.to_bits()], [at.x.to_bits(), at.y.to_bits(), at.z.to_bits()]]);
                 defense.ticks_until_ready[mount] = defense.reload_ticks;
             }
             *self.ecs.get::<&mut MissileDefense>(entity).expect("defense list only holds defenses") = defense;
@@ -3544,12 +3656,14 @@ impl SimWorld {
         self.landed.clear();
         self.pending_shield_hits.clear();
         self.dead_projectiles.clear();
-        let mut shot_down = if self.missile_defenses.is_empty() { Vec::new() } else { self.intercept_missiles() };
+        // Interceptors in flight still arrive when their defense is gone.
+        let mut shot_down = if self.missile_defenses.is_empty() && self.interceptors.is_empty() { Vec::new() } else { self.intercept_missiles() };
         if !self.torpedo_defenses.is_empty() {
             shot_down.extend(self.intercept_torpedoes());
             shot_down.sort_unstable();
             shot_down.dedup();
         }
+        self.shot_down.clone_from(&shot_down);
         let domes = if self.shields.is_empty() { Vec::new() } else { self.standing_domes() };
         let shield_hits = &mut self.pending_shield_hits;
         let discharges = &mut self.pending_discharges;
@@ -4120,11 +4234,16 @@ impl SimWorld {
             // Both lists are sorted by SimId, so one forward pass finds every match.
             let mut next_dead = 0;
             let landed = &mut self.landed;
+            let shot_down = &self.shot_down;
             self.projectiles.retain(|&(id, entity)| {
                 if dead.get(next_dead) == Some(&id) {
                     next_dead += 1;
                     if let Ok((position, projectile, discharged, missile, beam)) = ecs.query_one_mut::<(&Position, &Projectile, Option<&Discharged>, Option<&Missile>, Option<&super::components::Beam>)>(entity) {
-                        landed.push(projectile_view(id, position, projectile, discharged, missile, beam));
+                        // A nuclear missile shot down bursts in the air, with no strike to see or hear.
+                        let nuclear_shot_down = missile.is_some_and(|missile| missile.strategic) && shot_down.binary_search(&id).is_ok();
+                        if !nuclear_shot_down {
+                            landed.push(projectile_view(id, position, projectile, discharged, missile, beam));
+                        }
                     }
                     ecs.despawn(entity).expect("dead projectiles are live until now");
                     false
@@ -4514,6 +4633,17 @@ impl SimWorld {
             hasher.write(&[wreck.kind as u8]);
             write_fp(&mut hasher, wreck.health);
         }
+        // Only while any is in flight, so that checksums from before interceptors flew still hold
+        // for matches where none does.
+        if !self.interceptors.is_empty() {
+            hasher.write(&[0x1c]);
+            for interceptor in &self.interceptors {
+                hasher.write(&interceptor.id.0.to_le_bytes());
+                hasher.write(&interceptor.target.0.to_le_bytes());
+                write_vec3(&mut hasher, interceptor.meet);
+                hasher.write(&interceptor.arrives.to_le_bytes());
+            }
+        }
         // Only while any is on its way down, so that checksums from before wrecks fell or sank
         // still hold for matches where none does.
         if !self.settling_wrecks.is_empty() {
@@ -4806,7 +4936,13 @@ impl SimWorld {
                 }
                 seen(projectile.source_team, view.x, view.y).then_some(view)
             })
-            .collect();
+            .collect::<Vec<_>>();
+        // Strategic interceptors in flight, drawn as missiles.
+        let mut projectiles = projectiles;
+        if !self.interceptors.is_empty() {
+            projectiles.extend(self.interceptors.iter().map(|interceptor| interceptor.view(self.current_tick)).filter(|view| seen(view.team, view.x, view.y)));
+            projectiles.sort_by_key(|view| view.id);
+        }
         let detonations = self
             .landed
             .iter()

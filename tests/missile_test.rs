@@ -437,3 +437,85 @@ fn a_nuclear_missile_leaves_its_silo_climbs_flies_level_and_comes_straight_down(
     run_until(&mut world, SILO_SEQUENCE_TICKS, |_| false);
     assert!(world.silo_doors().is_empty());
 }
+
+/// What a strategic defense's interceptor and the nuclear missile it chases look like, tick by
+/// tick, to the team defending: where each is, until both are gone.
+struct Chase {
+    /// The interceptor's positions, as raw `Fp` bits, from its first snapshot.
+    interceptor: Vec<[i32; 3]>,
+    /// The missile's, over the same ticks and before, until it is gone.
+    missile: Vec<[i32; 3]>,
+    /// Where the snapshots flashed an interception.
+    flashes: Vec<[[i32; 3]; 2]>,
+    /// Whether anyone heard a nuclear strike.
+    struck: bool,
+}
+
+/// Orders the standoff's silo to fire at the base, with a Red defense at a cell, and follows the
+/// chase. `after_launch` runs once, on the tick the interceptor is first seen.
+fn chase(defense_cell: (u32, u32), mut after_launch: impl FnMut(&mut SimWorld, SimId)) -> (SimWorld, Vec<SimId>, SimId, Chase) {
+    use sim_engine::sim::world::{DetonationKind, ProjectileKind};
+    let (mut world, silo, base, _) = nuclear_standoff();
+    let defense = structure(&mut world, "strategic_missile_defense", Team::Red, defense_cell.0, defense_cell.1);
+    world.ecs.get::<&mut MissileDefense>(world.unit_entity(defense).unwrap()).unwrap().stock = 1;
+    world.advance_tick(&[SimCommand::AttackGround { units: vec![silo], point: ground_zero() }]);
+    let mut seen = Chase { interceptor: Vec::new(), missile: Vec::new(), flashes: Vec::new(), struck: false };
+    for _ in 0..1_000 {
+        world.advance_tick(&[]);
+        let snapshot = world.snapshot_for(Some(Team::Red));
+        let interceptor = snapshot.projectiles.iter().find(|view| view.kind == ProjectileKind::Interceptor && view.source == defense);
+        let missile = snapshot.projectiles.iter().find(|view| view.kind == ProjectileKind::StrategicMissile);
+        seen.flashes.extend(snapshot.interceptions.iter().copied());
+        seen.struck |= snapshot.detonations.iter().any(|detonation| detonation.kind == DetonationKind::StrategicMissile);
+        if let Some(view) = interceptor {
+            if seen.interceptor.is_empty() {
+                after_launch(&mut world, defense);
+            }
+            seen.interceptor.push([view.x, view.y, view.z]);
+        }
+        if let Some(view) = missile {
+            seen.missile.push([view.x, view.y, view.z]);
+        }
+        if missile.is_none() && interceptor.is_none() && !seen.missile.is_empty() {
+            break;
+        }
+    }
+    (world, base, defense, seen)
+}
+
+fn apart(a: [i32; 3], b: [i32; 3]) -> f64 {
+    let raw = |value: i32| f64::from(value) / 4096.0;
+    (raw(a[0]) - raw(b[0])).hypot(raw(a[1]) - raw(b[1])).hypot(raw(a[2]) - raw(b[2]))
+}
+
+/// A strategic defense fires an interceptor of its own, a missile seen flying up from it, and it
+/// meets the nuclear missile further along its path: the two are gone on the same tick, where
+/// they met, with a flash there, and nothing strikes the ground or is heard striking. It never
+/// misses (2026-11-26, the user's call): not when the defense is destroyed while it flies, and
+/// not when the missile only comes into range just before it would strike.
+#[test]
+fn a_strategic_defense_fires_an_interceptor_that_meets_the_missile_and_never_misses() {
+    use sim_engine::sim::world::INTERCEPTOR_FLIGHT_TICKS;
+    let destroy = |world: &mut SimWorld, defense: SimId| world.strike(defense, fp_int(100_000));
+    // Under the missile's path, its target at the edge of its range, and one destroyed as soon
+    // as it has fired.
+    let cases: [(&str, (u32, u32), bool); 3] = [("under the path", (165, 30), false), ("at the edge of its range", (170, 110), false), ("destroyed", (165, 30), true)];
+    for (case, cell, destroyed) in cases {
+        let (world, base, defense, seen) = chase(cell, |world, defense| {
+            if destroyed {
+                destroy(world, defense);
+            }
+        });
+        assert!(!seen.interceptor.is_empty(), "{case}: an interceptor is seen in flight");
+        assert!(seen.interceptor.len() <= INTERCEPTOR_FLIGHT_TICKS as usize, "{case}: it flies {} ticks", seen.interceptor.len());
+        let (first, last) = (seen.interceptor[0], *seen.interceptor.last().unwrap());
+        assert!(last[2] > first[2], "{case}: it climbs to the missile");
+        let met = *seen.missile.last().unwrap();
+        assert!(apart(last, met) < 1.0, "{case}: the two meet, {:.1} apart when last seen", apart(last, met));
+        assert!(seen.flashes.iter().any(|flash| apart(flash[1], met) < 1.0), "{case}: with a flash where they meet");
+        assert!(!seen.struck, "{case}: no strike is heard");
+        assert!(base.iter().all(|id| alive(&world, *id)), "{case}: the base stands");
+        assert!(world.missiles.is_empty(), "{case}: the missile is gone");
+        assert_eq!(alive(&world, defense), !destroyed, "{case}: the defense is there unless destroyed");
+    }
+}

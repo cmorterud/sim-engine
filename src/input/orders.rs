@@ -130,6 +130,40 @@ pub fn weapons_reach(def: &crate::sim::blueprints::Blueprint, kind: TargetKind) 
     })
 }
 
+/// Whether a unit fires missiles only on order, from a stock it builds and stows: the tactical
+/// and strategic missile launchers and the missile submarine. Cruise missiles that pick their own
+/// targets, as a ship's do, are not.
+pub fn launches_on_order(def: &crate::sim::blueprints::Blueprint) -> bool {
+    def.max_stock > 0 && def.weapon.is_some_and(|weapon| matches!(weapon.kind, WeaponKind::TacticalMissile | WeaponKind::StrategicMissile) && !weapon.automatic)
+}
+
+/// Whether this unit fires missiles only on order.
+pub fn is_launcher(unit: &UnitView, blueprints: &BlueprintDb) -> bool {
+    unit.blueprint != u16::MAX && launches_on_order(blueprints.get(BlueprintId(unit.blueprint)))
+}
+
+/// Whether a unit could fire at a spot, `radius` short of it: anything that can move goes into
+/// range, so only a structure's reach counts. A launcher that cannot reach is left out of an
+/// order rather than told to wait on a target it will never fire at.
+fn reaches_from_where_it_stands(unit: &UnitView, blueprints: &BlueprintDb, point: [f64; 2], radius: f64) -> bool {
+    if unit.blueprint == u16::MAX || !unit.is_structure {
+        return true;
+    }
+    let raw = |value: i32| f64::from(value) / 4096.0;
+    let range = blueprints.get(BlueprintId(unit.blueprint)).weapon.map_or(0.0, |weapon| weapon.range.to_num::<f64>());
+    (raw(unit.x) - point[0]).hypot(raw(unit.y) - point[1]) <= range + radius
+}
+
+/// Drops the selected missile launchers that stand where they cannot reach the spot.
+fn without_launchers_out_of_reach(ids: &mut Vec<SimId>, click: &RightClick<'_>, point: [f64; 2], radius: f64) {
+    ids.retain(|id| {
+        click.units.binary_search_by_key(id, |unit| unit.id).ok().is_none_or(|index| {
+            let unit = &click.units[index];
+            !is_launcher(unit, click.blueprints) || reaches_from_where_it_stands(unit, click.blueprints, point, radius)
+        })
+    });
+}
+
 /// The enemy under the cursor, in sight or on radar, and what it is: a unit, or a contact's
 /// position when it names none (a decoy, which looks the same).
 pub enum Hovered {
@@ -206,9 +240,26 @@ pub fn right_click_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
     // the same, is gone to, to find nothing.
     if enemy.is_none() && !parts.armed.is_empty() {
         if let Some(Hovered::Contact(unit, at, _)) = hovered_enemy(click) {
+            let mut armed = parts.armed.clone();
+            without_launchers_out_of_reach(&mut armed, click, at, 0.0);
             match unit {
-                Some(target) => commands.push(SimCommand::Attack { units: parts.armed.clone(), target }),
-                None => commands.push(order_command(&parts.mobile, at, true)),
+                Some(target) if !armed.is_empty() => commands.push(SimCommand::Attack { units: armed, target }),
+                Some(_) => {}
+                // Missile launchers fire at a decoy's spot, as they would at what it looks like.
+                None => {
+                    if !parts.mobile.is_empty() {
+                        commands.push(order_command(&parts.mobile, at, true));
+                    }
+                    let point = Vec2Fp::new(Fp::from_num(at[0]), Fp::from_num(at[1]));
+                    let launchers: Vec<SimId> = armed
+                        .iter()
+                        .copied()
+                        .filter(|id| !parts.mobile.contains(id) && click.units.binary_search_by_key(id, |unit| unit.id).ok().is_some_and(|index| is_launcher(&click.units[index], click.blueprints)))
+                        .collect();
+                    if !launchers.is_empty() {
+                        commands.push(SimCommand::AttackGround { units: launchers, point });
+                    }
+                }
             }
             return commands;
         }
@@ -221,6 +272,9 @@ pub fn right_click_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
         // on it and let what comes close go by.
         let kind = unit_target_kind(&click.units[index], click.blueprints, click.surfaced);
         let mut armed = parts.armed.clone();
+        let raw = |value: i32| f64::from(value) / 4096.0;
+        let aimed = &click.units[index];
+        without_launchers_out_of_reach(&mut armed, click, [raw(aimed.x), raw(aimed.y)], raw(aimed.radius));
         armed.extend(defenses_in_reach(click, &click.units[index], kind));
         armed.sort_unstable();
         armed.dedup();
@@ -445,6 +499,94 @@ pub fn assist_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
         commands.push(SimCommand::Follow { units: followers, target });
     }
     commands
+}
+
+/// Launch: the selected missile launchers fire at the enemy under the cursor, in sight or on
+/// radar, or at the ground there. Those standing out of reach are left out; a missile submarine
+/// sails into range first. An enemy no launcher's missile can hit, such as an aircraft, is
+/// passed over for the ground beneath it. Nothing if no launcher selected can fire there.
+pub fn launch_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
+    let launchers: Vec<&UnitView> = click
+        .selected
+        .iter()
+        .filter_map(|id| click.units.binary_search_by_key(id, |unit| unit.id).ok().map(|index| &click.units[index]))
+        .filter(|unit| unit.team == click.team && is_launcher(unit, click.blueprints))
+        .collect();
+    if launchers.is_empty() {
+        return Vec::new();
+    }
+    let raw = |value: i32| f64::from(value) / 4096.0;
+    let hittable = |kind: TargetKind| launchers.iter().any(|unit| weapons_reach(click.blueprints.get(BlueprintId(unit.blueprint)), kind));
+    let aim = match hovered_enemy(click) {
+        Some(Hovered::Unit(id, kind)) if hittable(kind) => {
+            let unit = &click.units[click.units.binary_search_by_key(&id, |unit| unit.id).expect("found in this list")];
+            Some((Some(id), [raw(unit.x), raw(unit.y)], raw(unit.radius)))
+        }
+        Some(Hovered::Contact(id, at, kind)) if hittable(kind) => Some((id, at, 0.0)),
+        _ => None,
+    };
+    let Some((target, point, radius)) = aim.or_else(|| click.ground.map(|ground| (None, ground, 0.0))) else {
+        return Vec::new();
+    };
+    let able: Vec<SimId> = launchers.iter().filter(|unit| reaches_from_where_it_stands(unit, click.blueprints, point, radius)).map(|unit| unit.id).collect();
+    if able.is_empty() {
+        return Vec::new();
+    }
+    match target {
+        Some(target) => vec![SimCommand::Attack { units: able, target }],
+        None => vec![SimCommand::AttackGround { units: able, point: Vec2Fp::new(Fp::from_num(point[0]), Fp::from_num(point[1])) }],
+    }
+}
+
+/// What a right-click on the enemy under the cursor would be, for the pointer to show.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum PointerTarget {
+    /// An attack: the red target.
+    Attack,
+    /// An attack in which missile launchers fire: the red target too.
+    Launch,
+    /// Nothing selected can reach it or hit its kind.
+    OutOfReach,
+}
+
+/// What a right-click would do to the enemy under the cursor, worked out from the very orders
+/// it would give, so that the pointer never promises an attack that the click does not make.
+/// `None` with no enemy there, or when the click captures it instead. A decoy shows the same
+/// as what it looks like.
+pub fn right_click_target(click: &RightClick<'_>) -> Option<PointerTarget> {
+    let hovered = hovered_enemy(click)?;
+    let (decoy, kind) = match hovered {
+        Hovered::Unit(_, kind) => (false, kind),
+        Hovered::Contact(unit, _, kind) => (unit.is_none(), kind),
+    };
+    // Of those ordered to attack, the ones that can hit what it is, and whether any launches.
+    let hitting = |units: &[SimId]| -> Option<bool> {
+        let able: Vec<&UnitView> = units
+            .iter()
+            .filter_map(|id| click.units.binary_search_by_key(id, |unit| unit.id).ok().map(|index| &click.units[index]))
+            .filter(|unit| unit.blueprint == u16::MAX || weapons_reach(click.blueprints.get(BlueprintId(unit.blueprint)), kind))
+            .collect();
+        (!able.is_empty()).then(|| able.iter().any(|unit| is_launcher(unit, click.blueprints)))
+    };
+    let orders = right_click_orders(click);
+    if let Some(units) = orders.iter().find_map(|order| match order {
+        SimCommand::Attack { units, .. } => Some(units),
+        SimCommand::AttackGround { units, .. } if decoy => Some(units),
+        _ => None,
+    }) {
+        return Some(match hitting(units) {
+            Some(true) => PointerTarget::Launch,
+            Some(false) => PointerTarget::Attack,
+            None => PointerTarget::OutOfReach,
+        });
+    }
+    if decoy && orders.iter().any(|order| matches!(order, SimCommand::AttackMove { units, .. } if !units.is_empty())) {
+        return Some(PointerTarget::Attack);
+    }
+    if orders.iter().any(|order| matches!(order, SimCommand::Capture { .. })) {
+        return None;
+    }
+    Some(PointerTarget::OutOfReach)
 }
 
 /// Fire at the ground under the cursor with everything selected that has a gun, structures
@@ -1114,6 +1256,63 @@ mod tests {
         units.sort_by_key(|unit| unit.id);
         let orders = click_at(&[SimId(1), SimId(2), SimId(3), SimId(5)], &units, &[], &db, &camera(), [2_000.0, 2_000.0]);
         assert_eq!(orders, [SimCommand::Attack { units: vec![SimId(1), SimId(2), SimId(5)], target: SimId(4) }], "the far point defense keeps to its own targets");
+    }
+
+    /// Launch (L) fires the selected missile launchers at the enemy under the cursor, or else at
+    /// the ground there. Launchers that stand out of reach are left out, a missile submarine
+    /// sails into range, and an enemy no missile can hit, such as an aircraft, is passed over for
+    /// the ground beneath it.
+    #[test]
+    fn launch_fires_the_selected_launchers_that_reach_at_an_enemy_or_the_ground() {
+        let db = db();
+        let mut units = vec![
+            view(1, Team::Blue, db.id("tactical_missile_launcher"), &db, 1_000.0, 1_000.0),
+            view(2, Team::Blue, db.id("strategic_missile_launcher"), &db, 1_100.0, 1_000.0),
+            // 7,000 off: beyond a tactical launcher's 5,120.
+            view(3, Team::Blue, db.id("tactical_missile_launcher"), &db, 9_000.0, 2_000.0),
+            view(4, Team::Blue, db.id("t1_medium_tank"), &db, 1_500.0, 1_500.0),
+            view(5, Team::Red, db.id("power_generator"), &db, 2_000.0, 2_000.0),
+            view(6, Team::Red, db.id("t1_interceptor"), &db, 2_300.0, 1_700.0),
+            view(7, Team::Blue, db.id("t3_missile_sub"), &db, 30_000.0, 2_000.0),
+        ];
+        units.sort_by_key(|unit| unit.id);
+        let camera = camera();
+        let selected = [SimId(1), SimId(2), SimId(3), SimId(4), SimId(7)];
+        let at = |world: [f64; 2]| launch_orders(&click_for(&selected, &units, &db, &camera, world));
+        assert_eq!(at([2_000.0, 2_000.0]), [SimCommand::Attack { units: vec![SimId(1), SimId(2), SimId(7)], target: SimId(5) }], "the far launcher is left out, and the tank");
+        assert_eq!(at([2_400.0, 2_300.0]), [SimCommand::AttackGround { units: vec![SimId(1), SimId(2), SimId(7)], point: Vec2Fp::new(Fp::from_num(2_400.0), Fp::from_num(2_300.0)) }]);
+        let under_aircraft = at([2_300.0, 1_700.0]);
+        assert!(matches!(under_aircraft.as_slice(), [SimCommand::AttackGround { .. }]), "missiles do not chase aircraft: {under_aircraft:?}");
+        assert!(launch_orders(&click_for(&[SimId(3)], &units, &db, &camera, [2_000.0, 2_000.0])).is_empty(), "out of reach");
+        assert!(launch_orders(&click_for(&[SimId(4)], &units, &db, &camera, [2_000.0, 2_000.0])).is_empty(), "a tank launches nothing");
+    }
+
+    /// The pointer turns into a red target over an enemy only when a right-click there attacks
+    /// or launches, worked out from the orders it gives: not when it captures, and not allowed
+    /// when nothing selected reaches it or can hit it. A launcher that stands out of reach is left
+    /// out of a right-click's attack, rather than told to wait on what it will never fire at.
+    #[test]
+    fn the_pointer_shows_a_target_only_where_a_right_click_attacks_or_launches() {
+        let db = db();
+        let mut units = vec![
+            view(1, Team::Blue, db.id("tactical_missile_launcher"), &db, 1_000.0, 1_000.0),
+            view(3, Team::Blue, db.id("tactical_missile_launcher"), &db, 9_000.0, 2_000.0),
+            view(4, Team::Blue, db.id("t1_medium_tank"), &db, 1_500.0, 1_500.0),
+            view(5, Team::Red, db.id("power_generator"), &db, 2_000.0, 2_000.0),
+            view(6, Team::Red, db.id("t1_interceptor"), &db, 2_300.0, 1_700.0),
+            view(8, Team::Blue, db.id("t1_engineer"), &db, 1_600.0, 1_500.0),
+        ];
+        units.sort_by_key(|unit| unit.id);
+        let camera = camera();
+        let target = |selected: &[SimId], world: [f64; 2]| right_click_target(&click_for(selected, &units, &db, &camera, world));
+        let generator = [2_000.0, 2_000.0];
+        assert_eq!(target(&[SimId(4)], generator), Some(PointerTarget::Attack));
+        assert_eq!(target(&[SimId(1), SimId(4)], generator), Some(PointerTarget::Launch));
+        assert_eq!(target(&[SimId(3)], generator), Some(PointerTarget::OutOfReach), "the far launcher cannot reach");
+        assert_eq!(click_at(&[SimId(1), SimId(3)], &units, &[], &db, &camera, generator), [SimCommand::Attack { units: vec![SimId(1)], target: SimId(5) }]);
+        assert_eq!(target(&[SimId(4)], [2_300.0, 1_700.0]), Some(PointerTarget::OutOfReach), "a tank cannot hit an aircraft");
+        assert_eq!(target(&[SimId(8)], generator), None, "engineers capture it");
+        assert_eq!(target(&[SimId(4)], [2_500.0, 2_500.0]), None, "no enemy there");
     }
 
     #[test]

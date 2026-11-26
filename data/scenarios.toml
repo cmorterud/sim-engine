@@ -382,14 +382,15 @@ red = [
 # far enough from the next that one missile's inner ring, which destroys any structure, takes only
 # one: a full launcher flattens it if every missile lands. The defense stands in the middle group,
 # and its reach covers every group, so it stops each missile on the way, one interceptor each.
-# Red's structures all hold. The launcher fires once for each order: select it and order an attack
-# on the ground, then again once it has reloaded.
+# Red's structures all hold. The launcher fires once for each order: select it, press L (Launch),
+# and click the ground, then again once it has reloaded. Since 2026-11-26 the defense fires an
+# interceptor that flies up to meet each missile, and never misses.
 
 [[scenario]]
 id = "nuke_against_a_base"
 title = "Nuclear: a full Strategic Missile Launcher against a large undefended base"
 shows = "What a full launcher does to a base with no strategic missile defense. The base is five groups of T3 structures, far enough apart that each takes a missile of its own, and the launcher holds five. Each missile that lands destroys everything within its inner ring, shields or not, and badly damages what is just outside it."
-try = "Order the launcher to attack the ground in the middle of a group, and watch the warning, the flight, and the blast. Fire all five, one at each group. With fog of war on, send the scout ahead to find the groups first: the heavy point defenses outrange it, so keep it back. Then aim one missile between two groups, to see the outer ring fall short."
+try = "Select the launcher, press L (Launch, which shows the missiles stowed), and click the ground in the middle of a group, and watch the warning, the flight, and the blast. Fire all five, one at each group. With fog of war on, send the scout ahead to find the groups first: the heavy point defenses outrange it, so keep it back. Then aim one missile between two groups, to see the outer ring fall short."
 blue = [
     { unit = "t1_land_scout", count = 1, at = [700, 2_560] },
     { unit = "strategic_missile_launcher", cell = [10, 127], stock = 5 },
@@ -435,8 +436,8 @@ red = [
 [[scenario]]
 id = "nuke_against_a_full_defense"
 title = "Nuclear: a full Strategic Missile Launcher against a base with a Strategic Missile Defense"
-shows = "The same base and launcher, with a Strategic Missile Defense in the base's middle group holding as many interceptors as the launcher holds missiles. Its reach covers every group, and it spends an interceptor on each missile that flies into it, wherever the missile is headed, so not one lands."
-try = "Fire all five, at any groups you like, and watch each be shot down well short of the base. Then play the next scenario, where the defense has one interceptor fewer."
+shows = "The same base and launcher, with a Strategic Missile Defense in the base's middle group holding as many interceptors as the launcher holds missiles. Its reach covers every group, and it fires an interceptor at each missile that flies into it, wherever the missile is headed, which flies up to meet it and never misses, so not one lands."
+try = "Fire all five with L, at any groups you like, and watch the defense fire an interceptor up to meet each one and shoot it down well short of the base. Then play the next scenario, where the defense has one interceptor fewer."
 blue = [
     { unit = "t1_land_scout", count = 1, at = [700, 2_560] },
     { unit = "strategic_missile_launcher", cell = [10, 127], stock = 5 },

@@ -17,6 +17,9 @@ pub const ATTACK_GROUND: char = 'I';
 pub const STOP: char = 'X';
 pub const PAUSE: char = 'O';
 pub const DISCHARGE: char = 'L';
+/// Shared with Discharge, as no commander carries missiles: with a missile launcher selected, L
+/// launches.
+pub const LAUNCH: char = 'L';
 pub const UPGRADE: char = 'U';
 pub const REPEAT: char = 'R';
 /// Away from the others, because it throws away a queue.

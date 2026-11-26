@@ -71,6 +71,11 @@ const SCAR_FADE: f64 = 90.0;
 const SCAR_APPEAR: f64 = 0.3;
 /// How high over the ground a blast can be and still mark it.
 const SCAR_REACH: f64 = 4.0;
+/// How far above the ground or water a missile must end, in world units, to burst in the air:
+/// one shot down, or an interceptor meeting its missile.
+const AIRBURST_HEIGHT: f64 = 40.0;
+/// How wide a nuclear missile shot down bursts: its fuel and casing, not its warhead.
+const NUCLEAR_AIRBURST_SIZE: f32 = 70.0;
 /// The most track marks kept at once, apart from the scars, so that driving never wipes out
 /// the marks of a battle.
 const MAX_TRACKS: usize = 2_000;
@@ -537,6 +542,7 @@ impl Effects {
                 ProjectileKind::Shell | ProjectileKind::Beam => 2.5,
                 ProjectileKind::Discharge => 8.0,
                 ProjectileKind::TacticalMissile => 14.0,
+                ProjectileKind::Interceptor => 30.0,
                 ProjectileKind::StrategicMissile => 220.0,
             };
             // The fireball is as wide as the blast that does the damage, so that a bomb or a
@@ -548,9 +554,18 @@ impl Effects {
             // On the water, or just over it, a shell throws up spray rather than earth.
             let on_water = water.is_some_and(|water| ground(at[0], at[1]) < water && at[2] <= water + SCAR_REACH);
             let style = self.shot(projectile);
+            // A missile that ends high in the air was shot down, or is an interceptor that met its
+            // missile: it bursts there, with no mushroom cloud, ring of dust, or mark below.
+            let missile = matches!(projectile.kind, ProjectileKind::TacticalMissile | ProjectileKind::StrategicMissile | ProjectileKind::Interceptor);
+            if missile && at[2] - ground(at[0], at[1]).max(water.unwrap_or(f64::MIN)) > AIRBURST_HEIGHT {
+                let across = if projectile.kind == ProjectileKind::StrategicMissile { NUCLEAR_AIRBURST_SIZE } else { least.max(blast) };
+                let life = self.fireball(at, across, time, seed);
+                self.smoke(at, across, life, 3, time, seed);
+                return;
+            }
             match projectile.kind {
                 ProjectileKind::Shell => self.burst(at, style, size, on_water, time, seed),
-                ProjectileKind::TacticalMissile => self.missile_burst(at, size, on_water, time, seed),
+                ProjectileKind::TacticalMissile | ProjectileKind::Interceptor => self.missile_burst(at, size, on_water, time, seed),
                 ProjectileKind::StrategicMissile => self.mushroom(at, size, time, seed),
                 ProjectileKind::Discharge | ProjectileKind::Beam => self.explode(at, size, time, seed),
             }
@@ -763,10 +778,14 @@ impl Effects {
             // Its other trail, an exhaust or a shell's smoke, is kept apart from the first by id.
             let second = SimId(projectile.id.0 ^ EXHAUST_ID);
             match projectile.kind {
-                ProjectileKind::TacticalMissile | ProjectileKind::StrategicMissile => {
-                    let strategic = projectile.kind == ProjectileKind::StrategicMissile;
-                    // A strategic missile's flame is larger, so that it glows (2026-11-25).
-                    let (size, length, flame) = if strategic { (7.0, 20.0, 7.0) } else { (3.0, 9.0, 1.6) };
+                ProjectileKind::TacticalMissile | ProjectileKind::StrategicMissile | ProjectileKind::Interceptor => {
+                    // A strategic missile's flame is larger, so that it glows (2026-11-25), and an
+                    // interceptor's trail is thick, so that it can be followed up to its missile.
+                    let (size, length, flame) = match projectile.kind {
+                        ProjectileKind::StrategicMissile => (7.0, 20.0, 7.0),
+                        ProjectileKind::Interceptor => (6.0, 14.0, 4.0),
+                        _ => (3.0, 9.0, 1.6),
+                    };
                     let puff = Puff { shape: Shape::Smoke, at, rise: 1.5, born: time, life: 1.6, size, growth: 1.4, height_share: 1.0, color: TRAIL_FRESH, fade_to: TRAIL_OLD, dense: false };
                     lay(self, projectile.id, at, f64::from(size) * TRAIL_SPACING, puff);
                     // A flame at its tail, brief, the way it has come.

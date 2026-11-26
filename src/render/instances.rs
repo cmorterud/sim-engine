@@ -63,6 +63,8 @@ const ROUND_WIDTH: f32 = 2.0;
 const DISCHARGE_SHELL: [f32; 3] = [0.75, 0.95, 1.00];
 const DISCHARGE_SIZE: f32 = 2.4;
 const MISSILE: [f32; 3] = [0.92, 0.92, 0.88];
+/// A strategic interceptor: pale blue-white, apart from a nuclear missile and a tactical one.
+const INTERCEPTOR: [f32; 3] = [0.78, 0.94, 1.0];
 const NUKE: [f32; 3] = [1.00, 0.95, 0.30];
 const OBSTACLE: [f32; 3] = [0.42, 0.40, 0.38];
 const WRECK: [f32; 3] = [0.24, 0.23, 0.22];
@@ -1067,6 +1069,7 @@ pub fn build_projectile_instances(
             ProjectileKind::Discharge => out.push(Shape::Shell, tracer_instance(center, flight(from, now), DISCHARGE_SIZE * 3.0, DISCHARGE_SIZE, DISCHARGE_SHELL, UNIT_ICON_PX, eye)),
             ProjectileKind::TacticalMissile => out.push(Shape::Missile, missile_instance(center, missile_way(from, now, heading), 9.0, 3.0, MISSILE, UNIT_ICON_PX, eye)),
             ProjectileKind::StrategicMissile => out.push(Shape::Missile, missile_instance(center, missile_way(from, now, heading), 20.0, 7.0, NUKE, UNIT_ICON_PX * 1.6, eye)),
+            ProjectileKind::Interceptor => out.push(Shape::Missile, missile_instance(center, missile_way(from, now, heading), 14.0, 5.0, INTERCEPTOR, UNIT_ICON_PX * 1.4, eye)),
             // A beam is over within its tick: the effects draw it, from its muzzle to its mark.
             ProjectileKind::Beam => {}
         }
