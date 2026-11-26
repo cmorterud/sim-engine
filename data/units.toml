@@ -1355,10 +1355,14 @@ radar = 960
 sonar = 400
 movement = "naval"
 # Three turrets, two forward and one aft, each firing from where it sits, as one broadside.
-weapon = { range = 3000, reload_ticks = 160, projectile_speed = 60, damage = 4400, splash_radius = 40, turn_rate = 30, spread = 6, mount = [0, 28] }
+# Its shells go up in a high arc, as artillery's do, at 1,100 a second across the ground (2026-11-26,
+# the design owner's ask): from the edge of its reach they fly about 2.7 seconds, which a
+# commander that turns back as the broadside goes up only just walks out of; any closer, they hit.
+# They flew flat at 600 a second until then, slow enough to walk out of from half its reach.
+weapon = { range = 3000, reload_ticks = 160, projectile_speed = 110, damage = 4400, splash_radius = 40, turn_rate = 30, spread = 6, lobbed = true, mount = [0, 28] }
 extra_weapons = [
-    { range = 3000, reload_ticks = 160, projectile_speed = 60, damage = 4400, splash_radius = 40, turn_rate = 30, spread = 6, mount = [0, 10], broadside = true },
-    { range = 3000, reload_ticks = 160, projectile_speed = 60, damage = 4400, splash_radius = 40, turn_rate = 30, spread = 6, mount = [0, -31], aft = true, broadside = true },
+    { range = 3000, reload_ticks = 160, projectile_speed = 110, damage = 4400, splash_radius = 40, turn_rate = 30, spread = 6, lobbed = true, mount = [0, 10], broadside = true },
+    { range = 3000, reload_ticks = 160, projectile_speed = 110, damage = 4400, splash_radius = 40, turn_rate = 30, spread = 6, lobbed = true, mount = [0, -31], aft = true, broadside = true },
     { range = 1200, reload_ticks = 17, projectile_speed = 180, damage = 96, targets = "air", turn_rate = 180 },
 ]
 missile_defense = { kind = "tactical", range = 620, reload_ticks = 18, mounts = 2 }

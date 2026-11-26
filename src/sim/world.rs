@@ -2542,14 +2542,14 @@ impl SimWorld {
             Option<&super::components::Adjacency>,
             Option<&mut super::components::ExtraWeapons>,
             Option<&super::components::Torpedo>,
-            (Option<&super::components::TractorBeam>, Option<&super::components::StunWeapon>, &Order, Option<&Builder>, Option<&super::components::Scatter>, (Option<&mut super::components::Setup>, &Velocity, Option<&super::components::NoseGun>, Option<&mut super::components::Salvo>)),
+            (Option<&super::components::TractorBeam>, Option<&super::components::StunWeapon>, &Order, Option<&Builder>, Option<&super::components::Scatter>, (Option<&mut super::components::Setup>, &Velocity, Option<&super::components::NoseGun>, Option<&mut super::components::Salvo>, Option<&super::components::HighArc>)),
         )>();
         let mut view = query.view();
         let disabled = &self.disabled;
         let grabs = &mut self.pending_grabs;
         grabs.clear();
         for (index, &(id, entity)) in units.iter().enumerate() {
-            let (stats, combat, turret, turning, mut discharge, discharge_order, mut launcher, anti_air, bomb_bay, flight, artillery, adjacency, extras, torpedo, (tractor, stun_weapon, order, builder, scatter, (setup, velocity, nose_gun, mut salvo))) =
+            let (stats, combat, turret, turning, mut discharge, discharge_order, mut launcher, anti_air, bomb_bay, flight, artillery, adjacency, extras, torpedo, (tractor, stun_weapon, order, builder, scatter, (setup, velocity, nose_gun, mut salvo, high_arc))) =
                 view.get_mut(entity).expect("unit list only holds live units");
             combat.ticks_until_ready = combat.ticks_until_ready.saturating_sub(1);
             if let Some(salvo) = salvo.as_mut() {
@@ -2875,8 +2875,9 @@ impl SimWorld {
                     // straight to where the aircraft will be.
                     let fused = entry.is_air && !guided && !torpedo;
                     let homing = ((entry.is_air && !fused) || torpedo).then_some(target);
-                    // Missiles, bombs and shots at aircraft are never blocked by the ground.
-                    let direct = missile.is_none() && homing.is_none() && bomb.is_none() && tractor.is_none() && !fused;
+                    // Missiles, bombs and shots at aircraft are never blocked by the ground, and
+                    // a high arc, as a battleship's, comes down on its aim from above.
+                    let direct = missile.is_none() && homing.is_none() && bomb.is_none() && tractor.is_none() && !fused && high_arc.is_none();
                     let clear = !direct || shot_is_clear(terrain, from, to, combat.projectile_speed);
                     // A target the player ordered is walked closer to until the shot is clear, rather
                     // than shelling the ground in the way. Artillery lobs over most of it, and fires.
@@ -2919,7 +2920,7 @@ impl SimWorld {
                             lead: (missile.is_none() && homing.is_none() && bomb.is_none()).then_some(entry.entity),
                             fused,
                             flak: fused && flak,
-                            lobbed: artillery.is_some() && missile.is_none(),
+                            lobbed: (artillery.is_some() || high_arc.is_some()) && missile.is_none(),
                         });
                         economies[stats.owner.index()].energy -= weapon_energy;
                         combat.ticks_until_ready = salvo.as_mut().map_or(reload, |salvo| salvo.fire(reload));
@@ -2947,7 +2948,7 @@ impl SimWorld {
                 let to = Vec3Fp::new(spot.x, spot.y, terrain.height_at(spot) - GROUND_AIM_DEPTH);
                 // A shell that would come down on a rise in between, or short on a slope, is not
                 // fired: the unit walks closer. Bombs, missiles and artillery go over.
-                if combat.ticks_until_ready == 0 && aimed && loaded && in_reach && bomb.is_none() && missile.is_none() && artillery.is_none() {
+                if combat.ticks_until_ready == 0 && aimed && loaded && in_reach && bomb.is_none() && missile.is_none() && artillery.is_none() && high_arc.is_none() {
                     let reach = combat.projectile_splash.max(fp_int(GROUND_SHOT_REACH_UNITS));
                     let lands = super::combat::shot_lands_near(terrain, from, to, combat.projectile_speed, reach);
                     combat.line_blocked = !lands && combat.still_closing([me.x, me.y], tick);
@@ -2974,7 +2975,7 @@ impl SimWorld {
                         lead: None,
                         fused: false,
                         flak: false,
-                        lobbed: artillery.is_some() && missile.is_none(),
+                        lobbed: (artillery.is_some() || high_arc.is_some()) && missile.is_none(),
                     });
                     economies[stats.owner.index()].energy -= weapon_energy;
                     combat.ticks_until_ready = salvo.as_mut().map_or(reload, |salvo| salvo.fire(reload));
@@ -3092,7 +3093,7 @@ impl SimWorld {
                     let missile = weapon.missile_height.map(|cruise_height| MissileShot { cruise_height, strategic: false, inner_radius: Fp::ZERO, inner_damage: Fp::ZERO });
                     let homing = if missile.is_some() { None } else { homing };
                     let fused = !weapon.homing && !weapon.torpedo && missile.is_none() && spot.is_none() && target.is_some_and(|entry| entry.is_air);
-                    if missile.is_none() && homing.is_none() && spot.is_none() && !fused && !shot_is_clear(terrain, from, to, weapon.projectile_speed) {
+                    if missile.is_none() && homing.is_none() && spot.is_none() && !fused && !weapon.lobbed && !shot_is_clear(terrain, from, to, weapon.projectile_speed) {
                         weapon.target = None;
                         continue;
                     }
@@ -3117,7 +3118,7 @@ impl SimWorld {
                         },
                         fused,
                         flak: fused && weapon.flak,
-                        lobbed: false,
+                        lobbed: weapon.lobbed && missile.is_none() && homing.is_none() && !fused,
                     });
                     weapon.ticks_until_ready = weapon.fired();
                     weapon.due = false;

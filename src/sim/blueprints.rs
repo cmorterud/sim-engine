@@ -322,6 +322,10 @@ pub struct WeaponDef {
     /// it fires, they fire once each, in turn after it, `BROADSIDE_RIPPLE_TICKS` apart, so that a
     /// battleship's turrets land as one volley at the main weapon's reload.
     pub broadside: bool,
+    /// Its shells go up in a high arc and come down on their aim, as artillery's do, taking as
+    /// long across the ground as a flat shell at `projectile_speed` would (`lobbed` in the unit
+    /// data). Artillery always lobs.
+    pub lobbed: bool,
 }
 
 /// Ticks between one gun of a broadside and the next (`WeaponDef::broadside`).
@@ -636,6 +640,9 @@ struct RawWeapon {
     /// An extra weapon that fires with the main weapon, as one broadside.
     #[serde(default)]
     broadside: bool,
+    /// Its shells go up in a high arc, as artillery's do.
+    #[serde(default)]
+    lobbed: bool,
 }
 
 #[derive(Deserialize)]
@@ -1055,6 +1062,9 @@ impl BlueprintDb {
                     (_, Some(speed)) => speed.fp().map_err(context)?,
                     (_, None) => return Err(context("a weapon needs a projectile_speed".into())),
                 };
+                if weapon.lobbed && kind != WeaponKind::Shell {
+                    return Err(context("only shells are lobbed".into()));
+                }
                 if kind == WeaponKind::Laser && (weapon.splash_radius.is_some() || weapon.spread.is_some() || weapon.artillery || weapon.homing) {
                     return Err(context("a laser hits one target where it is aimed: it has no splash_radius or spread, and is neither artillery nor homing".into()));
                 }
@@ -1090,6 +1100,7 @@ impl BlueprintDb {
                     arc: weapon.arc.map(|degrees| crate::math::fp::cos_sin_tenths_of_degree(degrees * 10).0),
                     salvo: weapon.salvo.as_ref().map(|salvo| SalvoDef { shots: salvo.shots, ticks: salvo.ticks }),
                     broadside: weapon.broadside,
+                    lobbed: weapon.lobbed || weapon.artillery,
                 })
             };
             let weapon = unit.weapon.as_ref().map(parse_weapon).transpose()?;
