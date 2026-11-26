@@ -702,9 +702,16 @@ fn a_dome_stops_a_laser_and_rising_ground_blocks_it() {
     let sheltered = tough_hovercraft(&mut world, point(2_650, 4_000));
     let before = health_of(&world, sheltered);
     // For as long as the dome can stand what the lasers do to it: they wear it down, as shells do.
+    // The dome is made to stand a few beams, whatever a beam does, so that there are some to see.
     let db = sim_engine::sim::blueprints::BlueprintDb::standard();
-    let dome_health = db.get(db.id("t2_escort_corvette")).shield.expect("the corvette has a dome").health.to_num::<f64>();
     let beam_damage = db.get(db.id("t3_battlecruiser")).weapon.expect("the battlecruiser has lasers").damage.to_num::<f64>();
+    let dome_health = 8.0 * beam_damage;
+    {
+        let entity = world.unit_entity(corvette).unwrap();
+        let mut dome = world.ecs.get::<&mut sim_engine::sim::components::Shield>(entity).expect("the corvette has a dome");
+        dome.health = Fp::from_num(dome_health);
+        dome.max_health = dome.health;
+    }
     let mut beams = Vec::new();
     for _ in 0..200 {
         if (beams.len() + 2) as f64 * beam_damage > dome_health * 0.8 {
