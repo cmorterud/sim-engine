@@ -93,6 +93,7 @@ cargo test --release --target x86_64-apple-darwin --test determinism_test
 cargo bench
 cargo run --release -- --soak 100         # Plays and replays 100 AI-vs-AI matches
 cargo run --release -- --autotest 60 --fast-forward 10000   # Opens a window for 60 seconds
+cargo run --release -- --scenario navy_frigates_against_t1_bombers --fog off --fast-forward 185 --autotest 10 --look-at 740,2575,220 --capture pictures/sinking   # Holds the camera over a fight, and saves pictures of it
 cargo run --release -- --map stillwater --landscape pictures/after/stillwater   # Land and sea from fixed views
 cargo run --release -- --map stillwater --landscape pictures/after/stillwater --landscape-frames 6   # Also times each view on the graphics card
 ```

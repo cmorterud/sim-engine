@@ -11,6 +11,11 @@ pub const COST_OPEN: u8 = 1;
 pub const COST_IMPASSABLE: u8 = 255;
 /// How far below the water a cell's highest corner must be for ships to sail it.
 pub const NAVAL_DEPTH_UNITS: i32 = 10;
+/// How far below its water every sea's floor lies, where the sea is open, in units: the ground
+/// that seabed walkers walk on and sunken wrecks come to rest on (GAME_SPECIFICATION.md §10).
+/// Shores and islands rise from it, and nowhere is deeper. Every map with water lays its sea
+/// floor here (`maps.rs`, `grounds.rs`, `playtest.rs`), and `tests/map_test.rs` holds them to it.
+pub const SEA_DEPTH_UNITS: i32 = 50;
 
 /// Height samples are stored in steps of 1/16 unit.
 pub const HEIGHT_FRAC_BITS: u32 = 4;
@@ -220,6 +225,11 @@ impl Terrain {
 
     pub const fn water_level(&self) -> Fp {
         self.water_level
+    }
+
+    /// Whether the ground at a point is under the water: whether it is sea floor.
+    pub fn under_water(&self, point: Vec2Fp) -> bool {
+        self.height_at(point) < self.water_level
     }
 
     pub const fn content_hash(&self) -> u64 {

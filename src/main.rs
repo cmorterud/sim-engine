@@ -124,6 +124,11 @@ Usage: sim-engine [options]
                        and print the checksum
   --fast-forward <n>   With --autotest, run n ticks at full speed first, to test a later match
   --capture <dir>      With --autotest, save screenshots at several zoom levels
+  --look-at <x>,<y>,<altitude>
+                       With --autotest, hold the camera over this point at this altitude
+                       instead of sweeping the zoom, and --capture a picture of the world
+                       alone, without the interface, every twentieth of the run, named by
+                       its tick
   --soak <matches>     Play and replay AI-vs-AI matches, and report on the exit criteria
   --threads <n>        Threads for --soak (default 6)
   --strategies <blue>,<red>
@@ -245,6 +250,8 @@ struct Options {
     autotest_seconds: Option<u32>,
     fast_forward: u32,
     capture_dir: Option<PathBuf>,
+    /// With --autotest, a fixed view to hold instead of the zoom sweep: where, and how high.
+    look_at: Option<[f64; 3]>,
     soak: Option<u64>,
     /// Print the balance harness's measurements of today's unit data (BALANCE.md).
     balance: bool,
@@ -398,6 +405,14 @@ fn parse_options() -> Result<Option<Options>, String> {
             "--autotest" => options.autotest_seconds = Some(number("--autotest", value("--autotest")?)? as u32),
             "--fast-forward" => options.fast_forward = number("--fast-forward", value("--fast-forward")?)? as u32,
             "--capture" => options.capture_dir = Some(PathBuf::from(value("--capture")?)),
+            "--look-at" => {
+                let given = value("--look-at")?;
+                let numbers: Vec<f64> = given.split(',').map(|part| part.trim().parse::<f64>()).collect::<Result<_, _>>().map_err(|_| format!("--look-at takes x,y,altitude, not {given}"))?;
+                let [x, y, altitude] = numbers[..] else {
+                    return Err(format!("--look-at takes x,y,altitude, not {given}"));
+                };
+                options.look_at = Some([x, y, altitude]);
+            }
             "--soak" => options.soak = Some(number("--soak", value("--soak")?)?),
             "--balance" => options.balance = true,
             "--balance-derive" => options.balance_derive = Some(value("--balance-derive")?),
@@ -669,12 +684,14 @@ struct Autotest {
     frames_by_altitude: Vec<(f64, Duration)>,
     capture_dir: Option<PathBuf>,
     capture_points: Vec<f64>,
+    /// A fixed view held instead of the zoom sweep (`--look-at`).
+    look_at: Option<[f64; 3]>,
     peak_projectiles: usize,
     peak_instances: usize,
 }
 
 impl Autotest {
-    fn new(seconds: u32, capture_dir: Option<PathBuf>) -> Self {
+    fn new(seconds: u32, capture_dir: Option<PathBuf>, look_at: Option<[f64; 3]>) -> Self {
         Self {
             duration: Duration::from_secs(u64::from(seconds)),
             started: None,
@@ -682,8 +699,10 @@ impl Autotest {
             work_times: Vec::new(),
             frames_by_altitude: Vec::new(),
             capture_dir,
-            // Progress through the run at which to take screenshots.
-            capture_points: vec![0.02, 0.15, 0.22, 0.30, 0.42, 0.50],
+            // Progress through the run at which to take screenshots: over the zoom sweep, or
+            // every twentieth of the run from a fixed view.
+            capture_points: if look_at.is_some() { (1..20).map(|step| f64::from(step) / 20.0).collect() } else { vec![0.02, 0.15, 0.22, 0.30, 0.42, 0.50] },
+            look_at,
             peak_projectiles: 0,
             peak_instances: 0,
         }
@@ -825,6 +844,11 @@ fn read_map(scenario: &Scenario) -> MapInfo {
 }
 
 impl MapInfo {
+    /// The water's height, if the map has any.
+    fn water(&self) -> Option<f64> {
+        (self.water_level > -1.0e5).then_some(f64::from(self.water_level))
+    }
+
     fn placement_map(&self) -> PlacementMap<'_> {
         PlacementMap {
             cells_per_side: self.cells_per_side,
@@ -1028,6 +1052,7 @@ fn issue_planned_orders(
         attack_move,
         contacts: &session.current.contacts,
         surfaced: &session.current.surfaced,
+        water: map.water(),
     });
     let orders = if queued { queued_commands(orders) } else { orders };
     let orders = if formation { formation_commands(orders) } else { orders };
@@ -1057,6 +1082,7 @@ fn issue_minimap_order(session: &Session, selection: &Selection, camera: &Camera
         attack_move,
         contacts: &[],
         surfaced: &session.current.surfaced,
+        water: map.water(),
     };
     let orders = if attack_move { right_click_orders(&click) } else { move_orders(&click) };
     let orders = if queued { queued_commands(orders) } else { orders };
@@ -1277,7 +1303,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
         None => Strategy::balanced(),
     };
 
-    let mut autotest = autotest_seconds.map(|seconds| Autotest::new(seconds, options.capture_dir.clone()));
+    let mut autotest = autotest_seconds.map(|seconds| Autotest::new(seconds, options.capture_dir.clone(), options.look_at));
     let source = match (autotest_seconds, battle) {
         (Some(seconds), true) => CommandSource::Script { seed, ticks: fast_forward + seconds * 10 },
         (Some(seconds), false) => CommandSource::AiVsAi { seed, ticks: fast_forward + seconds * 10 },
@@ -1322,6 +1348,9 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     // A watcher who sees everything starts over the middle, high enough for both bases.
     if watching && watch_view.is_none() {
         camera.look_at(map.map_units / 2.0, map.map_units / 2.0, camera.max_altitude() * WATCH_ALTITUDE_FRACTION);
+    }
+    if let Some([x, y, altitude]) = autotest.as_ref().and_then(|test| test.look_at) {
+        camera.look_at(x, y, altitude);
     }
     // Whether the fog has been cleared for seeing everything, since snapshots then carry none.
     let mut fog_cleared = false;
@@ -1888,7 +1917,9 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                         if let Some(test) = autotest.as_mut() {
                             let started = *test.started.get_or_insert(now);
                             let fraction = ((now - started).as_secs_f64() / test.duration.as_secs_f64()).min(1.0);
-                            camera.set_altitude(Autotest::altitude_at(fraction, camera.min_altitude(), camera.max_altitude()));
+                            if test.look_at.is_none() {
+                                camera.set_altitude(Autotest::altitude_at(fraction, camera.min_altitude(), camera.max_altitude()));
+                            }
                             progress = Some(fraction);
                             if is_match && !autotest_selected {
                                 if let Some(commander) = commander_of(&session.current, &map.blueprints) {
@@ -1970,7 +2001,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                         // Screenshots show one of each marker and a queue of builds, since test runs have no clicks.
                         let mut demo_snapshot = None;
                         if let (Some(test), Some(fraction)) = (autotest.as_ref(), progress) {
-                            if test.capture_dir.is_some() && test.capture_points.first().is_some_and(|&point| fraction >= point) {
+                            if test.capture_dir.is_some() && test.look_at.is_none() && test.capture_points.first().is_some_and(|&point| fraction >= point) {
                                 let mut snapshot = (*session.current).clone();
                                 let own: Vec<SimId> = snapshot.units.iter().filter(|unit| unit.team == PLAYER_TEAM).map(|unit| unit.id).collect();
                                 if let Some(commander) = commander_of(&snapshot, &map.blueprints) {
@@ -2161,6 +2192,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                     attack_move: false,
                                     contacts: &snapshot.contacts,
                                     surfaced: &snapshot.surfaced,
+                                    water: map.water(),
                                 };
                                 if let Some(hovered) = sim_engine::input::orders::hovered_enemy(&click) {
                                     let kind = match hovered {
@@ -2374,17 +2406,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                             let center = [center_x, center_y, map.heights.height_at(center_x, center_y) + 0.5];
                             scene_instances.push(Shape::Cube, instances::vent_instance(center, cell * 2.6, eye));
                         }
-                        for wreck in &current.wrecks {
-                            let center = [raw_to_world(wreck.x), raw_to_world(wreck.y), raw_to_world(wreck.z)];
-                            if wreck.kind.is_scenery() {
-                                let (shape, instance) = instances::scenery_instance(wreck.kind, center, raw_to_world(wreck.radius), eye);
-                                scene_instances.push(shape, instance);
-                            } else if let Some((blueprint, facing)) = effects.wreck_origin(wreck.id).filter(|(blueprint, _)| usize::from(*blueprint) < looks.len()) {
-                                instances::wreck_model_instances(center, raw_to_world(wreck.radius), &looks[usize::from(blueprint)], facing, eye, &mut scene_instances);
-                            } else {
-                                scene_instances.push(Shape::Wreck, instances::wreck_instance(center, raw_to_world(wreck.radius), eye));
-                            }
-                        }
+                        sim_engine::render::wrecks::build_wreck_instances(&previous.wrecks, &current.wrecks, alpha, eye, &effects, &looks, map.water(), motion.time, &mut scene_instances);
                         for shield in snapshot.shields.iter().filter(|shield| shield.up) {
                             scene_instances.push(Shape::Dome, instances::dome_instance(shield, eye));
                         }
@@ -2420,8 +2442,11 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                             if test.capture_points.first().is_some_and(|&point| fraction >= point) {
                                 let point = test.capture_points.remove(0);
                                 if let Some(directory) = &test.capture_dir {
-                                    let path = directory.join(format!("zoom_{:03}.bmp", (point * 100.0) as u32));
-                                    match renderer.capture(&scene, Some(&ui_frame), &path) {
+                                    let name = if test.look_at.is_some() { format!("tick_{:05}.bmp", session.current.tick) } else { format!("zoom_{:03}.bmp", (point * 100.0) as u32) };
+                                    let path = directory.join(name);
+                                    // A fixed view is of the world alone, without the interface.
+                                    let ui = if test.look_at.is_some() { None } else { Some(&ui_frame) };
+                                    match renderer.capture(&scene, ui, &path) {
                                         Ok(()) => println!(
                                             "captured {} at altitude {:.0}, {} units, {} projectiles",
                                             path.display(), camera.altitude(), session.current.units.len(), session.current.projectiles.len()

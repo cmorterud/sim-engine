@@ -508,7 +508,7 @@ fn vs_scar(
 @fragment
 fn fs_scar(input: ScarOutput) -> @location(0) vec4<f32> {
     let sight = 0.18 + 0.82 * textureSample(fog_texture, fog_sampler, input.fog_coordinates).r;
-    // Wakes, the fourth kind, are drawn over the water instead, by fs_wake.
+    // Wakes and slicks, the fourth and fifth kinds, are drawn over the water instead, by fs_wake.
     if (input.look.x > 2.5) {
         discard;
     }
@@ -559,6 +559,9 @@ fn fs_wake(input: ScarOutput) -> @location(0) vec4<f32> {
     if (input.look.x < 2.5) {
         discard;
     }
+    if (input.look.x > 3.5) {
+        return oil_slick(input, fog);
+    }
     let age = input.look.z;
     // Each stretch is drawn wider than the wake is where it lies, and narrows towards the ship,
     // as the wake does, so that the edges of one stretch meet those of the next in a straight
@@ -578,6 +581,36 @@ fn fs_wake(input: ScarOutput) -> @location(0) vec4<f32> {
     let alpha = (arms * 0.65 * (1.0 - age * 0.6) + middle * 0.55) * mix(0.35, 1.0, broken) * along * input.look.y;
     let sight = 0.18 + 0.82 * fog;
     let lit = FOAM_COLOR * mix(1.0, cloud_light(input.world), 0.5) * sight;
+    return vec4<f32>(tone(strategic_sight(lit, fog, input.fog_coordinates)), alpha);
+}
+
+// How dark an oil slick is, and the colors of the bands where it thins out at its edge.
+const OIL: vec3<f32> = vec3<f32>(0.018, 0.02, 0.024);
+const FLOTSAM: vec3<f32> = vec3<f32>(0.2, 0.17, 0.13);
+
+// A slick of oil on the water over a wreck on the sea floor, the fifth kind of scar: a dark,
+// glossy film, ragged at its edge and slowly changing shape, with faint bands of color where it
+// thins out, and scraps of debris afloat in it. Its look is how strongly it shows and a number
+// that varies its shape. It marks where a wreck lies, as the water hides the floor.
+fn oil_slick(input: ScarOutput, fog: f32) -> vec4<f32> {
+    let time = globals.water.x;
+    let seed = input.look.z * 37.0;
+    let drift = vec2<f32>(time * 0.013, -time * 0.009);
+    let ragged = (value_noise(input.across * 1.7 + vec2<f32>(seed, -seed) + drift) - 0.5) * 0.5
+        + (value_noise(input.across * 4.3 - vec2<f32>(seed, seed) - drift * 2.0) - 0.5) * 0.18;
+    let reach = length(input.across) + ragged;
+    let film = 1.0 - smoothstep(0.5, 0.95, reach);
+    // Bands of color where the film thins, towards its edge.
+    let thickness = reach * 7.0 + value_noise(input.world / 6.0 + drift * 4.0) * 3.0 + time * 0.05;
+    let bands = 0.5 + 0.5 * cos(vec3<f32>(thickness) + vec3<f32>(0.0, 2.1, 4.2));
+    let thin = smoothstep(0.3, 0.85, reach);
+    var color = mix(OIL, bands * 0.28 + OIL, thin * 0.7);
+    // Scraps of debris afloat in the middle of it.
+    let scraps = step(0.86, value_noise(input.world / 1.4 + vec2<f32>(seed * 3.0))) * (1.0 - smoothstep(0.25, 0.6, reach));
+    color = mix(color, FLOTSAM, scraps);
+    let alpha = max(film * mix(0.62, 0.3, thin), scraps * 0.85) * input.look.y;
+    let sight = 0.18 + 0.82 * fog;
+    let lit = color * mix(1.0, cloud_light(input.world), 0.5) * sight;
     return vec4<f32>(tone(strategic_sight(lit, fog, input.fog_coordinates)), alpha);
 }
 

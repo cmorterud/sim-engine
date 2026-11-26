@@ -1046,6 +1046,20 @@ pub struct Wreck {
     pub health: Fp,
 }
 
+/// Debris still on its way down (GAME_SPECIFICATION.md §6.1): an aircraft's, falling with the
+/// way it was flying until it strikes the ground or the water, or anything's in the water,
+/// sinking to the sea floor. Wrecks at rest have none, and lie half their radius over the ground.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Settling {
+    /// The height of its middle, as a wreck at rest is reported half its radius up.
+    pub z: Fp,
+    /// How far it moves in a tick.
+    pub velocity: Vec3Fp,
+    /// In the water, sinking, rather than falling through the air. Reclaim reaches it there as
+    /// it does on the floor; in the air nothing does.
+    pub wet: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

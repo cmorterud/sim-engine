@@ -118,3 +118,51 @@ fn the_same_map_and_seed_play_the_same_match() {
     assert_eq!(replay_match_on(&source, 5, &first.log), first.checksums, "and a replay of its orders matches");
     assert!(first.units_built_peak > 10, "both sides built something: {}", first.units_built_peak);
 }
+
+/// Every sea has a floor (GAME_SPECIFICATION.md §10): seabed walkers walk along it, and sunken
+/// wrecks come to rest on it. Under the water of every bundled map, of generated maps with water
+/// of each kind, size, and amount of water, of the balance harness's grounds, and of the playtest
+/// sandbox, the ground is never deeper than `SEA_DEPTH_UNITS`, and the open sea goes that deep.
+#[test]
+fn every_sea_has_its_floor_at_the_sea_depth() {
+    use sim_engine::sim::config::SimConfig;
+    use sim_engine::sim::grounds::Ground;
+    use sim_engine::sim::maps::{bundled, generate, Choices, MapSettings, BUNDLED};
+    use sim_engine::sim::terrain::{Terrain, SEA_DEPTH_UNITS};
+    // The deepest water over any sample, in sixteenths of a unit, or `None` with none.
+    let deepest = |terrain: &Terrain| {
+        let water = i32::from(terrain.water_level().to_num::<i16>()) << HEIGHT_FRAC_BITS;
+        terrain.heights().iter().map(|&height| water - i32::from(height)).max().filter(|&depth| depth > 0)
+    };
+    let floor = SEA_DEPTH_UNITS << HEIGHT_FRAC_BITS;
+    let mut seas = Vec::new();
+    for name in BUNDLED {
+        let map = bundled(name).expect("a bundled map");
+        seas.push((name.to_string(), Terrain::from_heights(map.map_units, map.heights, &map.blocked, map.water_level)));
+    }
+    for kind in ["central_lake", "islands"] {
+        for size_km in [5, 20] {
+            for water in ["some", "lots"] {
+                let choices = Choices { kind: kind.into(), size_km: Some(size_km), water: Some(water.into()), seed: Some(7), ..Choices::default() };
+                let map = generate(&MapSettings::chosen(&choices).expect("valid choices"));
+                seas.push((format!("{kind}, {size_km} km, {water} water"), Terrain::from_heights(map.map_units, map.heights, &map.blocked, map.water_level)));
+            }
+        }
+    }
+    for ground in [Ground::Water, Ground::Shore] {
+        seas.push((ground.name().to_string(), ground.world(SimConfig::default(), 1).terrain));
+    }
+    seas.push(("the playtest sandbox".into(), sim_engine::sim::playtest::playtest(1).world.terrain));
+    let mut with_water = 0;
+    for (name, terrain) in &seas {
+        let Some(depth) = deepest(terrain) else {
+            assert!(!terrain.has_water(), "{name}: water with nothing under it");
+            continue;
+        };
+        with_water += 1;
+        assert_eq!(depth, floor, "{name}: its sea goes {} units deep, not {SEA_DEPTH_UNITS}", f64::from(depth) / 16.0);
+    }
+    // Twin Passes, Stillwater, Scattered Isles, the eight generated maps, both grounds, and the
+    // sandbox; Highland and Saddleback are dry.
+    assert_eq!(with_water, 14, "every map with water was looked at");
+}

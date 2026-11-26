@@ -1362,6 +1362,7 @@ impl SimWorld {
                 if finished {
                     self.ecs.despawn(wreck_entity).expect("task checked the wreck");
                     self.wrecks.retain(|wreck| wreck.0 != target);
+                    self.settling_wrecks.retain(|wreck| wreck.0 != target);
                 }
             }
             TaskStep::MoveTo(goal) => {
@@ -1495,8 +1496,15 @@ impl SimWorld {
                 };
                 let wreck_entity = self.wrecks[index].1;
                 let wreck = *self.ecs.get::<&Wreck>(wreck_entity).expect("wreck list only holds wrecks");
+                // Reach is measured across the ground, so a wreck on the sea floor, or sinking to
+                // it, is reclaimed as readily by a builder floating on the water over it as by
+                // one walking the seabed beside it.
                 if !self.within(here, wreck.position, range + wreck.radius) {
                     return TaskStep::MoveTo(wreck.position);
+                }
+                // Debris still falling through the air is out of reach until it comes down.
+                if self.wreck_in_the_air(wreck_entity) {
+                    return TaskStep::Wait;
                 }
                 TaskStep::Reclaim { target, entity: wreck_entity }
             }
@@ -2066,7 +2074,7 @@ impl SimWorld {
         for &(id, wreck_entity) in &self.wrecks {
             let wreck = self.ecs.get::<&Wreck>(wreck_entity).ok()?;
             let distance = here.distance_squared(&wreck.position);
-            if distance <= limit && best.is_none_or(|(closest, _)| distance < closest) {
+            if distance <= limit && best.is_none_or(|(closest, _)| distance < closest) && !self.wreck_in_the_air(wreck_entity) {
                 best = Some((distance, BuildTask::Reclaim { target: id }));
             }
         }
@@ -2366,22 +2374,23 @@ impl SimWorld {
                 if !link.reclaim && self.economies[owner.index()].satisfaction == Res::ZERO {
                     return None;
                 }
-                let (place, radius) = if link.reclaim {
+                let (place, z) = if link.reclaim {
                     let index = self.wrecks.binary_search_by_key(&link.target, |wreck| wreck.0).ok()?;
-                    let wreck = self.ecs.get::<&Wreck>(self.wrecks[index].1).ok()?;
-                    (wreck.position, wreck.radius)
+                    let wreck_entity = self.wrecks[index].1;
+                    let wreck = *self.ecs.get::<&Wreck>(wreck_entity).ok()?;
+                    (wreck.position, self.wreck_height(wreck_entity, &wreck))
                 } else {
                     let (_, target) = self.find_unit(link.target)?;
                     let radius = self.ecs.get::<&UnitStats>(target).ok()?.radius;
-                    (self.ecs.get::<&Position>(target).ok()?.0.xy(), radius)
+                    let place = self.ecs.get::<&Position>(target).ok()?.0.xy();
+                    (place, self.terrain.height_at(place) + radius / 2)
                 };
                 let here = self.ecs.get::<&Position>(builder).ok()?.0;
                 let (x, y) = (place.x.to_bits(), place.y.to_bits());
                 if !seen(team, here.x.to_bits(), here.y.to_bits()) || !seen(team, x, y) {
                     return None;
                 }
-                let z = (self.terrain.height_at(place) + radius / 2).to_bits();
-                Some(WorkLinkView { builder: link.builder, target: [x, y, z], reclaim: link.reclaim })
+                Some(WorkLinkView { builder: link.builder, target: [x, y, z.to_bits()], reclaim: link.reclaim })
             })
             .collect()
     }

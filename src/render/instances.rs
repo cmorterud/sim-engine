@@ -1094,24 +1094,80 @@ pub fn wreck_instance(center: [f64; 3], radius: f64, eye: [f64; 3]) -> UnitInsta
 }
 
 /// A wreck drawn as the burnt-out shell of the unit it was, `look`, facing as it fell: its own
-/// models, charred, squashed down, and sunk a little into the ground, with nothing lit.
-pub fn wreck_model_instances(center: [f64; 3], radius: f64, look: &UnitLook, facing: [f32; 2], eye: [f64; 3], out: &mut InstanceBatches) {
+/// models, charred, squashed down, and sunk a little into the ground, with nothing lit. `tilt`
+/// tips the whole of it over, as it falls or sinks (`render::wrecks`).
+pub fn wreck_model_instances(center: [f64; 3], radius: f64, look: &UnitLook, facing: [f32; 2], eye: [f64; 3], tilt: Option<&Tilt>, out: &mut InstanceBatches) {
     let size = if look.size > 0.0 { look.size } else { (radius * 2.0) as f32 };
     let height = size * look.height_share.min(1.0) * WRECK_SQUASH;
     let ground = center[2] - radius * 0.5;
     let at = [center[0], center[1], ground + f64::from(height) * 0.35];
     let (char_dark, char_light) = (WRECK, WRECK.map(|channel| channel * 1.35));
     let part = painted(at, [size, size, height], facing, char_dark, char_light, char_dark, PROJECTILE_ICON_PX, eye);
+    let mut push = |shape: Shape, mut part: UnitInstanceRaw| {
+        if let Some(tilt) = tilt {
+            tilt.apply(&mut part, eye);
+        }
+        out.push(shape, part);
+    };
     // Far off, where it is only a dot, one box draws it.
     if is_dot(&part) {
-        out.push(Shape::Cube, part);
+        push(Shape::Cube, part);
         return;
     }
     for shape in look.base.into_iter().chain([look.shape]) {
-        out.push(shape, part);
+        push(shape, part);
     }
     for (turret, turret_at, turret_facing) in mounted_turrets(look, at, [size, size, height], facing, |_| None) {
-        out.push(turret, painted(turret_at, [size, size, height], turret_facing, char_dark, char_light, char_dark, PROJECTILE_ICON_PX, eye));
+        push(turret, painted(turret_at, [size, size, height], turret_facing, char_dark, char_light, char_dark, PROJECTILE_ICON_PX, eye));
+    }
+}
+
+/// A turn of a whole model about a point in the world, as a falling or sinking wreck tips over.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Tilt {
+    pub pivot: [f64; 3],
+    /// Rows of a rotation in world space.
+    pub rotation: [[f32; 3]; 3],
+}
+
+impl Tilt {
+    /// A turn of `angle` radians about the unit vector `axis`, right-handed.
+    pub fn about(pivot: [f64; 3], axis: [f32; 3], angle: f32) -> Self {
+        let (sin, cos) = angle.sin_cos();
+        let [x, y, z] = axis;
+        let rest = 1.0 - cos;
+        Self {
+            pivot,
+            rotation: [
+                [cos + x * x * rest, x * y * rest - z * sin, x * z * rest + y * sin],
+                [y * x * rest + z * sin, cos + y * y * rest, y * z * rest - x * sin],
+                [z * x * rest - y * sin, z * y * rest + x * sin, cos + z * z * rest],
+            ],
+        }
+    }
+
+    /// This turn, and then `after`, about this one's pivot.
+    pub fn then(&self, after: &Self) -> Self {
+        let (a, b) = (after.rotation, self.rotation);
+        let rotation = std::array::from_fn(|row| std::array::from_fn(|column| (0..3).map(|k| a[row][k] * b[k][column]).sum()));
+        Self { pivot: self.pivot, rotation }
+    }
+
+    pub fn turn(&self, vector: [f32; 3]) -> [f32; 3] {
+        std::array::from_fn(|row| (0..3).map(|k| self.rotation[row][k] * vector[k]).sum())
+    }
+
+    /// Turns a part drawn relative to `eye` about the pivot: its axes, and where it is.
+    pub fn apply(&self, part: &mut UnitInstanceRaw, eye: [f64; 3]) {
+        for column in 0..3 {
+            let [x, y, z, _] = part.model_matrix[column];
+            let [x, y, z] = self.turn([x, y, z]);
+            part.model_matrix[column][..3].copy_from_slice(&[x, y, z]);
+        }
+        let pivot: [f32; 3] = std::array::from_fn(|axis| (self.pivot[axis] - eye[axis]) as f32);
+        let [x, y, z, _] = part.model_matrix[3];
+        let turned = self.turn([x - pivot[0], y - pivot[1], z - pivot[2]]);
+        part.model_matrix[3][..3].copy_from_slice(&std::array::from_fn::<f32, 3, _>(|axis| pivot[axis] + turned[axis]));
     }
 }
 
@@ -1560,7 +1616,7 @@ mod tests {
         let looks = unit_looks(&db);
         let tank = &looks[usize::from(db.id("t1_medium_tank").0)];
         let mut out = InstanceBatches::default();
-        wreck_model_instances([0.0, 0.0, 4.5], 9.0, tank, [1.0, 0.0], [0.0, 0.0, 500.0], &mut out);
+        wreck_model_instances([0.0, 0.0, 4.5], 9.0, tank, [1.0, 0.0], [0.0, 0.0, 500.0], None, &mut out);
         let (hull, turret) = (out.shape(Shape::TankHull), out.shape(Shape::Tank));
         assert_eq!((hull.len(), turret.len()), (1, 1), "the tank's hull and turret");
         for part in [hull[0], turret[0]] {
@@ -1994,7 +2050,7 @@ mod tests {
         let tank = &looks[usize::from(db.id("t1_medium_tank").0)];
         let wreck = |height: f64| {
             let mut out = InstanceBatches::default();
-            wreck_model_instances([0.0, 0.0, 4.5], 9.0, tank, [1.0, 0.0], [0.0, 0.0, height], &mut out);
+            wreck_model_instances([0.0, 0.0, 4.5], 9.0, tank, [1.0, 0.0], [0.0, 0.0, height], None, &mut out);
             out
         };
         assert!(wreck(500.0).shape(Shape::Cube).is_empty());

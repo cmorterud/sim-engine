@@ -67,7 +67,7 @@ const SCARS: [f64; 2] = [2_300.0, 3_560.0];
 /// The marks of a battle around `SCARS`: shells that landed, and units that died and left wrecks.
 fn battlefield() -> Effects {
     use sim_engine::sim::components::{SimId, WreckKind};
-    use sim_engine::sim::world::{ProjectileKind, ProjectileView, SimSnapshot, UnitView, WreckView};
+    use sim_engine::sim::world::{ProjectileKind, ProjectileView, SimSnapshot, UnitView, WreckMotion, WreckView};
     let raw = |value: f64| (value * 4096.0) as i32;
     let spot = |index: u32, spread: f64| {
         let angle = f64::from(index) * 2.399;
@@ -103,7 +103,7 @@ fn battlefield() -> Effects {
             remembered: false,
             ally: false,
         });
-        after.wrecks.push(WreckView { id: SimId(3_000 + index), x: raw(x), y: raw(y), z: raw(z), radius: raw(radius), mass: 1, energy: 0, kind: WreckKind::Debris });
+        after.wrecks.push(WreckView { id: SimId(3_000 + index), x: raw(x), y: raw(y), z: raw(z), radius: raw(radius), mass: 1, energy: 0, kind: WreckKind::Debris, motion: WreckMotion::Still });
     }
     let mut effects = Effects::new();
     effects.note_events(&before, &after, 0.0, &ground_height, Some(0.0), &[]);

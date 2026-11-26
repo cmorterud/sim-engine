@@ -15,7 +15,7 @@
 use super::components::WreckKind;
 use super::config::TERRAIN_CELL_UNITS;
 use super::scenario::MapData;
-use super::terrain::{add_noise_octave, HEIGHT_FRAC_BITS};
+use super::terrain::{add_noise_octave, HEIGHT_FRAC_BITS, SEA_DEPTH_UNITS};
 use crate::math::fp::{fp_int, Fp, Vec2Fp};
 use crate::math::rng::SimRng;
 
@@ -601,7 +601,7 @@ pub fn twin_passes() -> MapData {
     // The sea: a band down the middle, with gentle shores, except where a bridge crosses, at 68%
     // of the way and at its turned partner, 32%. Both are symmetric about the center already.
     let (sea_half_width, shore, bridge_row, bridge_half_width, bridge_shore) = (84, 26, CELLS as i32 * 68 / 100, 22, 14);
-    let floor = (WATER_UNITS - 50) << HEIGHT_FRAC_BITS;
+    let floor = (WATER_UNITS - SEA_DEPTH_UNITS) << HEIGHT_FRAC_BITS;
     // The west shore wanders in and out along the map, smoothly, and the east shore is the west
     // one turned about the center, so the sea stays fair while its coasts look natural.
     let wander = smooth_line(&mut draft.rng, CELLS as i32 + 1, 48, 24);
@@ -949,7 +949,7 @@ pub fn central_lake(settings: &MapSettings) -> MapData {
         radius * FINE + wander[round as usize]
     };
     let from_middle = |at: (i32, i32)| isqrt((at.0 - middle).pow(2) + (at.1 - middle).pow(2));
-    let floor = (WATER_UNITS - 50) << HEIGHT_FRAC_BITS;
+    let floor = (WATER_UNITS - SEA_DEPTH_UNITS) << HEIGHT_FRAC_BITS;
     let furthest = radius + sway + SHORE;
     for y in (middle - furthest).max(0)..=(middle + furthest).min(last) {
         for x in (middle - furthest).max(0)..=(middle + furthest).min(last) {
@@ -1166,7 +1166,7 @@ pub fn islands(settings: &MapSettings) -> MapData {
         let line = if seaward >= 0 { &inner } else { &outer };
         isqrt((seaward * seaward + past * past) * FINE * FINE) - half_width * FINE - line[along.min(steps * spacing) as usize]
     };
-    let floor = (WATER_UNITS - 50) << HEIGHT_FRAC_BITS;
+    let floor = (WATER_UNITS - SEA_DEPTH_UNITS) << HEIGHT_FRAC_BITS;
     for y in 0..=last {
         for x in 0..=last {
             let out = off_home(x, y);
