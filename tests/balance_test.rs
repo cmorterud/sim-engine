@@ -241,6 +241,13 @@ fn the_t3_fighter_outclasses_the_t1_interceptor() {
     let turn = |unit: &sim_engine::sim::blueprints::Blueprint| f64::from(unit.flight.expect("flies").turn_rate);
     assert!(turn(fighter) >= turn(interceptor) * number("turn_over_interceptor"), "turns at {}", turn(fighter));
     assert!(gun.arc.is_none(), "its guns fire off its nose");
+    // It eases off slower than the interceptor to turn tighter; the T1 bomber never eases off,
+    // and the Strategic Bomber only slightly (the design owner, 2026-11-26).
+    let slowest = |unit: &sim_engine::sim::blueprints::Blueprint| unit.flight.expect("flies").min_speed;
+    assert!(slowest(fighter) < slowest(interceptor), "eases off to {}", slowest(fighter));
+    let t1_bomber = db.get(db.id("t1_bomber"));
+    assert_eq!(slowest(t1_bomber), t1_bomber.speed, "the T1 bomber never eases off");
+    assert!(slowest(bomber) < bomber.speed && slowest(bomber) >= bomber.speed * 4 / 5, "the Strategic Bomber eases off to {}", slowest(bomber));
     let materiel = 6.0 * cost_at(fighter, 3);
     let fight = mirrored(&db, bought_at(&db, "t3_air_superiority", materiel, 3), bought_at(&db, "t1_interceptor", materiel, 3), 1.0);
     assert!(fight.score >= number("beats_interceptors_by"), "six fighters score {} against as much in interceptors", fight.score);

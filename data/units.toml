@@ -657,7 +657,8 @@ speed = 20
 radius = 10
 vision = 640
 radar = 880
-flight = { elevation = 264, turn_rate = 180, break_off = 640, fuel = 400 }
+# Never eases off for a turn (the design owner, 2026-11-26).
+flight = { elevation = 264, turn_rate = 180, break_off = 640, fuel = 400, min_speed = 20 }
 weapon = { kind = "bomb", range = 800, reload_ticks = 50, projectile_speed = 20, damage = 410, splash_radius = 29 }
 
 # Two shots a volley in the inspiration, one shot of twice the damage here.
@@ -691,7 +692,7 @@ turn_rate = 80
 turn_radius = 10
 radius = 8
 vision = 400
-weapon = { range = 640, reload_ticks = 10, projectile_speed = 90, damage = "20.8", targets = "air", turn_rate = 180 }
+weapon = { range = 640, reload_ticks = 10, projectile_speed = 90, damage = "20.9", targets = "air", turn_rate = 180 }
 
 # Upgraded from the Air Factory: its mass, energy, and build time are what the upgrade costs.
 [[unit]]
@@ -779,7 +780,9 @@ health = 3520
 speed = 52
 radius = 12
 vision = 640
-flight = { elevation = 352, turn_rate = 340, break_off = 300, fuel = 1000 }
+# Eases off slower than the interceptor (15), to turn tighter (the design owner, 2026-11-26):
+# a quarter of its top speed.
+flight = { elevation = 352, turn_rate = 340, break_off = 300, fuel = 1000, min_speed = 13 }
 # Its gun destroys a Strategic Bomber in about 10 seconds, so 640 a second, and another T3 fighter
 # in about 5, so health 3,520 (five and a half shots: the first lands at once); it flies 30% faster than the Strategic Bomber (2026-11-26, the
 # design owner's rules, [kill_times] and [air]).
@@ -802,7 +805,8 @@ speed = 40
 radius = 16
 vision = 640
 radar = 1280
-flight = { elevation = 352, turn_rate = 70, break_off = 1000, fuel = 1500 }
+# Eases off only slightly for a turn (the design owner, 2026-11-26): to nine tenths.
+flight = { elevation = 352, turn_rate = 70, break_off = 1000, fuel = 1500, min_speed = 36 }
 weapon = { kind = "bomb", range = 1800, reload_ticks = 80, projectile_speed = 40, damage = 5200, splash_radius = 83 }
 # Its two railguns, of 16 each every 0.7 seconds, as one.
 

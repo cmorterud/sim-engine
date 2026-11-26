@@ -315,17 +315,16 @@ impl SimWorld {
                 let behind = facing.x * offset.x + facing.y * offset.y > Fp::ZERO && offset.length_squared() <= wide_mul(reach, reach);
                 behind.then(|| {
                     let away = facing.x * Fp::from_bits(entry.velocity[0]) + facing.y * Fp::from_bits(entry.velocity[1]);
-                    away.clamp(top_speed / 2, top_speed)
+                    away.clamp(flight.min_speed.min(top_speed), top_speed)
                 })
             });
             // A point inside its turn at full speed it reaches by easing off just enough to turn
-            // onto it, rather than fly on and loop round, as long as that is no slower than half
-            // its own: tighter still, it flies on at full speed. A turn it can make at full speed
-            // it makes at full speed. Not while a bomber breaks off, which flies on on purpose, nor
-            // against another aircraft: slowing in a dogfight helps the nimbler, cheaper plane, so a
-            // fighter keeps to its tailing speed (2026-11-26).
-            let air_target = chasing.and_then(locate).is_some_and(|entry| entry.is_air);
-            let turning_in = heading_for.filter(|_| !air_target && !flight.hovers && !flight.breaking_off && !hold && !landing).and_then(|point| {
+            // onto it, rather than fly on and loop round, as long as that is no slower than its
+            // slowest (`min_speed`): tighter still, it flies on at full speed. A turn it can make at
+            // full speed it makes at full speed. In a dogfight too (the design owner, 2026-11-26).
+            // Not while a bomber breaks off, which flies on on purpose.
+            let floor = flight.min_speed.min(top_speed);
+            let turning_in = heading_for.filter(|_| floor < top_speed && !flight.hovers && !flight.breaking_off && !hold && !landing).and_then(|point| {
                 let offset = point - here;
                 let facing = turning.facing;
                 (offset != Vec2Fp::ZERO && inside_turn(facing, offset, turn_radius(top_speed, turning.max_turn))).then_some(())?;
@@ -333,7 +332,7 @@ impl SimWorld {
                 // The circle through it that leaves along its heading, d² / 2·across.
                 let fits = Fp::from_bits(i32::try_from((wide_mul(offset.x, offset.x) + wide_mul(offset.y, offset.y)).to_bits() / (2 * i64::from(across.to_bits().max(1)))).unwrap_or(i32::MAX));
                 let speed = fits.saturating_mul(turning.max_turn);
-                (speed >= top_speed / 2).then_some(speed.min(top_speed))
+                (speed >= floor).then_some(speed.min(top_speed))
             });
             let down = |value: Fp, full: Fp, floor: Fp| (value - full / LANDING_TICKS).max(floor);
             let up = |value: Fp, full: Fp, ceiling: Fp| if value > ceiling { down(value, full, ceiling) } else { (value + full / LANDING_TICKS).min(ceiling) };
