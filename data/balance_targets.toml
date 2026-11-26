@@ -271,10 +271,13 @@ battleship_breaks_t3_shield = [40, 52]
 frigate_anti_air_t1_bomber = [20, 22]
 six_t1_bombers_sink_a_frigate_passes = 2
 # Air against air and the commander (2026-11-26, the design owner's rules): they set the T3
-# fighter's gun (640 a second) and health (3,520), the heavy gunship's health (9,600, also the cruiser's six volleys) and gun (360
+# fighter's gun (1,070 a shot every second, in a 40-degree cone) and health (3,520), the heavy gunship's health (9,600, also the cruiser's six volleys) and gun (360
 # a second), and the fighter-bomber's anti-air (174 a second). Timed from the first shot, which
 # lands at once, so health is set at half a shot past the time. The Strategic Bomber has no anti-air.
-t3_fighter_strategic_bomber = [9, 11]
+# With its gun in a 40-degree cone (2026-11-26) it lands a shot about every 2 seconds, so its
+# kill times step by 2 seconds; the design owner took 1,070 damage, which puts a Strategic Bomber
+# down in 8.7 s (6 shots), and the band's low end with it.
+t3_fighter_strategic_bomber = [8.5, 11]
 t3_fighter_t3_fighter = [4.5, 5.5]
 t3_fighter_heavy_gunship = [14, 16]
 heavy_gunship_commander_on_land = [45, 55]
