@@ -10,9 +10,12 @@ use super::commands::SimCommand;
 use super::components::{BuildTask, AntiAir, Artillery, BombBay, Falling, Flight, Homing,
     Blueprinted, Builder, Combat, Construction, Factory, Footprint, Health, MoveClass, Order, OrderKind, OrderQueue, Patrol,
     Intel, Launcher, Missile, Stunning, MissileDefense, Upgrading, Discharged, DischargeOrder, DischargeWeapon, Paused, PlayerId, Position, Projectile, Shield, SimId, Team, Turning, Turret, UnitStats, Velocity, Veterancy,
-    Wreck, WreckKind, rotate_toward, LeavingFactory, Transport,
+    Settling, Wreck, WreckKind, rotate_toward, LeavingFactory, Transport,
 };
-use super::config::{SimConfig, TARGET_SEARCH_INTERVAL, TERRAIN_CELL_UNITS, WRECK_HEALTH_PERMILLE, WRECK_MASS_PERMILLE, WRECK_SUNK_PERMILLE, WRECK_TECH_PERMILLE};
+use super::config::{
+    SimConfig, TARGET_SEARCH_INTERVAL, TERRAIN_CELL_UNITS, WRECK_AIR_KEEP_SIXTEENTHS, WRECK_HEALTH_PERMILLE, WRECK_MASS_PERMILLE, WRECK_SINK_PULL_RAW, WRECK_SINK_SPEED_RAW,
+    WRECK_SUNK_PERMILLE, WRECK_TECH_PERMILLE, WRECK_WATER_KEEP_SIXTEENTHS,
+};
 use super::flowfield::{nearest_passable_cell_for, FlowField, FlowSample};
 use super::formation::{plan_formation, within, Travel};
 use super::production::{Economy, WorkKind, WorkLink};
@@ -28,6 +31,8 @@ use crate::math::rng::SimRng;
 /// and how long the decoy is drawn, in ticks (2026-11-25).
 const DECOY_OUT_UNITS: i32 = 120;
 const DECOY_DEPTH_UNITS: i32 = 6;
+const WRECK_SINK_SPEED: Fp = Fp::from_bits(WRECK_SINK_SPEED_RAW);
+const WRECK_SINK_PULL: Fp = Fp::from_bits(WRECK_SINK_PULL_RAW);
 const DECOY_TICKS: u32 = 40;
 /// How far under the water a ship's torpedoes start (2026-11-25).
 const TORPEDO_LAUNCH_DEPTH_UNITS: i32 = 8;
@@ -276,11 +281,24 @@ pub struct WreckView {
     pub id: SimId,
     pub x: i32,
     pub y: i32,
+    /// Its middle, half its radius over the ground at rest.
     pub z: i32,
     pub radius: i32,
     pub mass: i32,
     pub energy: i32,
     pub kind: WreckKind,
+    /// On its way down, or at rest.
+    pub motion: WreckMotion,
+}
+
+/// Whether a wreck is falling through the air, sinking through the water, or at rest
+/// (`Settling`).
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub enum WreckMotion {
+    #[default]
+    Still,
+    Falling,
+    Sinking,
 }
 
 /// A player as the score panel shows them (GAME_SPECIFICATION.md §17.2): what the viewer can see
@@ -778,6 +796,8 @@ pub struct SimWorld {
     /// The structure on each occupied terrain cell, by cell index.
     pub occupancy: BTreeMap<u32, SimId>,
     pub wrecks: Vec<(SimId, hecs::Entity)>,
+    /// Wrecks still falling or sinking (`Settling`), sorted by `SimId`.
+    pub settling_wrecks: Vec<(SimId, hecs::Entity)>,
     pub builders: Vec<(SimId, hecs::Entity)>,
     pub factories: Vec<(SimId, hecs::Entity)>,
     pub structures: Vec<(SimId, hecs::Entity)>,
@@ -885,6 +905,8 @@ pub struct SimWorld {
     pending_shots: Vec<PendingShot>,
     /// Each hit, and who caused it.
     pub(super) pending_hits: Vec<(hecs::Entity, Fp, Option<SimId>)>,
+    /// Hits queued from outside the simulation (`strike`), dealt with the next tick's.
+    strikes: Vec<(SimId, Fp)>,
     pending_explosions: Vec<Explosion>,
     /// Shells that came down on a shield this tick, and what they do to it.
     pending_shield_hits: Vec<(SimId, Fp)>,
@@ -964,6 +986,7 @@ impl SimWorld {
             vents: Vec::new(),
             occupancy: BTreeMap::new(),
             wrecks: Vec::new(),
+            settling_wrecks: Vec::new(),
             builders: Vec::new(),
             factories: Vec::new(),
             structures: Vec::new(),
@@ -1019,6 +1042,7 @@ impl SimWorld {
             max_structure_radius: 0,
             pending_shots: Vec::new(),
             pending_hits: Vec::new(),
+            strikes: Vec::new(),
             pending_explosions: Vec::new(),
             pending_wreck_blasts: Vec::new(),
             pending_shield_hits: Vec::new(),
@@ -1174,6 +1198,13 @@ impl SimWorld {
     pub fn unit_health(&self, id: SimId) -> Option<Fp> {
         let (_, entity) = self.find_unit(id)?;
         Some(self.ecs.get::<&Health>(entity).ok()?.current)
+    }
+
+    /// Queues a hit of `damage` on a unit, from no one, as a shell's that lands on it would be:
+    /// dealt at the end of the next tick, and, if it takes all the unit's health, destroying it
+    /// there, wreck and all. For tests and scripted scenarios. Does nothing if there is no such unit.
+    pub fn strike(&mut self, id: SimId, damage: Fp) {
+        self.strikes.push((id, damage));
     }
 
     pub fn unit_order(&self, id: SimId) -> Option<Order> {
@@ -3935,6 +3966,12 @@ impl SimWorld {
         self.dead_units.clear();
         self.blasts.clear();
         self.commander_blasts.clear();
+        self.step_wrecks();
+        for (id, damage) in std::mem::take(&mut self.strikes) {
+            if let Some((_, entity)) = self.find_unit(id) {
+                self.pending_hits.push((entity, damage, None));
+            }
+        }
         self.step_exotic();
         let mut kills: Vec<(SimId, Team, Res)> = Vec::new();
         if !self.config.invulnerable_units {
@@ -4131,7 +4168,8 @@ impl SimWorld {
         let mut destroyed = Vec::new();
         for &(id, entity) in &self.wrecks {
             let mut wreck = self.ecs.get::<&mut Wreck>(entity).expect("wreck list only holds live wrecks");
-            if wreck.kind.is_scenery() {
+            // Nor debris still falling: blasts hit what lies on the ground, or in the water.
+            if wreck.kind.is_scenery() || self.ecs.get::<&Settling>(entity).is_ok_and(|settling| !settling.wet) {
                 continue;
             }
             let (x, y, radius) = (wreck.position.x.to_bits(), wreck.position.y.to_bits(), i64::from(wreck.radius.to_bits()));
@@ -4164,6 +4202,7 @@ impl SimWorld {
             self.ecs.despawn(self.wrecks[index].1).expect("wreck list only holds live wrecks");
         }
         self.wrecks.retain(|wreck| destroyed.binary_search(&wreck.0).is_err());
+        self.settling_wrecks.retain(|wreck| destroyed.binary_search(&wreck.0).is_err());
     }
 
     /// A player whose commander died is out, and everything they own goes with it (GAME_SPECIFICATION.md
@@ -4233,6 +4272,7 @@ impl SimWorld {
         }
         let position = self.ecs.get::<&Position>(entity).expect("units have positions").0;
         let radius = self.ecs.get::<&UnitStats>(entity).expect("units have stats").radius;
+        let velocity = self.ecs.get::<&Velocity>(entity).map_or(Vec3Fp::ZERO, |velocity| velocity.0);
         if let Ok(footprint) = self.ecs.get::<&Footprint>(entity).map(|footprint| *footprint) {
             self.clear_footprint(footprint);
             self.economy_dirty = true;
@@ -4244,9 +4284,19 @@ impl SimWorld {
                 self.economy_dirty = true;
             }
         }
+        // Where its wreck starts: its middle, half its radius over its underside, as a wreck at
+        // rest lies half its radius over the ground. A unit on the ground leaves it at rest. One
+        // in the air falls, going on the way it was going; one in the water, on it or under it,
+        // sinks to the floor (`step_wrecks`).
+        let half = radius / 2;
+        let start = position.z - half;
+        let ground = self.terrain.height_at(position.xy());
+        let wet = ground < self.terrain.water_level() && start <= self.terrain.water_level() + half;
+        let settling = (start > ground + half).then_some(Settling { z: start, velocity, wet });
         // A unit that blew itself up leaves nothing to reclaim. The inspiration's rules for the
         // rest: 90% of the mass, less by tech level, less again if it sank, for as much as was
-        // built; nothing from a unit under half built, or from a structure not finished.
+        // built; nothing from a unit under half built, or from a structure not finished. What
+        // falls into the water loses the share for sinking when it does.
         let wreck = self.ecs.get::<&Blueprinted>(entity).ok().filter(|_| !self.blew_itself_up(entity)).and_then(|blueprint| {
             let built = self.ecs.get::<&Construction>(entity).map_or(Res::ONE, |construction| construction.progress);
             let unit = self.blueprints.get(blueprint.0);
@@ -4258,9 +4308,8 @@ impl SimWorld {
             } else {
                 WRECK_TECH_PERMILLE[usize::from(unit.tier.clamp(1, 4)) - 1]
             };
-            let sank = self.terrain.height_at(position.xy()) < self.terrain.water_level();
             let mut mass = unit.mass * WRECK_MASS_PERMILLE / 1000 * tech / 1000;
-            if sank {
+            if wet {
                 mass = mass * WRECK_SUNK_PERMILLE / 1000;
             }
             let health = Fp::from_num(Res::from_num(unit.health) * WRECK_HEALTH_PERMILLE / 1000 * built).max(Fp::from_bits(1));
@@ -4271,7 +4320,73 @@ impl SimWorld {
             let wreck_id = self.next_id();
             let wreck = self.ecs.spawn((wreck_id, Wreck { mass, energy: Res::ZERO, position: position.xy(), radius, kind: WreckKind::Debris, health }));
             self.wrecks.push((wreck_id, wreck));
+            if let Some(settling) = settling {
+                self.ecs.insert_one(wreck, settling).expect("just spawned");
+                self.settling_wrecks.push((wreck_id, wreck));
+            }
         }
+    }
+
+    /// Moves wrecks on their way down (GAME_SPECIFICATION.md §6.1). In the air, debris falls as
+    /// a bomb does, keeping most of the way it was going, so that a downed aircraft comes down
+    /// well ahead of where it was hit; it strikes the ground and lies there, or the water, where
+    /// it loses the share of its mass for sinking. In the water, it soon slows, and sinks at a
+    /// steady pace to the floor, every sea having one (`SEA_DEPTH_UNITS`), and lies there. It can
+    /// be reclaimed all the while it is in the water, as on the floor, from above as from beside
+    /// it: reclaim reaches as far across, whatever the depth.
+    pub(super) fn step_wrecks(&mut self) {
+        if self.settling_wrecks.is_empty() {
+            return;
+        }
+        let terrain = &self.terrain;
+        let water = terrain.water_level();
+        let max = Fp::from_bits(terrain.max_coordinate_raw());
+        let mut settled = Vec::new();
+        for &(id, entity) in &self.settling_wrecks {
+            let (wreck, settling) = self.ecs.query_one_mut::<(&mut Wreck, &mut Settling)>(entity).expect("settling wrecks are live wrecks with a way down");
+            let half = wreck.radius / 2;
+            let velocity = &mut settling.velocity;
+            if settling.wet {
+                velocity.x = velocity.x * WRECK_WATER_KEEP_SIXTEENTHS / 16;
+                velocity.y = velocity.y * WRECK_WATER_KEEP_SIXTEENTHS / 16;
+                // Down to a steady pace: gathering it from still, or losing what it fell in with.
+                velocity.z = if velocity.z < -WRECK_SINK_SPEED { (velocity.z - WRECK_SINK_SPEED) / 2 } else { (velocity.z - WRECK_SINK_PULL).max(-WRECK_SINK_SPEED) };
+            } else {
+                velocity.x = velocity.x * WRECK_AIR_KEEP_SIXTEENTHS / 16;
+                velocity.y = velocity.y * WRECK_AIR_KEEP_SIXTEENTHS / 16;
+                velocity.z -= BOMB_GRAVITY;
+            }
+            let at = Vec2Fp::new((wreck.position.x + velocity.x).clamp(Fp::ZERO, max), (wreck.position.y + velocity.y).clamp(Fp::ZERO, max));
+            wreck.position = at;
+            settling.z += velocity.z;
+            let ground = terrain.height_at(at);
+            if !settling.wet && ground < water && settling.z <= water + half {
+                settling.wet = true;
+                wreck.mass = wreck.mass * WRECK_SUNK_PERMILLE / 1000;
+            }
+            if settling.z <= ground + half {
+                settled.push(id);
+            }
+        }
+        if settled.is_empty() {
+            return;
+        }
+        for &id in &settled {
+            let index = self.settling_wrecks.binary_search_by_key(&id, |wreck| wreck.0).expect("just found");
+            self.ecs.remove_one::<Settling>(self.settling_wrecks[index].1).expect("settling wrecks have a way down");
+        }
+        self.settling_wrecks.retain(|wreck| settled.binary_search(&wreck.0).is_err());
+    }
+
+    /// The height of a wreck's middle: where it is on its way down, or, at rest, half its radius
+    /// over the ground, or the sea floor.
+    pub fn wreck_height(&self, entity: hecs::Entity, wreck: &Wreck) -> Fp {
+        self.ecs.get::<&Settling>(entity).map_or_else(|_| self.terrain.height_at(wreck.position) + wreck.radius / 2, |settling| settling.z)
+    }
+
+    /// Whether a wreck is still in the air, falling, where reclaim cannot reach it.
+    pub fn wreck_in_the_air(&self, entity: hecs::Entity) -> bool {
+        self.ecs.get::<&Settling>(entity).is_ok_and(|settling| !settling.wet)
     }
 
     /// Computes a 64-bit checksum of the entire simulation state. Every value that can
@@ -4397,6 +4512,18 @@ impl SimWorld {
             write_fp(&mut hasher, wreck.radius);
             hasher.write(&[wreck.kind as u8]);
             write_fp(&mut hasher, wreck.health);
+        }
+        // Only while any is on its way down, so that checksums from before wrecks fell or sank
+        // still hold for matches where none does.
+        if !self.settling_wrecks.is_empty() {
+            hasher.write(&[0x5e]);
+            for &(id, entity) in &self.settling_wrecks {
+                let settling = self.ecs.get::<&Settling>(entity).expect("settling wrecks have a way down");
+                hasher.write(&id.0.to_le_bytes());
+                write_fp(&mut hasher, settling.z);
+                write_vec3(&mut hasher, settling.velocity);
+                hasher.write(&[u8::from(settling.wet)]);
+            }
         }
         self.flow_field.hash_state(&mut hasher);
         // Nothing is written without storms, so checksums from before they existed still hold.
@@ -4701,11 +4828,16 @@ impl SimWorld {
                     id,
                     x,
                     y,
-                    z: (self.terrain.height_at(wreck.position) + wreck.radius / 2).to_bits(),
+                    z: self.wreck_height(entity, &wreck).to_bits(),
                     radius: wreck.radius.to_bits(),
                     mass: wreck.mass.to_num::<i32>(),
                     energy: wreck.energy.to_num::<i32>(),
                     kind: wreck.kind,
+                    motion: match self.ecs.get::<&Settling>(entity).map(|settling| settling.wet) {
+                        Ok(true) => WreckMotion::Sinking,
+                        Ok(false) => WreckMotion::Falling,
+                        Err(_) => WreckMotion::Still,
+                    },
                 })
             })
             .collect();

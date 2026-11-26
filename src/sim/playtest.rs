@@ -8,15 +8,16 @@ use crate::math::fp::{fp_int, Fp, Vec2Fp};
 use super::components::{MoveClass, Team};
 use super::config::{SimConfig, TerrainStyle, TERRAIN_CELL_UNITS};
 use super::scenario::Scenario;
-use super::terrain::{Terrain, HEIGHT_FRAC_BITS};
+use super::terrain::{Terrain, HEIGHT_FRAC_BITS, SEA_DEPTH_UNITS};
 use super::world::SimWorld;
 
 pub const MAP_UNITS: i32 = 10_240;
-/// The land ends here, going down to the sea floor by `SEA_FROM`.
+/// The land ends here, going down to the sea floor by `SEA_FROM`. The water is at height 0, and
+/// its floor as deep as every sea's.
 const SHORE_FROM: i32 = 5_000;
 const SEA_FROM: i32 = 5_400;
 const LAND_HEIGHT: i32 = 20;
-const SEA_FLOOR: i32 = -50;
+const SEA_FLOOR: i32 = -SEA_DEPTH_UNITS;
 /// How many of each unit Blue has.
 const EACH: usize = 5;
 /// Where Blue's land army, aircraft, and fleet start.

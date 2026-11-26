@@ -9,7 +9,7 @@ use std::collections::VecDeque;
 use super::instances::{merge_by_id, painted, InstanceBatches, ShotLook, ShotStyle, UnitLook, RAW_TO_WORLD};
 use super::meshes::Shape;
 use crate::sim::components::{SimId, WreckKind};
-use crate::sim::world::{ProjectileKind, ProjectileView, SimSnapshot, UnitView};
+use crate::sim::world::{ProjectileKind, ProjectileView, SimSnapshot, UnitView, WreckMotion, WreckView};
 
 /// The most puffs kept at once. The oldest go first, so that a huge battle cannot slow the frame.
 const MAX_PUFFS: usize = 6_000;
@@ -25,9 +25,17 @@ const WAKE_SPACING: f64 = 0.35;
 /// keeps where the spray last went apart from where the wake did, which share the ship's id.
 const BOW_SPRAY_SPACING: f64 = 0.5;
 const BOW_SPRAY_ID: u32 = 1 << 31;
+/// The bit that keeps a falling wreck's smoke apart from its fire, which share its id.
+const WRECK_SMOKE_ID: u32 = 1 << 29;
+/// How often debris sinking in the water sends up foam and smoke while it is still going under,
+/// and bubbles once it is under, in seconds.
+const GOING_UNDER_EVERY: f64 = 0.1;
+const BUBBLES_EVERY: f64 = 0.16;
 
 const FIRE_HOT: [f32; 3] = [1.0, 0.92, 0.55];
 const FIRE_COOL: [f32; 3] = [0.85, 0.28, 0.05];
+/// A fire that goes on burning, as on a falling wreck: redder than a blast's first flash.
+const FIRE_BURNING: [f32; 3] = [1.0, 0.55, 0.16];
 const SMOKE_DARK: [f32; 3] = [0.24, 0.23, 0.22];
 const SMOKE_PALE: [f32; 3] = [0.45, 0.44, 0.42];
 const TRAIL_FRESH: [f32; 3] = [0.92, 0.90, 0.86];
@@ -219,6 +227,8 @@ pub struct Effects {
     /// What each shell in flight, or just landed, looks like, by projectile, sorted: worked out
     /// once, when it is first seen, from the weapon that fired it (`ShotStyle::resolve`).
     shots: Vec<(SimId, ShotStyle)>,
+    /// When each wreck sinking in the water last sent up foam, smoke, or bubbles, by wreck.
+    sinking_puffs: Vec<(SimId, f64)>,
 }
 
 /// A laser's beam, which the simulation fires and lands within one tick: drawn for a moment
@@ -598,6 +608,7 @@ impl Effects {
                 self.scar(spot, size * 0.55, false, time, seed);
             }
         }
+        self.note_wrecks_coming_down(previous, current, time, ground, water);
         if gone.is_empty() {
             return;
         }
@@ -630,6 +641,92 @@ impl Effects {
                 self.scar(spot, (radius * 1.6) as f32, false, time, u64::from(unit.id.0) << 1);
             }
         }
+    }
+
+    /// Debris that has come down since the last snapshot (`render::wrecks`): a downed aircraft
+    /// that has struck the ground bursts into flame, throws up earth, and scorches it; one that
+    /// has struck the water throws up spray and a ring of foam. A ship that has just begun to
+    /// sink churns up a ring of foam round it.
+    fn note_wrecks_coming_down(&mut self, previous: &SimSnapshot, current: &SimSnapshot, time: f64, ground: &dyn Fn(f64, f64) -> f64, water: Option<f64>) {
+        let mut landed: Vec<(WreckView, bool)> = Vec::new();
+        merge_by_id(&previous.wrecks, &current.wrecks, |wreck| wreck.id, |before, wreck| {
+            let fell = before.is_some_and(|before| before.motion == WreckMotion::Falling) && wreck.motion != WreckMotion::Falling;
+            if fell {
+                landed.push((*wreck, true));
+            } else if before.is_none() && wreck.motion == WreckMotion::Sinking {
+                landed.push((*wreck, false));
+            }
+        });
+        for (wreck, fell) in landed {
+            let radius = f64::from(wreck.radius) * RAW_TO_WORLD;
+            let at = raw_point(wreck.x, wreck.y, wreck.z);
+            let size = (radius * 2.6) as f32;
+            let seed = (u64::from(wreck.id.0) << 2) | 1;
+            match (wreck.motion, water) {
+                (WreckMotion::Sinking, Some(water)) => {
+                    let surface = [at[0], at[1], water];
+                    // Only one going in at the surface: one that has come into sight deep down
+                    // is nothing new.
+                    if at[2] - radius > water + 1.0 || at[2] + radius < water {
+                        continue;
+                    }
+                    if fell {
+                        self.fountain(surface, size * 1.3, 5, true, time, seed);
+                        self.add(Puff { shape: Shape::Smoke, at: surface, rise: f64::from(size) * 1.4, born: time, life: 1.1, size: size * 0.45, growth: 0.6, height_share: 2.5, color: FOAM, fade_to: FOAM_OLD, dense: false });
+                    }
+                    self.ring(surface, size * 1.2, if fell { 1.2 } else { 1.8 }, true, time);
+                }
+                _ if fell => {
+                    let spot = [at[0], at[1], ground(at[0], at[1])];
+                    self.explode(spot, size, time, seed);
+                    self.fountain(spot, size, 3, false, time, seed);
+                    self.scar(spot, (radius * 1.8) as f32, false, time, seed);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Fire and black smoke trailed by a downed aircraft as it falls, and what a wreck sinking in
+    /// the water sends up: foam churned round it and smoke from what still burns, while it goes
+    /// under, then bubbles breaking on the surface over it, until it lies on the floor.
+    fn wreck_trails(&mut self, previous: &SimSnapshot, current: &SimSnapshot, alpha: f64, water: Option<f64>, time: f64) {
+        let mut clocks = std::mem::take(&mut self.sinking_puffs);
+        let mut next_clocks = Vec::with_capacity(clocks.len());
+        clocks.sort_unstable_by_key(|clock| clock.0);
+        merge_by_id(&previous.wrecks, &current.wrecks, |wreck| wreck.id, |before, wreck| {
+            let (Some(water), WreckMotion::Sinking) = (water, wreck.motion) else { return };
+            let now = [wreck.x, wreck.y, wreck.z];
+            let then = before.map_or(now, |before| [before.x, before.y, before.z]);
+            let at: [f64; 3] = std::array::from_fn(|axis| (f64::from(then[axis]) + (f64::from(now[axis]) - f64::from(then[axis])) * alpha) * RAW_TO_WORLD);
+            let radius = f64::from(wreck.radius) * RAW_TO_WORLD;
+            let going_under = at[2] + radius * 0.8 > water;
+            let every = if going_under { GOING_UNDER_EVERY } else { BUBBLES_EVERY };
+            let last = clocks.binary_search_by_key(&wreck.id, |clock| clock.0).ok().map(|index| clocks[index].1);
+            // New, or out of sight for a while: start from now.
+            let mut next = last.filter(|last| time - last < 2.0 && *last <= time).map_or(time, |last| last + every);
+            let mut sent = last.unwrap_or(time);
+            while next <= time {
+                let seed = (u64::from(wreck.id.0) << 24) ^ (next / every) as u64;
+                let angle = noise(seed ^ 0x21) * std::f64::consts::TAU;
+                let reach = radius * (0.2 + 0.7 * noise(seed ^ 0x22));
+                let spot = [at[0] + angle.cos() * reach, at[1] + angle.sin() * reach, water + 0.3];
+                let size = (radius * (0.35 + 0.3 * noise(seed ^ 0x23))) as f32;
+                if going_under {
+                    self.add(Puff { shape: Shape::Wake, at: spot, rise: 0.0, born: next, life: 1.4, size, growth: 1.6, height_share: 0.12, color: FOAM, fade_to: FOAM_OLD, dense: false });
+                    if at[2] + radius * 0.3 > water {
+                        let top = [at[0], at[1], at[2] + radius * 0.6];
+                        self.add(Puff { shape: Shape::Smoke, at: top, rise: 3.0, born: next, life: 2.2, size: size * 1.4, growth: 1.4, height_share: 1.0, color: SMOKE_DARK, fade_to: SMOKE_PALE, dense: false });
+                    }
+                } else {
+                    self.add(Puff { shape: Shape::Wake, at: spot, rise: 0.0, born: next, life: 0.8, size: size * 0.45, growth: 0.9, height_share: 0.3, color: FOAM, fade_to: FOAM_OLD, dense: false });
+                }
+                sent = next;
+                next += every;
+            }
+            next_clocks.push((wreck.id, sent));
+        });
+        self.sinking_puffs = next_clocks;
     }
 
     /// Lays smoke behind missiles and foam behind ships, as far as each has moved since the last
@@ -701,6 +798,20 @@ impl Effects {
                 ProjectileKind::Discharge | ProjectileKind::Beam => {}
             }
         });
+        // A downed aircraft trails fire, and black smoke behind it, as it falls.
+        merge_by_id(&previous.wrecks, &current.wrecks, |wreck| wreck.id, |before, wreck| {
+            if wreck.motion != WreckMotion::Falling {
+                return;
+            }
+            let now = [wreck.x, wreck.y, wreck.z];
+            let at = interpolate(before.map_or(now, |before| [before.x, before.y, before.z]), now);
+            let size = (f64::from(wreck.radius) * RAW_TO_WORLD * 0.9) as f32;
+            let smoke = Puff { shape: Shape::Smoke, at, rise: 2.0, born: time, life: 2.6, size, growth: 1.6, height_share: 1.0, color: SMOKE_DARK, fade_to: SMOKE_PALE, dense: false };
+            lay(self, SimId(wreck.id.0 ^ WRECK_SMOKE_ID), at, f64::from(size) * 0.7, smoke);
+            // Flames at the wreck itself, short-lived, so that what is burning still shows.
+            let fire = Puff { shape: Shape::Fireball, at, rise: 0.0, born: time, life: 0.15, size: size * 0.5, growth: 0.3, height_share: 1.0, color: FIRE_BURNING, fade_to: FIRE_COOL, dense: false };
+            lay(self, wreck.id, at, f64::from(size) * 0.35, fire);
+        });
         if let Some(water) = water {
             merge_by_id(&previous.units, &current.units, |unit| unit.id, |before, unit| {
                 let Some(before) = before else { return };
@@ -728,6 +839,7 @@ impl Effects {
             });
         }
         self.trail_ends = next_ends;
+        self.wreck_trails(previous, current, alpha, water, time);
         self.lay_tracks(previous, current, alpha, looks, water, time);
         if let Some(water) = water {
             self.lay_wakes(previous, current, alpha, looks, water, time);
@@ -909,7 +1021,7 @@ mod tests {
     use super::*;
     use crate::sim::components::Team;
     use crate::render::instances::UnitInstanceRaw;
-    use crate::sim::world::{ProjectileView, WreckView};
+    use crate::sim::world::{ProjectileView, WreckMotion, WreckView};
 
     fn snapshot(tick: u32) -> SimSnapshot {
         SimSnapshot { tick, ..SimSnapshot::default() }
@@ -1063,7 +1175,7 @@ mod tests {
         before.units = vec![unit(1), unit(2)];
         let mut after = snapshot(2);
         // Unit 1 left a wreck where it stood. Unit 2 only went out of sight.
-        after.wrecks = vec![WreckView { id: SimId(9), x: 4096 * 50, y: 4096 * 50, z: 0, radius: 4096 * 3, mass: 1, energy: 0, kind: WreckKind::Debris }];
+        after.wrecks = vec![WreckView { id: SimId(9), x: 4096 * 50, y: 4096 * 50, z: 0, radius: 4096 * 3, mass: 1, energy: 0, kind: WreckKind::Debris, motion: WreckMotion::Still }];
         before.units[1].x = 4096 * 900;
         let mut effects = Effects::new();
         effects.note_events(&before, &after, 0.0, &|_, _| 0.0, None, &[]);
@@ -1082,7 +1194,7 @@ mod tests {
         before.units = vec![unit(1)];
         before.units[0].blueprint = 7;
         before.units[0].facing = [4096, 0];
-        let wreck = WreckView { id: SimId(9), x: 4096 * 50, y: 4096 * 50, z: 0, radius: 4096 * 3, mass: 1, energy: 0, kind: WreckKind::Debris };
+        let wreck = WreckView { id: SimId(9), x: 4096 * 50, y: 4096 * 50, z: 0, radius: 4096 * 3, mass: 1, energy: 0, kind: WreckKind::Debris, motion: WreckMotion::Still };
         let stranger = WreckView { id: SimId(10), x: 4096 * 900, ..wreck };
         let mut after = snapshot(2);
         after.wrecks = vec![wreck, stranger];

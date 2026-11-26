@@ -1,6 +1,6 @@
 use super::*;
 use crate::sim::components::{Team, WreckKind};
-use crate::sim::world::{BlastView, Detonation, DetonationKind, FactoryView, ProjectileKind, ProjectileView, WorkLinkView, WreckView};
+use crate::sim::world::{BlastView, Detonation, DetonationKind, FactoryView, ProjectileKind, ProjectileView, WorkLinkView, WreckMotion, WreckView};
 
 const RATE: f32 = 48_000.0;
 
@@ -738,7 +738,7 @@ fn a_unit_is_heard_destroyed_only_if_it_left_debris() {
     let (mut previous, mut current) = ticks();
     previous.units = vec![view(5, tank, 0, 1000)];
     assert!(events_between(&previous, &current, 0.0, true).is_empty(), "out of sight is not destroyed");
-    current.wrecks = vec![WreckView { id: SimId(90), x: 0, y: 0, z: 0, radius: 4096, mass: 10, energy: 0, kind: WreckKind::Debris }];
+    current.wrecks = vec![WreckView { id: SimId(90), x: 0, y: 0, z: 0, radius: 4096, mass: 10, energy: 0, kind: WreckKind::Debris, motion: WreckMotion::Still }];
     let heard = events_between(&previous, &current, 0.0, true);
     assert!(matches!(heard.as_slice(), [SoundEvent { sound: OneShot::Destroyed(_), .. }]), "{heard:?}");
     // A blast as it dies is heard too.

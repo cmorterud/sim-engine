@@ -8,7 +8,7 @@ use crate::sim::blueprints::{BlueprintDb, BlueprintId, UnitClass, WeaponKind};
 use crate::sim::commands::SimCommand;
 use crate::sim::components::{BuildTask, SimId, Team};
 use crate::sim::config::TERRAIN_CELL_UNITS;
-use crate::sim::world::{SimSnapshot, UnitView, WreckView};
+use crate::sim::world::{SimSnapshot, UnitView, WreckMotion, WreckView};
 
 const RAW_TO_WORLD: f64 = 1.0 / 4096.0;
 /// How close, in pixels, a click must be to a wreck to reclaim it.
@@ -75,6 +75,9 @@ pub struct RightClick<'a> {
     pub contacts: &'a [crate::sim::world::ContactView],
     /// Submarines on the surface, which guns reach as well as torpedoes.
     pub surfaced: &'a [SimId],
+    /// The water's height, if the map has any: a wreck on the sea floor is picked from the slick
+    /// on the surface over it, as well as where it lies.
+    pub water: Option<f64>,
 }
 
 /// What a target is, which decides what weapons reach it.
@@ -467,12 +470,17 @@ pub fn attack_ground_orders(click: &RightClick<'_>) -> Vec<SimCommand> {
 
 fn wreck_under_cursor(click: &RightClick<'_>) -> Option<SimId> {
     let mut best: Option<(f64, SimId)> = None;
-    for wreck in click.wrecks {
+    // Debris still falling through the air cannot be reclaimed yet, nor shot at on the ground.
+    for wreck in click.wrecks.iter().filter(|wreck| wreck.motion != WreckMotion::Falling) {
         let world = [f64::from(wreck.x) * RAW_TO_WORLD, f64::from(wreck.y) * RAW_TO_WORLD, f64::from(wreck.z) * RAW_TO_WORLD];
-        if let Some(position) = click.camera.world_to_screen(world) {
-            let distance = (position[0] - click.cursor[0]).hypot(position[1] - click.cursor[1]);
-            if distance <= WRECK_CLICK_PX && best.is_none_or(|(closest, _)| distance < closest) {
-                best = Some((distance, wreck.id));
+        // Under the water, also where the slick over it is, on the surface.
+        let surface = click.water.filter(|&water| world[2] < water).map(|water| [world[0], world[1], water]);
+        for spot in std::iter::once(world).chain(surface) {
+            if let Some(position) = click.camera.world_to_screen(spot) {
+                let distance = (position[0] - click.cursor[0]).hypot(position[1] - click.cursor[1]);
+                if distance <= WRECK_CLICK_PX && best.is_none_or(|(closest, _)| distance < closest) {
+                    best = Some((distance, wreck.id));
+                }
             }
         }
     }
@@ -702,12 +710,13 @@ mod tests {
             attack_move: false,
             contacts: &[],
             surfaced: &[],
+            water: None,
         })
     }
 
     fn click_for<'a>(selected: &'a [SimId], units: &'a [UnitView], db: &'a BlueprintDb, camera: &'a Camera, world: [f64; 2]) -> RightClick<'a> {
         let cursor = camera.world_to_screen([world[0], world[1], 8.0]).unwrap();
-        RightClick { selected, units, wrecks: &[], blueprints: db, team: Team::Blue, camera, cursor, ground: Some(world), attack_move: false, contacts: &[], surfaced: &[] }
+        RightClick { selected, units, wrecks: &[], blueprints: db, team: Team::Blue, camera, cursor, ground: Some(world), attack_move: false, contacts: &[], surfaced: &[], water: None }
     }
 
     #[test]
@@ -736,13 +745,13 @@ mod tests {
             view(4, Team::Red, db.id("t1_light_walker"), &db, 2_300.0, 2_300.0),
         ];
         let raw = |value: f64| (value * 4096.0) as i32;
-        let wreck = |id: u32, x: f64, kind: WreckKind| WreckView { id: SimId(id), x: raw(x), y: raw(2_050.0), z: raw(8.0), radius: raw(8.0), mass: 10, energy: 0, kind };
+        let wreck = |id: u32, x: f64, kind: WreckKind| WreckView { id: SimId(id), x: raw(x), y: raw(2_050.0), z: raw(8.0), radius: raw(8.0), mass: 10, energy: 0, kind, motion: WreckMotion::Still };
         let wrecks = [wreck(8, 1_900.0, WreckKind::Debris), wreck(9, 2_100.0, WreckKind::Tree)];
         let camera = camera();
         let selected = [SimId(1), SimId(2), SimId(3), SimId(4)];
         let at = |world: [f64; 2]| {
             let cursor = camera.world_to_screen([world[0], world[1], 8.0]).unwrap();
-            attack_ground_orders(&RightClick { selected: &selected, units: &units, wrecks: &wrecks, blueprints: &db, team: Team::Blue, camera: &camera, cursor, ground: Some(world), attack_move: false, contacts: &[], surfaced: &[] })
+            attack_ground_orders(&RightClick { selected: &selected, units: &units, wrecks: &wrecks, blueprints: &db, team: Team::Blue, camera: &camera, cursor, ground: Some(world), attack_move: false, contacts: &[], surfaced: &[], water: None })
         };
         let point = |x: f64, y: f64| Vec2Fp::new(Fp::from_num(x), Fp::from_num(y));
         let armed = vec![SimId(1), SimId(3)];
@@ -899,6 +908,7 @@ mod tests {
             attack_move: true,
             contacts: &[],
             surfaced: &[],
+            water: None,
         });
         let goal = Vec2Fp::new(Fp::from_num(world[0]), Fp::from_num(world[1]));
         assert_eq!(orders, [SimCommand::AttackMove { units: vec![SimId(1)], goal }]);
@@ -922,6 +932,7 @@ mod tests {
             attack_move: true,
             contacts: &[],
             surfaced: &[],
+            water: None,
         });
         assert!(orders.is_empty());
     }
@@ -960,6 +971,7 @@ mod tests {
                 attack_move: false,
                 contacts: &[],
                 surfaced: &[],
+                water: None,
             })
         };
         assert_eq!(click(18.0), [SimCommand::Attack { units: vec![SimId(1)], target: SimId(2) }], "18 pixels off still attacks");
@@ -977,12 +989,12 @@ mod tests {
         let contact = |unit: Option<SimId>| crate::sim::world::ContactView { unit, x: raw(2_100.0), y: raw(2_000.0), z: raw(9.0), is_air: false, is_naval: false, is_sub: false, is_structure: false };
         let cursor = camera.world_to_screen([2_100.0, 2_000.0, 9.0]).unwrap();
         let click = |contacts: &[crate::sim::world::ContactView]| {
-            right_click_orders(&RightClick { selected: &[SimId(1)], units: &units, wrecks: &[], blueprints: &db, team: Team::Blue, camera: &camera, cursor, ground: Some([2_100.0, 2_000.0]), attack_move: false, contacts, surfaced: &[] })
+            right_click_orders(&RightClick { selected: &[SimId(1)], units: &units, wrecks: &[], blueprints: &db, team: Team::Blue, camera: &camera, cursor, ground: Some([2_100.0, 2_000.0]), attack_move: false, contacts, surfaced: &[], water: None })
         };
         assert_eq!(click(&[contact(Some(SimId(7)))]), [SimCommand::Attack { units: vec![SimId(1)], target: SimId(7) }]);
         assert!(matches!(click(&[contact(None)])[..], [SimCommand::AttackMove { .. }]), "a decoy is gone to");
         // What the cursor says: a tank reaches a contact on land, not one in the air.
-        let hover = RightClick { selected: &[SimId(1)], units: &units, wrecks: &[], blueprints: &db, team: Team::Blue, camera: &camera, cursor, ground: None, attack_move: false, contacts: &[], surfaced: &[] };
+        let hover = RightClick { selected: &[SimId(1)], units: &units, wrecks: &[], blueprints: &db, team: Team::Blue, camera: &camera, cursor, ground: None, attack_move: false, contacts: &[], surfaced: &[], water: None };
         assert!(selection_reaches(&hover, TargetKind::Ground));
         assert!(!selection_reaches(&hover, TargetKind::Air));
     }
@@ -998,7 +1010,7 @@ mod tests {
         let raw = |value: f64| (value * 4096.0) as i32;
         let contacts = [crate::sim::world::ContactView { unit: Some(SimId(7)), x: raw(2_100.0), y: raw(2_000.0), z: raw(9.0), is_air: false, is_naval: false, is_sub: false, is_structure: false }];
         let cursor = camera.world_to_screen([2_100.0, 2_000.0, 9.0]).unwrap();
-        let click = RightClick { selected: &[SimId(1)], units: &units, wrecks: &[], blueprints: &db, team: Team::Blue, camera: &camera, cursor, ground: Some([2_100.0, 2_000.0]), attack_move: false, contacts: &contacts, surfaced: &[] };
+        let click = RightClick { selected: &[SimId(1)], units: &units, wrecks: &[], blueprints: &db, team: Team::Blue, camera: &camera, cursor, ground: Some([2_100.0, 2_000.0]), attack_move: false, contacts: &contacts, surfaced: &[], water: None };
         assert_eq!(queued_commands(right_click_orders(&click)), [SimCommand::QueueAttack { units: vec![SimId(1)], target: SimId(7) }]);
     }
 
@@ -1013,7 +1025,7 @@ mod tests {
         let cursor = camera.world_to_screen([ground[0], ground[1], 0.0]).unwrap();
         for def in db.iter().filter(|def| !def.is_structure() && def.speed > Fp::ZERO && def.class != crate::sim::blueprints::UnitClass::Ammo) {
             let units = [view(1, Team::Blue, db.id(&def.key), &db, 1_000.0, 1_000.0)];
-            let click = RightClick { selected: &[SimId(1)], units: &units, wrecks: &[], blueprints: &db, team: Team::Blue, camera: &camera, cursor, ground: Some(ground), attack_move: false, contacts: &[], surfaced: &[] };
+            let click = RightClick { selected: &[SimId(1)], units: &units, wrecks: &[], blueprints: &db, team: Team::Blue, camera: &camera, cursor, ground: Some(ground), attack_move: false, contacts: &[], surfaced: &[], water: None };
             let orders = right_click_orders(&click);
             assert!(matches!(orders[..], [SimCommand::Move { .. }]), "{} on a right-click: {orders:?}", def.key);
             assert!(matches!(move_orders(&click)[..], [SimCommand::Move { .. }]), "{} on a move order", def.key);
@@ -1056,7 +1068,7 @@ mod tests {
         hurt.health_permille = 400;
         let units = [view(1, Team::Blue, db.id("t1_engineer"), &db, 2_000.0, 1_950.0), hurt];
         let raw = |value: f64| (value * 4096.0) as i32;
-        let wrecks = [WreckView { id: SimId(9), x: raw(1_900.0), y: raw(2_050.0), z: raw(8.0), radius: raw(8.0), mass: 10, energy: 0, kind: crate::sim::components::WreckKind::Debris }];
+        let wrecks = [WreckView { id: SimId(9), x: raw(1_900.0), y: raw(2_050.0), z: raw(8.0), radius: raw(8.0), mass: 10, energy: 0, kind: crate::sim::components::WreckKind::Debris, motion: WreckMotion::Still }];
         let camera = camera();
         assert_eq!(
             click_at(&[SimId(1)], &units, &wrecks, &db, &camera, [2_100.0, 2_050.0]),

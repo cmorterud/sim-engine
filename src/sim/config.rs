@@ -76,6 +76,16 @@ pub const WRECK_MASS_PERMILLE: i64 = 900;
 pub const WRECK_TECH_PERMILLE: [i64; 4] = [900, 800, 700, 600];
 /// A wreck that sinks, from a unit that died over water, keeps this share again, in thousandths.
 pub const WRECK_SUNK_PERMILLE: i64 = 600;
+/// Debris falling through the air keeps this much of the way it was going each tick, in
+/// sixteenths, and in the water this much: a downed interceptor comes down some 350 units ahead
+/// of where it was hit, and a sinking ship drifts on three ticks' worth of its speed.
+pub const WRECK_AIR_KEEP_SIXTEENTHS: i32 = 15;
+pub const WRECK_WATER_KEEP_SIXTEENTHS: i32 = 12;
+/// How fast debris sinks through the water, in raw `Fp` bits a tick (6 units a second), and how
+/// much faster it goes each tick from still, so that a ship slips under in a few seconds and
+/// comes to rest on a floor 50 units down some nine seconds after it was lost.
+pub const WRECK_SINK_SPEED_RAW: i32 = 2_458;
+pub const WRECK_SINK_PULL_RAW: i32 = 205;
 /// Debris has this share of the destroyed unit's health, in thousandths (GAME_SPECIFICATION.md
 /// §6.2): the inspiration's Wreckage.HealthMult.
 pub const WRECK_HEALTH_PERMILLE: i64 = 900;

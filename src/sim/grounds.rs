@@ -9,7 +9,7 @@ use crate::math::fp::fp_int;
 
 use super::components::MoveClass;
 use super::config::{SimConfig, TERRAIN_CELL_UNITS};
-use super::terrain::{Terrain, HEIGHT_FRAC_BITS};
+use super::terrain::{Terrain, HEIGHT_FRAC_BITS, SEA_DEPTH_UNITS};
 use super::world::SimWorld;
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Deserialize)]
@@ -21,10 +21,11 @@ pub enum Ground {
     Shore,
 }
 
-/// The sea grounds, in units: the water's surface, the sea floor below it, deep enough for ships
-/// and submarines everywhere, as the named maps' seas are, and the land of the shore above it.
+/// The sea grounds, in units: the water's surface, the sea floor below it, as deep as every
+/// sea's open floor (`SEA_DEPTH_UNITS`), as the named maps' seas are, and the land of the shore
+/// above it.
 const WATER_LEVEL: i32 = 100;
-const SEA_FLOOR: i32 = 50;
+const SEA_FLOOR: i32 = WATER_LEVEL - SEA_DEPTH_UNITS;
 const SHORE_LAND: i32 = 110;
 
 impl Ground {
