@@ -1262,9 +1262,10 @@ id = "t2_destroyer"
 name = "Destroyer"
 class = "tank"
 tier = 2
-mass = 1658
-energy = 11050
-build_time = 8241
+# Cost by the ability price list (2026-11-26): 1,684 to 1,530 (reports/plans/2026-11-26-ability-price-list.md).
+mass = 1506
+energy = 10038
+build_time = 7486
 health = 10990
 speed = "10.4"
 turn_rate = 55
@@ -1298,9 +1299,10 @@ id = "t2_cruiser"
 name = "Cruiser"
 class = "tank"
 tier = 2
-mass = 1473
-energy = 13260
-build_time = 6592
+# Cost by the ability price list (2026-11-26): 1,529 to 1,684 (reports/plans/2026-11-26-ability-price-list.md).
+mass = 1622
+energy = 14603
+build_time = 7260
 health = 4404
 speed = 9
 turn_rate = 40
@@ -1353,9 +1355,10 @@ id = "t3_battleship"
 name = "Battleship"
 class = "tank"
 tier = 3
-mass = 6842
-energy = 42423
-build_time = 24423
+# Cost by the ability price list (2026-11-26): 6,920 to 5,905 (reports/plans/2026-11-26-ability-price-list.md).
+mass = 5838
+energy = 36199
+build_time = 20840
 health = 90314
 speed = "7.2"
 turn_rate = 27
@@ -1389,9 +1392,11 @@ id = "t3_battlecruiser"
 name = "Battlecruiser"
 class = "tank"
 tier = 3
-mass = 5128
-energy = 43956
-build_time = 20677
+# Cost by the ability price list (2026-11-26): 5,302 to 4,785, the navy base solved at 0.691
+# (reports/plans/2026-11-26-ability-price-list.md).
+mass = 4628
+energy = 39667
+build_time = 18659
 health = 31516
 speed = "10.8"
 turn_rate = 35
@@ -1432,9 +1437,11 @@ tier = 1
 # against its T1 tank (2026-11-24, [domains]). Its torpedo and reach come from the navy T1 time to
 # kill (2026-11-26, reports/plans/2026-11-26-derived-stats.md): six of them sink a destroyer in
 # about 39 seconds ([kill_times]).
-mass = 265
-energy = 2122
-build_time = 1187
+# Cost by the ability price list (2026-11-26): 345 to 386, its torpedo counted once with the
+# flexibility price, submerged out of cannons' reach (reports/plans/2026-11-26-ability-price-list.md).
+mass = 297
+energy = 2376
+build_time = 1329
 health = 1279
 speed = 12
 turn_rate = 80
@@ -2015,7 +2022,9 @@ movement = "naval"
 # Two destroy a commander with no enhancements under the water in about 60 seconds
 # ([kill_times], 2026-11-25).
 weapon = { range = 814, reload_ticks = 8, projectile_speed = 30, damage = 126, targets = "naval" }
-torpedo_defense = { range = 500, reload_ticks = 25 }
+# Decoys 3x as often as the destroyer's, as its torpedoes do 3x its damage a second, at the
+# destroyer's reach (2026-11-26).
+torpedo_defense = { range = 600, reload_ticks = 33 }
 
 # It cannot move, so it is worth more for its cost ([premiums], 2026-11-25): damage two and a half
 # times its earlier, so that three hold against half again their cost in Heavy Walkers. Health is

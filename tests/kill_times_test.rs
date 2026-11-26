@@ -382,7 +382,9 @@ fn a_battleship_outranges_and_destroys_shielded_t2_artillery() {
     let turrets = db.get(db.id("t3_battleship")).extra_weapons.iter().chain(&db.get(db.id("t3_battleship")).weapon).filter(|weapon| weapon.targets == Targets::Ground).count();
     assert_eq!(volley_landed, Some(turrets), "shells landed when the dome went down");
     assert!(!fired_on, "the artillery fired at the battleship");
-    assert_eq!(world.unit_health(battleship), Some(full), "the battleship was hit");
+    // Not hit: its health is never under full. Destroying the position can earn it a veterancy
+    // rank, which adds health.
+    assert!(world.unit_health(battleship).is_some_and(|health| health >= full), "the battleship was hit");
     let (least, most) = range("battleship_breaks_shielded_t2_artillery");
     let took = seconds(cleared.expect("the position was not destroyed"));
     println!("battleship_breaks_shielded_t2_artillery: {took} s");

@@ -153,7 +153,7 @@ ground = "water"
 target = "domains.cells.fleet_without_anti_air_loses_to_torpedo_bombers"
 shows = "Destroyers with no cruisers or corvettes, against an equal cost of torpedo bombers. Their anti-torpedo charges stop only a few of the torpedoes a wing drops, and they have next to no anti-air: the bombers win easily. A fleet that skips anti-air loses to the air."
 try = "Attack-move in, and compare with the T2 fleet against twice its cost in torpedo bombers."
-blue = [{ unit = "t2_torpedo_bomber", count = 55, at = [1_200, 2_560], columns = 11 }]
+blue = [{ unit = "t2_torpedo_bomber", count = 50, at = [1_200, 2_560], columns = 10 }]
 red = [{ unit = "t2_destroyer", count = 8, at = [3_000, 2_560], columns = 4 }]
 
 [[scenario]]
@@ -175,9 +175,9 @@ id = "navy_destroyers_against_submarines"
 title = "Hunting submarines: destroyers alone against submarines"
 ground = "water"
 target = "domains.cells.submarines_beat_destroyers"
-shows = "Destroyers on their own against an equal cost of Attack Submarines, about six to a destroyer. A destroyer's torpedoes outrange the submarines' and sink one in about 25 seconds, but its anti-torpedo charge stops only one torpedo every 10 seconds, so six sink it in about 33, having lost one. The submarines win easily."
+shows = "Destroyers on their own against an equal cost of Attack Submarines, five to a destroyer. A destroyer's torpedoes outrange the submarines' and sink one in about 25 seconds, but its anti-torpedo charge stops only one torpedo every 10 seconds, so six sink it in about 33, having lost one. The submarines win easily."
 try = "Attack-move in. Then add destroyers two at a time, and see how many it takes to come out even."
-blue = [{ unit = "t1_attack_sub", count = 25, at = [1_400, 2_560], columns = 5 }]
+blue = [{ unit = "t1_attack_sub", count = 20, at = [1_400, 2_560], columns = 5 }]
 red = [{ unit = "t2_destroyer", count = 4, at = [3_000, 2_560], columns = 4 }]
 
 [[scenario]]
@@ -199,7 +199,7 @@ id = "navy_cruiser_against_a_coast"
 title = "From the sea: two Cruisers against a coastal T2 position"
 ground = "shore"
 target = "domains.cells.coastal_seconds_max"
-blue_over_red = 1.34
+blue_over_red = 1.48
 shows = "Two Cruisers at sea against point defenses under a shield, ashore. Their cruise missiles outrange the point defenses three times over, so they break the position without loss, in about a minute. It takes two: the shield heals as fast as one cruiser's missiles strike it, so one alone never gets through. Inland, beyond their reach, is safe from ships: that is navy's limit."
 try = "Attack-move at the position and time it. Then send one cruiser alone and watch the shield hold. Then sail in within the point defenses' reach."
 blue = [{ unit = "t2_cruiser", count = 2, at = [600, 2_560], columns = 2 }]
@@ -215,8 +215,8 @@ id = "navy_destroyer_against_torpedo_launchers"
 title = "Defending a coast: a Destroyer closing on T2 torpedo launchers"
 ground = "shore"
 target = "domains.cells.destroyers_break_torpedo_launchers"
-blue_over_red = 0.68
-shows = "Torpedo launchers are the coast's answer to ships. A Destroyer, which must close to fight, sails in on three of them: its anti-torpedo charge stops one torpedo at a time, and each launcher fires four at once, so it is sunk before it breaks them. One destroyer is two-thirds of their cost, as the harness buys whole ships."
+blue_over_red = 0.62
+shows = "Torpedo launchers are the coast's answer to ships. A Destroyer, which must close to fight, sails in on three of them: its anti-torpedo charge stops one torpedo at a time, and each launcher fires four at once, so it is sunk before it breaks them. One destroyer is about three-fifths of their cost, as the harness buys whole ships."
 try = "Attack-move in. Then try to pick off one launcher from the edge of the others' reach."
 blue = [{ unit = "t2_destroyer", count = 1, at = [600, 2_560] }]
 red = [
@@ -292,7 +292,7 @@ ground = "water"
 target = "domains.cells.battleship_heavy_fleet_breaks_to_torpedo_bombers_at_most"
 shows = "Battleships and battlecruisers with one each of the escorts for every pair, three-quarters of the fleet's cost in capital ships, against an equal cost of torpedo bombers. Without enough cruisers and destroyers, the capital ships are prey: the bombers break the fleet for far less than its cost. This is the counterplay to skimping on escorts."
 try = "Attack-move in, and compare with the massed fleet against twice its cost."
-blue = [{ unit = "t2_torpedo_bomber", count = 132, at = [1_200, 2_560], columns = 12 }]
+blue = [{ unit = "t2_torpedo_bomber", count = 119, at = [1_200, 2_560], columns = 12 }]
 red = [
     { unit = "t2_destroyer", count = 2, at = [3_000, 2_560], columns = 2 },
     { unit = "t2_cruiser", count = 2, at = [3_060, 2_560], columns = 2 },
@@ -306,7 +306,7 @@ id = "navy_battleship_against_a_coast"
 title = "From the sea at T3: two Battleships against a coastal T3 position"
 ground = "shore"
 target = "domains.cells.coastal_seconds_max"
-blue_over_red = 1.40
+blue_over_red = 1.20
 shows = "Two Battleships at sea against heavy point defenses under a heavy shield, ashore. They outrange them twice over and break the position without loss, in under a minute and a half. It takes two: the heavy shield heals faster than one battleship's guns strike it."
 try = "Attack-move at the position and time it. Then send one battleship alone and watch the shield hold. Then sail in within the heavy point defenses' reach."
 blue = [{ unit = "t3_battleship", count = 2, at = [600, 2_560], columns = 2 }]
