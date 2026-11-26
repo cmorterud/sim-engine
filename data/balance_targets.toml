@@ -394,7 +394,10 @@ t2_destroyer = 0.33
 t2_cruiser = 0.20
 t2_torpedo_boat = 0.32
 t3_battleship = 0.40
-t3_battlecruiser = 0.25
+# The battlecruiser by the ability price list (2026-11-26, the design owner's pick), not the
+# inspiration's 0.25: 1.4 times its model strength at the same cost, for lasers that cannot be
+# dodged (reports/plans/2026-11-26-derived-stats.md).
+t3_battlecruiser = 0.44
 t2_gunship = 0.62
 t2_torpedo_bomber = 0.55
 t2_fighter_bomber = 0.45
