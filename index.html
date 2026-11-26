@@ -296,6 +296,18 @@
           </div>
         </div>
 
+        <h2>Graphics</h2>
+        <div class="row">
+          <div class="field">
+            <label for="bloom">HDR bloom</label>
+            <select id="bloom" name="bloom" aria-describedby="bloom-hint">
+              <option value="off" selected>Off</option>
+              <option value="on">On</option>
+            </select>
+            <span class="hint" id="bloom-hint">A soft glow around fire, explosions and lights. Costs the graphics card more. <kbd>F8</kbd> switches it in the game.</span>
+          </div>
+        </div>
+
         <details>
           <summary>More options</summary>
           <div class="row">
@@ -355,10 +367,17 @@
               <option value="red">Red's sight</option>
             </select>
           </div>
+          <div class="field">
+            <label for="watch-bloom">HDR bloom</label>
+            <select id="watch-bloom" name="bloom">
+              <option value="off" selected>Off</option>
+              <option value="on">On</option>
+            </select>
+          </div>
         </div>
         <div class="actions">
           <button class="play secondary" type="submit">Watch</button>
-          <span class="hint">In the match: <kbd>V</kbd> switches whose sight, <kbd>-</kbd> and <kbd>=</kbd> change the speed up to 16x, and <kbd>Space</kbd> pauses.</span>
+          <span class="hint">In the match: <kbd>V</kbd> switches whose sight, <kbd>-</kbd> and <kbd>=</kbd> change the speed up to 16x, <kbd>Space</kbd> pauses, and <kbd>F8</kbd> switches HDR bloom.</span>
         </div>
       </form>
 
