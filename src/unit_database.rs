@@ -323,8 +323,9 @@ fn weapon_stats(weapon: &WeaponDef) -> Vec<(&'static str, String)> {
     rows
 }
 
-fn table(out: &mut String, rows: &[(&'static str, String)]) {
-    out.push_str("<table>");
+/// A table of labelled values. Its class, `stats` or `weapon`, is how the comparison finds it.
+fn table(out: &mut String, class: &str, rows: &[(&'static str, String)]) {
+    let _ = write!(out, "<table class=\"{class}\">");
     for (label, value) in rows {
         // Values are numbers and fixed words, or links made above from escaped names.
         let _ = write!(out, "<tr><th>{label}</th><td>{value}</td></tr>");
@@ -397,7 +398,9 @@ fn card(out: &mut String, unit: &Blueprint, db: &BlueprintDb, portraits: &Portra
         None => out.push_str("<span class=\"portrait none\"></span>"),
     }
     out.push_str("</span>");
-    let _ = write!(out, "<div><h4>{}</h4><p class=\"sub\">T{} {}</p></div></header>", escape(&unit.name), unit.tier, what_it_is(unit));
+    let _ = write!(out, "<div><h4>{}</h4><p class=\"sub\">T{} {}</p></div>", escape(&unit.name), unit.tier, what_it_is(unit));
+    // Picks the unit for the comparison; the script shows it, as without scripts there is none.
+    let _ = write!(out, "<button type=\"button\" class=\"pick\" aria-pressed=\"false\" aria-label=\"Compare {}\" hidden>Compare</button></header>", escape(&unit.name));
     // At a glance: what it costs, how tough it is, and what it does a second.
     let weapons: Vec<&WeaponDef> = unit.weapon.iter().chain(&unit.extra_weapons).collect();
     let dps: f64 = weapons.iter().map(|weapon| damage_per_second(weapon)).sum();
@@ -409,11 +412,11 @@ fn card(out: &mut String, unit: &Blueprint, db: &BlueprintDb, portraits: &Portra
         let _ = write!(out, "<div><dt>Damage/s</dt><dd>{}</dd></div>", number(dps, 0));
     }
     out.push_str("</dl>");
-    table(out, &stats(unit, db));
+    table(out, "stats", &stats(unit, db));
     for (index, weapon) in weapons.iter().enumerate() {
         let title = if weapons.len() == 1 { "Weapon".to_string() } else { format!("Weapon {}", index + 1) };
         let _ = write!(out, "<h5>{title}</h5>");
-        table(out, &weapon_stats(weapon));
+        table(out, "weapon", &weapon_stats(weapon));
     }
     if !unit.builds.is_empty() {
         let _ = write!(out, "<details><summary>Builds {} kinds</summary><p class=\"builds\">", unit.builds.len());
@@ -467,15 +470,53 @@ details { margin-top: 10px; font-size: 13px; }
 summary { cursor: pointer; color: var(--muted); }
 .builds { margin: 6px 0 0; }
 .empty { color: var(--muted); }
+.unit header > div { flex: 1; min-width: 0; }
+.pick { flex: none; align-self: flex-start; font: inherit; font-size: 12px; color: var(--text); background: var(--panel-raised); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; cursor: pointer; }
+.pick::before { content: "+ "; }
+.pick[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.pick[aria-pressed="true"]::before { content: "\2713  "; }
+.unit.picked { border-color: var(--accent); }
+body.picking .page { padding-bottom: 140px; }
+.tray { position: fixed; left: 0; right: 0; bottom: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; padding: 10px max(16px, calc((100% - 1208px) / 2)); background: var(--panel-raised); border-top: 1px solid var(--line); box-shadow: 0 -6px 18px #0008; }
+.picked { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; flex: 1 1 300px; }
+.picked button { font: inherit; font-size: 13px; color: var(--text-strong); background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 3px 6px 3px 12px; cursor: pointer; }
+.picked button span { color: var(--muted); margin-left: 6px; }
+.tray-actions { display: flex; gap: 8px; }
+.go, .back { font: inherit; font-size: 14px; border-radius: 6px; padding: 6px 14px; cursor: pointer; }
+.go { color: #fff; background: var(--accent); border: 1px solid var(--accent); font-weight: 600; }
+.go:disabled { opacity: 0.5; cursor: default; }
+.back { color: var(--text); background: var(--panel); border: 1px solid var(--line); }
+#compare .bar h2 { margin: 0; padding: 0; border: 0; font-size: 18px; flex: 1 1 auto; }
+.toggle { white-space: nowrap; font-size: 13px; color: var(--text); display: flex; gap: 6px; align-items: center; cursor: pointer; }
+#compare .lede { margin-top: 12px; }
+.compare-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.compare-table { --label: 160px; --column: 200px; table-layout: fixed; width: max(100%, calc(var(--label) + var(--units, 2) * var(--column))); font-size: 13px; }
+@media (max-width: 600px) { .compare-table { --label: 104px; --column: 150px; } .compare-table th, .compare-table td { padding: 5px 8px; } }
+.compare-table th, .compare-table td { width: auto; padding: 5px 10px; }
+.compare-table tbody th { position: sticky; left: 0; z-index: 1; background: var(--panel); color: var(--muted); overflow-wrap: anywhere; }
+.compare-table td { overflow-wrap: anywhere; }
+.compare-table thead th { border-top: 0; vertical-align: bottom; padding-top: 12px; }
+.compare-table thead th:first-child { position: sticky; left: 0; z-index: 1; background: var(--panel); width: var(--label); }
+.compare-table thead .head { display: flex; flex-direction: column; gap: 6px; }
+.compare-table thead .head > div { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.compare-table thead a { color: var(--text-strong); font-weight: 600; font-size: 15px; text-decoration: none; }
+.compare-table thead a:hover { text-decoration: underline; }
+.compare-table .remove { flex: none; font: inherit; font-size: 15px; line-height: 1; color: var(--muted); background: none; border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; cursor: pointer; }
+.compare-table tr.section th { white-space: nowrap; position: sticky; left: 0; background: var(--panel-raised); color: var(--text-strong); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; padding-top: 8px; }
+.compare-table tr.section td { background: var(--panel-raised); }
+.compare-table td.best { color: var(--text-strong); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent-strong); }
+.compare-table td.none { color: var(--muted); }
 [hidden] { display: none !important; }
 "#;
 
-/// Filters by kind, tech level and name, and hides headings with nothing left under them.
-/// Without scripts, everything shows.
+/// Filters by kind, tech level and name, and hides headings with nothing left under them; picks
+/// units to compare, and shows those picked side by side, at `#compare=<key>,<key>`, read from
+/// their cards. Without scripts, everything shows, and there is no comparison.
 const SCRIPT: &str = r#"
 (() => {
   const state = { kind: "all", tier: "all", text: "" };
   const units = [...document.querySelectorAll(".unit")];
+  const byKey = new Map(units.map((unit) => [unit.id, unit]));
   const count = document.getElementById("count");
   const apply = () => {
     let shown = 0;
@@ -506,10 +547,230 @@ const SCRIPT: &str = r#"
     apply();
   });
   apply();
-  // The game writes this page after the address has loaded, so a link to one unit,
-  // `?units#t1_medium_tank`, is scrolled to here.
-  const linked = location.hash && document.getElementById(decodeURIComponent(location.hash.slice(1)));
-  if (linked) linked.scrollIntoView();
+
+  // Picking units to compare, in the order picked.
+  let picked = [];
+  const list = document.getElementById("list");
+  const compare = document.getElementById("compare");
+  const tray = document.getElementById("tray");
+  const nameOf = (unit) => unit.querySelector("h4").textContent;
+  const showPicked = () => {
+    const inCompare = !compare.hidden;
+    for (const unit of units) {
+      const on = picked.includes(unit.id);
+      unit.classList.toggle("picked", on);
+      unit.querySelector(".pick").setAttribute("aria-pressed", String(on));
+    }
+    const tags = document.getElementById("picked");
+    tags.replaceChildren(...picked.map((key) => {
+      const tag = document.createElement("button");
+      tag.type = "button";
+      tag.dataset.key = key;
+      tag.title = `Take ${nameOf(byKey.get(key))} out`;
+      tag.textContent = nameOf(byKey.get(key));
+      const cross = document.createElement("span");
+      cross.textContent = "×";
+      tag.append(cross);
+      return tag;
+    }));
+    const go = document.getElementById("compare-go");
+    go.disabled = picked.length < 2;
+    go.textContent = picked.length < 2 ? "Pick another to compare" : `Compare ${picked.length} units`;
+    tray.hidden = inCompare || picked.length === 0;
+    document.body.classList.toggle("picking", !tray.hidden);
+  };
+  const toggle = (key) => {
+    picked = picked.includes(key) ? picked.filter((other) => other !== key) : [...picked, key];
+    showPicked();
+  };
+  for (const unit of units) {
+    const pick = unit.querySelector(".pick");
+    pick.hidden = false;
+    pick.addEventListener("click", () => toggle(unit.id));
+  }
+  document.getElementById("picked").addEventListener("click", (event) => {
+    const tag = event.target.closest("button");
+    if (tag) toggle(tag.dataset.key);
+  });
+  document.getElementById("compare-clear").addEventListener("click", () => {
+    picked = [];
+    showPicked();
+  });
+
+  // What a card says: its glance numbers, its stats, and each weapon's, as label and value.
+  const rowsOf = (table) => {
+    const rows = [];
+    for (const row of table.rows) {
+      const label = row.cells[0].textContent;
+      const value = row.cells[1].innerHTML;
+      const same = rows.find((other) => other[0] === label);
+      // A label a card has twice, such as "Built on", reads as one value.
+      if (same) same[1] += "; " + value; else rows.push([label, value]);
+    }
+    return rows;
+  };
+  const read = (unit) => ({
+    glance: [...unit.querySelectorAll(".glance div")].map((item) => [item.querySelector("dt").textContent, item.querySelector("dd").textContent]),
+    stats: rowsOf(unit.querySelector("table.stats")),
+    weapons: [...unit.querySelectorAll("table.weapon")].map(rowsOf),
+  });
+  // The labels of several lists, each once, keeping the order each list has them in.
+  const merge = (lists) => {
+    const order = [];
+    for (const rows of lists) {
+      let at = -1;
+      for (const [label] of rows) {
+        const found = order.indexOf(label);
+        if (found === -1) order.splice(++at, 0, label); else at = found;
+      }
+    }
+    return order;
+  };
+  // At a glance, the best of each is marked: the cheapest, the toughest, the hardest-hitting.
+  const better = { Materiel: -1, Energy: -1, Health: 1, "Damage/s": 1 };
+  const table = document.getElementById("compare-table");
+  const differences = document.getElementById("differences");
+  const render = () => {
+    const cards = picked.map((key) => byKey.get(key));
+    const facts = cards.map(read);
+    document.getElementById("compare-title").textContent = `Comparing ${cards.length} ${cards.length === 1 ? "unit" : "units"}`;
+    const head = document.createElement("thead");
+    const top = head.insertRow();
+    top.append(document.createElement("th"));
+    for (const card of cards) {
+      const cell = document.createElement("th");
+      cell.scope = "col";
+      const box = document.createElement("div");
+      box.className = "head";
+      box.append(card.querySelector(".backdrop").cloneNode(true));
+      const line = document.createElement("div");
+      const name = document.createElement("a");
+      name.href = `#${card.id}`;
+      name.textContent = nameOf(card);
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "remove";
+      remove.dataset.key = card.id;
+      remove.title = `Take ${nameOf(card)} out`;
+      remove.textContent = "×";
+      line.append(name, remove);
+      const sub = document.createElement("p");
+      sub.className = "sub";
+      sub.textContent = card.querySelector(".sub").textContent;
+      box.append(line, sub);
+      cell.append(box);
+      top.append(cell);
+    }
+    const body = document.createElement("tbody");
+    const section = (title) => {
+      const row = body.insertRow();
+      row.className = "section";
+      const label = document.createElement("th");
+      label.textContent = title;
+      row.append(label);
+      for (const _ of cards) row.insertCell();
+      return row;
+    };
+    const rows = (title, lists) => {
+      const heading = section(title);
+      let any = false;
+      for (const label of merge(lists)) {
+        const values = lists.map((list) => (list.find((row) => row[0] === label) || [])[1]);
+        const row = body.insertRow();
+        const th = document.createElement("th");
+        th.scope = "row";
+        th.textContent = label;
+        row.append(th);
+        const cells = values.map((value) => {
+          const cell = row.insertCell();
+          if (value === undefined) {
+            cell.className = "none";
+            cell.textContent = "—";
+          } else {
+            cell.innerHTML = value;
+          }
+          return cell;
+        });
+        const direction = better[label];
+        const numbers = values.map((value) => value === undefined ? NaN : parseFloat(value.replace(/,/g, "")));
+        const known = numbers.filter((value) => !Number.isNaN(value));
+        if (direction && known.length > 1 && new Set(known).size > 1) {
+          const best = direction > 0 ? Math.max(...known) : Math.min(...known);
+          numbers.forEach((value, index) => { if (value === best) cells[index].classList.add("best"); });
+        }
+        const same = values.every((value) => value === values[0]);
+        row.hidden = differences.checked && same && cards.length > 1;
+        if (!row.hidden) any = true;
+      }
+      heading.hidden = !any;
+    };
+    rows("At a glance", facts.map((fact) => fact.glance));
+    rows("Stats", facts.map((fact) => fact.stats));
+    const most = Math.max(0, ...facts.map((fact) => fact.weapons.length));
+    for (let index = 0; index < most; index++) {
+      rows(most === 1 ? "Weapon" : `Weapon ${index + 1}`, facts.map((fact) => fact.weapons[index] || []));
+    }
+    // Every unit gets a column as wide as the others, and a phone scrolls them sideways.
+    table.style.setProperty("--units", cards.length);
+    table.replaceChildren(head, body);
+  };
+  table.addEventListener("click", (event) => {
+    const remove = event.target.closest(".remove");
+    if (!remove) return;
+    picked = picked.filter((key) => key !== remove.dataset.key);
+    if (picked.length === 0) {
+      location.hash = "";
+      return;
+    }
+    history.replaceState(null, "", `#compare=${picked.join(",")}`);
+    render();
+  });
+  differences.addEventListener("change", render);
+
+  // The list and the comparison are one page, told apart by the address: `#compare=a,b` for
+  // the comparison, so it can be linked to and the back button leaves it.
+  let listScroll = 0;
+  const route = () => {
+    const hash = decodeURIComponent(location.hash.slice(1));
+    const wanted = hash.startsWith("compare=") ? hash.slice("compare=".length).split(",").filter((key) => byKey.has(key)) : null;
+    if (wanted && wanted.length > 0) {
+      if (compare.hidden) listScroll = window.scrollY;
+      picked = [...new Set(wanted)];
+      list.hidden = true;
+      compare.hidden = false;
+      render();
+      showPicked();
+      window.scrollTo(0, 0);
+      return;
+    }
+    const leaving = !compare.hidden;
+    compare.hidden = true;
+    list.hidden = false;
+    showPicked();
+    // The game writes this page after the address has loaded, so a link to one unit,
+    // `?units#t1_medium_tank`, is scrolled to here, as is one from the comparison.
+    const linked = hash && document.getElementById(hash);
+    if (linked && linked.classList.contains("unit")) {
+      if (linked.hidden) {
+        for (const chips of document.querySelectorAll(".chips")) chips.querySelector('[data-value="all"]').click();
+        const search = document.getElementById("search");
+        search.value = "";
+        state.text = "";
+        apply();
+      }
+      linked.scrollIntoView();
+    } else if (leaving) {
+      window.scrollTo(0, listScroll);
+    }
+  };
+  document.getElementById("compare-go").addEventListener("click", () => {
+    if (picked.length > 1) location.hash = `compare=${picked.join(",")}`;
+  });
+  document.getElementById("compare-back").addEventListener("click", () => {
+    location.hash = "";
+  });
+  window.addEventListener("hashchange", route);
+  route();
 })();
 "#;
 
@@ -536,7 +797,7 @@ pub fn page(db: &BlueprintDb) -> String {
         "<p class=\"lede\">Every unit and structure, {} in all, with all its numbers, by kind and tech level. Distances are in world units, where a terrain cell is 20 across; build time is the build power it takes for a second, so a builder with 10 build power takes a tenth of it in seconds.</p>",
         units.len()
     );
-    out.push_str("<div class=\"bar\">\n<div class=\"chips\" data-filter=\"kind\" role=\"group\" aria-label=\"Kind\"><button type=\"button\" data-value=\"all\" aria-pressed=\"true\">All</button>");
+    out.push_str("<div id=\"list\">\n<div class=\"bar\">\n<div class=\"chips\" data-filter=\"kind\" role=\"group\" aria-label=\"Kind\"><button type=\"button\" data-value=\"all\" aria-pressed=\"true\">All</button>");
     for (kind, heading, _) in KINDS {
         let value = match kind {
             Kind::Land => "land",
@@ -573,7 +834,21 @@ pub fn page(db: &BlueprintDb) -> String {
         }
         out.push_str("</section>\n");
     }
-    out.push_str("<p class=\"empty\" id=\"none\" hidden>No unit matches.</p>\n");
+    out.push_str("<p class=\"empty\" id=\"none\" hidden>No unit matches.</p>\n</div>\n");
+    // The comparison, which the script fills from the cards above, so it shows just what they do.
+    out.push_str(concat!(
+        "<section id=\"compare\" hidden>\n",
+        "<div class=\"bar\"><button type=\"button\" class=\"back\" id=\"compare-back\">&larr; All units</button>",
+        "<h2 id=\"compare-title\">Comparing units</h2>",
+        "<label class=\"toggle\"><input type=\"checkbox\" id=\"differences\"> Only what differs</label></div>\n",
+        "<p class=\"lede\">Side by side, with the cheapest, toughest and hardest-hitting at a glance marked. A unit's name goes to its card.</p>\n",
+        "<div class=\"compare-scroll\"><table class=\"compare-table\" id=\"compare-table\"></table></div>\n",
+        "</section>\n",
+        // The units picked so far, while looking through the list.
+        "<div class=\"tray\" id=\"tray\" hidden><div class=\"picked\" id=\"picked\"></div>",
+        "<div class=\"tray-actions\"><button type=\"button\" class=\"go\" id=\"compare-go\">Compare</button>",
+        "<button type=\"button\" class=\"back\" id=\"compare-clear\">Clear</button></div></div>\n",
+    ));
     let _ = writeln!(out, "</div>\n<script>{SCRIPT}</script>\n</body>\n</html>");
     out
 }
@@ -623,10 +898,27 @@ mod tests {
             let ground = Ground::of(unit);
             assert!(card.contains(&format!("class=\"backdrop {}\"", ground_class(ground))), "{} sits on its {ground:?} backdrop", unit.key);
             assert!(card.contains(&format!("<td>{}</td>", ground.name())) || unit.is_structure(), "{} says where it can go", unit.key);
+            assert_eq!(card.matches("<table class=\"weapon\">").count(), weapons, "{} marks each weapon for the comparison", unit.key);
+            assert_eq!(card.matches("<table class=\"stats\">").count(), 1, "{} marks its stats for the comparison", unit.key);
+            assert_eq!(card.matches("class=\"pick\"").count(), 1, "{} can be picked to compare", unit.key);
         }
         for (key, class) in [("t1_medium_tank", "g-land"), ("t1_interceptor", "g-air"), ("t1_frigate", "g-ocean"), ("t1_attack_sub", "g-deep"), ("t2_assault_hovercraft", "g-coast")] {
             let start = html.find(&format!("id=\"{key}\"")).expect("listed");
             assert!(html[start..start + 400].contains(class), "{key} is on {class}");
+        }
+    }
+
+    /// The comparison has its place on the page, outside the list it hides, and its tray.
+    #[test]
+    fn the_page_has_a_comparison() {
+        let html = page(&BlueprintDb::standard());
+        let list = html.find("<div id=\"list\">").expect("the list is wrapped");
+        let compare = html.find("<section id=\"compare\" hidden>").expect("the comparison is there, hidden");
+        assert!(list < compare, "the comparison comes after the list");
+        assert!(html[list..compare].contains("class=\"unit\""), "the cards are in the list");
+        assert!(!html[compare..].contains("class=\"unit\""), "no card is in the comparison");
+        for id in ["compare-table", "differences", "compare-back", "tray", "picked", "compare-go", "compare-clear"] {
+            assert_eq!(html.matches(&format!("id=\"{id}\"")).count(), 1, "{id} is on the page once");
         }
     }
 }
