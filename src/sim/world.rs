@@ -1853,7 +1853,11 @@ impl SimWorld {
         let Some(route) = route else {
             return;
         };
-        let crossing = i64::from(arrive_radius.to_bits()) * 4 / i64::from(speed.to_bits().max(1));
+        // Its time runs from the start, not from when it reaches the rally point: a unit that
+        // cannot get there, such as one hemmed in by structures built round its factory's door,
+        // stops once it is up, rather than stand pushing for the rest of the match.
+        let trip = sqrt_wide(here.distance_squared(&slot)) + arrive_radius;
+        let crossing = i64::from(trip.to_bits()) * 4 / i64::from(speed.to_bits().max(1));
         let slot_ticks = (crossing + SLOT_EXTRA_TICKS).min(i64::from(u32::MAX)) as u32;
         let passable = |point: Vec2Fp| self.terrain.passable_for(class, point);
         let direct = straight_way_is_clear(&passable, here, self.flow_field.goal(route).unwrap_or(rally), radius);
@@ -2191,6 +2195,15 @@ impl SimWorld {
                 // submarine's deck gun at something on land its torpedoes cannot reach.
                 let extra_engaged = combat.forced_target.is_some() && extras.is_some_and(|extras| extras.0.iter().any(|weapon| weapon.target == combat.forced_target));
                 let may_walk = (order.kind == OrderKind::Move || (combat.target.is_none() && !extra_engaged) || combat.line_blocked) && !shelling_ground;
+                if let (Some(_), true, false) = (order.slot, order.settles, arrived) {
+                    // On its way to a rally point, its time runs all the way (`send_to_rally`).
+                    if order.slot_ticks == 0 {
+                        flow.release(order.route);
+                        *order = Order::IDLE;
+                    } else {
+                        order.slot_ticks -= 1;
+                    }
+                }
                 if let Some(slot) = order.slot {
                     // Close enough to the group's goal to leave the route and walk to its own spot.
                     if arrived {
