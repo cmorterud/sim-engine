@@ -85,6 +85,12 @@ fn extractors_can_only_go_on_deposits() {
     assert!(!world.can_place(generator, 50, 50), "other structures must not cover a deposit");
 }
 
+/// The site's cost: the T1 Power Generator's mass and build time, from the data.
+fn site_cost(world: &SimWorld) -> (f64, f64) {
+    let generator = world.blueprints.get(id(world, "power_generator"));
+    (generator.mass.to_num::<f64>(), generator.build_time.to_num::<f64>())
+}
+
 /// Sets up one engineer already next to a site, with resources under the test's control.
 fn engineer_at_site(world: &mut SimWorld) -> (SimId, SimId) {
     let engineer_blueprint = id(world, "t1_engineer");
@@ -102,18 +108,20 @@ fn construction_takes_build_time_divided_by_build_power() {
     let mut world = test_world();
     set_resources(&mut world, Team::Blue, 10_000, 100_000);
     let (_, site) = engineer_at_site(&mut world);
-    // 125 build time at 5 power is 25 s, or 250 ticks.
+    // Its build time at 5 power: 122 is 24.4 s, or 244 ticks.
+    let (mass, build_time) = site_cost(&world);
+    let wanted = (build_time / 5.0 * 10.0).round() as i32;
     let mut ticks = 0;
     while !is_finished(&world, site) {
         world.advance_tick(&[]);
         ticks += 1;
         assert!(ticks < 400, "still at {}", progress(&world, site));
     }
-    assert!((248..=252).contains(&ticks), "took {ticks} ticks");
+    assert!((wanted - 2..=wanted + 2).contains(&ticks), "took {ticks} ticks, not about {wanted}");
     let health = *world.ecs.get::<&Health>(entity(&world, site)).unwrap();
     assert!(health.current >= health.max * 99 / 100, "a finished site should have nearly full health, not {}", health.current);
     let spent = 10_000.0 - world.economies[0].mass.to_num::<f64>();
-    assert!((74.0..=76.0).contains(&spent), "spent {spent} materiel, but the cost is 75");
+    assert!((spent - mass).abs() <= 1.0, "spent {spent} materiel, but the cost is {mass}");
 }
 
 #[test]
@@ -127,9 +135,12 @@ fn mass_stall_slows_work_in_proportion_to_supply() {
     run(&mut world, 5);
     let before = progress(&world, site);
     run(&mut world, 100);
-    // Demand is 3 mass/s (75 mass over 25 s) against 2 mass/s of income, so work runs at 2/3 speed.
+    // Demand is about 3 mass/s (73 mass over 24.4 s) against 2 mass/s of income, so work runs at
+    // about 2/3 speed.
+    let (mass, build_time) = site_cost(&world);
+    let (ticks, demand) = (build_time / 5.0 * 10.0, mass / (build_time / 5.0));
     let rate = (progress(&world, site) - before) / 100.0;
-    let expected = (1.0 / 250.0) * (2.0 / 3.0);
+    let expected = (1.0 / ticks) * (2.0 / demand);
     assert!((rate - expected).abs() < expected * 0.02, "rate {rate}, expected {expected}");
     assert!(world.economies[0].mass.to_num::<f64>() < 0.5, "a stalled team spends what comes in");
 }
@@ -149,10 +160,11 @@ fn storage_buffers_a_stall_until_it_runs_out() {
     let mut world = test_world();
     set_resources(&mut world, Team::Blue, 30, 100_000);
     let (_, site) = engineer_at_site(&mut world);
-    // At 3 mass/s, 30 mass lasts 10 s (100 ticks), which is 40% of the job.
+    // At about 3 mass/s, 30 mass lasts about 10 s (100 ticks), 30 of the job's 73, about 41%.
     run(&mut world, 150);
+    let (mass, _) = site_cost(&world);
     let done = progress(&world, site);
-    assert!((0.39..=0.41).contains(&done), "progress was {done}");
+    assert!((done - 30.0 / mass).abs() < 0.01, "progress was {done}, not {:.3}", 30.0 / mass);
 }
 
 #[test]
@@ -540,7 +552,8 @@ fn destroying_a_structure_opens_the_ground_and_leaves_a_wreck() {
     assert!(world.terrain.cell_is_open(50, 50), "the ground should be open again");
     assert_eq!(world.wrecks.len(), 1);
     let wreck = *world.ecs.get::<&sim_engine::sim::components::Wreck>(world.wrecks[0].1).unwrap();
-    assert_eq!(wreck.mass.to_num::<i64>(), 60, "81% of a 75-materiel generator");
+    let mass = world.blueprints.get(generator).mass.to_num::<f64>();
+    assert!((wreck.mass.to_num::<f64>() - mass * 0.81).abs() < 1.0, "81% of a {mass}-materiel generator, not {}", wreck.mass);
 }
 
 #[test]
