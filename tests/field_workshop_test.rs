@@ -1,5 +1,9 @@
 //! Engineering stations help whatever is being built, made, upgraded, or repaired within their
-//! reach, by themselves, and nothing beyond it.
+//! reach, by themselves, and nothing beyond it. The Field Workshops left the roster on 2026-11-27
+//! (the design owner's pick); these tests load them from tests/fixtures/retired_units.toml, so that
+//! the mechanic stays tested for data that uses it.
+
+mod common;
 
 use sim_engine::math::fp::fp_int;
 use sim_engine::sim::blueprints::{BlueprintId, Res};
@@ -11,6 +15,7 @@ use sim_engine::sim::world::SimWorld;
 fn test_world() -> SimWorld {
     let config = SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, ..SimConfig::default() };
     let mut world = SimWorld::new(config, 1);
+    common::retire_into(&mut world);
     for economy in &mut world.economies {
         economy.base_mass_capacity = Res::from_num(100_000);
         economy.base_energy_capacity = Res::from_num(1_000_000);

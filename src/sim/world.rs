@@ -193,6 +193,9 @@ pub struct UnitView {
     /// Whether it belongs to an ally: a player of its team other than the team's first, the
     /// one a person plays. Theirs to command, not the person's, so it cannot be selected.
     pub ally: bool,
+    /// Whose it is, where the viewer knows: not for an enemy structure remembered out of sight.
+    /// The interface shows it in that player's color.
+    pub owner: Option<PlayerId>,
 }
 
 /// A factory's production state, for the build menu. Only for the viewer's team.
@@ -5011,6 +5014,7 @@ impl SimWorld {
                     id,
                     team: stats.team,
                     ally: stats.owner != self.first_player(stats.team),
+                    owner: Some(stats.owner),
                     x,
                     y,
                     z,
@@ -5074,6 +5078,7 @@ impl SimWorld {
                     id: record.id,
                     team: viewer.enemy(),
                     ally: false,
+                    owner: None,
                     x: record.x,
                     y: record.y,
                     z: record.z,
