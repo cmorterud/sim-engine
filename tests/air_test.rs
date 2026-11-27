@@ -389,12 +389,32 @@ fn patrolling_aircraft_stay_up_refuel_when_low_and_go_back_to_their_patrol() {
     assert!(after.fuel > after.max_fuel * 9 / 10);
 }
 
-/// A gunship circles what it attacks, anticlockwise, at half its top speed and about half its range out, rather than make
-/// passes, and its turret keeps on the target all the way round: once it is circling it lands
-/// every shot its reload allows (the design owner, 2026-11-27). Both gunships, and the heavy
-/// gunship's railgun too, which only fires at aircraft, is left out here.
 #[test]
-fn gunships_circle_what_they_attack_and_keep_firing() {
+fn gunships_hover_over_what_they_attack() {
+    let mut world = world();
+    let generator = world.spawn_finished_structure(world.blueprints.id("power_generator"), Team::Red, 150, 125).unwrap();
+    let gunship = spawn(&mut world, "t2_gunship", Team::Blue, point(1_000, 1_000));
+    world.advance_tick(&[SimCommand::Attack { units: vec![gunship], target: generator }]);
+    let target = world.unit_position(generator).unwrap().xy();
+    let mut hovered = false;
+    for _ in 0..600 {
+        world.advance_tick(&[]);
+        if world.unit_health(generator).is_none() {
+            break;
+        }
+        let near = distance(&world, gunship, target) < 440;
+        hovered |= near && flight(&world, gunship).speed == Fp::ZERO;
+    }
+    assert!(hovered, "it should stop in the air within range");
+    assert!(world.unit_health(generator).is_none(), "and shoot the generator to pieces");
+    assert!(flight(&world, gunship).airborne());
+}
+
+/// Hovering over its work, a gunship drifts back and forth about where it stopped, never far, and
+/// its turret keeps on the target: it lands every shot its reload allows (the design owner,
+/// 2026-11-27).
+#[test]
+fn hovering_gunships_bob_and_keep_firing() {
     for key in ["t2_gunship", "t3_heavy_gunship"] {
         let mut world = world();
         let at = point(2_560, 2_560);
@@ -406,42 +426,24 @@ fn gunships_circle_what_they_attack_and_keep_firing() {
         world.ecs.get::<&mut sim_engine::sim::components::Combat>(entity).unwrap().enabled = false;
         let gunship = spawn(&mut world, key, Team::Blue, point(1_200, 2_560));
         world.advance_tick(&[SimCommand::Attack { units: vec![gunship], target }]);
-        let def = world.blueprints.get(world.blueprints.id(key)).clone();
-        let weapon = def.weapon.expect("a gunship has a gun");
-        let range = i64::from(weapon.range.to_num::<i32>());
-        // Until it is in range and up to speed.
-        let settled = (0..600).find(|_| {
+        let weapon = world.blueprints.get(world.blueprints.id(key)).weapon.expect("a gunship has a gun");
+        let stopped = (0..600).find(|_| {
             world.advance_tick(&[]);
-            distance(&world, gunship, at) < range * 3 / 4 && flight(&world, gunship).speed == def.speed / 2
+            flight(&world, gunship).hovering_since != u32::MAX
         });
-        assert!(settled.is_some(), "{key} should come round onto its circle");
-        run(&mut world, 50);
+        assert!(stopped.is_some(), "{key} should come to hover over its target");
+        run(&mut world, 60);
         let before = world.unit_health(target).unwrap();
-        let bearing = |world: &SimWorld| {
-            let here = world.unit_position(gunship).unwrap().xy();
-            f64::from((here.y - at.y).to_num::<i32>()).atan2(f64::from((here.x - at.x).to_num::<i32>()))
-        };
-        let (mut turned, mut last) = (0.0_f64, bearing(&world));
-        let ticks = 300;
+        let start = world.unit_position(gunship).unwrap().xy();
+        let (mut farthest, ticks) = (0, 300);
         for _ in 0..ticks {
             world.advance_tick(&[]);
-            let now = bearing(&world);
-            let mut step = now - last;
-            if step > std::f64::consts::PI {
-                step -= std::f64::consts::TAU;
-            } else if step < -std::f64::consts::PI {
-                step += std::f64::consts::TAU;
-            }
-            (turned, last) = (turned + step, now);
-            let off = distance(&world, gunship, at);
-            assert!(off > range / 4 && off < range * 3 / 4, "{key} should keep about half its range out, not {off} of {range}");
-            assert_eq!(flight(&world, gunship).speed, def.speed / 2, "{key} should keep flying as it circles");
+            farthest = farthest.max(distance(&world, gunship, start));
         }
-        assert!(turned > std::f64::consts::TAU, "{key} should go right round its target anticlockwise, not {:.0} degrees", turned.to_degrees());
+        assert!(farthest > 20 && farthest < 200, "{key} should drift a little about where it hovers, not {farthest}");
         let dealt = (before - world.unit_health(target).unwrap()).to_num::<f64>();
         let most = f64::from(ticks) / f64::from(weapon.reload_ticks) * weapon.damage.to_num::<f64>();
-        assert!(dealt >= most * 0.95, "{key} should land every shot as it circles: {dealt:.0} of {most:.0}");
-        assert!(flight(&world, gunship).airborne());
+        assert!(dealt >= most * 0.95, "{key} should land every shot as it drifts: {dealt:.0} of {most:.0}");
     }
 }
 

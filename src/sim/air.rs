@@ -81,22 +81,25 @@ fn inside_turn(facing: Vec2Fp, offset: Vec2Fp, radius: Fp) -> bool {
     wide_mul(along, along) + wide_mul(side, side) < wide_mul(radius, radius)
 }
 
-/// Which way a gunship circling `center` at `radius` heads from `here`: along the circle,
-/// anticlockwise, and in or out across it by how far off it is, so that it comes onto it and keeps
-/// to it. Anticlockwise for both teams, since a half turn of the map keeps it anticlockwise.
-/// Rounded toward zero, so that mirror images circle in mirror image.
-fn orbit_heading(here: Vec2Fp, center: Vec2Fp, radius: Fp) -> Vec2Fp {
-    let out = here - center;
-    if out == Vec2Fp::ZERO || radius <= Fp::ZERO {
-        return Vec2Fp::new(Fp::ONE, Fp::ZERO);
-    }
-    let distance = crate::math::fp::sqrt_wide(out.length_squared());
-    let out = out.normalized();
-    // How far off the circle, as a share of its radius: out beyond it, in inside it, at most one.
-    let off = (distance - radius).saturating_div(radius).clamp(-Fp::ONE, Fp::ONE);
-    let along = Vec2Fp::new(-out.y, out.x);
-    let across = out.scaled(off);
-    Vec2Fp::new(along.x - across.x, along.y - across.y).normalized()
+/// Ticks a hovering gunship drifts one way across its line to its target before it drifts back,
+/// and the share of its top speed it drifts at; and the same for its drift in and out along that
+/// line, slower and out of step, so that a group over its work is a loose, bobbing blob rather
+/// than a still knot (the design owner, 2026-11-27).
+pub const BOB_ACROSS_TICKS: u32 = 20;
+pub const BOB_ACROSS_SHARE: i32 = 8;
+pub const BOB_ALONG_TICKS: u32 = 30;
+pub const BOB_ALONG_SHARE: i32 = 16;
+
+/// How a gunship hovering since `since` drifts this tick, facing `facing` (towards its target):
+/// across, then along, each a half swing first, so that it rocks about where it stopped. It
+/// depends only on how long it has hovered and which way it faces, so mirror images drift in
+/// mirror image, and gunships that stopped on different ticks drift out of step.
+fn bob(since: u32, tick: u32, facing: Vec2Fp, top_speed: Fp) -> Vec2Fp {
+    let hovered = tick.wrapping_sub(since);
+    let sign = |period: u32| if ((hovered + period / 2) / period).is_multiple_of(2) { Fp::ONE } else { -Fp::ONE };
+    let across = Vec2Fp::new(-facing.y, facing.x).scaled(top_speed * sign(BOB_ACROSS_TICKS) / BOB_ACROSS_SHARE);
+    let along = facing.scaled(top_speed * sign(BOB_ALONG_TICKS) / BOB_ALONG_SHARE);
+    Vec2Fp::new(across.x + along.x, across.y + along.y)
 }
 
 /// Below this share of a full tank, a patrolling aircraft goes to refuel.
@@ -211,6 +214,7 @@ impl SimWorld {
         let occupancy = &self.occupancy;
         let max = terrain.max_coordinate_raw();
         let center = Vec2Fp::new(Fp::from_bits(max / 2), Fp::from_bits(max / 2));
+        let tick = self.current_tick;
         let locate = |target: SimId| -> Option<GridEntry> { units.binary_search_by_key(&target, |unit| unit.0).ok().map(|index| *grid.entry(index)) };
         let mut query = self.ecs.query_mut::<(
             &mut Position,
@@ -308,15 +312,20 @@ impl SimWorld {
                 }
             }
 
-            // A gunship circles what it attacks once well within range, at half its top speed and half
-            // its range out, rather than make passes (the design owner, 2026-11-27; it hovered over
-            // it until then).
+            // A gunship stops over what it attacks, well within range, turns to face it, and drifts
+            // back and forth there (`bob`).
             let hold = flight.hovers
                 && attacking
                 && heading_for.is_some_and(|point| {
                     let reach = combat.range * 3 / 4;
                     here.distance_squared(&point) <= wide_mul(reach, reach)
                 });
+            // It notes when it came to a stop over its work, which sets how it drifts there.
+            if !hold {
+                flight.hovering_since = u32::MAX;
+            } else if flight.hovering_since == u32::MAX {
+                flight.hovering_since = tick;
+            }
             // With nothing to do, it lands, if there is open ground below to land on. Patrols
             // and trips to refuel keep it in the air.
             let margin = radius.saturating_mul(fp_int(3));
@@ -363,7 +372,7 @@ impl SimWorld {
                 flight.speed = down(flight.speed, stats.max_speed, Fp::ZERO);
                 flight.altitude = down(flight.altitude, flight.elevation, Fp::ZERO);
             } else if hold {
-                flight.speed = up(flight.speed, stats.max_speed, top_speed / 2);
+                flight.speed = down(flight.speed, stats.max_speed, Fp::ZERO);
                 flight.altitude = up(flight.altitude, flight.elevation, height);
             } else {
                 flight.speed = up(flight.speed, stats.max_speed, tailing.unwrap_or(top_speed).min(turning_in.unwrap_or(top_speed)));
@@ -415,12 +424,10 @@ impl SimWorld {
                         let half = break_off / 2;
                         flight.breaking_off = behind && distance_squared < wide_mul(half, half);
                     }
-                    // A gunship turns tight enough that nothing is out of its reach. Easing off
+                    // A gunship can turn on the spot, so nothing is out of its reach. Easing off
                     // to turn in, it turns as tight as its speed allows.
                     let unreachable = !flight.hovers && inside_turn(facing, offset, if turning_in.is_some() { turn_radius(speed, turning.max_turn) } else { radius });
-                    if hold {
-                        rotate_toward(facing, orbit_heading(here, point, combat.range / 2), turning.max_turn)
-                    } else if flight.breaking_off || offset == Vec2Fp::ZERO || unreachable {
+                    if flight.breaking_off || offset == Vec2Fp::ZERO || unreachable {
                         facing
                     } else {
                         rotate_toward(facing, offset.normalized(), turning.max_turn)
@@ -446,6 +453,12 @@ impl SimWorld {
             let turned = Vec2Fp::new(facing.x * now.x + facing.y * now.y, facing.x * now.y - facing.y * now.x);
             flight.turn = Vec2Fp::new((flight.turn.x * 3 + turned.x) / 4, (flight.turn.y * 3 + turned.y) / 4);
             let step = turning.facing.scaled(speed);
+            let step = if hold {
+                let drift = bob(flight.hovering_since, tick, turning.facing, top_speed);
+                Vec2Fp::new(step.x + drift.x, step.y + drift.y)
+            } else {
+                step
+            };
             let next = Vec2Fp::new(Fp::from_bits((here.x + step.x).to_bits().clamp(0, max)), Fp::from_bits((here.y + step.y).to_bits().clamp(0, max)));
             // Landed, it rests on the ground like any other unit.
             position.0 = Vec3Fp::new(next.x, next.y, flying_height(terrain, next, flight.altitude.max(stats.radius)));

@@ -115,7 +115,7 @@ fn stats(unit: &Blueprint, db: &BlueprintDb) -> Vec<(&'static str, String)> {
         add(
             "Flight",
             match (flight.hovers, flight.break_off > Fp::ZERO) {
-                (true, _) => "circles its target".to_string(),
+                (true, _) => "hovers over its target".to_string(),
                 (false, true) => format!("makes passes, breaking off {} past", number(fp(flight.break_off), 0)),
                 (false, false) => "makes passes".to_string(),
             },
