@@ -69,7 +69,8 @@ pub const TREE_RADIUS_UNITS: i32 = 4;
 /// A rock holds this much mass for each unit of its radius.
 pub const ROCK_MASS_PER_RADIUS: i64 = 5;
 /// Wrecks keep this share of a unit's mass cost, in thousandths, before the share for its tech
-/// level and for sinking (GAME_SPECIFICATION.md §6.1): the inspiration's Wreckage.MassMult.
+/// level and for sinking (GAME_SPECIFICATION.md §6.1): the inspiration's Wreckage.MassMult. These
+/// wreck rules are the design owner's, written down in `[constants.wreckage]` (2026-11-27).
 pub const WRECK_MASS_PERMILLE: i64 = 900;
 /// The inspiration's further share of a wreck's mass by tech level, in thousandths: T1, T2, T3, and
 /// experimental. Commanders and field rigs keep T1's.

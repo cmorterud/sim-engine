@@ -635,23 +635,24 @@ struct Explosion {
 /// Mixed into the world's seed for the scatter streams, so that they do not repeat its numbers.
 const SCATTER_SEED: u64 = 0x5CA7_7E25_0FF5_E7ED;
 
-/// The highest veteran rank.
+/// The highest veteran rank. These veterancy rules are the design owner's, written down in
+/// `[constants.veterancy]` (data/balance_targets.toml, 2026-11-27; tests/constants_test.rs).
 pub const MAX_RANK: u8 = 5;
 /// Each rank adds this share of a unit's base health, as the inspiration's veterancy does: 10% a
 /// level.
-pub(super) const RANK_HEALTH_PERMILLE: i64 = 100;
+pub const RANK_HEALTH_PERMILLE: i64 = 100;
 /// Reaching a rank heals this share of the unit's base health at once: the inspiration's default of
 /// 10%. The commander heals more at each level, as its blueprint sets.
-const PROMOTION_HEAL_PERMILLE: i64 = 100;
-const COMMANDER_PROMOTION_HEAL_PERMILLE: [i64; 5] = [100, 200, 300, 400, 500];
+pub const PROMOTION_HEAL_PERMILLE: i64 = 100;
+pub const COMMANDER_PROMOTION_HEAL_PERMILLE: [i64; 5] = [100, 200, 300, 400, 500];
 /// The inspiration's mass a level, as a multiple of the unit's own cost, in thousandths, by tech
 /// level: a rank n unit has destroyed n times that. The commander has its own steps instead.
-const VET_MASS_PERMILLE_BY_TIER: [i64; 3] = [2_000, 1_500, 1_250];
-const VET_MASS_PERMILLE_SUPPORT: i64 = 2_000;
-const COMMANDER_VET_MASS: [i64; 5] = [1_000, 2_250, 4_000, 6_500, 10_000];
+pub const VET_MASS_PERMILLE_BY_TIER: [i64; 3] = [2_000, 1_500, 1_250];
+pub const VET_MASS_PERMILLE_SUPPORT: i64 = 2_000;
+pub const COMMANDER_VET_MASS: [i64; 5] = [1_000, 2_250, 4_000, 6_500, 10_000];
 /// The inspiration's regeneration a second for each rank, by tech row: T1, T2, T3 and commanders,
 /// support commanders, experimentals. Ships, below experimental, take the row above their tier.
-const VET_REGEN_ROWS: [i64; 5] = [1, 3, 6, 9, 25];
+pub const VET_REGEN_ROWS: [i64; 5] = [1, 3, 6, 9, 25];
 
 /// The mass a unit must have destroyed to reach a rank, the inspiration's veterancy thresholds.
 pub fn vet_threshold(unit: &super::blueprints::Blueprint, rank: u8) -> Res {

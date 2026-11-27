@@ -864,3 +864,56 @@ t3_strategic_bomber = 0.90
 t2_torpedo_bomber = 0.82
 t2_gunship = 1.0
 t3_heavy_gunship = 1.0
+
+[constants]
+# Shared constants (2026-11-27, the design owner's OK to the plan): each is a family rule that
+# every unit of the family follows, an identity knob the design owner owns, or a mechanic rule, at
+# the numbers they have today (tests/constants_test.rs). Speeds are units a tick, as in
+# data/units.toml. Land units' shells take their flight times from their roles ([micro],
+# balance::t1_land_roles and on).
+#
+# Family rules. Every ship's gun at the surface flies at one speed, but the battleship's lobbed
+# shells, which its broadside and [micro] set.
+ship_gun_speed = 60
+# Every torpedo: from a ship, a submarine, an aircraft or a launcher.
+torpedo_speed = 30
+# A tactical missile by what launches it: a structure's, slow, from far off; a ship's or a
+# submarine's; a vehicle's, quick, from close in. Every strategic missile at one speed.
+tactical_missile_speed = { structure = 28, ship = 32, vehicle = 40 }
+strategic_missile_speed = 25
+# A fighter's gun: the T1 Interceptor's, the T3 fighter's, and the Fighter-Bomber's anti-air.
+fighter_gun_speed = 180
+# The T1 Interceptor, the T1 Bomber and the Fighter-Bomber turn on one radius, in units, each at
+# its own speed.
+fighter_turn_radius = 64
+#
+# Identity knobs, the design owner's, kept in data/units.toml: each hull's turn rate and turn
+# radius; each unit's speed, under [air]'s ratio rules; each aircraft's turn rate outside the
+# radius family (the T3 fighter's, the gunships', the Strategic Bomber's, the scouts' and the
+# transports'); each anti-air gun's shell speed outside the fighters'; each weapon's spread; each
+# reload that no [kills], [volleys] or broadside rule sets; and the split of a ship's or an
+# aircraft's cost between mass and energy (land units spend 5 energy a materiel, the anchor's).
+
+[constants.veterancy]
+# A unit reaches each rank by destroying its own mass this many times over, in thousandths, by its
+# tier (a field rig as T1); the commander by its own steps of mass destroyed. Each rank adds this
+# share of its base health, in thousandths, and reaching one heals this share at once (the
+# commander more at each rank). Each rank regenerates this much a second, by row: T1, T2, T3 and
+# commanders, field rigs, experimentals; ships take the row above their tier.
+max_rank = 5
+mass_permille_by_tier = [2000, 1500, 1250]
+mass_permille_field_rig = 2000
+commander_mass = [1000, 2250, 4000, 6500, 10000]
+rank_health_permille = 100
+promotion_heal_permille = 100
+commander_promotion_heal_permille = [100, 200, 300, 400, 500]
+regen_rows = [1, 3, 6, 9, 25]
+
+[constants.wreckage]
+# A wreck keeps this share of the unit's mass cost, in thousandths, then this share again by its
+# tier (T1 to experimental; commanders and field rigs as T1), and this share again if it sank. It
+# has this share of the unit's health.
+mass_permille = 900
+tech_permille = [900, 800, 700, 600]
+sunk_permille = 600
+health_permille = 900
