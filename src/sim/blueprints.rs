@@ -1357,6 +1357,11 @@ impl BlueprintDb {
         current.is_some_and(|current| current == enhancement || self.builds_on(current, enhancement))
     }
 
+    /// Every enhancement, in the order of the data.
+    pub fn enhancements(&self) -> impl Iterator<Item = &Enhancement> {
+        self.enhancements.iter()
+    }
+
     /// The enhancements a unit can take, in the order of the data.
     pub fn enhancements_for(&self, blueprint: BlueprintId) -> impl Iterator<Item = &Enhancement> {
         self.enhancements.iter().filter(move |enhancement| enhancement.units.contains(&blueprint))
