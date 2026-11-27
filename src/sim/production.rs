@@ -19,6 +19,10 @@ use crate::math::fp::{fp_int, wide_mul, Fp, FpWide, Vec2Fp};
 
 /// A new site starts with this share of its health, so that it exists to be shot at.
 const SITE_STARTING_HEALTH_PERMILLE: i32 = 10;
+/// How long an engineer's arms take to reach out from stowed into their build pose, in ticks:
+/// half a second, long enough to be seen. It starts work only once they are out, and they fold
+/// back as it drives off, so it pays this again only after moving, not between jobs in reach.
+pub const ENGINEER_ARM_TICKS: u8 = 5;
 
 /// One team's resources. Everything is per tick, except for stored amounts and capacities.
 #[derive(Copy, Clone, Debug, Default)]
@@ -532,6 +536,7 @@ impl SimWorld {
                     missile_height: (weapon.kind == WeaponKind::TacticalMissile).then_some(weapon.cruise_height),
                     target: None,
                     turret: weapon.turn_rate.map(|rate| Turret::mounted(facing, rate, weapon.mount, weapon.aft, weapon.laid_for_range())),
+                    arc: weapon.arc,
                     spread: weapon.spread,
                     stun_ticks: weapon.stun_ticks,
                     salvo: weapon.salvo.map(super::components::Salvo::new),
@@ -628,7 +633,8 @@ impl SimWorld {
         } else if power > Fp::ZERO && (!unit.is_structure() || unit.assists) {
             // A structure's build power only drives its own upgrades, but for an engineering
             // station's, which helps whatever is in reach.
-            self.ecs.insert_one(entity, Builder { power, range, tasks: Vec::new() }).expect("entity was just spawned");
+            let arm_ticks = if unit.class == UnitClass::Engineer { ENGINEER_ARM_TICKS } else { 0 };
+            self.ecs.insert_one(entity, Builder { power, range, tasks: Vec::new(), arm_ticks, arms: 0, arms_held: false }).expect("entity was just spawned");
             self.builders.push((id, entity));
         }
     }
@@ -1146,6 +1152,7 @@ impl SimWorld {
         for index in 0..self.builders.len() {
             let (id, entity) = self.builders[index];
             self.step_builder(id, entity, &mut power_by_target);
+            self.fold_unheld_arms(entity);
         }
         for index in 0..self.upgrading.len() {
             let (id, entity) = self.upgrading[index];
@@ -1329,6 +1336,42 @@ impl SimWorld {
         paid
     }
 
+    /// Reaches a builder's arms out a tick further, as it stands at its work: whether they were
+    /// already all the way out, so that it can work this tick.
+    fn reach_out_arms(&mut self, entity: hecs::Entity) -> bool {
+        let mut builder = self.ecs.get::<&mut Builder>(entity).expect("builder list only holds builders");
+        builder.arms_held = true;
+        if builder.arms >= builder.arm_ticks {
+            return true;
+        }
+        builder.arms += 1;
+        false
+    }
+
+    /// Folds a builder's arms back a tick, if it did not stand at its work this tick and is
+    /// moving or has nothing left to do. One waiting by its task, such as a factory it helps
+    /// that has nothing queued yet, keeps them out.
+    fn fold_unheld_arms(&mut self, entity: hecs::Entity) {
+        let moving = self.ecs.get::<&Order>(entity).is_ok_and(|order| order.kind != OrderKind::Idle);
+        let mut builder = self.ecs.get::<&mut Builder>(entity).expect("builder list only holds builders");
+        if !builder.arms_held && builder.arms > 0 && (moving || builder.tasks.is_empty()) {
+            builder.arms -= 1;
+        }
+        builder.arms_held = false;
+    }
+
+    /// How far out each builder's arms are that has them out at all, as a share in thousandths,
+    /// sorted by `SimId`. Drawing only.
+    pub fn builder_arms(&self) -> Vec<(SimId, u16)> {
+        self.builders
+            .iter()
+            .filter_map(|&(id, entity)| {
+                let builder = self.ecs.get::<&Builder>(entity).ok()?;
+                (builder.arms > 0).then(|| (id, (u32::from(builder.arms) * 1_000 / u32::from(builder.arm_ticks.max(1))) as u16))
+            })
+            .collect()
+    }
+
     fn step_builder(&mut self, id: SimId, entity: hecs::Entity, power_by_target: &mut BTreeMap<(SimId, WorkKind), Fp>) {
         // Upgrading takes all of its build power, and its other work waits, as does a teleport.
         if self.is_busy_in_place(entity) {
@@ -1373,12 +1416,18 @@ impl SimWorld {
             }
             TaskStep::Work { target, kind } => {
                 self.halt(id, entity);
+                if !self.reach_out_arms(entity) {
+                    return;
+                }
                 *power_by_target.entry((target, kind)).or_insert(Fp::ZERO) += power;
                 self.work_sources.push((target, kind, id, power));
                 self.work_links.push(WorkLink { builder: id, target, reclaim: false });
             }
             TaskStep::Reclaim { target, entity: wreck_entity } => {
                 self.halt(id, entity);
+                if !self.reach_out_arms(entity) {
+                    return;
+                }
                 self.work_links.push(WorkLink { builder: id, target, reclaim: true });
                 let per_tick = |rate: i64| fp_to_res(power) * rate / TICKS_PER_SECOND;
                 let mut wreck = self.ecs.get::<&mut Wreck>(wreck_entity).expect("task checked the wreck");
@@ -2533,6 +2582,10 @@ impl SimWorld {
             hasher.write(&[5]);
             hasher.write(&builder.power.to_bits().to_le_bytes());
             hasher.write(&builder.range.to_bits().to_le_bytes());
+            // Only for builders with arms to reach out, so that checksums without engineers hold.
+            if builder.arm_ticks > 0 {
+                hasher.write(&[builder.arms]);
+            }
             for task in &builder.tasks {
                 let (kind, first, second, third, fourth) = match *task {
                     BuildTask::Build { blueprint, cell_x, cell_y, site } => {

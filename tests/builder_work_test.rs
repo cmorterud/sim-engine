@@ -54,10 +54,14 @@ fn every_builder_captures_in_half_the_build_time_for_the_energy() {
         let (mut world, builder, target) = setup();
         let (mut control, _, _) = setup();
         let target_def = world.blueprints.get(world.blueprints.id("t1_medium_tank")).clone();
-        let power = world.ecs.get::<&Builder>(world.unit_entity(builder).unwrap()).unwrap().power;
+        let (power, arm_ticks) = {
+            let held = world.ecs.get::<&Builder>(world.unit_entity(builder).unwrap()).unwrap();
+            (held.power, held.arm_ticks)
+        };
         world.advance_tick(&[SimCommand::Capture { units: vec![builder], target }]);
         control.advance_tick(&[]);
-        let expected = target_def.build_time.to_num::<f64>() * 10.0 / 2.0 / power.to_num::<f64>();
+        // An engineer reaches its arms out first, and only then starts.
+        let expected = target_def.build_time.to_num::<f64>() * 10.0 / 2.0 / power.to_num::<f64>() + f64::from(arm_ticks);
         let taken = (0..(expected as u32 * 2 + 100)).find(|_| {
             world.advance_tick(&[]);
             control.advance_tick(&[]);

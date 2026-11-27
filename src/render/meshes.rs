@@ -592,6 +592,35 @@ impl Material {
 
 /// How a part moves, as flags above a vertex's material. Each moves about the vertex's pivot,
 /// driven by the instance's phase (the hull color's last byte) or action (the glow's last byte).
+/// An engineer's arms, in its shape's own space: how far apart side by side, where each turns at
+/// its shoulder and its elbow, and the tip of the tool at its end that its beam leaves from, as
+/// (forward, up). The shader's `ENGINEER_SHOULDER` matches.
+pub const ENGINEER_ARM_SPACING: f32 = 0.12;
+pub const ENGINEER_SHOULDER: [f32; 2] = [-0.12, 0.06];
+pub const ENGINEER_ELBOW: [f32; 2] = [0.12, 0.36];
+pub const ENGINEER_TOOL_TIP: [f32; 2] = [0.38, 0.18];
+/// How far an engineer's arm is folded when stowed, in radians, at the shoulder (back over its
+/// hull) and at the elbow (the forearm folded down along the upper arm). The shader's match.
+pub const ENGINEER_FOLD: [f32; 2] = [1.75, -1.85];
+
+/// Where the tip of the tool on the end of each of an engineer's `arms` arms is, in its shape's
+/// own space, with its arms reached out by `reach`, from 0 for stowed to 1, as the shader folds them.
+pub fn engineer_tool_tips(arms: usize, reach: f32) -> impl Iterator<Item = [f32; 3]> {
+    let fold = 1.0 - reach.clamp(0.0, 1.0);
+    let turn = |point: [f32; 2], pivot: [f32; 2], angle: f32| {
+        let (sin, cos) = angle.sin_cos();
+        let arm = [point[0] - pivot[0], point[1] - pivot[1]];
+        [pivot[0] + arm[0] * cos - arm[1] * sin, pivot[1] + arm[0] * sin + arm[1] * cos]
+    };
+    let tip = turn(turn(ENGINEER_TOOL_TIP, ENGINEER_ELBOW, fold * ENGINEER_FOLD[1]), ENGINEER_SHOULDER, fold * ENGINEER_FOLD[0]);
+    (0..arms).map(move |index| [(index as f32 - (arms as f32 - 1.0) * 0.5) * ENGINEER_ARM_SPACING, tip[0], tip[1]])
+}
+
+/// Where a commander's build beam leaves it, in its shape's own space: the emitter on its left forearm.
+pub const COMMANDER_TOOL_TIP: [f32; 3] = [-0.37, 0.34, -0.02];
+/// Where a field rig's build beam leaves it: the tip of the tool arm on its left.
+pub const FIELD_RIG_TOOL_TIP: [f32; 3] = [-0.22, 0.38, 0.05];
+
 pub mod motion {
     /// Turns about the vertical line through the pivot, once per phase.
     pub const SPIN: u32 = 1 << 8;
@@ -607,6 +636,12 @@ pub mod motion {
     /// A door leaf, slid by the action, from shut at 0 to its pivot's offset at 1: for a door,
     /// the pivot is the way it slides and how far, not a point.
     pub const DOOR: u32 = 1 << 13;
+    /// An engineer's upper arm, folded back about its shoulder, the pivot, by one less the
+    /// instance's reach: stowed at 0, reached out at 1.
+    pub const ARM: u32 = 1 << 14;
+    /// An engineer's forearm, folded about its elbow, the pivot, and then with the upper arm
+    /// about the shoulder (`ENGINEER_SHOULDER`), by one less the instance's reach.
+    pub const FOREARM: u32 = 1 << 15;
     /// The bits that hold the material.
     pub const MATERIAL_MASK: u32 = 0xff;
     /// How far up the top byte holds how open the vertex is to the sky: 255 for nothing in
@@ -1285,26 +1320,37 @@ impl MeshBuilder {
     /// together at the elbow and the wrist so that they move as one, each with a tool at its end
     /// that glows at work. An engineer's tech level is the number of its arms.
     fn engineer_arms(&mut self, arms: usize) {
-        let spacing = 0.12;
+        let spacing = ENGINEER_ARM_SPACING;
         let xs: Vec<f32> = (0..arms).map(|index| (index as f32 - (arms as f32 - 1.0) * 0.5) * spacing).collect();
         let half = xs.last().copied().unwrap_or(0.0);
+        let [shoulder_y, shoulder_z] = ENGINEER_SHOULDER;
+        let [elbow_y, elbow_z] = ENGINEER_ELBOW;
+        let [tip_y, tip_z] = ENGINEER_TOOL_TIP;
         self.paint(Material::Trim);
         self.frustum([0.0, -0.12], [-0.12, 0.02], [0.24 + half * 0.4, 0.2 + half * 0.4], 8);
         self.paint(Material::Metal);
         self.frustum([0.0, -0.12], [0.02, 0.1], [0.08 + half * 0.8, 0.07 + half * 0.8], 6);
+        // Each arm folds at the shoulder and the elbow: stowed back over the hull while it drives,
+        // and reached out in front while it works.
         for &x in &xs {
-            self.paint(Material::Hull);
-            self.beam([x, -0.12, 0.06], [x, 0.12, 0.36], 0.05, 0.05);
-            self.beam([x, 0.12, 0.36], [x, 0.36, 0.3], 0.042, 0.04);
-            self.paint(Material::Metal);
-            self.frustum([x, 0.38], [0.3, 0.36], [0.045, 0.045], 6);
+            let elbow = [x, elbow_y, elbow_z];
+            self.moving(motion::ARM, [x, shoulder_y, shoulder_z], |mesh| {
+                mesh.paint(Material::Hull);
+                mesh.beam([x, shoulder_y, shoulder_z], elbow, 0.05, 0.05);
+            });
+            self.moving(motion::FOREARM, elbow, |mesh| {
+                mesh.paint(Material::Hull);
+                mesh.beam(elbow, [x, tip_y - 0.02, 0.3], 0.042, 0.04);
+                mesh.paint(Material::Metal);
+                mesh.frustum([x, tip_y], [0.3, 0.36], [0.045, 0.045], 6);
+            });
             self.paint(Material::Glow);
-            self.moving(motion::PULSE, [x, 0.38, 0.25], |mesh| mesh.frustum([x, 0.38], [0.18, 0.3], [0.026, 0.056], 6));
+            self.moving(motion::PULSE | motion::FOREARM, elbow, |mesh| mesh.frustum([x, tip_y], [tip_z, 0.3], [0.026, 0.056], 6));
         }
         self.paint(Material::Metal);
-        self.block([-half - 0.05, 0.08, 0.3], [half + 0.05, 0.16, 0.42]);
+        self.moving(motion::ARM, [0.0, shoulder_y, shoulder_z], |mesh| mesh.block([-half - 0.05, 0.08, 0.3], [half + 0.05, 0.16, 0.42]));
         if arms > 1 {
-            self.block([-half - 0.03, 0.33, 0.27], [half + 0.03, 0.39, 0.33]);
+            self.moving(motion::FOREARM, [0.0, elbow_y, elbow_z], |mesh| mesh.block([-half - 0.03, 0.33, 0.27], [half + 0.03, 0.39, 0.33]));
         }
     }
 
@@ -1496,6 +1542,11 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.beam([x, 0.0, 0.18], [x, 0.08, 0.02], 0.06, 0.06);
             }
             mesh.bevel([-0.43, 0.06, -0.08], [-0.31, 0.24, 0.04], 0.03);
+            // The build emitter on the end of its left forearm, which its build beam leaves from.
+            mesh.paint(Material::Metal);
+            mesh.body(-0.37, &[[0.23, 0.045, 0.045, -0.02], [0.3, 0.035, 0.035, -0.02]], 6);
+            mesh.paint(Material::Glow);
+            mesh.moving(motion::PULSE, [-0.37, 0.32, -0.02], |mesh| mesh.body(-0.37, &[[0.3, 0.028, 0.028, -0.02], [0.34, 0.012, 0.012, -0.02]], 6));
             mesh.paint(Material::Metal);
             mesh.bevel([0.31, 0.0, -0.04], [0.45, 0.28, 0.1], 0.03);
             mesh.moving(motion::RECOIL, [0.38, 0.0, 0.03], |mesh| mesh.body(0.38, &[[0.26, 0.04, 0.04, 0.03], [0.5, 0.032, 0.032, 0.03]], 6));

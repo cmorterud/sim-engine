@@ -429,6 +429,9 @@ pub struct ExtraWeapon {
     pub missile_height: Option<Fp>,
     pub target: Option<SimId>,
     pub turret: Option<Turret>,
+    /// A gun fixed to the nose, as `NoseGun`: it fires only at what is within this of straight
+    /// ahead, the cosine of the half-angle. None for one that fires in any direction.
+    pub arc: Option<Fp>,
     /// How far from where it aims its shots land, as `Scatter`. Fixed from the blueprint.
     pub spread: Fp,
     /// What it hits is stunned this many ticks.
@@ -1034,6 +1037,14 @@ pub struct Builder {
     pub power: Fp,
     pub range: Fp,
     pub tasks: Vec<BuildTask>,
+    /// How many ticks its arms take to reach out into their build pose, or 0 for a builder that
+    /// works the moment it arrives. An engineer's do: it works only once they are out.
+    pub arm_ticks: u8,
+    /// How far out its arms are, in ticks, up to `arm_ticks`. They reach out a tick at a time
+    /// while it stands at its work, and fold back a tick at a time otherwise.
+    pub arms: u8,
+    /// Whether it stood at its work this tick, with its arms out or reaching out.
+    pub arms_held: bool,
 }
 
 #[derive(Clone, Debug)]

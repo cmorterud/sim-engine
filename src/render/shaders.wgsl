@@ -190,6 +190,13 @@ const RECOIL: u32 = 1024u;
 const FLASH: u32 = 2048u;
 const PULSE: u32 = 4096u;
 const DOOR: u32 = 8192u;
+const ARM: u32 = 16384u;
+const FOREARM: u32 = 32768u;
+// An engineer's shoulder, in its shape's own space (forward, up), and how far its arm folds
+// when stowed, in radians, at the shoulder and the elbow: meshes::ENGINEER_SHOULDER and
+// meshes::ENGINEER_FOLD.
+const ENGINEER_SHOULDER: vec2<f32> = vec2<f32>(-0.12, 0.06);
+const ENGINEER_FOLD: vec2<f32> = vec2<f32>(1.75, -1.85);
 const TAU: f32 = 6.2831853;
 // How far a leg swings either way, in radians, and how far a gun kicks back, as a share of the unit.
 const SWING_ANGLE: f32 = 0.45;
@@ -229,6 +236,17 @@ struct Animated {
     position: vec3<f32>,
     normal: vec3<f32>,
 };
+
+// Turns a point and its normal about the line through `pivot` running across the shape (along
+// x), by `angle`, from forward towards up.
+fn pitched(moved: Animated, pivot: vec2<f32>, angle: f32) -> Animated {
+    let c = cos(angle);
+    let s = sin(angle);
+    let arm = moved.position.yz - pivot;
+    let turned = pivot + vec2<f32>(arm.x * c - arm.y * s, arm.x * s + arm.y * c);
+    let normal = vec2<f32>(moved.normal.y * c - moved.normal.z * s, moved.normal.y * s + moved.normal.z * c);
+    return Animated(vec3<f32>(moved.position.x, turned), vec3<f32>(moved.normal.x, normal));
+}
 
 // Moves a vertex of a moving part, in the shape's own space, by the instance's phase (the
 // hull color's last byte) and action (the glow's last byte).
@@ -277,6 +295,20 @@ fn animate(position: vec3<f32>, normal: vec3<f32>, flags: u32, pivot: vec3<f32>,
     if ((flags & DOOR) != 0u) {
         // A door's pivot is the way it slides, and how far when fully open.
         point = point + pivot * action;
+    }
+    if ((flags & (ARM | FOREARM)) != 0u) {
+        // An engineer's arm, folded by one less its reach (the model's second column's last
+        // component): a forearm at its elbow first, then either part at the shoulder.
+        let fold = 1.0 - clamp(instance.m1.w, 0.0, 1.0);
+        var moved = Animated(point, turned);
+        if ((flags & FOREARM) != 0u) {
+            moved = pitched(moved, pivot.yz, fold * ENGINEER_FOLD.y);
+            moved = pitched(moved, ENGINEER_SHOULDER, fold * ENGINEER_FOLD.x);
+        } else {
+            moved = pitched(moved, pivot.yz, fold * ENGINEER_FOLD.x);
+        }
+        point = moved.position;
+        turned = moved.normal;
     }
     return Animated(point, turned);
 }
