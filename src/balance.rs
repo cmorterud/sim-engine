@@ -1218,11 +1218,13 @@ pub fn escorted_army(db: &BlueprintDb, materiel: f64, share: f64) -> [Side; 2] {
     [bought(db, "t1_medium_tank", materiel * (1.0 - share)), bought(db, "t1_mobile_aa", materiel * share)]
 }
 
-/// T1 air from its rules (`[air]` and `[kills]`), against T1 land frozen. No strength is solved
-/// for: each rule sets one number, in order. The bomb is the biggest that destroys a T1 tank in two; Mobile
-/// Anti-Air takes two bombs, at the anchor's health per mass; a
-/// bomber lasts the rule's time under one interceptor's gun; and Mobile Anti-Air's gun is what
-/// brings an army a fifth anti-air even with an equal materiel of bombers.
+/// T1 air from its rules (`[air]`, `[kills]` and `[kill_times]`), against T1 land frozen. No
+/// strength is solved for: each rule sets one number, in order. The bomb is the biggest that
+/// destroys a T1 tank in two; Mobile Anti-Air takes two bombs, at the anchor's health per mass; a
+/// bomber lasts the rule's time under one interceptor's gun; Mobile Anti-Air's gun destroys a
+/// bomber in its `[kill_times]` time; and the bomber costs what brings an army a fifth anti-air
+/// even with an equal materiel of bombers (2026-11-27), which sets the T1 air base
+/// (`[price_list]`). Its mass, energy and build time scale together to that cost.
 pub fn derive_t1_air(base: &BlueprintDb) -> BlueprintDb {
     let anchor = Anchor::from_targets();
     let bomber = base.id("t1_bomber");
@@ -1247,16 +1249,45 @@ pub fn derive_t1_air(base: &BlueprintDb) -> BlueprintDb {
     let interceptor_dps = damage_per_second(&interceptor);
     let bomber_health = (interceptor_dps * target_number("air", "interceptor_seconds_per_bomber_t1")).round();
     db = db.with_unit(bomber, |unit| unit.health = Fp::from_num(bomber_health));
-    // Mobile Anti-Air's gun: an escorted army's score against bombers rises with it.
-    let gun = db.get(anti_air).weapon.expect("anti-air has a gun").damage.to_num::<f64>();
+    // Mobile Anti-Air's gun: one destroys a bomber in the middle of its [kill_times] time.
+    let (least, most) = target_number_range("kill_times", "mobile_aa_t1_bomber");
+    let gun = (bomber_health / ((least + most) / 2.0) * 10.0).round() / 10.0;
+    db = db.with_unit(anti_air, |unit| unit.weapon.as_mut().expect("anti-air has a gun").damage = Fp::from_num(gun));
+    // The bomber's cost: where an army a fifth anti-air and an equal materiel of bombers break
+    // even. So many bombers, each costing the army's materiel over their number, break even where
+    // the army's health is scaled by `h`, at a cost of that times `h` (their cost counts in the
+    // fight through the veterancy their kills give). Whole bombers and whole bombs make one
+    // fight's answer jump by about a tenth from one count to the next, so it is the mean over
+    // five counts round the materiel's, recentred until it stays.
     let materiel = target_number("air", "check_materiel");
     let share = target_number("air", "anti_air_escort_share");
-    let gun_with = |db: &BlueprintDb, damage: f64| db.with_unit(anti_air, |unit| unit.weapon.as_mut().expect("anti-air has a gun").damage = Fp::from_num((damage * 10.0).round() / 10.0));
-    let multiple = nearest_strength(0.0, true, |multiple| {
-        let trial = Arc::new(gun_with(&db, gun * multiple));
-        mirrored_armies(&trial, &escorted_army(&trial, materiel, share), &[bought(&trial, "t1_bomber", materiel)], 1.0).score
-    });
-    gun_with(&db, gun * multiple)
+    let costing = |db: &BlueprintDb, cost: f64| {
+        let scale = cost / cost_at(db.get(bomber), 1);
+        db.with_unit(bomber, |unit| {
+            unit.mass = Res::from_num((unit.mass.to_num::<f64>() * scale).round());
+            unit.energy = Res::from_num((unit.energy.to_num::<f64>() * scale).round());
+            unit.build_time = Res::from_num((unit.build_time.to_num::<f64>() * scale).round());
+        })
+    };
+    let army = escorted_army(&db, materiel, share);
+    let army_materiel = force_materiel(&db, &army, 1);
+    let even_at = |count: u32| {
+        let each = army_materiel / f64::from(count);
+        let trial = Arc::new(costing(&db, each));
+        let bombers = Side { unit: bomber, count, tactics: Tactics::AttackMove };
+        each * break_even_forces(&trial, Field::LAND, &army, &[bombers]).health_factor
+    };
+    let mut cost = cost_at(db.get(bomber), 1);
+    for _ in 0..3 {
+        let middle = (materiel / cost).round() as u32;
+        let next = (middle - 2..=middle + 2).map(even_at).sum::<f64>() / 5.0;
+        let settled = (materiel / next).round() as u32 == middle;
+        cost = next;
+        if settled {
+            break;
+        }
+    }
+    costing(&db, cost)
 }
 
 /// The `--balance-derive t1-air` report: T1 air's numbers from its rules, against T1 land frozen,

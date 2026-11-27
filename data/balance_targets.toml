@@ -270,6 +270,11 @@ battleship_breaks_t3_shield = [40, 52]
 # check its health (between six bombs and twelve); its cost is then the price list's.
 frigate_anti_air_t1_bomber = [20, 22]
 six_t1_bombers_sink_a_frigate_passes = 2
+# Mobile Anti-Air against the T1 Bomber (2026-11-27, the design owner's rule): one destroys one
+# hanging in the air in about 24 seconds, as it did before. It sets Mobile Anti-Air's gun (a
+# bomber's 500 over 24 seconds, 20.8 a second), and through [air] anti_air_escort_share the T1
+# Bomber's cost and the T1 air base ([price_list] domain_base).
+mobile_aa_t1_bomber = [23, 25]
 # Air against air and the commander (2026-11-26, the design owner's rules): they set the T3
 # fighter's gun (1,070 a shot every second, in a 40-degree cone) and health (3,520), the heavy gunship's health (9,600, also the cruiser's six volleys) and gun (360
 # a second), and the fighter-bomber's anti-air (174 a second). Timed from the first shot, which
@@ -305,11 +310,15 @@ anti_air_health_over_bomb = 1.5
 # One interceptor on a bomber's tail destroys it in about this long: what sets a bomber's health.
 interceptor_seconds_per_bomber_t1 = 10
 # A land army this share anti-air, by materiel, comes out about even with an equal materiel of
-# bombers ([counters] even_margin): what sets Mobile Anti-Air's gun.
+# bombers ([counters] even_margin): what sets the T1 Bomber's cost, with Mobile Anti-Air's gun set
+# by [kill_times] mobile_aa_t1_bomber (2026-11-27; until then this set the gun, against a bomber
+# cost taken from the inspiration).
 anti_air_escort_share = 0.2
 # Checks. Bombers destroy an equal materiel with no anti-air within a tier fight's time ([pace]),
 # at a tier fight's size, ten anchors a side: bigger groups of bombers take longer, as more of
 # their bombs fall on the same targets. Pure anti-air keeps at least this share against an equal materiel of bombers.
+# The strike is measured, not held: T1 bombers clear ten undefended Medium Tanks in about 22
+# seconds, as T2 gunships clear ten Heavy Tanks (2026-11-27), a little under this.
 strike_seconds_t1 = [25, 45]
 anti_air_keeps_min = 0.7
 # The materiel a side for these fights, enough that a fifth of it is several anti-air.
@@ -428,9 +437,9 @@ t2_torpedo_bomber = 0.51
 t2_fighter_bomber = 0.31
 t3_heavy_gunship = 0.88
 t3_air_superiority = 0.79
-# The interceptor keeps the inspiration's ratio while T1 aircraft keep their costs
-# ([price_list] domain_base).
-t1_interceptor = 0.31
+# The interceptor by the ability price list at the T1 air base (2026-11-27, [price_list]
+# domain_base): its strength per cost at 162.
+t1_interceptor = 0.33
 # The mobile flak is not here: like the T1 mobile anti-air, it is set by the anti-air share rule
 # (air_force_against_land_army_t2_even), not by a ratio.
 
@@ -442,20 +451,6 @@ t1_interceptor = 0.31
 # seven-tenths of its cost (2026-11-24): they carry its anti-air and its anti-torpedo charges, as in the
 # inspiration, whose battleships have next to no anti-air and no anti-torpedo charge, so a fleet
 # is as safe from the air as it is escorted. The AI's T3 naval factories build this mix.
-# Aircraft pay for the damage they land, not their card's (2026-11-26): anti-air against a bomber
-# flying its run (the Strategic Bomber at T3, the T1 Bomber below), bombs, guns and torpedoes against
-# a target holding still. The share each lands, as tests/kill_times_test.rs measures it.
-[price_list.landed_share]
-t1_interceptor = 0.91
-t2_fighter_bomber_anti_air = 1.0
-t3_air_superiority = 1.0
-t1_bomber = 0.52
-t2_fighter_bomber = 0.95
-t3_strategic_bomber = 0.89
-t2_torpedo_bomber = 0.82
-t2_gunship = 1.0
-t3_heavy_gunship = 1.0
-
 [domains.forces]
 t1_fleet = { t1_frigate = 3, t1_attack_sub = 1 }
 t2_fleet = { t2_destroyer = 2, t2_cruiser = 2, t2_escort_corvette = 1 }
@@ -602,10 +597,13 @@ tier_efficiency = [1.0, 1.0, 1.0]
 # The navy's base, solved by holding the T2 fleet (two destroyers, two cruisers) at its cost. Air's,
 # as the navy's, by holding the T2 air force's strike aircraft (four gunships, two fighter-bombers)
 # at their cost (2026-11-26). A price every aircraft would pay alike, for flying, cancels in it.
-# T1 aircraft keep their costs, held by [air] strike_seconds_t1: the list prices them at about a
-# third of them, which says it is missing something about aircraft against land, most likely that
-# only anti-air reaches them. That is open.
-domain_base = { land = 1.0, navy = 0.669, air = 0.902 }
+# Each tier's air base comes from how deadly its anti-air is, which nothing else sets: anti-air
+# guns are set by [air] anti_air_escort_share against the aircraft's cost. T2 flak hits about four
+# times harder for its health than T1 Mobile Anti-Air, so air's base, held at T2, priced T1
+# aircraft at about a third of their cost. At T1 (2026-11-27), Mobile Anti-Air downs a bomber in
+# [kill_times] mobile_aa_t1_bomber, anti_air_escort_share then sets the T1 Bomber's cost (249.5),
+# and the T1 base is what prices the bomber at that: 0.318. The Interceptor is priced at it (162).
+domain_base = { land = 1.0, navy = 0.669, air = 0.902, air_t1 = 0.318 }
 # Reach past the line's: x = c (r / r_line - 1), price x h / (1 - x h), h about 1 for shells and
 # 0 for missiles. Short of it: -c (1 - r / r_line) (v_line / v). Speed: speed_share (1 - v_line / v).
 speed_share = 0.3
@@ -638,3 +636,17 @@ torpedo_boat_decoys = 0.22
 # building that has it: (range^2 - vision^2) / building range^2 x building cost. A ship's radar is
 # shared by the radar ships of its tier's standard fleet, whose cover overlaps, so it pays that
 # over their number (2026-11-26).
+
+# Aircraft pay for the damage they land, not their card's (2026-11-26): anti-air against a bomber
+# flying its run (the Strategic Bomber at T3, the T1 Bomber below), bombs, guns and torpedoes against
+# a target holding still. The share each lands, as tests/kill_times_test.rs measures it.
+[price_list.landed_share]
+t1_interceptor = 0.91
+t2_fighter_bomber_anti_air = 1.0
+t3_air_superiority = 1.0
+t1_bomber = 0.52
+t2_fighter_bomber = 0.95
+t3_strategic_bomber = 0.89
+t2_torpedo_bomber = 0.82
+t2_gunship = 1.0
+t3_heavy_gunship = 1.0

@@ -293,6 +293,17 @@ pub struct TerrainProbe {
 
 /// Samples the height map along a segment at intervals of at most one terrain cell.
 pub fn probe_terrain(terrain: &Terrain, start: Vec3Fp, step: Vec3Fp) -> TerrainProbe {
+    probe_ground(terrain, start, step, false)
+}
+
+/// As `probe_terrain`, but over the sea the water's surface counts as the ground: a bomb bursts
+/// on the water rather than sinking to the sea floor. Where it meets the surface is worked out
+/// exactly, not at the sample, so the burst is on the water and not a step below it.
+pub fn probe_surface(terrain: &Terrain, start: Vec3Fp, step: Vec3Fp) -> TerrainProbe {
+    probe_ground(terrain, start, step, true)
+}
+
+fn probe_ground(terrain: &Terrain, start: Vec3Fp, step: Vec3Fp, water_is_ground: bool) -> TerrainProbe {
     let span = step.x.to_bits().abs().max(step.y.to_bits().abs());
     let interval = TERRAIN_CELL_UNITS << FP_FRAC_BITS;
     let samples = (span / interval + 1).max(1);
@@ -302,9 +313,16 @@ pub fn probe_terrain(terrain: &Terrain, start: Vec3Fp, step: Vec3Fp) -> TerrainP
         let t = one * sample / samples;
         let along = |value: Fp| Fp::from_bits(((i64::from(value.to_bits()) * i64::from(t)) / (1 << FP_FRAC_BITS)) as i32);
         let at = Vec2Fp::new(start.x + along(step.x), start.y + along(step.y));
-        let ground = terrain.height_at(at);
+        let floor = terrain.height_at(at);
+        let water = terrain.water_level();
+        let ground = if water_is_ground { floor.max(water) } else { floor };
         highest_ground = highest_ground.max(ground);
         if start.z + along(step.z) <= ground {
+            // On the water, the step is cut where it crosses the surface, if that is sooner.
+            if water_is_ground && floor < water && step.z < Fp::ZERO && start.z > water {
+                let crossing = ((i64::from((start.z - water).to_bits()) << FP_FRAC_BITS) / i64::from(-step.z.to_bits())) as i32;
+                return TerrainProbe { hit: Some(crossing.min(t)), highest_ground };
+            }
             return TerrainProbe { hit: Some(t), highest_ground };
         }
     }

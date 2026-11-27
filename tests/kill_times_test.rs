@@ -261,6 +261,16 @@ fn a_frigates_anti_air_destroys_a_t1_bomber_in_time() {
     assert_within("frigate_anti_air_t1_bomber", ticks_to_kill(&mut world, &[frigate], bomber, 600));
 }
 
+/// Mobile Anti-Air destroys one T1 bomber hanging in the air in about 24 seconds (2026-11-27, the
+/// design owner's number), which sets its gun and, through the escort rule, the bomber's cost.
+#[test]
+fn mobile_anti_air_destroys_a_t1_bomber_in_time() {
+    let mut world = world();
+    let bomber = target(&mut world, "t1_bomber", (SHORE_X + 1_400, 5_000));
+    let anti_air = place(&mut world, "t1_mobile_aa", Team::Blue, (SHORE_X + 1_000, 5_000));
+    assert_within("mobile_aa_t1_bomber", ticks_to_kill(&mut world, &[anti_air], bomber, 600));
+}
+
 /// Six T1 bombers sink a frigate that fires back in two passes and lose none (2026-11-26, the
 /// design owner's rule): it outlives one pass's six bombs and not two passes' twelve.
 #[test]
