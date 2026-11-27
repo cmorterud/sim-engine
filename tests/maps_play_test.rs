@@ -182,6 +182,10 @@ fn team_matches_on_scattered_isles_put_each_team_on_its_own_island() {
 /// On Scattered Isles the Naval AI's yards go on to T2 as its economy grows (2026-11-25): they
 /// waited for twelve times as much energy income as mass, which a growing economy's mass outran
 /// for good, and its yards stayed T1 all match while its mass passed a thousand a second.
+/// Over three matches, since one can end before thirty minutes: on seed 1 the Naval AI was
+/// beaten at 26 minutes once units stopped circling their goals (2026-11-27), and on seed 8 of
+/// main before that at 29. Every match it is still playing at thirty minutes fields a T2 ship,
+/// and it is still playing in at least two.
 #[test]
 #[cfg_attr(debug_assertions, ignore = "release only")]
 fn on_scattered_isles_the_naval_ais_yards_reach_t2() {
@@ -189,19 +193,27 @@ fn on_scattered_isles_the_naval_ais_yards_reach_t2() {
     use sim_engine::ai_strategy::Strategy;
     use sim_engine::sim::components::{MoveClass, Team};
     let map = MapSource::Map(Arc::new(scattered_isles()));
-    let mut upgraded = None;
-    play_match_with(&map, 1, 18_000, [Strategy::named("naval").expect("naval"), Strategy::balanced()], |world| {
-        if upgraded.is_some() || !world.current_tick.is_multiple_of(100) {
-            return;
-        }
-        let fielded = world.units.iter().any(|&(_, entity)| {
-            let (Ok(stats), Ok(unit)) = (world.ecs.get::<&UnitStats>(entity), world.ecs.get::<&Blueprinted>(entity)) else { return false };
-            let unit = world.blueprints.get(unit.0);
-            stats.team == Team::Blue && !unit.is_structure() && unit.tier >= 2 && matches!(unit.move_class(), MoveClass::Naval | MoveClass::Submarine)
+    let mut played_out = 0;
+    for seed in 1..=3 {
+        let mut upgraded = None;
+        let record = play_match_with(&map, seed, 18_000, [Strategy::named("naval").expect("naval"), Strategy::balanced()], |world| {
+            if upgraded.is_some() || !world.current_tick.is_multiple_of(100) {
+                return;
+            }
+            let fielded = world.units.iter().any(|&(_, entity)| {
+                let (Ok(stats), Ok(unit)) = (world.ecs.get::<&UnitStats>(entity), world.ecs.get::<&Blueprinted>(entity)) else { return false };
+                let unit = world.blueprints.get(unit.0);
+                stats.team == Team::Blue && !unit.is_structure() && unit.tier >= 2 && matches!(unit.move_class(), MoveClass::Naval | MoveClass::Submarine)
+            });
+            if fielded {
+                upgraded = Some(world.current_tick);
+            }
         });
-        if fielded {
-            upgraded = Some(world.current_tick);
+        if record.result.is_some() {
+            continue;
         }
-    });
-    assert!(upgraded.is_some(), "the Naval AI fielded no T2 ship in thirty minutes");
+        played_out += 1;
+        assert!(upgraded.is_some(), "seed {seed}: the Naval AI fielded no T2 ship in thirty minutes");
+    }
+    assert!(played_out >= 2, "the Naval AI was beaten before thirty minutes in {} of 3 matches", 3 - played_out);
 }

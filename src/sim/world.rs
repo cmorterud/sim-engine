@@ -601,6 +601,8 @@ pub struct SimSnapshot {
     /// The viewer's finished factories with nothing to build and no factory to help, sorted by
     /// `SimId`.
     pub idle_factories: Vec<SimId>,
+    /// The viewer's mobile builders with nothing to do, the commander aside, sorted by `SimId`.
+    pub idle_engineers: Vec<SimId>,
     /// How many of the viewer's orders have been cancelled because they could not be reached.
     pub orders_cancelled: u32,
     /// The viewer's paused factories and sites, sorted by `SimId`.
@@ -5425,6 +5427,7 @@ impl SimWorld {
         let rates = viewer.map_or_else(Vec::new, |viewer| self.rates_for(viewer));
         let spending = viewer.map_or_else(Vec::new, |viewer| self.spending_for(viewer));
         let idle_factories = viewer.map_or_else(Vec::new, |viewer| self.idle_factories(viewer));
+        let idle_engineers = viewer.map_or_else(Vec::new, |viewer| self.idle_engineers(viewer));
         // The viewer's own economy: its team's first player's, the one a person plays.
         let economy = viewer.map_or_else(EconomyView::default, |viewer| self.economies[self.first_player(viewer).index()].view());
         let team_economies = viewer.is_none().then(|| {
@@ -5509,6 +5512,7 @@ impl SimWorld {
             rates,
             spending,
             idle_factories,
+            idle_engineers,
             orders_cancelled: viewer.map_or(0, |viewer| self.orders_cancelled[viewer.index()]),
             paused: viewer.map_or_else(Vec::new, |viewer| self.paused_for(viewer)),
             veterans: self

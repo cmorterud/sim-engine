@@ -695,3 +695,41 @@ fn a_shift_patrol_adds_a_point_to_the_loop() {
     }
     assert!(reached, "it should patrol to the added point");
 }
+
+/// No unit circles or steps back and forth across a point it was sent to. A fast scout once
+/// circled its first patrol point for good, and a light walker, turning as it went, stepped past
+/// its own and back, because neither slowed for a turn whose circle held the point (2026-11-27).
+#[test]
+fn units_never_keep_overshooting_their_patrol_points() {
+    let mut seed = 12_345u64;
+    let mut random = |n: i32| {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed % n as u64) as i32
+    };
+    let keys = ["t1_land_scout", "t1_light_walker", "t1_mobile_aa"];
+    for trial in 0..90 {
+        let key = keys[trial % keys.len()];
+        let terrain = if trial % 2 == 0 { TerrainStyle::Flat } else { TerrainStyle::Hills };
+        let mut world = SimWorld::new(SimConfig { map_units: 5_120, terrain, ..Default::default() }, 1 + trial as u64);
+        let spawn = point(1_500 + random(2_000), 1_500 + random(2_000));
+        let unit = world.spawn_mobile(world.blueprints.id(key), Team::Blue, spawn);
+        let start = world.unit_position(unit).unwrap().xy();
+        let mut points = vec![start];
+        for _ in 0..1 + random(4) {
+            points.push(Vec2Fp::new(start.x + fp_int(random(800) - 400), start.y + fp_int(random(800) - 400)));
+        }
+        world.advance_tick(&[SimCommand::Patrol { units: vec![unit], points: points.clone(), queued: false }]);
+        // Passing a point takes a few ticks; going round it, or back and forth across it, many.
+        let mut near = vec![0u32; points.len()];
+        for _ in 0..2_000 {
+            world.advance_tick(&[]);
+            let here = world.unit_position(unit).unwrap().xy();
+            for (ticks, point) in near.iter_mut().zip(&points) {
+                *ticks = if sqrt_wide(here.distance_squared(point)) < fp_int(60) { *ticks + 1 } else { 0 };
+                assert!(*ticks <= 120, "trial {trial}: a {key} kept going past its patrol point {point:?}, of {points:?}");
+            }
+        }
+    }
+}
