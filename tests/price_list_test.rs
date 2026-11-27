@@ -79,6 +79,25 @@ fn builders_cost_their_build_power() {
     }
 }
 
+/// Cargo is a utility job (2026-11-27): the armed transports cost their cargo, at the share of a
+/// full load the Light Air Transport pays, and their weapons, which do a quarter of their tier's
+/// gunship's damage a second (the design owner's rule).
+#[test]
+fn transports_cost_their_cargo_and_weak_weapons() {
+    let db = BlueprintDb::standard();
+    let dps = |key: &str| {
+        let unit = db.get(db.id(key));
+        unit.weapon.iter().chain(&unit.extra_weapons).map(sim_engine::balance::damage_per_second).sum::<f64>()
+    };
+    for (key, gunship) in [("t2_transport", "t2_gunship"), ("t3_heavy_transport", "t3_heavy_gunship")] {
+        let pricing = price_list::price(&db, key).unwrap_or_else(|| panic!("the list prices {key}"));
+        assert!(pricing.cargo > 0.0, "{key} carries");
+        assert!(pricing.drift().abs() < 0.01, "{key} costs {:.1}, the list {:.1}", pricing.actual, pricing.list);
+        let share = dps(key) / dps(gunship);
+        assert!((share - 0.25).abs() < 0.01, "{key}'s weapons do {share:.3} of the {gunship}'s damage a second, not a quarter");
+    }
+}
+
 /// `[missiles] strategic_minutes` (2026-11-27): each game-ending weapon costs its minutes of a
 /// standard T3 economy's income, at T3 prices, and each missile defense its share of the missile
 /// it stops (`defense_over_missile`), within 1%.

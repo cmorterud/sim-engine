@@ -2206,6 +2206,8 @@ tier = 1
 mass = 120
 energy = 4800
 build_time = 800
+# The T2 Flak Cannon destroys it in about 4 seconds, four shells ([kill_times], the design
+# owner's number, 2026-11-27): as it was.
 health = 500
 speed = "21.5"
 radius = 12
@@ -2214,32 +2216,43 @@ flight = { elevation = 198, turn_rate = 90, fuel = 600, hovers = true }
 transport = { small = 6, medium = 2, large = 1 }
 
 # Two linked railguns, each firing both muzzles at once, as one. They reach 0.7 of the T1 Mobile
-# Anti-Air's, as the Gunship's do ([model] aircraft_gun_over_anti_air; 400 until 2026-11-27).
+# Anti-Air's, as the Gunship's do ([model] aircraft_gun_over_anti_air; 400 until 2026-11-27), and
+# do a quarter of the Gunship's damage a second, 18.8 (the design owner's rule, 2026-11-27: a
+# transport's guns are weak; 48 until then).
 [[unit]]
 id = "t2_transport"
 name = "Air Transport"
 class = "air"
 tier = 2
-mass = 330
-energy = 13200
-build_time = 2640
-health = 1675
+# Cost by the price list (2026-11-27): its cargo, two-thirds of a full load of Heavy Tanks as
+# the Light Air Transport pays for its own, 480, and its weak guns, 73: 440 to 553.
+mass = 415
+energy = 16580
+build_time = 3316
+# The T2 Flak Cannon destroys it in about 11 seconds, thirteen shells ([kill_times], the design
+# owner's number, 2026-11-27): 1,675 to 1,810, still two of the cruiser's volleys.
+health = 1810
 speed = 29
 radius = 16
 vision = 640
 flight = { elevation = 198, turn_rate = 90, fuel = 600, hovers = true }
 transport = { small = 14, medium = 6, large = 3 }
-weapon = { range = 448, reload_ticks = 5, projectile_speed = 120, damage = 24 }
+weapon = { range = 448, reload_ticks = 5, projectile_speed = 120, damage = "9.4" }
 
 [[unit]]
 id = "t3_heavy_transport"
 name = "Heavy Air Transport"
 class = "air"
 tier = 3
-mass = 1400
-energy = 52500
-build_time = 5250
-health = 4500
+# Cost by the price list (2026-11-27): its cargo, two-thirds of a full load of Heavy Walkers as
+# the Light Air Transport pays for its own, 1,440, and its weak guns and racks, with its shield
+# counted in its health, 616: 1,833 to 2,056.
+mass = 1570
+energy = 58880
+build_time = 5888
+# The T2 Flak Cannon destroys it in about 55 seconds, through its shield and the shield's
+# regeneration ([kill_times], the design owner's number, 2026-11-27): 4,500 to 9,800.
+health = 9800
 speed = 35
 radius = 20
 vision = 640
@@ -2250,5 +2263,8 @@ shield = { radius = 85, health = 3000, regen = 30, recharge_seconds = 20, upkeep
 # Two plasma guns, and four anti-air missile racks. The guns reach 0.7 of the Mobile Flak's, as the
 # Heavy Gunship's do, and the racks its tier's fighter, the Air Superiority Fighter's 600 ([model]
 # aircraft_gun_over_anti_air, aircraft_anti_air_at_fighter; 500 and 1,000 until 2026-11-27).
-weapon = { range = 560, reload_ticks = 5, projectile_speed = 120, damage = 30 }
-extra_weapons = [{ range = 600, reload_ticks = 1, projectile_speed = 120, damage = 27, targets = "air" }]
+# Together they do a quarter of the Heavy Gunship's damage a second, 94, shared as before, 17 the
+# guns' and 77 the racks' (the design owner's rule, 2026-11-27: a transport's weapons are weak; 60
+# and 270 until then).
+weapon = { range = 560, reload_ticks = 5, projectile_speed = 120, damage = "8.5" }
+extra_weapons = [{ range = 600, reload_ticks = 1, projectile_speed = 120, damage = "7.7", targets = "air" }]
