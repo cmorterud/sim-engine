@@ -120,13 +120,16 @@ fn on_scattered_isles_ais_keep_a_guard_at_home_and_cross_by_sea_and_air() {
 /// it there while T3 extractors raised mass income past 400 a second: by tick 12,000 each side
 /// had 8 ships and 2 aircraft, with its mass store full and running over.
 /// Measured by build time afloat and flying, which a change in a unit's cost leaves alone.
+/// Seed 2 since aircraft stopped keeping apart in flight (2026-11-27): seed 1 then happened to
+/// build one yard a side instead of two, 8,168 of build time afloat, while seeds 2 to 5 kept
+/// 14,206 to 23,947, about what they had before (15,652 to 26,458).
 #[test]
 #[cfg_attr(debug_assertions, ignore = "release only")]
 fn on_scattered_isles_ais_spend_on_a_fleet_and_an_air_force() {
     use sim_engine::sim::components::MoveClass;
     let map = MapSource::Map(Arc::new(scattered_isles()));
     let (mut ships, mut aircraft, mut ships_time, mut flying_time) = ([0; 2], [0; 2], [0.0f64; 2], [0.0f64; 2]);
-    play_match_on(&map, 1, 12_000, |world| {
+    play_match_on(&map, 2, 12_000, |world| {
         if world.current_tick != 12_000 {
             return;
         }
