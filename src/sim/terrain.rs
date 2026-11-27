@@ -262,14 +262,15 @@ impl Terrain {
     /// still runs: units may be there, though no order can send them there.
     pub fn in_play(&self, point: Vec2Fp) -> bool {
         let (x, y) = (point.x.to_bits(), point.y.to_bits());
-        let (low, high) = (-self.outer_margin_raw(), self.max_coordinate_raw() + self.outer_margin_raw());
+        let (low, high) = (1 - self.outer_margin_raw(), self.max_coordinate_raw() + self.outer_margin_raw());
         (low..=high).contains(&x) && (low..=high).contains(&y)
     }
 
-    /// The point, moved onto the map if it is off it: where an order meant for it can go.
+    /// The point, moved onto the map if it is off it: where an order meant for it can go. A raw
+    /// bit in from the low edges, so that the two sides' limits are mirror images.
     pub fn onto_map(&self, point: Vec2Fp) -> Vec2Fp {
         let max = self.max_coordinate_raw();
-        Vec2Fp::new(Fp::from_bits(point.x.to_bits().clamp(0, max)), Fp::from_bits(point.y.to_bits().clamp(0, max)))
+        Vec2Fp::new(Fp::from_bits(point.x.to_bits().clamp(1, max)), Fp::from_bits(point.y.to_bits().clamp(1, max)))
     }
 
     pub fn in_bounds(&self, point: Vec2Fp) -> bool {
@@ -333,9 +334,14 @@ impl Terrain {
         let sample = |offset: usize| (self.heights[index + offset] as i64) << (FP_FRAC_BITS - HEIGHT_FRAC_BITS);
         let (h00, h10) = (sample(0), sample(1));
         let (h01, h11) = (sample(self.samples), sample(self.samples + 1));
-        let near = h00 + (h10 - h00) * frac_x / CELL_RAW;
-        let far = h01 + (h11 - h01) * frac_x / CELL_RAW;
-        Fp::from_bits((near + (far - near) * frac_y / CELL_RAW) as i32)
+        // Weighted all at once, with one rounding, so that a point and its image turned half
+        // about the map's middle, which weigh the same four samples the other way round, stand
+        // at exactly the same height: interpolating along x and then y rounded twice, from
+        // opposite corners, and mirrored units a raw bit apart in height could disagree over
+        // whether a target was in range.
+        let (rest_x, rest_y) = (CELL_RAW - frac_x, CELL_RAW - frac_y);
+        let sum = h00 * rest_x * rest_y + h10 * frac_x * rest_y + h01 * rest_x * frac_y + h11 * frac_x * frac_y;
+        Fp::from_bits((sum / (CELL_RAW * CELL_RAW)) as i32)
     }
 }
 

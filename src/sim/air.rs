@@ -308,7 +308,10 @@ impl SimWorld {
             let idle = heading_for.is_none() && !patrolling && flight.refit.is_none();
             let landing = idle && !near_edge && terrain.is_passable(here);
             // Over a structure, such as the facility it has just left, it flies on to land beyond it.
-            let (cell_x, cell_y) = terrain.cell_of(here);
+            // The cell as units count it, which on a cell's edge is the one toward the map's
+            // center, so that an aircraft flying along an edge, as one leaving its factory's pad
+            // along the middle of the factory does, sees what its mirror image does.
+            let (cell_x, cell_y) = terrain.unit_cell_of(here);
             let over_structure = idle && occupancy.contains_key(&((cell_y * terrain.cells_per_side() + cell_x) as u32));
             // Out of fuel, it flies at half its height and speed.
             let (top_speed, height) = (if flight.out_of_fuel() { stats.max_speed / 2 } else { stats.max_speed }, flight.cruising_height());
@@ -393,7 +396,7 @@ impl SimWorld {
                     } else if flight.breaking_off {
                         let out = unready_reach.map_or(break_off, |reach| reach.max(break_off));
                         // At the outer margin past the map's edge it turns back whatever its run.
-                        let at_limit = [here.x, here.y].iter().any(|&value| value.to_bits() <= -outer || value.to_bits() >= max + outer);
+                        let at_limit = [here.x, here.y].iter().any(|&value| value.to_bits() <= 1 - outer || value.to_bits() >= max + outer);
                         flight.breaking_off = distance_squared < wide_mul(out, out) && !at_limit;
                     } else {
                         // Once over the target and past it, fly on for a run-up to the next pass.
@@ -431,8 +434,10 @@ impl SimWorld {
             flight.turn = Vec2Fp::new((flight.turn.x * 3 + turned.x) / 4, (flight.turn.y * 3 + turned.y) / 4);
             let step = turning.facing.scaled(speed);
             // It may fly on past the map's edge, as after a pass, and turns back of itself; the
-            // outer margin only stops a runaway.
-            let next = Vec2Fp::new(Fp::from_bits((here.x + step.x).to_bits().clamp(-outer, max + outer)), Fp::from_bits((here.y + step.y).to_bits().clamp(-outer, max + outer)));
+            // outer margin only stops a runaway. Kept a raw bit further in on the low side, so
+            // that the limits are mirror images: the map runs from 0 to a raw bit short of its
+            // size, and mirrored matches parted where one side was held a bit further out.
+            let next = Vec2Fp::new(Fp::from_bits((here.x + step.x).to_bits().clamp(1 - outer, max + outer)), Fp::from_bits((here.y + step.y).to_bits().clamp(1 - outer, max + outer)));
             // Landed, it rests on the ground like any other unit.
             position.0 = Vec3Fp::new(next.x, next.y, flying_height(terrain, next, flight.altitude.max(stats.radius)));
             velocity.0 = Vec3Fp::new(step.x, step.y, Fp::ZERO);
@@ -509,8 +514,8 @@ impl SimWorld {
                 continue;
             }
             let mut position = self.ecs.get::<&mut Position>(entity).expect("aircraft are live units");
-            let x = (i64::from(position.0.x.to_bits()) + push_x).clamp(-outer, max + outer) as i32;
-            let y = (i64::from(position.0.y.to_bits()) + push_y).clamp(-outer, max + outer) as i32;
+            let x = (i64::from(position.0.x.to_bits()) + push_x).clamp(1 - outer, max + outer) as i32;
+            let y = (i64::from(position.0.y.to_bits()) + push_y).clamp(1 - outer, max + outer) as i32;
             position.0 = Vec3Fp::new(Fp::from_bits(x), Fp::from_bits(y), position.0.z);
         }
     }
