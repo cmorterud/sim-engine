@@ -85,9 +85,11 @@ fn the_commander_takes_an_engineering_suite_standing_still_and_then_builds_the_n
     assert!(world.ecs.get::<&Enhancing>(entity).is_ok());
     // An order to build waits until the enhancement is done.
     world.advance_tick(&[SimCommand::QueueTask { units: vec![commander], task: BuildTask::Assist { target: commander } }]);
-    // 1,000 build time at 10 build power is 100 seconds.
+    // Its build time at 10 build power, a tick a point: 833 ticks at its list price (2026-11-27).
+    let pack = world.blueprints.enhancement(world.blueprints.enhancement_id("t2_fabrication")).clone();
+    let build_ticks = pack.build_time.to_num::<i64>() as usize;
     let mut done_at = None;
-    for tick in 0..1_100 {
+    for tick in 0..build_ticks + 100 {
         world.advance_tick(&[]);
         assert_eq!(world.ecs.get::<&Position>(entity).unwrap().0, here, "it stands still while it works");
         if fabrication(&world, commander).as_deref() == Some("t2_fabrication") {
@@ -96,10 +98,11 @@ fn the_commander_takes_an_engineering_suite_standing_still_and_then_builds_the_n
         }
     }
     let done_at = done_at.expect("the enhancement should finish");
-    assert!((990..=1_010).contains(&done_at), "it took {done_at} ticks");
-    // 800 mass, less the commander's own 1 a second over the 100 seconds.
+    assert!((build_ticks - 10..=build_ticks + 10).contains(&done_at), "it took {done_at} ticks for {build_ticks}");
+    // Its mass, less the commander's own 1 a second over the time it took.
     let spent = (mass_before - world.economies[0].mass).to_num::<f64>();
-    assert!((695.0..=705.0).contains(&spent), "it cost {spent} materiel");
+    let expected = pack.mass.to_num::<f64>() - build_ticks as f64 / 10.0;
+    assert!((spent - expected).abs() <= 5.0, "it cost {spent} materiel, not {expected}");
     assert_eq!(world.ecs.get::<&Builder>(entity).unwrap().power, fp_int(42), "with more build power");
     assert_eq!(world.unit_health(commander).unwrap(), health_before + fp_int(2_000), "and more health");
     assert_eq!(blueprint_key(&world, commander), "command_rig", "the commander keeps its own blueprint");
@@ -122,12 +125,13 @@ fn engineers_can_assist_an_enhancement_and_a_new_order_cancels_it() {
     enhance(&mut world, commander, "t2_fabrication");
     world.advance_tick(&[SimCommand::Assist { units: vec![helper], target: commander }]);
     // 10 and 5 build power together take two thirds of the time.
-    let took = (0..1_000).position(|_| {
+    let build_ticks = world.blueprints.enhancement(world.blueprints.enhancement_id("t2_fabrication")).build_time.to_num::<f64>();
+    let took = (0..build_ticks as usize).position(|_| {
         world.advance_tick(&[]);
         fabrication(&world, commander).is_some()
     });
-    let took = took.expect("the enhancement should finish");
-    assert!((640..=700).contains(&took), "it took {took} ticks");
+    let took = took.expect("the enhancement should finish") as f64;
+    assert!((0.96..=1.05).contains(&(took / (build_ticks * 2.0 / 3.0))), "it took {took} ticks for {build_ticks}");
 
     let entity = world.unit_entity(commander).unwrap();
     enhance(&mut world, commander, "t3_fabrication");

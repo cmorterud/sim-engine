@@ -155,6 +155,36 @@ fn the_field_rig_costs_its_gun_its_build_power_and_its_income() {
     assert!(price_list::held_reason("field_rig").is_none(), "nothing holds it");
 }
 
+/// The rigs' enhancements (2026-11-27, the design owner's pick): each costs what it adds to its rig,
+/// at the tier it is fitted at, and one that builds on another pays only for what it adds.
+#[test]
+fn every_enhancement_costs_what_it_adds_to_its_rig() {
+    let db = BlueprintDb::standard();
+    let table = targets();
+    let drift_max = table["price_list"]["drift_max"].as_float().expect("[price_list] drift_max");
+    let held = table["price_list"]["enhancements"]["held"].as_table().expect("[price_list.enhancements] held");
+    let mut off = Vec::new();
+    for enhancement in db.enhancements() {
+        let Some(pricing) = price_list::enhancement_price(&db, &enhancement.key) else {
+            assert!(held.contains_key(&enhancement.key), "the list cannot price {}, and nothing holds it", enhancement.key);
+            continue;
+        };
+        println!("{:24} T{} list {:8.1}, costs {:8.1} ({:+5.1}%): {:?}", pricing.key, pricing.tier, pricing.list, pricing.actual, pricing.drift() * 100.0, pricing.parts);
+        if pricing.drift().abs() > drift_max {
+            off.push(format!("{} costs {:.1}, {:+.1}% off the list's {:.1}", pricing.key, pricing.actual, pricing.drift() * 100.0, pricing.list));
+        }
+    }
+    assert!(off.is_empty(), "{off:#?}");
+    // The commander's at T2 prices, its T3 pack at T3's; the field rig's at its own T3.
+    let tier = |key: &str| price_list::enhancement_price(&db, key).expect("priced").tier;
+    assert_eq!((tier("heavy_cannon"), tier("t2_fabrication"), tier("t3_fabrication"), tier("long_barrel")), (2, 2, 3, 3));
+    // The T3 pack pays only for what it adds over the T2 one: 58 more points of build power.
+    let rate = price_list::build_power_rate(&db, "command_rig");
+    let pack = price_list::enhancement_price(&db, "t3_fabrication").expect("priced");
+    let build = pack.parts.iter().find(|(name, _)| *name == "build power").expect("build power").1;
+    assert!((build - 58.0 * rate).abs() < 0.01, "{build:.1} for 58 points at {rate:.2}");
+}
+
 /// T4, for experimentals (2026-11-27): every per-tier table has a T4 entry, and a unit made T4 is
 /// priced by them: its fights last the T4 time to kill, 1.45 of T1's, and it is measured against
 /// T3's line, at T3's energy price and, in the air, T3's base.

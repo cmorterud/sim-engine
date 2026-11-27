@@ -436,6 +436,26 @@ out close and why: evidence about the process, not a target.
   (`payback_held`). Build time stays each unit's own, an identity knob (the design owner's pick:
   one number a domain would have had the T1 Bomber build 75% slower and the Gunship 46% faster). The T3 Mass Fabricator turns energy into materiel at T3's rate, as the T2 one
   does at T2's: 1,600 energy a second for its 16, from 1,500.
+* 2026-11-27: the rigs' enhancements priced by the list (the design owner's pick;
+  `[price_list.enhancements]`, `--balance-derive enhancements`): each costs what it adds to its
+  rig, at T2 prices for the commander's (T3 for its T3 pack) and T3 for the field rig's. Weapons,
+  sensors and build power cost what they add to the rig's price on the list; health, regeneration
+  and shields the snipe price, the Strategic Bomber's cost over its bomb, 0.22 a point; hiding
+  from radar the cheapest Stealth Field Generator; income its tier's payback; one that builds on
+  another only what it adds. The commander's: Heavy Cannon 990 to 312, T2 pack 962 to 801, T3 pack
+  2,762 to 853, Damage Control 990 to 451, Field Shield 3,262 to 4,248, Area Shield 1,714 to
+  1,278, Signature Suppression 752 to 832, Onboard Reactor 6,429 to 9,286. The field rig's: Long
+  Barrel 1,048 to 169, Capacitor Bank 1,378 to 273, Rapid Fabricator 1,243 to 437, Sensor Mast 762
+  to 281, Field Shield 2,859 to 5,887, Area Shield 6,770 to 6,086, Onboard Reactor 5,143 to 7,619.
+  Mass, energy and build time go together. Orbital Redeploy (both), the Radar Jammer and Thermal
+  Camouflage are out of the roster (the design owner's pick); the engine keeps teleporting,
+  cloaking and jamming, tested with tests/fixtures/retired_enhancements.toml. As a check, the Heavy
+  Cannon lets the commander hold against 22 Medium Tanks rather than 16, about 240 of tanks.
+* 2026-11-27: the Field Workshops (T2 and T3) out of the roster (the design owner's pick): a
+  station is an engineer that cannot walk to its work, and cost 26 to 35 a point of build power
+  against the engineers' 10.4, so the list would have halved it into an engineer that needs no
+  minding. The AI's idle engineers assist its factories instead. The engine keeps assisting
+  stations, tested with tests/fixtures/retired_units.toml.
 
 ## Order of work
 
