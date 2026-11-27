@@ -1457,6 +1457,97 @@ pub fn derive_air_bases_report() {
     println!("  t2_mobile_flak: damage {} (efficiency at it {efficiency:.3})", db.get(db.id("t2_mobile_flak")).weapon.expect("flak has a gun").damage);
 }
 
+// Counters, priced by the duel they win ([counters] counter_squadrons, 2026-11-27).
+
+fn counters_table() -> toml::Value {
+    TARGETS.parse::<toml::Table>().expect("data/balance_targets.toml is valid").remove("counters").expect("[counters]")
+}
+
+/// `first`, at `squadrons_of_it` squadrons, against an equal cost of `second`, on a field: the
+/// score, as `[counters]` scores it.
+pub fn score_against(db: &Arc<BlueprintDb>, field: Field, first: &str, squadrons_of_it: f64, second: &str) -> f64 {
+    let squadron = domain_force(db, first);
+    let one = force_materiel(db, &squadrons(db, &squadron, 0.0, field.tier, Tactics::AttackMove), field.tier);
+    let a = squadrons(db, &squadron, one * squadrons_of_it, field.tier, Tactics::AttackMove);
+    let b = squadrons(db, &domain_force(db, second), force_materiel(db, &a, field.tier), field.tier, Tactics::AttackMove);
+    mirrored_on(db, field, &a, &b, 1.0).score
+}
+
+/// Torpedo Boats against an equal cost of submarines on T2 water: the mean score over fleets of
+/// `[counters] counter_squadrons` squadrons of them.
+pub fn torpedo_boats_against_submarines(db: &Arc<BlueprintDb>) -> f64 {
+    let sizes: Vec<f64> = counters_table()["counter_squadrons"].as_array().expect("[counters] counter_squadrons").iter().map(as_number).collect();
+    sizes.iter().map(|&n| score_against(db, Field::new(Ground::Water, 2), "t2_torpedo_boats", n, "t1_submarines")).sum::<f64>() / sizes.len() as f64
+}
+
+/// The torpedo bombers it takes to break the T2 fleet (two squadrons of it), as a multiple of its
+/// cost: the fleet's break-even efficiency against them.
+pub fn torpedo_bombers_to_break_t2_fleet(db: &Arc<BlueprintDb>) -> f64 {
+    let fleet = domain_force(db, "t2_fleet");
+    let one = force_materiel(db, &squadrons(db, &fleet, 0.0, 2, Tactics::AttackMove), 2);
+    let fleet = squadrons(db, &fleet, one * 2.0, 2, Tactics::AttackMove);
+    let bombers = squadrons(db, &domain_force(db, "t2_torpedo_bombers"), force_materiel(db, &fleet, 2), 2, Tactics::AttackMove);
+    break_even_forces(db, Field::new(Ground::Water, 2), &fleet, &bombers).efficiency
+}
+
+/// Bisects a unit's cost at T2, between a fifth under and a fifth over what it costs, for the
+/// edge where `meets` turns: the last cost that meets it when `meets_below` (it holds at low cost),
+/// else the first. Returns the copy at that cost and the measure there.
+fn bisect_cost(base: &BlueprintDb, key: &str, meets_below: bool, measure: impl Fn(&Arc<BlueprintDb>) -> f64, meets: impl Fn(f64) -> bool) -> (BlueprintDb, f64) {
+    let id = base.id(key);
+    let now = cost_at(base.get(id), 2);
+    let at = |cost: f64| {
+        let db = Arc::new(scaled_to(base, id, 2, cost));
+        let value = measure(&db);
+        (db, value)
+    };
+    let (mut low, mut high) = (now * 0.8, now * 1.2);
+    let (mut good, bad) = if meets_below { (at(low), at(high).1) } else { (at(high), at(low).1) };
+    assert!(meets(good.1) && !meets(bad), "{key}: the edge is not between {low:.0} and {high:.0} ({:.3}, {bad:.3})", good.1);
+    // To about a unit of mass: each step halves the range.
+    while high - low > now / 400.0 {
+        let middle = (low + high) / 2.0;
+        let trial = at(middle);
+        let met = meets(trial.1);
+        // The edge is above the middle when the middle is on the low end's side of it.
+        if met == meets_below {
+            low = middle;
+        } else {
+            high = middle;
+        }
+        if met {
+            good = trial;
+        }
+    }
+    (Arc::try_unwrap(good.0).unwrap_or_else(|db| (*db).clone()), good.1)
+}
+
+/// The Torpedo Boat's cost from the duel it wins: the most it can cost and still keep the top of
+/// `[counters] winner_survivors` against an equal cost of submarines, as the mean over fleet sizes.
+pub fn derive_torpedo_boat(base: &BlueprintDb) -> (BlueprintDb, f64) {
+    let top = counters_table()["winner_survivors"].as_array().expect("[counters] winner_survivors").iter().map(as_number).fold(f64::MIN, f64::max);
+    bisect_cost(base, "t2_torpedo_boat", true, torpedo_boats_against_submarines, |score| score >= top)
+}
+
+/// The Torpedo Bomber's cost from the duel it wins: the least it can cost and still need the
+/// least of `[domains.cells] torpedo_bombers_to_break_fleet_t2` times the T2 fleet's cost to break it.
+pub fn derive_torpedo_bomber(base: &BlueprintDb) -> (BlueprintDb, f64) {
+    let least = domain_cell("torpedo_bombers_to_break_fleet_t2").as_array().expect("a band").iter().map(as_number).fold(f64::MAX, f64::min);
+    bisect_cost(base, "t2_torpedo_bomber", false, torpedo_bombers_to_break_t2_fleet, |multiple| multiple >= least)
+}
+
+/// The `--balance-derive counters` report: the counters' costs from the duels they win.
+pub fn derive_counters_report() {
+    let base = BlueprintDb::standard();
+    let db = Arc::new(base.clone());
+    println!("Torpedo Boats against an equal cost of submarines, as they are: mean score {:+.3}", torpedo_boats_against_submarines(&db));
+    println!("Torpedo bombers to break the T2 fleet, as they are: {:.3} times its cost", torpedo_bombers_to_break_t2_fleet(&db));
+    for (key, (derived, measure)) in [("t2_torpedo_boat", derive_torpedo_boat(&base)), ("t2_torpedo_bomber", derive_torpedo_bomber(&base))] {
+        let unit = derived.get(derived.id(key));
+        println!("  {key}: cost {:.1}, from {:.1} (mass = {}, energy = {}, build_time = {}; the duel there {measure:.3})", cost_at(unit, 2), cost_at(base.get(base.id(key)), 2), unit.mass, unit.energy, unit.build_time);
+    }
+}
+
 // Fights between domains (BALANCE.md, 2026-11-24): `[domains]` in the targets.
 
 /// Three T2 torpedo launchers on the water just off the shore ground's land, for ships to close

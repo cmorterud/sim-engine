@@ -135,14 +135,15 @@ Usage: sim-engine [options]
                        With --soak, the strategies Blue and Red play (default
                        balanced,balanced)
   --balance            Measure the unit data with the balance harness's duels (BALANCE.md)
-  --balance-derive <t1|t2|t3|t1-air|air-bases|domains|list|unit <key>>
+  --balance-derive <t1|t2|t3|t1-air|air-bases|counters|domains|list|unit <key>>
                        Derive a tier of land units' numbers, or T1 air's, from
                        data/balance_targets.toml, priced by duels against the tiers below as
                        the unit data has them; with air-bases, the Mobile Flak's gun from
-                       the escort rule at T2; or, with domains, measure the fights between
-                       land, air, navy, and hovercraft against [domains]; with list, print
-                       every unit's price by the ability price list against its cost; with
-                       unit <key>, one unit's price, job by job
+                       the escort rule at T2; with counters, the Torpedo Boat's and Torpedo
+                       Bomber's costs from the duels they win; or, with domains, measure the
+                       fights between land, air, navy, and hovercraft against [domains];
+                       with list, print every unit's price by the ability price list against
+                       its cost; with unit <key>, one unit's price, job by job
   --no-tick-gate       With --soak, report tick times without failing on them, for
                        shared machines such as CI runners
   --seed <number>      Scenario seed
@@ -627,10 +628,11 @@ fn main() {
             "t3" => sim_engine::balance::derive_t3_report(),
             "t1-air" => sim_engine::balance::derive_t1_air_report(),
             "air-bases" => sim_engine::balance::derive_air_bases_report(),
+            "counters" => sim_engine::balance::derive_counters_report(),
             "domains" => sim_engine::balance::derive_domains_report(),
             "list" => sim_engine::price_list::list_report(&sim_engine::sim::blueprints::BlueprintDb::standard()),
             other if other.starts_with("unit ") => sim_engine::price_list::unit_report(&sim_engine::sim::blueprints::BlueprintDb::standard(), &other["unit ".len()..]),
-            other => println!("--balance-derive takes t1, t2, t3, t1-air, air-bases, domains, list, or unit <key>, not {other}"),
+            other => println!("--balance-derive takes t1, t2, t3, t1-air, air-bases, counters, domains, list, or unit <key>, not {other}"),
         }
         return;
     }

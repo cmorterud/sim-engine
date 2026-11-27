@@ -321,6 +321,13 @@ out close and why: evidence about the process, not a target.
   seconds until now), the Heavy Walker's own (12) and the Heavy Air Transport's (35). The dearer
   Corvette made the T2 fleet dearer for the same strength, so torpedo bombers broke it at 1.98
   times its cost; the Torpedo Bomber's cost, the least that keeps it at twice, is 243, from 240.
+* 2026-11-27: counters priced by the duel they win, in code (`[counters] counter_squadrons`,
+  `balance::derive_torpedo_boat`, `derive_torpedo_bomber`, `--balance-derive counters`). The
+  Torpedo Boat costs the most it can and still keep 0.70, the top of `winner_survivors`, against
+  an equal cost of submarines, as the mean over fleets of four to seven of it: 819 to 794. One
+  size alone turns on how the submarines round, a step of a tenth of its cost, and at four it
+  read 0.71. The Torpedo Bomber costs the least that needs twice the T2 fleet's cost to break it,
+  243 as it is. Both re-solve when what they fight changes, and a test holds them to it.
 
 ## Order of work
 
