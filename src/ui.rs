@@ -4370,7 +4370,7 @@ mod tests {
         assert_eq!(press('D', Some(2)), place("t2_point_defense"));
         assert_eq!(press('D', Some(3)), place("t3_heavy_point_defense"));
         assert_eq!(press('W', Some(3)), place("rig_yard"), "a support factory needs a headquarters, and there is none");
-        assert_eq!(press('V', Some(2)), place("field_workshop"));
+        assert_eq!(press('V', Some(2)), place("airfield"));
         assert_eq!(press('V', Some(1)), place("wall"));
         assert_eq!(press('Q', Some(1)), None, "Q is a factory's key");
         // A bot can build nothing, so N mutes instead.
@@ -4622,9 +4622,16 @@ mod tests {
         assert_eq!(upgrade_progress(&current, SimId(12), &db), None);
     }
 
+    /// The standard data with the enhancements out of the roster since 2026-11-27, whose
+    /// mechanics the engine keeps for data that uses them.
+    fn with_retired_enhancements() -> BlueprintDb {
+        let text = format!("{}\n{}", include_str!("../data/units.toml"), include_str!("../tests/fixtures/retired_enhancements.toml"));
+        BlueprintDb::parse(&text).expect("the data with the retired enhancements is valid")
+    }
+
     #[test]
     fn enhancements_are_offered_slot_by_slot_once_what_they_build_on_is_there() {
-        let db = BlueprintDb::standard();
+        let db = with_retired_enhancements();
         let mut current = commander_and_engineer(&db);
         assert!(enhancement_offers(&current, &[SimId(11)], &db).is_empty(), "an engineer has none");
         let rows = enhancement_offers(&current, &[SimId(10), SimId(11)], &db);
@@ -4654,7 +4661,7 @@ mod tests {
 
     #[test]
     fn only_commanders_with_a_teleporter_can_teleport() {
-        let db = BlueprintDb::standard();
+        let db = with_retired_enhancements();
         let mut current = commander_and_engineer(&db);
         assert!(teleporters(&current, &[SimId(10), SimId(11)], &db).is_empty());
         current.enhancements = vec![(SimId(10), [u16::MAX, u16::MAX, db.enhancement_id("teleporter").0])];
