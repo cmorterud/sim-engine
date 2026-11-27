@@ -328,6 +328,11 @@ out close and why: evidence about the process, not a target.
   size alone turns on how the submarines round, a step of a tenth of its cost, and at four it
   read 0.71. The Torpedo Bomber costs the least that needs twice the T2 fleet's cost to break it,
   243 as it is. Both re-solve when what they fight changes, and a test holds them to it.
+* 2026-11-27: build power in the price list, a utility job: its points at the least any unit that
+  only builds pays for one, over the domain base, each engineer priced by the others. The T1 and
+  T3 Engineers pay 10.4 a point and come out at their costs; the T2 Engineer 130 to 125; the
+  Combat Engineer, its 17.5 points with its gun and radar, 224 to 253. The Field Rig and the
+  Command Rig carry it in their lists and stay held.
 
 ## Order of work
 

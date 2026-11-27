@@ -3,6 +3,7 @@
 //!
 //! ```text
 //! cost = Σ over jobs √(health × damage a second at the job) / σ_job + what its sensors cost
+//!        + its build power at the cheapest builder's rate / domain base
 //! σ_job = anchor × tier efficiency × domain base / (1 + Σ the job's prices)
 //! ```
 //!
@@ -71,6 +72,8 @@ pub struct Pricing {
     pub jobs: Vec<JobPrice>,
     /// What each sensor costs, by name: what it sees past its own vision.
     pub sensors: Vec<(&'static str, f64)>,
+    /// What its build power costs: its points at the cheapest builder's rate, over its base.
+    pub build_power: f64,
     /// The list's price.
     pub list: f64,
     /// What it costs, at its tier's prices.
@@ -291,8 +294,8 @@ pub fn shield_price(db: &BlueprintDb, key: &str) -> Option<ShieldPricing> {
     Some(ShieldPricing { key: key.to_string(), group: group_name.to_string(), group_cost, group_health, effective_health, sensors, list: price, actual: cost_at(unit, tier) })
 }
 
-/// A unit's price by the list. `None` for one with no fighting weapon, whose jobs (building,
-/// seeing, carrying) the list does not price yet, and for structures, which pay the immobile
+/// A unit's price by the list. `None` for one with no fighting weapon and no build power, whose
+/// jobs (seeing, carrying) the list does not price yet, and for structures, which pay the immobile
 /// premium instead (`[premiums]`).
 pub fn price(db: &BlueprintDb, key: &str) -> Option<Pricing> {
     price_with(db, &table(), key)
@@ -301,7 +304,8 @@ pub fn price(db: &BlueprintDb, key: &str) -> Option<Pricing> {
 fn price_with(db: &BlueprintDb, table: &toml::Table, key: &str) -> Option<Pricing> {
     let unit = db.get(db.find(key)?);
     let weapons = fighting_weapons(unit);
-    if weapons.is_empty() || unit.is_structure() {
+    let points = unit.build_power.to_num::<f64>();
+    if unit.is_structure() || (weapons.is_empty() && points <= 0.0) {
         return None;
     }
     let list = &table["price_list"];
@@ -390,8 +394,21 @@ fn price_with(db: &BlueprintDb, table: &toml::Table, key: &str) -> Option<Pricin
         jobs.push(JobPrice { job, damage_per_second: damage, strength, prices, sigma, cost: strength / sigma });
     }
     let sensors = sensors(db, table, unit);
-    let total = jobs.iter().map(|job| job.cost).sum::<f64>() + sensors.iter().map(|(_, cost)| cost).sum::<f64>();
-    Some(Pricing { key: key.to_string(), tier, domain, base, jobs, sensors, list: total, actual: cost_at(unit, tier) })
+    // Build power, a utility job (2026-11-27): what the cheapest builder that does nothing else
+    // pays for a point, over the domain base, as any other job.
+    let build_power = if points > 0.0 { points * build_power_rate(db, key) / base } else { 0.0 };
+    let total = jobs.iter().map(|job| job.cost).sum::<f64>() + sensors.iter().map(|(_, cost)| cost).sum::<f64>() + build_power;
+    Some(Pricing { key: key.to_string(), tier, domain, base, jobs, sensors, build_power, list: total, actual: cost_at(unit, tier) })
+}
+
+/// What a point of build power costs (2026-11-27): the least any unit that only builds pays for
+/// one, at its own tier's prices, leaving out the unit being priced, so that each engineer is
+/// priced by the others.
+pub fn build_power_rate(db: &BlueprintDb, except: &str) -> f64 {
+    db.iter()
+        .filter(|unit| !unit.is_structure() && unit.key != except && unit.build_power.to_num::<f64>() > 0.0 && fighting_weapons(unit).is_empty())
+        .map(|unit| cost_at(unit, unit.tier.clamp(1, 3)) / unit.build_power.to_num::<f64>())
+        .fold(f64::INFINITY, f64::min)
 }
 
 /// The `--balance-derive unit <key>` report: one unit's price, job by job.
@@ -426,6 +443,9 @@ pub fn unit_report(db: &BlueprintDb, key: &str) {
     }
     for (name, cost) in &pricing.sensors {
         println!("  {name:8} {cost:8.1}");
+    }
+    if pricing.build_power > 0.0 {
+        println!("  building {:.1} points at {:.2} a point: {:8.1}", unit.build_power.to_num::<f64>(), build_power_rate(db, key), pricing.build_power);
     }
     println!("  list {:.1}, costs {:.1} ({:+.1}%){}", pricing.list, pricing.actual, pricing.drift() * 100.0, held_note(&table, key));
 }

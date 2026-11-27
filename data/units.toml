@@ -369,9 +369,11 @@ id = "t2_engineer"
 name = "Engineer (T2)"
 class = "engineer"
 tier = 2
-mass = 130
-energy = 650
-build_time = 650
+# Cost by its build power, at the rate the T1 and T3 Engineers pay, 10.4 a point (the price
+# list's build power, 2026-11-27): 130 to 125.
+mass = 125
+energy = 624
+build_time = 624
 health = 400
 speed = "3.8"
 # Engineers float over water, so they can build out on it.
@@ -2024,9 +2026,11 @@ id = "t2_combat_engineer"
 name = "Combat Engineer"
 class = "engineer"
 tier = 2
-mass = 225
-energy = 1000
-build_time = 1000
+# Cost by the price list (2026-11-27): its build power at the engineers' 10.4 a point, 182, with
+# its gun and radar, 70: 224 to 253.
+mass = 254
+energy = 1128
+build_time = 1128
 health = 1040
 speed = 6
 turn_rate = 160
