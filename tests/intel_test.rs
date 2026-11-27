@@ -7,6 +7,8 @@ use sim_engine::sim::components::{Blueprinted, Combat, Intel, SimId, Team};
 use sim_engine::sim::config::{SimConfig, TerrainStyle};
 use sim_engine::sim::world::{decoy_spot, SimWorld};
 
+mod common;
+
 fn point(x: i32, y: i32) -> Vec2Fp {
     Vec2Fp::new(fp_int(x), fp_int(y))
 }
@@ -15,6 +17,8 @@ fn point(x: i32, y: i32) -> Vec2Fp {
 fn foggy_world() -> SimWorld {
     let config = SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: true, ..SimConfig::default() };
     let mut world = SimWorld::new(config, 1);
+    // Thermal Camouflage is out of the roster; cloaking is tested here.
+    common::retire_into(&mut world);
     for economy in &mut world.economies {
         for value in [&mut economy.base_mass_capacity, &mut economy.mass_capacity, &mut economy.mass] {
             *value = Res::from_num(100_000);

@@ -367,6 +367,21 @@ fn ai_puts_up_radar_shields_and_missiles_and_discharges_what_comes_close() {
     let commander = world.commanders[Team::Blue.index()].unwrap();
     let at = world.unit_position(commander).unwrap().xy();
     let tank = world.spawn_mobile(world.blueprints.id("t2_heavy_tank"), Team::Red, Vec2Fp::new(at.x + fp_int(300), at.y));
+    // Kept standing too, and as tough as the generator: with the Heavy Cannon at its list price the
+    // commander has it by now, and it and the base's guns ended the tank in under two seconds,
+    // before the AI next looked (2026-11-27).
+    {
+        let entity = world.unit_entity(tank).unwrap();
+        let mut health = world.ecs.get::<&mut sim_engine::sim::components::Health>(entity).unwrap();
+        health.max = fp_int(50_000);
+        health.current = health.max;
+    }
+    let keep_tank = |world: &mut SimWorld| {
+        if let Some(entity) = world.unit_entity(tank) {
+            let mut health = world.ecs.get::<&mut sim_engine::sim::components::Health>(entity).unwrap();
+            health.current = health.max;
+        }
+    };
     let (mut fired_at, mut discharged) = (false, false);
     let launcher = world.units.iter().find(|(_, entity)| {
         world.ecs.get::<&Blueprinted>(*entity).is_ok_and(|unit| unit.0 == world.blueprints.id("tactical_missile_launcher"))
@@ -378,6 +393,7 @@ fn ai_puts_up_radar_shields_and_missiles_and_discharges_what_comes_close() {
         world.advance_tick(&commands);
         keep_red_alive(&mut world);
         keep_standing(&mut world);
+        keep_tank(&mut world);
         // Discharge needs the energy stored, and whether a big build happens to be emptying
         // the store just now is down to timing that has nothing to do with what is tested here.
         let economy = &mut world.economies[Team::Blue.index()];

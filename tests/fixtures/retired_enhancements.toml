@@ -1,0 +1,47 @@
+# Enhancements out of the standard roster since 2026-11-27 (the design owner's pick), as they were,
+# kept so that the engine's teleporting, cloaking and personal jamming stay tested for data that
+# uses them. Tests append this to data/units.toml (tests/common/mod.rs).
+
+[[enhancement]]
+id = "thermal_camouflage"
+name = "Thermal Camouflage"
+units = ["command_rig"]
+slot = "systems"
+requires = "signature_suppression"
+mass = 6000
+energy = 750000
+build_time = 4200
+health = 12000
+stealth_upkeep = 50
+cloak = { upkeep = 3000 }
+
+[[enhancement]]
+id = "teleporter"
+name = "Orbital Redeploy"
+units = ["command_rig"]
+slot = "systems"
+mass = 15000
+energy = 1500000
+build_time = 4200
+teleporter = { flat_energy = 100000, max_energy = 2500000, min_seconds = 20, max_seconds = 50 }
+
+[[enhancement]]
+id = "radar_jammer"
+name = "Radar Jammer"
+units = ["field_rig"]
+slot = "systems"
+mass = 300
+energy = 8000
+build_time = 2500
+jammer = { radius = 520, decoys = 5 }
+jammer_upkeep = 100
+
+[[enhancement]]
+id = "support_teleporter"
+name = "Orbital Redeploy"
+units = ["field_rig"]
+slot = "systems"
+mass = 15000
+energy = 1500000
+build_time = 21000
+teleporter = { flat_energy = 100000, max_energy = 2500000, min_seconds = 20, max_seconds = 50 }

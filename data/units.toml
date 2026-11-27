@@ -1770,14 +1770,19 @@ weapon = { kind = "tactical_missile", automatic = true, artillery = true, min_ra
 # Field enhancements (GAME_SPECIFICATION.md §2.1), with the inspiration's numbers for its
 # commander. A commander has three bays, and one enhancement in each: a new one replaces what is
 # there, unless it builds on it. Its effects are totals over the commander's own, not steps.
+# Orbital Redeploy, Thermal Camouflage and the field rig's Radar Jammer and Orbital Redeploy are
+# out of the roster (2026-11-27, the design owner's pick); the engine still supports teleporting,
+# cloaking and jamming for data that uses them (tests/fixtures/retired_enhancements.toml).
 [[enhancement]]
 id = "heavy_cannon"
 name = "Heavy Cannon"
 units = ["command_rig"]
 slot = "weapons"
-mass = 800
-energy = 24000
-build_time = 800
+# Cost by what it adds to its rig (2026-11-27, the design owner's pick, [price_list.enhancements]),
+# at T2 prices: gun 312.2; 990 to 312.
+mass = 252
+energy = 7565
+build_time = 252
 # The inspiration's 30 range for 22, and double the damage.
 weapon_range = 600
 weapon_damage = 140
@@ -1787,9 +1792,11 @@ id = "t2_fabrication"
 name = "T2 Fabrication Pack"
 units = ["command_rig"]
 slot = "fabrication"
-mass = 800
-energy = 21000
-build_time = 1000
+# Cost by what it adds to its rig (2026-11-27, the design owner's pick, [price_list.enhancements]),
+# at T2 prices: build power 332.8, health 468.1; 962 to 801.
+mass = 666
+energy = 17485
+build_time = 833
 build_power = 42
 build_tier = 2
 health = 2000
@@ -1801,9 +1808,11 @@ name = "T3 Fabrication Pack"
 units = ["command_rig"]
 slot = "fabrication"
 requires = "t2_fabrication"
-mass = 2400
-energy = 50000
-build_time = 8400
+# Cost by what it adds to its rig (2026-11-27, the design owner's pick, [price_list.enhancements]),
+# at T3 prices: build power 603.2, health 249.4; 2,762 to 853.
+mass = 741
+energy = 15435
+build_time = 2593
 build_power = 100
 build_tier = 3
 health = 3000
@@ -1814,9 +1823,11 @@ id = "damage_control"
 name = "Damage Control"
 units = ["command_rig"]
 slot = "systems"
-mass = 800
-energy = 24000
-build_time = 800
+# Cost by what it adds to its rig (2026-11-27, the design owner's pick, [price_list.enhancements]),
+# at T2 prices: health 450.6; 990 to 451.
+mass = 364
+energy = 10918
+build_time = 364
 health = 1500
 regen = 40
 
@@ -1825,9 +1836,11 @@ id = "field_shield"
 name = "Field Shield"
 units = ["command_rig"]
 slot = "systems"
-mass = 2300
-energy = 112500
-build_time = 2100
+# Cost by what it adds to its rig (2026-11-27, the design owner's pick, [price_list.enhancements]),
+# at T2 prices: shields 4248.3; 3,262 to 4,248.
+mass = 2996
+energy = 146520
+build_time = 2735
 # Back 20 seconds after it falls, as the other domes (the design owner's rule, 2026-11-25; 140 until then).
 shield = { radius = 30, health = 19000, regen = 30, recharge_seconds = 20, upkeep = 250 }
 
@@ -1836,9 +1849,11 @@ id = "area_shield"
 name = "Area Shield"
 units = ["command_rig"]
 slot = "systems"
-mass = 1400
-energy = 40000
-build_time = 1400
+# Cost by what it adds to its rig (2026-11-27, the design owner's pick, [price_list.enhancements]),
+# at T2 prices: shields 1277.6; 1,714 to 1,278.
+mass = 1043
+energy = 29810
+build_time = 1043
 # Back 20 seconds after it falls, as the other domes (the design owner's rule, 2026-11-25; 45 until then).
 shield = { radius = 200, health = 5000, regen = 60, recharge_seconds = 20, upkeep = 200 }
 
@@ -1847,56 +1862,39 @@ id = "signature_suppression"
 name = "Signature Suppression"
 units = ["command_rig"]
 slot = "systems"
-mass = 650
-energy = 14000
-build_time = 800
+# Cost by what it adds to its rig (2026-11-27, the design owner's pick, [price_list.enhancements]),
+# at T2 prices: health 437.5, stealth 394.3; 752 to 832.
+mass = 719
+energy = 15477
+build_time = 884
 health = 2000
 stealth_upkeep = 50
-
-[[enhancement]]
-id = "thermal_camouflage"
-name = "Thermal Camouflage"
-units = ["command_rig"]
-slot = "systems"
-requires = "signature_suppression"
-mass = 6000
-energy = 750000
-build_time = 4200
-health = 12000
-stealth_upkeep = 50
-cloak = { upkeep = 3000 }
-
-[[enhancement]]
-id = "teleporter"
-name = "Orbital Redeploy"
-units = ["command_rig"]
-slot = "systems"
-mass = 15000
-energy = 1500000
-build_time = 4200
-teleporter = { flat_energy = 100000, max_energy = 2500000, min_seconds = 20, max_seconds = 50 }
 
 [[enhancement]]
 id = "onboard_reactor"
 name = "Onboard Reactor"
 units = ["command_rig"]
 slot = "systems"
-mass = 5000
-energy = 175000
-build_time = 2800
+# Cost by what it adds to its rig (2026-11-27, the design owner's pick, [price_list.enhancements]),
+# at T2 prices: income 9285.7; 6,429 to 9,286.
+mass = 7222
+energy = 252776
+build_time = 4044
 mass_income = 14
 energy_income = 2500
 
-# The field rig's enhancements, in §2.1's bays: weapons, fabrication, and systems. Its redeploy
-# and fabricator take the inspiration's numbers for another faction's, and its engineering drone needs aircraft.
+# The field rig's enhancements, in §2.1's bays: weapons, fabrication, and systems. Its fabricator
+# took the inspiration's numbers for another faction's, and its engineering drone needs aircraft.
 [[enhancement]]
 id = "long_barrel"
 name = "Long Barrel"
 units = ["field_rig"]
 slot = "weapons"
-mass = 800
-energy = 30000
-build_time = 3360
+# Cost by what it adds to its rig (2026-11-27, the design owner's pick, [price_list.enhancements]),
+# at T3 prices: gun 169.3; 1,048 to 169.
+mass = 129
+energy = 4848
+build_time = 543
 # The inspiration's 35 range for 25, and a blast of 2.
 weapon_range = 700
 weapon_splash = 40
@@ -1906,9 +1904,11 @@ id = "capacitor_bank"
 name = "Capacitor Bank"
 units = ["field_rig"]
 slot = "weapons"
-mass = 1000
-energy = 44700
-build_time = 5040
+# Cost by what it adds to its rig (2026-11-27, the design owner's pick, [price_list.enhancements]),
+# at T3 prices: gun 272.8; 1,378 to 273.
+mass = 198
+energy = 8849
+build_time = 998
 # Two shots a second for one.
 weapon_reload_ticks = 5
 
@@ -1917,9 +1917,11 @@ id = "rapid_fabricator"
 name = "Rapid Fabricator"
 units = ["field_rig"]
 slot = "fabrication"
-mass = 800
-energy = 50500
-build_time = 4200
+# Cost by what it adds to its rig (2026-11-27, the design owner's pick, [price_list.enhancements]),
+# at T3 prices: build power 436.8; 1,243 to 437.
+mass = 281
+energy = 17748
+build_time = 1476
 build_power = 98
 
 [[enhancement]]
@@ -1927,9 +1929,11 @@ id = "sensor_mast"
 name = "Sensor Mast"
 units = ["field_rig"]
 slot = "systems"
-mass = 600
-energy = 20000
-build_time = 3000
+# Cost by what it adds to its rig (2026-11-27, the design owner's pick, [price_list.enhancements]),
+# at T3 prices: sensors 281.2; 762 to 281.
+mass = 221
+energy = 7382
+build_time = 1107
 # The inspiration's 45 sight and 80 omni.
 vision = 900
 deep_scan = 1600
@@ -1939,9 +1943,11 @@ id = "support_shield"
 name = "Field Shield"
 units = ["field_rig"]
 slot = "systems"
-mass = 2000
-energy = 100200
-build_time = 7200
+# Cost by what it adds to its rig (2026-11-27, the design owner's pick, [price_list.enhancements]),
+# at T3 prices: shields 5886.8; 2,859 to 5,887.
+mass = 4118
+energy = 206316
+build_time = 14825
 # Back 20 seconds after it falls, as every shield (the design owner's rule, 2026-11-25, for every
 # shield from 2026-11-27; 170 until then).
 shield = { radius = 30, health = 26000, regen = 50, recharge_seconds = 20, upkeep = 500 }
@@ -1952,41 +1958,24 @@ name = "Area Shield"
 units = ["field_rig"]
 slot = "systems"
 requires = "support_shield"
-mass = 3500
-energy = 360800
-build_time = 10800
+# Cost by what it adds to its rig (2026-11-27, the design owner's pick, [price_list.enhancements]),
+# at T3 prices: shields 6085.9; 6,770 to 6,086.
+mass = 3147
+energy = 324366
+build_time = 9709
 # Back 20 seconds after it falls, as every shield (2026-11-27; 215 until then).
 shield = { radius = 200, health = 52000, regen = 150, recharge_seconds = 20, upkeep = 1000 }
-
-[[enhancement]]
-id = "radar_jammer"
-name = "Radar Jammer"
-units = ["field_rig"]
-slot = "systems"
-mass = 300
-energy = 8000
-build_time = 2500
-jammer = { radius = 520, decoys = 5 }
-jammer_upkeep = 100
-
-[[enhancement]]
-id = "support_teleporter"
-name = "Orbital Redeploy"
-units = ["field_rig"]
-slot = "systems"
-mass = 15000
-energy = 1500000
-build_time = 21000
-teleporter = { flat_energy = 100000, max_energy = 2500000, min_seconds = 20, max_seconds = 50 }
 
 [[enhancement]]
 id = "support_onboard_reactor"
 name = "Onboard Reactor"
 units = ["field_rig"]
 slot = "systems"
-mass = 4500
-energy = 90000
-build_time = 8400
+# Cost by what it adds to its rig (2026-11-27, the design owner's pick, [price_list.enhancements]),
+# at T3 prices: income 7619.0; 5,143 to 7,619.
+mass = 6667
+energy = 133331
+build_time = 12444
 mass_income = 10
 energy_income = 1000
 
