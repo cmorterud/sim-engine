@@ -369,11 +369,12 @@ id = "t2_engineer"
 name = "Engineer (T2)"
 class = "engineer"
 tier = 2
-# Cost by its build power, at the rate the T1 and T3 Engineers pay, 10.4 a point (the price
-# list's build power, 2026-11-27): 130 to 125.
-mass = 125
-energy = 624
-build_time = 624
+# Its build power at the rate the T1 and T3 Engineers pay, 10.4 a point, lists it at 125 (the
+# price list's build power, 2026-11-27). Held at 130 for the design owner: at 125, one saddleback
+# soak match (seed 3) ran to 4077 s, past the 4000 s limit for an unfinished match.
+mass = 130
+energy = 650
+build_time = 650
 health = 400
 speed = "3.8"
 # Engineers float over water, so they can build out on it.

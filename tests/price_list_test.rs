@@ -65,14 +65,17 @@ fn every_dome_costs_the_strength_it_adds() {
 }
 
 /// Build power is a utility job (2026-11-27): the engineers and the Combat Engineer cost what the
-/// list prices them at, the engineers' 10.4 a point with the Combat Engineer's gun and radar.
+/// list prices them at, the engineers' 10.4 a point with the Combat Engineer's gun and radar, but
+/// for any `[price_list.held]` holds (the T2 Engineer, for the design owner).
 #[test]
 fn builders_cost_their_build_power() {
     let db = BlueprintDb::standard();
     for key in ["t1_engineer", "t2_engineer", "t3_engineer", "t2_combat_engineer"] {
         let pricing = price_list::price(&db, key).unwrap_or_else(|| panic!("the list prices {key}"));
         assert!(pricing.build_power > 0.0, "{key} builds");
-        assert!(pricing.drift().abs() < 0.01, "{key} costs {:.1}, the list {:.1}", pricing.actual, pricing.list);
+        if price_list::held_reason(key).is_none() {
+            assert!(pricing.drift().abs() < 0.01, "{key} costs {:.1}, the list {:.1}", pricing.actual, pricing.list);
+        }
     }
 }
 
