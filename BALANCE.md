@@ -466,6 +466,20 @@ out close and why: evidence about the process, not a target.
   33%, headquarters 3 to 9%; the Rig Yard unchanged. Mass, energy and build time go together.
   Today's soaks miss [pace]: matches run about 45 minutes against 30, the first T3 factory comes
   at about 33 against 16 to 22; the soak now reports both (`pace:`).
+* 2026-11-28: every unit names what sets its cost (`price_list::cost_source`,
+  `--balance-derive sources`, tests/price_list_test.rs): the list's price or what holds it, a
+  dome's group, the factory recipe, minutes of a T3 economy, a share of the missile it stops, its
+  tier's payback, or, for a unit no rule prices, a reason in `[price_list.unlisted]`. An anchor is
+  the design owner's number that a rule prices others from: the Wall Section for a structure's
+  hull, the Radar and the T1 Sonar for sensors, the Stealth Field Generator for stealth, the Light
+  Air Transport for cargo. Storage and the fabricators stay the design owner's (the plan's pick).
+  Written down by rule, today's numbers: the Heavy Artillery Installation, 9.95 minutes of a T3
+  economy, and the Strategic Missile Defense, 0.94 (`[missiles] strategic_minutes`); a Medium Tank
+  breaks a Wall Section in 17 shots (`[kills]`). The Tactical Missile Launcher is a factory for its
+  missiles, which carry the damage: its build power and hull, 800 to 838. Twelve units are not
+  derived yet, each named with the rule to come: the torpedo launchers, the static anti-air and the
+  Mobile Flak, the T2 Artillery Installation, the Tactical Missile, the T2 Radar, the T2 Sonar,
+  the Deep Scan Array and the Airfield.
 
 ## Order of work
 
