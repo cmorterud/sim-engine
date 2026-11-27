@@ -2451,6 +2451,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                             &looks,
                         );
                         motion.note_doors(&previous.silo_doors, &current.silo_doors);
+                        motion.note_arms(&previous.arms, &current.arms);
                         motion.note_beams(&current.landed, &current.units, &looks);
                         instances::build_unit_instances(&previous.units, &current.units, alpha, eye, selection.selected(), &looks, &current.work_links, &mut motion, &mut scene_instances);
                         // Explosions, missile trails, and wakes, made from the snapshots alone. The
@@ -2480,7 +2481,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                         // Builders' beams and adjacency wiring are in the world, and only up close:
                         // zoomed out to icons, they would be clutter.
                         if camera.altitude() < ICON_ALTITUDE {
-                            links::build_work_beam_instances(&beams, beam_time, eye, &mut scene_instances);
+                            links::build_work_beam_instances(&links::from_tools(beams.clone(), &motion), beam_time, eye, &mut scene_instances);
                             links::build_wiring_instances(&snapshot.adjacency, &snapshot.units, beam_time, eye, &mut scene_instances);
                         }
                         let cell = f64::from(TERRAIN_CELL_UNITS);
