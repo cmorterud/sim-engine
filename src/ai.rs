@@ -1284,6 +1284,17 @@ impl AiBrain {
             }
             _ => {}
         }
+        // With no land route and mass running over, the yards and air factories its income wants
+        // come before more extractors, whose income it could not spend either (2026-11-27): on
+        // Scattered Isles both AIs' stores were full from the eighth minute, the yards waited
+        // behind seventy deposits, and whether a second came at all turned on a submarine's cost
+        // a few percent either way, one yard by the twentieth minute or four. Only from the
+        // income a second yard is wanted at: the first still waits for extractors.
+        if !self.land_route && mass_income >= self.naval(SECOND_NAVAL_FACTORY_INCOME) && economy.mass >= economy.mass_capacity * 9 / 10 {
+            if let Some(choice) = naval_choice().or_else(air_choice) {
+                return Some(choice);
+            }
+        }
         if let Some(cell) = self.nearest_deposit(world, forces, position, is_commander, planned) {
             return Some((roster.extractor, cell));
         }

@@ -388,6 +388,10 @@ out close and why: evidence about the process, not a target.
   (the Battlecruiser, which had drifted 6% under its list, 4,987 to 5,070; the Cruiser 1,608 to
   1,529), the Escort Corvette 913 to 882 with its group, and the T3 fleet scores +0.88 against the
   T3 air force. The counters re-solve: the Torpedo Boat 794 to 748, the Torpedo Bomber 243 to 234.
+  The cheaper Attack Submarine (402 to 379) tipped the AI on Scattered Isles from four yards to one
+  by the twentieth minute (any cost under about 385 did), its mass store full all the while, so the
+  AI now builds the yards and air factories its income wants before more extractors when its store
+  runs over with no land route (GAME_SPECIFICATION.md).
 
 ## Order of work
 
