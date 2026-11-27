@@ -134,6 +134,14 @@ fn glowing(color: [f32; 3]) -> [f32; 3] {
 const NORTH: [f32; 2] = [0.0, 1.0];
 /// What a factory is building faces one of the bay's open ends.
 const EAST: [f32; 2] = [1.0, 0.0];
+const WEST: [f32; 2] = [-1.0, 0.0];
+const SOUTH: [f32; 2] = [0.0, -1.0];
+
+/// A naval factory, drawn turned a quarter so that its slip, built east to west, runs north and
+/// south.
+fn is_dock(shape: Shape) -> bool {
+    matches!(shape, Shape::NavalFactory | Shape::NavalFactoryT2 | Shape::NavalFactoryT3 | Shape::NavalFactoryT2Support | Shape::NavalFactoryT3Support)
+}
 
 fn instance(center: [f64; 3], size: [f32; 3], heading: [f32; 2], color: [f32; 3], icon_px: f32, eye: [f64; 3]) -> UnitInstanceRaw {
     let [x, y] = heading;
@@ -1536,6 +1544,8 @@ pub fn build_unit_instances(
                     {
                         motion.swing(unit.id, 0, NORTH)
                     }
+                    // A dock's slip runs north and south, the way its ships face and leave.
+                    None if is_dock(shape) => EAST,
                     None => NORTH,
                 };
                 let mut body = animated(
@@ -1698,7 +1708,7 @@ pub fn build_unit_instances(
                 }
                 // What a factory is building stands in its bay, rising from the floor as it is built,
                 // in its team's colors but unlit and dim, until it drives or flies out.
-                if let (Some((item, permille)), Some(floor), true) = (
+                if let (Some((item, permille, heading)), Some(floor), true) = (
                     unit.assembling,
                     shape.bay_floor(),
                     unit.built_permille >= 1000,
@@ -1717,22 +1727,24 @@ pub fn build_unit_instances(
                         let made_trim = color.map(|channel| channel * dim);
                         let made_hull = FACTION_HULL.map(|channel| channel * dim);
                         let extent = [made.size, made.size, rise];
+                        // It faces the way it will leave.
+                        let way = [EAST, NORTH, WEST, SOUTH][usize::from(heading % 4)];
                         if let Some(base) = made.base {
                             out.push(
                                 base,
                                 painted(
-                                    at, extent, EAST, made_trim, made_hull, made_hull, NO_ICON, eye,
+                                    at, extent, way, made_trim, made_hull, made_hull, NO_ICON, eye,
                                 ),
                             );
                         }
                         out.push(
                             made.shape,
                             painted(
-                                at, extent, EAST, made_trim, made_hull, made_hull, NO_ICON, eye,
+                                at, extent, way, made_trim, made_hull, made_hull, NO_ICON, eye,
                             ),
                         );
                         for (turret, turret_at, facing, turret_extent) in
-                            mounted_turrets(made, at, extent, EAST, |_| None)
+                            mounted_turrets(made, at, extent, way, |_| None)
                         {
                             out.push(
                                 turret,
@@ -2899,11 +2911,11 @@ mod tests {
             out.shape(Shape::Bot).iter().map(|instance| instance.model_matrix[2][2]).collect::<Vec<f32>>()
         };
         assert!(draw(factory).is_empty(), "an idle factory's bay is empty");
-        let early = draw(UnitView { assembling: Some((bot, 100)), ..factory });
-        let late = draw(UnitView { assembling: Some((bot, 900)), ..factory });
+        let early = draw(UnitView { assembling: Some((bot, 100, 0)), ..factory });
+        let late = draw(UnitView { assembling: Some((bot, 900, 0)), ..factory });
         assert_eq!((early.len(), late.len()), (1, 1), "the bot stands in the bay");
         assert!(late[0] > early[0], "it rises as it is built: {early:?} then {late:?}");
-        assert!(draw(UnitView { assembling: Some((bot, 500)), built_permille: 500, ..factory }).is_empty(), "not while the factory is unfinished");
+        assert!(draw(UnitView { assembling: Some((bot, 500, 0)), built_permille: 500, ..factory }).is_empty(), "not while the factory is unfinished");
     }
 
     /// Working lights shine while a unit works, and dim when it stops.
