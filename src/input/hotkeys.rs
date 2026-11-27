@@ -60,7 +60,7 @@ pub const BUILDER_FAMILIES: [(char, &[&str]); 8] = [
     ('A', &["t2_artillery", "t3_artillery", "tactical_missile_launcher", "strategic_missile_launcher"]),
     ('Z', &["radar", "radar_t2", "deep_scan_array", "t1_sonar", "t2_sonar", "stealth_field_generator"]),
     ('C', &["shield_generator", "t3_heavy_shield", "tactical_missile_defense", "strategic_missile_defense"]),
-    ('V', &["field_workshop", "field_workshop_t3", "airfield", "wall"]),
+    ('V', &["airfield", "wall"]),
 ];
 
 /// A builder's structure's family, by its place in `BUILDER_FAMILIES`, and its place in the

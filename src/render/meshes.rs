@@ -149,8 +149,6 @@ pub enum Shape {
     HeavyPointDefense,
     /// A wall section: a block with crenellations along the top.
     Wall,
-    /// A field workshop: a pad with a tower, and a drone hovering over it.
-    FieldWorkshop,
     /// An air transport, pointing along +Y: a long body with a cargo bay under it and a fan
     /// in a ring at each side.
     Transport,
@@ -268,8 +266,6 @@ pub enum Shape {
     ShieldGeneratorT3,
     /// The T3 mass fabricator: a core on a slab, between four cooling fins in an X.
     FabricatorT3,
-    /// The T3 field workshop: a pad with two masts, their drones' booms crossing over it.
-    FieldWorkshopT3,
     /// The T3 artillery's emplacement, filling its four by four footprint: a slab ringed by
     /// sloped revetments, bunkers at its corners, ammunition rails, and a turntable for the gun.
     ArtilleryEmplacement,
@@ -321,7 +317,7 @@ pub enum Shape {
 }
 
 impl Shape {
-    pub const ALL: [Self; 143] = [
+    pub const ALL: [Self; 141] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -398,7 +394,6 @@ impl Shape {
         Self::TorpedoBoat,
         Self::HeavyPointDefense,
         Self::Wall,
-        Self::FieldWorkshop,
         Self::Transport,
         Self::Scout,
         Self::FighterBomber,
@@ -447,7 +442,6 @@ impl Shape {
         Self::ArtilleryGunT3,
         Self::ShieldGeneratorT3,
         Self::FabricatorT3,
-        Self::FieldWorkshopT3,
         Self::ArtilleryEmplacement,
         Self::FlakHull,
         Self::AntiAirMount,
@@ -1360,40 +1354,6 @@ impl MeshBuilder {
         }
     }
 
-    /// A field workshop's pad, with the team's edging round it.
-    fn workshop_pad(&mut self) {
-        self.paint(Material::Hull);
-        self.bevel([-0.5, -0.5, -0.5], [0.5, 0.5, -0.38], 0.03);
-        self.paint(Material::Trim);
-        for (min, max) in [([-0.47, -0.47], [0.47, -0.41]), ([-0.47, 0.41], [0.47, 0.47]), ([-0.47, -0.41], [-0.41, 0.41]), ([0.41, -0.41], [0.47, 0.41])] {
-            self.block([min[0], min[1], -0.39], [max[0], max[1], -0.37]);
-        }
-    }
-
-    /// A field workshop's mast standing at `foot`, its boom at `height` reaching out to a drone
-    /// hovering over `drone`, lit while it works.
-    fn workshop_mast(&mut self, foot: [f32; 2], drone: [f32; 2], height: f32) {
-        self.paint(Material::Trim);
-        self.frustum(foot, [-0.38, 0.12], [0.16, 0.12], 8);
-        self.paint(Material::Metal);
-        self.frustum(foot, [0.12, height - 0.04], [0.04, 0.03], 6);
-        self.beam([foot[0], foot[1], height - 0.06], [drone[0] - 0.01, drone[1] - 0.01, height], 0.025, 0.025);
-        self.paint(Material::Hull);
-        self.bevel([drone[0] - 0.11, drone[1] - 0.11, height - 0.1], [drone[0] + 0.11, drone[1] + 0.11, height - 0.02], 0.02);
-        self.paint(Material::Glow);
-        self.moving(motion::PULSE, [0.0; 3], |mesh| mesh.ball([drone[0], drone[1], height - 0.13], 0.04, 6, 3));
-    }
-
-    /// Lights at the corners of a field workshop's pad, lit while it works.
-    fn workshop_lights(&mut self) {
-        self.paint(Material::Glow);
-        self.moving(motion::PULSE, [0.0; 3], |mesh| {
-            for (x, y) in [(-0.4_f32, -0.4_f32), (0.4, -0.4), (-0.4, 0.4), (0.4, 0.4)] {
-                mesh.block([x - 0.02, y - 0.02, -0.38], [x + 0.02, y + 0.02, -0.36]);
-            }
-        });
-    }
-
     /// A transport's ducted rotor at `at`, of `radius`: a duct, a team-colored ring over it if
     /// `ring`, and two blades crossing inside, which turn.
     fn ducted_rotor(&mut self, at: [f32; 2], radius: f32, ring: bool) {
@@ -2267,11 +2227,6 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             }
             mesh.paint(Material::Glow);
             mesh.block([-0.05, 0.43, 0.04], [0.05, 0.45, 0.07]);
-        }
-        Shape::FieldWorkshop => {
-            mesh.workshop_pad();
-            mesh.workshop_mast([-0.18, -0.18], [0.23, 0.19], 0.34);
-            mesh.workshop_lights();
         }
         Shape::Wall => {
             mesh.paint(Material::Hull);
@@ -3697,12 +3652,6 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             }
             mesh.paint(Material::Trim);
             mesh.frustum([0.0, 0.0], [0.3, 0.45], [0.24, 0.1], 12);
-        }
-        Shape::FieldWorkshopT3 => {
-            mesh.workshop_pad();
-            mesh.workshop_mast([-0.22, -0.22], [0.22, -0.02], 0.34);
-            mesh.workshop_mast([0.22, 0.22], [-0.22, 0.02], 0.42);
-            mesh.workshop_lights();
         }
         // A half-track, long and narrow: wheels under fenders at the front, a hood and a cab, a
         // pedestal for the guns over the tracks, outriggers either side of it, and an ammunition
