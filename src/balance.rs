@@ -1301,9 +1301,17 @@ pub fn derive_t1_air(base: &BlueprintDb) -> BlueprintDb {
         }
     }
     let db = costing(&db, cost);
-    // The Interceptor costs the ability price list's price at the T1 air base.
-    let listed = crate::price_list::price(&db, "t1_interceptor").expect("the list prices the interceptor").list;
+    // The T1 air base is what prices the bomber at that cost (`[price_list] domain_base air_t1`),
+    // and the Interceptor costs the list's price at it.
+    let base = t1_air_base(&db);
+    let listed = crate::price_list::price(&db, "t1_interceptor").expect("the list prices the interceptor").at_base(base);
     scaled_to(&db, interceptor_id, 1, listed)
+}
+
+/// The T1 air base that prices the T1 Bomber at its cost, which the escort rule sets.
+pub fn t1_air_base(db: &BlueprintDb) -> f64 {
+    let bomber = crate::price_list::price(db, "t1_bomber").expect("the list prices the bomber");
+    bomber.base_for(bomber.actual)
 }
 
 /// The [model] time to kill at a tier, in a domain's fights (`time_to_kill_domain`).
@@ -1335,6 +1343,7 @@ pub fn derive_t1_air_report() {
         println!("  {}", describe(unit));
         println!("             mass = {}, energy = {}, build_time = {}, health = {}, damage = {}", unit.mass, unit.energy, unit.build_time, unit.health, weapon.damage);
     }
+    println!("  the T1 air base that prices the bomber at its cost: {:.3} ([price_list] domain_base air_t1)", t1_air_base(&db));
     println!();
     print_t1_air_checks(&db);
 }
@@ -1364,6 +1373,88 @@ pub fn print_t1_air_checks(db: &Arc<BlueprintDb>) {
     let clear = target_number_range("air", "interceptors_clear_bombers_seconds");
     println!("  interceptors against bombers:         {:+.2} in {:.1} s (targets: {:.0}-{:.0} s)", caught_all.score, caught_all.seconds, clear.0, clear.1);
     println!("  interceptors against interceptors:    {:+.2} (even)", mirrored(db, bought(db, "t1_interceptor", materiel), bought(db, "t1_interceptor", materiel), 1.0).score);
+}
+
+/// A force named in `[domains.forces]` in its proportions by cost, bought to about `materiel` at
+/// a tier's prices in whole units of each: so that it can match another force's materiel closely,
+/// which whole squadrons cannot.
+pub fn force_by_cost(db: &BlueprintDb, name: &str, materiel: f64, tier: u8) -> Vec<Side> {
+    let squadron = domain_force(db, name);
+    let one: f64 = squadron.iter().map(|&(unit, count)| f64::from(count) * cost_at(db.get(unit), tier)).sum();
+    squadron.iter().map(|&(unit, count)| Side { unit, count: (materiel * f64::from(count) / one).round().max(1.0) as u32, tactics: Tactics::AttackMove }).collect()
+}
+
+/// The escort rule at a tier (`[air] escort_forces`): the land army and the strike aircraft
+/// that are to break even at a tier.
+pub fn escort_forces(tier: u8) -> (String, String) {
+    let table: toml::Table = TARGETS.parse().expect("data/balance_targets.toml is valid");
+    let pair = table["air"]["escort_forces"][format!("t{tier}").as_str()].as_array().unwrap_or_else(|| panic!("[air] escort_forces has t{tier}"));
+    let name = |index: usize| pair[index].as_str().expect("a force's name").to_string();
+    (name(0), name(1))
+}
+
+/// Strike aircraft against an escorted army (`[air] escort_forces`): their break-even efficiency
+/// against the tier's land army, the mean over armies of `[air] escort_squadrons` squadrons, the
+/// aircraft bought by cost to each army's materiel. Above 1, the aircraft are the better buy. One
+/// fight's answer moves by about a tenth from one size to the next, as whole units and the
+/// aircraft's passes fall, so it is the mean.
+pub fn strike_against_army(db: &BlueprintDb, tier: u8) -> f64 {
+    let (army, strike) = escort_forces(tier);
+    let db = Arc::new(db.clone());
+    // Each unit marches in its own block, one behind another, as a player lines an army up: the
+    // shortest reach in front, and the escort behind the rest, as at T1 (`escorted_army`). Where
+    // each stands decides much of the fight, since aircraft strip the army of what they reach
+    // first.
+    let mut squadron = domain_force(&db, &army);
+    let is_anti_air = |unit: BlueprintId| db.get(unit).weapon.is_some_and(|weapon| weapon.targets == crate::sim::blueprints::Targets::Air);
+    let reach = |unit: BlueprintId| db.get(unit).weapon.map_or(0, |weapon| weapon.range.to_num::<i32>());
+    squadron.sort_by_key(|&(unit, _)| (is_anti_air(unit), reach(unit)));
+    let table: toml::Table = TARGETS.parse().expect("data/balance_targets.toml is valid");
+    let range = table["air"]["escort_squadrons"][format!("t{tier}").as_str()].as_array().unwrap_or_else(|| panic!("[air] escort_squadrons has t{tier}"));
+    let sizes = (as_number(&range[0]) as u32)..=(as_number(&range[1]) as u32);
+    let count = sizes.clone().count() as f64;
+    sizes
+        .map(|size| {
+            let army: Vec<Side> = squadron.iter().map(|&(unit, each)| Side { unit, count: each * size, tactics: Tactics::AttackMove }).collect();
+            let air = force_by_cost(&db, &strike, force_materiel(&db, &army, tier), tier);
+            break_even_forces(&db, Field::new(Ground::Land, tier), &air, &army).efficiency
+        })
+        .sum::<f64>()
+        / count
+}
+
+/// The Mobile Flak's gun from the escort rule at T2: the damage a shell at which the T2 strike
+/// aircraft and the standard T2 army break even, with the aircraft as they are. Their efficiency
+/// goes about as the damage to a power, so each step solves for 1 on the line through the last
+/// two; it stops when a step changes the damage by under one.
+pub fn derive_t2_flak(base: &BlueprintDb) -> (BlueprintDb, f64) {
+    let flak = base.id("t2_mobile_flak");
+    let start = base.get(flak).weapon.expect("flak has a gun").damage.to_num::<f64>();
+    let with = |damage: f64| base.with_unit(flak, |unit| unit.weapon.as_mut().expect("flak has a gun").damage = Fp::from_num(damage));
+    let mut tried = vec![(start, strike_against_army(base, 2))];
+    // A first guess: efficiency as one over the damage to the power 1.3, as measured (2026-11-27).
+    let mut damage = (start * tried[0].1.powf(1.0 / 1.3)).round();
+    for _ in 0..4 {
+        if tried.iter().any(|&(tried_damage, _)| tried_damage == damage) {
+            break;
+        }
+        let efficiency = strike_against_army(&with(damage), 2);
+        tried.push((damage, efficiency));
+        let [(d0, e0), (d1, e1)] = [tried[tried.len() - 2], tried[tried.len() - 1]];
+        let slope = (e1.ln() - e0.ln()) / (d1.ln() - d0.ln());
+        damage = if slope < 0.0 { (d1.ln() - e1.ln() / slope).exp().round() } else { d1 };
+    }
+    let (damage, efficiency) = tried.iter().copied().min_by(|a, b| (a.1 - 1.0).abs().total_cmp(&(b.1 - 1.0).abs())).expect("a trial");
+    (with(damage), efficiency)
+}
+
+/// The `--balance-derive air-bases` report: the Mobile Flak's gun from the escort rule at T2.
+pub fn derive_air_bases_report() {
+    let base = BlueprintDb::standard();
+    let (army, strike) = escort_forces(2);
+    println!("T2 strike aircraft ({strike}) against the standard T2 army ({army}), as they are: efficiency {:.3}", strike_against_army(&base, 2));
+    let (db, efficiency) = derive_t2_flak(&base);
+    println!("  t2_mobile_flak: damage {} (efficiency at it {efficiency:.3})", db.get(db.id("t2_mobile_flak")).weapon.expect("flak has a gun").damage);
 }
 
 // Fights between domains (BALANCE.md, 2026-11-24): `[domains]` in the targets.
@@ -1549,19 +1640,15 @@ pub fn derive_domains_report() {
     score_cell(&mut cells, "T2 fleet against an equal cost of hovercraft, on water", water(2), "t2_fleet", 2.0, "t2_hovercraft", Some(-number("hovercraft_loses_to_fleet")), None);
     score_cell(&mut cells, "T1 fleet against an equal cost of the T1 air force, over water", water(1), "t1_fleet", 4.0, "t1_air_force", None, None);
     score_cell(&mut cells, "Frigates against an equal cost of T1 bombers, over water", water(1), "t1_frigates", 12.0, "t1_bombers", None, None);
-    // Air against land, about even, as at T1.
+    // Air against the standard T2 army, even by the escort rule ([air] escort_forces).
     {
-        let margin = target_number("counters", "even_margin");
-        let land = Field::new(Ground::Land, 2);
-        let army = force("t2_land_army", squadron_cost("t2_land_army", 2) * 4.0, 2);
-        let materiel = force_materiel(&db, &army, 2);
-        let air = force("t2_air_force", materiel, 2);
-        let result = mirrored_on(&db, land, &air, &army, 1.0);
+        let (low, high) = target_number_range("air", "escort_efficiency");
+        let efficiency = strike_against_army(&db, 2);
         cells.push(Cell {
-            name: "T2 air force against an equal cost of a T2 land army a fifth anti-air".to_string(),
-            target: format!("within ±{margin:.2}"),
-            measured: format!("{:+.2} in {:.0} s ({:.0} materiel)", result.score, result.seconds, materiel),
-            met: Some(result.score.abs() <= margin),
+            name: "T2 strike aircraft against the standard T2 land army, about a third anti-air, by break-even".to_string(),
+            target: format!("{low:.2}–{high:.2}"),
+            measured: format!("{efficiency:.2} (the aircraft's strength per materiel over the army's)"),
+            met: Some((low..=high).contains(&efficiency)),
         });
     }
     // The torpedo bombers it takes to break a fleet, at T2 and a massed T3 one.

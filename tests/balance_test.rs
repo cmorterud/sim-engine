@@ -416,16 +416,16 @@ fn a_t2_fleet_rules_the_water() {
     assert!(-hovercraft <= cell("hovercraft_loses_to_fleet"), "hovercraft score {:+.2} against the T2 fleet", -hovercraft);
 }
 
-/// `[domains]`: at T2, the AI's air force comes out even with a land army a fifth flak, and two
-/// cruisers break a coastal position of T2 point defenses under a dome, from beyond their reach.
+/// `[air] escort_forces`: at T2, the strike aircraft break even with an equal cost of the standard
+/// T2 land army, about a third flak (2026-11-27); and `[domains]`: two cruisers break a coastal position of T2 point defenses under a dome, from beyond their reach.
 /// One cannot, by design: the dome heals as fast as its missiles strike (2026-11-25).
 #[test]
 #[cfg_attr(debug_assertions, ignore = "release only")]
 fn t2_air_meets_a_land_army_evenly_and_cruisers_break_a_coastal_position() {
     let db = db();
-    let even = fight(&db, Field::new(Ground::Land, 2), "t2_land_army", 4.0, "t2_air_force");
-    let margin = sim_engine::balance::target_number("counters", "even_margin");
-    assert!(even.abs() <= margin, "a T2 land army a fifth flak scores {even:+.2} against the T2 air force");
+    let even = sim_engine::balance::strike_against_army(&db, 2);
+    let (low, high) = sim_engine::balance::target_number_range("air", "escort_efficiency");
+    assert!((low..=high).contains(&even), "T2 strike aircraft are {even:.2} as strong per cost as the standard T2 army");
     let count = number(&domains(&["cells", "coastal_ship_count"])) as u32;
     let cruisers = [Side { unit: db.id("t2_cruiser"), count, tactics: Tactics::AttackMove }];
     let siege = siege_on(&db, Field::new(Ground::Shore, 2), &cruisers, T2_POSITION);

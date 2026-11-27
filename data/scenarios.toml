@@ -320,15 +320,14 @@ red = [
 
 [[scenario]]
 id = "air_t2_against_a_land_army"
-title = "Air against land at T2: the T2 air force against an army a fifth anti-air"
+title = "Air against land at T2: strike aircraft against the standard T2 army"
 ground = "land"
-target = "domains.cells.air_force_against_land_army_t2_even"
-shows = "The T2 air force against an equal cost of a T2 land army with a fifth of it in Mobile Flak, as the anti-air rule has it. About even: an army that brings its anti-air holds off the air, and one that skips it does not."
+target = "air.escort_efficiency"
+shows = "The T2 strike aircraft, Gunships and Fighter-Bombers, against an equal cost of the standard T2 land army, about a third of it in Mobile Flak. About even, the escort rule that sets the flak's gun: an army that brings its anti-air holds off the air, and one that skips it does not."
 try = "Attack-move in. Then go for the flak first with the fighter-bombers, and bring the gunships in after."
 blue = [
-    { unit = "t1_interceptor", count = 6, at = [1_300, 2_560], columns = 6 },
     { unit = "t2_fighter_bomber", count = 4, at = [1_250, 2_560], columns = 4 },
-    { unit = "t2_gunship", count = 8, at = [1_190, 2_560], columns = 8 },
+    { unit = "t2_gunship", count = 9, at = [1_190, 2_560], columns = 9 },
 ]
 red = [
     { unit = "t2_heavy_tank", count = 8, at = [3_000, 2_560], columns = 8 },

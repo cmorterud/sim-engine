@@ -629,15 +629,17 @@ flight = { elevation = 308, turn_rate = 80, fuel = 500 }
 # and its health over its damage a second the [model] time to kill in air-to-air fights, 9.1 s
 # (2026-11-27, `--balance-derive t1-air`: 435 health and 50 a second to 445 and 48.9). Its
 # health stays under the T3 fighter's one shot. Cost by the ability price list at the T1 air
-# base ([price_list] domain_base, 2026-11-27): 184 to 162, mass, energy and build time together.
+# base ([price_list] domain_base, 2026-11-27): 184 to 162, mass, energy and build time together;
+# then 175 once that base was the one that prices the Bomber at its cost (0.294, the design
+# owner's pick, 2026-11-27).
 [[unit]]
 id = "t1_interceptor"
 name = "Interceptor"
 class = "air"
 tier = 1
-mass = 32
-energy = 1460
-build_time = 363
+mass = 35
+energy = 1576
+build_time = 392
 health = 445
 speed = 30
 radius = 10
@@ -858,7 +860,9 @@ extra_weapons = [{ range = 600, reload_ticks = 13, projectile_speed = 90, damage
 
 # Flak bursts on an aircraft and hits every enemy aircraft around it.
 # Static anti-air is worth more for its cost than mobile ([premiums], 2026-11-25): half again as
-# strong per cost against aircraft, mostly in health (2,590 to 11,600; damage 125 to 145).
+# strong per cost against aircraft, mostly in health (2,590 to 11,600; damage 125 to 145). With the
+# Mobile Flak's shell set by the escort rule (58 to 45, 2026-11-27) it is 1.85 times as strong per
+# cost, still inside the band, and its shell stays as it is.
 [[unit]]
 id = "t2_flak"
 name = "Flak Cannon"
@@ -892,8 +896,10 @@ vision = 560
 weapon = { range = 1200, reload_ticks = 14, projectile_speed = 90, damage = 850, splash_radius = 30, targets = "air", turn_rate = 180, homing = true }
 
 # Two shells a volley in the inspiration, one here, slow, as the Flak Cannon's. Its damage is set by the
-# anti-air share rule at T2, as the T1 mobile anti-air's is at T1: a T2 land army a fifth flak by
-# materiel comes out even with an equal cost of the AI's T2 air force (2026-11-24: 64, from 72).
+# escort rule at T2 ([air] escort_forces, balance::derive_t2_flak): the standard T2 land army, about
+# a third flak by materiel, and an equal cost of the T2 strike aircraft break even (efficiency
+# 1.005). 45, from 58 (2026-11-27, the design owner's pick); 64 by an equal-cost score against the
+# whole T2 air force, fighters and all, from 2026-11-24, and 58 once guns fired only when laid.
 [[unit]]
 id = "t2_mobile_flak"
 name = "Mobile Flak"
@@ -908,7 +914,7 @@ turn_rate = 90
 turn_radius = 20
 radius = 10
 vision = 400
-weapon = { kind = "flak", range = 800, reload_ticks = 5, projectile_speed = 40, damage = 58, splash_radius = 80, targets = "air", turn_rate = 180, spread = 60 }
+weapon = { kind = "flak", range = 800, reload_ticks = 5, projectile_speed = 40, damage = 45, splash_radius = 80, targets = "air", turn_rate = 180, spread = 60 }
 
 # Support factories (GAME_SPECIFICATION.md §15), as in the inspiration: T2 and T3 builders
 # build them for less than an upgrade costs, but only while the team has a headquarters, a factory
