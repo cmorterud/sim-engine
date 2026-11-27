@@ -456,6 +456,16 @@ out close and why: evidence about the process, not a target.
   against the engineers' 10.4, so the list would have halved it into an engineer that needs no
   minding. The AI's idle engineers assist its factories instead. The engine keeps assisting
   stations, tested with tests/fixtures/retired_units.toml.
+* 2026-11-27: every factory priced as its build power, its hull and its tech (the design owner's
+  pick; `[price_list.factories]`, `--balance-derive factories`). Build power at the engineers'
+  10.4 a point wherever the point sits, health at the Wall Section's 0.007 a point, and for a
+  headquarters and the Rig Yard a tech price, what opening its tier costs: the design owner's
+  knob, kept at a headquarters' cost over its support factory's (T2 land 851, air 486, naval 900;
+  T3 land 3,941, air 3,080, naval 7,276; the Rig Yard 1,825), to be tuned against [pace] with the
+  AI's upgrade rules. T1 factories 20 to 32% cheaper (land 330 to 236), support factories 10 to
+  33%, headquarters 3 to 9%; the Rig Yard unchanged. Mass, energy and build time go together.
+  Today's soaks miss [pace]: matches run about 45 minutes against 30, the first T3 factory comes
+  at about 33 against 16 to 22; the soak now reports both (`pace:`).
 
 ## Order of work
 

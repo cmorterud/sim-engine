@@ -333,7 +333,10 @@ impl SimWorld {
             let idle = heading_for.is_none() && !patrolling && flight.refit.is_none();
             let landing = idle && !near_edge && terrain.is_passable(here);
             // Over a structure, such as the facility it has just left, it flies on to land beyond it.
-            let (cell_x, cell_y) = terrain.cell_of(here);
+            // The cell as units count it, which on a cell's edge is the one toward the map's
+            // center, so that an aircraft flying along an edge, as one leaving its factory's pad
+            // along the middle of the factory does, sees what its mirror image does.
+            let (cell_x, cell_y) = terrain.unit_cell_of(here);
             let over_structure = idle && occupancy.contains_key(&((cell_y * terrain.cells_per_side() + cell_x) as u32));
             // Out of fuel, it flies at half its height and speed.
             let (top_speed, height) = (if flight.out_of_fuel() { stats.max_speed / 2 } else { stats.max_speed }, flight.cruising_height());
@@ -459,7 +462,10 @@ impl SimWorld {
             } else {
                 step
             };
-            let next = Vec2Fp::new(Fp::from_bits((here.x + step.x).to_bits().clamp(0, max)), Fp::from_bits((here.y + step.y).to_bits().clamp(0, max)));
+            // Kept a raw bit inside the map on both sides, so that the edge an aircraft is held
+            // at is the mirror image of the other: the map's own run from 0 to a raw bit short of
+            // its size held one side's a bit further out, and mirrored matches parted there.
+            let next = Vec2Fp::new(Fp::from_bits((here.x + step.x).to_bits().clamp(1, max)), Fp::from_bits((here.y + step.y).to_bits().clamp(1, max)));
             // Landed, it rests on the ground like any other unit.
             position.0 = Vec3Fp::new(next.x, next.y, flying_height(terrain, next, flight.altitude.max(stats.radius)));
             velocity.0 = Vec3Fp::new(step.x, step.y, Fp::ZERO);
@@ -535,8 +541,8 @@ impl SimWorld {
                 continue;
             }
             let mut position = self.ecs.get::<&mut Position>(entity).expect("aircraft are live units");
-            let x = (i64::from(position.0.x.to_bits()) + push_x).clamp(0, max) as i32;
-            let y = (i64::from(position.0.y.to_bits()) + push_y).clamp(0, max) as i32;
+            let x = (i64::from(position.0.x.to_bits()) + push_x).clamp(1, max) as i32;
+            let y = (i64::from(position.0.y.to_bits()) + push_y).clamp(1, max) as i32;
             position.0 = Vec3Fp::new(Fp::from_bits(x), Fp::from_bits(y), position.0.z);
         }
     }

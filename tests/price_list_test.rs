@@ -185,6 +185,32 @@ fn every_enhancement_costs_what_it_adds_to_its_rig() {
     assert!((build - 58.0 * rate).abs() < 0.01, "{build:.1} for 58 points at {rate:.2}");
 }
 
+/// Factories (2026-11-27, the design owner's pick): each costs its build power at the build-power
+/// price, its hull at the Wall Section's price a point of health, and, for a headquarters and the
+/// Rig Yard, its tier's tech price.
+#[test]
+fn every_factory_costs_its_build_power_hull_and_tech() {
+    let db = BlueprintDb::standard();
+    let drift_max = targets()["price_list"]["drift_max"].as_float().expect("[price_list] drift_max");
+    let mut off = Vec::new();
+    let mut priced = 0;
+    for unit in db.iter() {
+        let Some(pricing) = price_list::factory_price(&db, &unit.key) else { continue };
+        priced += 1;
+        println!("{:26} T{} build power {:7.1}, hull {:5.1}, tech {:7.1}: list {:7.1}, costs {:7.1} ({:+.1}%)", pricing.key, pricing.tier, pricing.build_power, pricing.hull, pricing.tech, pricing.list, pricing.actual, pricing.drift() * 100.0);
+        if pricing.drift().abs() > drift_max {
+            off.push(format!("{} costs {:.1}, {:+.1}% off the list's {:.1}", pricing.key, pricing.actual, pricing.drift() * 100.0, pricing.list));
+        }
+        // Only a headquarters, and the Rig Yard, opens a tier.
+        assert_eq!(pricing.tech > 0.0, unit.is_headquarters() || unit.key == "rig_yard", "{}'s tech price {}", unit.key, pricing.tech);
+    }
+    assert!(off.is_empty(), "{off:#?}");
+    assert_eq!(priced, 16, "the land, air and naval factories at every tier, and the Rig Yard");
+    // A point of build power costs the same in a factory as in an engineer.
+    let factory = price_list::factory_price(&db, "land_factory_t1").expect("priced");
+    assert!((factory.build_power - 20.0 * price_list::build_power_rate(&db, "")).abs() < 1e-9);
+}
+
 /// T4, for experimentals (2026-11-27): every per-tier table has a T4 entry, and a unit made T4 is
 /// priced by them: its fights last the T4 time to kill, 1.45 of T1's, and it is measured against
 /// T3's line, at T3's energy price and, in the air, T3's base.

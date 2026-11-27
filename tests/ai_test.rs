@@ -851,3 +851,87 @@ fn ships_at_home_turn_to_meet_raiders_even_when_busy() {
     }
     assert!(met, "the busy ships at home were never sent at the raiders");
 }
+
+#[test]
+fn in_sudden_death_a_commander_with_nothing_left_to_fight_with_goes_for_the_enemy_commander() {
+    // Two lone commanders, each at home, once stood there for the last 50 minutes of a match.
+    let orders_at = |minute: u32| {
+        let mut world = scenario::skirmish(41).world;
+        world.current_tick = minute * 600;
+        AiBrain::new(Team::Blue, 41, world.starts).think(&world)
+    };
+    let commander_sent = |orders: &[SimCommand], world: &SimWorld| {
+        let blue = world.commanders[Team::Blue.index()].unwrap();
+        orders.iter().find_map(|command| match command {
+            SimCommand::AttackMove { units, goal } if units.contains(&blue) => Some(*goal),
+            _ => None,
+        })
+    };
+    let world = scenario::skirmish(41).world;
+    assert_eq!(commander_sent(&orders_at(30), &world), None, "the commander stays home before sudden death");
+    let red = world.unit_position(world.commanders[Team::Red.index()].unwrap()).unwrap().xy();
+    assert_eq!(commander_sent(&orders_at(51), &world), Some(red), "and goes for the enemy commander in it");
+}
+
+#[test]
+fn once_the_nearest_enemy_player_is_out_the_waves_go_for_the_nearest_one_left() {
+    // On Scattered Isles (4v4, seed 1, 2026-11-27) the last player of each side kept sending its
+    // aircraft and fleet at the empty base of an enemy wiped out at minute 45, until the time ran
+    // out at 100.
+    let map = scenario::MapSource::Map(std::sync::Arc::new(sim_engine::sim::maps::scattered_isles()));
+    let wave_goal = |eliminate_nearest: bool| {
+        let mut world = map.scenario_teams(1, 2).expect("scattered isles holds 2v2").world;
+        let blue = world.players_of(Team::Blue).next().unwrap();
+        let home = world.start_of(blue);
+        let mut enemies: Vec<_> = world.players_of(Team::Red).collect();
+        enemies.sort_by_key(|&enemy| world.start_of(enemy).distance_squared(&home));
+        // Made at the start of the match, as it is in one.
+        let mut brain = AiBrain::for_player(&world, blue, 1, Difficulty::Normal, sim_engine::ai_strategy::Strategy::balanced());
+        if eliminate_nearest {
+            let doomed = world.commanders[enemies[0].index()].unwrap();
+            world.advance_tick(&[SimCommand::SelfDestruct { units: vec![doomed] }]);
+            for _ in 0..80 {
+                world.advance_tick(&[]);
+            }
+            assert!(world.eliminated[enemies[0].index()], "the nearest enemy is out");
+        }
+        // Hovercraft cross the sea between the islands, and enough of them make a full-size wave.
+        let hover = world.blueprints.id("t2_assault_hovercraft");
+        for index in 0..60 {
+            world.spawn_mobile_for(hover, blue, Vec2Fp::new(home.x + fp_int(200 + index % 10 * 30), home.y + fp_int(200 + index / 10 * 30)));
+        }
+        // Before sudden death, when waves go for the enemy commander wherever it is.
+        world.current_tick = 38 * 600;
+        let orders = brain.think(&world);
+        let goal = orders.iter().find_map(|command| match command {
+            SimCommand::AttackMove { units, goal } if units.len() >= 50 => Some(*goal),
+            _ => None,
+        });
+        (goal.expect("a full-size wave sets out"), enemies.iter().map(|&enemy| world.start_of(enemy)).collect::<Vec<_>>())
+    };
+    let (goal, starts) = wave_goal(false);
+    assert_eq!(goal, starts[0], "the wave goes for the nearest enemy's start");
+    let (goal, starts) = wave_goal(true);
+    assert_eq!(goal, starts[1], "and once that enemy is out, for the other's");
+}
+
+#[test]
+fn in_sudden_death_an_idle_commander_goes_for_the_enemy_commander_while_its_army_is_out() {
+    // On Saddleback (2v2, seed 4, 2026-11-27) both armies were always out attacking, so no wave
+    // of idle units formed for the commander to join, and both stood idle at home for 15 minutes.
+    let mut world = scenario::skirmish(41).world;
+    let home = scenario::skirmish_start(Team::Blue);
+    let tank = world.blueprints.id("t2_heavy_tank");
+    let army: Vec<_> = (0..10).map(|index| world.spawn_mobile(tank, Team::Blue, Vec2Fp::new(home.x + fp_int(300 + index * 30), home.y + fp_int(300)))).collect();
+    let middle = Vec2Fp::new(fp_int(5_000), fp_int(5_000));
+    world.advance_tick(&[SimCommand::AttackMove { units: army.clone(), goal: middle }]);
+    world.current_tick = 51 * 600;
+    let orders = AiBrain::new(Team::Blue, 41, world.starts).think(&world);
+    let blue = world.commanders[Team::Blue.index()].unwrap();
+    let red = world.unit_position(world.commanders[Team::Red.index()].unwrap()).unwrap().xy();
+    let sent = orders.iter().find_map(|command| match command {
+        SimCommand::AttackMove { units, goal } if units == &vec![blue] => Some(*goal),
+        _ => None,
+    });
+    assert_eq!(sent, Some(red), "the idle commander goes for the enemy commander");
+}

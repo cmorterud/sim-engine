@@ -312,9 +312,14 @@ impl Terrain {
         let sample = |offset: usize| (self.heights[index + offset] as i64) << (FP_FRAC_BITS - HEIGHT_FRAC_BITS);
         let (h00, h10) = (sample(0), sample(1));
         let (h01, h11) = (sample(self.samples), sample(self.samples + 1));
-        let near = h00 + (h10 - h00) * frac_x / CELL_RAW;
-        let far = h01 + (h11 - h01) * frac_x / CELL_RAW;
-        Fp::from_bits((near + (far - near) * frac_y / CELL_RAW) as i32)
+        // Weighted all at once, with one rounding, so that a point and its image turned half
+        // about the map's middle, which weigh the same four samples the other way round, stand
+        // at exactly the same height: interpolating along x and then y rounded twice, from
+        // opposite corners, and mirrored units a raw bit apart in height could disagree over
+        // whether a target was in range.
+        let (rest_x, rest_y) = (CELL_RAW - frac_x, CELL_RAW - frac_y);
+        let sum = h00 * rest_x * rest_y + h10 * frac_x * rest_y + h01 * rest_x * frac_y + h11 * frac_x * frac_y;
+        Fp::from_bits((sum / (CELL_RAW * CELL_RAW)) as i32)
     }
 }
 

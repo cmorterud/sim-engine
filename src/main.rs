@@ -136,7 +136,7 @@ Usage: sim-engine [options]
                        With --soak, the strategies Blue and Red play (default
                        balanced,balanced)
   --balance            Measure the unit data with the balance harness's duels (BALANCE.md)
-  --balance-derive <t1|t2|t3|t1-air|air-bases|counters|structures|battle-line|domains|list|enhancements|unit <key>>
+  --balance-derive <t1|t2|t3|t1-air|air-bases|counters|structures|battle-line|domains|list|enhancements|factories|unit <key>>
                        Derive a tier of land units' numbers, or T1 air's, from
                        data/balance_targets.toml, priced by duels against the tiers below as
                        the unit data has them; with air-bases, the Mobile Flak's gun from
@@ -640,8 +640,9 @@ fn main() {
             "domains" => sim_engine::balance::derive_domains_report(),
             "list" => sim_engine::price_list::list_report(&sim_engine::sim::blueprints::BlueprintDb::standard()),
             "enhancements" => sim_engine::price_list::enhancement_report(&sim_engine::sim::blueprints::BlueprintDb::standard()),
+            "factories" => sim_engine::price_list::factory_report(&sim_engine::sim::blueprints::BlueprintDb::standard()),
             other if other.starts_with("unit ") => sim_engine::price_list::unit_report(&sim_engine::sim::blueprints::BlueprintDb::standard(), &other["unit ".len()..]),
-            other => println!("--balance-derive takes t1, t2, t3, t1-air, air-bases, counters, structures, battle-line, domains, list, enhancements, or unit <key>, not {other}"),
+            other => println!("--balance-derive takes t1, t2, t3, t1-air, air-bases, counters, structures, battle-line, domains, list, enhancements, factories, or unit <key>, not {other}"),
         }
         return;
     }
@@ -2472,6 +2473,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                             &looks,
                         );
                         motion.note_doors(&previous.silo_doors, &current.silo_doors);
+                        motion.note_arms(&previous.arms, &current.arms);
                         motion.note_beams(&current.landed, &current.units, &looks);
                         instances::build_unit_instances(&previous.units, &current.units, alpha, eye, selection.selected(), &looks, &current.work_links, &player_palette, &mut motion, &mut scene_instances);
                         // Explosions, missile trails, and wakes, made from the snapshots alone. The
@@ -2501,7 +2503,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                         // Builders' beams and adjacency wiring are in the world, and only up close:
                         // zoomed out to icons, they would be clutter.
                         if camera.altitude() < ICON_ALTITUDE {
-                            links::build_work_beam_instances(&beams, beam_time, eye, &mut scene_instances);
+                            links::build_work_beam_instances(&links::from_tools(beams.clone(), &motion), beam_time, eye, &mut scene_instances);
                             links::build_wiring_instances(&snapshot.adjacency, &snapshot.units, beam_time, eye, &mut scene_instances);
                         }
                         let cell = f64::from(TERRAIN_CELL_UNITS);

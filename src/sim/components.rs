@@ -208,13 +208,16 @@ pub struct Order {
     pub slot: Option<Vec2Fp>,
     /// How long it may spend walking to its spot, so that a blocked spot cannot trap it.
     pub slot_ticks: u32,
+    /// It brakes onto its spot and stops dead there, as a unit sent to a rally point does,
+    /// rather than coast past it as its velocity eases off.
+    pub settles: bool,
     /// The way straight to its route's goal is clear, so it walks straight there rather than
     /// along the route's eight directions and through the middles of its sectors' edges.
     pub direct: bool,
 }
 
 impl Order {
-    pub const IDLE: Self = Self { kind: OrderKind::Idle, route: 0, slot: None, slot_ticks: 0, direct: false };
+    pub const IDLE: Self = Self { kind: OrderKind::Idle, route: 0, slot: None, slot_ticks: 0, settles: false, direct: false };
 }
 
 /// Marks a unit made from a blueprint. PoC stress-test units have none.
@@ -690,17 +693,39 @@ impl Turning {
         let dot = facing.x * toward.x + facing.y * toward.y;
         // Exactly behind has no shorter side, so it turns the positive way.
         let left = facing.x * toward.y - facing.y * toward.x >= Fp::ZERO;
+        // At full turn rate it drives a circle of radius forward / max_turn. With the goal inside
+        // that circle it only goes round it, as a scout did its patrol point for good, and a
+        // walker, turning as it went, stepped past its own and back (2026-11-27): a vehicle slows
+        // until the circle it can turn in reaches the goal, and one that can turn on the spot
+        // does that instead. Crawling round the arc, walkers fought on worse, and fleets lost
+        // half again as many ships in AI matches.
+        let reaching = self.max_turn.saturating_mul(self.widest_turn_to(toward, goal_distance, left));
         let (forward, turn) = if self.radius == Fp::ZERO {
-            (speed * dot.max(Fp::ZERO), self.max_turn)
+            // One that can turn on the spot does so, rather than crawl round a tight arc.
+            let forward = speed * dot.max(Fp::ZERO);
+            if forward > reaching && dot < ROUGHLY_FACING { (Fp::ZERO, self.max_turn) } else { (forward.min(reaching), self.max_turn) }
         } else if dot < ROUGHLY_FACING && self.goal_is_inside_turn(toward, goal_distance, left) {
             (Fp::ZERO, self.max_turn * PIVOT_SHARE)
         } else {
-            let forward = speed * dot.clamp(TURNING_SPEED_SHARE, Fp::ONE);
+            let forward = (speed * dot.clamp(TURNING_SPEED_SHARE, Fp::ONE)).min(reaching);
             (forward, self.max_turn.min(forward / self.radius))
         };
         self.facing = rotate_toward(facing, toward, turn);
         let ahead = if self.radius == Fp::ZERO { forward.min(speed * (self.facing.x * toward.x + self.facing.y * toward.y).max(Fp::ZERO)) } else { forward };
         self.facing.scaled(ahead)
+    }
+
+    /// The widest turning circle on that side that still reaches the goal, `goal_distance`
+    /// along `toward`: |goal|² / (2 goal·side), never tighter than its own turn radius.
+    fn widest_turn_to(&self, toward: Vec2Fp, goal_distance: Fp, left: bool) -> Fp {
+        let (side_x, side_y) = if left { (-self.facing.y, self.facing.x) } else { (self.facing.y, -self.facing.x) };
+        let across = (toward.x * side_x + toward.y * side_y).max(Fp::ZERO);
+        // across * goal_distance is goal·side; the widest radius is goal_distance / (2 across).
+        let twice = across * 2;
+        if twice == Fp::ZERO {
+            return Fp::MAX;
+        }
+        goal_distance.saturating_div(twice).max(self.radius)
     }
 
     /// Whether the goal is inside the circle this unit would turn in on that side, where
@@ -1036,6 +1061,14 @@ pub struct Builder {
     pub power: Fp,
     pub range: Fp,
     pub tasks: Vec<BuildTask>,
+    /// How many ticks its arms take to reach out into their build pose, or 0 for a builder that
+    /// works the moment it arrives. An engineer's do: it works only once they are out.
+    pub arm_ticks: u8,
+    /// How far out its arms are, in ticks, up to `arm_ticks`. They reach out a tick at a time
+    /// while it stands at its work, and fold back a tick at a time otherwise.
+    pub arms: u8,
+    /// Whether it stood at its work this tick, with its arms out or reaching out.
+    pub arms_held: bool,
 }
 
 #[derive(Clone, Debug)]

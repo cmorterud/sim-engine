@@ -108,9 +108,9 @@ fn construction_takes_build_time_divided_by_build_power() {
     let mut world = test_world();
     set_resources(&mut world, Team::Blue, 10_000, 100_000);
     let (_, site) = engineer_at_site(&mut world);
-    // Its build time at 5 power: 122 is 24.4 s, or 244 ticks.
+    // Its build time at 5 power: 122 is 24.4 s, or 244 ticks, once the engineer's arms are out.
     let (mass, build_time) = site_cost(&world);
-    let wanted = (build_time / 5.0 * 10.0).round() as i32;
+    let wanted = (build_time / 5.0 * 10.0).round() as i32 + i32::from(sim_engine::sim::production::ENGINEER_ARM_TICKS);
     let mut ticks = 0;
     while !is_finished(&world, site) {
         world.advance_tick(&[]);
@@ -382,8 +382,10 @@ fn upgrade_halts_production_then_improves_the_factory() {
         SimCommand::QueueUnit { factory, blueprint: t2, count: 1 },
         SimCommand::QueueUnit { factory, blueprint: bot, count: 1 },
     ]);
-    // The inspiration's 2,300 build time at 20 power is 115 s. The bot behind it must wait.
-    run(&mut world, 1_100);
+    // Its build time at the T1 factory's 20 power: 2,099 is 105 s (by its build power, hull and
+    // tech since 2026-11-27). The bot behind it must wait.
+    let upgrade_ticks = (world.blueprints.get(t2).build_time / Res::from_num(world.blueprints.get(t1).build_power) * Res::from_num(10)).to_num::<u32>();
+    run(&mut world, upgrade_ticks - 50);
     assert_eq!(world.units.len(), 1, "production must halt during an upgrade");
     run(&mut world, 60);
     let power = world.ecs.get::<&Factory>(entity(&world, factory)).unwrap().power;
