@@ -5,7 +5,7 @@ use twox_hash::XxHash64;
 
 use super::blueprints::{BlueprintDb, Res, UnitClass};
 use super::air::{bomb_lands_on, BOMB_GRAVITY};
-use super::combat::{dome_entry, entry_hit, firing_solution_within, missile_velocity, probe_terrain, shot_is_clear, GRAVITY};
+use super::combat::{dome_entry, entry_hit, firing_solution_within, missile_velocity, probe_surface, probe_terrain, shot_is_clear, GRAVITY};
 use super::commands::SimCommand;
 use super::components::{BuildTask, AntiAir, Artillery, BombBay, Falling, Flight, Homing,
     Blueprinted, Builder, Combat, Construction, Factory, Footprint, Health, MoveClass, Order, OrderKind, OrderQueue, Patrol,
@@ -2947,8 +2947,10 @@ impl SimWorld {
             // while taking off or landing.
             let at_height = flight.is_none_or(|flight| flight.altitude >= flight.cruising_height());
             let raw = |x: i32, y: i32, z: i32| Vec3Fp::new(Fp::from_bits(x), Fp::from_bits(y), Fp::from_bits(z));
-            // A bomber lets go only when its bomb would land on the target.
+            // A bomber lets go only when its bomb would land on the target. It falls to the
+            // ground, or over the sea to the water's surface, where it bursts.
             let splash = combat.projectile_splash;
+            let surface = |at: Vec2Fp| terrain.height_at(at).max(terrain.water_level());
             let bomb_on = |to: Vec3Fp, radius: i32, velocity: [i32; 2]| {
                 let reach = (splash + Fp::from_bits(radius)) / 2;
                 at_height && turning.is_some_and(|turning| bomb_lands_on(raw(me.x, me.y, muzzle), turning.facing, speed, to, velocity, reach))
@@ -2986,7 +2988,7 @@ impl SimWorld {
                             combat.closing = None;
                         }
                     }
-                    if bomb.is_some() && !bomb_on(Vec3Fp::new(to.x, to.y, terrain.height_at(to.xy())), entry.radius, entry.velocity) {
+                    if bomb.is_some() && !bomb_on(Vec3Fp::new(to.x, to.y, surface(to.xy())), entry.radius, entry.velocity) {
                         // Not over it yet.
                     } else if !clear && combat.forced_target.is_none() {
                         // A target picked by the unit itself is passed over for a while.
@@ -3036,7 +3038,7 @@ impl SimWorld {
             // A ground attack aims a hair below the ground, so that rounding cannot leave the shell
             // just above it at the spot, to skim on past. Any deeper, and a flat shot lands short.
             if let Some(spot) = ground.filter(|_| hits_ground && tractor.is_none()) {
-                let spot_point = Vec3Fp::new(spot.x, spot.y, terrain.height_at(spot));
+                let spot_point = Vec3Fp::new(spot.x, spot.y, if bomb.is_some() { surface(spot) } else { terrain.height_at(spot) });
                 let distance = squared_distance(spot.x.to_bits(), spot.y.to_bits());
                 let in_reach = if bomb.is_some() { bomb_on(spot_point, 0, [0, 0]) } else { distance <= range * range && far_enough(distance) };
                 let charged = economies[stats.owner.index()].energy >= weapon_energy;
@@ -3876,7 +3878,8 @@ impl SimWorld {
             let allies_are_safe = projectile.allied_safe_ticks > 0;
             projectile.allied_safe_ticks = projectile.allied_safe_ticks.saturating_sub(1);
 
-            let probe = probe_terrain(terrain, start, step);
+            // A bomb bursts on the water's surface; a shell still goes in, to the sea floor.
+            let probe = if falling.is_some() { probe_surface(terrain, start, step) } else { probe_terrain(terrain, start, step) };
 
             // Shells far above the ground cannot touch a unit, which spares most grid queries.
             // Over the sea, the ground that counts is the surface ships ride on, not the seabed.
