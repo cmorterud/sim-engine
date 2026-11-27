@@ -332,7 +332,8 @@ interceptor_seconds_per_bomber_t1 = 10
 # √(health × damage a second), which every T1 air number above scales with. Its health over its
 # damage a second is the [model] time to kill in air-to-air fights. With the T1 air base pricing
 # the Bomber at its cost (0.294), the Interceptor costs 8% more and they take 11.2 s: the design
-# owner kept its size and took the dearer Interceptor (2026-11-27; 9 to 11 s until then).
+# owner kept its size and took the dearer Interceptor (2026-11-27; 9 to 11 s until then). With
+# every sensor over the base (0.315), it costs 164.
 interceptors_clear_bombers_seconds = [9, 12]
 # A land army this share anti-air, by materiel, comes out about even with an equal materiel of
 # bombers ([counters] even_margin): what sets the T1 Bomber's cost, with Mobile Anti-Air's gun set
@@ -701,19 +702,22 @@ anchor_strength_per_cost = 2.806
 tier_efficiency = [1.0, 1.0, 1.0, 1.0]
 # The navy's base from the battle line ([battle_line] navy, 2026-11-27): the T2 fleet, its ships on
 # the list, scores +0.6 against an equal cost of the T2 air force; 0.669 until then, solved by
-# holding the T2 fleet (two destroyers, two cruisers) at its cost. Air's at T2 by holding the T2 air force's strike aircraft (four gunships, two
-# fighter-bombers) at their cost (2026-11-26). A price every aircraft would pay alike, for flying,
+# holding the T2 fleet (two destroyers, two cruisers) at its cost; 0.702, then 0.709 once every
+# sensor was priced over its domain base (2026-11-27). Air's at T2 by holding the T2 air force's
+# strike aircraft (four gunships, two fighter-bombers) at their cost (2026-11-26): 0.902, then
+# 0.904 with every sensor over the base. A price every aircraft would pay alike, for flying,
 # cancels in it. Each tier's air base comes from how deadly its anti-air is, which nothing else
 # sets: anti-air guns and aircraft costs are set by the escort rules ([air]). At T1 (2026-11-27),
 # Mobile Anti-Air downs a bomber in [kill_times] mobile_aa_t1_bomber, anti_air_escort_share then
 # sets the T1 Bomber's cost, and the T1 base is what prices the bomber at that
 # (balance::t1_air_base): 0.318, then 0.294 once the landed shares were measured again with turrets
-# that fire only once laid (2026-11-27). The Interceptor is priced at it. At T2 the escort rule sets the
+# that fire only once laid, then 0.315 once every sensor, the Bomber's radar too, was priced over
+# its domain base (2026-11-27). The Interceptor is priced at it. At T2 the escort rule sets the
 # Mobile Flak's gun against the strike aircraft as they are. At T3 (2026-11-27), from the battle
 # line ([battle_line] t3_air): the base at which the Heavy Gunships are as good a buy against the
 # standard T3 army as the T2 strike aircraft against the T2 army, both standing in ranks; T2's
 # 0.902 until then.
-domain_base = { land = 1.0, navy = 0.702, air_t1 = 0.294, air_t2 = 0.902, air_t3 = 1.005 }
+domain_base = { land = 1.0, navy = 0.709, air_t1 = 0.315, air_t2 = 0.904, air_t3 = 1.005 }
 # Reach past the line's: x = c (r / r_line - 1), price x h / (1 - x h), h about 1 for shells and
 # 0 for missiles. Short of it: -c (1 - r / r_line) (v_line / v). Speed: speed_share (1 - v_line / v).
 speed_share = 0.3
@@ -732,7 +736,10 @@ first_volley_share = 0.5
 undodgeable = 0.34
 # Out of cannons' reach (submerged): sqrt(1 / (1 - f)) - 1, f the share of its tier's fleet's
 # anti-ship damage that cannot reach it. The T1 fleet for this is two frigates and two submarines,
-# f 0.63, so 0.65. A submarine's deck gun fires only on the surface and pays no premium.
+# f 0.63, so 0.65. A submarine's torpedoes and missiles fire from under the water and pay it; its
+# deck gun fires only on the surface and pays no premium. At every tier at T1's (2026-11-27, for
+# the Strategic Missile Submarine's cruise missiles), until a tier has a sub hunter of its own to
+# measure the share against.
 submerged_t1 = 0.65
 # A weapon with more than one kind of target: sqrt(1 / the largest share of the enemy mix a
 # single-target weapon could hit) - 1. A navy is taken as half ships, half submarines, so a torpedo
@@ -749,10 +756,17 @@ torpedo_flexibility = 0.41
 # Build power (2026-11-27), a utility job: its points at the least any unit that only builds pays
 # for one (the T1 and T3 Engineers, 10.4), over the domain base. Each engineer is priced by the
 # others. The Field Rig and the Command Rig carry it in their lists, still held.
+# Strategic launching (2026-11-27, the design owner's pick), for a unit that builds strategic
+# missiles and is not the launcher: the launcher's cost, half by its share of the launcher's build
+# power and half by its share of its stock. Not over the domain base: the launcher is priced in
+# minutes of a T3 economy ([economy]), not by a fight. Its build power is this job's, not a
+# builder's.
 # A sensor pays only for what it sees past its own vision, at the price per area of the cheapest
 # building that has it: (range^2 - vision^2) / building range^2 x building cost. A ship's radar is
 # shared by the radar ships of its tier's standard fleet, whose cover overlaps, so it pays that
-# over their number (2026-11-26).
+# over their number (2026-11-26). Every sensor is then over its unit's domain base, as every other
+# job is (2026-11-27, the design owner's pick), so that one radar is priced by one rule on a scout
+# and on a warship; a unit that only sees, as the Air Scout, costs its sensors.
 
 # Each tier's line, in its domain, which reach and speed are measured against (2026-11-27, as the
 # list was worked by hand): the land line, and the navy's ships of each tier's line (the
@@ -810,8 +824,8 @@ t3_strategic_bomber = 3.03
 t2_torpedo_boat = 0.33
 t2_destroyer = 0.07
 
-# Units with a fighting weapon whose cost something other than the list sets, and what. Every
-# other such unit costs the list's price (tests/price_list_test.rs).
+# Units the list prices whose cost something other than the list sets, and what. Every other such
+# unit costs the list's price (tests/price_list_test.rs).
 [price_list.held]
 t1_medium_tank = "the anchor"
 t1_light_walker = "the land solver's targets ([roles])"
@@ -831,7 +845,10 @@ t2_torpedo_boat = "the duel it wins ([counters]): the most that keeps 0.70 again
 t1_point_defense = "the hold rule ([premiums]): the most it can cost and still hold, under the list's price"
 command_rig = "not derived yet: the snipe rules, its gun and enhancements"
 field_rig = "not derived yet: build power, income and its gun"
-t3_missile_sub = "not derived yet: the launcher's share, its cruise missiles, submerged at T3 (left for the design owner, 2026-11-27)"
+# The Spy Plane can look anywhere, which the list prices only through what its radar sees past
+# its vision (42 at the T3 air base). Its cost is the design owner's until a price for seeing
+# anywhere exists (2026-11-27, the plan's pick).
+t3_spy_plane = "the design owner's cost until a price for seeing anywhere exists"
 
 # Aircraft pay for the damage they land, not their card's (2026-11-26): anti-air against a bomber
 # flying its run (the Strategic Bomber at T3, the T1 Bomber below), bombs, guns and torpedoes against

@@ -621,9 +621,11 @@ id = "t1_air_scout"
 name = "Air Scout"
 class = "air"
 tier = 1
-mass = 40
-energy = 580
-build_time = 200
+# Cost by the ability price list (2026-11-27): its radar past its vision, over the T1 air base, as
+# every sensor is priced: 78 to 62.
+mass = 32
+energy = 458
+build_time = 158
 health = 35
 speed = 38
 radius = 8
@@ -645,9 +647,11 @@ id = "t1_interceptor"
 name = "Interceptor"
 class = "air"
 tier = 1
-mass = 35
-energy = 1576
-build_time = 392
+# 175 to 164 once every sensor was priced over its domain base, which moved the T1 air base, the
+# one that prices the Bomber at its cost, to 0.315 (2026-11-27).
+mass = 33
+energy = 1469
+build_time = 366
 health = 445
 speed = 30
 radius = 10
@@ -1221,9 +1225,10 @@ tier = 1
 # equal-cost fight with bombers (reports/plans/2026-11-26-ability-price-list.md).
 # With the first-volley price ([price_list], 2026-11-26): 398 to 392.
 # At the navy base from the battle line ([battle_line] navy, 2026-11-27): 392 to 386.
-mass = 258
-energy = 2570
-build_time = 1437
+# At the navy base with every sensor over it (2026-11-27, 0.709): 386 to 389.
+mass = 260
+energy = 2586
+build_time = 1446
 health = 2949
 speed = 12
 turn_rate = 60
@@ -1328,9 +1333,10 @@ tier = 2
 # With the first-volley price ([price_list], 2026-11-26): 1,625 to 1,605.
 # At the navy base from the battle line ([battle_line] navy, 2026-11-27), on the list: 1,605 to
 # 1,579.
-mass = 1554
-energy = 10359
-build_time = 7725
+# At the navy base with every sensor over it (2026-11-27, 0.709): 1,579 to 1,563.
+mass = 1539
+energy = 10258
+build_time = 7650
 health = 10990
 speed = "10.4"
 turn_rate = 55
@@ -1372,9 +1378,10 @@ tier = 2
 # Cost by the ability price list (2026-11-26): 1,529 to 1,588 (reports/plans/2026-11-26-ability-price-list.md).
 # With the first-volley price ([price_list], 2026-11-26): 1,588 to 1,608.
 # At the navy base from the battle line ([battle_line] navy, 2026-11-27): 1,608 to 1,529.
-mass = 1473
-energy = 13255
-build_time = 6589
+# At the navy base with every sensor over it (2026-11-27, 0.709): 1,529 to 1,536.
+mass = 1480
+energy = 13318
+build_time = 6620
 health = 4404
 speed = 9
 turn_rate = 40
@@ -1435,9 +1442,10 @@ tier = 3
 # With the first-volley price ([price_list], 2026-11-26): 6,298 to 6,442.
 # At the navy base from the battle line ([battle_line] navy, 2026-11-27), on the list: 6,442 to
 # 6,244.
-mass = 6173
-energy = 38276
-build_time = 22036
+# At the navy base with every sensor over it (2026-11-27, 0.709): 6,244 to 6,180.
+mass = 6110
+energy = 37886
+build_time = 21811
 health = 90314
 speed = "7.2"
 turn_rate = 27
@@ -1478,9 +1486,10 @@ tier = 3
 # With the first-volley price ([price_list], 2026-11-26): 5,098 to 4,987.
 # At the navy base from the battle line ([battle_line] navy, 2026-11-27), on the list, which it
 # had drifted 6% under: 4,987 to 5,070.
-mass = 4903
-energy = 42022
-build_time = 19767
+# At the navy base with every sensor over it (2026-11-27, 0.709): 5,070 to 5,018.
+mass = 4853
+energy = 41597
+build_time = 19567
 health = 31516
 speed = "10.8"
 turn_rate = 35
@@ -1527,9 +1536,10 @@ tier = 1
 # flexibility price, submerged out of cannons' reach (reports/plans/2026-11-26-ability-price-list.md).
 # With the first-volley price ([price_list], 2026-11-26): 411 to 402.
 # At the navy base from the battle line ([battle_line] navy, 2026-11-27): 402 to 379.
-mass = 291
-energy = 2331
-build_time = 1303
+# At the navy base with every sensor over it (2026-11-27, 0.709): 379 to 383.
+mass = 295
+energy = 2359
+build_time = 1319
 health = 1279
 speed = 12
 turn_rate = 80
@@ -1679,9 +1689,10 @@ tier = 2
 # Cost by the strength its dome and hull add to the T2 fleet's destroyers and cruisers
 # ([price_list.shield_groups], 2026-11-27): 733 to 913.
 # Its group cheaper at the navy base from the battle line (2026-11-27): 913 to 882.
-mass = 842
-energy = 8428
-build_time = 3613
+# Its group at the navy base with every sensor over it (2026-11-27): 882 to 880.
+mass = 840
+energy = 8406
+build_time = 3604
 health = 1500
 speed = 10
 turn_rate = 45
@@ -1701,9 +1712,13 @@ id = "t3_missile_sub"
 name = "Strategic Missile Submarine"
 class = "factory"
 tier = 3
-mass = 9500
-energy = 152000
-build_time = 20000
+# Cost by the ability price list (2026-11-27, the design owner's pick): its share of the
+# Strategic Missile Launcher, half by build power (1,080 of 1,500) and half by stock (3 of 5),
+# 12,964; its cruise missiles, fired from under the water, with the submerged price, 750; and its
+# sonar, 37: 10,495 to 13,751, mass, energy and build time together.
+mass = 12447
+energy = 199150
+build_time = 26204
 health = 4000
 speed = "6.6"
 turn_rate = 50
@@ -2111,9 +2126,11 @@ tier = 2
 # 2026-11-27): the most it can cost and still keep 0.70 against an equal cost of submarines, on
 # average over fleets of four to seven of it: 819 to 794.
 # Re-solved with the submarines at the navy base from the battle line (2026-11-27): 794 to 748.
-mass = 727
-energy = 5819
-build_time = 3259
+# The most that keeps 0.70 against an equal cost of submarines, once every sensor was priced over
+# its domain base made the Attack Submarine dearer (2026-11-27): 748 to 758.
+mass = 737
+energy = 5901
+build_time = 3305
 health = 3040
 speed = 12
 turn_rate = 100
