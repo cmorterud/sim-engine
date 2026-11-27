@@ -298,7 +298,7 @@ fn main() {
         renderer.set_water_level(if on_water { -1_000.0 } else { 0.0 });
         let mut frame = |units: &[sim_engine::sim::world::UnitView]| {
             let mut instances = InstanceBatches::default();
-            build_unit_instances(units, units, 1.0, camera.eye(), &[], &looks, &[], &mut Motion::new(), &mut instances);
+            build_unit_instances(units, units, 1.0, camera.eye(), &[], &looks, &[], &sim_engine::player_colors::Palette::default(), &mut Motion::new(), &mut instances);
             renderer.capture_rgba(&FrameScene { camera: &camera, instances: &instances, selection_box: None, time: 0.0 }, None)
         };
         let (width, height, with) = frame(std::slice::from_ref(&view));

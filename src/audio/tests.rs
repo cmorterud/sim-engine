@@ -344,6 +344,7 @@ fn view(id: u32, blueprint: u16, x: i32, built_permille: u16) -> UnitView {
         upgrade: None,
         remembered: false,
         ally: false,
+        owner: None,
     }
 }
 

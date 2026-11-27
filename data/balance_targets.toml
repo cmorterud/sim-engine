@@ -854,6 +854,20 @@ t2_destroyer = 0.07
 
 # Units the list prices whose cost something other than the list sets, and what. Every other such
 # unit costs the list's price (tests/price_list_test.rs).
+# The rigs' enhancements (2026-11-27, the design owner's pick): each costs what it adds to its rig
+# (`price_list::enhancement_price`, `--balance-derive enhancements`), at the tier it is fitted at:
+# its rig's, but no lower than T2, since a commander fits them once it has a T2 economy, and a
+# fabrication pack at the tier it unlocks. Its gun, sensors and build power cost what they add to
+# the rig's price on the list. Its health, its regeneration over the [model] time to kill and its
+# shields cost the snipe price a point: what the cheapest force that destroys a rig in one pass,
+# this weapon's, pays for a point of the health it takes ([kills]). Hiding it from radar costs
+# the cheapest Stealth Field Generator, and its income its tier's payback ([economy]). One that
+# builds on another pays only for what it adds, since it replaces it. Mass, energy and build time
+# go together.
+[price_list.enhancements]
+snipe = "t3_strategic_bomber"
+held = {}
+
 [price_list.held]
 t1_medium_tank = "the anchor"
 t1_light_walker = "the land solver's targets ([roles])"

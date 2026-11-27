@@ -14,7 +14,7 @@ use crate::input::orders::PendingBuild;
 use crate::math::fp::{Fp, FP_FRAC_BITS};
 use crate::render::camera::Camera;
 use crate::sim::blueprints::{BlueprintDb, BlueprintId, Enhancement, EnhancementId, FactoryKind, Res, Slot, Targets, UnitClass, WeaponKind, TICKS_PER_SECOND};
-use crate::sim::components::{BuildTask, OrderKind, SimId, Team};
+use crate::sim::components::{BuildTask, OrderKind, PlayerId, SimId, Team};
 use crate::sim::world::{EconomyView, MatchResult, PlanStepKind, PlayerView, SimSnapshot, UnitRatesView, UnitView};
 
 /// Trails are capped so that a large selection stays readable and cheap to draw.
@@ -34,8 +34,8 @@ const GRID_REACH_CELLS: i32 = 8;
 
 /// Above this altitude, units are drawn with tactical icons.
 use crate::icons::ICON_ALTITUDE;
-const BLUE: Color32 = Color32::from_rgb(90, 160, 255);
-const RED: Color32 = Color32::from_rgb(255, 95, 80);
+const BLUE: Color32 = crate::player_colors::BLUE_SIDE[0].ui;
+const RED: Color32 = crate::player_colors::RED_SIDE[0].ui;
 const STALLED: Color32 = Color32::from_rgb(255, 110, 90);
 const HEALTHY: Color32 = Color32::from_rgb(120, 230, 120);
 /// A factory with nothing to do: red, hatched with paler stripes, and edged paler still.
@@ -165,6 +165,8 @@ pub enum UiAction {
     SetPaused { units: Vec<SimId>, paused: bool },
     /// Stop or restart the game clock.
     TogglePause,
+    /// Shows each ally in their own color, or all in one shared ally color (`AllyColors`).
+    ToggleAllyColors,
     /// Move the camera to look at this world point, in whole units, keeping its height.
     CenterCamera([i32; 2]),
     /// Order the selection to this world point, in whole units, as a right-click on the ground
@@ -2059,11 +2061,6 @@ fn score_row(ui: &mut egui::Ui, color: Color32, name: &str, figures: [String; 3]
     painter.text(Pos2::new(rect.right(), rect.center().y), Align2::RIGHT_CENTER, state.0, FontId::proportional(12.0), state.1);
 }
 
-/// An ally's color in the score panel, as on the minimap: a lighter shade of the team's, cyan
-/// beside Blue's blue and orange beside Red's red, for any player of a team but its first.
-const BLUE_ALLY: Color32 = Color32::from_rgb(70, 220, 240);
-const RED_ALLY: Color32 = Color32::from_rgb(255, 165, 50);
-
 /// A line of the score panel in a team match: a team with its players' totals, or one player
 /// under it.
 #[derive(Clone, Debug, PartialEq)]
@@ -2082,10 +2079,12 @@ pub struct ScoreLine {
 
 /// The score panel's lines in a team match: each team with its players' totals, and under it a
 /// line for each player, in order. Playing, the person is the first of Blue's players, "You",
-/// and the others on Blue are their allies; watching, everyone is an AI.
-pub fn team_match_lines(players: &[PlayerView], result: Option<MatchResult>, watching: bool) -> Vec<ScoreLine> {
+/// and the others on Blue are their allies; watching, everyone is an AI. Each player's swatch is
+/// in their color as the palette shows it, as their units are.
+pub fn team_match_lines(players: &[PlayerView], result: Option<MatchResult>, watching: bool, palette: &crate::player_colors::Palette) -> Vec<ScoreLine> {
     let mut lines = Vec::new();
     for team in [Team::Blue, Team::Red] {
+        let ids: Vec<PlayerId> = players.iter().enumerate().filter(|(_, player)| player.team == team).map(|(index, _)| PlayerId(index as u8)).collect();
         let theirs: Vec<&PlayerView> = players.iter().filter(|player| player.team == team).collect();
         let incomes: Option<Vec<i64>> = theirs.iter().map(|player| player.mass_income).collect();
         let income = |income: Option<i64>| income.map_or_else(|| "?".to_string(), |income| format!("+{income}"));
@@ -2117,11 +2116,7 @@ pub fn team_match_lines(players: &[PlayerView], result: Option<MatchResult>, wat
                 (Team::Blue, _, true) => format!("Blue {} (AI)", number + 1),
                 (Team::Red, _, _) => format!("Red {} (AI)", number + 1),
             };
-            let color = match (team, number) {
-                (_, 0) => team_color(team),
-                (Team::Blue, _) => BLUE_ALLY,
-                (Team::Red, _) => RED_ALLY,
-            };
+            let color = palette.player(team, ids[number]).ui;
             let state = match (result, player.out) {
                 (Some(_), _) => {
                     let (state, color) = team_state(result, team);
@@ -2299,6 +2294,7 @@ pub fn resource_bar(ctx: &egui::Context, snapshot: &SimSnapshot, db: &BlueprintD
                 hud::square_button(ui, Vec2::splat(ORDER_BUTTON), false, true, |painter, rect| hud::draw_glyph(painter, rect.shrink(2.0), Glyph::Sound)).on_hover_text(sound);
             }
             range_menu(ui, ranges);
+            ally_colors_button(ui, snapshot, actions);
         });
     });
     let ((), score) = hud::panel_rect(ctx, "score", Align2::RIGHT_TOP, Vec2::new(-4.0, 4.0), |ui| {
@@ -2308,7 +2304,7 @@ pub fn resource_bar(ctx: &egui::Context, snapshot: &SimSnapshot, db: &BlueprintD
         score_header(ui, SLIM_WIDTH, snapshot.tick, &format!("{} · {mine} units", short_map_name(map)));
         panel_rule(ui, SLIM_WIDTH);
         let lines = if snapshot.players.len() > 2 {
-            team_match_lines(&snapshot.players, snapshot.match_result, false)
+            team_match_lines(&snapshot.players, snapshot.match_result, false, &crate::player_colors::Palette::of(ui.ctx()))
         } else {
             let line = |team: Team, name: &str, income: Option<i64>| {
                 let (state, color) = team_state(snapshot.match_result, team);
@@ -2943,6 +2939,7 @@ pub fn watch_bar(ctx: &egui::Context, snapshot: &SimSnapshot, db: &BlueprintDb, 
             }
             ui.add_space(6.0);
             range_menu(ui, ranges);
+            ally_colors_button(ui, snapshot, actions);
         });
     });
     let ((), score) = hud::panel_rect(ctx, "score", Align2::RIGHT_TOP, Vec2::new(-4.0, 4.0), |ui| {
@@ -2951,7 +2948,7 @@ pub fn watch_bar(ctx: &egui::Context, snapshot: &SimSnapshot, db: &BlueprintDb, 
         panel_rule(ui, SCORE_WIDTH);
         score_columns(ui);
         if snapshot.players.len() > 2 {
-            for line in team_match_lines(&snapshot.players, snapshot.match_result, true) {
+            for line in team_match_lines(&snapshot.players, snapshot.match_result, true, &crate::player_colors::Palette::of(ui.ctx())) {
                 score_line(ui, &line, actions);
             }
         } else {
@@ -3676,6 +3673,34 @@ pub fn draw_range_outlines(ctx: &egui::Context, camera: &Camera, heights: &crate
     }
 }
 
+/// In a team match, the button at the top that switches between each ally in their own color
+/// and all of them in one: four swatches, of the person's team's players as they are shown now.
+fn ally_colors_button(ui: &mut egui::Ui, snapshot: &SimSnapshot, actions: &mut Vec<UiAction>) {
+    if snapshot.players.len() <= 2 {
+        return;
+    }
+    let palette = crate::player_colors::Palette::of(ui.ctx());
+    let team = Team::Blue;
+    let swatches: Vec<Color32> = snapshot.players.iter().enumerate().filter(|(_, player)| player.team == team).map(|(index, _)| palette.player(team, PlayerId(index as u8)).ui).take(4).collect();
+    let unique = palette.mode == crate::player_colors::AllyColors::Unique;
+    let hint = if unique {
+        "[F9] Ally colors: each their own\nEvery player is in the color they were given before the match. Click to show all your allies in one shared color."
+    } else {
+        "[F9] Ally colors: one shared color\nYour units are in your color and every ally's in one shared color. Click to show each player in their own."
+    };
+    let button = hud::square_button(ui, Vec2::splat(ORDER_BUTTON), false, true, |painter, rect| {
+        let inner = rect.shrink(5.0);
+        let half = inner.size() / 2.0;
+        for (place, color) in swatches.iter().enumerate() {
+            let corner = inner.min + Vec2::new(half.x * (place % 2) as f32, half.y * (place / 2) as f32);
+            painter.rect(Rect::from_min_size(corner, half).shrink(1.0), 1.0, *color, Stroke::new(1.0_f32, Color32::from_black_alpha(160)));
+        }
+    });
+    if button.on_hover_text(bold_keys(hint)).clicked() {
+        actions.push(UiAction::ToggleAllyColors);
+    }
+}
+
 /// The ranges toggle at the top: a button that opens a list of every kind of range, each with a
 /// checkbox in its own color, to outline it for all the viewer's units.
 fn range_menu(ui: &mut egui::Ui, toggles: &mut RangeToggles) {
@@ -4128,6 +4153,7 @@ fn draw_bar(painter: &egui::Painter, center: Pos2, width: f32, share: f32, color
 pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapshot, selected: &[SimId], db: &BlueprintDb, pixels_per_point: f32) {
     let painter = ctx.layer_painter(egui::LayerId::background());
     let show_icons = camera.altitude() >= ICON_ALTITUDE;
+    let palette = crate::player_colors::Palette::of(ctx);
     let to_points = |pixels: [f64; 2]| Pos2::new(pixels[0] as f32 / pixels_per_point, pixels[1] as f32 / pixels_per_point);
     let raw = |value: i32| f64::from(value) / 4096.0;
     let viewport = ctx.screen_rect();
@@ -4155,7 +4181,8 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
         let icon_bottom = icons::reach_below(icon, icon_half, blueprint.tier);
         if show_icons {
             // A structure remembered out of sight shows dimmer, as it may be gone.
-            let color = if unit.remembered { team_color(unit.team).gamma_multiply(0.55) } else { team_color(unit.team) };
+            let color = palette.unit(unit.team, unit.owner, unit.ally).ui;
+            let color = if unit.remembered { color.gamma_multiply(0.55) } else { color };
             draw_icon(&painter, center, &blueprint.key, blueprint.tier, color, is_selected);
         }
         // Commanders carry their side's name, underlined in its color, so they can be found.
@@ -4166,7 +4193,7 @@ pub fn world_overlay(ctx: &egui::Context, camera: &Camera, snapshot: &SimSnapsho
             let width = galley.size().x;
             hud::outlined_text(&painter, below, Align2::CENTER_TOP, name, FontId::proportional(12.0), Color32::WHITE);
             let underline = below.y + galley.size().y + 1.0;
-            painter.line_segment([Pos2::new(below.x - width / 2.0, underline), Pos2::new(below.x + width / 2.0, underline)], Stroke::new(1.2_f32, team_color(unit.team)));
+            painter.line_segment([Pos2::new(below.x - width / 2.0, underline), Pos2::new(below.x + width / 2.0, underline)], Stroke::new(1.2_f32, palette.unit(unit.team, unit.owner, unit.ally).ui));
         }
         if snapshot.paused.binary_search(&unit.id).is_ok() {
             painter.text(center, Align2::CENTER_CENTER, "PAUSED", FontId::proportional(13.0), Color32::YELLOW);
@@ -4299,6 +4326,7 @@ mod tests {
             upgrade: None,
             remembered: false,
             ally: false,
+            owner: None,
         }
     }
 
@@ -4370,7 +4398,7 @@ mod tests {
         assert_eq!(press('D', Some(2)), place("t2_point_defense"));
         assert_eq!(press('D', Some(3)), place("t3_heavy_point_defense"));
         assert_eq!(press('W', Some(3)), place("rig_yard"), "a support factory needs a headquarters, and there is none");
-        assert_eq!(press('V', Some(2)), place("field_workshop"));
+        assert_eq!(press('V', Some(2)), place("airfield"));
         assert_eq!(press('V', Some(1)), place("wall"));
         assert_eq!(press('Q', Some(1)), None, "Q is a factory's key");
         // A bot can build nothing, so N mutes instead.
@@ -4622,9 +4650,16 @@ mod tests {
         assert_eq!(upgrade_progress(&current, SimId(12), &db), None);
     }
 
+    /// The standard data with the enhancements out of the roster since 2026-11-27, whose
+    /// mechanics the engine keeps for data that uses them.
+    fn with_retired_enhancements() -> BlueprintDb {
+        let text = format!("{}\n{}", include_str!("../data/units.toml"), include_str!("../tests/fixtures/retired_enhancements.toml"));
+        BlueprintDb::parse(&text).expect("the data with the retired enhancements is valid")
+    }
+
     #[test]
     fn enhancements_are_offered_slot_by_slot_once_what_they_build_on_is_there() {
-        let db = BlueprintDb::standard();
+        let db = with_retired_enhancements();
         let mut current = commander_and_engineer(&db);
         assert!(enhancement_offers(&current, &[SimId(11)], &db).is_empty(), "an engineer has none");
         let rows = enhancement_offers(&current, &[SimId(10), SimId(11)], &db);
@@ -4654,7 +4689,7 @@ mod tests {
 
     #[test]
     fn only_commanders_with_a_teleporter_can_teleport() {
-        let db = BlueprintDb::standard();
+        let db = with_retired_enhancements();
         let mut current = commander_and_engineer(&db);
         assert!(teleporters(&current, &[SimId(10), SimId(11)], &db).is_empty());
         current.enhancements = vec![(SimId(10), [u16::MAX, u16::MAX, db.enhancement_id("teleporter").0])];
@@ -5892,7 +5927,8 @@ mod tests {
             player(Team::Red, false, 3, 100, None, None),
             player(Team::Red, false, 0, 0, None, None),
         ];
-        let lines = team_match_lines(&players, None, false);
+        let palette = crate::player_colors::PlayerColors::assign(&players.map(|player| player.team)).shown(crate::player_colors::AllyColors::Unique);
+        let lines = team_match_lines(&players, None, false, &palette);
         // Name, figures, state, whether a player's line, and where a click takes the camera.
         type Summary<'a> = (&'a str, [&'a str; 3], &'a str, bool, Option<[i32; 2]>);
         let summary: Vec<Summary> = lines
@@ -5911,19 +5947,21 @@ mod tests {
                 ("Red 2 (AI)", ["0", "?", nothing.as_str()], "Playing", true, None),
             ]
         );
-        // Each team's first player in its color, the others in the lighter shade the minimap uses.
-        assert_eq!(lines.iter().map(|line| line.color).collect::<Vec<_>>(), [BLUE, BLUE, BLUE_ALLY, RED, RED, RED_ALLY]);
+        // Each player's swatch in the color they were given, as their units are; each team's first's
+        // is the team's.
+        use crate::player_colors::{BLUE_SIDE, RED_SIDE};
+        assert_eq!(lines.iter().map(|line| line.color).collect::<Vec<_>>(), [BLUE, BLUE, BLUE_SIDE[1].ui, RED, RED, RED_SIDE[1].ui]);
 
         // Watching, everyone is an AI, and a watcher seeing everything can look at any base.
         let seen_by_all = players.map(|player| PlayerView { mass_income: player.mass_income.or(Some(7)), start: player.start.or(raw(900, 900)), ..player });
-        let watched = team_match_lines(&seen_by_all, None, true);
+        let watched = team_match_lines(&seen_by_all, None, true, &palette);
         let names: Vec<&str> = watched.iter().map(|line| line.name.as_str()).collect();
         assert_eq!(names, ["Blue", "Blue 1 (AI)", "Blue 2 (AI)", "Red", "Red 1 (AI)", "Red 2 (AI)"]);
         assert!(watched.iter().filter(|line| line.player).all(|line| line.jump.is_some()));
         assert_eq!(watched[3].figures[1], "+14", "a team's income is its players' together");
 
         // Decided, every line says how it ended, out or not.
-        let decided = team_match_lines(&players, Some(MatchResult::Winner(Team::Red)), false);
+        let decided = team_match_lines(&players, Some(MatchResult::Winner(Team::Red)), false, &palette);
         let states: Vec<&str> = decided.iter().map(|line| line.state.0.as_str()).collect();
         assert_eq!(states, ["Defeated", "Defeated", "Defeated", "Victorious", "Victorious", "Victorious"]);
     }

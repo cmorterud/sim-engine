@@ -41,6 +41,9 @@ pub struct MatchSummary {
     /// The mass each team put into each domain, and lost from it (`Domain`), Blue's then Red's.
     pub spent: [[u64; DOMAINS]; 2],
     pub lost: [[u64; DOMAINS]; 2],
+    /// The tick each side first had a finished T2 factory, then a T3 one, Blue's then Red's, for
+    /// the `[pace]` targets.
+    pub first_factory: [[Option<u32>; 2]; 2],
 }
 
 /// What a unit is for, for the soak's account of where each side's mass went (2026-11-24, for
@@ -71,6 +74,7 @@ struct DomainTally {
     alive: std::collections::BTreeMap<u32, (usize, usize, u64)>,
     spent: [[u64; DOMAINS]; 2],
     lost: [[u64; DOMAINS]; 2],
+    first_factory: [[Option<u32>; 2]; 2],
 }
 
 impl DomainTally {
@@ -81,6 +85,13 @@ impl DomainTally {
             let (Ok(stats), Ok(unit)) = (world.ecs.get::<&UnitStats>(entity), world.ecs.get::<&Blueprinted>(entity)) else { continue };
             let blueprint = world.blueprints.get(unit.0);
             let entry = (stats.team.index(), domain_of(blueprint), blueprint.mass.to_num::<u64>());
+            // A factory upgraded in place takes its new blueprint once the upgrade is done, and one
+            // being built carries its construction until it is finished.
+            if blueprint.class == crate::sim::blueprints::UnitClass::Factory && blueprint.tier >= 2 && world.ecs.get::<&crate::sim::components::Construction>(entity).is_err() {
+                for tier in 2..=blueprint.tier.min(3) {
+                    self.first_factory[entry.0][usize::from(tier) - 2].get_or_insert(world.current_tick);
+                }
+            }
             // New, or upgraded in place since the last look, which keeps its id and adds its mass.
             let before = self.alive.get(&id.0).map_or(0, |&(_, _, mass)| mass);
             self.spent[entry.0][entry.1] += entry.2.saturating_sub(before);
@@ -139,6 +150,7 @@ pub fn run_soak(first_seed: u64, count: u64, threads: usize, map: &MapSource, st
                     peak_units: record.units_built_peak,
                     spent: tally.spent,
                     lost: tally.lost,
+                    first_factory: tally.first_factory,
                 });
                 times.lock().expect("no worker panicked").extend(local_times);
             })
@@ -186,6 +198,7 @@ impl SoakReport {
             );
         }
         println!("  peak units on the map {peak}");
+        self.print_pace(&lengths);
         // Where each side's mass went, over every match: spent on each domain, and the share of
         // it lost. A strategy soak reads these for balance between domains.
         for (team, name) in [(0, "blue"), (1, "red")] {
@@ -216,5 +229,30 @@ impl SoakReport {
         let passed = unfinished == 0 && mismatched == 0 && tick_gate;
         println!("  result: {}", if passed { "PASS" } else { "FAIL" });
         passed
+    }
+
+    /// The `[pace]` targets against what the matches did (2026-11-27, for the economy's knobs):
+    /// when each side first had a finished T2 and T3 factory, and how long matches ran, as medians
+    /// with the targets' ranges beside them. Reported, not gated: the soaks tune the knobs to them.
+    fn print_pace(&self, lengths: &[u32]) {
+        let table: toml::Table = crate::balance::TARGETS.parse().expect("data/balance_targets.toml is valid");
+        let pace = &table["pace"];
+        let range = |name: &str| {
+            let bounds: Vec<f64> = pace[name].as_array().expect("a range").iter().map(|value| value.as_float().or_else(|| value.as_integer().map(|value| value as f64)).expect("a number")).collect();
+            format!("{}-{}", bounds[0], bounds[1])
+        };
+        let minutes = |ticks: u32| f64::from(ticks) / (60.0 * crate::sim::blueprints::TICKS_PER_SECOND as f64);
+        let median = |mut ticks: Vec<u32>| {
+            ticks.sort_unstable();
+            ticks.get(ticks.len() / 2).map_or("none".to_string(), |&tick| format!("{:.1} min", minutes(tick)))
+        };
+        let mut parts = Vec::new();
+        for (index, (label, target)) in [("T2", "first_t2_minute"), ("T3", "first_t3_minute")].into_iter().enumerate() {
+            let reached: Vec<u32> = self.matches.iter().flat_map(|summary| summary.first_factory.iter().filter_map(move |team| team[index])).collect();
+            let sides = self.matches.len() * 2;
+            parts.push(format!("first {label} factory median {} (target {} min, {} of {sides} sides reached it)", median(reached.clone()), range(target), reached.len()));
+        }
+        let length = lengths.get(lengths.len() / 2).map_or("none".to_string(), |&tick| format!("{:.1} min", minutes(tick)));
+        println!("  pace: {}; match length median {length} (target {} min, {} median)", parts.join("; "), range("match_minutes_range"), pace["match_minutes_median"]);
     }
 }

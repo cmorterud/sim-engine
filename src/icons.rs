@@ -116,7 +116,6 @@ pub enum Icon {
     Sonar,
     Stealth,
     Wall,
-    FieldWorkshop,
     TacticalMissile,
     StrategicMissile,
     StrategicInterceptor,
@@ -214,7 +213,7 @@ pub enum BarGroup {
 }
 
 impl Icon {
-    pub const ALL: [Self; 59] = [
+    pub const ALL: [Self; 58] = [
         Self::Commander,
         Self::FieldRig,
         Self::Engineer,
@@ -269,7 +268,6 @@ impl Icon {
         Self::Sonar,
         Self::Stealth,
         Self::Wall,
-        Self::FieldWorkshop,
         Self::TacticalMissile,
         Self::StrategicMissile,
         Self::StrategicInterceptor,
@@ -334,7 +332,6 @@ impl Icon {
             "t1_sonar" | "t2_sonar" => Self::Sonar,
             "stealth_field_generator" => Self::Stealth,
             "wall" => Self::Wall,
-            "field_workshop" | "field_workshop_t3" => Self::FieldWorkshop,
             "tactical_missile" => Self::TacticalMissile,
             "strategic_missile" => Self::StrategicMissile,
             "strategic_interceptor" => Self::StrategicInterceptor,
@@ -363,7 +360,7 @@ impl Icon {
         let mark = match self {
             Self::Commander => Mark::Star,
             Self::FieldRig | Self::RigYard => Mark::HollowStar,
-            Self::Engineer | Self::CombatEngineer | Self::FieldWorkshop => Mark::Build,
+            Self::Engineer | Self::CombatEngineer => Mark::Build,
             Self::Tank | Self::AssaultHovercraft | Self::Walker | Self::HeavyWalker | Self::Gunship | Self::Warship | Self::PointDefense => Mark::Gun,
             Self::Artillery | Self::Battleship | Self::ArtilleryInstallation => Mark::Artillery,
             Self::MobileAntiAir | Self::Fighter | Self::AntiAirTurret => Mark::AntiAir,
@@ -406,7 +403,7 @@ impl Icon {
 
     pub const fn group(self) -> BarGroup {
         match self {
-            Self::LandFactory | Self::LandSupportFactory | Self::AirFactory | Self::AirSupportFactory | Self::NavalFactory | Self::NavalSupportFactory | Self::RigYard | Self::Airfield | Self::FieldWorkshop => BarGroup::Factories,
+            Self::LandFactory | Self::LandSupportFactory | Self::AirFactory | Self::AirSupportFactory | Self::NavalFactory | Self::NavalSupportFactory | Self::RigYard | Self::Airfield => BarGroup::Factories,
             Self::Extractor | Self::Generator | Self::Geothermal | Self::MassStorage | Self::EnergyStorage | Self::Fabricator => BarGroup::Resources,
             Self::PointDefense | Self::AntiAirTurret | Self::TorpedoLauncher | Self::ShieldGenerator | Self::TacticalDefense | Self::StrategicDefense | Self::Wall => BarGroup::Defenses,
             Self::Radar | Self::Sonar | Self::Stealth => BarGroup::Intel,
