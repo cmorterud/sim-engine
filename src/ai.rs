@@ -759,6 +759,32 @@ impl AiBrain {
             .map(|(id, _)| id)
     }
 
+    /// Once the enemy it was going for is out of the match, the nearest enemy start still in
+    /// it, with the way there by land and the deep water off it worked out again. Its waves,
+    /// fleets and air strikes went on going for the empty start: on Scattered Isles (4v4, seed
+    /// 1, 2026-11-27) the last player of each side kept sending 150 aircraft and a fleet at the
+    /// base of an enemy wiped out at minute 45, until the time ran out at 100.
+    fn retarget(&mut self, world: &SimWorld) {
+        let live = world
+            .players_of(self.team.enemy())
+            .filter(|enemy| !world.eliminated[enemy.index()])
+            .map(|enemy| world.start_of(enemy))
+            .min_by_key(|start| {
+                let seen = self.plan_position(world, *start);
+                (start.distance_squared(&self.home), seen.x, seen.y)
+            });
+        let Some(start) = live else {
+            return;
+        };
+        let current_is_live = world.players_of(self.team.enemy()).any(|enemy| !world.eliminated[enemy.index()] && world.start_of(enemy) == self.enemy_home);
+        if current_is_live || start == self.enemy_home {
+            return;
+        }
+        self.enemy_home = start;
+        self.naval_plan = Some(self.plan_naval(world));
+        self.land_route = self.plan_land_route(world);
+    }
+
     pub const fn strategy(&self) -> &'static Strategy {
         self.strategy
     }
@@ -788,6 +814,7 @@ impl AiBrain {
             self.naval_plan = Some(self.plan_naval(world));
             self.land_route = self.plan_land_route(world);
         }
+        self.retarget(world);
         let mut forces = self.survey(world);
         let sightings = visible_enemies(world, self.team);
         if sightings.iter().any(|enemy| enemy.is_air) {
@@ -2421,10 +2448,24 @@ impl AiBrain {
     fn command_army(&mut self, world: &SimWorld, forces: &Forces, sightings: &[Sighting], commands: &mut Vec<SimCommand>) {
         let haste = if self.land_route { 0 } else { NO_LAND_ROUTE_HASTE_TICKS };
         let sudden_death = world.current_tick >= (SUDDEN_DEATH_TICKS - haste).max(self.skill.commander_push_ticks);
+        let commander_attacking = forces.commander.and_then(|id| world.unit_entity(id)).is_some_and(|entity| world.ecs.get::<&Order>(entity).is_ok_and(|order| order.kind == OrderKind::AttackMove));
+        // In sudden death the commander goes for the enemy's whenever it has nothing else to do,
+        // or nothing left on land or at sea to fight with. It used to go only with a wave of idle
+        // units, and none formed: on Scattered Isles (4v4, seed 1, 2026-11-27) the last player of
+        // each side had no land army to send, and on Saddleback (2v2, seed 4) the armies were
+        // always out attacking or meeting raids at home, while both commanders stood idle at home
+        // for the last 15 minutes.
+        let nothing_left = forces.combat_units == 0 && forces.fleet.is_empty();
+        let commander_idle = forces.idle_builders.iter().any(|builder| Some(builder.id) == forces.commander);
+        if sudden_death && (nothing_left || commander_idle) && !commander_attacking && !commander_enhancing(world, forces) {
+            let goal = self.enemy_commander(world).and_then(|id| world.unit_position(id)).map_or(self.enemy_home, |at| at.xy());
+            if let Some(commander) = forces.commander.filter(|_| world.terrain.height_at(goal) >= world.terrain.water_level()) {
+                commands.push(SimCommand::AttackMove { units: vec![commander], goal });
+            }
+        }
         if sudden_death && world.current_tick.is_multiple_of(SUDDEN_DEATH_REAIM_TICKS) {
             let goal = self.enemy_commander(world).and_then(|id| world.unit_position(id)).map_or(self.enemy_home, |at| at.xy());
             let mut going = forces.attacking.clone();
-            let commander_attacking = forces.commander.and_then(|id| world.unit_entity(id)).is_some_and(|entity| world.ecs.get::<&Order>(entity).is_ok_and(|order| order.kind == OrderKind::AttackMove));
             if commander_attacking && world.terrain.height_at(goal) >= world.terrain.water_level() {
                 going.extend(forces.commander);
             }

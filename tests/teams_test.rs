@@ -168,3 +168,22 @@ fn a_snapshot_tells_the_players_apart_and_keeps_an_enemys_income_and_base_hidden
     assert!(!blue.players[0].out);
     assert_eq!(world.match_result, None);
 }
+
+/// The quick select bar's idle factories and idle engineers are the player's own: an ally's are
+/// not theirs to order (Cody's playtest, 2026-11-27).
+#[test]
+fn idle_factories_and_engineers_are_only_the_players_own() {
+    let (mut world, _) = two_on_two();
+    let factory = world.blueprints.id("land_factory_t1");
+    let engineer = world.blueprints.id("t1_engineer");
+    let mine = world.spawn_finished_structure_for(factory, PlayerId(0), 100, 160).expect("open ground");
+    let _allys = world.spawn_finished_structure_for(factory, PlayerId(1), 160, 160).expect("open ground");
+    let my_engineer = world.spawn_mobile_for(engineer, PlayerId(0), point(2_000, 2_000));
+    let busy_engineer = world.spawn_mobile_for(engineer, PlayerId(0), point(2_100, 2_000));
+    let _allys_engineer = world.spawn_mobile_for(engineer, PlayerId(1), point(2_200, 2_000));
+    world.advance_tick(&[SimCommand::Move { units: vec![busy_engineer], goal: point(4_000, 2_000) }]);
+    world.advance_tick(&[]);
+    let snapshot = world.snapshot_for(Some(Team::Blue));
+    assert_eq!(snapshot.idle_factories, vec![mine]);
+    assert_eq!(snapshot.idle_engineers, vec![my_engineer], "not the moving one, the ally's, or the commander");
+}

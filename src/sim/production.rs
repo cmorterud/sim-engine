@@ -363,6 +363,11 @@ impl SimWorld {
         self.place_structure(blueprint, self.first_player(team), cell_x, cell_y, true)
     }
 
+    /// Places a finished structure for a player, for scenarios and tests.
+    pub fn spawn_finished_structure_for(&mut self, blueprint: BlueprintId, owner: PlayerId, cell_x: u32, cell_y: u32) -> Option<SimId> {
+        self.place_structure(blueprint, owner, cell_x, cell_y, true)
+    }
+
     fn place_structure(&mut self, blueprint: BlueprintId, owner: PlayerId, cell_x: u32, cell_y: u32, finished: bool) -> Option<SimId> {
         if !self.can_place(blueprint, cell_x, cell_y) {
             return None;
@@ -2448,9 +2453,37 @@ impl SimWorld {
             .collect()
     }
 
+    /// A team's mobile builders with nothing to do: no order, no work, nothing queued, not on
+    /// patrol, and not carried or still leaving their factory. Only its first player's, the one
+    /// a person plays, as allies' are not theirs to order. Not the commander, which the quick
+    /// select bar has a square of its own for.
+    pub(super) fn idle_engineers(&self, team: Team) -> Vec<SimId> {
+        let player = self.first_player(team);
+        let mut idle: Vec<SimId> = self
+            .builders
+            .iter()
+            .filter(|&&(_, entity)| {
+                self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team == team && stats.owner == player && !stats.is_structure)
+                    && self.ecs.get::<&Blueprinted>(entity).is_ok_and(|unit| !self.blueprints.get(unit.0).is_commander())
+                    && self.ecs.get::<&Builder>(entity).is_ok_and(|builder| builder.tasks.is_empty())
+                    && self.ecs.get::<&Order>(entity).is_ok_and(|order| order.kind == OrderKind::Idle)
+                    && self.ecs.get::<&OrderQueue>(entity).map_or(true, |queue| queue.0.is_empty())
+                    && self.ecs.get::<&Patrol>(entity).is_err()
+                    && self.ecs.get::<&Construction>(entity).is_err()
+                    && self.ecs.get::<&super::components::Carried>(entity).is_err()
+                    && self.ecs.get::<&super::components::LeavingFactory>(entity).is_err()
+            })
+            .map(|&(id, _)| id)
+            .collect();
+        idle.sort_unstable();
+        idle
+    }
+
     /// A team's finished factories with nothing queued and no other factory to help. A missile
-    /// launcher is not one: with nothing queued, it is ready with what it has.
+    /// launcher is not one: with nothing queued, it is ready with what it has. Only its first
+    /// player's, the one a person plays: an ally's idle factory is not theirs to fill.
     pub(super) fn idle_factories(&self, team: Team) -> Vec<SimId> {
+        let player = self.first_player(team);
         let makes_units = |entity: hecs::Entity| {
             self.ecs.get::<&Blueprinted>(entity).is_ok_and(|unit| self.blueprints.get(unit.0).builds.iter().any(|&item| self.blueprints.get(item).class != UnitClass::Ammo))
         };
@@ -2458,7 +2491,7 @@ impl SimWorld {
             .factories
             .iter()
             .filter(|&&(_, entity)| {
-                self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team == team)
+                self.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.team == team && stats.owner == player)
                     && self.ecs.get::<&Construction>(entity).is_err()
                     && makes_units(entity)
                     && self.ecs.get::<&Factory>(entity).is_ok_and(|factory| factory.queue.is_empty() && factory.assisting.is_none())

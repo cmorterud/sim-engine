@@ -15,7 +15,7 @@ use crate::math::fp::{Fp, FP_FRAC_BITS};
 use crate::render::camera::Camera;
 use crate::sim::blueprints::{BlueprintDb, BlueprintId, Enhancement, EnhancementId, FactoryKind, Res, Slot, Targets, UnitClass, WeaponKind, TICKS_PER_SECOND};
 use crate::sim::components::{BuildTask, OrderKind, PlayerId, SimId, Team};
-use crate::sim::world::{EconomyView, MatchResult, PlanStepKind, PlayerView, SimSnapshot, UnitRatesView, UnitView};
+use crate::sim::world::{EconomyView, MatchResult, PlanStep, PlanStepKind, PlayerView, SimSnapshot, UnitRatesView, UnitView};
 
 /// Trails are capped so that a large selection stays readable and cheap to draw.
 const MAX_TRAIL_UNITS: usize = 64;
@@ -25,6 +25,9 @@ const TRAIL_OPACITY: f32 = 0.85;
 const RALLY_OPACITY: f32 = 0.5;
 const DASH_POINTS: f32 = 8.0;
 const GAP_POINTS: f32 = 5.0;
+/// The size of the chevrons on a patrol's way back to its first point, and how far apart they are.
+const LOOP_ARROW_POINTS: f32 = 9.0;
+const LOOP_ARROW_SPACING_POINTS: f32 = 90.0;
 /// Below this on-screen size, a terrain cell is too small for a placement grid to help.
 const MIN_GRID_CELL_POINTS: f32 = 5.0;
 /// Below this on-screen radius, a selected unit's ground ring is too small to see.
@@ -1542,7 +1545,8 @@ fn factory_family_name(key: &str) -> String {
 pub fn quick_select_groups(snapshot: &SimSnapshot, team: Team, db: &BlueprintDb) -> QuickSelect {
     let mut groups = QuickSelect::default();
     let mut families: BTreeMap<String, BTreeMap<u8, Vec<SimId>>> = BTreeMap::new();
-    for unit in snapshot.units.iter().filter(|unit| unit.team == team && unit.blueprint != u16::MAX) {
+    // Only the player's own: an ally's commander and factories are not theirs to order.
+    for unit in snapshot.units.iter().filter(|unit| unit.team == team && !unit.ally && unit.blueprint != u16::MAX) {
         let blueprint = db.get(BlueprintId(unit.blueprint));
         if blueprint.is_commander() {
             groups.commander.get_or_insert(unit.id);
@@ -1697,10 +1701,26 @@ fn quick_rows(
             }
         }
     }
+    // Last, so that its coming and going never moves the squares above it.
+    let engineers: Vec<SimId> = snapshot.idle_engineers.iter().copied().filter(|&id| find_unit(snapshot, id).is_some()).collect();
+    if !engineers.is_empty() {
+        // The portrait is the lowest tech level among them.
+        let tier_of = |id: SimId| find_unit(snapshot, id).filter(|unit| unit.blueprint != u16::MAX).map_or(u8::MAX, |unit| db.get(BlueprintId(unit.blueprint)).tier);
+        let key = engineers.iter().min_by_key(|&&id| tier_of(id)).map_or_else(String::new, |&id| key_of(id));
+        let any_selected = engineers.iter().any(|id| selected.contains(id));
+        let hint = format!("Engineers with nothing to do: {}. Click for the closest to your view. Double-click for all.", engineers.len());
+        if quick_square(ui, db, &key, None, any_selected, None, engineers.len()).on_hover_text(hint).clicked() {
+            let units = if state.register_click(IDLE_ENGINEERS_ROW, now) { engineers } else { closest_unit(snapshot, &engineers, view_center).into_iter().collect() };
+            actions.push(UiAction::QuickSelect { units, add: shift });
+        }
+    }
 }
 
-/// The column on the right, under the score panel: select the commander or factories from
-/// anywhere, without moving the view.
+/// The quick select bar's square for idle engineers, as its double-clicks know it.
+const IDLE_ENGINEERS_ROW: &str = "idle engineers";
+
+/// The column on the right, under the score panel: select the commander, factories, or idle
+/// engineers from anywhere, without moving the view.
 #[allow(clippy::too_many_arguments)]
 pub fn quick_select_bar(
     ctx: &egui::Context,
@@ -1713,7 +1733,7 @@ pub fn quick_select_bar(
     actions: &mut Vec<UiAction>,
 ) {
     let groups = quick_select_groups(snapshot, team, db);
-    if groups.commander.is_none() && groups.families.is_empty() {
+    if groups.commander.is_none() && groups.families.is_empty() && snapshot.idle_engineers.is_empty() {
         return;
     }
     let top = ctx.data(|data| data.get_temp::<f32>(egui::Id::new(BELOW_SCORE))).unwrap_or(QUICK_SELECT_TOP);
@@ -3174,6 +3194,9 @@ pub struct TrailLeg {
     pub unit: SimId,
     /// For the selection's moves, how many seconds until the unit gets to the leg's end.
     pub eta: Option<f64>,
+    /// The leg a patrol takes from its last point back to its first, which the unit is never
+    /// ordered to walk as such: drawn with arrows, so the loop shows.
+    pub loop_back: bool,
 }
 
 fn trail_marker_kind(kind: PlanStepKind) -> MarkerKind {
@@ -3229,6 +3252,7 @@ fn trails_for(previous: &SimSnapshot, current: &SimSnapshot, alpha: f64, selecte
                 number: 0,
                 unit: id,
                 eta: None,
+                loop_back: false,
             });
         }
         let Ok(index) = current.plans.binary_search_by_key(&id, |plan| plan.id) else {
@@ -3238,7 +3262,19 @@ fn trails_for(previous: &SimSnapshot, current: &SimSnapshot, alpha: f64, selecte
             continue;
         }
         units_drawn += 1;
-        let steps = &current.plans[index].steps;
+        let mut steps: &[PlanStep] = &current.plans[index].steps;
+        // A patrol's points end the plan. On its way to one of them, the plan lists that point
+        // again as the loop's last, so the loop already closes there: the repeat is left out,
+        // and the loop goes back to where the unit is headed instead of to the first listed.
+        let patrol_from = steps.iter().rposition(|step| step.kind != PlanStepKind::Patrol).map_or(0, |last| last + 1);
+        let mut loop_start = steps.get(patrol_from).map(|step| (step.x, step.y, step.z));
+        if patrol_from > 0 && steps.len() > patrol_from + 1 {
+            let (ahead, last) = (&steps[patrol_from - 1], &steps[steps.len() - 1]);
+            if (ahead.x, ahead.y) == (last.x, last.y) {
+                loop_start = Some((ahead.x, ahead.y, ahead.z));
+                steps = &steps[..steps.len() - 1];
+            }
+        }
         let mut from = start;
         for (position, step) in steps.iter().enumerate() {
             let to = [raw(step.x), raw(step.y), raw(step.z)];
@@ -3250,8 +3286,15 @@ fn trails_for(previous: &SimSnapshot, current: &SimSnapshot, alpha: f64, selecte
                 number: if steps.len() > 1 { position + 1 } else { 0 },
                 unit: id,
                 eta: None,
+                loop_back: false,
             });
             from = to;
+        }
+        if let Some((x, y, z)) = loop_start.filter(|_| steps.len() > patrol_from) {
+            let to = [raw(x), raw(y), raw(z)];
+            if to[..2] != from[..2] {
+                legs.push(TrailLeg { from, to, kind: MarkerKind::Patrol, opacity: TRAIL_OPACITY, number: 0, unit: id, eta: None, loop_back: true });
+            }
         }
     }
     legs
@@ -3295,6 +3338,33 @@ pub fn eta_text(seconds: f64) -> String {
     format!("ETA {}:{:02}", whole / 60, whole % 60)
 }
 
+/// Chevrons along a patrol's way back from its last point to its first, pointing the way the
+/// unit goes round, on the part of the leg that is on screen (`start` to `end`, of the whole
+/// leg `from` to `to`). Spaced along the leg itself, so that they do not crawl as it is clipped.
+fn loop_back_arrows(start: Pos2, end: Pos2, from: Pos2, to: Pos2, color: Color32) -> Vec<egui::Shape> {
+    let length = (to - from).length();
+    if length < LOOP_ARROW_SPACING_POINTS * 0.5 {
+        return Vec::new();
+    }
+    let along = (to - from) / length;
+    let across = along.rot90();
+    let count = (length / LOOP_ARROW_SPACING_POINTS).floor().max(1.0);
+    let spacing = length / count;
+    let (shown_from, shown_to) = ((start - from).dot(along), (end - from).dot(along));
+    let mut shapes = Vec::new();
+    for index in 0..count as usize {
+        let distance = spacing * (index as f32 + 0.5);
+        if distance < shown_from || distance > shown_to {
+            continue;
+        }
+        let tip = from + along * (distance + LOOP_ARROW_POINTS * 0.5);
+        let back = tip - along * LOOP_ARROW_POINTS;
+        let stroke = Stroke::new(2.0_f32, color);
+        shapes.push(egui::Shape::line(vec![back + across * (LOOP_ARROW_POINTS * 0.6), tip, back - across * (LOOP_ARROW_POINTS * 0.6)], stroke));
+    }
+    shapes
+}
+
 /// Draws the selected units' trails: a wide, faint ribbon along their walks, dashed lines
 /// through their pending orders, a dot at each stop, numbers when there are several, and when
 /// each walk arrives. Stops that several units share show one time, the slowest's.
@@ -3319,7 +3389,14 @@ pub fn order_trails(ctx: &egui::Context, camera: &Camera, legs: &[TrailLeg], pix
         if let (Some(from), Some(to)) = (to_points(leg.from), to_points(leg.to)) {
             if let Some((start, end)) = clip_segment(from, to, bounds) {
                 painter.extend(egui::Shape::dashed_line(&[start, end], stroke, DASH_POINTS, GAP_POINTS));
+                if leg.loop_back {
+                    painter.extend(loop_back_arrows(start, end, from, to, color));
+                }
             }
+        }
+        if leg.loop_back {
+            // It ends at a stop another leg already marks.
+            continue;
         }
         let Some(end) = to_points(leg.to) else {
             continue;
@@ -4302,7 +4379,7 @@ mod tests {
     }
 
     use super::*;
-    use crate::sim::world::{BuildQueueView, FactoryView, OrderStopView, PlanStep, UnitPlanView, UnitSpendingView};
+    use crate::sim::world::{BuildQueueView, FactoryView, OrderStopView, UnitPlanView, UnitSpendingView};
 
     fn raw(value: f64) -> i32 {
         (value * 4096.0) as i32
@@ -5467,6 +5544,47 @@ mod tests {
     }
 
     #[test]
+    fn an_allys_commander_and_factories_are_not_on_the_bar() {
+        let db = BlueprintDb::standard();
+        let mut current = base_with_factories(&db);
+        // An ally on Blue, with its own commander and factory.
+        for (id, key) in [(20, "command_rig"), (21, "land_factory_t3")] {
+            let mut view = unit(id, 50.0);
+            view.blueprint = db.id(key).0;
+            view.is_structure = key != "command_rig";
+            view.ally = true;
+            current.units.push(view);
+        }
+        current.units.sort_unstable_by_key(|unit| unit.id);
+        let groups = quick_select_groups(&current, Team::Blue, &db);
+        assert_eq!(groups.commander, Some(SimId(1)));
+        let factories: Vec<SimId> = groups.families.iter().flat_map(|family| &family.tiers).flat_map(|tier| tier.units.iter().copied()).collect();
+        assert!(!factories.contains(&SimId(21)), "the ally's factory: {factories:?}");
+    }
+
+    #[test]
+    fn the_idle_engineers_square_selects_the_closest_to_the_view_and_all_on_a_double_click() {
+        let db = BlueprintDb::standard();
+        let mut bar = BarTest::new();
+        for (id, x) in [(30, 100.0), (31, 600.0)] {
+            let mut view = unit(id, x);
+            view.x = (x * 4096.0) as i32;
+            view.blueprint = db.id("t1_engineer").0;
+            bar.current.units.push(view);
+        }
+        bar.current.idle_engineers = vec![SimId(30), SimId(31)];
+        // Under the commander and the factory kind: the view's centre is at 680 across.
+        let square = egui::pos2(32.0, 136.0);
+        assert_eq!(bar.click_at(square, egui::Modifiers::NONE), [UiAction::QuickSelect { units: vec![SimId(31)], add: false }]);
+        assert_eq!(bar.click_at(square, egui::Modifiers::NONE), [UiAction::QuickSelect { units: vec![SimId(30), SimId(31)], add: false }]);
+        bar.time += 1.0;
+        assert_eq!(bar.click_at(square, egui::Modifiers::SHIFT), [UiAction::QuickSelect { units: vec![SimId(31)], add: true }]);
+        bar.current.idle_engineers.clear();
+        bar.time += 1.0;
+        assert!(bar.click_at(square, egui::Modifiers::NONE).is_empty(), "with none idle there is no square");
+    }
+
+    #[test]
     fn spending_is_listed_by_kind_the_most_first() {
         let db = BlueprintDb::standard();
         let mut current = base_with_factories(&db);
@@ -5841,6 +5959,40 @@ mod tests {
         assert_eq!(to, [100.0, 200.0, 300.0]);
         let numbers: Vec<usize> = legs.iter().map(|leg| leg.number).collect();
         assert_eq!(numbers, [1, 2, 3]);
+    }
+
+    #[test]
+    fn a_patrol_after_other_orders_shows_its_way_back_to_its_first_point() {
+        let steps = vec![step(PlanStepKind::Move, 100.0, 0.0), step(PlanStepKind::Patrol, 200.0, 0.0), step(PlanStepKind::Patrol, 300.0, 0.0), step(PlanStepKind::Patrol, 400.0, 0.0)];
+        let current = snapshot(vec![unit(1, 0.0)], vec![UnitPlanView { id: SimId(1), steps }]);
+        let legs = build_trails(&current, &current, 1.0, &[SimId(1)]);
+        let ends: Vec<(f64, f64, bool)> = legs.iter().map(|leg| (leg.from[0], leg.to[0], leg.loop_back)).collect();
+        assert_eq!(ends, [(0.0, 100.0, false), (100.0, 200.0, false), (200.0, 300.0, false), (300.0, 400.0, false), (400.0, 200.0, true)]);
+        assert_eq!(legs[4].number, 0, "the way back is not an order of its own");
+        assert_eq!(legs[4].kind, MarkerKind::Patrol);
+    }
+
+    #[test]
+    fn a_patrol_under_way_closes_its_loop_where_the_unit_is_headed() {
+        // On its way to 300, the plan lists the loop from the next point, ending at 300 again.
+        let steps = vec![step(PlanStepKind::AttackMove, 300.0, 0.0), step(PlanStepKind::Patrol, 400.0, 0.0), step(PlanStepKind::Patrol, 200.0, 0.0), step(PlanStepKind::Patrol, 300.0, 0.0)];
+        let current = snapshot(vec![unit(1, 0.0)], vec![UnitPlanView { id: SimId(1), steps }]);
+        let legs = build_trails(&current, &current, 1.0, &[SimId(1)]);
+        let ends: Vec<(f64, f64, bool)> = legs.iter().map(|leg| (leg.from[0], leg.to[0], leg.loop_back)).collect();
+        assert_eq!(ends, [(0.0, 300.0, false), (300.0, 400.0, false), (400.0, 200.0, false), (200.0, 300.0, true)]);
+        let numbers: Vec<usize> = legs.iter().map(|leg| leg.number).collect();
+        assert_eq!(numbers, [1, 2, 3, 0]);
+    }
+
+    #[test]
+    fn loop_back_arrows_point_along_the_leg_and_skip_what_is_off_screen() {
+        let (from, to) = (Pos2::new(0.0, 0.0), Pos2::new(LOOP_ARROW_SPACING_POINTS * 4.0, 0.0));
+        let all = loop_back_arrows(from, to, from, to, Color32::WHITE);
+        assert_eq!(all.len(), 4);
+        let egui::Shape::Path(path) = &all[0] else { panic!("a chevron") };
+        assert!(path.points[1].x > path.points[0].x && path.points[1].x > path.points[2].x, "the tip is ahead, towards the first point");
+        let clipped = loop_back_arrows(from, Pos2::new(LOOP_ARROW_SPACING_POINTS * 2.0, 0.0), from, to, Color32::WHITE);
+        assert_eq!(clipped.len(), 2);
     }
 
     #[test]
