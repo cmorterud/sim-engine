@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use sim_engine::balance::{
-    anti_air_strength, break_even, break_even_forces, cost_at, defenses_against_line, derive_structure_closing_share, derive_torpedo_boat, derive_torpedo_bomber, domain_force, duel, force_materiel,
+    anti_air_strength, break_even, break_even_forces, cost_at, defenses_against_line, derive_structure_closing_share, derive_torpedo_boat, derive_torpedo_bomber, domain_force, torpedo_launchers_against_line, duel, force_materiel,
     mirrored, mirrored_on, point_defense_cost,
     position_materiel_at, purpose_strength, siege_on, squadrons, Field, Ground, Side, Tactics,
     T1_TORPEDO_POSITION, T2_POSITION, T3_POSITION, TORPEDO_POSITION,
@@ -324,14 +324,14 @@ fn fight(db: &Arc<BlueprintDb>, field: Field, first: &str, how_many: f64, second
     mirrored_on(db, field, &a, &b, 1.0).score
 }
 
-/// BALANCE.md, T1 navy (2026-11-24): the frigate, the attack submarine, and the T1 torpedo
-/// launcher are as strong per cost against the anchor as the inspiration has its own against its
-/// T1 tank, within `[domains] strength_band`.
+/// BALANCE.md, T1 navy (2026-11-24): the frigate and the attack submarine are as strong per cost
+/// against the anchor as the inspiration has its own against its T1 tank, within `[domains]
+/// strength_band`. The T1 torpedo launcher is priced by the list since 2026-11-28.
 #[test]
 fn t1_navy_is_as_strong_per_cost_as_the_inspirations() {
     let db = db();
     let band = domains(&["strength_band"]).as_array().expect("a band").iter().map(number).collect::<Vec<f64>>();
-    for key in ["t1_frigate", "t1_attack_sub", "t1_torpedo_launcher"] {
+    for key in ["t1_frigate", "t1_attack_sub"] {
         let ratio = purpose_strength(&db, key) / number(&domains(&["strength_over_anchor", key]));
         assert!((band[0]..=band[1]).contains(&ratio), "{key} is {ratio:.2} of the inspiration's strength per cost");
     }
@@ -418,7 +418,7 @@ fn skipping_the_counter_still_loses_and_ships_still_outrange_the_coast() {
 fn t2_air_and_navy_are_as_strong_per_cost_as_the_inspirations() {
     let db = db();
     let band = domains(&["strength_band"]).as_array().expect("a band").iter().map(number).collect::<Vec<f64>>();
-    for key in ["t2_destroyer", "t2_cruiser", "t2_torpedo_boat", "t2_torpedo_launcher", "t2_gunship", "t2_torpedo_bomber", "t2_fighter_bomber"] {
+    for key in ["t2_destroyer", "t2_cruiser", "t2_torpedo_boat", "t2_gunship", "t2_torpedo_bomber", "t2_fighter_bomber"] {
         let ratio = purpose_strength(&db, key) / number(&domains(&["strength_over_anchor", key]));
         assert!((band[0]..=band[1]).contains(&ratio), "{key} is {ratio:.2} of the inspiration's strength per cost");
     }
@@ -536,7 +536,8 @@ fn static_anti_air_is_worth_more_for_its_cost_than_mobile() {
 }
 
 /// `[premiums]`: three point defenses of each tier hold against half again their cost in the line
-/// unit of their tier attack-moving into them; and the hovercraft, which crosses water, is weaker
+/// unit of their tier attack-moving into them, and three torpedo launchers in the line ship; and
+/// the hovercraft, which crosses water, is weaker
 /// per materiel than the Heavy Tank on land.
 #[test]
 #[cfg_attr(debug_assertions, ignore = "release only")]
@@ -546,6 +547,12 @@ fn point_defenses_are_worth_more_and_hovercraft_less_for_their_cost() {
     for tier in 1..=3 {
         let siege = defenses_against_line(&db, tier, times);
         assert!(!siege.broken, "three T{tier} point defenses fell to {times} times their cost in the line unit: {siege:?}");
+    }
+    // The torpedo launchers, priced by the list at the navy base (2026-11-28), against their
+    // tier's line ship.
+    for tier in 1..=2 {
+        let siege = torpedo_launchers_against_line(&db, tier, times);
+        assert!(!siege.broken, "three T{tier} torpedo launchers fell to {times} times their cost in the line ship: {siege:?}");
     }
     let hover = squadrons(&db, &domain_force(&db, "t2_hovercraft"), 2_400.0, 2, Tactics::AttackMove);
     let tanks = squadrons(&db, &domain_force(&db, "t2_heavy_tanks"), force_materiel(&db, &hover, 2), 2, Tactics::AttackMove);

@@ -2100,6 +2100,15 @@ pub fn defenses_against_line(db: &Arc<BlueprintDb>, tier: u8, times: f64) -> Sie
     siege_on(db, Field::new(Ground::Land, tier), &attackers, defenses)
 }
 
+/// Whether three torpedo launchers of a tier hold against `times` their cost in that tier's line
+/// ship closing on them off the shore, and the siege (`[premiums]`
+/// point_defense_holds_against_line_units, 2026-11-28).
+pub fn torpedo_launchers_against_line(db: &Arc<BlueprintDb>, tier: u8, times: f64) -> SiegeResult {
+    let (ship, launchers) = if tier == 1 { ("t1_frigate", T1_TORPEDO_POSITION) } else { ("t2_destroyer", TORPEDO_POSITION) };
+    let attackers = squadrons(db, &[(db.id(ship), 1)], position_materiel_at(db, launchers, tier) * times, tier, Tactics::AttackMove);
+    siege_on(db, Field::new(Ground::Shore, tier), &attackers, launchers)
+}
+
 /// The materiel a position costs at a tier's prices.
 pub fn position_materiel_at(db: &BlueprintDb, position: Position, tier: u8) -> f64 {
     position.iter().map(|&(key, _, _)| cost_at(db.get(db.id(key)), tier)).sum()
@@ -2248,6 +2257,15 @@ pub fn derive_domains_report() {
             let result = defenses_against_line(&db, tier, times);
             cells.push(Cell {
                 name: format!("Three T{tier} point defenses against {times} times their cost in the T{tier} line unit"),
+                target: "hold".to_string(),
+                measured: format!("{} after {:.0} s, the attackers losing {:.0}%", if result.broken { "broken" } else { "held" }, result.seconds, result.losses * 100.0),
+                met: Some(!result.broken),
+            });
+        }
+        for tier in 1..=2u8 {
+            let result = torpedo_launchers_against_line(&db, tier, times);
+            cells.push(Cell {
+                name: format!("Three T{tier} torpedo launchers against {times} times their cost in the T{tier} line ship"),
                 target: "hold".to_string(),
                 measured: format!("{} after {:.0} s, the attackers losing {:.0}%", if result.broken { "broken" } else { "held" }, result.seconds, result.losses * 100.0),
                 met: Some(!result.broken),
