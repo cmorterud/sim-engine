@@ -12,8 +12,10 @@ use crate::sim::scenario::MapSource;
 use crate::sim::components::Team;
 use crate::sim::world::MatchResult;
 
-/// Matches running past this many ticks (about 67 minutes) are counted as unfinished.
-pub const MATCH_TICK_LIMIT: u32 = 40_000;
+/// Matches running past this many ticks (75 minutes) are counted as unfinished. 67 until
+/// 2026-11-27, when a saddleback 1v1 ran to 68, both bases flattened by strategic missiles at 35
+/// minutes and rebuilt, and finished: the limit is for stalemates.
+pub const MATCH_TICK_LIMIT: u32 = 45_000;
 /// Team matches of three or more a side, and any match on a map 20 km across or more, past this
 /// many ticks (100 minutes) instead, the user's decisions (2026-11-25): Scattered Isles 4v4s ran to
 /// 65 minutes, and one to 73 once defenses were made worth more for their cost; and since matches

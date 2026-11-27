@@ -528,14 +528,15 @@ fn entity_handles_do_not_affect_results() {
     assert_eq!(clean, reordered);
 }
 
-/// The soak counts a match unfinished past 67 minutes, or past 100 for team matches of three or
-/// more a side and for any match on a map 20 km across or more, which run longer (2026-11-25).
+/// The soak counts a match unfinished past 75 minutes (67 until 2026-11-27), or past 100 for team
+/// matches of three or more a side and for any match on a map 20 km across or more, which run
+/// longer (2026-11-25).
 #[test]
 fn team_matches_and_big_maps_get_longer_before_they_count_unfinished() {
     use sim_engine::soak::{match_tick_limit, BIG_MAP_UNITS, MATCH_TICK_LIMIT, TEAM_MATCH_TICK_LIMIT};
-    assert_eq!((MATCH_TICK_LIMIT, TEAM_MATCH_TICK_LIMIT, BIG_MAP_UNITS), (40_000, 60_000, 20_480));
+    assert_eq!((MATCH_TICK_LIMIT, TEAM_MATCH_TICK_LIMIT, BIG_MAP_UNITS), (45_000, 60_000, 20_480));
     let ten_km = 10 * 1_024;
-    assert_eq!([1, 2, 3, 4].map(|per_team| match_tick_limit(per_team, ten_km)), [40_000, 40_000, 60_000, 60_000]);
+    assert_eq!([1, 2, 3, 4].map(|per_team| match_tick_limit(per_team, ten_km)), [45_000, 45_000, 60_000, 60_000]);
     assert_eq!([1, 2].map(|per_team| match_tick_limit(per_team, BIG_MAP_UNITS)), [60_000, 60_000]);
     let scattered_isles = sim_engine::sim::scenario::MapSource::Map(std::sync::Arc::new(sim_engine::sim::maps::scattered_isles()));
     assert_eq!(match_tick_limit(1, scattered_isles.map_units()), 60_000, "Scattered Isles is a big map");

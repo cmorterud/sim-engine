@@ -697,9 +697,7 @@ torpedo_flexibility = 0.41
 # as the destroyer's (its torpedoes do 3x the damage a second): 33% stopped, so 0.22.
 # Build power (2026-11-27), a utility job: its points at the least any unit that only builds pays
 # for one (the T1 and T3 Engineers, 10.4), over the domain base. Each engineer is priced by the
-# others. The Field Rig and the Command Rig carry it in their lists, still held, and the T2 Engineer
-# is held at its cost for the design owner: at the list's 125, one saddleback soak match ran past
-# the limit.
+# others. The Field Rig and the Command Rig carry it in their lists, still held.
 # A sensor pays only for what it sees past its own vision, at the price per area of the cheapest
 # building that has it: (range^2 - vision^2) / building range^2 x building cost. A ship's radar is
 # shared by the radar ships of its tier's standard fleet, whose cover overlaps, so it pays that
@@ -725,7 +723,8 @@ immobile = 1.5
 # Each dome's group (2026-11-27): a force in [domains.forces], less the dome itself, or a position
 # below. The Mobile Shield covers the standard T2 land army; the Escort Corvette the T2 fleet's
 # destroyers and cruisers; the Shield Generator the [siege] T2 position's three point defenses; the
-# Heavy Shield Generator the T3 position's. The Corvette's anti-torpedo charge is not priced yet.
+# Heavy Shield Generator the T3 position's. The Corvette has no anti-torpedo charge (taken off,
+# 2026-11-27).
 [price_list.shield_groups]
 t2_mobile_shield = "t2_land_army"
 t2_escort_corvette = "t2_fleet"
@@ -771,7 +770,6 @@ t2_mobile_flak = "not derived yet: its cost is borrowed, its gun set by the esco
 t3_mobile_artillery = "the T3 line's micro cell: the middle of the costs where it holds"
 t2_torpedo_bomber = "the duel it wins ([counters]): the least that needs twice the T2 fleet's cost to break it"
 t2_torpedo_boat = "the duel it wins ([counters]): the most that keeps 0.70 against an equal cost of submarines"
-t2_engineer = "build power lists it at 125; at 125 saddleback seed 3 runs past the soak's 4000 s limit (left for the design owner, 2026-11-27)"
 command_rig = "not derived yet: the snipe rules, its gun and enhancements"
 field_rig = "not derived yet: build power, income and its gun"
 t2_transport = "not derived yet: cargo, and its guns"
