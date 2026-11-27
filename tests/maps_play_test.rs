@@ -119,21 +119,24 @@ fn on_scattered_isles_ais_keep_a_guard_at_home_and_cross_by_sea_and_air() {
 /// was under a quarter, and a half, of what it could hold, and two generators at a time never got
 /// it there while T3 extractors raised mass income past 400 a second: by tick 12,000 each side
 /// had 8 ships and 2 aircraft, with its mass store full and running over.
-/// Measured by build time afloat and flying, which a change in a unit's cost leaves alone.
+/// Measured by the build time each side launched, which a change in a unit's cost leaves alone.
+/// It counts every ship and aircraft once, when it is finished, and not only those still alive at
+/// the end. Counting the survivors measured how soon the fleets met rather than how busy the
+/// yards were (2026-11-27): with cheaper T1 factories, the fleets met before tick 12,000 and sank
+/// each other and most of the yards. Each side had launched 33,434 of build time in ships by
+/// then, against 34,880 before, but only 9,614 was still afloat.
 #[test]
 #[cfg_attr(debug_assertions, ignore = "release only")]
 fn on_scattered_isles_ais_spend_on_a_fleet_and_an_air_force() {
-    use sim_engine::sim::components::MoveClass;
+    use sim_engine::sim::components::{Construction, MoveClass};
     let map = MapSource::Map(Arc::new(scattered_isles()));
     let (mut ships, mut aircraft, mut ships_time, mut flying_time) = ([0; 2], [0; 2], [0.0f64; 2], [0.0f64; 2]);
+    let mut launched = std::collections::BTreeSet::new();
     play_match_on(&map, 1, 12_000, |world| {
-        if world.current_tick != 12_000 {
-            return;
-        }
-        for &(_, entity) in &world.units {
+        for &(id, entity) in &world.units {
             let (Ok(stats), Ok(unit)) = (world.ecs.get::<&UnitStats>(entity), world.ecs.get::<&Blueprinted>(entity)) else { continue };
             let unit = world.blueprints.get(unit.0);
-            if unit.is_structure() {
+            if unit.is_structure() || world.ecs.get::<&Construction>(entity).is_ok() || !launched.insert(id.0) {
                 continue;
             }
             match unit.move_class() {
@@ -151,13 +154,12 @@ fn on_scattered_isles_ais_spend_on_a_fleet_and_an_air_force() {
     });
     // By build time afloat rather than a count of ships, so that a dearer ship is not fewer yard
     // hours (2026-11-26: the frigate's cost rose by the price list, and 14 ships became 10 for
-    // the same 15,000 of build time). Ships and aircraft together take about 30,000. 2026-11-27:
-    // T1 aircraft 1% cheaper (bombers no longer stuck on the map's edge in the fight that prices
-    // them) and the AI here kept 11,060 afloat, 23 ships built a side, where it had kept 15,144.
+    // the same 15,000 of build time). Ships and aircraft launched by tick 12,000 come to about
+    // 58,000 (2026-11-27).
     let total: Vec<f64> = (0..2).map(|team| ships_time[team] + flying_time[team]).collect();
-    assert!(ships_time.iter().all(|&time| time >= 10_000.0), "both sides keep their yards busy: {ships:?} ships, {ships_time:?} of build time, at tick 12,000");
-    assert!(total.iter().all(|&time| time >= 25_000.0), "both sides spend on ships and aircraft: {total:?} of build time at tick 12,000");
-    assert!(aircraft.iter().all(|&flying| flying >= 20), "both sides keep their air factories busy: {aircraft:?} aircraft at tick 12,000");
+    assert!(ships_time.iter().all(|&time| time >= 12_000.0), "both sides keep their yards busy: {ships:?} ships, {ships_time:?} of build time, launched by tick 12,000");
+    assert!(total.iter().all(|&time| time >= 25_000.0), "both sides spend on ships and aircraft: {total:?} of build time launched by tick 12,000");
+    assert!(aircraft.iter().all(|&flying| flying >= 20), "both sides keep their air factories busy: {aircraft:?} aircraft launched by tick 12,000");
 }
 
 /// On Scattered Isles each team has an island: a 2v2 and a 4v4 put all of Blue's commanders on

@@ -382,8 +382,10 @@ fn upgrade_halts_production_then_improves_the_factory() {
         SimCommand::QueueUnit { factory, blueprint: t2, count: 1 },
         SimCommand::QueueUnit { factory, blueprint: bot, count: 1 },
     ]);
-    // The inspiration's 2,300 build time at 20 power is 115 s. The bot behind it must wait.
-    run(&mut world, 1_100);
+    // Its build time at the T1 factory's 20 power: 2,099 is 105 s (by its build power, hull and
+    // tech since 2026-11-27). The bot behind it must wait.
+    let upgrade_ticks = (world.blueprints.get(t2).build_time / Res::from_num(world.blueprints.get(t1).build_power) * Res::from_num(10)).to_num::<u32>();
+    run(&mut world, upgrade_ticks - 50);
     assert_eq!(world.units.len(), 1, "production must halt during an upgrade");
     run(&mut world, 60);
     let power = world.ecs.get::<&Factory>(entity(&world, factory)).unwrap().power;
