@@ -1049,14 +1049,36 @@ impl AiBrain {
             }
         }
         // Extractors pay their upkeep before anything is built. Once raids take out the
-        // generators and less comes in than they cost, a generator under way never finishes.
+        // generators and less comes in than they cost, a generator under way never finishes. The
+        // radar, shields and other running structures with upkeep count with them: on Highland
+        // (2026-11-27) both sides lost every generator at 28 minutes, and their geothermal plants
+        // made a little more than the extractors cost but less than those and the T2 radar, so no
+        // crisis began, and four extractor upgrades and every build crawled at a fiftieth of their
+        // speed until the time ran out.
         let economy = &world.economies[self.player.index()];
-        forces.energy_crisis = economy.energy <= economy.energy_capacity / 20 && economy.energy_income <= forces.extractor_upkeep && forces.extractor_upkeep > Res::ZERO;
+        let standing_upkeep = forces.extractor_upkeep + self.running_upkeep(world);
+        forces.energy_crisis = economy.energy <= economy.energy_capacity / 20 && economy.energy_income <= standing_upkeep && forces.extractor_upkeep > Res::ZERO;
         if forces.energy_crisis {
             let busy = std::mem::take(&mut forces.busy_builders);
             forces.idle_builders.extend(busy);
         }
         forces
+    }
+
+    /// The energy a tick this player's finished, running structures other than extractors pay to
+    /// run: the upkeep of the radar, fabricators and the like, and shields' domes.
+    fn running_upkeep(&self, world: &SimWorld) -> Res {
+        world
+            .units
+            .iter()
+            .filter(|&&(_, entity)| {
+                world.ecs.get::<&UnitStats>(entity).is_ok_and(|stats| stats.owner == self.player && stats.is_structure)
+                    && world.ecs.get::<&Construction>(entity).is_err()
+                    && world.ecs.get::<&crate::sim::components::Paused>(entity).is_err()
+            })
+            .filter_map(|&(_, entity)| world.ecs.get::<&Blueprinted>(entity).ok().map(|unit| world.blueprints.get(unit.0)))
+            .filter(|unit| !unit.requires_deposit)
+            .fold(Res::ZERO, |total, unit| total + unit.upkeep + unit.shield.map_or(Res::ZERO, |shield| shield.upkeep))
     }
 
     fn command_builders(&mut self, world: &SimWorld, forces: &Forces, commands: &mut Vec<SimCommand>) {
