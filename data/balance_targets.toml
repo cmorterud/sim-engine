@@ -702,6 +702,11 @@ torpedo_flexibility = 0.41
 # Torpedo decoys: as undodgeable, d the share of a submarine group's damage they stop, measured
 # ([price_list.decoy_share]), on every job the unit does. The sub hunter's decoys fire 3x as often
 # as the destroyer's (its torpedoes do 3x the damage a second): 33% stopped, so 0.22.
+# Cargo (2026-11-27, the design owner's pick), a utility job: room for a full load of its tier's
+# land line unit, at T2 energy prices, at the share of a full load the Light Air Transport, which
+# only carries, pays for its own (0.667). Not over the domain base: the load is land units. A
+# shield of a unit's own counts in its health, as a dome's does in its group's. Transports' weapons
+# do a quarter of their tier's gunship's damage a second (the design owner's rule).
 # Build power (2026-11-27), a utility job: its points at the least any unit that only builds pays
 # for one (the T1 and T3 Engineers, 10.4), over the domain base. Each engineer is priced by the
 # others. The Field Rig and the Command Rig carry it in their lists, still held.
@@ -779,8 +784,6 @@ t2_torpedo_bomber = "the duel it wins ([counters]): the least that needs twice t
 t2_torpedo_boat = "the duel it wins ([counters]): the most that keeps 0.70 against an equal cost of submarines"
 command_rig = "not derived yet: the snipe rules, its gun and enhancements"
 field_rig = "not derived yet: build power, income and its gun"
-t2_transport = "not derived yet: cargo, and its guns"
-t3_heavy_transport = "not derived yet: cargo, its guns and shield"
 t3_missile_sub = "not derived yet: the launcher's share, its cruise missiles, submerged at T3 (left for the design owner, 2026-11-27)"
 
 # Aircraft pay for the damage they land, not their card's (2026-11-26): anti-air against a bomber

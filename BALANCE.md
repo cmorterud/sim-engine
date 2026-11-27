@@ -343,7 +343,12 @@ out close and why: evidence about the process, not a target.
 * 2026-11-27: the air transports' health from the design owner's kill times: the T2 Flak Cannon
   destroys a Light Air Transport in about 4 seconds (500, as it was), an Air Transport in about 11
   (1,675 to 1,810), and a Heavy Air Transport, through its shield, in about 55 (4,500 to 9,800).
-  Their costs wait on how cargo is priced and how weak the Air Transport's guns are.
+* 2026-11-27: cargo in the price list (the design owner's pick): room for a full load of the
+  tier's land line unit, at T2 energy prices, at the share the Light Air Transport pays for its
+  own, 0.667, since it only carries. A transport's weapons do a quarter of its tier's gunship's
+  damage a second (the Air Transport 48 to 18.8; the Heavy Air Transport 330 to 94, shared as
+  before), and a shield of a unit's own counts in its health. The Air Transport 440 to 553
+  (cargo 480, guns 73), the Heavy Air Transport 1,833 to 2,056 (cargo 1,440, weapons 616).
 * 2026-11-27: game-ending weapons in minutes of a standard T3 economy, eight T3 extractors, 144 a
   second (`[missiles] strategic_minutes`): the Strategic Missile 2.98, its launcher 2.27, the
   Strategic Interceptor 0.79, today's costs written down; and each missile defense a share of the

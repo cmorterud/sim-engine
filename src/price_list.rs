@@ -4,8 +4,12 @@
 //! ```text
 //! cost = Σ over jobs √(health × damage a second at the job) / σ_job + what its sensors cost
 //!        + its build power at the cheapest builder's rate / domain base
+//!        + its cargo: the Light Air Transport's share of a full load of its tier's line units
 //! σ_job = anchor × tier efficiency × domain base / (1 + Σ the job's prices)
 //! ```
+//!
+//! Health is the hull's, and a shield of its own adds its health and its regeneration over the
+//! [model] time to kill, as a dome's does to its group (`shield_price`).
 //!
 //! reports/plans/2026-11-26-ability-price-list.md works the units through it. Until 2026-11-27 the
 //! list lived in that report and in scripts that were not kept; this is the list as code, so that
@@ -74,6 +78,8 @@ pub struct Pricing {
     pub sensors: Vec<(&'static str, f64)>,
     /// What its build power costs: its points at the cheapest builder's rate, over its base.
     pub build_power: f64,
+    /// What its room for cargo costs (`cargo_share`).
+    pub cargo: f64,
     /// The list's price.
     pub list: f64,
     /// What it costs, at its tier's prices.
@@ -91,14 +97,19 @@ impl Pricing {
         self.sensors.iter().map(|(_, cost)| cost).sum()
     }
 
+    /// The part of its price that does not go with the domain base: sensors and cargo.
+    fn fixed_cost(&self) -> f64 {
+        self.sensor_cost() + self.cargo
+    }
+
     /// The list's price at another domain base: each job's part goes as one over the base.
     pub fn at_base(&self, base: f64) -> f64 {
-        (self.list - self.sensor_cost()) * self.base / base + self.sensor_cost()
+        (self.list - self.fixed_cost()) * self.base / base + self.fixed_cost()
     }
 
     /// The domain base at which the list prices it at `cost`.
     pub fn base_for(&self, cost: f64) -> f64 {
-        self.base * (self.list - self.sensor_cost()) / (cost - self.sensor_cost())
+        self.base * (self.list - self.fixed_cost()) / (cost - self.fixed_cost())
     }
 }
 
@@ -323,7 +334,7 @@ fn price_with(db: &BlueprintDb, table: &toml::Table, key: &str) -> Option<Pricin
     let base = number(&list["domain_base"][base_key]);
     let tier_efficiency = numbers(&list["tier_efficiency"])[usize::from(tier) - 1];
     let anchor = number(&list["anchor_strength_per_cost"]);
-    let health = unit.health.to_num::<f64>();
+    let health = unit.health.to_num::<f64>() + own_shield_health(table, unit);
     let speed = unit.speed.to_num::<f64>();
     let line = line_of(db, table, domain, tier);
     let line_speed = match line {
@@ -399,8 +410,44 @@ fn price_with(db: &BlueprintDb, table: &toml::Table, key: &str) -> Option<Pricin
     // Build power, a utility job (2026-11-27): what the cheapest builder that does nothing else
     // pays for a point, over the domain base, as any other job.
     let build_power = if points > 0.0 { points * build_power_rate(db, key) / base } else { 0.0 };
-    let total = jobs.iter().map(|job| job.cost).sum::<f64>() + sensors.iter().map(|(_, cost)| cost).sum::<f64>() + build_power;
-    Some(Pricing { key: key.to_string(), tier, domain, base, jobs, sensors, build_power, list: total, actual: cost_at(unit, tier) })
+    // Cargo, a utility job (2026-11-27): the share of a full load that the only unit that only
+    // carries pays. Not over the base: the load is land units, priced as they are.
+    let cargo = if unit.transport.is_some() { cargo_share(db, table) * full_load(db, table, unit) } else { 0.0 };
+    let total = jobs.iter().map(|job| job.cost).sum::<f64>() + sensors.iter().map(|(_, cost)| cost).sum::<f64>() + build_power + cargo;
+    Some(Pricing { key: key.to_string(), tier, domain, base, jobs, sensors, build_power, cargo, list: total, actual: cost_at(unit, tier) })
+}
+
+/// What a shield of its own adds to a unit's health (2026-11-27): the shield's health and its
+/// regeneration over the [model] time to kill, as a dome adds to its group. Nothing for a dome
+/// priced by its group (`[price_list.shield_groups]`).
+fn own_shield_health(table: &toml::Table, unit: &Blueprint) -> f64 {
+    let Some(shield) = unit.shield else { return 0.0 };
+    if table["price_list"]["shield_groups"].get(&unit.key).is_some() {
+        return 0.0;
+    }
+    let domain = if domain_of(unit) == Domain::Navy { "navy" } else { "land" };
+    let regen_per_second = shield.regen_per_tick.to_num::<f64>() * TICKS_PER_SECOND as f64;
+    shield.health.to_num::<f64>() + regen_per_second * crate::balance::model_time_to_kill(unit.tier.clamp(1, MAX_TIER), domain)
+}
+
+/// A transport's full load: as many of its tier's land line unit as it has room for at that
+/// unit's size, at T2 energy prices, the energy price of every tier but the first, so that a
+/// load costs the same whichever transport carries it.
+pub fn full_load(db: &BlueprintDb, table: &toml::Table, unit: &Blueprint) -> f64 {
+    let Some(transport) = unit.transport else { return 0.0 };
+    let Some(line) = line_of(db, table, Domain::Land, unit.tier.clamp(1, MAX_TIER)) else { return 0.0 };
+    let size = crate::sim::transport::transport_size(line).expect("a land line unit can be carried");
+    f64::from(transport.slots[size]) * cost_at(line, 2)
+}
+
+/// The share of a full load that cargo room costs (2026-11-27, the design owner's pick): what the
+/// cheapest unit that only carries, the Light Air Transport, pays for its own, its cost at T2
+/// energy prices over its full load.
+pub fn cargo_share(db: &BlueprintDb, table: &toml::Table) -> f64 {
+    db.iter()
+        .filter(|unit| !unit.is_structure() && unit.transport.is_some() && fighting_weapons(unit).is_empty())
+        .map(|unit| cost_at(unit, 2) / full_load(db, table, unit))
+        .fold(f64::INFINITY, f64::min)
 }
 
 /// What a point of build power costs (2026-11-27): the least any unit that only builds pays for
@@ -448,6 +495,13 @@ pub fn unit_report(db: &BlueprintDb, key: &str) {
     }
     if pricing.build_power > 0.0 {
         println!("  building {:.1} points at {:.2} a point: {:8.1}", unit.build_power.to_num::<f64>(), build_power_rate(db, key), pricing.build_power);
+    }
+    if pricing.cargo > 0.0 {
+        println!("  cargo, {:.3} of a full load of {:.1}: {:8.1}", cargo_share(db, &table), full_load(db, &table, unit), pricing.cargo);
+    }
+    let shield = own_shield_health(&table, unit);
+    if shield > 0.0 {
+        println!("  its shield adds {shield:.0} health");
     }
     println!("  list {:.1}, costs {:.1} ({:+.1}%){}", pricing.list, pricing.actual, pricing.drift() * 100.0, held_note(&table, key));
 }
