@@ -8,6 +8,8 @@ use sim_engine::sim::config::{SimConfig, TerrainStyle};
 use sim_engine::sim::enhancements::teleport_cost;
 use sim_engine::sim::world::{MatchResult, SimWorld};
 
+mod common;
+
 fn point(x: i32, y: i32) -> Vec2Fp {
     Vec2Fp::new(fp_int(x), fp_int(y))
 }
@@ -15,6 +17,8 @@ fn point(x: i32, y: i32) -> Vec2Fp {
 fn world_with(fog_of_war: bool) -> SimWorld {
     let config = SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war, ..SimConfig::default() };
     let mut world = SimWorld::new(config, 1);
+    // Orbital Redeploy and Thermal Camouflage are out of the roster; their mechanics are tested here.
+    common::retire_into(&mut world);
     for economy in &mut world.economies {
         for value in [&mut economy.base_mass_capacity, &mut economy.mass_capacity, &mut economy.mass] {
             *value = Res::from_num(100_000);
