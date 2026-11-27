@@ -11,7 +11,6 @@ use crate::render::camera::{Camera, HeightField};
 use crate::render::climate::{to_screen, Climate, TEMPERATE};
 use crate::render::land::{LandField, SUN_DIRECTION};
 use crate::render::pipeline::FOG_CELL_UNITS;
-use crate::sim::components::Team;
 use crate::sim::world::SimSnapshot;
 use crate::ui::UiAction;
 
@@ -252,18 +251,14 @@ impl Minimap {
                 // Every dot in one mesh: a battle has thousands, and shapes one by one cost
                 // more to lay out than the rest of the interface.
                 let mut dots = egui::epaint::Mesh::default();
+                let palette = crate::player_colors::Palette::of(ui.ctx());
                 for blip in &snapshot.blips {
                     dots.add_colored_rect(Rect::from_center_size(to_minimap(rect, map_size, [raw(blip[0]), raw(blip[1])]), Vec2::splat(2.5)), Color32::from_gray(170));
                 }
                 for unit in &snapshot.units {
                     let at = to_minimap(rect, map_size, [raw(unit.x), raw(unit.y)]);
-                    // An ally's, another player's on the same team, in a lighter shade.
-                    let color = match (unit.team, unit.ally) {
-                        (Team::Blue, false) => Color32::from_rgb(90, 160, 255),
-                        (Team::Red, false) => Color32::from_rgb(255, 95, 80),
-                        (Team::Blue, true) => Color32::from_rgb(70, 220, 240),
-                        (Team::Red, true) => Color32::from_rgb(255, 165, 50),
-                    };
+                    // In its player's color, or with ally colors shared, its team's or the allies' shade.
+                    let color = palette.unit(unit.team, unit.owner, unit.ally).ui;
                     // A structure remembered out of sight is dimmer, as it may be gone.
                     let color = if unit.remembered { color.gamma_multiply(REMEMBERED_DIM) } else { color };
                     if unit.is_structure {
