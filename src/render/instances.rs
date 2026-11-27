@@ -308,6 +308,12 @@ pub struct Motion {
     launched: BTreeMap<SimId, ([f64; 3], f64)>,
     /// Shots that have left their muzzles since the effects last took them.
     launches: Vec<Launch>,
+    /// Builders with their arms out, by id: how far out at the last tick and at this one, from
+    /// 0 for stowed to 1, sorted.
+    arms: Vec<(SimId, f32, f32)>,
+    /// Where each builder at work was drawn with its tools this frame, in the world, by id: the
+    /// points its build beams leave from, one for each arm that carries a tool.
+    tool_tips: BTreeMap<SimId, Vec<[f64; 3]>>,
 }
 
 impl Motion {
@@ -655,20 +661,31 @@ impl Motion {
     /// Notes how far open each silo's doors are, from the last two snapshots' `silo_doors`. A
     /// silo in neither has them shut.
     pub fn note_doors(&mut self, previous: &[(SimId, u16)], current: &[(SimId, u16)]) {
-        let open = |list: &[(SimId, u16)], id: SimId| list.binary_search_by_key(&id, |&(id, _)| id).map_or(0.0, |index| f32::from(list[index].1) / 1_000.0);
-        let mut ids: Vec<SimId> = previous.iter().chain(current).map(|&(id, _)| id).collect();
-        ids.sort_unstable();
-        ids.dedup();
-        self.doors = ids.into_iter().map(|id| (id, open(previous, id), open(current, id))).collect();
+        self.doors = between(previous, current);
     }
 
     /// How far open a silo's doors are drawn, from 0 to 1, between the last two ticks, easing
     /// in and out of each move.
     fn doors(&self, id: SimId, alpha: f64) -> f32 {
-        let Ok(index) = self.doors.binary_search_by_key(&id, |&(id, _, _)| id) else { return 0.0 };
-        let (_, before, now) = self.doors[index];
-        let open = (before + (now - before) * alpha as f32).clamp(0.0, 1.0);
-        open * open * (3.0 - 2.0 * open)
+        eased(&self.doors, id, alpha)
+    }
+
+    /// Notes how far out each builder's arms are, from the last two snapshots' `arms`. A
+    /// builder in neither has them stowed.
+    pub fn note_arms(&mut self, previous: &[(SimId, u16)], current: &[(SimId, u16)]) {
+        self.arms = between(previous, current);
+    }
+
+    /// How far out a builder's arms are drawn, from 0 for stowed to 1, between the last two
+    /// ticks, easing in and out of each move.
+    fn reach(&self, id: SimId, alpha: f64) -> f32 {
+        eased(&self.arms, id, alpha)
+    }
+
+    /// Where a builder's build beams leave it this frame, in the world: the tips of the tools
+    /// on its arms, if it is drawn with any.
+    pub fn tool_tips(&self, id: SimId) -> Option<&[[f64; 3]]> {
+        self.tool_tips.get(&id).map(Vec::as_slice)
     }
 
     /// How hard a unit's guns are kicking back, from 1 as it fires to 0.
@@ -692,6 +709,45 @@ impl Motion {
         }
         (stride.walked / length).rem_euclid(1.0) as f32
     }
+}
+
+/// Each id in either of two ticks' lists of shares in thousandths, with its share at each, from
+/// 0 to 1, and 0 at a tick it is missing from, sorted.
+fn between(previous: &[(SimId, u16)], current: &[(SimId, u16)]) -> Vec<(SimId, f32, f32)> {
+    let share = |list: &[(SimId, u16)], id: SimId| list.binary_search_by_key(&id, |&(id, _)| id).map_or(0.0, |index| f32::from(list[index].1) / 1_000.0);
+    let mut ids: Vec<SimId> = previous.iter().chain(current).map(|&(id, _)| id).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    ids.into_iter().map(|id| (id, share(previous, id), share(current, id))).collect()
+}
+
+/// An id's share from `between`, from 0 to 1, `alpha` of the way from the last tick to this one,
+/// easing in and out of each move. 0 for one not there.
+fn eased(list: &[(SimId, f32, f32)], id: SimId, alpha: f64) -> f32 {
+    let Ok(index) = list.binary_search_by_key(&id, |&(id, _, _)| id) else { return 0.0 };
+    let (_, before, now) = list[index];
+    let share = (before + (now - before) * alpha as f32).clamp(0.0, 1.0);
+    share * share * (3.0 - 2.0 * share)
+}
+
+/// Where the tools that a builder's build beams leave from are on its shape, in its own space,
+/// with its arms reached out by `reach`. Empty for a shape without any drawn, whose beams leave
+/// from its front.
+fn tool_tips(shape: Shape, reach: f32) -> Vec<[f32; 3]> {
+    use super::meshes::{engineer_tool_tips, COMMANDER_TOOL_TIP, FIELD_RIG_TOOL_TIP};
+    match shape {
+        Shape::Commander => vec![COMMANDER_TOOL_TIP],
+        Shape::FieldRig => vec![FIELD_RIG_TOOL_TIP],
+        Shape::Engineer => engineer_tool_tips(1, reach).collect(),
+        Shape::EngineerT2 => engineer_tool_tips(2, reach).collect(),
+        Shape::EngineerT3 => engineer_tool_tips(3, reach).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Whether a shape's arms fold away while it is not at work: an engineer's.
+const fn folds_arms(shape: Shape) -> bool {
+    matches!(shape, Shape::Engineer | Shape::EngineerT2 | Shape::EngineerT3)
 }
 
 fn interpolate(previous: [i32; 3], current: [i32; 3], alpha: f64) -> [f64; 3] {
@@ -1403,6 +1459,7 @@ pub fn build_unit_instances(
     let time = motion.time;
     let mut next_selected = 0;
     let mut next_work = 0;
+    motion.tool_tips.clear();
     merge_by_id(
         previous,
         current,
@@ -1802,6 +1859,20 @@ pub fn build_unit_instances(
                     ),
                     spin,
                 );
+                // An engineer's arms reach out as it starts work and fold away after.
+                let reach = if folds_arms(shape) { motion.reach(unit.id, alpha) } else { 1.0 };
+                top.model_matrix[1][3] = if folds_arms(shape) { reach } else { 0.0 };
+                if working_on.is_some() {
+                    let tips = tool_tips(shape, reach);
+                    if !tips.is_empty() {
+                        let ([x, y], scale) = (upper.map(f64::from), f64::from(drawn));
+                        let world = |[across, forward, up]: [f32; 3]| {
+                            let [across, forward, up] = [across, forward, up].map(|axis| f64::from(axis) * scale);
+                            [center[0] + across * y + forward * x, center[1] - across * x + forward * y, center[2] + up]
+                        };
+                        motion.tool_tips.insert(unit.id, tips.into_iter().map(world).collect());
+                    }
+                }
                 if is_dot(&top) {
                     out.push(Shape::Cube, top);
                 } else {
