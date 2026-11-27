@@ -258,6 +258,17 @@ fn animate(position: vec3<f32>, normal: vec3<f32>, flags: u32, pivot: vec3<f32>,
     }
     if ((flags & RECOIL) != 0u) {
         point.y -= action * RECOIL_DISTANCE;
+        // A barrel is raised or lowered about its trunnion, the pivot, by the instance's pitch
+        // (the model's first column's last component), in radians of the shape's own space.
+        let pitch = instance.m0.w;
+        if (pitch != 0.0) {
+            let c = cos(pitch);
+            let s = sin(pitch);
+            let arm = point.yz - pivot.yz;
+            let raised = pivot.yz + vec2<f32>(arm.x * c - arm.y * s, arm.x * s + arm.y * c);
+            point = vec3<f32>(point.x, raised.x, raised.y);
+            turned = vec3<f32>(turned.x, turned.y * c - turned.z * s, turned.y * s + turned.z * c);
+        }
     }
     if ((flags & FLASH) != 0u) {
         // Only in the first moments after a shot, and gone to nothing otherwise.

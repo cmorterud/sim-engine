@@ -147,7 +147,7 @@ fn main() {
             camera.update(0.0, &field);
             let mut instances = InstanceBatches::default();
             if projectiles {
-                build_projectile_instances(&first.projectiles, &second.projectiles, &[], 1.0, camera.eye(), &|projectile| effects.shot(projectile), water, &mut instances);
+                build_projectile_instances(&first.projectiles, &second.projectiles, &[], 1.0, camera.eye(), &|projectile| effects.shot(projectile), &|_| None, water, &mut instances);
             }
             effects.build(time, camera.eye(), &mut instances);
             let (width, height, pixels) = renderer.capture_rgba(&FrameScene { camera: &camera, instances: &instances, selection_box: None, time: time as f32 }, None);
