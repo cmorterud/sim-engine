@@ -101,3 +101,25 @@ fn strategic_weapons_cost_their_minutes_of_a_t3_economy() {
         assert!((own / stops / share - 1.0).abs() < 0.01, "{key} costs {:.2} of a {missile}, not {share}", own / stops);
     }
 }
+
+/// T4, for experimentals (2026-11-27): every per-tier table has a T4 entry, and a unit made T4 is
+/// priced by them: its fights last the T4 time to kill, 1.45 of T1's, and it is measured against
+/// T3's line, at T3's energy price and, in the air, T3's base.
+#[test]
+fn an_experimental_is_priced_by_the_t4_constants() {
+    let targets: toml::Table = include_str!("../data/balance_targets.toml").parse().expect("valid targets");
+    let tiers = usize::from(sim_engine::balance::MAX_TIER);
+    for (section, key) in [("model", "time_to_kill_tier"), ("model", "closing_share_land"), ("price_list", "tier_efficiency"), ("economy", "energy_per_materiel")] {
+        assert_eq!(targets[section][key].as_array().map(Vec::len), Some(tiers), "[{section}] {key} has an entry for each tier");
+    }
+    assert!((sim_engine::balance::model_time_to_kill(4, "land") / sim_engine::balance::model_time_to_kill(1, "land") - 1.45).abs() < 1e-9);
+    let db = BlueprintDb::standard();
+    for key in ["t3_battleship", "t3_heavy_walker", "t3_strategic_bomber"] {
+        let id = db.id(key);
+        let experimental = db.with_unit(id, |unit| unit.tier = 4);
+        let (t3, t4) = (price_list::price(&db, key).expect("priced at T3"), price_list::price(&experimental, key).expect("priced at T4"));
+        assert_eq!(t4.tier, 4);
+        assert_eq!(t4.base, t3.base, "{key} at T4 keeps its domain's T3 base");
+        assert!(t4.list.is_finite() && t4.list > 0.0, "{key} at T4 lists {}", t4.list);
+    }
+}

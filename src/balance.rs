@@ -236,6 +236,10 @@ pub fn damage_per_second(weapon: &WeaponDef) -> f64 {
     weapon.damage.to_num::<f64>() * f64::from(weapon.shots_per_reload()) * TICKS_PER_SECOND as f64 / f64::from(weapon.reload_ticks.max(1))
 }
 
+/// The highest tier the model has constants for: T4, the experimentals (2026-11-27). Each
+/// per-tier table in data/balance_targets.toml has an entry for each tier up to it.
+pub const MAX_TIER: u8 = 4;
+
 /// What a unit costs in a fight at this tier, in the materiel of a land unit of the same price:
 /// its mass and energy together, energy at the tier's rate (`[economy] energy_per_materiel`),
 /// measured so that a land unit, which spends the anchor's energy for each materiel, costs
@@ -256,7 +260,7 @@ pub fn cost_at(unit: &Blueprint, tier: u8) -> f64 {
             })
             .collect()
     });
-    let (rate, land_share) = rates[usize::from(tier.clamp(1, 3)) - 1];
+    let (rate, land_share) = rates[usize::from(tier.clamp(1, MAX_TIER)) - 1];
     (unit.mass.to_num::<f64>() + unit.energy.to_num::<f64>() / rate) / land_share
 }
 
@@ -1319,7 +1323,7 @@ pub fn model_time_to_kill(tier: u8, domain: &str) -> f64 {
     let table: toml::Table = TARGETS.parse().expect("data/balance_targets.toml is valid");
     let model = &table["model"];
     let tiers = model["time_to_kill_tier"].as_array().expect("[model] time_to_kill_tier");
-    as_number(&model["time_to_kill_base_seconds"]) * as_number(&tiers[usize::from(tier.clamp(1, 3)) - 1]) * as_number(&model["time_to_kill_domain"][domain])
+    as_number(&model["time_to_kill_base_seconds"]) * as_number(&tiers[usize::from(tier.clamp(1, MAX_TIER)) - 1]) * as_number(&model["time_to_kill_domain"][domain])
 }
 
 /// A copy with one unit's mass, energy and build time scaled together to a cost at a tier.

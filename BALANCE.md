@@ -340,6 +340,11 @@ out close and why: evidence about the process, not a target.
   Strategic Interceptor 0.79, today's costs written down; and each missile defense a share of the
   missile it stops, today's (`defense_over_missile`). Nothing moves. The Missile Submarine is left
   for the design owner.
+* 2026-11-27: T4 constants, for experimentals (`balance::MAX_TIER`): a time to kill 1.45 of T1's,
+  continuing the steps; a closing share of 0.48; tier efficiency 1.0; T3's energy price; and, in
+  the air, T3's base until a T4 anti-air unit exists. A unit made T4 is measured against T3's line.
+  No unit is T4 yet, so nothing moves. The size and overkill prices and the equal-cost-answer check
+  wait for the first experimental.
 
 ## Order of work
 

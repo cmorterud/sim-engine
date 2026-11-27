@@ -12,7 +12,7 @@
 //! `--balance-derive unit <key>` prints any unit's price and tests/price_list_test.rs fails when a
 //! unit the list prices drifts from it.
 
-use crate::balance::{cost_at, damage_per_second, TARGETS};
+use crate::balance::{cost_at, damage_per_second, MAX_TIER, TARGETS};
 use crate::sim::blueprints::{Blueprint, BlueprintDb, BlueprintId, Targets, WeaponDef, WeaponKind, TICKS_PER_SECOND};
 use crate::sim::components::MoveClass;
 
@@ -153,10 +153,11 @@ pub const fn job_of(weapon: &WeaponDef) -> Job {
 /// The [model] time to kill at a tier, in a domain's fights.
 fn fight_seconds(table: &toml::Table, tier: u8, domain: &str) -> f64 {
     let model = &table["model"];
-    number(&model["time_to_kill_base_seconds"]) * numbers(&model["time_to_kill_tier"])[usize::from(tier.clamp(1, 3)) - 1] * number(&model["time_to_kill_domain"][domain])
+    number(&model["time_to_kill_base_seconds"]) * numbers(&model["time_to_kill_tier"])[usize::from(tier.clamp(1, MAX_TIER)) - 1] * number(&model["time_to_kill_domain"][domain])
 }
 
-/// The line unit a unit's reach and speed are measured against: its tier's, in its domain.
+/// The line unit a unit's reach and speed are measured against: its tier's, in its domain. T4
+/// has no line of its own and is measured against T3's.
 fn line_of<'a>(db: &'a BlueprintDb, table: &toml::Table, domain: Domain, tier: u8) -> Option<&'a Blueprint> {
     let name = match domain {
         Domain::Land => "land",
@@ -171,7 +172,7 @@ fn line_of<'a>(db: &'a BlueprintDb, table: &toml::Table, domain: Domain, tier: u
 /// The closing share at a tier, in a domain ([model]).
 fn closing_share(table: &toml::Table, domain: Domain, tier: u8) -> f64 {
     let model = &table["model"];
-    let land = numbers(&model["closing_share_land"])[usize::from(tier.clamp(1, 3)) - 1];
+    let land = numbers(&model["closing_share_land"])[usize::from(tier.clamp(1, MAX_TIER)) - 1];
     match domain {
         Domain::Navy => land * number(&model["closing_share_navy_over_land"]),
         _ => land,
@@ -272,7 +273,7 @@ pub fn shield_price(db: &BlueprintDb, key: &str) -> Option<ShieldPricing> {
     let group_name = list["shield_groups"].get(key)?.as_str().expect("a shield group names a force or a position");
     let unit = db.get(db.find(key)?);
     let dome = unit.shield?;
-    let tier = unit.tier.clamp(1, 3);
+    let tier = unit.tier.clamp(1, MAX_TIER);
     let group: Vec<(BlueprintId, u32)> = match group_name.strip_prefix("position:") {
         Some(position) => {
             let units = table["price_list"]["positions"][position].as_table().unwrap_or_else(|| panic!("[price_list.positions] has {position}"));
@@ -310,12 +311,13 @@ fn price_with(db: &BlueprintDb, table: &toml::Table, key: &str) -> Option<Pricin
     }
     let list = &table["price_list"];
     let domain = domain_of(unit);
-    let tier = unit.tier.clamp(1, 3);
+    let tier = unit.tier.clamp(1, MAX_TIER);
     let base_key = match domain {
         Domain::Land => "land",
         Domain::Navy => "navy",
         Domain::Air if tier == 1 => "air_t1",
         Domain::Air if tier == 2 => "air_t2",
+        // T4 aircraft at T3's base until a T4 anti-air unit exists (2026-11-27).
         Domain::Air => "air_t3",
     };
     let base = number(&list["domain_base"][base_key]);
@@ -407,7 +409,7 @@ fn price_with(db: &BlueprintDb, table: &toml::Table, key: &str) -> Option<Pricin
 pub fn build_power_rate(db: &BlueprintDb, except: &str) -> f64 {
     db.iter()
         .filter(|unit| !unit.is_structure() && unit.key != except && unit.build_power.to_num::<f64>() > 0.0 && fighting_weapons(unit).is_empty())
-        .map(|unit| cost_at(unit, unit.tier.clamp(1, 3)) / unit.build_power.to_num::<f64>())
+        .map(|unit| cost_at(unit, unit.tier.clamp(1, MAX_TIER)) / unit.build_power.to_num::<f64>())
         .fold(f64::INFINITY, f64::min)
 }
 

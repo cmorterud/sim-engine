@@ -78,7 +78,8 @@ artillery = [1.0, 1.3]
 # units spend five energy for each materiel at every tier, and their prices are scaled to stay
 # their mass, so this changes no land unit's price. Air keeps its heavy energy costs, as in the
 # inspiration, where going air means building power; this only counts them.
-energy_per_materiel = [5, 100, 100]
+# T4 (experimentals) at T3's (2026-11-27).
+energy_per_materiel = [5, 100, 100, 100]
 # One T1 extractor's income buys an anchor every this many seconds: cheaper units for their
 # income than the inspiration's, for bigger armies.
 t1_extractor_seconds_per_anchor = [17, 21]
@@ -593,7 +594,8 @@ frigates_break_t1_torpedo_launchers = false
 # Time to kill, health over damage a second, between equal groups of the same unit:
 # base x tier x domain x role.
 time_to_kill_base_seconds = 14
-time_to_kill_tier = [1.0, 1.15, 1.3]
+# T4 continues the steps, 1.45 (2026-11-27), for experimentals; no unit is T4 yet.
+time_to_kill_tier = [1.0, 1.15, 1.3, 1.45]
 time_to_kill_domain = { land = 1.0, navy = 3.0, air_to_air = 0.65 }
 # Roles, as a factor on the line's time to kill and its closing share. The destroyer is the navy
 # line, measured on its guns, its torpedo a sub-hunting ability; the frigate a brawler; the
@@ -601,7 +603,8 @@ time_to_kill_domain = { land = 1.0, navy = 3.0, air_to_air = 0.65 }
 # artillery takes the Light Artillery's factor (2026-11-27), the missile launcher the line's.
 role_time_to_kill = { line = 1.0, sub_hunter = 0.4, artillery = 1.15 }
 # Reach: closing share x speed x time to kill. Navy closes at 0.57 of land's share.
-closing_share_land = [0.35, 0.44, 0.47]
+# T4 0.48: T2 to T3 added only 0.03 (2026-11-27).
+closing_share_land = [0.35, 0.44, 0.47, 0.48]
 closing_share_navy_over_land = 0.57
 closing_share_role = { brawler = 0.12, sub_hunter = 0.35 }
 # Base speeds: land, and navy at about 85 seconds to cross 10 km.
@@ -652,7 +655,7 @@ battleship_broadside_seconds = 13.5
 # their own job; one weapon that can hit several kinds counts once, at its best job, with a
 # flexibility price. The anchor is the Medium Tank's strength per cost.
 anchor_strength_per_cost = 2.806
-tier_efficiency = [1.0, 1.0, 1.0]
+tier_efficiency = [1.0, 1.0, 1.0, 1.0]
 # The navy's base, solved by holding the T2 fleet (two destroyers, two cruisers) at its cost. Air's
 # at T2, as the navy's, by holding the T2 air force's strike aircraft (four gunships, two
 # fighter-bombers) at their cost (2026-11-26). A price every aircraft would pay alike, for flying,
