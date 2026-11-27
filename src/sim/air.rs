@@ -81,6 +81,13 @@ fn inside_turn(facing: Vec2Fp, offset: Vec2Fp, radius: Fp) -> bool {
     wide_mul(along, along) + wide_mul(side, side) < wide_mul(radius, radius)
 }
 
+/// Whether an aircraft at `here`, within `margin` of an edge of the map (0 to `max` on each axis),
+/// is heading out over that edge.
+fn flying_off(here: Vec2Fp, facing: Vec2Fp, margin: Fp, max: Fp) -> bool {
+    let out = |at: Fp, toward: Fp| (at < margin && toward < Fp::ZERO) || (max - at < margin && toward > Fp::ZERO);
+    out(here.x, facing.x) || out(here.y, facing.y)
+}
+
 /// Below this share of a full tank, a patrolling aircraft goes to refuel.
 const REFUEL_SHARE_PERCENT: u32 = 20;
 /// Ticks of fuel gained each tick on the ground, the inspiration's recharge rate of 5, and on an
@@ -393,12 +400,24 @@ impl SimWorld {
                         // Once over the target and past it, fly on for a run-up to the next pass.
                         let behind = facing.x * offset.x + facing.y * offset.y <= Fp::ZERO;
                         let half = break_off / 2;
-                        flight.breaking_off = behind && distance_squared < wide_mul(half, half);
+                        // Not by the map's edge, where it turns back in instead (below).
+                        flight.breaking_off = behind && distance_squared < wide_mul(half, half) && !near_edge;
                     }
+                    // Flying on would take it off the map: it turns back now, for room to line up
+                    // inside, rather than run into the edge and stay there, still breaking off.
+                    // Half a turn's width from the edge is room enough to turn in along it.
                     // A gunship can turn on the spot, so nothing is out of its reach. Easing off
                     // to turn in, it turns as tight as its speed allows.
                     let unreachable = !flight.hovers && inside_turn(facing, offset, if turning_in.is_some() { turn_radius(speed, turning.max_turn) } else { radius });
-                    if flight.breaking_off || offset == Vec2Fp::ZERO || unreachable {
+                    // Only once past what it attacks, or flying on to turn onto it: one ahead of
+                    // it it can reach, by the edge, it flies on to.
+                    let past = facing.x * offset.x + facing.y * offset.y <= Fp::ZERO;
+                    let leaving = attacking && !flight.hovers && (past || unreachable) && flying_off(here, facing, radius.saturating_mul(fp_int(3)) / 2, Fp::from_bits(max));
+                    flight.breaking_off &= !leaving;
+                    if leaving {
+                        // The way round that turns it in from the edge, not out over it.
+                        rotate_toward(facing, (center - here).normalized(), turning.max_turn)
+                    } else if flight.breaking_off || offset == Vec2Fp::ZERO || unreachable {
                         facing
                     } else {
                         rotate_toward(facing, offset.normalized(), turning.max_turn)

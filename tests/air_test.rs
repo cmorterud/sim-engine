@@ -723,3 +723,34 @@ fn aircraft_obey_orders_over_open_sea() {
         assert!(x > 3_000, "it should fly out over the sea, not stay at {x}");
     }
 }
+
+/// A bomber whose passes carry it past the map's edge turns back inside rather than fly on into
+/// the edge and stay there (the playtest bug, 2026-11-27): bombing ground close to the east edge,
+/// it keeps coming back over it. Ground too near the edge to turn short of, it touches the edge
+/// only for part of its turn back in (a half turn is 26 ticks).
+#[test]
+fn a_bomber_breaking_off_at_the_map_edge_turns_back_for_its_next_pass() {
+    for x in [4_700, 4_850, 5_000, 5_100] {
+        bombs_by_the_east_edge(point(x, 2_560));
+    }
+}
+
+fn bombs_by_the_east_edge(target: Vec2Fp) {
+    let mut world = world();
+    let bomber = spawn(&mut world, "t3_strategic_bomber", Team::Blue, point(2_000, 2_560));
+    world.advance_tick(&[SimCommand::AttackGround { units: vec![bomber], point: target }]);
+    let edge = fp_int(5_120 - 8);
+    let (mut pinned, mut longest, mut passes, mut was_near) = (0u32, 0u32, 0u32, false);
+    for _ in 0..3_000 {
+        world.advance_tick(&[]);
+        let at = world.unit_position(bomber).unwrap().xy();
+        pinned = if at.x >= edge || at.y >= edge || at.y <= fp_int(8) { pinned + 1 } else { 0 };
+        longest = longest.max(pinned);
+        let near = distance(&world, bomber, target) < 300;
+        passes += u32::from(near && !was_near);
+        was_near = near;
+    }
+    assert_eq!(world.unit_order(bomber).unwrap().kind, OrderKind::Attack, "it keeps its order");
+    assert!(longest < 20, "by {target:?} it should not ride along the map edge, did for {longest} ticks");
+    assert!(passes >= 3, "by {target:?} it should keep making passes over the target, made {passes}");
+}
