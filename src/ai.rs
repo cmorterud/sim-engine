@@ -2449,11 +2449,15 @@ impl AiBrain {
         let haste = if self.land_route { 0 } else { NO_LAND_ROUTE_HASTE_TICKS };
         let sudden_death = world.current_tick >= (SUDDEN_DEATH_TICKS - haste).max(self.skill.commander_push_ticks);
         let commander_attacking = forces.commander.and_then(|id| world.unit_entity(id)).is_some_and(|entity| world.ecs.get::<&Order>(entity).is_ok_and(|order| order.kind == OrderKind::AttackMove));
-        // With nothing left on land or at sea to fight with, the commander goes for the enemy's
-        // itself. It used to go only with a wave, so on Scattered Isles (4v4, seed 1, 2026-11-27)
-        // the last commander of each side stood at its own base from minute 50 until the time
-        // ran out, each rebuilding and neither attacking.
-        if sudden_death && forces.combat_units == 0 && forces.fleet.is_empty() && !commander_attacking && !commander_enhancing(world, forces) {
+        // In sudden death the commander goes for the enemy's whenever it has nothing else to do,
+        // or nothing left on land or at sea to fight with. It used to go only with a wave of idle
+        // units, and none formed: on Scattered Isles (4v4, seed 1, 2026-11-27) the last player of
+        // each side had no land army to send, and on Saddleback (2v2, seed 4) the armies were
+        // always out attacking or meeting raids at home, while both commanders stood idle at home
+        // for the last 15 minutes.
+        let nothing_left = forces.combat_units == 0 && forces.fleet.is_empty();
+        let commander_idle = forces.idle_builders.iter().any(|builder| Some(builder.id) == forces.commander);
+        if sudden_death && (nothing_left || commander_idle) && !commander_attacking && !commander_enhancing(world, forces) {
             let goal = self.enemy_commander(world).and_then(|id| world.unit_position(id)).map_or(self.enemy_home, |at| at.xy());
             if let Some(commander) = forces.commander.filter(|_| world.terrain.height_at(goal) >= world.terrain.water_level()) {
                 commands.push(SimCommand::AttackMove { units: vec![commander], goal });

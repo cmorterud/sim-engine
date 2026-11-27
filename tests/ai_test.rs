@@ -914,3 +914,24 @@ fn once_the_nearest_enemy_player_is_out_the_waves_go_for_the_nearest_one_left() 
     let (goal, starts) = wave_goal(true);
     assert_eq!(goal, starts[1], "and once that enemy is out, for the other's");
 }
+
+#[test]
+fn in_sudden_death_an_idle_commander_goes_for_the_enemy_commander_while_its_army_is_out() {
+    // On Saddleback (2v2, seed 4, 2026-11-27) both armies were always out attacking, so no wave
+    // of idle units formed for the commander to join, and both stood idle at home for 15 minutes.
+    let mut world = scenario::skirmish(41).world;
+    let home = scenario::skirmish_start(Team::Blue);
+    let tank = world.blueprints.id("t2_heavy_tank");
+    let army: Vec<_> = (0..10).map(|index| world.spawn_mobile(tank, Team::Blue, Vec2Fp::new(home.x + fp_int(300 + index * 30), home.y + fp_int(300)))).collect();
+    let middle = Vec2Fp::new(fp_int(5_000), fp_int(5_000));
+    world.advance_tick(&[SimCommand::AttackMove { units: army.clone(), goal: middle }]);
+    world.current_tick = 51 * 600;
+    let orders = AiBrain::new(Team::Blue, 41, world.starts).think(&world);
+    let blue = world.commanders[Team::Blue.index()].unwrap();
+    let red = world.unit_position(world.commanders[Team::Red.index()].unwrap()).unwrap().xy();
+    let sent = orders.iter().find_map(|command| match command {
+        SimCommand::AttackMove { units, goal } if units == &vec![blue] => Some(*goal),
+        _ => None,
+    });
+    assert_eq!(sent, Some(red), "the idle commander goes for the enemy commander");
+}
