@@ -1,13 +1,54 @@
 # sim-engine
 
-A deterministic, flow-economy RTS in Rust, set in a civil war between the two halves of a colony garrison (GAME_SPECIFICATION.md §1.1). This is the vertical slice: one 10 km skirmish against a scripted AI, on an engine tested to 5,000 units and 2,000 physical shells at 10 ticks per second on an 81 km map.
+**A free real-time strategy game where every unit's stats and cost come from a mathematical model, not guesswork.**
 
+Build an economy, out-produce your opponent across land, sea and air, and destroy their commander to win. It runs in your browser, with nothing to install.
+
+<p align="center">
+  <a href="https://codymorterud.com/sim-engine/"><strong>▶ Play in your browser</strong></a>
+  &nbsp;·&nbsp;
+  <a href="docs/how-balance-works.md">How balance works</a>
+  &nbsp;·&nbsp;
+  <a href="#build-from-source">Build from source</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/cmorterud/sim-engine/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/cmorterud/sim-engine/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="License: GPL v3" src="https://img.shields.io/badge/license-GPLv3-blue.svg"></a>
+  <img alt="Written in Rust" src="https://img.shields.io/badge/written%20in-Rust-orange.svg">
+</p>
+
+<p align="center">
+  <img src="docs/media/fleet-against-air.gif" width="720" alt="A T3 fleet under a shield dome fights off a wave of gunships and fighters">
+</p>
+
+## What makes it different
+
+- **Balance you can read.** A designer sets a few dozen targets, such as "a tank destroys a copy of itself in 14 seconds", and a model works out every unit's health, damage, range and cost from them. A headless harness then fights every pair of units at equal cost to check the math. [How balance works](docs/how-balance-works.md) explains it in a few minutes.
+- **Big battles.** The engine is tested to 5,000 units and 2,000 physical shells at once, with every shell flying a real arc and leading its target.
+- **Fully deterministic.** The same map and seed replay an AI match exactly, checked on both x86 and ARM, so any of them can be watched again from its seed.
+- **Land, sea and air.** Tanks and walkers, fleets with shield domes and submarines, bombers and fighters, artillery, shields and strategic missiles.
+- **Its own game.** An original setting, units and art, written from scratch in Rust and free under the GPL.
+
+<p align="center">
+  <img src="docs/media/land-battle.jpg" width="49%" alt="Heavy Walkers hold the line while T3 artillery shells land on a charge of tanks">
+  <img src="docs/media/base.jpg" width="49%" alt="Engineers building a base in a skirmish against the AI">
+</p>
+
+## More
+
+- [`docs/how-balance-works.md`](docs/how-balance-works.md): the balance model in plain language
 - [`SPECIFICATION.md`](SPECIFICATION.md): the engine design and its acceptance gates
-- [`GAME_SPECIFICATION.md`](GAME_SPECIFICATION.md): the game design, with the slice's scope in §18
-- [`BALANCE.md`](BALANCE.md): how the game's numbers are made, from [`data/balance_targets.toml`](data/balance_targets.toml)
-- [`data/units.toml`](data/units.toml): unit and structure stats, which are starting values for tuning
+- [`GAME_SPECIFICATION.md`](GAME_SPECIFICATION.md): the game design, with the slice's scope in §18, set in a civil war between the two halves of a colony garrison (§1.1)
+- [`BALANCE.md`](BALANCE.md): how the game's numbers are made, in full, from [`data/balance_targets.toml`](data/balance_targets.toml)
+- [`data/units.toml`](data/units.toml): unit and structure stats
 
-## Play
+This is the vertical slice: one 10 km skirmish against a scripted AI, on an engine tested to 5,000 units and 2,000 physical shells at 10 ticks per second on an 81 km map.
+
+## Build from source
+
+You need [Rust](https://rustup.rs). Then:
+
 
 ```bash
 cargo run --release              # A skirmish against the AI, which plays easy (--ai normal for the full AI)
