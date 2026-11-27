@@ -272,6 +272,13 @@ out close and why: evidence about the process, not a target.
   the Destroyer at 3% with its decoys now counted), until the navy base is solved from it.
   Landed shares measured again with turrets that fire only once laid: the T1 Bomber 0.54, the
   Fighter-Bomber's bomb 0.92 and its anti-air 0.98, the Strategic Bomber 0.90.
+* 2026-11-27: the Interceptor's size, the user's rule (`[air] interceptors_clear_bombers_seconds`):
+  an equal cost of Interceptors clears an equal cost of T1 Bombers in about the time it takes,
+  10.3 seconds once guns fire only when laid (8.9 before). Every T1 air number scales with that
+  size. Its health over its damage a second is now the [model] time to kill in air-to-air fights,
+  9.1 seconds (8.7): 445 health and 48.9 a second, from 435 and 50. With it the Bomber's health
+  (ten seconds of that gun) is 489, Mobile Anti-Air's gun 20.4, and the Bomber's cost 253. The
+  Interceptor's cost is the list's at the T1 air base, set in `balance::derive_t1_air`.
 
 ## Order of work
 

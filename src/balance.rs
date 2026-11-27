@@ -1244,8 +1244,21 @@ pub fn derive_t1_air(base: &BlueprintDb) -> BlueprintDb {
         unit.energy = Res::from_num(mass * anchor.energy / anchor.materiel);
         unit.build_time = Res::from_num((mass * build_per_mass).round());
     });
+    // The Interceptor: its size, √(health × damage a second), is what an equal cost of them
+    // clearing an equal cost of bombers in [air] interceptors_clear_bombers_seconds holds (checked
+    // by its fight, as every T1 air number scales with it); its health over its damage a second is
+    // the [model] time to kill in air-to-air fights at T1.
+    let interceptor_id = db.id("t1_interceptor");
+    let interceptor = db.get(interceptor_id).weapon.expect("interceptors have a gun");
+    let size = (db.get(interceptor_id).health.to_num::<f64>() * damage_per_second(&interceptor)).sqrt();
+    let air_to_air = model_time_to_kill(1, "air_to_air");
+    let reload_seconds = f64::from(interceptor.reload_ticks.max(1)) / TICKS_PER_SECOND as f64 / f64::from(interceptor.shots_per_reload());
+    db = db.with_unit(interceptor_id, |unit| {
+        unit.health = Fp::from_num((size * air_to_air.sqrt()).round());
+        unit.weapon.as_mut().expect("interceptors have a gun").damage = Fp::from_num((size / air_to_air.sqrt() * reload_seconds * 10.0).round() / 10.0);
+    });
     // The bomber: so many seconds of one interceptor's gun.
-    let interceptor = db.get(db.id("t1_interceptor")).weapon.expect("interceptors have a gun");
+    let interceptor = db.get(interceptor_id).weapon.expect("interceptors have a gun");
     let interceptor_dps = damage_per_second(&interceptor);
     let bomber_health = (interceptor_dps * target_number("air", "interceptor_seconds_per_bomber_t1")).round();
     db = db.with_unit(bomber, |unit| unit.health = Fp::from_num(bomber_health));
@@ -1287,7 +1300,28 @@ pub fn derive_t1_air(base: &BlueprintDb) -> BlueprintDb {
             break;
         }
     }
-    costing(&db, cost)
+    let db = costing(&db, cost);
+    // The Interceptor costs the ability price list's price at the T1 air base.
+    let listed = crate::price_list::price(&db, "t1_interceptor").expect("the list prices the interceptor").list;
+    scaled_to(&db, interceptor_id, 1, listed)
+}
+
+/// The [model] time to kill at a tier, in a domain's fights (`time_to_kill_domain`).
+pub fn model_time_to_kill(tier: u8, domain: &str) -> f64 {
+    let table: toml::Table = TARGETS.parse().expect("data/balance_targets.toml is valid");
+    let model = &table["model"];
+    let tiers = model["time_to_kill_tier"].as_array().expect("[model] time_to_kill_tier");
+    as_number(&model["time_to_kill_base_seconds"]) * as_number(&tiers[usize::from(tier.clamp(1, 3)) - 1]) * as_number(&model["time_to_kill_domain"][domain])
+}
+
+/// A copy with one unit's mass, energy and build time scaled together to a cost at a tier.
+pub fn scaled_to(db: &BlueprintDb, id: BlueprintId, tier: u8, cost: f64) -> BlueprintDb {
+    let scale = cost / cost_at(db.get(id), tier);
+    db.with_unit(id, |unit| {
+        unit.mass = Res::from_num((unit.mass.to_num::<f64>() * scale).round());
+        unit.energy = Res::from_num((unit.energy.to_num::<f64>() * scale).round());
+        unit.build_time = Res::from_num((unit.build_time.to_num::<f64>() * scale).round());
+    })
 }
 
 /// The `--balance-derive t1-air` report: T1 air's numbers from its rules, against T1 land frozen,
@@ -1327,7 +1361,8 @@ pub fn print_t1_air_checks(db: &Arc<BlueprintDb>) {
     let pure = mirrored(db, bought(db, "t1_mobile_aa", materiel), bought(db, "t1_bomber", materiel), 1.0);
     println!("  Mobile Anti-Air against bombers:      {:+.2} (anti-air keeps at least {:.1})", pure.score, target_number("air", "anti_air_keeps_min"));
     let caught_all = mirrored(db, bought(db, "t1_interceptor", materiel), bought(db, "t1_bomber", materiel), 1.0);
-    println!("  interceptors against bombers:         {:+.2} in {:.1} s", caught_all.score, caught_all.seconds);
+    let clear = target_number_range("air", "interceptors_clear_bombers_seconds");
+    println!("  interceptors against bombers:         {:+.2} in {:.1} s (targets: {:.0}-{:.0} s)", caught_all.score, caught_all.seconds, clear.0, clear.1);
     println!("  interceptors against interceptors:    {:+.2} (even)", mirrored(db, bought(db, "t1_interceptor", materiel), bought(db, "t1_interceptor", materiel), 1.0).score);
 }
 

@@ -625,38 +625,41 @@ radar = 1280
 flight = { elevation = 308, turn_rate = 80, fuel = 500 }
 
 # Shoots only at aircraft, with guns fixed to its nose: it must face what it shoots.
-# Health as the inspiration has its interceptor against its T1 tank (2026-11-25); its damage is
-# kept, since it sets the bomber's health ([air]), and its health stays under the T3 fighter's one
-# shot. Cost by the ability price list at the T1 air base ([price_list] domain_base, 2026-11-27):
-# 184 to 162, mass, energy and build time together.
+# Its size, √(health × damage a second), is what [air] interceptors_clear_bombers_seconds holds,
+# and its health over its damage a second the [model] time to kill in air-to-air fights, 9.1 s
+# (2026-11-27, `--balance-derive t1-air`: 435 health and 50 a second to 445 and 48.9). Its
+# health stays under the T3 fighter's one shot. Cost by the ability price list at the T1 air
+# base ([price_list] domain_base, 2026-11-27): 184 to 162, mass, energy and build time together.
 [[unit]]
 id = "t1_interceptor"
 name = "Interceptor"
 class = "air"
 tier = 1
 mass = 32
-energy = 1456
-build_time = 362
-health = 435
+energy = 1460
+build_time = 363
+health = 445
 speed = 30
 radius = 10
 vision = 560
 flight = { elevation = 264, turn_rate = 270, break_off = 200, fuel = 300 }
-weapon = { range = 500, reload_ticks = 10, projectile_speed = 180, damage = 50, targets = "air", arc = 30 }
+weapon = { range = 500, reload_ticks = 10, projectile_speed = 180, damage = "48.9", targets = "air", arc = 30 }
 
 # Its carpet of four napalm bombs is one bomb here, with their damage over time added up.
 # Its cost is what brings an army a fifth anti-air even with an equal cost of bombers, with
 # Mobile Anti-Air's gun set by [kill_times] mobile_aa_t1_bomber (2026-11-27,
-# `--balance-derive t1-air`): 250 to 249.5. That sets the T1 air base ([price_list]).
+# `--balance-derive t1-air`): 250 to 249.5, then 255 once guns fired only when laid, and 253
+# with the Interceptor's gun at its [model] time to kill. That sets the T1 air base
+# ([price_list]). Its health is ten seconds of an Interceptor's gun ([air]).
 [[unit]]
 id = "t1_bomber"
 name = "Attack Bomber"
 class = "air"
 tier = 1
-mass = 92
-energy = 2087
-build_time = 509
-health = 500
+mass = 91
+energy = 2071
+build_time = 505
+health = 489
 speed = 20
 radius = 10
 vision = 640
@@ -683,7 +686,8 @@ vision = 480
 weapon = { range = 880, reload_ticks = 7, projectile_speed = 90, damage = "69.0", targets = "air", turn_rate = 180 }
 
 # Its gun destroys a T1 Bomber hanging in the air in about 24 seconds ([kill_times]
-# mobile_aa_t1_bomber, 2026-11-27): 20.9 to 20.8.
+# mobile_aa_t1_bomber, 2026-11-27): 20.9 to 20.8, and 20.4 with the bomber's health from the
+# Interceptor's gun at its [model] time to kill.
 [[unit]]
 id = "t1_mobile_aa"
 name = "Mobile Anti-Air"
@@ -698,7 +702,7 @@ turn_rate = 80
 turn_radius = 10
 radius = 8
 vision = 400
-weapon = { range = 640, reload_ticks = 10, projectile_speed = 90, damage = "20.8", targets = "air", turn_rate = 180 }
+weapon = { range = 640, reload_ticks = 10, projectile_speed = 90, damage = "20.4", targets = "air", turn_rate = 180 }
 
 # Upgraded from the Air Factory: its mass, energy, and build time are what the upgrade costs.
 [[unit]]

@@ -198,6 +198,9 @@ fn t1_air_meets_its_rules_in_the_duels() {
     assert!(escorted.score.abs() <= target_number("counters", "even_margin"), "an escorted army scores {} against bombers", escorted.score);
     let pure = mirrored(&db, bought(&db, "t1_mobile_aa", materiel), bought(&db, "t1_bomber", materiel), 1.0);
     assert!(pure.score >= target_number("air", "anti_air_keeps_min"), "anti-air alone scores {} against bombers", pure.score);
+    let cleared = mirrored(&db, bought(&db, "t1_interceptor", materiel), bought(&db, "t1_bomber", materiel), 1.0);
+    let (low, high) = target_number_range("air", "interceptors_clear_bombers_seconds");
+    assert!(cleared.score > 0.0 && (low..=high).contains(&cleared.seconds), "interceptors score {:+.2} against bombers in {:.1} s", cleared.score, cleared.seconds);
 }
 
 /// Mobile Anti-Air is no cheaper a shield than the anchor, and fighters out-turn the T1 bomber.
