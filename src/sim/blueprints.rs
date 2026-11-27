@@ -1412,6 +1412,29 @@ mod tests {
         mass_income = 2
     "#;
 
+    /// Every gun that turns to its target can follow anything it shoots at, so that waiting to be
+    /// laid on a target costs a shot only when it swings onto a new one (the design owner,
+    /// 2026-11-27). A gun at aircraft is hardest pressed by one flying straight over it, its
+    /// line of sight turning at its speed over its height a tick; and every gun on an aircraft
+    /// turns, as its turret is drawn.
+    #[test]
+    fn every_turning_gun_can_follow_what_it_shoots_at() {
+        let db = BlueprintDb::standard();
+        let degrees_per_second = |speed: Fp, height: Fp| (speed.to_num::<f64>() / height.to_num::<f64>()).to_degrees() * TICKS_PER_SECOND as f64;
+        let overhead = db.iter().filter_map(|unit| unit.flight.as_ref().map(|flight| (unit.key.as_str(), degrees_per_second(unit.speed, flight.elevation)))).fold(("", 0.0), |most, next| if next.1 > most.1 { next } else { most });
+        for unit in db.iter() {
+            for weapon in unit.weapon.iter().chain(&unit.extra_weapons) {
+                let gun = matches!(weapon.kind, WeaponKind::Shell | WeaponKind::Flak) && !weapon.homing && weapon.targets != Targets::Naval;
+                if unit.flight.is_some() && gun && weapon.arc.is_none() {
+                    assert!(weapon.turn_rate.is_some(), "{}'s gun turns", unit.key);
+                }
+                if let (Some(rate), true) = (weapon.turn_rate, matches!(weapon.targets, Targets::Air | Targets::Both) && gun) {
+                    assert!(f64::from(rate) >= overhead.1, "{}'s gun turns {rate} degrees a second, but a {} flying over it needs {:.0}", unit.key, overhead.0, overhead.1);
+                }
+            }
+        }
+    }
+
     #[test]
     fn standard_data_has_the_vertical_slice_roster() {
         let db = BlueprintDb::standard();

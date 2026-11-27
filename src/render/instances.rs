@@ -545,14 +545,18 @@ impl Motion {
 
     /// How high a gun is drawn raised, in radians in the world: to its latest shot's elevation,
     /// and back to `rest`, as it is modeled, once it has held it a while.
-    fn raise(&mut self, unit: SimId, weapon: u8, rest: f32) -> f32 {
+    /// A gun the simulation lays, `laid` (in radians in the world), follows it instead.
+    fn raise(&mut self, unit: SimId, weapon: u8, rest: f32, laid: Option<f32>) -> f32 {
         let time = self.time;
         let shot = self
             .guns
             .get(&(unit, weapon))
             .filter(|shot| time - shot.at < GUN_HOLD_SECONDS)
             .and_then(|shot| shot.pitch);
-        let (target, pace) = shot.map_or((rest, SETTLE_SECONDS), |pitch| (pitch, RAISE_SECONDS));
+        let (target, pace) = match (laid, shot) {
+            (Some(pitch), _) | (None, Some(pitch)) => (pitch, RAISE_SECONDS),
+            (None, None) => (rest, SETTLE_SECONDS),
+        };
         let raise = self
             .raises
             .entry((unit, weapon))
@@ -1969,7 +1973,11 @@ fn gun_muzzles(
         let modeled = muzzle.modeled_pitch();
         // From the part's own box, stretched by its drawn size, to the world, and back.
         let rest = (modeled.sin() * up).atan2(modeled.cos() * along);
-        let world = motion.raise(unit.id, weapon_of(muzzle), rest);
+        // A gun on a turret in the simulation is drawn raised as far as it has laid its barrels.
+        let weapon = weapon_of(muzzle);
+        let turns = weapon_aim(unit, weapon) != [0, 0];
+        let laid = turns.then(|| (f64::from(unit.pitches.get(usize::from(weapon)).copied().unwrap_or(0)) / 4096.0).clamp(-1.0, 1.0).asin() as f32);
+        let world = motion.raise(unit.id, weapon, rest, laid);
         pitch = (world.sin() / up.max(1e-6)).atan2(world.cos() / along.max(1e-6)) - modeled;
         part.model_matrix[0][3] = pitch;
     }
@@ -2293,7 +2301,7 @@ mod tests {
             health_permille: 1000,
             built_permille: 1000,
             is_structure: false,
-            facing: [0, 0], aim: [0, 0], extra_aims: [[0; 2]; 3],
+            facing: [0, 0], aim: [0, 0], extra_aims: [[0; 2]; 3], pitches: [0; 4],
             working: false,
             assembling: None,
             upgrade: None,
@@ -3242,7 +3250,7 @@ mod tests {
         }
         // Turned east, the hull carries its turrets round with it.
         ship.facing = [4096, 0];
-        let east = draw(UnitView { aim: [0, 0], extra_aims: [[0; 2]; 3], ..ship });
+        let east = draw(UnitView { aim: [0, 0], extra_aims: [[0; 2]; 3], pitches: [0; 4], ..ship });
         let front = look.turrets[0].expect("a front turret").at[1] * look.size;
         assert!((east[0].1[0] - front).abs() < 1e-3 && east[0].1[1].abs() < 1e-3, "the front turret is east of the middle: {:?}", east[0].1);
     }
@@ -3554,10 +3562,10 @@ mod tests {
         );
     }
 
-    /// A gun is raised to the elevation of the shell it fires, as an artillery piece lobbing
-    /// its rounds high is, and laid back down once it has stopped firing a while.
+    /// A gun is drawn raised as far as the simulation has laid it, as an artillery piece lobbing
+    /// its rounds high is, and follows it as it is laid down again.
     #[test]
-    fn a_gun_is_raised_to_its_shot_and_laid_down_after() {
+    fn a_gun_is_drawn_raised_as_the_simulation_lays_it() {
         let pitch = |motion: &mut Motion, looks: &[UnitLook], gun: UnitView| {
             let mut out = InstanceBatches::default();
             build_unit_instances(
@@ -3573,20 +3581,22 @@ mod tests {
             );
             out.shape(Shape::Artillery)[0].model_matrix[0][3]
         };
-        let (mut motion, looks, gun, _, out) =
+        let (mut motion, looks, mut gun, _, _) =
             fire("t1_light_artillery", [1.0, 0.0], [20.0, 0.0, 20.0]);
-        let at_rest_pitch = out.shape(Shape::Artillery)[0].model_matrix[0][3];
+        assert_ne!(gun.aim, [0, 0], "the simulation turns it");
+        gun.pitches[0] = 2896;
         motion.time += 0.5;
         let raised = pitch(&mut motion, &looks, gun);
         let muzzle = super::super::meshes::muzzles(Shape::Artillery)[0];
         let elevation = raised + muzzle.modeled_pitch();
         assert!(
             (elevation - std::f32::consts::FRAC_PI_4).abs() < 0.05,
-            "raised to the round's 45 degrees: {elevation} ({at_rest_pitch} as it fired)"
+            "raised to the 45 degrees it is laid at: {elevation}"
         );
+        gun.pitches[0] = 0;
         motion.time += GUN_HOLD_SECONDS + 3.0;
-        let laid = pitch(&mut motion, &looks, gun);
-        assert!(laid.abs() < 0.02, "back at rest as modeled: {laid}");
+        let level = pitch(&mut motion, &looks, gun) + muzzle.modeled_pitch();
+        assert!(level.abs() < 0.02, "and level once it is laid level: {level}");
     }
 
     /// The battleship's broadside, its three guns firing at once from where each is mounted,
@@ -3665,10 +3675,12 @@ mod tests {
         );
     }
 
-    /// A gun the simulation does not turn, as a gunship's, is drawn turned to its latest shot.
+    /// A gun on an aircraft turns in the simulation, so a gunship's chin turret is drawn turned
+    /// as it is, not as the gunship faces.
     #[test]
-    fn a_gun_the_simulation_does_not_turn_turns_to_its_shots() {
-        let (mut motion, looks, gun, _, _) = fire("t2_gunship", [0.0, 0.0], [0.0, -40.0, -20.0]);
+    fn a_gunships_turret_is_drawn_as_the_simulation_turns_it() {
+        let (mut motion, looks, mut gun, _, _) = fire("t2_gunship", [0.0, 0.0], [0.0, -40.0, -20.0]);
+        gun.aim = [0, -4096];
         motion.time += 0.5;
         let mut out = InstanceBatches::default();
         build_unit_instances(
@@ -3685,7 +3697,7 @@ mod tests {
         let turret = facing(&out.shape(Shape::ChinTurret)[0]);
         assert!(
             turret[1] < -0.95,
-            "turned south to its shot, though the gunship faces east: {turret:?}"
+            "turned south, though the gunship faces east: {turret:?}"
         );
     }
 

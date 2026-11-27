@@ -338,7 +338,7 @@ fn view(id: u32, blueprint: u16, x: i32, built_permille: u16) -> UnitView {
         is_structure: false,
         facing: [0, 0],
         aim: [0, 0],
-        extra_aims: [[0; 2]; 3],
+        extra_aims: [[0; 2]; 3], pitches: [0; 4],
         working: false,
         assembling: None,
         upgrade: None,

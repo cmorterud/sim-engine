@@ -102,7 +102,7 @@ fn main() {
             is_structure: blueprint.is_structure(),
             facing: [4096, 0],
             aim: [4096, 0],
-            extra_aims: [[0; 2]; 3],
+            extra_aims: [[0; 2]; 3], pitches: [0; 4],
             working: false,
             assembling: None,
             upgrade: None,

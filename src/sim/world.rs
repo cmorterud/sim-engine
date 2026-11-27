@@ -166,6 +166,9 @@ pub struct UnitView {
     pub aim: [i32; 2],
     /// Which way its first extra weapons point, as `aim` does: a battleship's other turrets.
     pub extra_aims: [[i32; 2]; 3],
+    /// How far each turning gun's barrels are raised, the main one's and then its extra
+    /// weapons', as the raw sine of their elevation. Zero for level, or for a gun that does not turn.
+    pub pitches: [i32; 4],
     /// A factory making something, or a builder at work, with the power to do it. For drawing.
     pub working: bool,
     /// What a factory is building, as a raw blueprint id, and how far along it is in
@@ -2887,7 +2890,7 @@ impl SimWorld {
                             Some(if missile.is_some() || homing {
                                 to - from
                             } else {
-                                launch(from, to, combat.projectile_speed, Some(&entry), fused, lobbed && !discharging)
+                                launch(from, to, combat.projectile_speed, Some(entry), fused, lobbed && !discharging)
                             })
                         }
                         (None, None) => None,
@@ -3214,7 +3217,7 @@ impl SimWorld {
                                         if weapon.missile_height.is_some() || homing {
                                             to - from
                                         } else {
-                                            launch(from, to, weapon.projectile_speed, Some(&entry), fused, weapon.lobbed && !fused)
+                                            launch(from, to, weapon.projectile_speed, Some(entry), fused, weapon.lobbed && !fused)
                                         }
                                     }
                                     (None, None) => Vec3Fp::ZERO,
@@ -4933,6 +4936,10 @@ impl SimWorld {
                         let turret = extras.and_then(|extras| extras.0.get(index)).and_then(|weapon| weapon.turret);
                         turret.map_or([0, 0], |turret| [turret.facing.x.to_bits(), turret.facing.y.to_bits()])
                     }),
+                    pitches: std::array::from_fn(|index| {
+                        let turret = if index == 0 { turret.copied() } else { extras.and_then(|extras| extras.0.get(index - 1)).and_then(|weapon| weapon.turret) };
+                        turret.map_or(0, |turret| turret.elevation.y.to_bits())
+                    }),
                     working: producing || builders.binary_search(&id).is_ok(),
                     assembling: factory.and_then(|factory| {
                         let item = *factory.queue.first()?;
@@ -4980,6 +4987,7 @@ impl SimWorld {
                     facing: record.facing,
                     aim: record.aim,
                     extra_aims: [[0, 0]; 3],
+                    pitches: [0; 4],
                     working: false,
                     assembling: None,
                     upgrade: None,

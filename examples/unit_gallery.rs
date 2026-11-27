@@ -96,7 +96,7 @@ fn battlefield() -> Effects {
             built_permille: 1000,
             is_structure: false,
             facing: [0, 0],
-            aim: [0, 0], extra_aims: [[0; 2]; 3],
+            aim: [0, 0], extra_aims: [[0; 2]; 3], pitches: [0; 4],
             working: false,
             assembling: None,
             upgrade: None,

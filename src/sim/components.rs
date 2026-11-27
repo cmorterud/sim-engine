@@ -1207,6 +1207,25 @@ mod tests {
     }
 
     #[test]
+    fn a_turret_raises_its_barrels_to_the_shot_before_it_fires() {
+        // A shot climbing at 45 degrees, straight ahead: laid level, at 9 degrees a tick, the
+        // barrels are within 6 degrees of it only after 5 ticks.
+        let mut turret = Turret::new(east(), 90);
+        let climb = Vec3Fp::new(fp_int(10), Fp::ZERO, fp_int(10));
+        let mut ticks = 1;
+        while !turret.lay(climb) {
+            ticks += 1;
+            assert!(ticks < 20, "it never came up");
+        }
+        assert_eq!(ticks, 5, "took {ticks} ticks");
+        assert!(turret.lay(climb), "it stays on it");
+        // Nearly straight up, it need hardly turn: the barrels point up either way.
+        let mut turret = Turret::new(east(), 90);
+        turret.elevation = Vec2Fp::new(Fp::from_bits(200), Fp::ONE).normalized();
+        assert!(turret.lay(Vec3Fp::new(-Fp::from_bits(200), Fp::ZERO, fp_int(4))), "a gun pointing up fires straight up, whichever way it faces");
+    }
+
+    #[test]
     fn standing_still_keeps_the_facing() {
         let mut turning = Turning::new(east(), 180, fp_int(40));
         assert_eq!(turning.steer(Vec2Fp::ZERO, far()), Vec2Fp::ZERO);
