@@ -336,6 +336,23 @@ fn priced_structure(db: &BlueprintDb, table: &toml::Table, unit: &Blueprint, wea
         })
 }
 
+/// The `[price_list] domain_base` a domain's units of a tier are priced at.
+pub const fn base_key(domain: Domain, tier: u8) -> &'static str {
+    match domain {
+        Domain::Land => "land",
+        Domain::Navy => "navy",
+        Domain::Air if tier == 1 => "air_t1",
+        Domain::Air if tier == 2 => "air_t2",
+        // T4 aircraft at T3's base until a T4 anti-air unit exists (2026-11-27).
+        Domain::Air => "air_t3",
+    }
+}
+
+/// The domes `[price_list.shield_groups]` prices, by key.
+pub fn shield_group_domes() -> Vec<String> {
+    table()["price_list"]["shield_groups"].as_table().expect("[price_list.shield_groups]").keys().cloned().collect()
+}
+
 fn price_with(db: &BlueprintDb, table: &toml::Table, key: &str) -> Option<Pricing> {
     let unit = db.get(db.find(key)?);
     let weapons = fighting_weapons(unit);
@@ -346,15 +363,7 @@ fn price_with(db: &BlueprintDb, table: &toml::Table, key: &str) -> Option<Pricin
     let list = &table["price_list"];
     let domain = domain_of(unit);
     let tier = unit.tier.clamp(1, MAX_TIER);
-    let base_key = match domain {
-        Domain::Land => "land",
-        Domain::Navy => "navy",
-        Domain::Air if tier == 1 => "air_t1",
-        Domain::Air if tier == 2 => "air_t2",
-        // T4 aircraft at T3's base until a T4 anti-air unit exists (2026-11-27).
-        Domain::Air => "air_t3",
-    };
-    let base = number(&list["domain_base"][base_key]);
+    let base = number(&list["domain_base"][base_key(domain, tier)]);
     let tier_efficiency = numbers(&list["tier_efficiency"])[usize::from(tier) - 1];
     let anchor = number(&list["anchor_strength_per_cost"]);
     let health = unit.health.to_num::<f64>() + own_shield_health(table, unit);
