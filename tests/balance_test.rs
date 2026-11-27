@@ -162,16 +162,22 @@ fn missile_launchers_lose_to_artillery_and_the_line_but_break_a_t2_position() {
     assert!(result.losses < 0.01, "and lost {:.0}%", result.losses * 100.0);
 }
 
-/// T1 air is what its rules derive ([air] and [kills]): the derivation, run on the unit data,
-/// changes nothing.
+/// T1 air is what its rules derive ([air], [kills] and [kill_times]): the derivation, run on the
+/// unit data, changes nothing but the rounding of the Bomber's cost, which it solves from fights.
 #[test]
 fn t1_air_is_what_its_rules_derive() {
     let standard = BlueprintDb::standard();
     let derived = sim_engine::balance::derive_t1_air(&standard);
     for key in ["t1_bomber", "t1_interceptor", "t1_mobile_aa"] {
         let (now, rule) = (standard.get(standard.id(key)), derived.get(derived.id(key)));
-        assert_eq!((now.mass, now.energy, now.build_time, now.health), (rule.mass, rule.energy, rule.build_time, rule.health), "{key}");
+        assert_eq!(now.health, rule.health, "{key}'s health");
         assert_eq!(now.weapon.map(|weapon| weapon.damage), rule.weapon.map(|weapon| weapon.damage), "{key}'s damage");
+        if key == "t1_bomber" {
+            let (cost, wanted) = (sim_engine::balance::cost_at(now, 1), sim_engine::balance::cost_at(rule, 1));
+            assert!((cost / wanted - 1.0).abs() <= 0.01, "the bomber costs {cost}, its rules {wanted}");
+        } else {
+            assert_eq!((now.mass, now.energy, now.build_time), (rule.mass, rule.energy, rule.build_time), "{key}");
+        }
     }
 }
 
