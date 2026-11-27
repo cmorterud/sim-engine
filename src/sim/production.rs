@@ -501,7 +501,7 @@ impl SimWorld {
                     torpedo: weapon.targets == Targets::Naval,
                     missile_height: (weapon.kind == WeaponKind::TacticalMissile).then_some(weapon.cruise_height),
                     target: None,
-                    turret: weapon.turn_rate.map(|rate| Turret::mounted(facing, rate, weapon.mount, weapon.aft)),
+                    turret: weapon.turn_rate.map(|rate| Turret::mounted(facing, rate, weapon.mount, weapon.aft, weapon.laid_for_range())),
                     spread: weapon.spread,
                     stun_ticks: weapon.stun_ticks,
                     salvo: weapon.salvo.map(super::components::Salvo::new),
@@ -541,7 +541,7 @@ impl SimWorld {
             self.tractors.push((id, entity));
         }
         if let Some((weapon, rate)) = unit.weapon.and_then(|weapon| Some((weapon, weapon.turn_rate?))) {
-            self.ecs.insert_one(entity, Turret::mounted(facing, rate, weapon.mount, weapon.aft)).expect("entity was just spawned");
+            self.ecs.insert_one(entity, Turret::mounted(facing, rate, weapon.mount, weapon.aft, weapon.laid_for_range())).expect("entity was just spawned");
         }
         if let Some(weapon) = unit.weapon.filter(|weapon| matches!(weapon.kind, WeaponKind::TacticalMissile | WeaponKind::StrategicMissile)) {
             let launcher = Launcher {
@@ -2540,6 +2540,8 @@ impl SimWorld {
             hasher.write(&[10]);
             hasher.write(&turret.facing.x.to_bits().to_le_bytes());
             hasher.write(&turret.facing.y.to_bits().to_le_bytes());
+            hasher.write(&turret.elevation.x.to_bits().to_le_bytes());
+            hasher.write(&turret.elevation.y.to_bits().to_le_bytes());
         }
         if let Ok(turning) = self.ecs.get::<&Turning>(entity) {
             hasher.write(&[9]);
@@ -2599,6 +2601,8 @@ impl SimWorld {
                 if let Some(turret) = weapon.turret {
                     hasher.write(&turret.facing.x.to_bits().to_le_bytes());
                     hasher.write(&turret.facing.y.to_bits().to_le_bytes());
+                    hasher.write(&turret.elevation.x.to_bits().to_le_bytes());
+                    hasher.write(&turret.elevation.y.to_bits().to_le_bytes());
                 }
             }
         }

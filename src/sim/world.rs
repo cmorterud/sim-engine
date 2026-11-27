@@ -109,9 +109,6 @@ const GUN_LEAD_ERROR: i32 = 5;
 /// aircraft's own radius: an aircraft that turns on some ticks and not others is only roughly
 /// where a gun aiming along its turn expects.
 const GUN_BURST_REACH: i32 = 24;
-/// The longest a flak shell flies before it bursts, if it can never catch its aircraft.
-const FLAK_MAX_TICKS: u32 = 60;
-
 /// Settings for spawning a unit.
 #[derive(Copy, Clone, Debug)]
 pub struct UnitSpawn {
@@ -2593,6 +2590,28 @@ impl SimWorld {
         let mut finished_attacks: Vec<SimId> = Vec::new();
         let mut finished_discharges: Vec<SimId> = Vec::new();
         let mut fired_nukes: Vec<SimId> = Vec::new();
+        // How each unit is moving and turning, for the guns that lead it, read before the units'
+        // weapons are borrowed: as the shots will read them when they are fired.
+        let courses: Vec<(Vec3Fp, Vec2Fp)> = units
+            .iter()
+            .map(|&(_, entity)| {
+                let velocity = self.ecs.get::<&Velocity>(entity).map_or(Vec3Fp::ZERO, |velocity| velocity.0);
+                let turn = self.ecs.get::<&Flight>(entity).map_or(Vec2Fp::new(Fp::ONE, Fp::ZERO), |flight| flight.turn);
+                (velocity, turn)
+            })
+            .collect();
+        // The velocity a shot leaves its gun with, before any scatter, as it will be fired: a gun
+        // on a turret points along it before it fires. A shot that steers itself, or a missile,
+        // points straight at its target. `lead` is the unit it aims ahead of.
+        let surface = |at: Vec2Fp| terrain.height_at(at).max(terrain.water_level());
+        let launch = |from: Vec3Fp, to: Vec3Fp, speed: Fp, lead: Option<&super::spatial::GridEntry>, fused: bool, lobbed: bool| {
+            let (velocity, turn) = lead.map_or((None, Vec2Fp::new(Fp::ONE, Fp::ZERO)), |entry| {
+                let (velocity, turn) = courses[entry.index as usize];
+                (Some(velocity), turn)
+            });
+            let aim = super::combat::lead_aim(from, to, speed, fused, velocity, turn, surface);
+            super::combat::launch_velocity(from, aim.to, speed, aim.flak_ticks, aim.least_ticks, lobbed)
+        };
         let mut query = self.ecs.query_mut::<(
             &UnitStats,
             &mut Combat,
@@ -2853,12 +2872,28 @@ impl SimWorld {
                     })
                 }),
                 Some(turret) => {
-                    let toward = |(x, y): (i32, i32)| {
-                        let away = Vec2Fp::new(Fp::from_bits(x - gun.0), Fp::from_bits(y - gun.1));
-                        (away != Vec2Fp::ZERO).then(|| away.normalized())
+                    // It lays its barrels along the shot it would fire: at where its target will
+                    // be, on the arc the shell will fly, as `PendingShot` resolves it.
+                    let raw = |x: i32, y: i32, z: i32| Vec3Fp::new(Fp::from_bits(x), Fp::from_bits(y), Fp::from_bits(z));
+                    let from = raw(gun.0, gun.1, launch_height(muzzle, torpedo));
+                    let lobbed = (artillery.is_some() || high_arc.is_some()) && missile.is_none();
+                    let laid = match (ground, aim_at.and_then(locate)) {
+                        (Some(spot), _) => Some(launch(from, Vec3Fp::new(spot.x, spot.y, terrain.height_at(spot) - GROUND_AIM_DEPTH), combat.projectile_speed, None, false, lobbed)),
+                        (None, Some(entry)) => {
+                            let to = raw(entry.x, entry.y, entry.z);
+                            let discharging = discharge_target == Some(entry.id);
+                            let fused = !discharging && entry.is_air && !guided && !torpedo;
+                            let homing = !discharging && ((entry.is_air && !fused) || torpedo);
+                            Some(if missile.is_some() || homing {
+                                to - from
+                            } else {
+                                launch(from, to, combat.projectile_speed, Some(&entry), fused, lobbed && !discharging)
+                            })
+                        }
+                        (None, None) => None,
                     };
-                    match aim_point {
-                        Some(point) => toward(point).is_none_or(|toward| turret.aim(toward)),
+                    match laid.filter(|_| aim_point.is_some()) {
+                        Some(velocity) => turret.lay(velocity),
                         None => {
                             if let Some(front) = front {
                                 turret.stand_down(front);
@@ -3165,9 +3200,24 @@ impl SimWorld {
                     let aimed = match weapon.turret.as_mut() {
                         None => true,
                         Some(turret) => match aim_at {
-                            Some((x, y)) => {
-                                let away = Vec2Fp::new(Fp::from_bits(x - gun.0), Fp::from_bits(y - gun.1));
-                                away == Vec2Fp::ZERO || turret.aim(away.normalized())
+                            Some(_) => {
+                                // Its barrels follow the shot it would fire, as the main gun's do.
+                                let from = raw(gun.0, gun.1, launch_height(muzzle, weapon.torpedo));
+                                let velocity = match (spot, target) {
+                                    (Some(spot), _) => launch(from, Vec3Fp::new(spot.x, spot.y, terrain.height_at(spot) - GROUND_AIM_DEPTH), weapon.projectile_speed, None, false, weapon.lobbed),
+                                    (None, Some(entry)) => {
+                                        let to = raw(entry.x, entry.y, entry.z);
+                                        let fused = !weapon.homing && !weapon.torpedo && weapon.missile_height.is_none() && entry.is_air;
+                                        let homing = (entry.is_air && weapon.homing) || weapon.torpedo;
+                                        if weapon.missile_height.is_some() || homing {
+                                            to - from
+                                        } else {
+                                            launch(from, to, weapon.projectile_speed, Some(&entry), fused, weapon.lobbed && !fused)
+                                        }
+                                    }
+                                    (None, None) => Vec3Fp::ZERO,
+                                };
+                                turret.lay(velocity)
                             }
                             None => {
                                 if let Some(front) = front {
@@ -3337,24 +3387,9 @@ impl SimWorld {
             // Flak flies straight, in three dimensions, to where the aircraft meets it.
             // Guns and flak aim along the aircraft's course and its steady turn.
             let turn = shot.lead.and_then(|target| self.ecs.get::<&super::components::Flight>(target).ok().map(|flight| flight.turn)).unwrap_or(Vec2Fp::new(Fp::ONE, Fp::ZERO));
-            let meeting = shot.fused.then(|| super::combat::intercept(shot.from, shot.to, target_velocity.unwrap_or(Vec3Fp::ZERO), turn, shot.speed, FLAK_MAX_TICKS));
-            let flak_ticks = meeting.map(|(ticks, _)| ticks);
-            let mut least_ticks = 1;
-            let aim = match (meeting, target_velocity) {
-                (Some((_, at)), Some(_)) => {
-                    let terrain = &self.terrain;
-                    let surface = |at: Vec2Fp| terrain.height_at(at).max(terrain.water_level());
-                    Vec3Fp::new(at.x, at.y, surface(at.xy()) + (shot.to.z - surface(shot.to.xy())))
-                }
-                (Some(_), None) => shot.to,
-                (None, Some(velocity)) => {
-                    let terrain = &self.terrain;
-                    let (aim, ticks) = super::combat::lead_point(shot.from, shot.to, velocity, shot.speed, |at| terrain.height_at(at).max(terrain.water_level()));
-                    least_ticks = ticks;
-                    aim
-                }
-                (None, None) => shot.to,
-            };
+            let terrain = &self.terrain;
+            let super::combat::Aim { to: aim, least_ticks, flak_ticks } =
+                super::combat::lead_aim(shot.from, shot.to, shot.speed, shot.fused, target_velocity, turn, |at| terrain.height_at(at).max(terrain.water_level()));
             // Flak and anti-air guns scatter the more, the faster the aircraft and the longer the
             // shell is in the air: the guess at where it will be is only as good as its course is
             // steady.

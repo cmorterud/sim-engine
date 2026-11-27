@@ -111,6 +111,56 @@ pub fn lead_point(from: Vec3Fp, to: Vec3Fp, velocity: Vec3Fp, horizontal_speed: 
     (Vec3Fp::new(aim.x, aim.y, surface(aim) + height), ticks as u32)
 }
 
+/// Where a shot is aimed, before any scatter: at where its target will be when it gets there.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct Aim {
+    pub to: Vec3Fp,
+    /// The fewest ticks its flight should take, so that it does not arrive early.
+    pub least_ticks: u32,
+    /// For a shell at an aircraft that flies straight to it, how long it flies.
+    pub flak_ticks: Option<u32>,
+}
+
+/// The longest a flak shell flies before it bursts, if it can never catch its aircraft.
+pub const FLAK_MAX_TICKS: u32 = 60;
+
+/// Where to aim a shot from `from` at a target now at `to` (§7.1, Leading Shots). A target moving
+/// at `velocity` and turning by `turn` a tick is led; `fused` is a shell at an aircraft, which
+/// flies straight, in three dimensions, to where it will be. `surface` is the height of the ground
+/// or water under a point.
+pub fn lead_aim(from: Vec3Fp, to: Vec3Fp, speed: Fp, fused: bool, velocity: Option<Vec3Fp>, turn: Vec2Fp, surface: impl Fn(Vec2Fp) -> Fp) -> Aim {
+    let meeting = fused.then(|| intercept(from, to, velocity.unwrap_or(Vec3Fp::ZERO), turn, speed, FLAK_MAX_TICKS));
+    let flak_ticks = meeting.map(|(ticks, _)| ticks);
+    match (meeting, velocity) {
+        (Some((_, at)), Some(_)) => Aim { to: Vec3Fp::new(at.x, at.y, surface(at.xy()) + (to.z - surface(to.xy()))), least_ticks: 1, flak_ticks },
+        (Some(_), None) => Aim { to, least_ticks: 1, flak_ticks },
+        (None, Some(velocity)) => {
+            let (aim, ticks) = lead_point(from, to, velocity, speed, surface);
+            Aim { to: aim, least_ticks: ticks, flak_ticks }
+        }
+        (None, None) => Aim { to, least_ticks: 1, flak_ticks },
+    }
+}
+
+/// The velocity a shot leaves its gun with to land on `to`: straight there for flak, which
+/// takes `flak_ticks`, and for a beam; up in a high arc if `lobbed`; otherwise on a flat shell's
+/// arc. A gun on a turret points along it before it fires.
+pub fn launch_velocity(from: Vec3Fp, to: Vec3Fp, speed: Fp, flak_ticks: Option<u32>, least_ticks: u32, lobbed: bool) -> Vec3Fp {
+    if is_beam(speed) {
+        return to - from;
+    }
+    if let Some(ticks) = flak_ticks {
+        let offset = to - from;
+        let ticks = i32::try_from(ticks).unwrap_or(1).max(1);
+        return Vec3Fp::new(offset.x / ticks, offset.y / ticks, offset.z / ticks);
+    }
+    if lobbed {
+        lobbed_solution(from, to, speed, least_ticks).0.velocity
+    } else {
+        firing_solution_within(from, to, speed, least_ticks).velocity
+    }
+}
+
 /// The longest flight a shell leads its target for: past the slowest artillery's longest.
 const LEAD_MAX_TICKS: i128 = 600;
 

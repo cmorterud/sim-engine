@@ -6,7 +6,7 @@ use std::hash::Hasher;
 use twox_hash::XxHash64;
 
 use super::config::TERRAIN_CELL_UNITS;
-use crate::math::fp::{fp_int, Fp, FpWide};
+use crate::math::fp::{fp_int, Fp, FpWide, Vec3Fp};
 
 /// Economy totals, costs, and rates. 64-bit, because they can exceed the range of `Fp`.
 pub type Res = FpWide;
@@ -352,7 +352,16 @@ impl SalvoDef {
     }
 }
 
+/// How far a gun on an aircraft can swing within one reload, in degrees: right round.
+const AIRCRAFT_GUN_SWING_DEGREES: u32 = 180;
+
 impl WeaponDef {
+    /// The way its shot leaves the gun at its full range over level ground: where a turret's
+    /// barrels are laid as it waits for a target.
+    pub fn laid_for_range(&self) -> Vec3Fp {
+        super::combat::launch_velocity(Vec3Fp::ZERO, Vec3Fp::new(self.range, Fp::ZERO, Fp::ZERO), self.projectile_speed, None, 1, self.lobbed || self.artillery)
+    }
+
     /// Shots each reload: a volley's, or one.
     pub fn shots_per_reload(&self) -> u32 {
         self.salvo.map_or(1, |salvo| salvo.shots)
@@ -1072,13 +1081,17 @@ impl BlueprintDb {
                 if kind == WeaponKind::Laser && (weapon.splash_radius.is_some() || weapon.spread.is_some() || weapon.artillery || weapon.homing) {
                     return Err(context("a laser hits one target where it is aimed: it has no splash_radius or spread, and is neither artillery nor homing".into()));
                 }
+                // A gun on an aircraft, with no rate of its own, swings right round within one
+                // reload, so that turning to a new target never costs it more than its first shot.
+                let aircraft_gun = unit.flight.is_some() && weapon.arc.is_none() && matches!(kind, WeaponKind::Shell | WeaponKind::Flak) && !weapon.homing && weapon.targets.as_deref() != Some("naval");
+                let turn_rate = weapon.turn_rate.or_else(|| aircraft_gun.then(|| AIRCRAFT_GUN_SWING_DEGREES * TICKS_PER_SECOND as u32 / weapon.reload_ticks.max(1)));
                 Ok(WeaponDef {
                     range: weapon.range.fp().map_err(context)?,
                     reload_ticks: weapon.reload_ticks,
                     projectile_speed,
                     damage: weapon.damage.fp().map_err(context)?,
                     splash_radius: whole(&weapon.splash_radius)?,
-                    turn_rate: weapon.turn_rate,
+                    turn_rate,
                     kind,
                     cruise_height: whole(&weapon.cruise_height)?,
                     targets: match weapon.targets.as_deref() {
