@@ -340,6 +340,10 @@ out close and why: evidence about the process, not a target.
   The Escort Corvette's anti-torpedo charge taken off (the design owner): the T2 fleet still takes
   2.06 times its cost of torpedo bombers to break, so the Torpedo Bomber and the Torpedo Boat
   re-solve to their costs.
+* 2026-11-27: the air transports' health from the design owner's kill times: the T2 Flak Cannon
+  destroys a Light Air Transport in about 4 seconds (500, as it was), an Air Transport in about 11
+  (1,675 to 1,810), and a Heavy Air Transport, through its shield, in about 55 (4,500 to 9,800).
+  Their costs wait on how cargo is priced and how weak the Air Transport's guns are.
 * 2026-11-27: game-ending weapons in minutes of a standard T3 economy, eight T3 extractors, 144 a
   second (`[missiles] strategic_minutes`): the Strategic Missile 2.98, its launcher 2.27, the
   Strategic Interceptor 0.79, today's costs written down; and each missile defense a share of the

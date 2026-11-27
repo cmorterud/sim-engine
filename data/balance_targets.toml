@@ -299,6 +299,13 @@ heavy_gunship_commander_on_land = [45, 55]
 fighter_bomber_interceptor = [1.5, 2.5]
 sam_t2_gunship = [1.5, 3.0]
 sam_t3_strategic_bomber = [9.5, 12.5]
+# The T2 Flak Cannon against air transports hanging in the air (2026-11-27, the design owner's
+# numbers): it destroys a Light Air Transport in about 4 seconds, an Air Transport in about 11, and
+# a Heavy Air Transport, through its shield and the shield's regeneration, in about 55. They set
+# the transports' health, in the middle of the health that takes that many shells.
+flak_t1_light_transport = [3.2, 4.8]
+flak_t2_transport = [10.2, 11.8]
+flak_t3_heavy_transport = [54.2, 55.8]
 # The cruiser's anti-air, its volleys timed by tests/kill_times_test.rs.
 cruiser_two_volleys_seconds_max = 4
 cruiser_six_volleys_seconds_max = 12

@@ -2206,6 +2206,8 @@ tier = 1
 mass = 120
 energy = 4800
 build_time = 800
+# The T2 Flak Cannon destroys it in about 4 seconds, four shells ([kill_times], the design
+# owner's number, 2026-11-27): as it was.
 health = 500
 speed = "21.5"
 radius = 12
@@ -2223,7 +2225,9 @@ tier = 2
 mass = 330
 energy = 13200
 build_time = 2640
-health = 1675
+# The T2 Flak Cannon destroys it in about 11 seconds, thirteen shells ([kill_times], the design
+# owner's number, 2026-11-27): 1,675 to 1,810, still two of the cruiser's volleys.
+health = 1810
 speed = 29
 radius = 16
 vision = 640
@@ -2239,7 +2243,9 @@ tier = 3
 mass = 1400
 energy = 52500
 build_time = 5250
-health = 4500
+# The T2 Flak Cannon destroys it in about 55 seconds, through its shield and the shield's
+# regeneration ([kill_times], the design owner's number, 2026-11-27): 4,500 to 9,800.
+health = 9800
 speed = 35
 radius = 20
 vision = 640

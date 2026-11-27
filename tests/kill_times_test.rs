@@ -232,6 +232,19 @@ fn a_sam_launcher_destroys_a_gunship_and_a_strategic_bomber_in_time() {
     }
 }
 
+/// The T2 Flak Cannon destroys each air transport hanging in the air in about the design owner's
+/// time (2026-11-27): a Light Air Transport in about 4 seconds, an Air Transport in about 11, and a
+/// Heavy Air Transport, through its shield, in about 55.
+#[test]
+fn the_flak_cannon_destroys_each_air_transport_in_time() {
+    for (name, key) in [("flak_t1_light_transport", "t1_light_transport"), ("flak_t2_transport", "t2_transport"), ("flak_t3_heavy_transport", "t3_heavy_transport")] {
+        let mut world = world();
+        let aircraft = target(&mut world, key, (7_600, 5_000));
+        let flak = place(&mut world, "t2_flak", Team::Blue, (7_000, 5_000));
+        assert_within(name, ticks_to_kill(&mut world, &[flak], aircraft, 1_000));
+    }
+}
+
 /// Aircraft against aircraft hanging in the air, and the heavy gunship against a commander on
 /// land, each alone, in about the design owner's times (2026-11-26).
 #[test]
