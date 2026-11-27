@@ -271,14 +271,12 @@ fn ai_climbs_the_tech_tree_and_upgrades_its_economy() {
     assert!(higher_tier >= 5 && third_tier >= 1, "the army is not keeping up with the tech: {higher_tier} of T2 and up, {third_tier} of T3");
     let income = (world.economies[0].mass_income * 10).to_num::<i64>();
     assert!(income >= 60, "materiel income is only {income}/s");
-    // The commander takes its fabrication pack and heavier cannon at home, and engineering
-    // stations help the factories.
+    // The commander takes its fabrication pack and heavier cannon at home.
     let commander = world.unit_entity(world.commanders[Team::Blue.index()].unwrap()).unwrap();
     let installed = world.ecs.get::<&sim_engine::sim::components::Enhancements>(commander).map_or([None; 3], |slots| slots.0);
     let has = |key: &str| installed.contains(&Some(world.blueprints.enhancement_id(key)));
     assert!(has("t2_fabrication") || has("t3_fabrication"), "the commander took no fabrication pack: {installed:?}");
     assert!(has("heavy_cannon"), "the commander took no heavier cannon: {installed:?}");
-    assert!(count("field_workshop") + count("field_workshop_t3") >= 1, "no field workshop");
     // A light transport took raiders aboard and set them down by an outlying deposit.
     assert!(loaded && dropped, "no transport drop: loaded {loaded}, dropped {dropped}");
 }

@@ -4370,7 +4370,7 @@ mod tests {
         assert_eq!(press('D', Some(2)), place("t2_point_defense"));
         assert_eq!(press('D', Some(3)), place("t3_heavy_point_defense"));
         assert_eq!(press('W', Some(3)), place("rig_yard"), "a support factory needs a headquarters, and there is none");
-        assert_eq!(press('V', Some(2)), place("field_workshop"));
+        assert_eq!(press('V', Some(2)), place("airfield"));
         assert_eq!(press('V', Some(1)), place("wall"));
         assert_eq!(press('Q', Some(1)), None, "Q is a factory's key");
         // A bot can build nothing, so N mutes instead.

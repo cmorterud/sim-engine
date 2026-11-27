@@ -228,7 +228,7 @@ fn every_enhancement_field_changes_the_checksum() {
     use sim_engine::sim::components::{Enhancements, Enhancing, SelfDestructing, Team, Teleporting};
     let (_, mut world) = run(scenario::battle(SEED, 20, small_config()), 10, 10);
     // Orbital Redeploy is out of the roster; teleporting is checked with it as it was.
-    world.blueprints = std::sync::Arc::new(common::with_retired_enhancements());
+    world.blueprints = std::sync::Arc::new(common::with_retired());
     let at = world.unit_position(world.units[0].0).unwrap().xy();
     let rig = world.blueprints.id("command_rig");
     let (installed, building, jumping) = (world.spawn_mobile(rig, Team::Blue, at), world.spawn_mobile(rig, Team::Blue, at), world.spawn_mobile(rig, Team::Blue, at));
