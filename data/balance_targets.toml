@@ -174,6 +174,15 @@ hovercraft_over_heavy_tank_on_land = [0.65, 0.85]
 # launchers break it in a few volleys, so their reload sets it, at every strength tried.
 strength_over_artillery = 0.8
 siege_seconds_max = 60
+# Game-ending weapons have no fight to price them (2026-11-27). Tech costs scale with income
+# ([economy]), so they are priced in minutes of a standard T3 economy: this many T3 extractors'
+# income, 144 a second, at T3 prices. Today's costs, written down as the design owner's numbers;
+# the step 5 soaks may move them against [pace].
+t3_economy_extractors = 8
+strategic_minutes = { strategic_missile = 2.98, strategic_missile_launcher = 2.27, strategic_interceptor = 0.79 }
+# A missile defense costs a share of the missile it stops, today's: an interceptor about a quarter
+# of a strategic missile; a Tactical Missile Defense about one tactical missile.
+defense_over_missile = { strategic_interceptor = 0.267, tactical_missile_defense = 1.09 }
 
 [splash]
 # Formations keep units 2.5 radii apart, center to center (FORMATION_SPACING_RADII). A blast's
@@ -761,7 +770,7 @@ command_rig = "not derived yet: the snipe rules, its gun and enhancements"
 field_rig = "not derived yet: build power, income and its gun"
 t2_transport = "not derived yet: cargo, and its guns"
 t3_heavy_transport = "not derived yet: cargo, its guns and shield"
-t3_missile_sub = "not derived yet: the launcher's share, its cruise missiles, submerged at T3"
+t3_missile_sub = "not derived yet: the launcher's share, its cruise missiles, submerged at T3 (left for the design owner, 2026-11-27)"
 
 # Aircraft pay for the damage they land, not their card's (2026-11-26): anti-air against a bomber
 # flying its run (the Strategic Bomber at T3, the T1 Bomber below), bombs, guns and torpedoes against

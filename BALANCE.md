@@ -333,6 +333,11 @@ out close and why: evidence about the process, not a target.
   T3 Engineers pay 10.4 a point and come out at their costs; the T2 Engineer 130 to 125; the
   Combat Engineer, its 17.5 points with its gun and radar, 224 to 253. The Field Rig and the
   Command Rig carry it in their lists and stay held.
+* 2026-11-27: game-ending weapons in minutes of a standard T3 economy, eight T3 extractors, 144 a
+  second (`[missiles] strategic_minutes`): the Strategic Missile 2.98, its launcher 2.27, the
+  Strategic Interceptor 0.79, today's costs written down; and each missile defense a share of the
+  missile it stops, today's (`defense_over_missile`). Nothing moves. The Missile Submarine is left
+  for the design owner.
 
 ## Order of work
 
