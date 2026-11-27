@@ -451,6 +451,11 @@ out close and why: evidence about the process, not a target.
   Camouflage are out of the roster (the design owner's pick); the engine keeps teleporting,
   cloaking and jamming, tested with tests/fixtures/retired_enhancements.toml. As a check, the Heavy
   Cannon lets the commander hold against 22 Medium Tanks rather than 16, about 240 of tanks.
+* 2026-11-27: the Field Workshops (T2 and T3) out of the roster (the design owner's pick): a
+  station is an engineer that cannot walk to its work, and cost 26 to 35 a point of build power
+  against the engineers' 10.4, so the list would have halved it into an engineer that needs no
+  minding. The AI's idle engineers assist its factories instead. The engine keeps assisting
+  stations, tested with tests/fixtures/retired_units.toml.
 
 ## Order of work
 

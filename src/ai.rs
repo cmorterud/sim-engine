@@ -149,9 +149,6 @@ const DISCHARGE_STORAGE_INCOME: i64 = 300;
 const COMMANDER_T2_SUITE_INCOME: i64 = 40;
 const COMMANDER_CANNON_INCOME: i64 = 60;
 const COMMANDER_T3_SUITE_INCOME: i64 = 80;
-/// Engineering stations, which help build whatever is near, beside the factories.
-const STATION_INCOME: i64 = 30;
-const MOST_STATIONS: usize = 2;
 /// A strategic missile costs 12,000 mass and 1.5 million energy: only a huge economy builds one.
 const NUKE_MASS_INCOME: i64 = 100;
 const NUKE_ENERGY_INCOME: i64 = 4_000;
@@ -219,7 +216,6 @@ struct Roster {
     tactical_launcher: BlueprintId,
     tactical_missile: BlueprintId,
     tactical_defense: BlueprintId,
-    field_workshops: [BlueprintId; 2],
     light_transport: BlueprintId,
     strategic_launcher: BlueprintId,
     strategic_missile: BlueprintId,
@@ -277,7 +273,6 @@ impl Roster {
             tactical_launcher: id("tactical_missile_launcher"),
             tactical_missile: id("tactical_missile"),
             tactical_defense: id("tactical_missile_defense"),
-            field_workshops: [id("field_workshop"), id("field_workshop_t3")],
             light_transport: id("t1_light_transport"),
             strategic_launcher: id("strategic_missile_launcher"),
             strategic_missile: id("strategic_missile"),
@@ -363,7 +358,6 @@ struct Forces {
     shields: usize,
     tactical_defenses: usize,
     tactical_launchers: Vec<LauncherInfo>,
-    stations: usize,
     transports: Vec<TransportInfo>,
     /// Idle T1 land combat units, which fit a light transport.
     idle_light_combat: Vec<(SimId, Vec2Fp)>,
@@ -1042,8 +1036,6 @@ impl AiBrain {
                         forces.shields += 1;
                     } else if blueprint == roster.tactical_defense {
                         forces.tactical_defenses += 1;
-                    } else if roster.field_workshops.contains(&blueprint) {
-                        forces.stations += 1;
                     }
                 }
             }
@@ -1392,13 +1384,6 @@ impl AiBrain {
             if forces.tactical_launchers.len() + count_planned(roster.tactical_launcher) < launchers_wanted && world.can_build(builder, roster.tactical_launcher) {
                 if let Some(cell) = self.site_near_home(world, roster.tactical_launcher, 1, planned) {
                     return Some((roster.tactical_launcher, cell));
-                }
-            }
-            // Engineering stations beside the factories, which help with whatever is near.
-            let stations_wanted = if mass_income >= STATION_INCOME { (1 + (mass_income - STATION_INCOME) as usize / 40).min(MOST_STATIONS) } else { 0 };
-            if forces.stations + count_planned(roster.field_workshops[0]) < stations_wanted && world.can_build(builder, roster.field_workshops[0]) {
-                if let Some(cell) = self.station_site(world, forces, planned) {
-                    return Some((roster.field_workshops[0], cell));
                 }
             }
             // A strategic missile defense once the enemy has been seen with a launcher.
@@ -2283,25 +2268,6 @@ impl AiBrain {
             .min_by_key(|extractor| (extractor.tier, extractor.position.distance_squared(&self.home), extractor.id));
         if let Some(extractor) = next {
             commands.push(SimCommand::Upgrade { units: vec![extractor.id] });
-        }
-    }
-
-    /// Beside the first finished land factory, so that a station reaches what it builds, or
-    /// near home if there is none.
-    fn station_site(&self, world: &SimWorld, forces: &Forces, planned: &[(u32, u32)]) -> Option<(u32, u32)> {
-        let station = self.roster().field_workshops[0];
-        match forces.factories.iter().find(|factory| factory.finished) {
-            Some(factory) => {
-                // The search runs on the plan, which Red sees turned around: a factory's cell
-                // given as it is on the map sent Red's engineers to build beside Blue's base.
-                let size = footprint(world, factory.blueprint);
-                // The footprint's exact middle, which turns into its partner's.
-                let edge = |cell: u32| fp_int(cell as i32 * TERRAIN_CELL_UNITS + size * TERRAIN_CELL_UNITS / 2);
-                let middle = Vec2Fp::new(edge(factory.cell.0), edge(factory.cell.1));
-                let on_plan = self.plan_position(world, middle);
-                self.search_site(world, station, 1, cell_i32(cell_of(on_plan)), planned)
-            }
-            None => self.site_near_home(world, station, 1, planned),
         }
     }
 

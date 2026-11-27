@@ -1048,7 +1048,6 @@ pub fn unit_look(key: &str) -> UnitLook {
         },
         "t3_heavy_shield" => look(Shape::ShieldGeneratorT3, Some([0.45, 0.70, 1.00]), 0.9),
         "wall" => look(Shape::Wall, Some([0.70, 0.70, 0.70]), 0.9),
-        "field_workshop" => look(Shape::FieldWorkshop, Some([0.95, 0.75, 0.30]), 0.8),
         "t1_light_transport" => look(Shape::Transport, Some([0.85, 0.80, 0.60]), 1.0),
         "t2_transport" => UnitLook {
             turrets: mounts([mount(Shape::ChinTurret, 0, [0.0, 0.34, -0.08], false, 0.3)]),
@@ -1061,7 +1060,6 @@ pub fn unit_look(key: &str) -> UnitLook {
             ]),
             ..look(Shape::TransportT3, Some([0.55, 0.60, 0.75]), 1.0)
         },
-        "field_workshop_t3" => look(Shape::FieldWorkshopT3, Some([0.95, 0.55, 0.20]), 0.95),
         "t1_light_artillery" => UnitLook { base: Some(Shape::ArtilleryHull), length: 22.0, ..look(Shape::Artillery, Some([0.74, 0.66, 0.52]), 1.0) },
         "t2_heavy_tank" => UnitLook { base: Some(Shape::HeavyTankHull), length: 26.0, ..look(Shape::HeavyTank, Some([0.62, 0.52, 0.48]), 1.0) },
         "t2_assault_hovercraft" => UnitLook { base: Some(Shape::HoverHull), ..look(Shape::Tank, Some([0.45, 0.65, 0.75]), 1.0) },
