@@ -77,4 +77,4 @@ A few rules are measured rather than calculated, because only the simulation kno
 
 ## Where it stands
 
-The navy, the T2 and T3 aircraft, and the land units' reach and fight times come from the model today. Land costs are within about 10% of the price list, and the solver's targets hold them. T1 aircraft, protection like shields, and some special units are still being worked through, and [`PROVENANCE.md`](../PROVENANCE.md) records which numbers are still starting values and which have been replaced. The goal is that every unit, including new experimental ones, can be priced from the model alone.
+The navy, the aircraft, and the land units' reach and fight times come from the model today. Land costs are within about 10% of the price list, and the solver's targets hold them. Protection like shields, structures and some special units are still being worked through, and [`PROVENANCE.md`](../PROVENANCE.md) records which numbers are still starting values and which have been replaced. The goal is that every unit, including new experimental ones, can be priced from the model alone.
