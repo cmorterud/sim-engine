@@ -531,6 +531,9 @@ pub struct SimSnapshot {
     /// How far open the doors of silos in `units` are, in thousandths, while a launch is under
     /// way, sorted by `SimId`. Drawing only (`SimWorld::silo_doors`).
     pub silo_doors: Vec<(SimId, u16)>,
+    /// How far out the arms of builders in `units` are, in thousandths, for those with them out
+    /// at all, sorted by `SimId`. Drawing only (`SimWorld::builder_arms`).
+    pub arms: Vec<(SimId, u16)>,
     /// How many units each of the viewer's transports carries, sorted by `SimId`. Everyone's,
     /// for a viewer who sees everything.
     pub cargo: Vec<(SimId, u32)>,
@@ -5376,6 +5379,9 @@ impl SimWorld {
         let mut silo_doors: Vec<(SimId, u16)> =
             self.silo_doors().into_iter().filter(|(id, _)| units.binary_search_by_key(id, |unit| unit.id).is_ok_and(|index| !units[index].remembered)).collect();
         silo_doors.sort_unstable();
+        let mut arms: Vec<(SimId, u16)> =
+            self.builder_arms().into_iter().filter(|(id, _)| units.binary_search_by_key(id, |unit| unit.id).is_ok_and(|index| !units[index].remembered)).collect();
+        arms.sort_unstable();
         SimSnapshot {
             tick: self.current_tick,
             units,
@@ -5388,6 +5394,7 @@ impl SimWorld {
             decoys,
             stocks,
             silo_doors,
+            arms,
             cargo,
             adjacency,
             blips,
