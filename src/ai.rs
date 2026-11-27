@@ -2421,15 +2421,26 @@ impl AiBrain {
     fn command_army(&mut self, world: &SimWorld, forces: &Forces, sightings: &[Sighting], commands: &mut Vec<SimCommand>) {
         let haste = if self.land_route { 0 } else { NO_LAND_ROUTE_HASTE_TICKS };
         let sudden_death = world.current_tick >= (SUDDEN_DEATH_TICKS - haste).max(self.skill.commander_push_ticks);
+        let commander_attacking = forces.commander.and_then(|id| world.unit_entity(id)).is_some_and(|entity| world.ecs.get::<&Order>(entity).is_ok_and(|order| order.kind == OrderKind::AttackMove));
         if sudden_death && world.current_tick.is_multiple_of(SUDDEN_DEATH_REAIM_TICKS) {
             let goal = self.enemy_commander(world).and_then(|id| world.unit_position(id)).map_or(self.enemy_home, |at| at.xy());
             let mut going = forces.attacking.clone();
-            let commander_attacking = forces.commander.and_then(|id| world.unit_entity(id)).is_some_and(|entity| world.ecs.get::<&Order>(entity).is_ok_and(|order| order.kind == OrderKind::AttackMove));
             if commander_attacking && world.terrain.height_at(goal) >= world.terrain.water_level() {
                 going.extend(forces.commander);
             }
             if !going.is_empty() {
                 commands.push(SimCommand::AttackMove { units: going, goal });
+            }
+        }
+        // In sudden death the commander goes even when nothing that could go with it is idle
+        // (2026-11-27). It used to go only along with idle units that could reach the enemy. On
+        // Scattered Isles 4v4, seed 3, each team's last player rebuilt only land units, which
+        // cannot cross the sea, so both last commanders stood at home for the hour that was left.
+        let movers = if self.land_route { &forces.idle_combat } else { &forces.idle_crossing };
+        if sudden_death && self.skill.attacks && movers.is_empty() && !commander_attacking && !commander_enhancing(world, forces) {
+            let goal = self.enemy_commander(world).and_then(|id| world.unit_position(id)).map_or(self.enemy_home, |at| at.xy());
+            if let Some(commander) = forces.commander.filter(|_| world.terrain.height_at(goal) >= world.terrain.water_level()) {
+                commands.push(SimCommand::AttackMove { units: vec![commander], goal });
             }
         }
         if forces.idle_combat.is_empty() {
