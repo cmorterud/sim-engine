@@ -2084,9 +2084,12 @@ id = "t2_torpedo_boat"
 name = "Torpedo Boat"
 class = "tank"
 tier = 2
-mass = 796
-energy = 6365
-build_time = 3565
+# Cost by the duel it wins ([counters] counter_squadrons, balance::derive_torpedo_boat,
+# 2026-11-27): the most it can cost and still keep 0.70 against an equal cost of submarines, on
+# average over fleets of four to seven of it: 819 to 794.
+mass = 772
+energy = 6176
+build_time = 3459
 health = 3040
 speed = 12
 turn_rate = 100

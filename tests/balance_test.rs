@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use sim_engine::balance::{
-    anti_air_strength, break_even, break_even_forces, defenses_against_line, domain_force, duel, force_materiel, mirrored, mirrored_on, position_materiel_at, purpose_strength, siege_on,
-    squadrons, Field, Ground, Side, Tactics,
+    anti_air_strength, break_even, break_even_forces, cost_at, defenses_against_line, derive_torpedo_boat, derive_torpedo_bomber, domain_force, duel, force_materiel, mirrored, mirrored_on,
+    position_materiel_at, purpose_strength, siege_on, squadrons, Field, Ground, Side, Tactics,
     T1_TORPEDO_POSITION, T2_POSITION, T3_POSITION, TORPEDO_POSITION,
 };
 use sim_engine::sim::blueprints::BlueprintDb;
@@ -356,6 +356,19 @@ fn torpedo_boats_beat_an_equal_cost_of_submarines() {
     let score = fight(&db, Field::new(Ground::Water, 2), "t2_torpedo_boats", 4.0, "t1_submarines");
     let least = number(&domains(&["cells", "torpedo_boats_beat_submarines"]));
     assert!(score >= least, "Torpedo Boats score {score:+.2} against an equal cost of submarines, under {least:+.2}");
+}
+
+/// `[counters] counter_squadrons`: the counters cost what the duels they win derive (2026-11-27),
+/// the Torpedo Boat the most that keeps 0.70 against submarines, the Torpedo Bomber the least
+/// that needs twice the T2 fleet's cost to break it.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn counters_cost_what_the_duels_they_win_derive() {
+    let base = BlueprintDb::standard();
+    for (key, (derived, _)) in [("t2_torpedo_boat", derive_torpedo_boat(&base)), ("t2_torpedo_bomber", derive_torpedo_bomber(&base))] {
+        let (cost, solved) = (cost_at(base.get(base.id(key)), 2), cost_at(derived.get(derived.id(key)), 2));
+        assert!((cost / solved - 1.0).abs() < 0.005, "{key} costs {cost:.1}, the duel it wins {solved:.1}");
+    }
 }
 
 /// `[domains]`, cells met before any naval pass that must stay met: skipping the counter loses (a

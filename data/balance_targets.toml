@@ -395,6 +395,13 @@ micro_cell_flip_min = 0.3
 # down on what it aims at (2026-11-21): a few small units charging it from the front now die on
 # the way, which is right, and raiders are for artillery left alone and caught close.
 artillery_counters_without_micro = ["artillery", "mobile_shield", "heavy", "bomber"]
+# Counters are priced by the duel they win (the design owner's call, 2026-11-26), solved in code
+# (balance::derive_counters, 2026-11-27). The Torpedo Boat costs the most it can and still keep
+# the top of winner_survivors against an equal cost of submarines, as the mean score over fleets of
+# these many squadrons of it: one size alone turns on how the submarines round, a step of a tenth
+# of the boat's cost. The Torpedo Bomber costs the least that keeps torpedo bombers needing twice
+# the T2 fleet's cost to break it ([domains.cells] torpedo_bombers_to_break_fleet_t2).
+counter_squadrons = [4, 5, 6, 7]
 
 [strategy]
 # AI strategy variants (T2 rush, T1 spam, air-heavy, naval-heavy) each win within their timing
@@ -521,8 +528,9 @@ battleship_heavy_fleet_breaks_to_torpedo_bombers_at_most = 1.0
 # shown by the balance report, not held.
 # The sub hunter is a hard counter (2026-11-26): Torpedo Boats beat an equal cost of submarines,
 # keeping at least [counters] winner_survivors. The ability price list averages a unit over an
-# enemy mix, half ships and half submarines, which undervalues a counter, so this duel holds the
-# Torpedo Boat's cost at 819 against the list's 634 (the design owner's call, 2026-11-26).
+# enemy mix, half ships and half submarines, which undervalues a counter, so the duel holds the
+# Torpedo Boat's cost against the list's (the design owner's call, 2026-11-26): 819, and 794 from
+# 2026-11-27, solved at the top of winner_survivors ([counters] counter_squadrons). This is its floor.
 torpedo_boats_beat_submarines = 0.40
 # Skipping the counter loses. A fleet with no anti-air loses to torpedo bombers; one with no
 # anti-submarine weapon loses to submarines. And submarines beat an equal cost of destroyers
@@ -744,8 +752,8 @@ t3_siege_walker = "the land solver's targets ([roles])"
 t1_mobile_aa = "its health per mass is the anchor's ([air] anti_air_health_over_bomb)"
 t2_mobile_flak = "not derived yet: its cost is borrowed, its gun set by the escort rule"
 t3_mobile_artillery = "the T3 line's micro cell: the middle of the costs where it holds"
-t2_torpedo_bomber = "the fleet cells: the least that needs twice the T2 fleet's cost to break it"
-t2_torpedo_boat = "the cell torpedo_boats_beat_submarines"
+t2_torpedo_bomber = "the duel it wins ([counters]): the least that needs twice the T2 fleet's cost to break it"
+t2_torpedo_boat = "the duel it wins ([counters]): the most that keeps 0.70 against an equal cost of submarines"
 command_rig = "not derived yet: the snipe rules, its gun and enhancements"
 field_rig = "not derived yet: build power, income and its gun"
 t2_combat_engineer = "not derived yet: build power, its gun and radar"
