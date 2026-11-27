@@ -951,3 +951,32 @@ fn a_torpedo_bombers_torpedo_comes_down_on_its_ship() {
     assert!(gaps.windows(2).all(|pair| pair[1] < pair[0]), "it did not close on the ship every tick: {gaps:.0?}");
     assert!(world.unit_health(destroyer).unwrap() < full, "the torpedo never hit");
 }
+
+/// A bomb dropped on a ship bursts on the water's surface, and does not sink through it to the
+/// sea floor to burst there (the user's call, 2026-11-27). Torpedoes still run under the water.
+#[test]
+fn a_bomb_bursts_on_the_waters_surface() {
+    let mut world = lake_world();
+    let frigate = spawn(&mut world, "t1_frigate", Team::Red, point(2_000, 1_000));
+    let bomber = spawn(&mut world, "t1_bomber", Team::Blue, point(1_000, 1_000));
+    world.advance_tick(&[SimCommand::Attack { units: vec![bomber], target: frigate }]);
+    let full = world.unit_health(frigate).unwrap();
+    let water = world.terrain.water_level();
+    let (mut bombs, mut lowest) = (0usize, Fp::MAX);
+    for _ in 0..900 {
+        world.advance_tick(&[]);
+        for &(_, entity) in &world.projectiles {
+            if world.ecs.get::<&sim_engine::sim::components::Falling>(entity).is_err() {
+                continue;
+            }
+            bombs += 1;
+            lowest = lowest.min(world.ecs.get::<&sim_engine::sim::components::Position>(entity).unwrap().0.z);
+        }
+        if world.unit_health(frigate).is_none_or(|health| health < full) && bombs > 0 && world.projectiles.is_empty() {
+            break;
+        }
+    }
+    assert!(bombs > 0, "the bomber dropped no bombs");
+    assert!(lowest >= water - Fp::ONE, "a bomb sank to {lowest}, below the water at {water}");
+    assert!(world.unit_health(frigate).is_none_or(|health| health < full), "the bombs never hurt the frigate");
+}
