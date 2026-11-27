@@ -372,6 +372,22 @@ out close and why: evidence about the process, not a target.
   Tanks (from 37) and 30 Heavy Walkers (from 26) to break, and the two coast duels' cost ratios
   are written down again. Easy's land cap 16 to 15 (GAME_SPECIFICATION.md, Difficulty), so that
   Normal still fields half as many units again on every test map.
+* 2026-11-27: the battle line (the design owner's pick; `[battle_line]`, tests/battle_line_test.rs,
+  `--balance-derive battle-line`): a force standing in fixed ranks by rule (direct fire in front,
+  shortest reach first; anti-air and gunless shields in the middle; artillery and lobbing guns
+  behind), and an equal cost of aircraft coming at it from the front, a flank and the rear, from
+  four layouts each, the teams each way round, at four sizes. It is steady where the march was
+  not: aircraft's efficiency falls smoothly as the army grows, 1.46 to 1.04 for Heavy Gunships over
+  two to five squadrons. A standing army does worse than a marching one: the T2 strike aircraft are
+  1.35 times the better buy against the T2 army in it, even on the march. The T3 air base is solved
+  to that deal for the Heavy Gunships against the standard T3 army (the AI's T3 mix, a fifth flak,
+  `[domains.forces] t3_land_army`): 0.902 to 1.005, so the Heavy Gunship 756 to 678, Air
+  Superiority 879 to 790, the Strategic Bomber 1,254 to 1,138 and the Heavy Air Transport 2,056 to
+  1,993. The navy base is solved so that the T2 fleet, its ships on the list, scores +0.6 against
+  an equal cost of the T2 air force (+0.56 before): 0.669 to 0.702. The ships move -6% to +2%
+  (the Battlecruiser, which had drifted 6% under its list, 4,987 to 5,070; the Cruiser 1,608 to
+  1,529), the Escort Corvette 913 to 882 with its group, and the T3 fleet scores +0.88 against the
+  T3 air force. The counters re-solve: the Torpedo Boat 794 to 748, the Torpedo Bomber 243 to 234.
 
 ## Order of work
 

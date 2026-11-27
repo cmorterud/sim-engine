@@ -1427,6 +1427,384 @@ pub fn strike_against_army(db: &BlueprintDb, tier: u8) -> f64 {
         / count
 }
 
+// The battle line (2026-11-27, the design owner's pick): an army or fleet standing in fixed
+// ranks, and an equal cost of aircraft coming at it from the front, a flank, or the rear. Where
+// an army's units stand decided much of what aircraft did to it (Heavy Gunships 0.94 to 1.66
+// times the better buy by march order alone), so the ranks are set by rule, and the approaches
+// averaged over, rather than taken from any one march.
+
+/// Where aircraft come at a battle line from.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Approach {
+    Front,
+    Flank,
+    Rear,
+}
+
+/// Every approach a battle line is measured from, each counted alike.
+pub const APPROACHES: [Approach; 3] = [Approach::Front, Approach::Flank, Approach::Rear];
+
+/// How one battle-line fight starts: where the aircraft come from, which team holds the line,
+/// and the layout, `(extra gap, offset along the line's edge)`.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct LineStart {
+    pub approach: Approach,
+    pub line_team: Team,
+    pub layout: (i32, i32),
+}
+
+/// A unit's rank in a battle line: 0 in front, 1 in the middle, 2 behind. Anti-air, whatever
+/// does more damage a second to aircraft than to the ground, and shields with no gun of their
+/// own stand in the middle, covered by the front and covering it; artillery and guns that lob
+/// stand behind, where their reach lets them; everything else is in front.
+pub fn battle_rank(unit: &Blueprint) -> u8 {
+    let (surface, _) = purpose_weapons(unit, Purpose::Surface);
+    let (air, _) = purpose_weapons(unit, Purpose::Air);
+    let lobs = unit.weapon.iter().chain(&unit.extra_weapons).any(|weapon| weapon.artillery || weapon.lobbed);
+    if (air > 0.0 && air >= surface) || (surface == 0.0 && unit.shield.is_some()) {
+        1
+    } else if lobs {
+        2
+    } else {
+        0
+    }
+}
+
+/// A force in its battle-line order, front to back: by rank, and in each rank the shortest
+/// surface reach first, so that what must close to fire is nearest the enemy.
+pub fn battle_order(db: &BlueprintDb, force: &[Side]) -> Vec<Side> {
+    let mut ordered = force.to_vec();
+    let key = |side: &Side| {
+        let unit = db.get(side.unit);
+        (battle_rank(unit), purpose_weapons(unit, Purpose::Surface).1.round() as i64, side.unit.0)
+    };
+    ordered.sort_by_key(key);
+    ordered
+}
+
+/// The battle line's ground: 10 km across, room for a massed T3 fleet and the aircraft that
+/// come at it from any side.
+const LINE_MAP_UNITS: i32 = 10_240;
+
+/// A block's columns for `count` units: at least five abreast, as `spawn_group` lays a group
+/// out, and square once there are more than 25, so that a massed rank is a line and not a
+/// column.
+fn block_columns(count: u32) -> i32 {
+    (f64::from(count).sqrt().ceil() as i32).max(5).min(count.max(1) as i32)
+}
+
+/// Spawns units in a block centered on `(x, y)`, `columns` abreast along y, each row behind
+/// the last towards `back` (-1 west, 1 east), `spacing` apart.
+fn spawn_block(world: &mut SimWorld, units: &[BlueprintId], team: Team, (x, y): (i32, i32), back: i32, columns: i32, spacing: i32) -> Vec<SimId> {
+    let rows = (units.len() as i32 + columns - 1) / columns;
+    units
+        .iter()
+        .enumerate()
+        .map(|(index, &unit)| {
+            let (row, column) = (index as i32 / columns, index as i32 % columns);
+            let along = y + (column * 2 - (columns - 1)) * spacing / 2;
+            let depth = x + back * (row * spacing - (rows - 1) * spacing / 2);
+            world.spawn_mobile(unit, team, Vec2Fp::new(fp_int(depth), fp_int(along)))
+        })
+        .collect()
+}
+
+/// The spacing a unit keeps in a block: three times its radius, as `group_shape`'s.
+fn block_spacing(db: &BlueprintDb, unit: BlueprintId) -> i32 {
+    db.get(unit).radius.to_num::<i32>().max(4) * 3
+}
+
+/// One battle-line fight: `line` standing in its ranks, facing west, with its health times
+/// `health[0]`, and `air` with its health times `health[1]`, in one block `START_GAP` and the
+/// layout's extra gap off the line's edge on the side the start's approach names, shifted along
+/// that edge by the layout's offset, attack-moving at its middle. The line holds: it fires at what comes,
+/// and nothing moves it. Each rank stands one behind another, at least five abreast and square
+/// once massed. `line_team` sides the teams, so that the two can be swapped; on a flank
+/// approach, the line's Blue comes from the north and its Red from the south. The score is the
+/// air's share of its materiel left less the line's.
+pub fn battle_line_fight(db: &Arc<BlueprintDb>, field: Field, line: &[Side], air: &[Side], health: [f64; 2], start: LineStart) -> DuelResult {
+    let LineStart { approach, line_team, layout } = start;
+    let config = SimConfig { map_units: LINE_MAP_UNITS, terrain: TerrainStyle::Flat, fog_of_war: false, ..SimConfig::default() };
+    let mut world = field.ground.world(config, 1);
+    if field.ground != Ground::Land {
+        world.prepare_map();
+    }
+    world.blueprints = Arc::clone(db);
+    let middle = LINE_MAP_UNITS / 2;
+    // Each rank's depth and spacing, front to back, then the whole centered on the map.
+    let ranks: Vec<(Side, i32, i32, i32)> = battle_order(db, line)
+        .into_iter()
+        .map(|side| {
+            let (columns, spacing) = (block_columns(side.count), block_spacing(db, side.unit));
+            let rows = (side.count as i32 + columns - 1) / columns;
+            (side, columns, spacing, (rows - 1) * spacing)
+        })
+        .collect();
+    let depth: i32 = ranks.windows(2).map(|pair| (pair[0].3 + pair[1].3) / 2 + pair[1].2).sum();
+    let mut center = middle - depth / 2;
+    let mut line_ids = Vec::new();
+    for (index, &(side, columns, spacing, rank_depth)) in ranks.iter().enumerate() {
+        if index > 0 {
+            center += (ranks[index - 1].3 + rank_depth) / 2 + spacing;
+        }
+        line_ids.extend(spawn_block(&mut world, &vec![side.unit; side.count as usize], line_team, (center, middle), 1, columns, spacing));
+    }
+    let positions: Vec<Vec2Fp> = line_ids.iter().filter_map(|&id| world.unit_position(id)).map(|at| at.xy()).collect();
+    let span = |pick: fn(&Vec2Fp) -> i32| (positions.iter().map(pick).min().unwrap_or(middle), positions.iter().map(pick).max().unwrap_or(middle));
+    let ((west, east), (south, north)) = (span(|at| at.x.to_num()), span(|at| at.y.to_num()));
+    // The aircraft in one block, by kind in turn, square.
+    let wing: Vec<BlueprintId> = air.iter().flat_map(|side| std::iter::repeat_n(side.unit, side.count as usize)).collect();
+    let spacing = air.iter().map(|side| block_spacing(db, side.unit)).max().unwrap_or(12);
+    let columns = (wing.len() as f64).sqrt().ceil().max(1.0) as i32;
+    let half = ((wing.len() as i32 + columns - 1) / columns - 1) * spacing / 2;
+    let (gap, along) = (START_GAP + layout.0 + half, layout.1);
+    let flank_north = line_team == Team::Blue;
+    let (x, y) = match approach {
+        Approach::Front => (west - gap, (south + north) / 2 + along),
+        Approach::Rear => (east + gap, (south + north) / 2 + along),
+        Approach::Flank => ((west + east) / 2 + along, if flank_north { north + gap } else { south - gap }),
+    };
+    let back = if approach == Approach::Rear { 1 } else { -1 };
+    let air_ids = spawn_block(&mut world, &wing, line_team.enemy(), (x, y), back, columns, spacing);
+    for (ids, scale) in [(&line_ids, health[0]), (&air_ids, health[1])] {
+        if scale == 1.0 {
+            continue;
+        }
+        for &id in ids {
+            let entity = world.unit_entity(id).expect("just spawned");
+            let mut health = world.ecs.get::<&mut Health>(entity).expect("units have health");
+            health.max = Fp::from_num(health.max.to_num::<f64>() * scale);
+            health.current = health.max;
+        }
+    }
+    let goal = Vec2Fp::new(fp_int((west + east) / 2), fp_int((south + north) / 2));
+    world.advance_tick(&[SimCommand::AttackMove { units: air_ids.clone(), goal }]);
+    let full = |world: &SimWorld, ids: &[SimId]| ids.iter().map(|&id| worth(world, id, field.tier)).sum::<f64>();
+    let (line_full, air_full) = (full(&world, &line_ids), full(&world, &air_ids));
+    let mut first_damage = None;
+    let mut finished = false;
+    while world.current_tick < MAX_TICKS {
+        let mut orders = Vec::new();
+        if world.current_tick.is_multiple_of(10) {
+            reengage_aircraft(&world, &air_ids, &line_ids, &mut orders);
+        }
+        world.advance_tick(&orders);
+        let (line_now, air_now) = (full(&world, &line_ids), full(&world, &air_ids));
+        if first_damage.is_none() && (line_now < line_full || air_now < air_full) {
+            first_damage = Some(world.current_tick);
+        }
+        if line_now == 0.0 || air_now == 0.0 {
+            finished = true;
+            break;
+        }
+    }
+    let score = full(&world, &air_ids) / air_full.max(f64::MIN_POSITIVE) - full(&world, &line_ids) / line_full.max(f64::MIN_POSITIVE);
+    let seconds = f64::from(world.current_tick - first_damage.unwrap_or(world.current_tick)) / 10.0;
+    DuelResult { score, seconds, finished }
+}
+
+/// The battle line's score at a health multiplier, `air`'s health times `h` and the line's over
+/// it: the mean over every approach and starting layout, with the teams each way round.
+pub fn battle_line_mean(db: &Arc<BlueprintDb>, field: Field, line: &[Side], air: &[Side], h: f64) -> DuelResult {
+    let (mut score, mut seconds, mut finished, mut runs) = (0.0, 0.0, true, 0.0);
+    for approach in APPROACHES {
+        for (line_team, layout) in [Team::Blue, Team::Red].into_iter().flat_map(|team| LAYOUTS.map(|layout| (team, layout))) {
+            let result = battle_line_fight(db, field, line, air, [1.0 / h, h], LineStart { approach, line_team, layout });
+            score += result.score;
+            seconds += result.seconds;
+            finished &= result.finished;
+            runs += 1.0;
+        }
+    }
+    DuelResult { score: score / runs, seconds: seconds / runs, finished }
+}
+
+/// Where aircraft and a battle line come out even, as `break_even_forces` finds for two forces
+/// meeting in the open: `efficiency` is the air's strength per materiel over the line's, so it
+/// is also how many times the air's cost of the line it takes to break the air.
+pub fn battle_line_break_even(db: &Arc<BlueprintDb>, field: Field, line: &[Side], air: &[Side]) -> BreakEven {
+    let (mut low, mut high) = (-4.0f64, 4.0f64);
+    let mut seconds = 0.0;
+    for _ in 0..BREAK_EVEN_STEPS {
+        let middle = (low + high) / 2.0;
+        let result = battle_line_mean(db, field, line, air, middle.exp2());
+        seconds = result.seconds;
+        if result.score == 0.0 {
+            (low, high) = (middle, middle);
+            break;
+        }
+        if result.score > 0.0 {
+            high = middle;
+        } else {
+            low = middle;
+        }
+    }
+    let exponent = (low + high) / 2.0;
+    let health_factor = exponent.exp2();
+    let efficiency = (force_materiel(db, line, field.tier) / force_materiel(db, air, field.tier)) / health_factor;
+    BreakEven { health_factor, efficiency, seconds, at_limit: exponent.abs() > 3.99 }
+}
+
+/// A named force's battle-line efficiency against named aircraft at a tier, the mean over
+/// forces of each of `sizes` squadrons, the aircraft bought by cost to each force's materiel.
+/// Above 1, the aircraft are the better buy.
+pub fn air_against_battle_line(db: &BlueprintDb, ground: Ground, tier: u8, line: &str, air: &str, sizes: std::ops::RangeInclusive<u32>) -> f64 {
+    let db = Arc::new(db.clone());
+    let squadron = domain_force(&db, line);
+    let count = sizes.clone().count() as f64;
+    sizes
+        .map(|size| {
+            let force: Vec<Side> = squadron.iter().map(|&(unit, each)| Side { unit, count: each * size, tactics: Tactics::Hold }).collect();
+            let aircraft = force_by_cost(&db, air, force_materiel(&db, &force, tier), tier);
+            battle_line_break_even(&db, Field::new(ground, tier), &force, &aircraft).efficiency
+        })
+        .sum::<f64>()
+        / count
+}
+
+fn battle_line_table() -> toml::Value {
+    TARGETS.parse::<toml::Table>().expect("data/balance_targets.toml is valid").remove("battle_line").expect("[battle_line]")
+}
+
+/// The squadron sizes a force is measured at in the battle line (`[battle_line] squadrons`).
+pub fn battle_line_squadrons(force: &str) -> std::ops::RangeInclusive<u32> {
+    let table = battle_line_table();
+    let range = table["squadrons"].get(force).and_then(toml::Value::as_array).unwrap_or_else(|| panic!("[battle_line] squadrons has {force}"));
+    (as_number(&range[0]) as u32)..=(as_number(&range[1]) as u32)
+}
+
+/// A pair of force names in `[battle_line]`.
+fn battle_line_pair(key: &str) -> (String, String) {
+    let table = battle_line_table();
+    let pair = table[key].as_array().unwrap_or_else(|| panic!("[battle_line] {key} names two forces"));
+    let name = |index: usize| pair[index].as_str().expect("a force's name").to_string();
+    (name(0), name(1))
+}
+
+/// A named army's battle-line efficiency against named aircraft on land at a tier, over the
+/// army's `[battle_line] squadrons`: above 1, the aircraft are the better buy.
+pub fn aircraft_against_army(db: &BlueprintDb, tier: u8, pair: &str) -> f64 {
+    let (army, aircraft) = battle_line_pair(pair);
+    air_against_battle_line(db, Ground::Land, tier, &army, &aircraft, battle_line_squadrons(&army))
+}
+
+/// A named fleet's score in its battle line at sea against an equal cost of named aircraft, the
+/// mean over the fleet's `[battle_line] squadrons`, every approach and layout: the fleet's share
+/// of its materiel left less the aircraft's, as `[domains.cells]` scores a fight.
+pub fn fleet_against_aircraft(db: &BlueprintDb, tier: u8, pair: &str) -> f64 {
+    let (fleet, aircraft) = battle_line_pair(pair);
+    let db = Arc::new(db.clone());
+    let squadron = domain_force(&db, &fleet);
+    let sizes = battle_line_squadrons(&fleet);
+    let count = sizes.clone().count() as f64;
+    sizes
+        .map(|size| {
+            let force: Vec<Side> = squadron.iter().map(|&(unit, each)| Side { unit, count: each * size, tactics: Tactics::Hold }).collect();
+            let air = force_by_cost(&db, &aircraft, force_materiel(&db, &force, tier), tier);
+            -battle_line_mean(&db, Field::new(Ground::Water, tier), &force, &air, 1.0).score
+        })
+        .sum::<f64>()
+        / count
+}
+
+/// The units as they would be at another domain base: every unit the list prices at `base_key`
+/// and nothing holds, at its list price at `base`, and each dome whose group that changes priced
+/// again by its group, keeping its drift from the list.
+pub fn priced_at_base(db: &BlueprintDb, base_key: &str, base: f64) -> BlueprintDb {
+    let mut out = db.clone();
+    for unit in db.iter() {
+        if crate::price_list::held_reason(&unit.key).is_some() {
+            continue;
+        }
+        let Some(pricing) = crate::price_list::price(db, &unit.key) else { continue };
+        if crate::price_list::base_key(pricing.domain, pricing.tier) != base_key {
+            continue;
+        }
+        let id = out.id(&unit.key);
+        out = scaled_to(&out, id, pricing.tier, pricing.at_base(base));
+    }
+    for dome in crate::price_list::shield_group_domes() {
+        let (Some(before), Some(after)) = (crate::price_list::shield_price(db, &dome), crate::price_list::shield_price(&out, &dome)) else { continue };
+        if (after.list / before.list - 1.0).abs() > 1e-4 {
+            let id = out.id(&dome);
+            let tier = out.get(id).tier;
+            out = scaled_to(&out, id, tier, before.actual * after.list / before.list);
+        }
+    }
+    out
+}
+
+/// A domain base solved so that `measure`, of the units priced at it (`priced_at_base`), comes
+/// to `target`: secant steps on the logarithm of the base from `first`, until within
+/// `tolerance` or after five measures, the closest kept. Returns the units, the base, and the
+/// measure there.
+fn solve_base(db: &BlueprintDb, base_key: &str, start: f64, first: f64, target: f64, tolerance: f64, measure: impl Fn(&BlueprintDb) -> f64) -> (BlueprintDb, f64, f64) {
+    let at = |base: f64| {
+        let units = priced_at_base(db, base_key, base);
+        let value = measure(&units);
+        (units, base, value)
+    };
+    let mut tried = vec![at(start)];
+    let mut next = first;
+    for _ in 0..4 {
+        if (tried.last().expect("a trial").2 - target).abs() <= tolerance || tried.iter().any(|trial| (trial.1 - next).abs() < 1e-4) {
+            break;
+        }
+        tried.push(at(next));
+        let [(_, b0, m0), (_, b1, m1)] = [&tried[tried.len() - 2], &tried[tried.len() - 1]].map(|trial| (0, trial.1, trial.2));
+        let slope = (m1 - m0) / (b1.ln() - b0.ln());
+        next = if slope.abs() > 1e-9 { (b1.ln() + (target - m1) / slope).exp() } else { b1 };
+    }
+    tried.into_iter().min_by(|a, b| (a.2 - target).abs().total_cmp(&(b.2 - target).abs())).expect("a trial")
+}
+
+fn domain_base(key: &str) -> f64 {
+    as_number(&TARGETS.parse::<toml::Table>().expect("data/balance_targets.toml is valid")["price_list"]["domain_base"][key])
+}
+
+/// The T3 air base from the battle line (`[battle_line] t3_air`, the design owner's pick): the
+/// base at which the T3 strike aircraft, priced at it, are as good a buy against the standard T3
+/// army as the T2 strike aircraft against the standard T2 army (`t3_air_as`), both armies
+/// standing in their ranks. Returns the units, the base, the T3 efficiency and the T2 one.
+pub fn derive_t3_air_base(db: &BlueprintDb) -> (BlueprintDb, f64, f64, f64) {
+    let target = aircraft_against_army(db, 2, "t3_air_as");
+    let start = domain_base("air_t3");
+    let now = aircraft_against_army(&priced_at_base(db, "air_t3", start), 3, "t3_air");
+    // Strength per cost goes as one over the cost, which goes as one over the base.
+    let (units, base, efficiency) = solve_base(db, "air_t3", start, start * target / now, target, target * 0.005, |units| aircraft_against_army(units, 3, "t3_air"));
+    (units, base, efficiency, target)
+}
+
+/// The navy base from the battle line (`[battle_line] navy`): the base at which the T2 fleet,
+/// its ships priced at it, scores `navy_score` against an equal cost of the T2 air force at sea.
+/// Returns the units, the base and the score.
+pub fn derive_navy_base(db: &BlueprintDb) -> (BlueprintDb, f64, f64) {
+    let target = as_number(&battle_line_table()["navy_score"]);
+    let start = domain_base("navy");
+    let now = fleet_against_aircraft(&priced_at_base(db, "navy", start), 2, "navy");
+    let first = if now < target { start * 1.05 } else { start / 1.05 };
+    solve_base(db, "navy", start, first, target, 0.005, |units| fleet_against_aircraft(units, 2, "navy"))
+}
+
+/// The `--balance-derive battle-line` report: the T3 air base and the navy base from the
+/// battle line, and what they price.
+pub fn derive_battle_line_report() {
+    let db = BlueprintDb::standard();
+    let show = |units: &BlueprintDb, keys: &[&str]| {
+        for key in keys {
+            let unit = units.get(units.id(key));
+            println!("  {key}: {:.0} (from {:.0})", cost_at(unit, unit.tier), cost_at(db.get(db.id(key)), unit.tier));
+        }
+    };
+    let (units, base, efficiency, target) = derive_t3_air_base(&db);
+    println!("T3 air base {base:.3} (from {:.3}): T3 strike aircraft {efficiency:.3} against the T3 army, T2's {target:.3} against the T2 army", domain_base("air_t3"));
+    show(&units, &["t3_heavy_gunship", "t3_air_superiority", "t3_strategic_bomber", "t3_heavy_transport"]);
+    let (units, base, score) = derive_navy_base(&db);
+    println!("Navy base {base:.3} (from {:.3}): the T2 fleet scores {score:+.3} against the T2 air force", domain_base("navy"));
+    show(&units, &["t1_frigate", "t1_attack_sub", "t2_destroyer", "t2_cruiser", "t2_escort_corvette", "t3_battleship", "t3_battlecruiser"]);
+    println!("  the T3 fleet scores {:+.3} against the T3 air force", fleet_against_aircraft(&units, 3, "navy_t3"));
+}
+
 /// The Mobile Flak's gun from the escort rule at T2: the damage a shell at which the T2 strike
 /// aircraft and the standard T2 army break even, with the aircraft as they are. Their efficiency
 /// goes about as the damage to a power, so each step solves for 1 on the line through the last

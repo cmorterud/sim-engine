@@ -345,9 +345,10 @@ anti_air_escort_share = 0.2
 # base) break even, by efficiency within escort_efficiency, the mean over armies of
 # escort_squadrons squadrons (two to four tier fights' worth, [pace]), each unit in its own block,
 # the shortest reach in front and the anti-air behind. What sets the Mobile Flak's gun
-# (balance::derive_t2_flak, `--balance-derive air-bases`). T3 has no escort rule yet: measured the
-# same way, against a fifth flak, the answer turns on which units make up the rest of the army and
-# in what order they march (Heavy Gunships 0.94 to 1.66 times the better buy, 2026-11-27).
+# (balance::derive_t2_flak, `--balance-derive air-bases`). T3's is measured in the battle line
+# instead ([battle_line] t3_air): measured this way, against a fifth flak, the answer turned on
+# which units made up the rest of the army and in what order they marched (Heavy Gunships 0.94 to
+# 1.66 times the better buy, 2026-11-27).
 escort_forces = { t2 = ["t2_land_army", "t2_strike_aircraft"] }
 escort_squadrons = { t2 = [3, 6] }
 escort_efficiency = [0.85, 1.15]
@@ -459,28 +460,30 @@ strength_band = [0.80, 1.25]
 
 [domains.strength_over_anchor]
 # The navy's by the ability price list's costs (2026-11-26, [price_list]): the submarine, destroyer,
-# cruiser, battleship and battlecruiser are their strength per cost at those costs.
+# cruiser, battleship and battlecruiser are their strength per cost at those costs, measured again
+# at the navy base from the battle line (2026-11-27).
 t1_frigate = 0.44
-t1_attack_sub = 0.20
+t1_attack_sub = 0.25
 t1_torpedo_launcher = 0.45
 t2_torpedo_launcher = 0.64
-t2_destroyer = 0.34
-t2_cruiser = 0.19
+t2_destroyer = 0.36
+t2_cruiser = 0.24
 t2_torpedo_boat = 0.32
-t3_battleship = 0.44
+t3_battleship = 0.54
 # The battlecruiser by the ability price list (2026-11-26), not the inspiration's 0.25: its
 # lasers at twice a battleship turret's damage a second, its cost paying for lasers that cannot
 # be dodged (reports/plans/2026-11-26-derived-stats.md).
 t3_battlecruiser = 0.45
 # T2 and T3 aircraft by the ability price list's costs (2026-11-26, [price_list]): their strength
-# per cost at those costs, their stats set by [kill_times] and [volleys].
+# per cost at those costs, their stats set by [kill_times] and [volleys]; T3's measured again at
+# the T3 air base from the battle line (2026-11-27).
 t2_gunship = 0.93
 # The torpedo bomber is a counter, its cost held by its cells (2026-11-26): this is its strength per
 # cost at 240, the price list's 131 only a check.
 t2_torpedo_bomber = 0.51
 t2_fighter_bomber = 0.31
-t3_heavy_gunship = 0.88
-t3_air_superiority = 0.79
+t3_heavy_gunship = 0.98
+t3_air_superiority = 0.88
 # The interceptor by the ability price list at the T1 air base (2026-11-27, [price_list]
 # domain_base): its strength per cost at 175 (0.33 at 162, until the base priced the Bomber).
 t1_interceptor = 0.31
@@ -521,6 +524,13 @@ t2_heavy_tanks = { t2_heavy_tank = 1 }
 t2_land_army = { t2_heavy_tank = 2, t2_grenadier_walker = 1, t2_mobile_missile_launcher = 1, t2_mobile_flak = 2 }
 # The T2 air force's strike aircraft, which hold the T2 air base ([price_list] domain_base).
 t2_strike_aircraft = { t2_gunship = 4, t2_fighter_bomber = 2 }
+# The standard T3 land army (2026-11-27): what the AI's T3 land factories build in turn
+# (data/ai_strategies.toml, Balanced: two Heavy Walkers, the Mobile Artillery, the Siege Walker, a
+# Heavy Tank and a Mobile Shield), and a fifth of it anti-air by cost, as at T1 (the design
+# owner's pick): four Mobile Flak, 640 of 3,018.
+t3_land_army = { t3_heavy_walker = 2, t3_mobile_artillery = 1, t3_siege_walker = 1, t2_heavy_tank = 1, t2_mobile_shield = 1, t2_mobile_flak = 4 }
+# The T3 air force's strike aircraft.
+t3_strike_aircraft = { t3_heavy_gunship = 1 }
 
 [domains.cells]
 # Each a fight at equal cost unless it says otherwise, scored as [counters] scores it: the first
@@ -547,7 +557,8 @@ battleship_heavy_fleet_breaks_to_torpedo_bombers_at_most = 1.0
 # keeping at least [counters] winner_survivors. The ability price list averages a unit over an
 # enemy mix, half ships and half submarines, which undervalues a counter, so the duel holds the
 # Torpedo Boat's cost against the list's (the design owner's call, 2026-11-26): 819, and 794 from
-# 2026-11-27, solved at the top of winner_survivors ([counters] counter_squadrons). This is its floor.
+# 2026-11-27, solved at the top of winner_survivors ([counters] counter_squadrons); 748 with the
+# submarines at the navy base from the battle line. This is its floor.
 torpedo_boats_beat_submarines = 0.40
 # Skipping the counter loses. A fleet with no anti-air loses to torpedo bombers; one with no
 # anti-submarine weapon loses to submarines. And submarines beat an equal cost of destroyers
@@ -592,6 +603,31 @@ battleship_breaks_shielded_t2_artillery = [40, 50]
 # torpedo launchers does not break them; and at T1, frigates closing on T1 torpedo launchers.
 destroyers_break_torpedo_launchers = false
 frigates_break_t1_torpedo_launchers = false
+
+[battle_line]
+# The battle line (2026-11-27, the design owner's pick; balance::battle_line_fight): a force
+# standing in fixed ranks, by rule (balance::battle_rank): direct fire in front, the shortest
+# reach first; anti-air, and shields without a gun, in the middle; artillery and guns that lob
+# behind. An equal cost of aircraft comes at it from the front, a flank, and the rear, each from
+# four starting layouts and with the teams each way round, and the fight is measured at four
+# sizes. Where an army stood decided much of what aircraft did to it (Heavy Gunships 0.94 to 1.66
+# times the better buy by march order alone), so the ranks are set by rule and the approaches
+# averaged over. A standing army does worse against aircraft than one marching with its anti-air
+# behind: the T2 strike aircraft are 1.35 times the better buy against the T2 army here, where
+# the escort rule ([air]) has them even on the march.
+squadrons = { t2_land_army = [3, 6], t3_land_army = [2, 5], t2_fleet = [2, 5], t3_fleet = [1, 2] }
+# The T3 air base ([price_list] domain_base air_t3): the T3 strike aircraft against the standard
+# T3 army as good a buy as the T2 strike aircraft against the standard T2 army
+# (balance::derive_t3_air_base).
+t3_air = ["t3_land_army", "t3_strike_aircraft"]
+t3_air_as = ["t2_land_army", "t2_strike_aircraft"]
+# The navy base ([price_list] domain_base navy): the T2 fleet, in its battle line at sea, scores
+# this against an equal cost of the T2 air force (the design owner's target, 2026-11-27, at about
+# what it scored then; balance::derive_navy_base). The T3 fleet against the T3 air force is a
+# check, [domains.cells] fleet_beats_air_force_t3.
+navy = ["t2_fleet", "t2_air_force"]
+navy_t3 = ["t3_fleet", "t3_air_force"]
+navy_score = 0.6
 
 [model]
 # The model every stat not pinned above is derived from (2026-11-26, the design owner's rule: no
@@ -663,8 +699,9 @@ battleship_broadside_seconds = 13.5
 # flexibility price. The anchor is the Medium Tank's strength per cost.
 anchor_strength_per_cost = 2.806
 tier_efficiency = [1.0, 1.0, 1.0, 1.0]
-# The navy's base, solved by holding the T2 fleet (two destroyers, two cruisers) at its cost. Air's
-# at T2, as the navy's, by holding the T2 air force's strike aircraft (four gunships, two
+# The navy's base from the battle line ([battle_line] navy, 2026-11-27): the T2 fleet, its ships on
+# the list, scores +0.6 against an equal cost of the T2 air force; 0.669 until then, solved by
+# holding the T2 fleet (two destroyers, two cruisers) at its cost. Air's at T2 by holding the T2 air force's strike aircraft (four gunships, two
 # fighter-bombers) at their cost (2026-11-26). A price every aircraft would pay alike, for flying,
 # cancels in it. Each tier's air base comes from how deadly its anti-air is, which nothing else
 # sets: anti-air guns and aircraft costs are set by the escort rules ([air]). At T1 (2026-11-27),
@@ -672,9 +709,11 @@ tier_efficiency = [1.0, 1.0, 1.0, 1.0]
 # sets the T1 Bomber's cost, and the T1 base is what prices the bomber at that
 # (balance::t1_air_base): 0.318, then 0.294 once the landed shares were measured again with turrets
 # that fire only once laid (2026-11-27). The Interceptor is priced at it. At T2 the escort rule sets the
-# Mobile Flak's gun against the strike aircraft as they are. T3 aircraft are priced at T2's base
-# until T3 has an escort rule.
-domain_base = { land = 1.0, navy = 0.669, air_t1 = 0.294, air_t2 = 0.902, air_t3 = 0.902 }
+# Mobile Flak's gun against the strike aircraft as they are. At T3 (2026-11-27), from the battle
+# line ([battle_line] t3_air): the base at which the Heavy Gunships are as good a buy against the
+# standard T3 army as the T2 strike aircraft against the T2 army, both standing in ranks; T2's
+# 0.902 until then.
+domain_base = { land = 1.0, navy = 0.702, air_t1 = 0.294, air_t2 = 0.902, air_t3 = 1.005 }
 # Reach past the line's: x = c (r / r_line - 1), price x h / (1 - x h), h about 1 for shells and
 # 0 for missiles. Short of it: -c (1 - r / r_line) (v_line / v). Speed: speed_share (1 - v_line / v).
 speed_share = 0.3

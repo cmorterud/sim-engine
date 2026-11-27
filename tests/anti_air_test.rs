@@ -225,13 +225,20 @@ fn flak_mostly_misses_fast_t3_aircraft_unless_massed() {
 
 /// Gunships hover over what they attack, too slow to outfly flak: as much flak as a gunship cost
 /// brings it down over its attack, and half as much again for the heavy gunship since the price
-/// list halved its cost (2026-11-26), less flak than its borrowed cost bought.
+/// list halved its cost (2026-11-26), less flak than its borrowed cost bought. Cost is at the
+/// gunship's tier's prices, energy and all (2026-11-27; mass alone until then, which leaves out
+/// most of what an aircraft costs).
 #[test]
 fn flak_brings_down_gunships() {
+    let db = sim_engine::sim::blueprints::BlueprintDb::standard();
+    let cost = |key: &str, tier: u8| sim_engine::balance::cost_at(db.get(db.id(key)), tier);
     let mut failures = Vec::new();
     for shooter in ["t2_flak", "t2_mobile_flak"] {
         for plane in GUNSHIPS {
-            let worth = if plane == "t3_heavy_gunship" { mass(plane) * 3 / 2 } else { mass(plane) };
+            let tier = db.get(db.id(plane)).tier;
+            let share = if plane == "t3_heavy_gunship" { 1.5 } else { 1.0 };
+            let count = (share * cost(plane, tier) / cost(shooter, tier)).ceil() as i64;
+            let worth = count * mass(shooter);
             let lost = health_lost(shooter, worth, plane, Approach::Attack);
             if lost < 1.0 {
                 failures.push(format!("{shooter} took only {:.0}% off a {plane} attacking it", lost * 100.0));
