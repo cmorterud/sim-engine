@@ -81,6 +81,27 @@ fn inside_turn(facing: Vec2Fp, offset: Vec2Fp, radius: Fp) -> bool {
     wide_mul(along, along) + wide_mul(side, side) < wide_mul(radius, radius)
 }
 
+/// Ticks a hovering gunship drifts one way across its line to its target before it drifts back,
+/// and the share of its top speed it drifts at; and the same for its drift in and out along that
+/// line, slower and out of step, so that a group over its work is a loose, bobbing blob rather
+/// than a still knot (the design owner, 2026-11-27).
+pub const BOB_ACROSS_TICKS: u32 = 20;
+pub const BOB_ACROSS_SHARE: i32 = 8;
+pub const BOB_ALONG_TICKS: u32 = 30;
+pub const BOB_ALONG_SHARE: i32 = 16;
+
+/// How a gunship hovering since `since` drifts this tick, facing `facing` (towards its target):
+/// across, then along, each a half swing first, so that it rocks about where it stopped. It
+/// depends only on how long it has hovered and which way it faces, so mirror images drift in
+/// mirror image, and gunships that stopped on different ticks drift out of step.
+fn bob(since: u32, tick: u32, facing: Vec2Fp, top_speed: Fp) -> Vec2Fp {
+    let hovered = tick.wrapping_sub(since);
+    let sign = |period: u32| if ((hovered + period / 2) / period).is_multiple_of(2) { Fp::ONE } else { -Fp::ONE };
+    let across = Vec2Fp::new(-facing.y, facing.x).scaled(top_speed * sign(BOB_ACROSS_TICKS) / BOB_ACROSS_SHARE);
+    let along = facing.scaled(top_speed * sign(BOB_ALONG_TICKS) / BOB_ALONG_SHARE);
+    Vec2Fp::new(across.x + along.x, across.y + along.y)
+}
+
 /// Below this share of a full tank, a patrolling aircraft goes to refuel.
 const REFUEL_SHARE_PERCENT: u32 = 20;
 /// Ticks of fuel gained each tick on the ground, the inspiration's recharge rate of 5, and on an
@@ -194,6 +215,7 @@ impl SimWorld {
         let max = terrain.max_coordinate_raw();
         let outer = terrain.outer_margin_raw();
         let center = Vec2Fp::new(Fp::from_bits(max / 2), Fp::from_bits(max / 2));
+        let tick = self.current_tick;
         let locate = |target: SimId| -> Option<GridEntry> { units.binary_search_by_key(&target, |unit| unit.0).ok().map(|index| *grid.entry(index)) };
         let mut query = self.ecs.query_mut::<(
             &mut Position,
@@ -291,13 +313,20 @@ impl SimWorld {
                 }
             }
 
-            // A gunship stops over what it attacks, well within range, and turns to face it.
+            // A gunship stops over what it attacks, well within range, turns to face it, and drifts
+            // back and forth there (`bob`).
             let hold = flight.hovers
                 && attacking
                 && heading_for.is_some_and(|point| {
                     let reach = combat.range * 3 / 4;
                     here.distance_squared(&point) <= wide_mul(reach, reach)
                 });
+            // It notes when it came to a stop over its work, which sets how it drifts there.
+            if !hold {
+                flight.hovering_since = u32::MAX;
+            } else if flight.hovering_since == u32::MAX {
+                flight.hovering_since = tick;
+            }
             // With nothing to do, it lands, if there is open ground below to land on. Patrols
             // and trips to refuel keep it in the air. It lands on the map, just inside the edge
             // if that is where it is: only where it is over the map and would still be once it
@@ -433,6 +462,12 @@ impl SimWorld {
             let turned = Vec2Fp::new(facing.x * now.x + facing.y * now.y, facing.x * now.y - facing.y * now.x);
             flight.turn = Vec2Fp::new((flight.turn.x * 3 + turned.x) / 4, (flight.turn.y * 3 + turned.y) / 4);
             let step = turning.facing.scaled(speed);
+            let step = if hold {
+                let drift = bob(flight.hovering_since, tick, turning.facing, top_speed);
+                Vec2Fp::new(step.x + drift.x, step.y + drift.y)
+            } else {
+                step
+            };
             // It may fly on past the map's edge, as after a pass, and turns back of itself; the
             // outer margin only stops a runaway. Kept a raw bit further in on the low side, so
             // that the limits are mirror images: the map runs from 0 to a raw bit short of its

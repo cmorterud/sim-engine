@@ -499,6 +499,7 @@ impl SimWorld {
                 docked: false,
                 pad: 0,
                 hovers: flight.hovers,
+                hovering_since: u32::MAX,
                 min_speed: flight.min_speed,
                 break_off: flight.break_off,
                 breaking_off: false,
@@ -2716,7 +2717,7 @@ impl SimWorld {
             for value in [flight.elevation, flight.altitude, flight.speed] {
                 hasher.write(&value.to_bits().to_le_bytes());
             }
-            for value in [flight.fuel, flight.max_fuel, flight.refit.map_or(u32::MAX, |staging| staging.0)] {
+            for value in [flight.fuel, flight.max_fuel, flight.refit.map_or(u32::MAX, |staging| staging.0), flight.hovering_since] {
                 hasher.write(&value.to_le_bytes());
             }
             hasher.write(&flight.break_off.to_bits().to_le_bytes());
