@@ -279,6 +279,22 @@ out close and why: evidence about the process, not a target.
   9.1 seconds (8.7): 445 health and 48.9 a second, from 435 and 50. With it the Bomber's health
   (ten seconds of that gun) is 489, Mobile Anti-Air's gun 20.4, and the Bomber's cost 253. The
   Interceptor's cost is the list's at the T1 air base, set in `balance::derive_t1_air`.
+* 2026-11-27: Mobile Heavy Artillery from the model. Gun artillery takes the Light Artillery's
+  factor on the line's time to kill (`[model] role_time_to_kill artillery = 1.15`), so its health
+  over its damage a second is 18.2 x 1.15 = 20.9 seconds: it fires every 13.8 seconds, from 11.5,
+  with the shell as it was. Its cost is the middle of the costs at which the T3 line's micro cell
+  holds (Heavy Walkers attack-moving into it lose by 0.3 or more, and with micro win by 0.3 or
+  more): against ten, five to seven of it, 720 to 514 each, so 600, as it was.
+* 2026-11-27: secondary reaches by rule (`[model]`, tests/reach_test.rs), each one already met at
+  two tiers or the same rule a tier up. Static anti-air reaches 1.25 times its tier's mobile
+  anti-air (the Anti-Air Turret 880 to 800), a ship's anti-air 1.2 times its tier's static (the
+  battleship 1,200 to 1,440); a sub-hunting torpedo the sub hunter's reach at its tier (the
+  destroyer's 900 to 814, the battlecruiser's 1,200 to 921); the T1 Torpedo Launcher the defense
+  window's floor over the frigate's gun (1,000 to 698), as the T2 launcher does the destroyer's;
+  the cruiser's gun its tier's navy line (1,200 to 1,255). An aircraft's anti-air reaches its
+  tier's fighter (the Heavy Gunship 880 to 600, the Heavy Air Transport 1,000 to 600), and the
+  transports' guns 0.7 of the anti-air they fly against, as the gunships' do (400 to 448, 500 to
+  560). Frigates still lose to the T1 launcher, and torpedo boats still beat submarines.
 
 ## Order of work
 

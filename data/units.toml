@@ -683,7 +683,9 @@ build_time = 188
 health = 4500
 footprint = 1
 vision = 480
-weapon = { range = 880, reload_ticks = 7, projectile_speed = 90, damage = "69.0", targets = "air", turn_rate = 180 }
+# It reaches 1.25 times its tier's mobile anti-air (the Mobile Anti-Air's 640), as the Flak Cannon
+# and the SAM do theirs ([model] static_anti_air_over_mobile): 800 (880 until 2026-11-27).
+weapon = { range = 800, reload_ticks = 7, projectile_speed = 90, damage = "69.0", targets = "air", turn_rate = 180 }
 
 # Its gun destroys a T1 Bomber hanging in the air in about 24 seconds ([kill_times]
 # mobile_aa_t1_bomber, 2026-11-27): 20.9 to 20.8, and 20.4 with the bomber's health from the
@@ -850,8 +852,9 @@ flight = { elevation = 198, turn_rate = 60, fuel = 800, hovers = true }
 # cruiser's six volleys ([volleys]), and it destroys a commander with no
 # enhancements in about 50, so 360 a second (2026-11-26, the design owner's rules, [kill_times]).
 weapon = { range = 560, reload_ticks = 4, projectile_speed = 70, damage = 144, spread = 6 }
-# Its railgun, two shots of 8 every 1.3 seconds, as one.
-extra_weapons = [{ range = 880, reload_ticks = 13, projectile_speed = 90, damage = "18.4", targets = "air" }]
+# Its railgun, two shots of 8 every 1.3 seconds, as one. It reaches its tier's fighter, the Air
+# Superiority Fighter's 600 ([model] aircraft_anti_air_at_fighter; 880 until 2026-11-27).
+extra_weapons = [{ range = 600, reload_ticks = 13, projectile_speed = 90, damage = "18.4", targets = "air" }]
 
 # Flak bursts on an aircraft and hits every enemy aircraft around it.
 # Static anti-air is worth more for its cost than mobile ([premiums], 2026-11-25): half again as
@@ -1128,13 +1131,16 @@ turn_rate = 75
 turn_radius = 20
 radius = 12
 vision = 1010
-# It fires every 11.5 seconds. That came from a rule retired on 2026-11-25 (a battleship turret at
-# twice its damage a second), and is to be derived from its time to kill in the next pass
-# (reports/plans/2026-11-26-derived-stats.md). The shell is as it was, and kills what it did.
-# At this rate it no longer wins a walk-in fight against bunched Medium Tanks of its cost, and is
-# not meant to: it is a siege piece, dearer than the line walker, that loses to what reaches it.
-# (For a day its cost was halved to keep that fight; put back on 2026-11-24.)
-weapon = { range = 1575, reload_ticks = 115, projectile_speed = 56, damage = "859.1", splash_radius = 83, turn_rate = 30, artillery = true, min_range = 394, spread = 60, setup_ticks = 10 }
+# It fires every 13.8 seconds: its health over its damage a second is the [model] time to kill at
+# T3 with the gun artillery's factor (role_time_to_kill artillery, the Light Artillery's 1.15),
+# 18.2 x 1.15 = 20.9 seconds (2026-11-27; 11.5 until then, from a rule retired on 2026-11-25).
+# The shell is as it was, and kills what it did. Its cost is the middle of the costs at which the
+# T3 line's micro cell holds ([counters] micro_cells): Heavy Walkers attack-moving into an equal
+# cost of it lose by at least 0.3, and with micro win by at least 0.3. Against ten, that holds
+# for five to seven of it (720 to 514 each), so six: 600, as it was (2026-11-27).
+# It no longer wins a walk-in fight against bunched Medium Tanks of its cost, and is not meant
+# to: it is a siege piece, dearer than the line walker, that loses to what reaches it.
+weapon = { range = 1575, reload_ticks = 138, projectile_speed = 56, damage = "859.1", splash_radius = 83, turn_rate = 30, artillery = true, min_range = 394, spread = 60, setup_ticks = 10 }
 
 # The inspiration's fighter-bomber: a carpet of napalm bombs, burning included, as one bomb, and two railguns at
 # aircraft, as one. Cost, build time, health, and damage set against the Medium Tank as the
@@ -1208,6 +1214,8 @@ radar = 1600
 sonar = 320
 movement = "naval"
 weapon = { range = 607, reload_ticks = 17, projectile_speed = 60, damage = 119, splash_radius = 20, turn_rate = 120, spread = 4 }
+# Its anti-air reaches 1.2 times its tier's static anti-air, the turret's 800 ([model]
+# ship_anti_air_over_static).
 extra_weapons = [{ range = 960, reload_ticks = 10, projectile_speed = 90, damage = "23.8", targets = "air", turn_rate = 180 }]
 
 # T2 and T3 naval factories: headquarters by upgrade, and support factories for T2 and T3
@@ -1316,8 +1324,13 @@ movement = "naval"
 weapon = { range = 1255, reload_ticks = 40, projectile_speed = 60, damage = 455, splash_radius = 20, turn_rate = 90, spread = 7 }
 extra_weapons = [
     { range = 1255, reload_ticks = 40, projectile_speed = 60, damage = 455, splash_radius = 20, turn_rate = 90, spread = 7 },
+    # Its anti-air reaches 1.2 times its tier's static anti-air, the Flak Cannon's 1,000
+    # ([model] ship_anti_air_over_static).
     { range = 1200, reload_ticks = 14, projectile_speed = 120, damage = "15.6", targets = "air", turn_rate = 180 },
-    { range = 900, reload_ticks = 40, projectile_speed = 30, damage = 190, targets = "naval" },
+    # Its torpedo is a sub-hunting ability, so it reaches what its tier's sub hunter does: the
+    # sub hunter's closing share of the navy's speed over its time to kill, 0.35 x 120.5 x 19.3
+    # = 814, the Torpedo Boat's ([model] closing_share_role; 900 until 2026-11-27).
+    { range = 814, reload_ticks = 40, projectile_speed = 30, damage = 190, targets = "naval" },
 ]
 
 # Cruise missiles it fires on its own, a gauss cannon, SAMs, and a close-in gun that shoots down
@@ -1355,12 +1368,16 @@ movement = "naval"
 # same damage a second (2026-11-25, reports/plans/2026-11-25-weapons-nukes-shields.md).
 weapon = { kind = "tactical_missile", automatic = true, artillery = true, min_range = 448, range = 2986, reload_ticks = 100, projectile_speed = 32, damage = 450, splash_radius = 40, cruise_height = 400, salvo = { shots = 4, ticks = 40 } }
 extra_weapons = [
-    { range = 1200, reload_ticks = 40, projectile_speed = 60, damage = 226, splash_radius = 40, turn_rate = 90, spread = 10 },
+    # Its gun reaches its tier's navy line, the destroyer's 1,255 ([model] support_gun_at_line;
+    # 1,200 until 2026-11-27).
+    { range = 1255, reload_ticks = 40, projectile_speed = 60, damage = 226, splash_radius = 40, turn_rate = 90, spread = 10 },
     # The fleet's anti-air missiles, which steer themselves: eight a volley over its first
     # second, a volley every two, set by how many volleys each aircraft takes ([volleys] in
     # data/balance_targets.toml, 2026-11-25): one for every T1 aircraft, the Torpedo Bomber and
     # the Gunship; two for the Fighter-Bomber, Spy Plane and Air Transport; three for the T3
-    # fighter, four for the Strategic Bomber, six for the Heavy Gunship.
+    # fighter, four for the Strategic Bomber, six for the Heavy Gunship. As the fleet's anti-air
+    # ship they reach 1.4 times its tier's static anti-air, the Flak Cannon's 1,000 ([model]
+    # cruiser_anti_air_over_static).
     { range = 1400, reload_ticks = 20, projectile_speed = 90, damage = 200, splash_radius = 80, targets = "air", turn_rate = 180, homing = true, salvo = { shots = 8, ticks = 10 } },
 ]
 # The fleet's tactical missile defense: a mount that stops a missile within 620 every 1.8
@@ -1414,7 +1431,9 @@ weapon = { range = 2990, reload_ticks = 135, projectile_speed = 110, damage = 44
 extra_weapons = [
     { range = 2990, reload_ticks = 135, projectile_speed = 110, damage = 4400, splash_radius = 40, turn_rate = 30, spread = 6, lobbed = true, mount = [0, 10], broadside = true },
     { range = 2990, reload_ticks = 135, projectile_speed = 110, damage = 4400, splash_radius = 40, turn_rate = 30, spread = 6, lobbed = true, mount = [0, -31], aft = true, broadside = true },
-    { range = 1200, reload_ticks = 17, projectile_speed = 180, damage = 96, targets = "air", turn_rate = 180 },
+    # Its anti-air reaches 1.2 times its tier's static anti-air, the SAM's 1,200, as the frigate's
+    # and the destroyer's do theirs ([model] ship_anti_air_over_static): 1,440 (1,200 until 2026-11-27).
+    { range = 1440, reload_ticks = 17, projectile_speed = 180, damage = 96, targets = "air", turn_rate = 180 },
 ]
 missile_defense = { kind = "tactical", range = 620, reload_ticks = 18, mounts = 2 }
 
@@ -1456,7 +1475,9 @@ movement = "naval"
 weapon = { kind = "laser", range = 1586, reload_ticks = 20, damage = 1304, turn_rate = 60, mount = [0, 27] }
 extra_weapons = [
     { kind = "laser", range = 1586, reload_ticks = 20, damage = 1304, turn_rate = 60, mount = [0, -31], aft = true },
-    { range = 1200, reload_ticks = 100, projectile_speed = 30, damage = 200, targets = "naval" },
+    # Its torpedo reaches what a T3 sub hunter would: 0.35 x 120.5 x 21.8 = 921 ([model]
+    # closing_share_role, the destroyer's rule a tier up; 1,200 until 2026-11-27).
+    { range = 921, reload_ticks = 100, projectile_speed = 30, damage = 200, targets = "naval" },
 ]
 missile_defense = { kind = "tactical", range = 620, reload_ticks = 18 }
 
@@ -1565,7 +1586,10 @@ footprint = 1
 on_water = true
 vision = 240
 sonar = 720
-weapon = { range = 1000, reload_ticks = 40, projectile_speed = 30, damage = 454, targets = "naval" }
+# It reaches the defense window's floor, 1.15 times its tier's navy direct fire (the frigate's
+# 607), as the T2 launcher does the destroyer's ([model] point_defense_over_direct_fire_min):
+# 698 (1,000 until 2026-11-27).
+weapon = { range = 698, reload_ticks = 40, projectile_speed = 30, damage = 454, targets = "naval" }
 
 # Four torpedoes a volley, each its own, so that a ship's anti-torpedo charge must stop every one:
 # fired as one, a destroyer's charge stopped them all. Cost, build time, and damage set against the
@@ -2166,7 +2190,8 @@ vision = 640
 flight = { elevation = 198, turn_rate = 90, fuel = 600, hovers = true }
 transport = { small = 6, medium = 2, large = 1 }
 
-# Two linked railguns, each firing both muzzles at once, as one.
+# Two linked railguns, each firing both muzzles at once, as one. They reach 0.7 of the T1 Mobile
+# Anti-Air's, as the Gunship's do ([model] aircraft_gun_over_anti_air; 400 until 2026-11-27).
 [[unit]]
 id = "t2_transport"
 name = "Air Transport"
@@ -2181,7 +2206,7 @@ radius = 16
 vision = 640
 flight = { elevation = 198, turn_rate = 90, fuel = 600, hovers = true }
 transport = { small = 14, medium = 6, large = 3 }
-weapon = { range = 400, reload_ticks = 5, projectile_speed = 120, damage = 24 }
+weapon = { range = 448, reload_ticks = 5, projectile_speed = 120, damage = 24 }
 
 [[unit]]
 id = "t3_heavy_transport"
@@ -2198,6 +2223,8 @@ vision = 640
 flight = { elevation = 198, turn_rate = 80, fuel = 800, hovers = true }
 transport = { small = 28, medium = 12, large = 6 }
 shield = { radius = 85, health = 3000, regen = 30, recharge_seconds = 35, upkeep = 0 }
-# Two plasma guns, and four anti-air missile racks.
-weapon = { range = 500, reload_ticks = 5, projectile_speed = 120, damage = 30 }
-extra_weapons = [{ range = 1000, reload_ticks = 1, projectile_speed = 120, damage = 27, targets = "air" }]
+# Two plasma guns, and four anti-air missile racks. The guns reach 0.7 of the Mobile Flak's, as the
+# Heavy Gunship's do, and the racks its tier's fighter, the Air Superiority Fighter's 600 ([model]
+# aircraft_gun_over_anti_air, aircraft_anti_air_at_fighter; 500 and 1,000 until 2026-11-27).
+weapon = { range = 560, reload_ticks = 5, projectile_speed = 120, damage = 30 }
+extra_weapons = [{ range = 600, reload_ticks = 1, projectile_speed = 120, damage = 27, targets = "air" }]
