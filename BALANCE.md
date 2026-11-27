@@ -308,6 +308,19 @@ out close and why: evidence about the process, not a target.
   (`air_t1`, `air_t2`, `air_t3`); T3 stays at T2's for now, since against a fifth flak the answer
   turned on the army's other units and the order they march in (Heavy Gunships 0.94 to 1.66 times
   the better buy).
+* 2026-11-27: shields. A dome costs the strength it adds to the group it covers
+  (`[price_list.shield_groups]`, `price_list::shield_price`): the group's cost times
+  √(1 + E / H) − 1, with H the group's health and E the dome's health, its regeneration over the
+  model time to kill at its tier in its domain, and its hull's; a dome that cannot move is worth
+  half again its cost (`[price_list] immobile`), as a point defense is. The Mobile Shield over the
+  standard T2 army comes to 218, as it costs; the Escort Corvette over the T2 fleet's destroyers
+  and cruisers 733 to 913 (its anti-torpedo charge not priced yet); the Shield Generator over the
+  T2 position's three point defenses 629 to 932; the Heavy Shield Generator over the T3 position's
+  3,667 to 3,104. Every shield now comes back 20 seconds after it falls, the design owner's rule
+  for the domes and the commander's shields carried to the rest: the Field Rig's two (170 and 215
+  seconds until now), the Heavy Walker's own (12) and the Heavy Air Transport's (35). The dearer
+  Corvette made the T2 fleet dearer for the same strength, so torpedo bombers broke it at 1.98
+  times its cost; the Torpedo Bomber's cost, the least that keeps it at twice, is 243, from 240.
 
 ## Order of work
 

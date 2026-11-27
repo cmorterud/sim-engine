@@ -132,22 +132,30 @@ fn a_dome_that_runs_out_collapses_and_comes_back_at_full_strength() {
     assert_eq!(back.health, back.max_health);
 }
 
-/// The domes of the shield generators, the Escort Corvette, the Mobile Shield Generator and the
-/// command rig's two shields all come back 20 seconds after they fall (the design owner's rule,
-/// 2026-11-25). `every_shield_absorbs_regenerates_collapses_and_recharges` checks that each one
-/// does come back after its own time.
+/// Every shield comes back 20 seconds after it falls: the domes of the shield generators, the Escort
+/// Corvette and the Mobile Shield Generator, and the command rig's two shields (the design owner's
+/// rule, 2026-11-25); and from 2026-11-27 every other one, the Field Rig's two, the Heavy Walker's
+/// own and the Heavy Air Transport's. `every_shield_absorbs_regenerates_collapses_and_recharges`
+/// checks that each one does come back after its own time.
 #[test]
-fn the_domes_and_the_commanders_shields_come_back_in_20_seconds() {
+fn every_shield_comes_back_in_20_seconds() {
     let db = open_world().blueprints;
-    for key in ["shield_generator", "t3_heavy_shield", "t2_escort_corvette", "t2_mobile_shield"] {
-        let dome = db.get(db.id(key)).shield.unwrap_or_else(|| panic!("{key} has a dome"));
-        assert_eq!(dome.recharge_ticks, 200, "{key}'s dome comes back in 20 seconds");
+    let mut shields = 0;
+    for unit in db.iter() {
+        if let Some(dome) = unit.shield {
+            assert_eq!(dome.recharge_ticks, 200, "{}'s shield comes back in 20 seconds", unit.key);
+            shields += 1;
+        }
+        for enhancement in db.enhancements_for(db.id(&unit.key)) {
+            if let Some(dome) = enhancement.effects.shield {
+                assert_eq!(dome.recharge_ticks, 200, "{}'s {} comes back in 20 seconds", unit.key, enhancement.key);
+                shields += 1;
+            }
+        }
     }
+    assert!(shields >= 10, "only {shields} shields");
     for key in ["field_shield", "area_shield"] {
-        let enhancement = db.enhancement(db.enhancement_id(key));
-        let dome = enhancement.effects.shield.unwrap_or_else(|| panic!("{key} is a shield"));
-        assert!(enhancement.units.contains(&db.id("command_rig")), "{key} is the command rig's");
-        assert_eq!(dome.recharge_ticks, 200, "{key} comes back in 20 seconds");
+        assert!(db.enhancement(db.enhancement_id(key)).units.contains(&db.id("command_rig")), "{key} is the command rig's");
     }
 }
 

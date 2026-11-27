@@ -226,9 +226,11 @@ id = "shield_generator"
 name = "Shield Generator"
 class = "defense"
 tier = 2
-mass = 600
-energy = 6000
-build_time = 1150
+# Cost by the strength its dome adds to the three point defenses of the T2 position, as a
+# structure worth half again its cost ([price_list.shield_groups], 2026-11-27): 629 to 932.
+mass = 889
+energy = 8892
+build_time = 1704
 health = 250
 footprint = 3
 vision = 400
@@ -1530,10 +1532,11 @@ class = "air"
 tier = 2
 # Cost held by its cells, as counters are (2026-11-26): the least that keeps torpedo bombers
 # needing twice a T2 fleet's cost to break it ([domains.cells] torpedo_bombers_to_break_fleet_t2),
-# 246 to 240. The price list's 131 is only a check (reports/plans/2026-11-26-ability-price-list.md).
-mass = 194
-energy = 5759
-build_time = 1288
+# 246 to 240, and 243 once the Escort Corvette was priced by its dome (2026-11-27). The price
+# list's 131 is only a check (reports/plans/2026-11-26-ability-price-list.md).
+mass = 197
+energy = 5840
+build_time = 1306
 health = 1252
 speed = 30
 radius = 12
@@ -1652,9 +1655,11 @@ id = "t2_escort_corvette"
 name = "Escort Corvette"
 class = "defense"
 tier = 2
-mass = 700
-energy = 7000
-build_time = 3000
+# Cost by the strength its dome and hull add to the T2 fleet's destroyers and cruisers
+# ([price_list.shield_groups], 2026-11-27): 733 to 913. Its anti-torpedo charge is not priced yet.
+mass = 871
+energy = 8714
+build_time = 3735
 health = 1500
 speed = 10
 turn_rate = 45
@@ -1887,7 +1892,9 @@ slot = "systems"
 mass = 2000
 energy = 100200
 build_time = 7200
-shield = { radius = 30, health = 26000, regen = 50, recharge_seconds = 170, upkeep = 500 }
+# Back 20 seconds after it falls, as every shield (the design owner's rule, 2026-11-25, for every
+# shield from 2026-11-27; 170 until then).
+shield = { radius = 30, health = 26000, regen = 50, recharge_seconds = 20, upkeep = 500 }
 
 [[enhancement]]
 id = "support_area_shield"
@@ -1898,7 +1905,8 @@ requires = "support_shield"
 mass = 3500
 energy = 360800
 build_time = 10800
-shield = { radius = 200, health = 52000, regen = 150, recharge_seconds = 215, upkeep = 1000 }
+# Back 20 seconds after it falls, as every shield (2026-11-27; 215 until then).
+shield = { radius = 200, health = 52000, regen = 150, recharge_seconds = 20, upkeep = 1000 }
 
 [[enhancement]]
 id = "radar_jammer"
@@ -2049,8 +2057,9 @@ speed = "6.1"
 turn_rate = 120
 radius = 13
 vision = 580
-# A personal shield that takes the first hits.
-shield = { radius = 25, health = 700, regen = 20, recharge_seconds = 12, upkeep = 25 }
+# A personal shield that takes the first hits. Back 20 seconds after it falls, as every shield
+# (2026-11-27; 12 until then).
+shield = { radius = 25, health = 700, regen = 20, recharge_seconds = 20, upkeep = 25 }
 weapon = { range = 525, reload_ticks = 3, projectile_speed = 95, damage = "70.7", turn_rate = 120 }
 
 # Heavy: slow and very tough, one big cannon reaching a tenth past the Heavy Walker's gun, about
@@ -2126,9 +2135,11 @@ id = "t3_heavy_shield"
 name = "Heavy Shield Generator"
 class = "defense"
 tier = 3
-mass = 3300
-energy = 55000
-build_time = 5000
+# Cost by the strength its dome adds to the three heavy point defenses of the T3 position, as a
+# structure worth half again its cost ([price_list.shield_groups], 2026-11-27): 3,667 to 3,104.
+mass = 2793
+energy = 46557
+build_time = 4232
 health = 500
 footprint = 3
 vision = 400
@@ -2228,7 +2239,8 @@ radius = 20
 vision = 640
 flight = { elevation = 198, turn_rate = 80, fuel = 800, hovers = true }
 transport = { small = 28, medium = 12, large = 6 }
-shield = { radius = 85, health = 3000, regen = 30, recharge_seconds = 35, upkeep = 0 }
+# Back 20 seconds after it falls, as every shield (2026-11-27; 35 until then).
+shield = { radius = 85, health = 3000, regen = 30, recharge_seconds = 20, upkeep = 0 }
 # Two plasma guns, and four anti-air missile racks. The guns reach 0.7 of the Mobile Flak's, as the
 # Heavy Gunship's do, and the racks its tier's fighter, the Air Superiority Fighter's 600 ([model]
 # aircraft_gun_over_anti_air, aircraft_anti_air_at_fighter; 500 and 1,000 until 2026-11-27).

@@ -139,7 +139,7 @@ target = "domains.cells.torpedo_bombers_to_break_fleet_t2"
 blue_over_red = 2.0
 shows = "Torpedo bombers worth twice the fleet. Torpedoes go under the corvettes' shields, but the destroyers' and corvettes' anti-torpedo charges stop some, and the cruisers shoot the bombers down as they come. At twice its cost they come out about even with it: it takes overwhelming numbers."
 try = "Send them all at once. Then try waves, and try going for the cruisers first, which carry the fleet's anti-air."
-blue = [{ unit = "t2_torpedo_bomber", count = 117, at = [1_200, 2_560], columns = 13 }]
+blue = [{ unit = "t2_torpedo_bomber", count = 121, at = [1_200, 2_560], columns = 11 }]
 red = [
     { unit = "t2_destroyer", count = 4, at = [3_000, 2_560], columns = 4 },
     { unit = "t2_escort_corvette", count = 2, at = [3_060, 2_560], columns = 2 },
@@ -164,7 +164,7 @@ target = "domains.cells.submarines_beat_fleet_without_anti_submarine"
 blue_over_red = 1.00
 shows = "Attack Submarines against cruisers and shield corvettes, a fleet with nothing that reaches under the water. The submarines win without loss, though slowly. The submarines are about the fleet's cost."
 try = "Attack-move in. Then go for the corvettes first, and see whether it is any faster."
-blue = [{ unit = "t1_attack_sub", count = 24, at = [1_400, 2_560], columns = 6 }]
+blue = [{ unit = "t1_attack_sub", count = 26, at = [1_400, 2_560], columns = 6 }]
 red = [
     { unit = "t2_escort_corvette", count = 2, at = [3_000, 2_560], columns = 2 },
     { unit = "t2_cruiser", count = 4, at = [3_060, 2_560], columns = 4 },
@@ -199,7 +199,7 @@ id = "navy_cruiser_against_a_coast"
 title = "From the sea: two Cruisers against a coastal T2 position"
 ground = "shore"
 target = "domains.cells.coastal_seconds_max"
-blue_over_red = 1.48
+blue_over_red = 1.25
 shows = "Two Cruisers at sea against point defenses under a shield, ashore. Their cruise missiles outrange the point defenses three times over, so they break the position without loss, in about a minute. It takes two: the shield heals as fast as one cruiser's missiles strike it, so one alone never gets through. Inland, beyond their reach, is safe from ships: that is navy's limit."
 try = "Attack-move at the position and time it. Then send one cruiser alone and watch the shield hold. Then sail in within the point defenses' reach."
 blue = [{ unit = "t2_cruiser", count = 2, at = [600, 2_560], columns = 2 }]
@@ -277,7 +277,7 @@ target = "domains.cells.torpedo_bombers_to_break_fleet_t3"
 blue_over_red = 2.0
 shows = "Torpedo bombers worth twice the massed T3 fleet, hundreds of them. The fleet's escorts carry its defense: the cruisers' anti-air bursts over the swarm and the destroyers' charges stop torpedoes, while the capital ships, with next to no anti-air and no anti-torpedo charge of their own, soak up what gets through. It comes out about even: a massed, escorted fleet takes overwhelming air to break."
 try = "Send them all at once. Then go for the cruisers first, and see how much sooner the battleship goes once they are gone."
-blue = [{ unit = "t2_torpedo_bomber", count = 328, at = [1_200, 2_560], columns = 20 }]
+blue = [{ unit = "t2_torpedo_bomber", count = 335, at = [1_200, 2_560], columns = 20 }]
 red = [
     { unit = "t2_destroyer", count = 4, at = [3_000, 2_560], columns = 4 },
     { unit = "t2_cruiser", count = 12, at = [3_080, 2_560], columns = 6 },
@@ -307,7 +307,7 @@ id = "navy_battleship_against_a_coast"
 title = "From the sea at T3: two Battleships against a coastal T3 position"
 ground = "shore"
 target = "domains.cells.coastal_seconds_max"
-blue_over_red = 1.20
+blue_over_red = 1.38
 shows = "Two Battleships at sea against heavy point defenses under a heavy shield, ashore. They outrange them twice over and break the position without loss, in under a minute and a half. It takes two: the heavy shield heals faster than one battleship's guns strike it."
 try = "Attack-move at the position and time it. Then send one battleship alone and watch the shield hold. Then sail in within the heavy point defenses' reach."
 blue = [{ unit = "t3_battleship", count = 2, at = [600, 2_560], columns = 2 }]
