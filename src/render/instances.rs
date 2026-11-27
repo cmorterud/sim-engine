@@ -7,6 +7,7 @@ use super::meshes::Shape;
 use super::pipeline::LOD_DOT_RATIO;
 use crate::sim::blueprints::{BlueprintDb, Targets, WeaponDef, WeaponKind};
 use crate::sim::components::{SimId, Team, WreckKind};
+use crate::player_colors::Palette;
 use crate::sim::world::{ProjectileKind, ProjectileView, ShieldView, UnitView, WorkLinkView};
 
 /// How long a gun's kick and flash last after it fires, in seconds.
@@ -34,7 +35,9 @@ const PROJECTILE_ICON_PX: f32 = 1.0;
 /// Geometry with this icon size never collapses to a dot.
 const NO_ICON: f32 = 0.0;
 
-pub(super) const BLUE: [f32; 3] = [0.20, 0.50, 1.00];
+/// Each team's own color, its first player's (`player_colors`). Shields, beams, and power
+/// cables are in their team's.
+pub(super) const BLUE: [f32; 3] = crate::player_colors::BLUE_SIDE[0].trim;
 /// How dark a remembered structure, out of sight, is drawn, and how much of its color goes grey.
 const REMEMBERED_SHADE: f32 = 0.6;
 const REMEMBERED_GREY: f32 = 0.5;
@@ -44,12 +47,7 @@ fn remembered_color(color: [f32; 3]) -> [f32; 3] {
     let grey = color[0] * 0.3 + color[1] * 0.59 + color[2] * 0.11;
     color.map(|channel| (channel + (grey - channel) * REMEMBERED_GREY) * REMEMBERED_SHADE)
 }
-pub(super) const RED: [f32; 3] = [1.00, 0.27, 0.22];
-/// An ally's units, another player's on the same team, in a team match: a lighter shade of the
-/// team's color, cyan beside Blue's blue and orange beside Red's red, so that the person's own
-/// stand apart from their ally's.
-pub(super) const BLUE_ALLY: [f32; 3] = [0.25, 0.85, 0.95];
-pub(super) const RED_ALLY: [f32; 3] = [1.00, 0.62, 0.18];
+pub(super) const RED: [f32; 3] = crate::player_colors::RED_SIDE[0].trim;
 const SELECTED: [f32; 3] = [0.25, 1.00, 0.35];
 /// A direct-fire shell with a blast: an orange streak.
 const SHELL: [f32; 3] = [1.00, 0.66, 0.26];
@@ -1400,6 +1398,7 @@ pub fn build_unit_instances(
     selected: &[SimId],
     looks: &[UnitLook],
     work: &[WorkLinkView],
+    palette: &Palette,
     motion: &mut Motion,
     out: &mut InstanceBatches,
 ) {
@@ -1421,12 +1420,8 @@ pub fn build_unit_instances(
                 next_work += 1;
             }
             let working_on = work.get(next_work).filter(|link| link.builder == unit.id);
-            let color = match (unit.team, unit.ally) {
-                (Team::Blue, false) => BLUE,
-                (Team::Red, false) => RED,
-                (Team::Blue, true) => BLUE_ALLY,
-                (Team::Red, true) => RED_ALLY,
-            };
+            // The color its player was given, or with ally colors shared, its team's or the allies'.
+            let color = palette.unit(unit.team, unit.owner, unit.ally).trim;
             let look = looks.get(usize::from(unit.blueprint));
             let tint = look.and_then(|look| look.tint);
             let hull = FACTION_HULL;
@@ -2307,6 +2302,7 @@ mod tests {
             upgrade: None,
             remembered: false,
             ally: false,
+            owner: None,
         }
     }
 
@@ -2318,7 +2314,7 @@ mod tests {
     /// Builds instances with no looks, so that everything lands in the cube batch.
     fn cubes(previous: &[UnitView], current: &[UnitView], alpha: f64, eye: [f64; 3], selected: &[SimId]) -> Vec<UnitInstanceRaw> {
         let mut out = InstanceBatches::default();
-        build_unit_instances(previous, current, alpha, eye, selected, &[], &[], &mut Motion::new(), &mut out);
+        build_unit_instances(previous, current, alpha, eye, selected, &[], &[], &Palette::default(), &mut Motion::new(), &mut out);
         out.shape(Shape::Cube).to_vec()
     }
 
@@ -2342,7 +2338,7 @@ mod tests {
     fn selected_units_keep_their_color_and_get_a_ring_at_their_feet() {
         let current = [unit(1, 0), unit(2, 0), unit(3, 0)];
         let mut out = InstanceBatches::default();
-        build_unit_instances(&current, &current, 0.0, [0.0; 3], &[SimId(2)], &[], &[], &mut Motion::new(), &mut out);
+        build_unit_instances(&current, &current, 0.0, [0.0; 3], &[SimId(2)], &[], &[], &Palette::default(), &mut Motion::new(), &mut out);
         assert!(out.shape(Shape::Cube).iter().all(|cube| cube.color[..3] == BLUE), "selection must not recolor units");
         let rings = out.shape(Shape::SelectionRing);
         assert_eq!(rings.len(), 1, "only the selected unit gets a ring");
@@ -2361,7 +2357,7 @@ mod tests {
         generator.blueprint = db.id("power_generator").0;
         generator.is_structure = true;
         let mut out = InstanceBatches::default();
-        build_unit_instances(&[], &[generator], 0.0, [0.0; 3], &[SimId(1)], &looks, &[], &mut Motion::new(), &mut out);
+        build_unit_instances(&[], &[generator], 0.0, [0.0; 3], &[SimId(1)], &looks, &[], &Palette::default(), &mut Motion::new(), &mut out);
         assert_eq!(out.shape(Shape::SelectionBox).len(), 1);
         assert_eq!(out.shape(Shape::SelectionRing).len(), 0);
         assert_ne!(out.shape(Shape::Generator)[0].color[..3], SELECTED);
@@ -2653,7 +2649,7 @@ mod tests {
                 drawn.team = team;
                 drawn.is_structure = blueprint.is_structure();
                 let mut out = InstanceBatches::default();
-                build_unit_instances(&[], &[drawn], 0.0, [0.0; 3], &[], &looks, &[], &mut Motion::new(), &mut out);
+                build_unit_instances(&[], &[drawn], 0.0, [0.0; 3], &[], &looks, &[], &Palette::default(), &mut Motion::new(), &mut out);
                 let look = unit_look(&blueprint.key);
                 for shape in look.base.into_iter().chain([look.shape]) {
                     let instance = out.shape(shape).first().unwrap_or_else(|| panic!("{} is drawn", blueprint.key));
@@ -2756,7 +2752,7 @@ mod tests {
         tank.blueprint = db.id("t1_medium_tank").0;
         let action = |motion: &mut Motion| {
             let mut out = InstanceBatches::default();
-            build_unit_instances(&[tank], &[tank], 1.0, [0.0; 3], &[], &looks, &[], motion, &mut out);
+            build_unit_instances(&[tank], &[tank], 1.0, [0.0; 3], &[], &looks, &[], &Palette::default(), motion, &mut out);
             out.shape(Shape::Tank)[0].glow[3]
         };
         let mut motion = Motion::new();
@@ -2799,7 +2795,7 @@ mod tests {
         silo.is_structure = true;
         let action = |motion: &mut Motion, alpha: f64| {
             let mut out = InstanceBatches::default();
-            build_unit_instances(&[silo], &[silo], alpha, [0.0; 3], &[], &looks, &[], motion, &mut out);
+            build_unit_instances(&[silo], &[silo], alpha, [0.0; 3], &[], &looks, &[], &Palette::default(), motion, &mut out);
             out.shape(Shape::NukeSilo)[0].glow[3]
         };
         let mut motion = Motion::new();
@@ -2828,7 +2824,7 @@ mod tests {
             let mut bot = unit(1, x);
             bot.blueprint = db.id("t1_light_walker").0;
             let mut out = InstanceBatches::default();
-            build_unit_instances(&[bot], &[bot], 1.0, [0.0; 3], &[], &looks, &[], motion, &mut out);
+            build_unit_instances(&[bot], &[bot], 1.0, [0.0; 3], &[], &looks, &[], &Palette::default(), motion, &mut out);
             out.shape(Shape::BotLegs)[0].hull[3]
         };
         assert_eq!(phase(&mut motion, 0), 0);
@@ -2853,7 +2849,7 @@ mod tests {
         finished.id = SimId(2);
         finished.built_permille = 1000;
         let mut out = InstanceBatches::default();
-        build_unit_instances(&[], &[site, finished], 0.0, [0.0; 3], &[], &looks, &[], &mut Motion::new(), &mut out);
+        build_unit_instances(&[], &[site, finished], 0.0, [0.0; 3], &[], &looks, &[], &Palette::default(), &mut Motion::new(), &mut out);
         let frames = out.shape(Shape::Scaffold);
         assert_eq!(frames.len(), 1);
         let site_height = out.shape(Shape::Generator)[0].model_matrix[2][2];
@@ -2872,7 +2868,7 @@ mod tests {
         let into = db.id("land_factory_t2").0;
         let heights = |factory: UnitView| {
             let mut out = InstanceBatches::default();
-            build_unit_instances(&[], &[factory], 0.0, [0.0; 3], &[], &looks, &[], &mut Motion::new(), &mut out);
+            build_unit_instances(&[], &[factory], 0.0, [0.0; 3], &[], &looks, &[], &Palette::default(), &mut Motion::new(), &mut out);
             out.shape(Shape::FactoryT2).iter().map(|instance| instance.model_matrix[2][2]).collect::<Vec<f32>>()
         };
         assert!(heights(factory).is_empty(), "no upgrade, no T2 shape");
@@ -2895,7 +2891,7 @@ mod tests {
         let bot = db.id("t1_light_walker").0;
         let draw = |factory: UnitView| {
             let mut out = InstanceBatches::default();
-            build_unit_instances(&[], &[factory], 0.0, [0.0; 3], &[], &looks, &[], &mut Motion::new(), &mut out);
+            build_unit_instances(&[], &[factory], 0.0, [0.0; 3], &[], &looks, &[], &Palette::default(), &mut Motion::new(), &mut out);
             out.shape(Shape::Bot).iter().map(|instance| instance.model_matrix[2][2]).collect::<Vec<f32>>()
         };
         assert!(draw(factory).is_empty(), "an idle factory's bay is empty");
@@ -2918,7 +2914,7 @@ mod tests {
         busy.id = SimId(2);
         busy.working = true;
         let mut out = InstanceBatches::default();
-        build_unit_instances(&[], &[factory, busy], 0.0, [0.0; 3], &[], &looks, &[], &mut Motion::new(), &mut out);
+        build_unit_instances(&[], &[factory, busy], 0.0, [0.0; 3], &[], &looks, &[], &Palette::default(), &mut Motion::new(), &mut out);
         let lights: Vec<u8> = out.shape(Shape::Factory).iter().map(|instance| instance.glow[3]).collect();
         assert_eq!(lights[0], 0);
         assert!(lights[1] >= 180, "busy lights shine: {}", lights[1]);
@@ -2935,7 +2931,7 @@ mod tests {
         site.id = SimId(2);
         site.built_permille = 500;
         let mut out = InstanceBatches::default();
-        build_unit_instances(&[], &[generator, site], 0.0, [0.0; 3], &[], &looks, &[], &mut Motion::new(), &mut out);
+        build_unit_instances(&[], &[generator, site], 0.0, [0.0; 3], &[], &looks, &[], &Palette::default(), &mut Motion::new(), &mut out);
         let [finished, building] = out.shape(Shape::Generator) else { panic!("two generators") };
         assert_eq!(finished.color[..3], BLUE, "the trim is the team's own color");
         assert_ne!(bytes(BLUE), finished.hull, "the armor is not the team color");
@@ -2956,7 +2952,7 @@ mod tests {
         (generator.blueprint, generator.is_structure, generator.radius) = (db.id("power_generator").0, true, (footprint * 0.5 * 4096.0) as i32);
         let wall = UnitView { id: SimId(2), blueprint: db.id("wall").0, ..generator };
         let mut out = InstanceBatches::default();
-        build_unit_instances(&[], &[generator, wall], 1.0, [0.0; 3], &[], &looks, &[], &mut Motion::new(), &mut out);
+        build_unit_instances(&[], &[generator, wall], 1.0, [0.0; 3], &[], &looks, &[], &Palette::default(), &mut Motion::new(), &mut out);
         let width = |instance: &UnitInstanceRaw| instance.model_matrix[0][0].hypot(instance.model_matrix[0][1]);
         assert!((width(&out.shape(Shape::Generator)[0]) - footprint * STRUCTURE_SHARE).abs() < 1e-3, "the generator stands inside its footprint");
         assert!(width(&out.shape(Shape::Apron)[0]) > footprint, "on a foundation wider than all of it");
@@ -2985,7 +2981,7 @@ mod tests {
         (generator.blueprint, generator.is_structure, generator.radius) = (db.id("power_generator").0, true, raw(footprint * 0.5));
         (generator.x, generator.y, generator.z) = (raw(x), raw(y), raw(x + footprint * 0.5));
         let mut out = InstanceBatches::default();
-        build_unit_instances(&[], &[generator], 1.0, [0.0; 3], &[], &looks, &[], &mut motion, &mut out);
+        build_unit_instances(&[], &[generator], 1.0, [0.0; 3], &[], &looks, &[], &Palette::default(), &mut motion, &mut out);
         let half = footprint * 0.5 * f64::from(APRON_WIDTH);
         let (low, high) = (x - half, x + half);
         let body = &out.shape(Shape::Generator)[0];
@@ -2997,20 +2993,28 @@ mod tests {
         assert!(slab_top >= foot, "and up to where it stands: {slab_top} against {foot}");
     }
 
-    /// An ally's units, another player's on the same team, are drawn in a lighter shade of the
-    /// team's color, so that the person's own stand apart from theirs.
+    /// Each player's units wear the color they were given before the match; with ally colors
+    /// shared, every ally's wear the one lighter shade of the team's, so that the person's own
+    /// stand apart from theirs either way.
     #[test]
-    fn an_allys_units_take_a_lighter_shade_of_the_team_color() {
+    fn units_wear_their_players_color_or_with_shared_colors_the_allies_shade() {
+        use crate::player_colors::{AllyColors, PlayerColors, BLUE_ALLIES, BLUE_SIDE};
+        use crate::sim::components::PlayerId;
         let db = BlueprintDb::standard();
         let looks = unit_looks(&db);
         let mut generator = unit(1, 0);
-        (generator.blueprint, generator.is_structure) = (db.id("power_generator").0, true);
-        let allys = UnitView { id: SimId(2), ally: true, ..generator };
-        let mut out = InstanceBatches::default();
-        build_unit_instances(&[], &[generator, allys], 0.0, [0.0; 3], &[], &looks, &[], &mut Motion::new(), &mut out);
-        let [mine, theirs] = out.shape(Shape::Generator) else { panic!("two generators") };
-        assert_eq!(mine.color[..3], BLUE);
-        assert_eq!(theirs.color[..3], BLUE_ALLY, "an ally's in its own shade");
+        (generator.blueprint, generator.is_structure, generator.owner) = (db.id("power_generator").0, true, Some(PlayerId(0)));
+        // A 3v3: Blue's players are 0, 2, and 4.
+        let first_ally = UnitView { id: SimId(2), ally: true, owner: Some(PlayerId(2)), ..generator };
+        let second_ally = UnitView { id: SimId(3), ally: true, owner: Some(PlayerId(4)), ..generator };
+        let colors = PlayerColors::assign(&[Team::Blue, Team::Red, Team::Blue, Team::Red, Team::Blue, Team::Red]);
+        let drawn = |mode| {
+            let mut out = InstanceBatches::default();
+            build_unit_instances(&[], &[generator, first_ally, second_ally], 0.0, [0.0; 3], &[], &looks, &[], &colors.shown(mode), &mut Motion::new(), &mut out);
+            out.shape(Shape::Generator).iter().map(|generator| <[f32; 3]>::try_from(&generator.color[..3]).expect("a color")).collect::<Vec<_>>()
+        };
+        assert_eq!(drawn(AllyColors::Unique), [BLUE, BLUE_SIDE[1].trim, BLUE_SIDE[2].trim], "each ally in their own color");
+        assert_eq!(drawn(AllyColors::Shared), [BLUE, BLUE_ALLIES.trim, BLUE_ALLIES.trim], "every ally in the one shade");
     }
 
     #[test]
@@ -3023,7 +3027,7 @@ mod tests {
         generator.blueprint = db.id("power_generator").0;
         generator.is_structure = true;
         let mut out = InstanceBatches::default();
-        build_unit_instances(&[], &[tank, generator], 0.0, [0.0; 3], &[], &looks, &[], &mut Motion::new(), &mut out);
+        build_unit_instances(&[], &[tank, generator], 0.0, [0.0; 3], &[], &looks, &[], &Palette::default(), &mut Motion::new(), &mut out);
         assert_eq!(out.shape(Shape::Tank).len(), 1);
         assert_eq!(out.shape(Shape::Generator).len(), 1);
         assert_eq!(out.shape(Shape::Cube).len(), 0);
@@ -3097,7 +3101,7 @@ mod tests {
         ship.facing = [0, 4096];
         let draw = |height: f64| {
             let mut out = InstanceBatches::default();
-            build_unit_instances(&[ship], &[ship], 1.0, [0.0, 0.0, height], &[], &looks, &[], &mut Motion::new(), &mut out);
+            build_unit_instances(&[ship], &[ship], 1.0, [0.0, 0.0, height], &[], &looks, &[], &Palette::default(), &mut Motion::new(), &mut out);
             out
         };
         let near = draw(500.0);
@@ -3130,7 +3134,7 @@ mod tests {
         gun.is_structure = true;
         let draw = |height: f64| {
             let mut out = InstanceBatches::default();
-            build_unit_instances(&[], &[gun], 0.0, [0.0, 0.0, height], &[], &looks, &[], &mut Motion::new(), &mut out);
+            build_unit_instances(&[], &[gun], 0.0, [0.0, 0.0, height], &[], &looks, &[], &Palette::default(), &mut Motion::new(), &mut out);
             out
         };
         let near = draw(300.0);
@@ -3212,7 +3216,7 @@ mod tests {
         motion.time = 1.0;
         motion.note_beams(&[beam], &[ship], &looks);
         let mut out = InstanceBatches::default();
-        build_unit_instances(&[ship], &[ship], 1.0, [0.0; 3], &[], &looks, &[], &mut motion, &mut out);
+        build_unit_instances(&[ship], &[ship], 1.0, [0.0; 3], &[], &looks, &[], &Palette::default(), &mut motion, &mut out);
         let turrets = out.shape(Shape::LaserTurret);
         assert_eq!(turrets.len(), 2, "a laser turret forward and one aft");
         let (fore, aft) = if turrets[0].model_matrix[3][1] > turrets[1].model_matrix[3][1] { (turrets[0], turrets[1]) } else { (turrets[1], turrets[0]) };
@@ -3232,7 +3236,7 @@ mod tests {
         ship.facing = [0, 4096];
         let draw = |ship: UnitView| {
             let mut out = InstanceBatches::default();
-            build_unit_instances(&[ship], &[ship], 1.0, [0.0; 3], &[], &looks, &[], &mut Motion::new(), &mut out);
+            build_unit_instances(&[ship], &[ship], 1.0, [0.0; 3], &[], &looks, &[], &Palette::default(), &mut Motion::new(), &mut out);
             out.shape(Shape::NavalTurret).iter().map(|turret| (facing(turret), [turret.model_matrix[3][0], turret.model_matrix[3][1]])).collect::<Vec<_>>()
         };
         let resting = draw(ship);
@@ -3488,6 +3492,7 @@ mod tests {
                 &[],
                 &looks,
                 &[],
+                &Palette::default(),
                 &mut motion,
                 &mut out,
             );
@@ -3502,6 +3507,7 @@ mod tests {
             &[],
             &looks,
             &[],
+            &Palette::default(),
             &mut motion,
             &mut out,
         );
@@ -3576,6 +3582,7 @@ mod tests {
                 &[],
                 looks,
                 &[],
+                &Palette::default(),
                 motion,
                 &mut out,
             );
@@ -3646,6 +3653,7 @@ mod tests {
             &[],
             &looks,
             &[],
+            &Palette::default(),
             &mut motion,
             &mut out,
         );
@@ -3691,6 +3699,7 @@ mod tests {
             &[],
             &looks,
             &[],
+            &Palette::default(),
             &mut motion,
             &mut out,
         );
@@ -3712,7 +3721,7 @@ mod tests {
         let mut motion = Motion::new();
         let mut draw = |before: UnitView, after: UnitView| {
             let mut out = InstanceBatches::default();
-            build_unit_instances(&[before], &[after], 1.0, [0.0; 3], &[], &looks, &[], &mut motion, &mut out);
+            build_unit_instances(&[before], &[after], 1.0, [0.0; 3], &[], &looks, &[], &Palette::default(), &mut motion, &mut out);
             facing(&out.shape(Shape::Tank)[0])
         };
         let start = draw(tank, tank);
@@ -3736,7 +3745,7 @@ mod tests {
         let mut motion = Motion::new();
         let mut draw = |before: UnitView, links: &[WorkLinkView]| {
             let mut out = InstanceBatches::default();
-            build_unit_instances(&[before], &[rig], 1.0, [0.0; 3], &[], &looks, links, &mut motion, &mut out);
+            build_unit_instances(&[before], &[rig], 1.0, [0.0; 3], &[], &looks, links, &Palette::default(), &mut motion, &mut out);
             facing(&out.shape(Shape::Commander)[0])
         };
         let start = draw(rig, &[]);
@@ -3794,7 +3803,7 @@ mod tests {
         let mut out = InstanceBatches::default();
         for _ in 0..60 {
             out.clear();
-            build_unit_instances(&[rig], &[rig], 1.0, [0.0; 3], &[], &looks, &work, &mut motion, &mut out);
+            build_unit_instances(&[rig], &[rig], 1.0, [0.0; 3], &[], &looks, &work, &Palette::default(), &mut motion, &mut out);
         }
         let legs = facing(&out.shape(Shape::CommanderLegs)[0]);
         let body = facing(&out.shape(Shape::Commander)[0]);
@@ -3804,7 +3813,7 @@ mod tests {
         // With the work done, the body settles back over its legs.
         for _ in 0..60 {
             out.clear();
-            build_unit_instances(&[rig], &[rig], 1.0, [0.0; 3], &[], &looks, &[], &mut motion, &mut out);
+            build_unit_instances(&[rig], &[rig], 1.0, [0.0; 3], &[], &looks, &[], &Palette::default(), &mut motion, &mut out);
         }
         let body = facing(&out.shape(Shape::Commander)[0]);
         assert!((body[0] - 1.0).abs() < 1e-2, "the body should face the way the legs do: {body:?}");
@@ -3822,7 +3831,7 @@ mod tests {
         let mut out = InstanceBatches::default();
         for _ in 0..60 {
             out.clear();
-            build_unit_instances(&[tank], &[tank], 1.0, [0.0; 3], &[], &looks, &[], &mut motion, &mut out);
+            build_unit_instances(&[tank], &[tank], 1.0, [0.0; 3], &[], &looks, &[], &Palette::default(), &mut motion, &mut out);
         }
         assert!((facing(&out.shape(Shape::TankHull)[0])[0] - 1.0).abs() < 1e-3, "the hull should face east");
         assert!((facing(&out.shape(Shape::Tank)[0])[1] + 1.0).abs() < 1e-2, "the turret should aim south");
@@ -3837,7 +3846,7 @@ mod tests {
         tower.is_structure = true;
         tower.aim = [-4096, 0];
         let mut out = InstanceBatches::default();
-        build_unit_instances(&[tower], &[tower], 1.0, [0.0; 3], &[], &looks, &[], &mut Motion::new(), &mut out);
+        build_unit_instances(&[tower], &[tower], 1.0, [0.0; 3], &[], &looks, &[], &Palette::default(), &mut Motion::new(), &mut out);
         assert_eq!(facing(&out.shape(Shape::PointDefenseBase)[0]), NORTH, "the base stays put");
         assert!((facing(&out.shape(Shape::PointDefense)[0])[0] + 1.0).abs() < 1e-3, "the gun should aim west");
     }
@@ -3852,7 +3861,7 @@ mod tests {
         let mut after = before;
         after.facing = [0, 4096];
         let mut out = InstanceBatches::default();
-        build_unit_instances(&[before], &[after], 0.5, [0.0; 3], &[], &looks, &[], &mut Motion::new(), &mut out);
+        build_unit_instances(&[before], &[after], 0.5, [0.0; 3], &[], &looks, &[], &Palette::default(), &mut Motion::new(), &mut out);
         let halfway = facing(&out.shape(Shape::Tank)[0]);
         assert!((halfway[0] - FRAC_1_SQRT_2).abs() < 1e-3 && (halfway[1] - FRAC_1_SQRT_2).abs() < 1e-3, "{halfway:?}");
     }
@@ -3871,7 +3880,7 @@ mod tests {
         let mut out = InstanceBatches::default();
         for _ in 0..60 {
             out.clear();
-            build_unit_instances(&units, &units, 1.0, [0.0; 3], &[], &looks, &work, &mut motion, &mut out);
+            build_unit_instances(&units, &units, 1.0, [0.0; 3], &[], &looks, &work, &Palette::default(), &mut motion, &mut out);
         }
         let engineers = out.shape(Shape::Engineer);
         assert!((facing(&engineers[0])[0] - FRAC_1_SQRT_2).abs() < 1e-3, "the idle one stays as it was");

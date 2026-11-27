@@ -18,6 +18,7 @@ use sim_engine::input::orders::{
 };
 use sim_engine::input::selection::{group_center, ControlGroups, Selection};
 use sim_engine::math::fp::{Fp, Vec2Fp};
+use sim_engine::player_colors::{AllyColors, PlayerColors};
 use sim_engine::render::camera::{Camera, HeightField};
 use sim_engine::render::climate::Climate;
 use sim_engine::render::effects::Effects;
@@ -242,6 +243,8 @@ Controls:
                        Z radar and sonar, C shields and missile defense, V support
   N                    Mute or unmute
   F8                   Bloom on or off
+  F9                   In a team match: each ally in their own color, or all
+                       allies in one shared ally color
   - and =              Sound quieter and louder
   Space                Tap: jump to your commander. Hold and move the mouse:
                        turn the camera round the middle of the view; let go
@@ -896,6 +899,8 @@ impl MapInfo {
 
 /// Everything the window needs from the running simulation.
 struct Session {
+    /// Each player's color, given out before the match starts (`player_colors`).
+    colors: PlayerColors,
     driver: Option<SimDriver>,
     previous: Arc<SimSnapshot>,
     current: Arc<SimSnapshot>,
@@ -905,6 +910,7 @@ struct Session {
 impl Session {
     fn start(scenario: Scenario, source: CommandSource, options: DriverOptions) -> Self {
         Self {
+            colors: PlayerColors::assign(&scenario.world.players),
             driver: Some(SimDriver::start_with(scenario, source, true, options)),
             previous: Arc::new(SimSnapshot::default()),
             current: Arc::new(SimSnapshot::default()),
@@ -1411,6 +1417,9 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     // Which kinds of range are outlined for all the viewer's units, and those outlines' rings,
     // gathered again only when the snapshot, the toggles, or the view changes.
     let mut range_toggles = ui::RangeToggles::default();
+    // Whether allies each show in their own color or all in one, which the person switches with
+    // F9 or the button at the top. It lasts through a restart.
+    let mut ally_colors = AllyColors::default();
     let mut overlay_cache: ((u32, ui::RangeToggles, Option<Team>), ui::RangeRings) = ((u32::MAX, range_toggles, None), Vec::new());
 
     let egui_context = egui::Context::default();
@@ -1756,7 +1765,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                     }
                                 }
                             }
-                            // A watcher's keys: pause, whose sight, and speed. No other key
+                            // A watcher's keys: pause, whose sight, speed, and ally colors. No other key
                             // gives orders.
                             PhysicalKey::Code(code) if watching => {
                                 if pressed && !event.repeat {
@@ -1765,6 +1774,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                         KeyCode::KeyV => hotkey_actions.push(UiAction::SetView(ui::next_watch_view(watch_view))),
                                         KeyCode::Minus => hotkey_actions.push(UiAction::SetSpeed(ui::step_watch_speed(speed, false))),
                                         KeyCode::Equal => hotkey_actions.push(UiAction::SetSpeed(ui::step_watch_speed(speed, true))),
+                                        KeyCode::F9 => hotkey_actions.push(UiAction::ToggleAllyColors),
                                         _ => {}
                                     }
                                 }
@@ -1897,6 +1907,10 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                     feedback.show_orders(std::slice::from_ref(&order), None, &map.blueprints, "");
                                     session.send(order);
                                 }
+                            }
+                            PhysicalKey::Code(KeyCode::F9) if pressed && !event.repeat => {
+                                ally_colors = ally_colors.toggled();
+                                feedback.set_label(MarkerKind::Move, ally_colors.name().to_string());
                             }
                             PhysicalKey::Code(KeyCode::F8) if pressed && !event.repeat => {
                                 let wanted = !renderer.bloom();
@@ -2195,7 +2209,9 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                             last_selected = selection.selected().to_vec();
                         }
                         let nuclear_missiles = ui::nuclear_missiles(&session.previous.projectiles, &snapshot.projectiles, alpha);
+                        let player_palette = session.colors.shown(ally_colors);
                         let output = egui_context.run(raw_input, |ctx| {
+                            player_palette.clone().store(ctx);
                             ui::release_keyboard_focus(ctx);
                             ui::draw_map_frame(ctx, &camera, &map.heights, pixels_per_point);
                             ui::draw_deposit_markers(ctx, &camera, &map.heights, &map.deposits, &map.vents, pixels_per_point);
@@ -2411,6 +2427,10 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                                         driver.set_viewer(view);
                                     }
                                 }
+                                UiAction::ToggleAllyColors => {
+                                    ally_colors = ally_colors.toggled();
+                                    feedback.set_label(MarkerKind::Move, ally_colors.name().to_string());
+                                }
                                 UiAction::SetSpeed(speed) => {
                                     if let Some(driver) = &session.driver {
                                         driver.set_speed(speed);
@@ -2452,7 +2472,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                         );
                         motion.note_doors(&previous.silo_doors, &current.silo_doors);
                         motion.note_beams(&current.landed, &current.units, &looks);
-                        instances::build_unit_instances(&previous.units, &current.units, alpha, eye, selection.selected(), &looks, &current.work_links, &mut motion, &mut scene_instances);
+                        instances::build_unit_instances(&previous.units, &current.units, alpha, eye, selection.selected(), &looks, &current.work_links, &player_palette, &mut motion, &mut scene_instances);
                         // Explosions, missile trails, and wakes, made from the snapshots alone. The
                         // snapshot's events come first, so that a new shell's look, from the weapon
                         // that fired it, is known before it is drawn.

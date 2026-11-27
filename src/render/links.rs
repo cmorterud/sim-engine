@@ -244,6 +244,7 @@ mod tests {
             upgrade: None,
             remembered: false,
             ally: false,
+            owner: None,
         }
     }
 
