@@ -401,7 +401,7 @@ mod tests {
             health_permille: 1000,
             built_permille: 1000,
             is_structure: false,
-            facing: [0, 0], aim: [0, 0], extra_aims: [[0; 2]; 3],
+            facing: [0, 0], aim: [0, 0], extra_aims: [[0; 2]; 3], pitches: [0; 4],
             working: false,
             assembling: None,
             upgrade: None,
@@ -412,7 +412,7 @@ mod tests {
 
 
     fn plain_unit(id: u32) -> UnitView {
-        UnitView { id: SimId(id), team: Team::Blue, x: 0, y: 0, z: 0, radius: 4096, blueprint: u16::MAX, health_permille: 1000, built_permille: 1000, is_structure: false, facing: [0, 0], aim: [0, 0], extra_aims: [[0; 2]; 3], working: false, assembling: None, upgrade: None, remembered: false, ally: false }
+        UnitView { id: SimId(id), team: Team::Blue, x: 0, y: 0, z: 0, radius: 4096, blueprint: u16::MAX, health_permille: 1000, built_permille: 1000, is_structure: false, facing: [0, 0], aim: [0, 0], extra_aims: [[0; 2]; 3], pitches: [0; 4], working: false, assembling: None, upgrade: None, remembered: false, ally: false }
     }
 
     #[test]

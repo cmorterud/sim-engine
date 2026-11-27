@@ -653,9 +653,9 @@ id = "t1_bomber"
 name = "Attack Bomber"
 class = "air"
 tier = 1
-mass = 90
-energy = 2045
-build_time = 499
+mass = 92
+energy = 2087
+build_time = 509
 health = 500
 speed = 20
 radius = 10
@@ -901,7 +901,7 @@ turn_rate = 90
 turn_radius = 20
 radius = 10
 vision = 400
-weapon = { kind = "flak", range = 800, reload_ticks = 5, projectile_speed = 40, damage = 64, splash_radius = 80, targets = "air", turn_rate = 180, spread = 60 }
+weapon = { kind = "flak", range = 800, reload_ticks = 5, projectile_speed = 40, damage = 58, splash_radius = 80, targets = "air", turn_rate = 180, spread = 60 }
 
 # Support factories (GAME_SPECIFICATION.md §15), as in the inspiration: T2 and T3 builders
 # build them for less than an upgrade costs, but only while the team has a headquarters, a factory

@@ -298,10 +298,30 @@ pub enum Shape {
     /// An artillery round, a bomb, or a flak shell in flight: a dark slug along x, the way it
     /// flies, with a narrower nose and a glowing base, where a `Shell` is all glow.
     Round,
+    /// A gun's muzzle flash, out along +Y from its muzzle at -Y: a white-hot core in a star of
+    /// flame, drawn for a moment as it fires (`render::effects`).
+    MuzzleFlash,
+    /// A ship's single gun on a drum, drawn on its own so that it turns to aim, as a
+    /// `NavalTurret` is: the frigate's, the destroyer's, the cruiser's, and a submarine's deck
+    /// gun, each drawn as large as its ship's own.
+    DeckGun,
+    /// The anti-air gun a ship carries, drawn on its own so that it turns to aim.
+    ShipAntiAir,
+    /// The SAM rack a ship carries, drawn on its own so that it turns to aim.
+    ShipSam,
+    /// A ball turret slung under an aircraft's nose, with two barrels: a gunship's or a
+    /// transport's guns at the ground, which turn to what they fire at.
+    ChinTurret,
+    /// A small turret on an aircraft's back with two barrels, drawn on its own so that it turns
+    /// to aim: its guns against other aircraft.
+    DorsalTurret,
+    /// A small gun on a pintle drum, drawn on its own so that it turns to aim: the land scout's
+    /// and the combat engineer's.
+    PintleGun,
 }
 
 impl Shape {
-    pub const ALL: [Self; 136] = [
+    pub const ALL: [Self; 143] = [
         Self::Cube,
         Self::Commander,
         Self::CommanderLegs,
@@ -438,6 +458,13 @@ impl Shape {
         Self::ArtilleryPad,
         Self::LaserTurret,
         Self::Round,
+        Self::MuzzleFlash,
+        Self::DeckGun,
+        Self::ShipAntiAir,
+        Self::ShipSam,
+        Self::ChinTurret,
+        Self::DorsalTurret,
+        Self::PintleGun,
     ];
     pub const COUNT: usize = Self::ALL.len();
 
@@ -459,7 +486,22 @@ impl Shape {
     /// Whether the shape throws a shadow on the ground. Markers, see-through domes, and shells
     /// too small to see do not.
     pub const fn casts_shadow(self) -> bool {
-        !matches!(self, Self::Dome | Self::SelectionRing | Self::SelectionBox | Self::Shell | Self::Round | Self::Fireball | Self::Smoke | Self::Wake | Self::Scar | Self::Apron | Self::Beam | Self::Cable)
+        !matches!(
+            self,
+            Self::Dome
+                | Self::SelectionRing
+                | Self::SelectionBox
+                | Self::Shell
+                | Self::Round
+                | Self::Fireball
+                | Self::MuzzleFlash
+                | Self::Smoke
+                | Self::Wake
+                | Self::Scar
+                | Self::Apron
+                | Self::Beam
+                | Self::Cable
+        )
     }
 
     /// Whether its action is how far open its doors are, rather than recoil or work: the
@@ -603,6 +645,53 @@ struct MeshBuilder {
     /// How far each side of a box drawn now leans in, as a share of its height (`ARMOR_SLOPE`),
     /// or zero for upright boxes.
     slope: f32,
+    /// The muzzles of the guns and launchers drawn so far, where shots leave them.
+    muzzles: Vec<Muzzle>,
+    /// The pivot of the barrel drawn last, which its muzzle is raised and lowered about.
+    barrel_pivot: Option<Vec3>,
+    /// Which of its unit's weapons the muzzles drawn next belong to, for a shape that carries
+    /// more than one: 0 for the main one, then the extra ones in order.
+    weapon: u8,
+}
+
+/// Where a shot leaves a shape: the tip of a barrel, or the mouth of a launcher, in the shape's
+/// own box. Drawing only: the simulation fires from the top of its unit, and a shot is drawn
+/// leaving its muzzle instead (`render::instances`), with a flash and smoke there
+/// (`render::effects`).
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Muzzle {
+    pub at: [f32; 3],
+    /// What its barrel turns about as it is raised (`motion::RECOIL`'s pivot): the muzzle
+    /// itself, for one that is not raised.
+    pub hinge: [f32; 3],
+    /// How wide its bore is, as a share of the box, which sizes its flash.
+    pub bore: f32,
+    /// Which of its unit's weapons fires from it: 0 for the main one, then the extra ones.
+    pub weapon: u8,
+}
+
+impl Muzzle {
+    /// How steeply it points as modeled, in radians of the shape's own space: zero for level.
+    pub fn modeled_pitch(&self) -> f32 {
+        let (along, up) = (self.at[1] - self.hinge[1], self.at[2] - self.hinge[2]);
+        if along.abs() + up.abs() < 1e-6 {
+            0.0
+        } else {
+            up.atan2(along.max(1e-6))
+        }
+    }
+
+    /// Where it is with its barrel raised by `pitch` radians about its hinge, as the shader
+    /// raises it (`animate`, for `motion::RECOIL`).
+    pub fn raised(&self, pitch: f32) -> [f32; 3] {
+        let (sin, cos) = pitch.sin_cos();
+        let (along, up) = (self.at[1] - self.hinge[1], self.at[2] - self.hinge[2]);
+        [
+            self.at[0],
+            self.hinge[1] + along * cos - up * sin,
+            self.hinge[2] + along * sin + up * cos,
+        ]
+    }
 }
 
 impl MeshBuilder {
@@ -612,6 +701,9 @@ impl MeshBuilder {
 
     /// Adds the parts `draw` makes as moving parts, then goes back to still ones.
     fn moving(&mut self, motion: u32, pivot: [f32; 3], draw: impl FnOnce(&mut Self)) {
+        if motion & motion::RECOIL != 0 {
+            self.barrel_pivot = Some(Vec3::from(pivot));
+        }
         let (before, before_pivot) = (self.motion, self.pivot);
         self.motion = motion;
         self.pivot = Vec3::from(pivot);
@@ -643,14 +735,29 @@ impl MeshBuilder {
         }
     }
 
-    /// A muzzle flash around a gun's tip, which shows only just after it fires.
+    /// A gun's muzzle, at the tip of the barrel drawn last, `half` as wide as its flash. The
+    /// flash itself, and the smoke after it, are effects drawn where the muzzle is as it fires
+    /// (`render::effects`): a block of glow in the model could not follow a barrel raised to
+    /// aim, nor drift off as smoke does.
     fn flash(&mut self, at: [f32; 3], half: f32) {
-        let before = self.material;
-        self.paint(Material::Glow);
-        let min = at.map(|value| (value - half).max(-0.5));
-        let max = at.map(|value| (value + half).min(0.5));
-        self.moving(motion::FLASH, at, |mesh| mesh.block(min, max));
-        self.paint(before);
+        let hinge = self.barrel_pivot.map_or(at, |pivot| pivot.to_array());
+        self.muzzles.push(Muzzle {
+            at,
+            hinge,
+            bore: half,
+            weapon: self.weapon,
+        });
+    }
+
+    /// The mouth of a launcher or tube, which a missile or torpedo leaves from, `half` as wide
+    /// as the smoke it throws out, not raised to aim.
+    fn launcher_mouth(&mut self, at: [f32; 3], half: f32) {
+        self.muzzles.push(Muzzle {
+            at,
+            hinge: at,
+            bore: half,
+            weapon: self.weapon,
+        });
     }
 
     /// Adds a flat, convex polygon facing away from `part_center`.
@@ -1276,7 +1383,12 @@ impl MeshBuilder {
             self.paint(Material::Hull);
             self.body(foot[0] + x * scale, &[station(-0.26, 0.05, 0.11), station(0.2, 0.05, 0.41)], 6);
             self.paint(Material::Glow);
-            self.body(foot[0] + x * scale, &[station(0.2, 0.05, 0.41), station(0.3, 0.0, 0.475)], 6);
+            self.body(
+                foot[0] + x * scale,
+                &[station(0.2, 0.05, 0.41), station(0.3, 0.0, 0.475)],
+                6,
+            );
+            self.launcher_mouth(at(x, 0.3, 0.475), 0.05 * scale);
         }
     }
 
@@ -1293,8 +1405,13 @@ impl MeshBuilder {
         for side in [-0.4_f32, 0.4] {
             let from = [x + side * size, y + way * size * 0.3, z + size * 0.6];
             let to = [x + side * size, y + way * size * 2.3, z + size * 1.5];
-            self.moving(motion::RECOIL, from, |mesh| mesh.beam(from, to, size * 0.16, size * 0.16));
-            self.flash(to, size * 0.3);
+            self.moving(motion::RECOIL, from, |mesh| {
+                mesh.beam(from, to, size * 0.16, size * 0.16)
+            });
+            // Guns facing aft, as the strategic bomber's tail guns, are only for show.
+            if !aft {
+                self.flash(to, size * 0.3);
+            }
         }
     }
 
@@ -1662,6 +1779,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 for lift in [-0.035_f32, 0.035] {
                     let cap = Vec3::from(front) + Vec3::X * x + up * lift;
                     mesh.beam(cap.to_array(), (cap + along * 0.02).to_array(), 0.02, 0.025);
+                    mesh.launcher_mouth((cap + along * 0.02).to_array(), 0.025);
                 }
             }
             mesh.paint(Material::Metal);
@@ -1942,9 +2060,8 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.block([-0.11, 0.16, -0.22], [0.11, 0.175, -0.15]);
             mesh.paint(Material::Trim);
             mesh.block([-0.07, 0.17, -0.26], [0.07, 0.44, -0.25]);
+            // Its gun is a `Shape::PintleGun` of its own on the cab's roof, which turns to aim.
             mesh.paint(Material::Metal);
-            mesh.body(0.0, &[[0.18, 0.02, 0.02, -0.08], [0.46, 0.016, 0.016, -0.08]], 6);
-            mesh.flash([0.0, 0.45, -0.08], 0.035);
             mesh.frustum([0.0, -0.3], [-0.26, 0.2], [0.025, 0.02], 6);
             mesh.paint(Material::Trim);
             mesh.moving(motion::SPIN, [0.0, -0.3, 0.0], |mesh| {
@@ -1965,12 +2082,22 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 [Vec3::new(-0.3, -0.3, 0.3), Vec3::new(0.3, -0.3, 0.3), Vec3::new(0.3, -0.06, 0.4), Vec3::new(-0.3, -0.06, 0.4)],
             );
             mesh.paint(Material::Metal);
+            // Four tubes, each with a heavy ring at its mouth, which all four fire from in turn.
             mesh.moving(motion::RECOIL, [0.0, -0.1, 0.3], |mesh| {
                 for x in [-0.21_f32, -0.07, 0.07, 0.21] {
-                    mesh.body(x, &[[-0.3, 0.055, 0.055, 0.27], [0.12, 0.055, 0.055, 0.43]], 6);
+                    mesh.body(
+                        x,
+                        &[[-0.3, 0.055, 0.055, 0.27], [0.12, 0.055, 0.055, 0.43]],
+                        6,
+                    );
+                    mesh.body(
+                        x,
+                        &[[0.04, 0.066, 0.066, 0.4], [0.14, 0.066, 0.066, 0.432]],
+                        6,
+                    );
                 }
             });
-            for x in [-0.21_f32, 0.21] {
+            for x in [-0.21_f32, -0.07, 0.07, 0.21] {
                 mesh.flash([x, 0.14, 0.44], 0.055);
             }
             // A stub arm either side, to steady it, and a visor low on its front.
@@ -2168,6 +2295,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.block([-0.5, -0.5, -0.5], [0.5, 0.5, -0.15]);
             mesh.paint(Material::Hull);
             mesh.beam([0.0, -0.3, -0.1], [0.0, 0.36, 0.36], 0.18, 0.1);
+            mesh.launcher_mouth([0.0, 0.37, 0.37], 0.1);
         }
         // The fleet's mount, large, on a base of its own.
         Shape::MissileDefense => {
@@ -2275,7 +2403,24 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Trim);
             mesh.fin(0.0, [-0.44, -0.22], 0.05, [-0.47, -0.37], 0.28, 0.012);
             mesh.paint(Material::Glass);
-            mesh.body(0.0, &[[0.08, 0.02, 0.012, 0.065], [0.16, 0.042, 0.03, 0.07], [0.27, 0.03, 0.02, 0.058], [0.32, 0.006, 0.005, 0.05]], 6);
+            mesh.body(
+                0.0,
+                &[
+                    [0.08, 0.02, 0.012, 0.065],
+                    [0.16, 0.042, 0.03, 0.07],
+                    [0.27, 0.03, 0.02, 0.058],
+                    [0.32, 0.006, 0.005, 0.05],
+                ],
+                6,
+            );
+            // Its guns: a cannon in each wing root, fixed to fire ahead.
+            mesh.paint(Material::Metal);
+            for x in [-0.1_f32, 0.1] {
+                mesh.moving(motion::RECOIL, [x, 0.06, -0.02], |mesh| {
+                    mesh.beam([x, 0.06, -0.02], [x, 0.3, -0.02], 0.01, 0.01)
+                });
+                mesh.flash([x, 0.31, -0.02], 0.025);
+            }
         }
         Shape::Scout => {
             mesh.paint(Material::Hull);
@@ -2316,7 +2461,10 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             for x in [-0.3_f32, -0.18, 0.18, 0.3] {
                 mesh.body(x, &[[-0.24, 0.008, 0.008, -0.055], [-0.18, 0.028, 0.028, -0.055], [-0.02, 0.028, 0.028, -0.055], [0.04, 0.01, 0.01, -0.055]], 6);
             }
-            // Its gun against aircraft: a cannon along each side of its nose.
+            // Its bomb drops from its belly, and its gun against aircraft, its second weapon, is a
+            // cannon along each side of its nose.
+            mesh.launcher_mouth([0.0, -0.05, -0.07], 0.04);
+            mesh.weapon = 1;
             for x in [-0.062_f32, 0.062] {
                 mesh.moving(motion::RECOIL, [x, 0.2, 0.0], |mesh| mesh.beam([x, 0.16, 0.005], [x, 0.4, -0.005], 0.012, 0.012));
                 mesh.flash([x, 0.415, -0.005], 0.025);
@@ -2326,6 +2474,8 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
         // an engine at the front of each boom, and a team-colored tailplane joining the booms.
         // From above the only aircraft with a hole in its outline.
         Shape::TorpedoBomber => {
+            // Its torpedo, slung under its belly, drops from there.
+            mesh.launcher_mouth([0.0, 0.0, -0.1], 0.04);
             mesh.paint(Material::Hull);
             mesh.body(0.0, &[[-0.14, 0.03, 0.03, 0.02], [0.0, 0.075, 0.07, 0.02], [0.3, 0.075, 0.07, 0.01], [0.44, 0.04, 0.035, 0.0], [0.5, 0.012, 0.012, -0.005]], 6);
             for x in [-0.17_f32, 0.17] {
@@ -2428,11 +2578,40 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.fin(x, [-0.46, -0.3], 0.04, [-0.48, -0.4], 0.2, 0.01);
             }
             mesh.paint(Material::Glass);
-            mesh.body(0.0, &[[0.2, 0.018, 0.012, 0.05], [0.28, 0.035, 0.026, 0.055], [0.38, 0.022, 0.016, 0.04], [0.42, 0.005, 0.004, 0.03]], 6);
+            mesh.body(
+                0.0,
+                &[
+                    [0.2, 0.018, 0.012, 0.05],
+                    [0.28, 0.035, 0.026, 0.055],
+                    [0.38, 0.022, 0.016, 0.04],
+                    [0.42, 0.005, 0.004, 0.03],
+                ],
+                6,
+            );
+            // Its guns: a cannon either side of its nose, fixed to fire ahead.
+            mesh.paint(Material::Metal);
+            for x in [-0.05_f32, 0.05] {
+                mesh.moving(motion::RECOIL, [x, 0.1, -0.01], |mesh| {
+                    mesh.beam([x, 0.1, -0.01], [x, 0.3, -0.012], 0.009, 0.009)
+                });
+                mesh.flash([x, 0.31, -0.012], 0.022);
+            }
         }
         // A bomber: a thick team-colored body, straight wings with engines under them, and a glazed nose.
         Shape::Bomber => {
-            mesh.body(0.0, &[[-0.5, 0.03, 0.03, 0.04], [-0.3, 0.09, 0.09, 0.01], [0.1, 0.14, 0.13, 0.0], [0.35, 0.11, 0.1, -0.01], [0.48, 0.04, 0.04, -0.02]], 6);
+            mesh.body(
+                0.0,
+                &[
+                    [-0.5, 0.03, 0.03, 0.04],
+                    [-0.3, 0.09, 0.09, 0.01],
+                    [0.1, 0.14, 0.13, 0.0],
+                    [0.35, 0.11, 0.1, -0.01],
+                    [0.48, 0.04, 0.04, -0.02],
+                ],
+                6,
+            );
+            // Its bombs drop from its belly.
+            mesh.launcher_mouth([0.0, 0.05, -0.12], 0.06);
             mesh.paint(Material::Hull);
             mesh.main_wing(shape, None);
             mesh.wings(0.02, 0.24, [-0.5, -0.38], [-0.48, -0.42], [0.012, 0.004], 0.04);
@@ -2465,7 +2644,17 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.body(x, &[[-0.06, 0.028, 0.028, -0.19], [0.17, 0.034, 0.034, -0.19], [0.22, 0.016, 0.016, -0.19]], 6);
             }
             mesh.paint(Material::Glass);
-            mesh.body(0.0, &[[0.26, 0.06, 0.03, -0.03], [0.36, 0.085, 0.05, -0.07], [0.46, 0.035, 0.025, -0.13]], 6);
+            mesh.body(
+                0.0,
+                &[
+                    [0.26, 0.06, 0.03, -0.03],
+                    [0.36, 0.085, 0.05, -0.07],
+                    [0.46, 0.035, 0.025, -0.13],
+                ],
+                6,
+            );
+            // Its guns are a `Shape::ChinTurret` of their own under its nose, which turns to
+            // what it fires at.
             mesh.paint(Material::Metal);
             mesh.moving(motion::SPIN, [0.0; 3], |mesh| {
                 mesh.paint(Material::Metal);
@@ -2486,17 +2675,32 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.fin(0.0, [-0.5, -0.4], -0.08, [-0.5, -0.45], 0.08, 0.012);
             mesh.paint(Material::Hull);
             mesh.wings(0.12, 0.34, [-0.1, 0.06], [-0.07, 0.04], [0.02, 0.01], -0.16);
-            // Its guns at the ground: a cannon pod under each wing tip.
+            // An ammunition pod under each wing tip. Its guns at the ground are a
+            // `Shape::ChinTurret` under its nose, and its guns against aircraft a
+            // `Shape::DorsalTurret` on its back between the rotors, each of its own, which turn
+            // to aim.
             mesh.paint(Material::Metal);
             for x in [-0.32_f32, 0.32] {
-                mesh.body(x, &[[-0.14, 0.03, 0.03, -0.2], [0.1, 0.036, 0.036, -0.2], [0.15, 0.018, 0.018, -0.2]], 6);
-                mesh.moving(motion::RECOIL, [x, 0.1, -0.2], |mesh| mesh.beam([x, 0.1, -0.2], [x, 0.26, -0.2], 0.012, 0.012));
-                mesh.flash([x, 0.275, -0.2], 0.03);
+                mesh.body(
+                    x,
+                    &[
+                        [-0.14, 0.03, 0.03, -0.2],
+                        [0.1, 0.036, 0.036, -0.2],
+                        [0.15, 0.018, 0.018, -0.2],
+                    ],
+                    6,
+                );
             }
             mesh.paint(Material::Glass);
-            mesh.body(0.0, &[[0.28, 0.06, 0.03, -0.06], [0.37, 0.08, 0.045, -0.09], [0.46, 0.035, 0.025, -0.15]], 6);
-            // Its guns against aircraft: a turret on its back, between the rotors.
-            mesh.dorsal_turret([0.0, -0.02, 0.02], 0.045, false, Material::Hull);
+            mesh.body(
+                0.0,
+                &[
+                    [0.28, 0.06, 0.03, -0.06],
+                    [0.37, 0.08, 0.045, -0.09],
+                    [0.46, 0.035, 0.025, -0.15],
+                ],
+                6,
+            );
             mesh.paint(Material::Metal);
             // A rotor at each end, on a mast.
             for y in [-0.26_f32, 0.24] {
@@ -2530,10 +2734,19 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.body(x, &[[-0.12, 0.026, 0.024, -0.035], [-0.08, 0.034, 0.03, -0.035]], 6);
             }
             mesh.paint(Material::Glass);
-            mesh.body(0.0, &[[0.32, 0.03, 0.015, 0.05], [0.39, 0.04, 0.025, 0.045], [0.45, 0.02, 0.01, 0.025]], 6);
-            // Its bomb: the bay's doors, along its belly.
+            mesh.body(
+                0.0,
+                &[
+                    [0.32, 0.03, 0.015, 0.05],
+                    [0.39, 0.04, 0.025, 0.045],
+                    [0.45, 0.02, 0.01, 0.025],
+                ],
+                6,
+            );
+            // Its bomb: the bay's doors, along its belly, which it drops from.
             mesh.paint(Material::Panel);
             mesh.block([-0.04, -0.2, -0.092], [0.04, 0.16, -0.075]);
+            mesh.launcher_mouth([0.0, -0.02, -0.095], 0.04);
             // Its guns against aircraft on its tail: a turret on its back, facing aft.
             mesh.dorsal_turret([0.0, -0.4, 0.075], 0.03, true, Material::Trim);
         }
@@ -2589,14 +2802,13 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Metal);
             mesh.frustum([0.0, -0.015], [0.06, 0.38], [0.016, 0.01], 6);
             mesh.block([-0.06, -0.025, 0.28], [0.06, -0.005, 0.3]);
-            // Its anti-air: the anti-air gun, on the deckhouse behind the bridge.
-            mesh.anti_air_gun([0.0, -0.14, -0.02], SHIP_ANTI_AIR_SIZE / 28.0);
+            // Its anti-air gun, on the deckhouse behind the bridge, and its gun on the foredeck,
+            // are a `Shape::ShipAntiAir` and a `Shape::DeckGun` of their own, which turn to aim.
             // A team-colored helipad on the stern.
             mesh.paint(Material::Trim);
             mesh.frustum([0.0, -0.345], [-0.2, -0.19], [0.09, 0.09], 12);
             mesh.paint(Material::Hull);
             mesh.frustum([0.0, -0.345], [-0.19, -0.186], [0.05, 0.05], 12);
-            mesh.turret([0.0, 0.2], [-0.16, -0.08], 0.055, 1, 0.1, false);
         }
         Shape::Destroyer => {
             // Long and lean, with a long raked bow.
@@ -2605,8 +2817,8 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.bevel([-0.055, -0.15, -0.2], [0.055, 0.17, -0.03], 0.025);
             mesh.paint(Material::Trim);
             mesh.bevel([-0.045, 0.06, -0.03], [0.045, 0.16, 0.07], 0.02);
-            // Its anti-air: the anti-air gun, on the deckhouse behind the bridge.
-            mesh.anti_air_gun([0.0, -0.04, -0.03], SHIP_ANTI_AIR_SIZE / 46.0);
+            // Its anti-air gun, on the deckhouse behind the bridge, and its guns fore and aft are
+            // a `Shape::ShipAntiAir` and `Shape::DeckGun`s of their own, which turn to aim.
             mesh.paint(Material::Metal);
             mesh.frustum([0.0, 0.11], [0.07, 0.42], [0.015, 0.009], 6);
             mesh.block([-0.06, 0.1, 0.32], [0.06, 0.12, 0.34]);
@@ -2625,23 +2837,26 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             for x in [-0.058_f32, 0.058] {
                 mesh.beam([x, -0.33, -0.17], [x, -0.23, -0.17], 0.013, 0.013);
             }
-            mesh.turret([0.0, 0.28], [-0.16, -0.08], 0.046, 1, 0.08, false);
-            mesh.turret([0.0, -0.39], [-0.2, -0.12], 0.046, 1, 0.05, true);
         }
         Shape::Cruiser => {
             // Widest amidships, where sponsons carry its radar domes out past its sides.
             mesh.hull(&side(&[[0.105, -0.5], [0.125, -0.2]], [0.125, 0.2], [0.09, 0.4], 4), 0.08);
             mesh.paint(Material::Hull);
             mesh.bevel([-0.09, -0.2, -0.2], [0.09, 0.07, 0.0], 0.035);
-            // Its anti-air missiles: the SAM launcher's rack, on the quarterdeck.
-            mesh.sam_rack([0.0, -0.36, -0.2], SHIP_SAM_SIZE / 40.0);
-            // Its cruise missiles: cells under dark hatches in a team-colored deck, forward.
+            // Its anti-air missiles, the SAM launcher's rack on the quarterdeck, and its gun on the
+            // bow are a `Shape::ShipSam` and a `Shape::DeckGun` of their own, which turn to aim.
+            // Its cruise missiles: cells under dark hatches in a team-colored deck, forward,
+            // which they climb out of.
             for (y0, y1, z) in [(0.12_f32, 0.28_f32, -0.16_f32)] {
                 mesh.paint(Material::Trim);
                 mesh.block([-0.075, y0, z], [0.075, y1, z + 0.03]);
                 mesh.paint(Material::Metal);
                 for x in [-0.04_f32, 0.0, 0.04] {
-                    mesh.block([x - 0.014, y0 + 0.02, z + 0.03], [x + 0.014, y1 - 0.02, z + 0.035]);
+                    mesh.block(
+                        [x - 0.014, y0 + 0.02, z + 0.03],
+                        [x + 0.014, y1 - 0.02, z + 0.035],
+                    );
+                    mesh.launcher_mouth([x, (y0 + y1) * 0.5, z + 0.035], 0.03);
                 }
             }
             mesh.paint(Material::Trim);
@@ -2673,7 +2888,6 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 [Vec3::new(-0.08, -0.14, 0.32), Vec3::new(0.08, -0.14, 0.32), Vec3::new(0.08, -0.11, 0.32), Vec3::new(-0.08, -0.11, 0.32)],
                 [Vec3::new(-0.08, -0.11, 0.44), Vec3::new(0.08, -0.11, 0.44), Vec3::new(0.08, -0.08, 0.44), Vec3::new(-0.08, -0.08, 0.44)],
             );
-            mesh.turret([0.0, 0.36], [-0.16, -0.09], 0.045, 1, 0.06, false);
         }
         Shape::Battleship => {
             // Broad, with bulged sides and a blunt, round bow.
@@ -2689,12 +2903,8 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.paint(Material::Metal);
             mesh.frustum([0.0, -0.06], [0.18, 0.44], [0.014, 0.008], 6);
             mesh.block([-0.06, -0.07, 0.34], [0.06, -0.05, 0.36]);
-            // Its anti-air: four of the T1 anti-air gun, two each side of the tower.
-            for x in [-0.14_f32, 0.14] {
-                for y in [-0.17_f32, -0.05] {
-                    mesh.anti_air_gun([x, y, -0.2], SHIP_ANTI_AIR_SIZE / 92.0);
-                }
-            }
+            // Its anti-air, four of the T1 anti-air gun two each side of the tower, are
+            // `Shape::ShipAntiAir`s of their own, which turn to aim.
             // Its tactical missile defense: two of the fleet's mount, on the tower behind the bridge.
             for foot in missile_defense_mounts(Shape::Battleship) {
                 mesh.missile_defense_mount(*foot, MISSILE_DEFENSE_WIDTH / 92.0);
@@ -2766,12 +2976,16 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.block([-0.18, 0.3, -0.34], [0.18, 0.37, -0.325]);
             mesh.block([-0.15, -0.47, -0.38], [0.15, -0.4, -0.365]);
             mesh.block([-0.008, -0.47, -0.33], [0.008, -0.39, -0.21]);
-            // The deck gun, forward of the sail.
-            mesh.turret([0.0, 0.29], [-0.25, -0.2], 0.035, 1, 0.07, false);
-            // Its torpedo tubes, out of the bow either side of the stem.
+            // The deck gun, forward of the sail, is a `Shape::DeckGun` of its own, which turns to
+            // aim. Its torpedo tubes, out of the bow either side of the stem.
             mesh.paint(Material::Metal);
             for x in [-0.028_f32, 0.028] {
-                mesh.body(x, &[[0.38, 0.016, 0.016, -0.31], [0.47, 0.016, 0.016, -0.31]], 6);
+                mesh.body(
+                    x,
+                    &[[0.38, 0.016, 0.016, -0.31], [0.47, 0.016, 0.016, -0.31]],
+                    6,
+                );
+                mesh.launcher_mouth([x, 0.47, -0.31], 0.016);
             }
         }
         Shape::MissileSubmarine => {
@@ -2798,11 +3012,14 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
                 mesh.block([-0.075, y - 0.05, -0.2], [0.075, y + 0.05, -0.192]);
                 mesh.paint(Material::Glow);
                 mesh.block([-0.055, y - 0.036, -0.192], [0.055, y + 0.036, -0.186]);
+                mesh.launcher_mouth([0.0, y, -0.186], 0.05);
             }
             mesh.paint(Material::Glow);
+            mesh.weapon = 1;
             for y in [-0.025_f32, 0.035] {
                 for x in [-0.045_f32, 0.045] {
                     mesh.block([x - 0.024, y - 0.022, -0.2], [x + 0.024, y + 0.022, -0.19]);
+                    mesh.launcher_mouth([x, y, -0.19], 0.024);
                 }
             }
         }
@@ -3184,14 +3401,9 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             }
             mesh.paint(Material::Glow);
             mesh.block([-0.05, 0.47, -0.04], [0.05, 0.49, -0.01]);
-            // Its guns at the ground: a cannon along each shoulder of its nose.
-            mesh.paint(Material::Metal);
-            for x in [-0.15_f32, 0.15] {
-                mesh.moving(motion::RECOIL, [x, 0.26, 0.07], |mesh| mesh.beam([x, 0.22, 0.075], [x, 0.4, 0.06], 0.014, 0.014));
-                mesh.flash([x, 0.415, 0.06], 0.028);
-            }
-            // Its guns against aircraft: a turret on its back, behind the cockpit.
-            mesh.dorsal_turret([0.0, 0.14, 0.13], 0.05, false, Material::Hull);
+            // Its guns at the ground, a `Shape::ChinTurret` under its nose, and its guns against
+            // aircraft, a `Shape::DorsalTurret` on its back behind the cockpit, are drawn on their
+            // own, and turn to aim.
             // Its shield: an emitter on a short mast on its back, aft.
             mesh.paint(Material::Metal);
             mesh.frustum([0.0, -0.22], [0.13, 0.19], [0.025, 0.02], 6);
@@ -3604,10 +3816,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             );
             mesh.paint(Material::Trim);
             mesh.bevel([-0.2, -0.46, -0.18], [0.2, -0.38, -0.14], 0.02);
-            mesh.frustum([0.3, 0.12], [-0.27, -0.17], [0.1, 0.085], 8);
-            mesh.paint(Material::Metal);
-            mesh.moving(motion::RECOIL, [0.3, 0.18, -0.22], |mesh| mesh.beam([0.3, 0.18, -0.22], [0.3, 0.48, -0.22], 0.022, 0.022));
-            mesh.flash([0.3, 0.47, -0.22], 0.04);
+            // Its gun over its right track is a `Shape::PintleGun` of its own, which turns to aim.
             // A dozer blade across the front, wider than the tracks, on push arms.
             mesh.paint(Material::Metal);
             for x in [-0.3_f32, 0.3] {
@@ -3658,6 +3867,68 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             });
         }
         Shape::NavalTurret => mesh.turret([0.0, 0.0], [0.0, 0.09], 0.095, 2, 0.06, false),
+        // Drawn as large as its ship (`TurretMount::scale`), where it stands on the deck.
+        Shape::DeckGun => {
+            mesh.turret([0.0, 0.0], [0.0, 0.15], 0.1, 1, 0.17, false);
+            // A sighting hood on the drum's roof, so that it reads as a gun house from above.
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.05, -0.07, 0.15], [0.05, 0.0, 0.18], 0.012);
+        }
+        Shape::ShipAntiAir => mesh.anti_air_gun([0.0, 0.0, 0.0], SHIP_MOUNT_SHARE),
+        Shape::ShipSam => mesh.sam_rack([0.0, 0.0, 0.0], SHIP_MOUNT_SHARE),
+        // Hung from its foot, at the top of its box, under the aircraft's nose.
+        Shape::ChinTurret => {
+            mesh.paint(Material::Metal);
+            mesh.frustum([0.0, 0.0], [-0.08, 0.0], [0.1, 0.12], 6);
+            mesh.paint(Material::Trim);
+            mesh.ball([0.0, 0.0, -0.2], 0.16, 7, 4);
+            mesh.paint(Material::Glass);
+            mesh.block([-0.05, 0.1, -0.16], [0.05, 0.15, -0.11]);
+            mesh.paint(Material::Metal);
+            for x in [-0.07_f32, 0.07] {
+                mesh.moving(motion::RECOIL, [x, 0.0, -0.22], |mesh| {
+                    mesh.beam([x, 0.0, -0.22], [x, 0.46, -0.22], 0.025, 0.025)
+                });
+                mesh.flash([x, 0.47, -0.22], 0.05);
+            }
+        }
+        Shape::DorsalTurret => mesh.dorsal_turret([0.0, 0.0, 0.0], 0.2, false, Material::Hull),
+        Shape::PintleGun => {
+            mesh.paint(Material::Trim);
+            mesh.frustum([0.0, 0.0], [0.0, 0.2], [0.2, 0.17], 8);
+            mesh.paint(Material::Hull);
+            mesh.bevel([-0.1, -0.12, 0.2], [0.1, 0.06, 0.26], 0.02);
+            mesh.paint(Material::Metal);
+            mesh.moving(motion::RECOIL, [0.0, 0.05, 0.12], |mesh| {
+                mesh.beam([0.0, 0.05, 0.12], [0.0, 0.48, 0.12], 0.045, 0.045)
+            });
+            mesh.flash([0.0, 0.49, 0.12], 0.08);
+        }
+        // A white-hot core, and four tongues of flame about it, all leaning out along +Y.
+        Shape::MuzzleFlash => {
+            mesh.paint(Material::Glow);
+            mesh.body(
+                0.0,
+                &[
+                    [-0.5, 0.05, 0.05, 0.0],
+                    [-0.3, 0.3, 0.3, 0.0],
+                    [0.0, 0.22, 0.22, 0.0],
+                    [0.5, 0.0, 0.0, 0.0],
+                ],
+                6,
+            );
+            for index in 0..4 {
+                let angle =
+                    std::f32::consts::FRAC_PI_4 + index as f32 * std::f32::consts::FRAC_PI_2;
+                let (x, z) = (angle.cos(), angle.sin());
+                mesh.beam(
+                    [x * 0.08, -0.4, z * 0.08],
+                    [x * 0.48, -0.12, z * 0.48],
+                    0.05,
+                    0.03,
+                );
+            }
+        }
         Shape::LaserTurret => {
             mesh.paint(Material::Trim);
             mesh.frustum([0.0, 0.0], [0.0, 0.065], [0.08, 0.068], 8);
@@ -3721,7 +3992,20 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
 /// not shaded so; aircraft fly and ships float, clear of the ground at the bottom of their box.
 const fn occlusion_ground(shape: Shape) -> Option<bool> {
     match shape {
-        Shape::Cube | Shape::Shell | Shape::Round | Shape::Missile | Shape::Fireball | Shape::Smoke | Shape::Wake | Shape::Scar | Shape::Dome | Shape::SelectionRing | Shape::SelectionBox | Shape::Beam | Shape::Cable => None,
+        Shape::Cube
+        | Shape::Shell
+        | Shape::Round
+        | Shape::Missile
+        | Shape::Fireball
+        | Shape::MuzzleFlash
+        | Shape::Smoke
+        | Shape::Wake
+        | Shape::Scar
+        | Shape::Dome
+        | Shape::SelectionRing
+        | Shape::SelectionBox
+        | Shape::Beam
+        | Shape::Cable => None,
         Shape::Aircraft
         | Shape::Bomber
         | Shape::Gunship
@@ -3745,7 +4029,12 @@ const fn occlusion_ground(shape: Shape) -> Option<bool> {
         | Shape::EscortCorvette
         | Shape::TorpedoBoat
         | Shape::NavalTurret
-        | Shape::LaserTurret => Some(false),
+        | Shape::LaserTurret
+        | Shape::DeckGun
+        | Shape::ShipAntiAir
+        | Shape::ShipSam
+        | Shape::ChinTurret
+        | Shape::DorsalTurret => Some(false),
         _ => Some(true),
     }
 }
@@ -3953,7 +4242,13 @@ impl MeshSet {
             mesh.pivot = Vec3::ZERO;
             let first_vertex = mesh.vertices.len();
             mesh.subdivide = occlusion_ground(shape).is_some();
-            mesh.slope = if sloped_armor(shape) { ARMOR_SLOPE } else { 0.0 };
+            mesh.slope = if sloped_armor(shape) {
+                ARMOR_SLOPE
+            } else {
+                0.0
+            };
+            mesh.barrel_pivot = None;
+            mesh.weapon = 0;
             build_shape(shape, &mut mesh);
             smooth_normals(&mut mesh.vertices, first_vertex);
             let end = mesh.indices.len() as u32;
@@ -3984,6 +4279,25 @@ impl MeshSet {
     }
 }
 
+/// Every shape's muzzles, in the order of `Shape::ALL`, worked out once from the models.
+static MUZZLES: std::sync::OnceLock<Vec<Vec<Muzzle>>> = std::sync::OnceLock::new();
+
+/// Where shots leave a shape: its guns' muzzles and its launchers' mouths, in its own box, in
+/// the order they are modeled. Empty for a shape that fires nothing.
+pub fn muzzles(shape: Shape) -> &'static [Muzzle] {
+    let all = MUZZLES.get_or_init(|| {
+        Shape::ALL
+            .into_iter()
+            .map(|shape| {
+                let mut mesh = MeshBuilder::default();
+                build_shape(shape, &mut mesh);
+                mesh.muzzles
+            })
+            .collect()
+    });
+    &all[shape as usize]
+}
+
 /// How many cells a side a shape is cut into, seen from above, for its far model: each cell
 /// that the shape covers becomes one box.
 const FAR_CELLS: usize = 3;
@@ -4008,9 +4322,12 @@ pub(super) const fn missile_defense_mounts(shape: Shape) -> &'static [[f32; 3]] 
 const MISSILE_DEFENSE_WIDTH: f32 = 4.6;
 /// How large the anti-air gun is drawn on a ship, as the side of its box in world units: about
 /// half the turret's own size on land, and the same on every ship that carries one.
-const SHIP_ANTI_AIR_SIZE: f32 = 10.0;
+pub(super) const SHIP_ANTI_AIR_SIZE: f32 = 10.0;
 /// And the SAM rack a ship carries, the same way.
-const SHIP_SAM_SIZE: f32 = 10.0;
+pub(super) const SHIP_SAM_SIZE: f32 = 10.0;
+/// How large a ship's anti-air gun or SAM rack is drawn in its own box, `Shape::ShipAntiAir`
+/// or `Shape::ShipSam`: a little under the land structure's, to keep inside the box.
+pub(super) const SHIP_MOUNT_SHARE: f32 = 0.85;
 
 /// A far model is only made for a shape with at least this many times its triangles.
 const FAR_SAVING: u32 = 3;
@@ -4200,6 +4517,44 @@ pub(super) mod tests {
         }
     }
 
+    /// Every muzzle is in its shape's box, and a barrel's is out along it from the pivot it is
+    /// raised about, forward and no more than a little below level, so that raising it to aim
+    /// swings its tip up and round where it fires from.
+    #[test]
+    fn every_muzzle_is_at_the_tip_of_its_barrel() {
+        for shape in Shape::ALL {
+            for muzzle in muzzles(shape) {
+                assert!(
+                    muzzle.at.iter().all(|axis| axis.abs() <= 0.5 + 1e-4),
+                    "{shape:?}'s muzzle {:?} leaves its box",
+                    muzzle.at
+                );
+                if muzzle.hinge == muzzle.at {
+                    continue;
+                }
+                let (along, up) = (
+                    muzzle.at[1] - muzzle.hinge[1],
+                    muzzle.at[2] - muzzle.hinge[2],
+                );
+                assert!(
+                    along > 0.0,
+                    "{shape:?}'s muzzle {:?} is not ahead of its pivot {:?}",
+                    muzzle.at,
+                    muzzle.hinge
+                );
+                assert!(
+                    up > -0.2 * along,
+                    "{shape:?}'s barrel points down from {:?} to {:?}",
+                    muzzle.hinge,
+                    muzzle.at
+                );
+                // Raised to its own pitch, as the shader raises it, it stays where it is.
+                let raised = muzzle.raised(0.0);
+                assert!((0..3).all(|axis| (raised[axis] - muzzle.at[axis]).abs() < 1e-5));
+            }
+        }
+    }
+
     /// Instances are batched by `shape as usize`, in the order of `Shape::ALL`.
     #[test]
     fn all_shapes_are_listed_in_order() {
@@ -4229,20 +4584,29 @@ pub(super) mod tests {
     /// each turned by its angle in radians about the vertical, then moved by its offset in
     /// shares of the box. The view spans -0.8 to 0.8 of the shape's box either way, so that
     /// nothing tilted leaves it.
-    pub fn view(set: &MeshSet, parts: &[(Shape, f32, [f32; 3])], pitch: f32) -> Vec<Option<Material>> {
+    pub fn view(
+        set: &MeshSet,
+        parts: &[(Shape, f32, [f32; 3], f32)],
+        pitch: f32,
+    ) -> Vec<Option<Material>> {
         let (sin, cos) = pitch.to_radians().sin_cos();
         let mut depth = vec![f32::MAX; VIEW_SIDE * VIEW_SIDE];
         let mut seen = vec![None; VIEW_SIDE * VIEW_SIDE];
         let span = 0.8_f32;
-        for &(shape, turn, [dx, dy, dz]) in parts {
+        for &(shape, turn, [dx, dy, dz], scale) in parts {
             let (turn_sin, turn_cos) = turn.sin_cos();
             let range = set.ranges[shape as usize].clone();
             for triangle in set.indices[range.start as usize..range.end as usize].chunks(3) {
                 let corners: Vec<(f32, f32, f32)> = triangle
                     .iter()
                     .map(|&index| {
-                        let [x, y, z] = set.vertices[index as usize].position;
-                        let (x, y) = (x * turn_cos - y * turn_sin + dx, x * turn_sin + y * turn_cos + dy);
+                        let [x, y, z] = set.vertices[index as usize]
+                            .position
+                            .map(|axis| axis * scale);
+                        let (x, y) = (
+                            x * turn_cos - y * turn_sin + dx,
+                            x * turn_sin + y * turn_cos + dy,
+                        );
                         let z = z + dz;
                         // Screen right is +X, screen up is north and up tilted, depth runs away from the eye.
                         let (up, away) = (y * sin + z * cos, y * cos - z * sin);
@@ -4464,6 +4828,10 @@ pub(super) mod tests {
     fn every_shape_can_fill_a_dot() {
         let set = MeshSet::build();
         for (index, shape) in Shape::ALL.iter().enumerate() {
+            // A muzzle flash is drawn only close up, and never as a dot.
+            if *shape == Shape::MuzzleFlash {
+                continue;
+            }
             let vertices = shape_vertices(&set, index);
             for (x_sign, y_sign) in [(1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0)] {
                 let found = vertices.iter().any(|vertex| vertex.position[0] * x_sign > 0.0 && vertex.position[1] * y_sign > 0.0);

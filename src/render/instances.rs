@@ -214,6 +214,70 @@ struct Shot {
     at: f64,
 }
 
+/// How long a gun holds the way it last fired, and how high, before it settles back to rest.
+const GUN_HOLD_SECONDS: f64 = 3.0;
+/// How quickly a barrel comes up to a new shot's elevation, and settles back to rest after, as
+/// the time over which it closes most of the way.
+const RAISE_SECONDS: f64 = 0.06;
+const SETTLE_SECONDS: f64 = 0.5;
+/// How quickly a gun that the simulation does not turn turns to its latest shot.
+const SWING_SECONDS: f64 = 0.08;
+/// How long a new shot is drawn closing from the muzzle it left onto the path the simulation
+/// flies it on, from the top of its unit. Long enough to read as leaving the barrel, and short
+/// enough that it is on its true path well before it gets anywhere.
+const LAUNCH_BLEND_SECONDS: f64 = 0.25;
+/// The highest a gun is raised, and the lowest it is laid, in radians.
+const MAX_ELEVATION: f32 = 1.35;
+const MAX_DEPRESSION: f32 = 0.3;
+
+/// A gun's latest shot: when, which way, and how high it was fired, and how many it has fired,
+/// for taking its barrels in turn.
+#[derive(Copy, Clone, Debug)]
+struct GunShot {
+    at: f64,
+    heading: [f32; 2],
+    /// How high, in radians in the world, for a gun raised to fire.
+    pitch: Option<f32>,
+    count: u32,
+}
+
+/// How high a gun is drawn raised, in radians in the world, and when that was.
+#[derive(Copy, Clone, Debug)]
+struct Raise {
+    pitch: f32,
+    time: f64,
+}
+
+/// A shot just fired, which has not yet been drawn leaving its muzzle: it will be, as its
+/// unit is drawn.
+#[derive(Copy, Clone, Debug)]
+struct NewShot {
+    projectile: ProjectileView,
+    unit: SimId,
+    weapon: u8,
+    /// Which of its gun's barrels, counting on round them all.
+    barrel: u32,
+    /// Where the simulation fired it from, in the world.
+    from: [f64; 3],
+    /// Which way it flew off, as a unit vector.
+    direction: [f32; 3],
+}
+
+/// A shot leaving its gun, for the flash and smoke there (`Effects::muzzle`).
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Launch {
+    pub projectile: ProjectileView,
+    /// The muzzle it left, in the world: the tip of the barrel or the mouth of the launcher it
+    /// was fired from, or where the simulation fired it from, for a gun not drawn.
+    pub at: [f64; 3],
+    /// Which way it flew off, as a unit vector.
+    pub direction: [f32; 3],
+    /// How wide its gun's bore is drawn, in world units: zero for a gun not drawn.
+    pub bore: f32,
+    /// The unit that fired it, as a raw blueprint id.
+    pub blueprint: u16,
+}
+
 /// How units move between frames, beyond where they are: facing, strides, and gunfire. Kept
 /// between frames, and only ever read from the snapshots, never written back.
 #[derive(Default)]
@@ -233,6 +297,19 @@ pub struct Motion {
     /// Silos with their doors moving, by id: how far open at the last tick and at this one,
     /// from 0 to 1, sorted.
     doors: Vec<(SimId, f32, f32)>,
+    /// Each gun's latest shot, by its unit and its weapon.
+    guns: BTreeMap<(SimId, u8), GunShot>,
+    /// How high each gun is drawn raised, by its unit and its weapon.
+    raises: BTreeMap<(SimId, u8), Raise>,
+    /// Which way each gun that the simulation does not turn is drawn facing, and when.
+    swings: BTreeMap<(SimId, u8), ([f32; 2], f64)>,
+    /// Shots fired since the last frame, waiting to be drawn leaving their muzzles.
+    new_shots: Vec<NewShot>,
+    /// Shots lately fired: how far their muzzle was from where the simulation fired them, and
+    /// when, for drawing them closing from the one onto the other.
+    launched: BTreeMap<SimId, ([f64; 3], f64)>,
+    /// Shots that have left their muzzles since the effects last took them.
+    launches: Vec<Launch>,
 }
 
 impl Motion {
@@ -268,6 +345,9 @@ impl Motion {
         self.strides.retain(|id, _| keep(id));
         self.shots.retain(|id, _| keep(id));
         self.beam_shots.retain(|(id, _), _| keep(id));
+        self.guns.retain(|(id, _), _| keep(id));
+        self.raises.retain(|(id, _), _| keep(id));
+        self.swings.retain(|(id, _), _| keep(id));
     }
 
     /// Notes which laser turrets fired in the latest tick, from their beams, which are never
@@ -292,18 +372,286 @@ impl Motion {
         self.beam_shots.get(&(id, weapon)).map_or(0.0, |shot| (1.0 - (self.time - shot.at) / RECOIL_SECONDS).clamp(0.0, 1.0) as f32)
     }
 
-    /// Notes which units fired since the last snapshot: those whose shells are new in it.
-    pub fn note_shots(&mut self, previous: &[ProjectileView], current: &[ProjectileView]) {
+    /// Notes which units fired since the last snapshot: those whose shells are new in it, and
+    /// which of their guns fired each, which way and how high, so that the gun is drawn turned
+    /// and raised to fire it and the shell is drawn leaving its muzzle. `units` are the latest
+    /// snapshot's, sorted by id.
+    pub fn note_shots(
+        &mut self,
+        previous: &[ProjectileView],
+        current: &[ProjectileView],
+        units: &[UnitView],
+        looks: &[UnitLook],
+    ) {
         let time = self.time;
-        merge_by_id(previous, current, |projectile| projectile.id, |before, projectile| {
-            if before.is_some() {
-                return;
+        // A clock that went backwards is a new game.
+        self.launched
+            .retain(|_, (_, born)| time - *born < LAUNCH_BLEND_SECONDS && *born <= time);
+        self.new_shots.clear();
+        merge_by_id(
+            previous,
+            current,
+            |projectile| projectile.id,
+            |before, projectile| {
+                if before.is_some() {
+                    return;
+                }
+                let shot = self.shots.entry(projectile.source).or_insert(Shot {
+                    shell: projectile.id,
+                    at: time,
+                });
+                if projectile.id > shot.shell {
+                    *shot = Shot {
+                        shell: projectile.id,
+                        at: time,
+                    };
+                }
+                // Each shot is noted once, though it is new in every frame until the next snapshot.
+                let Some(from) = projectile.from else { return };
+                if self.launched.contains_key(&projectile.id) {
+                    return;
+                }
+                self.launched.insert(projectile.id, ([0.0; 3], time));
+                let Ok(index) = units.binary_search_by_key(&projectile.source, |unit| unit.id)
+                else {
+                    return;
+                };
+                let unit = &units[index];
+                let from = from.map(|axis| f64::from(axis) * RAW_TO_WORLD);
+                let now = [projectile.x, projectile.y, projectile.z]
+                    .map(|axis| f64::from(axis) * RAW_TO_WORLD);
+                let delta = [now[0] - from[0], now[1] - from[1], now[2] - from[2]];
+                let length =
+                    (delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2]).sqrt();
+                let facing = unit_vector(unit.facing).unwrap_or(NORTH);
+                let direction = if length > 1e-6 {
+                    delta.map(|axis| (axis / length) as f32)
+                } else {
+                    [facing[0], facing[1], 0.0]
+                };
+                let look = looks.get(usize::from(unit.blueprint));
+                let weapon =
+                    look.map_or(0, |look| self.gun_that_fired(look, unit, projectile, from));
+                let gun = look.and_then(|look| look.guns[usize::from(weapon)]);
+                let across = (f64::from(direction[0])).hypot(f64::from(direction[1]));
+                let heading = if across > 1e-6 {
+                    [
+                        (f64::from(direction[0]) / across) as f32,
+                        (f64::from(direction[1]) / across) as f32,
+                    ]
+                } else {
+                    facing
+                };
+                let pitch = gun.filter(|gun| gun.raised).map(|_| {
+                    (f64::from(direction[2]).atan2(across) as f32)
+                        .clamp(-MAX_DEPRESSION, MAX_ELEVATION)
+                });
+                let entry = self.guns.entry((unit.id, weapon)).or_insert(GunShot {
+                    at: time,
+                    heading,
+                    pitch,
+                    count: 0,
+                });
+                *entry = GunShot {
+                    at: time,
+                    heading,
+                    pitch,
+                    count: entry.count.wrapping_add(1),
+                };
+                self.new_shots.push(NewShot {
+                    projectile: *projectile,
+                    unit: unit.id,
+                    weapon,
+                    barrel: entry.count,
+                    from,
+                    direction,
+                });
+            },
+        );
+    }
+
+    /// Which of a unit's weapons fired a shot: of those that fire its kind of shot with its
+    /// blast, the one mounted nearest where it was fired from, and of those mounted alike, the
+    /// one that fired longest ago, so that guns that fire together take their shots in turn.
+    fn gun_that_fired(
+        &self,
+        look: &UnitLook,
+        unit: &UnitView,
+        projectile: &ProjectileView,
+        from: [f64; 3],
+    ) -> u8 {
+        let fires = |gun: &GunLook, exact: bool| {
+            gun.kind == projectile.kind
+                && (!exact || gun.kind != ProjectileKind::Shell || gun.splash == projectile.splash)
+        };
+        let exact = look.guns.iter().flatten().any(|gun| fires(gun, true));
+        let facing = unit_vector(unit.facing).unwrap_or(NORTH);
+        let center = [
+            f64::from(unit.x) * RAW_TO_WORLD,
+            f64::from(unit.y) * RAW_TO_WORLD,
+        ];
+        let mut best: Option<(u8, f64, f64)> = None;
+        for (index, gun) in look.guns.iter().enumerate() {
+            let Some(gun) = gun.filter(|gun| fires(gun, exact)) else {
+                continue;
+            };
+            let weapon = index as u8;
+            // To the right of a body facing (x, y) is (y, -x).
+            let (right, forward) = (f64::from(gun.mount[0]), f64::from(gun.mount[1]));
+            let (x, y) = (f64::from(facing[0]), f64::from(facing[1]));
+            let at = [
+                center[0] + right * y + forward * x,
+                center[1] - right * x + forward * y,
+            ];
+            let distance = (at[0] - from[0]).hypot(at[1] - from[1]);
+            let fired = self
+                .guns
+                .get(&(unit.id, weapon))
+                .map_or(f64::MIN, |shot| shot.at);
+            let better = best.is_none_or(|(_, near, last)| {
+                distance < near - 0.5 || (distance < near + 0.5 && fired < last)
+            });
+            if better {
+                best = Some((weapon, distance, fired));
             }
-            let shot = self.shots.entry(projectile.source).or_insert(Shot { shell: projectile.id, at: time });
-            if projectile.id > shot.shell {
-                *shot = Shot { shell: projectile.id, at: time };
+        }
+        best.map_or(0, |(weapon, _, _)| weapon)
+    }
+
+    /// Which way a gun that the simulation does not turn is drawn facing: to its latest shot,
+    /// swung round to it, and back to `rest` once it has held it a while.
+    fn swing(&mut self, unit: SimId, weapon: u8, rest: [f32; 2]) -> [f32; 2] {
+        let time = self.time;
+        let target = self
+            .guns
+            .get(&(unit, weapon))
+            .filter(|shot| time - shot.at < GUN_HOLD_SECONDS)
+            .map_or(rest, |shot| shot.heading);
+        let (heading, then) = self.swings.entry((unit, weapon)).or_insert((rest, time));
+        let share = 1.0 - (-(time - *then).max(0.0) / SWING_SECONDS).exp();
+        let turned = [
+            heading[0] + (target[0] - heading[0]) * share as f32,
+            heading[1] + (target[1] - heading[1]) * share as f32,
+        ];
+        let length = turned[0].hypot(turned[1]);
+        *heading = if length > 1e-3 {
+            [turned[0] / length, turned[1] / length]
+        } else {
+            target
+        };
+        *then = time;
+        *heading
+    }
+
+    /// How high a gun is drawn raised, in radians in the world: to its latest shot's elevation,
+    /// and back to `rest`, as it is modeled, once it has held it a while.
+    /// A gun the simulation lays, `laid` (in radians in the world), follows it instead.
+    fn raise(&mut self, unit: SimId, weapon: u8, rest: f32, laid: Option<f32>) -> f32 {
+        let time = self.time;
+        let shot = self
+            .guns
+            .get(&(unit, weapon))
+            .filter(|shot| time - shot.at < GUN_HOLD_SECONDS)
+            .and_then(|shot| shot.pitch);
+        let (target, pace) = match (laid, shot) {
+            (Some(pitch), _) | (None, Some(pitch)) => (pitch, RAISE_SECONDS),
+            (None, None) => (rest, SETTLE_SECONDS),
+        };
+        let raise = self
+            .raises
+            .entry((unit, weapon))
+            .or_insert(Raise { pitch: rest, time });
+        let share = 1.0 - (-(time - raise.time).max(0.0) / pace).exp();
+        raise.pitch += (target - raise.pitch) * share as f32;
+        raise.time = time;
+        raise.pitch
+    }
+
+    /// Whether a gun has fired within the time it holds its aim after a shot.
+    fn fired_lately(&self, unit: SimId, weapon: u8) -> bool {
+        self.guns
+            .get(&(unit, weapon))
+            .is_some_and(|shot| self.time - shot.at < GUN_HOLD_SECONDS)
+    }
+
+    /// How hard one gun is kicking back, from 1 as it fires to 0.
+    fn gun_recoil(&self, unit: SimId, weapon: u8) -> f32 {
+        self.guns.get(&(unit, weapon)).map_or(0.0, |shot| {
+            (1.0 - (self.time - shot.at) / RECOIL_SECONDS).clamp(0.0, 1.0) as f32
+        })
+    }
+
+    /// Gives each new shot of a unit its muzzle, from where its guns' muzzles are drawn, by
+    /// weapon: the muzzle it left, taking each gun's barrels in turn. `muzzles` are the unit's,
+    /// as `(weapon, where, bore)`.
+    fn fire_from(&mut self, unit: &UnitView, muzzles: &[(u8, [f64; 3], f32)]) {
+        if self.new_shots.is_empty() {
+            return;
+        }
+        let time = self.time;
+        let mut index = 0;
+        while index < self.new_shots.len() {
+            let shot = self.new_shots[index];
+            let theirs: Vec<_> = muzzles
+                .iter()
+                .filter(|muzzle| muzzle.0 == shot.weapon)
+                .collect();
+            if shot.unit != unit.id || theirs.is_empty() {
+                index += 1;
+                continue;
             }
-        });
+            self.new_shots.swap_remove(index);
+            let (_, at, bore) = *theirs[shot.barrel as usize % theirs.len()];
+            // Torpedoes go under the water from where the simulation looses them: no barrel to leave.
+            let torpedo = shot
+                .projectile
+                .from
+                .is_some_and(|from| from[2] < unit.z.saturating_add(unit.radius));
+            let at = if torpedo { shot.from } else { at };
+            let offset = [
+                at[0] - shot.from[0],
+                at[1] - shot.from[1],
+                at[2] - shot.from[2],
+            ];
+            self.launched.insert(shot.projectile.id, (offset, time));
+            self.launches.push(Launch {
+                projectile: shot.projectile,
+                at,
+                direction: shot.direction,
+                bore,
+                blueprint: unit.blueprint,
+            });
+        }
+    }
+
+    /// Shots whose guns were not drawn, as far off as dots, leave from where the simulation fired
+    /// them. Called once every unit is drawn.
+    fn fire_the_rest(&mut self, units: &[UnitView]) {
+        for shot in std::mem::take(&mut self.new_shots) {
+            let blueprint = units
+                .binary_search_by_key(&shot.unit, |unit| unit.id)
+                .map_or(u16::MAX, |index| units[index].blueprint);
+            self.launches.push(Launch {
+                projectile: shot.projectile,
+                at: shot.from,
+                direction: shot.direction,
+                bore: 0.0,
+                blueprint,
+            });
+        }
+    }
+
+    /// The shots that have left their muzzles since this was last called, for their flash and smoke.
+    pub fn take_launches(&mut self) -> Vec<Launch> {
+        std::mem::take(&mut self.launches)
+    }
+
+    /// How far from where the simulation has a shot it is drawn, in the world: from its muzzle
+    /// as it leaves, closing to nothing over `LAUNCH_BLEND_SECONDS`.
+    pub fn launch_offset(&self, projectile: SimId) -> Option<[f64; 3]> {
+        let &(offset, born) = self.launched.get(&projectile)?;
+        let share = 1.0 - (self.time - born) / LAUNCH_BLEND_SECONDS;
+        (share > 0.0 && offset != [0.0; 3]).then(|| offset.map(|axis| axis * share * share))
     }
 
     /// Notes how far open each silo's doors are, from the last two snapshots' `silo_doors`. A
@@ -388,13 +736,64 @@ pub struct UnitLook {
     /// `unit_look`; `unit_looks` sets it.
     pub apron: bool,
     /// Gun turrets drawn on their own, each turning to its weapon's aim.
-    pub turrets: [Option<TurretMount>; 3],
+    pub turrets: [Option<TurretMount>; MOUNTS],
     /// What the shells of each of its weapons look like, by the weapon's splash radius in raw
     /// `Fp` bits, which is how a shot in a snapshot is told back to the weapon that fired it.
     /// Empty from `unit_look`; `unit_looks` sets it.
     pub shots: [Option<(i32, ShotLook)>; 4],
     /// How big its artillery rounds and bombs are drawn, by its tier.
     pub shot_scale: f32,
+    /// What each of its weapons fires, and from where, for telling a new shot back to the gun
+    /// that fired it, which is drawn firing it. Empty from `unit_look`; `unit_looks` sets it.
+    pub guns: [Option<GunLook>; 4],
+    /// Whether it flies: its guns are fixed to its airframe, and are not raised to aim, but
+    /// for those on turrets of their own. False from `unit_look`; `unit_looks` sets it.
+    pub flies: bool,
+}
+
+/// The most turrets drawn on their own on one unit: the battleship's three, and its four
+/// anti-air guns.
+pub const MOUNTS: usize = 8;
+
+/// What one of a unit's weapons fires, and from where, for telling its shots apart from its
+/// other weapons'. Drawing only.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct GunLook {
+    /// What its shots are in a snapshot.
+    pub kind: ProjectileKind,
+    /// How far its blast reaches, in raw `Fp` bits, as a shot in a snapshot carries it.
+    pub splash: i32,
+    /// Where it fires from, from the unit's middle, as `[right, forward]` in units.
+    pub mount: [f32; 2],
+    /// A shell, which a gun is raised to fire: not a missile, a bomb, or a torpedo.
+    pub raised: bool,
+    /// Whether the simulation turns it to aim (`UnitView::aim`). One that it does not is drawn
+    /// turning to its latest shot.
+    pub aims: bool,
+    /// Whether the simulation rests it facing the stern.
+    pub aft: bool,
+}
+
+impl GunLook {
+    fn of(weapon: &WeaponDef) -> Option<Self> {
+        let kind = match weapon.kind {
+            WeaponKind::TacticalMissile => ProjectileKind::TacticalMissile,
+            WeaponKind::StrategicMissile => ProjectileKind::StrategicMissile,
+            WeaponKind::Laser => ProjectileKind::Beam,
+            WeaponKind::Tractor => return None,
+            WeaponKind::Shell | WeaponKind::Bomb | WeaponKind::Flak => ProjectileKind::Shell,
+        };
+        let raised = matches!(weapon.kind, WeaponKind::Shell | WeaponKind::Flak)
+            && weapon.targets != Targets::Naval;
+        Some(Self {
+            kind,
+            splash: weapon.splash_radius.to_bits(),
+            mount: weapon.mount.map(|axis| axis.to_num::<f32>()),
+            raised,
+            aims: weapon.turn_rate.is_some(),
+            aft: weapon.aft,
+        })
+    }
 }
 
 /// What a shot looks like, in flight and where it lands, by the kind of weapon that fired it.
@@ -512,6 +911,16 @@ pub struct TurretMount {
     pub at: [f32; 3],
     /// It faces the stern when it has nothing to aim at, as the weapon's turret does.
     pub aft: bool,
+    /// How large it is drawn, as a share of its hull's drawn size: 1 for a turret modeled at
+    /// its hull's scale, as the battleship's are, less for a small gun modeled large.
+    pub scale: f32,
+}
+
+/// A look's turrets, from a list of up to `MOUNTS` of them.
+fn mounts<const N: usize>(list: [Option<TurretMount>; N]) -> [Option<TurretMount>; MOUNTS] {
+    let mut all = [None; MOUNTS];
+    all[..N].copy_from_slice(&list);
+    all
 }
 
 /// The work yellow the engineers' tools glow, the same at every tier.
@@ -519,9 +928,66 @@ const ENGINEER_YELLOW: [f32; 3] = [1.00, 0.70, 0.12];
 
 /// Maps a blueprint to its look. Unknown keys fall back to a plain cube.
 pub fn unit_look(key: &str) -> UnitLook {
-    let look = |shape, tint, height_share| UnitLook { shape, tint, height_share, base: None, size: 0.0, length: 0.0, apron: false, turrets: [None; 3], shots: [None; 4], shot_scale: 1.0 };
-    let turret = |weapon, at, aft| Some(TurretMount { shape: Shape::NavalTurret, weapon, at, aft });
-    let laser = |weapon, at, aft| Some(TurretMount { shape: Shape::LaserTurret, weapon, at, aft });
+    let look = |shape, tint, height_share| UnitLook {
+        shape,
+        tint,
+        height_share,
+        base: None,
+        size: 0.0,
+        length: 0.0,
+        apron: false,
+        turrets: [None; MOUNTS],
+        shots: [None; 4],
+        shot_scale: 1.0,
+        guns: [None; 4],
+        flies: false,
+    };
+    let turret = |weapon, at, aft| {
+        Some(TurretMount {
+            shape: Shape::NavalTurret,
+            weapon,
+            at,
+            aft,
+            scale: 1.0,
+        })
+    };
+    let laser = |weapon, at, aft| {
+        Some(TurretMount {
+            shape: Shape::LaserTurret,
+            weapon,
+            at,
+            aft,
+            scale: 1.0,
+        })
+    };
+    let mount = |shape, weapon, at, aft, scale| {
+        Some(TurretMount {
+            shape,
+            weapon,
+            at,
+            aft,
+            scale,
+        })
+    };
+    // A ship's gun, drawn as large as its ship's own was modeled on its hull.
+    let deck_gun =
+        |weapon, at, aft, radius: f32| mount(Shape::DeckGun, weapon, at, aft, radius / 0.1);
+    // A ship's anti-air gun or SAM rack, the same size in the world on every ship, by how long
+    // the ship is drawn.
+    let ship_mount = |shape, weapon, at, length: f32| {
+        let size = if shape == Shape::ShipSam {
+            super::meshes::SHIP_SAM_SIZE
+        } else {
+            super::meshes::SHIP_ANTI_AIR_SIZE
+        };
+        mount(
+            shape,
+            weapon,
+            at,
+            false,
+            size / length / super::meshes::SHIP_MOUNT_SHARE,
+        )
+    };
     match key {
         "command_rig" => UnitLook { base: Some(Shape::CommanderLegs), ..look(Shape::Commander, Some([1.00, 1.00, 1.00]), 1.0) },
         "field_rig" => UnitLook { base: Some(Shape::FieldRigLegs), ..look(Shape::FieldRig, Some([0.70, 0.75, 0.85]), 1.0) },
@@ -532,23 +998,69 @@ pub fn unit_look(key: &str) -> UnitLook {
         "t2_engineer" => UnitLook { base: Some(Shape::EngineerHull), length: 19.0, ..look(Shape::EngineerT2, Some(ENGINEER_YELLOW), 1.0) },
         "t3_engineer" => UnitLook { base: Some(Shape::EngineerHull), length: 23.0, ..look(Shape::EngineerT3, Some(ENGINEER_YELLOW), 1.0) },
         "land_factory_t3" => look(Shape::FactoryT3, Some([0.10, 0.10, 0.20]), 0.85),
-        "t1_engineer" => UnitLook { base: Some(Shape::EngineerHull), ..look(Shape::Engineer, Some(ENGINEER_YELLOW), 1.0) },
-        "t1_light_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::Bot, Some([0.78, 0.70, 0.50]), 1.0) },
-        "t1_land_scout" => UnitLook { length: 14.0, ..look(Shape::LandScout, Some([0.75, 0.95, 1.00]), 1.0) },
-        "t1_medium_tank" => UnitLook { base: Some(Shape::TankHull), ..look(Shape::Tank, Some([0.80, 0.85, 0.70]), 1.0) },
-        "t2_grenadier_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::GrenadierWalker, Some([0.72, 0.58, 0.40]), 1.0) },
-        "t2_mobile_shield" => UnitLook { base: Some(Shape::ShieldCarrier), length: 15.0, ..look(Shape::ShieldEmitter, Some([0.55, 0.85, 1.00]), 1.0) },
-        "t2_combat_engineer" => UnitLook { base: Some(Shape::CombatEngineerHull), length: 19.0, ..look(Shape::Engineer, Some([0.95, 0.32, 0.22]), 1.0) },
-        "t3_heavy_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::HeavyWalker, Some([0.58, 0.46, 0.36]), 1.0) },
-        "t3_siege_walker" => UnitLook { base: Some(Shape::BotLegs), ..look(Shape::SiegeWalker, Some([0.70, 0.70, 0.75]), 1.0) },
-        "t2_torpedo_boat" => UnitLook { length: 24.0, ..look(Shape::TorpedoBoat, Some([0.90, 0.78, 0.30]), 0.5) },
-        "t3_heavy_point_defense" => UnitLook { base: Some(Shape::HeavyDefenseBase), ..look(Shape::HeavyPointDefense, Some([0.95, 0.35, 0.30]), 1.0) },
+        "t1_engineer" => UnitLook {
+            base: Some(Shape::EngineerHull),
+            ..look(Shape::Engineer, Some(ENGINEER_YELLOW), 1.0)
+        },
+        "t1_light_walker" => UnitLook {
+            base: Some(Shape::BotLegs),
+            ..look(Shape::Bot, Some([0.78, 0.70, 0.50]), 1.0)
+        },
+        "t1_land_scout" => UnitLook {
+            length: 14.0,
+            turrets: mounts([mount(Shape::PintleGun, 0, [0.0, 0.03, -0.12], false, 0.35)]),
+            ..look(Shape::LandScout, Some([0.75, 0.95, 1.00]), 1.0)
+        },
+        "t1_medium_tank" => UnitLook {
+            base: Some(Shape::TankHull),
+            ..look(Shape::Tank, Some([0.80, 0.85, 0.70]), 1.0)
+        },
+        "t2_grenadier_walker" => UnitLook {
+            base: Some(Shape::BotLegs),
+            ..look(Shape::GrenadierWalker, Some([0.72, 0.58, 0.40]), 1.0)
+        },
+        "t2_mobile_shield" => UnitLook {
+            base: Some(Shape::ShieldCarrier),
+            length: 15.0,
+            ..look(Shape::ShieldEmitter, Some([0.55, 0.85, 1.00]), 1.0)
+        },
+        "t2_combat_engineer" => UnitLook {
+            base: Some(Shape::CombatEngineerHull),
+            length: 19.0,
+            turrets: mounts([mount(Shape::PintleGun, 0, [0.3, 0.12, -0.17], false, 0.5)]),
+            ..look(Shape::Engineer, Some([0.95, 0.32, 0.22]), 1.0)
+        },
+        "t3_heavy_walker" => UnitLook {
+            base: Some(Shape::BotLegs),
+            ..look(Shape::HeavyWalker, Some([0.58, 0.46, 0.36]), 1.0)
+        },
+        "t3_siege_walker" => UnitLook {
+            base: Some(Shape::BotLegs),
+            ..look(Shape::SiegeWalker, Some([0.70, 0.70, 0.75]), 1.0)
+        },
+        "t2_torpedo_boat" => UnitLook {
+            length: 24.0,
+            ..look(Shape::TorpedoBoat, Some([0.90, 0.78, 0.30]), 0.5)
+        },
+        "t3_heavy_point_defense" => UnitLook {
+            base: Some(Shape::HeavyDefenseBase),
+            ..look(Shape::HeavyPointDefense, Some([0.95, 0.35, 0.30]), 1.0)
+        },
         "t3_heavy_shield" => look(Shape::ShieldGeneratorT3, Some([0.45, 0.70, 1.00]), 0.9),
         "wall" => look(Shape::Wall, Some([0.70, 0.70, 0.70]), 0.9),
         "field_workshop" => look(Shape::FieldWorkshop, Some([0.95, 0.75, 0.30]), 0.8),
         "t1_light_transport" => look(Shape::Transport, Some([0.85, 0.80, 0.60]), 1.0),
-        "t2_transport" => look(Shape::TransportT2, Some([0.70, 0.75, 0.80]), 1.0),
-        "t3_heavy_transport" => look(Shape::TransportT3, Some([0.55, 0.60, 0.75]), 1.0),
+        "t2_transport" => UnitLook {
+            turrets: mounts([mount(Shape::ChinTurret, 0, [0.0, 0.34, -0.08], false, 0.3)]),
+            ..look(Shape::TransportT2, Some([0.70, 0.75, 0.80]), 1.0)
+        },
+        "t3_heavy_transport" => UnitLook {
+            turrets: mounts([
+                mount(Shape::ChinTurret, 0, [0.0, 0.36, -0.08], false, 0.35),
+                mount(Shape::DorsalTurret, 1, [0.0, 0.14, 0.13], false, 0.25),
+            ]),
+            ..look(Shape::TransportT3, Some([0.55, 0.60, 0.75]), 1.0)
+        },
         "field_workshop_t3" => look(Shape::FieldWorkshopT3, Some([0.95, 0.55, 0.20]), 0.95),
         "t1_light_artillery" => UnitLook { base: Some(Shape::ArtilleryHull), length: 22.0, ..look(Shape::Artillery, Some([0.74, 0.66, 0.52]), 1.0) },
         "t2_heavy_tank" => UnitLook { base: Some(Shape::HeavyTankHull), length: 26.0, ..look(Shape::HeavyTank, Some([0.62, 0.52, 0.48]), 1.0) },
@@ -575,27 +1087,84 @@ pub fn unit_look(key: &str) -> UnitLook {
         "air_factory" => look(Shape::AirFactory, Some([0.45, 0.60, 0.80]), 0.5),
         "airfield" => look(Shape::Airfield, Some([0.70, 0.80, 0.90]), 0.5),
         "naval_factory" => look(Shape::NavalFactory, Some([0.35, 0.45, 0.55]), 0.5),
-        "t1_frigate" => look(Shape::Frigate, Some([0.45, 0.62, 0.28]), 0.5),
-        "t1_attack_sub" => look(Shape::Submarine, Some([0.10, 0.20, 0.30]), 0.3),
-        "t2_escort_corvette" => UnitLook { length: 30.0, ..look(Shape::EscortCorvette, Some([0.55, 0.85, 1.00]), 0.5) },
-        "t3_missile_sub" => UnitLook { length: 48.0, ..look(Shape::MissileSubmarine, Some([0.05, 0.10, 0.20]), 0.35) },
-        "t2_mobile_missile_launcher" => UnitLook { base: Some(Shape::MissileTruck), length: 26.0, ..look(Shape::MissileRack, Some([0.80, 0.80, 0.70]), 1.0) },
-        "t2_torpedo_bomber" => UnitLook { length: 26.0, ..look(Shape::TorpedoBomber, Some([0.40, 0.55, 0.70]), 0.55) },
+        // Its gun on the foredeck, and its anti-air gun behind the bridge.
+        "t1_frigate" => UnitLook {
+            turrets: mounts([
+                deck_gun(0, [0.0, 0.2, -0.16], false, 0.055),
+                ship_mount(Shape::ShipAntiAir, 1, [0.0, -0.14, -0.02], 28.0),
+            ]),
+            ..look(Shape::Frigate, Some([0.45, 0.62, 0.28]), 0.5)
+        },
+        "t1_attack_sub" => UnitLook {
+            turrets: mounts([deck_gun(1, [0.0, 0.29, -0.25], false, 0.035)]),
+            ..look(Shape::Submarine, Some([0.10, 0.20, 0.30]), 0.3)
+        },
+        "t2_escort_corvette" => UnitLook {
+            length: 30.0,
+            ..look(Shape::EscortCorvette, Some([0.55, 0.85, 1.00]), 0.5)
+        },
+        "t3_missile_sub" => UnitLook {
+            length: 48.0,
+            ..look(Shape::MissileSubmarine, Some([0.05, 0.10, 0.20]), 0.35)
+        },
+        "t2_mobile_missile_launcher" => UnitLook {
+            base: Some(Shape::MissileTruck),
+            length: 26.0,
+            ..look(Shape::MissileRack, Some([0.80, 0.80, 0.70]), 1.0)
+        },
+        "t2_torpedo_bomber" => UnitLook {
+            length: 26.0,
+            ..look(Shape::TorpedoBomber, Some([0.40, 0.55, 0.70]), 0.55)
+        },
         "t1_sonar" => look(Shape::Sonar, Some([0.30, 0.60, 0.90]), 1.0),
         "t2_sonar" => look(Shape::SonarT2, Some([0.20, 0.45, 0.85]), 1.2),
-        "t1_torpedo_launcher" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::TorpedoLauncher, Some([0.20, 0.68, 0.56]), 0.7) },
-        "t2_torpedo_launcher" => UnitLook { base: Some(Shape::PointDefenseBase), ..look(Shape::TorpedoLauncherT2, Some([0.14, 0.55, 0.44]), 0.8) },
-        "t2_destroyer" => UnitLook { length: 46.0, ..look(Shape::Destroyer, Some([0.12, 0.30, 0.62]), 0.5) },
-        "t2_cruiser" => look(Shape::Cruiser, Some([1.00, 1.00, 1.00]), 0.5),
-        // Two turrets forward, the second firing over the first, and one aft.
+        "t1_torpedo_launcher" => UnitLook {
+            base: Some(Shape::PointDefenseBase),
+            ..look(Shape::TorpedoLauncher, Some([0.20, 0.68, 0.56]), 0.7)
+        },
+        "t2_torpedo_launcher" => UnitLook {
+            base: Some(Shape::PointDefenseBase),
+            ..look(Shape::TorpedoLauncherT2, Some([0.14, 0.55, 0.44]), 0.8)
+        },
+        // A gun forward and one aft, and its anti-air gun behind the bridge.
+        "t2_destroyer" => UnitLook {
+            length: 46.0,
+            turrets: mounts([
+                deck_gun(0, [0.0, 0.28, -0.16], false, 0.046),
+                deck_gun(1, [0.0, -0.39, -0.2], true, 0.046),
+                ship_mount(Shape::ShipAntiAir, 2, [0.0, -0.04, -0.03], 46.0),
+            ]),
+            ..look(Shape::Destroyer, Some([0.12, 0.30, 0.62]), 0.5)
+        },
+        // A gun on the bow, and its SAM rack on the quarterdeck.
+        "t2_cruiser" => UnitLook {
+            turrets: mounts([
+                deck_gun(1, [0.0, 0.36, -0.16], false, 0.045),
+                ship_mount(Shape::ShipSam, 2, [0.0, -0.36, -0.2], 40.0),
+            ]),
+            ..look(Shape::Cruiser, Some([1.00, 1.00, 1.00]), 0.5)
+        },
+        // Two turrets forward, the second firing over the first, and one aft, and four anti-air
+        // guns, two each side of the tower, all one weapon.
         "t3_battleship" => UnitLook {
-            turrets: [turret(0, [0.0, 0.304, -0.16], false), turret(1, [0.0, 0.109, -0.11], false), turret(2, [0.0, -0.337, -0.2], true)],
+            turrets: mounts([
+                turret(0, [0.0, 0.304, -0.16], false),
+                turret(1, [0.0, 0.109, -0.11], false),
+                turret(2, [0.0, -0.337, -0.2], true),
+                ship_mount(Shape::ShipAntiAir, 3, [-0.14, -0.17, -0.2], 92.0),
+                ship_mount(Shape::ShipAntiAir, 3, [-0.14, -0.05, -0.2], 92.0),
+                ship_mount(Shape::ShipAntiAir, 3, [0.14, -0.17, -0.2], 92.0),
+                ship_mount(Shape::ShipAntiAir, 3, [0.14, -0.05, -0.2], 92.0),
+            ]),
             ..look(Shape::Battleship, Some([0.04, 0.04, 0.07]), 0.6)
         },
         // A laser turret on the forecastle and one on the quarterdeck, where the blueprint mounts them.
         "t3_battlecruiser" => UnitLook {
             length: 86.0,
-            turrets: [laser(0, [0.0, 27.0 / 86.0, -0.16], false), laser(1, [0.0, -31.0 / 86.0, -0.2], true), None],
+            turrets: mounts([
+                laser(0, [0.0, 27.0 / 86.0, -0.16], false),
+                laser(1, [0.0, -31.0 / 86.0, -0.2], true),
+            ]),
             ..look(Shape::Battlecruiser, Some([0.62, 0.56, 0.48]), 0.55)
         },
         "naval_factory_t2" => look(Shape::NavalFactoryT2, Some([0.25, 0.35, 0.45]), 0.6),
@@ -612,8 +1181,17 @@ pub fn unit_look(key: &str) -> UnitLook {
         "t2_point_defense" => UnitLook { base: Some(Shape::PointDefenseBaseT2), ..look(Shape::PointDefenseT2, Some([0.85, 0.30, 0.65]), 1.0) },
         "air_factory_t2" => look(Shape::AirFactoryT2, Some([0.30, 0.45, 0.65]), 0.65),
         "air_factory_t3" => look(Shape::AirFactoryT3, Some([0.15, 0.25, 0.45]), 0.8),
-        "t2_gunship" => look(Shape::Gunship, Some([0.52, 0.66, 0.46]), 0.6),
-        "t3_heavy_gunship" => look(Shape::HeavyGunship, Some([0.20, 0.20, 0.25]), 0.6),
+        "t2_gunship" => UnitLook {
+            turrets: mounts([mount(Shape::ChinTurret, 0, [0.0, 0.32, -0.24], false, 0.35)]),
+            ..look(Shape::Gunship, Some([0.52, 0.66, 0.46]), 0.6)
+        },
+        "t3_heavy_gunship" => UnitLook {
+            turrets: mounts([
+                mount(Shape::ChinTurret, 0, [0.0, 0.3, -0.26], false, 0.35),
+                mount(Shape::DorsalTurret, 1, [0.0, -0.02, 0.02], false, 0.225),
+            ]),
+            ..look(Shape::HeavyGunship, Some([0.20, 0.20, 0.25]), 0.6)
+        },
         "t3_spy_plane" => look(Shape::SpyPlane, Some([0.30, 0.30, 0.35]), 0.5),
         "t3_air_superiority" => UnitLook { length: 28.0, ..look(Shape::AirSuperiority, Some([0.95, 0.95, 1.00]), 0.5) },
         // The largest aircraft with wings, longer and wider than even the heavy transport.
@@ -639,11 +1217,27 @@ pub fn unit_looks(blueprints: &BlueprintDb) -> Vec<UnitLook> {
         .map(|unit| {
             let look = unit_look(&unit.key);
             let mut shots = [None; 4];
-            for (slot, weapon) in shots.iter_mut().zip(unit.weapon.iter().chain(&unit.extra_weapons)) {
+            let mut guns = [None; 4];
+            for (slot, weapon) in shots
+                .iter_mut()
+                .zip(unit.weapon.iter().chain(&unit.extra_weapons))
+            {
                 *slot = ShotLook::of(weapon).map(|look| (weapon.splash_radius.to_bits(), look));
             }
+            // By the weapon's index, as the simulation counts them: the main one, then the extra ones.
+            for (gun, weapon) in guns.iter_mut().zip(
+                std::iter::once(unit.weapon.as_ref()).chain(unit.extra_weapons.iter().map(Some)),
+            ) {
+                *gun = weapon.and_then(GunLook::of);
+            }
             UnitLook {
-                size: if look.length > 0.0 { look.length } else { unit.radius.to_num::<f32>() * 2.0 },
+                guns,
+                flies: unit.flight.is_some(),
+                size: if look.length > 0.0 {
+                    look.length
+                } else {
+                    unit.radius.to_num::<f32>() * 2.0
+                },
                 apron: unit.is_structure() && !unit.on_water && look.shape != Shape::Wall,
                 shots,
                 shot_scale: tier_scale(unit.tier),
@@ -728,15 +1322,34 @@ fn turned(now: [i32; 2], before: Option<[i32; 2]>, alpha: f64) -> Option<[f32; 2
 /// Where each of a look's turrets is drawn on its hull, drawn at `center` as large as `extent`
 /// and facing `body`: its middle, and which way it faces. `aim` gives a weapon's aim, if it has
 /// one; a turret without rests facing the bow, or the stern.
-fn mounted_turrets(look: &UnitLook, center: [f64; 3], extent: [f32; 3], body: [f32; 2], aim: impl Fn(u8) -> Option<[f32; 2]>) -> impl Iterator<Item = (Shape, [f64; 3], [f32; 2])> {
+fn mounted_turrets(
+    look: &UnitLook,
+    center: [f64; 3],
+    extent: [f32; 3],
+    body: [f32; 2],
+    aim: impl Fn(u8) -> Option<[f32; 2]>,
+) -> impl Iterator<Item = (Shape, [f64; 3], [f32; 2], [f32; 3])> {
     look.turrets.into_iter().flatten().map(move |mount| {
         let [right, forward, up] = mount.at;
         // To the right of a hull facing (x, y) is (y, -x).
         let (across, along) = (f64::from(right * extent[0]), f64::from(forward * extent[1]));
         let (x, y) = (f64::from(body[0]), f64::from(body[1]));
-        let at = [center[0] + across * y + along * x, center[1] - across * x + along * y, center[2] + f64::from(up * extent[2])];
-        let rest = if mount.aft { [-body[0], -body[1]] } else { body };
-        (mount.shape, at, aim(mount.weapon).unwrap_or(rest))
+        let at = [
+            center[0] + across * y + along * x,
+            center[1] - across * x + along * y,
+            center[2] + f64::from(up * extent[2]),
+        ];
+        let rest = if mount.aft {
+            [-body[0], -body[1]]
+        } else {
+            body
+        };
+        (
+            mount.shape,
+            at,
+            aim(mount.weapon).unwrap_or(rest),
+            extent.map(|axis| axis * mount.scale),
+        )
     })
 }
 
@@ -760,9 +1373,13 @@ fn laser_turret(look: &UnitLook, unit: &UnitView, from: [f64; 3]) -> Option<(u8,
     let body = unit_vector(unit.facing).unwrap_or(NORTH);
     mounted_turrets(look, center, [look.size; 3], body, |_| None)
         .zip(look.turrets.into_iter().flatten())
-        .filter(|((shape, _, _), _)| *shape == Shape::LaserTurret)
-        .map(|((_, foot, _), mount)| (mount.weapon, foot))
-        .min_by(|(_, first), (_, second)| (first[0] - from[0]).hypot(first[1] - from[1]).total_cmp(&(second[0] - from[0]).hypot(second[1] - from[1])))
+        .filter(|((shape, _, _, _), _)| *shape == Shape::LaserTurret)
+        .map(|((_, foot, _, _), mount)| (mount.weapon, foot))
+        .min_by(|(_, first), (_, second)| {
+            (first[0] - from[0])
+                .hypot(first[1] - from[1])
+                .total_cmp(&(second[0] - from[0]).hypot(second[1] - from[1]))
+        })
 }
 
 /// Which way a unit's weapon aims, as the simulation has it: 0 for the main weapon, then its
@@ -789,186 +1406,588 @@ pub fn build_unit_instances(
     let time = motion.time;
     let mut next_selected = 0;
     let mut next_work = 0;
-    merge_by_id(previous, current, |unit| unit.id, |before, unit| {
-        let now = [unit.x, unit.y, unit.z];
-        let from = before.map_or(now, |before| [before.x, before.y, before.z]);
-        while next_selected < selected.len() && selected[next_selected] < unit.id {
-            next_selected += 1;
-        }
-        let is_selected = selected.get(next_selected) == Some(&unit.id);
-        while next_work < work.len() && work[next_work].builder < unit.id {
-            next_work += 1;
-        }
-        let working_on = work.get(next_work).filter(|link| link.builder == unit.id);
-        let color = match (unit.team, unit.ally) {
-            (Team::Blue, false) => BLUE,
-            (Team::Red, false) => RED,
-            (Team::Blue, true) => BLUE_ALLY,
-            (Team::Red, true) => RED_ALLY,
-        };
-        let look = looks.get(usize::from(unit.blueprint));
-        let tint = look.and_then(|look| look.tint);
-        let hull = FACTION_HULL;
-        let glow = glowing(tint.unwrap_or(color));
-        let shape = look.map_or(Shape::Cube, |look| look.shape);
-        let size = (f64::from(unit.radius) * RAW_TO_WORLD * 2.0) as f32;
-        let mut center = interpolate(from, now, alpha);
-        // Guns kick back as they fire, and working lights pulse.
-        let pulse = if unit.working { (1.0 - WORK_DIP * (0.5 + 0.5 * (time * WORK_PULSES * std::f64::consts::TAU).sin())) as f32 } else { 0.0 };
-        // A silo's action is how far open its doors are.
-        let action = if look.is_some_and(|look| look.shape.has_doors()) { byte(motion.doors(unit.id, alpha)) } else { byte(motion.recoil(unit.id).max(pulse)) };
-        // Spinning parts turn with time, each unit a little apart from the next.
-        let spin = look.and_then(|look| look.shape.spin_rate()).map_or(0, |rate| byte(((time * f64::from(rate) + f64::from(unit.id.0) * 0.618) % 1.0) as f32));
-        let animated = |mut instance: UnitInstanceRaw, phase: u8| {
-            instance.hull[3] = phase;
-            instance.glow[3] = action;
-            instance
-        };
-        if is_selected {
-            // Selection is shown on the ground, so that the unit keeps its own colors.
-            let radius = f64::from(unit.radius) * RAW_TO_WORLD;
-            let foot = [center[0], center[1], center[2] - radius + SELECTION_LIFT];
-            let (marker, scale) = if unit.is_structure { (Shape::SelectionBox, 1.12) } else { (Shape::SelectionRing, 1.4) };
-            let width = size * scale;
-            out.push(marker, instance(foot, [width, width, SELECTION_THICKNESS], NORTH, SELECTED, NO_ICON, eye));
-        }
-        if unit.is_structure {
-            // Drawn a little inside its footprint, on a foundation as wide as all of it, so that
-            // a strip of floor shows between neighbors, where adjacency wiring runs. Walls fill
-            // theirs, to join up.
-            let footprint = size;
-            // On a slope it stands level, on top of its foundation, which reaches from the highest
-            // ground under it down below the lowest, rather than sinking into the hill on one side.
-            let half = f64::from(footprint) * 0.5 * f64::from(APRON_WIDTH);
-            let slab = motion.ground_under(center[0], center[1], half);
-            if let Some((_, high)) = slab {
-                let foot = center[2] - f64::from(unit.radius) * RAW_TO_WORLD;
-                center[2] += (high - foot).max(0.0);
+    merge_by_id(
+        previous,
+        current,
+        |unit| unit.id,
+        |before, unit| {
+            let now = [unit.x, unit.y, unit.z];
+            let from = before.map_or(now, |before| [before.x, before.y, before.z]);
+            while next_selected < selected.len() && selected[next_selected] < unit.id {
+                next_selected += 1;
             }
-            let size = if shape == Shape::Wall { footprint } else { footprint * STRUCTURE_SHARE };
-            // A structure rises from the ground as it is built, and looks unfinished until then.
-            let built = f32::from(unit.built_permille) / 1000.0;
-            let height_share = look.map_or(0.6, |look| look.height_share);
-            let height = size * height_share * (0.25 + 0.75 * built);
-            center[2] += f64::from(height - footprint) * 0.5;
-            let shade = 0.55 + 0.45 * built;
-            let (trim, hull) = (color.map(|channel| channel * shade), hull.map(|channel| channel * shade));
-            // One remembered out of sight is faded: darker, its team color half grey, and unlit.
-            let (trim, hull) = if unit.remembered { (remembered_color(trim), remembered_color(hull)) } else { (trim, hull) };
-            // Its foundation and scaffolding too.
-            let color = if unit.remembered { remembered_color(color) } else { color };
-            // Nothing glows until it is finished.
-            let glow = if unit.built_permille >= 1000 && !unit.remembered { glow } else { hull };
-            // A structure's base stays put, and its gun, if any, turns to aim. Far off, where it
-            // is only a dot, one box draws it.
-            let aim = unit_vector(unit.aim).unwrap_or(NORTH);
-            let body = animated(painted(center, [size, size, height], aim, trim, hull, glow, UNIT_ICON_PX * 1.6, eye), spin);
-            if is_dot(&body) {
-                out.push(Shape::Cube, body);
-            } else {
-                if let Some(base) = look.and_then(|look| look.base) {
-                    out.push(base, animated(painted(center, [size, size, height], NORTH, trim, hull, glow, UNIT_ICON_PX * 1.6, eye), 0));
-                }
-                out.push(shape, body);
+            let is_selected = selected.get(next_selected) == Some(&unit.id);
+            while next_work < work.len() && work[next_work].builder < unit.id {
+                next_work += 1;
             }
-            // The foundation it stands on, laid before it rises, a little wider than it: a level
-            // slab from the highest ground under it to below the lowest.
-            if look.is_some_and(|look| look.apron) {
-                let ground = center[2] - f64::from(height) * 0.5;
-                let (bottom, top) = slab.map_or((ground - f64::from(APRON_HEIGHT) * 0.5, ground + f64::from(APRON_HEIGHT) * 0.5), |(low, _)| (low - f64::from(APRON_HEIGHT) * 0.5, ground + f64::from(APRON_HEIGHT) * 0.5));
-                let thick = (top - bottom) as f32;
-                out.push(Shape::Apron, painted([center[0], center[1], (top + bottom) * 0.5], [footprint * APRON_WIDTH, footprint * APRON_WIDTH, thick], NORTH, color, hull, hull, NO_ICON, eye));
-            }
-            // Scaffolding stands around the whole of what it will be until it is finished.
-            if unit.built_permille < 1000 {
-                let full = size * height_share;
-                let ground = center[2] - f64::from(height) * 0.5;
-                let frame = [center[0], center[1], ground + f64::from(full) * 0.5];
-                out.push(Shape::Scaffold, painted(frame, [size * 1.04, size * 1.04, full], NORTH, color, hull, glow, NO_ICON, eye));
-            }
-            // An upgrade shows the next tier going up through the structure as it progresses,
-            // unlit, inside scaffolding as tall as it will be.
-            if let (Some((into, permille)), true) = (unit.upgrade, unit.built_permille >= 1000) {
-                if let Some(next) = looks.get(usize::from(into)) {
-                    let progress = f32::from(permille) / 1000.0;
-                    let ground = center[2] - f64::from(height) * 0.5;
-                    let full = size * next.height_share;
-                    let rising = full * (0.1 + 0.9 * progress);
-                    let at = [center[0], center[1], ground + f64::from(rising) * 0.5];
-                    let next_hull = FACTION_HULL.map(|channel| channel * (0.6 + 0.4 * progress));
-                    let next_trim = color.map(|channel| channel * (0.6 + 0.4 * progress));
-                    let grown = size * 1.02;
-                    if let Some(base) = next.base {
-                        out.push(base, painted(at, [grown, grown, rising], NORTH, next_trim, next_hull, next_hull, NO_ICON, eye));
-                    }
-                    out.push(next.shape, painted(at, [grown, grown, rising], NORTH, next_trim, next_hull, next_hull, NO_ICON, eye));
-                    let frame = [center[0], center[1], ground + f64::from(full) * 0.5];
-                    out.push(Shape::Scaffold, painted(frame, [size * 1.06, size * 1.06, full], NORTH, color, hull, hull, NO_ICON, eye));
-                }
-            }
-            // What a factory is building stands in its bay, rising from the floor as it is built,
-            // in its team's colors but unlit and dim, until it drives or flies out.
-            if let (Some((item, permille)), Some(floor), true) = (unit.assembling, shape.bay_floor(), unit.built_permille >= 1000) {
-                if let Some(made) = looks.get(usize::from(item)).filter(|made| made.size > 0.0) {
-                    let ground = center[2] - f64::from(height) * 0.5;
-                    let progress = f32::from(permille) / 1000.0;
-                    let rise = made.size * (0.2 + 0.8 * progress);
-                    let at = [center[0], center[1], ground + f64::from(height * floor + rise * 0.5)];
-                    let dim = 0.55 + 0.45 * progress;
-                    let made_trim = color.map(|channel| channel * dim);
-                    let made_hull = FACTION_HULL.map(|channel| channel * dim);
-                    let extent = [made.size, made.size, rise];
-                    if let Some(base) = made.base {
-                        out.push(base, painted(at, extent, EAST, made_trim, made_hull, made_hull, NO_ICON, eye));
-                    }
-                    out.push(made.shape, painted(at, extent, EAST, made_trim, made_hull, made_hull, NO_ICON, eye));
-                    for (turret, turret_at, facing) in mounted_turrets(made, at, extent, EAST, |_| None) {
-                        out.push(turret, painted(turret_at, extent, facing, made_trim, made_hull, made_hull, NO_ICON, eye));
-                    }
-                }
-            }
-        } else {
-            // The body faces the way the simulation says. Units that turn instantly, such as the
-            // stress test's cubes, have no facing, so they are turned here as before.
-            let (body, upper) = match body_facing(unit, before, alpha) {
-                Some(body) => {
-                    // Work comes first, then the weapon's aim, and otherwise straight ahead.
-                    let rest = unit_vector(unit.aim).unwrap_or(body);
-                    let upper = if look.is_some_and(|look| look.base.is_some()) { update_heading(&mut motion.headings, unit, before, working_on, Some(rest)) } else { body };
-                    (body, upper)
-                }
-                None => {
-                    // The stress test's plain cubes have no front, and skip this to save time.
-                    let heading = if look.is_some() { update_heading(&mut motion.headings, unit, before, working_on, None) } else { NORTH };
-                    (heading, heading)
-                }
+            let working_on = work.get(next_work).filter(|link| link.builder == unit.id);
+            let color = match (unit.team, unit.ally) {
+                (Team::Blue, false) => BLUE,
+                (Team::Red, false) => RED,
+                (Team::Blue, true) => BLUE_ALLY,
+                (Team::Red, true) => RED_ALLY,
             };
-            // A ship, vehicle, or aircraft may be drawn longer or shorter than its footprint.
-            let drawn = look.map(|look| look.length).filter(|&length| length > 0.0).unwrap_or(size);
-            // Far off, where it is only a dot, one box draws all of it: hull, body, and turrets.
-            let top = animated(painted(center, [drawn; 3], upper, color, hull, glow, UNIT_ICON_PX, eye), spin);
-            if is_dot(&top) {
-                out.push(Shape::Cube, top);
+            let look = looks.get(usize::from(unit.blueprint));
+            let tint = look.and_then(|look| look.tint);
+            let hull = FACTION_HULL;
+            let glow = glowing(tint.unwrap_or(color));
+            let shape = look.map_or(Shape::Cube, |look| look.shape);
+            let size = (f64::from(unit.radius) * RAW_TO_WORLD * 2.0) as f32;
+            let mut center = interpolate(from, now, alpha);
+            // Guns kick back as they fire, and working lights pulse.
+            let pulse = if unit.working {
+                (1.0 - WORK_DIP * (0.5 + 0.5 * (time * WORK_PULSES * std::f64::consts::TAU).sin()))
+                    as f32
             } else {
-                if let Some(base) = look.and_then(|look| look.base) {
-                    let stride = if base.walks() { byte(motion.stride(unit.id, center, drawn)) } else { 0 };
-                    out.push(base, animated(painted(center, [drawn; 3], body, color, hull, glow, UNIT_ICON_PX, eye), stride));
+                0.0
+            };
+            // A silo's action is how far open its doors are.
+            let action = if look.is_some_and(|look| look.shape.has_doors()) {
+                byte(motion.doors(unit.id, alpha))
+            } else {
+                byte(motion.recoil(unit.id).max(pulse))
+            };
+            // Spinning parts turn with time, each unit a little apart from the next.
+            let spin = look
+                .and_then(|look| look.shape.spin_rate())
+                .map_or(0, |rate| {
+                    byte(((time * f64::from(rate) + f64::from(unit.id.0) * 0.618) % 1.0) as f32)
+                });
+            let animated = |mut instance: UnitInstanceRaw, phase: u8| {
+                instance.hull[3] = phase;
+                instance.glow[3] = action;
+                instance
+            };
+            if is_selected {
+                // Selection is shown on the ground, so that the unit keeps its own colors.
+                let radius = f64::from(unit.radius) * RAW_TO_WORLD;
+                let foot = [center[0], center[1], center[2] - radius + SELECTION_LIFT];
+                let (marker, scale) = if unit.is_structure {
+                    (Shape::SelectionBox, 1.12)
+                } else {
+                    (Shape::SelectionRing, 1.4)
+                };
+                let width = size * scale;
+                out.push(
+                    marker,
+                    instance(
+                        foot,
+                        [width, width, SELECTION_THICKNESS],
+                        NORTH,
+                        SELECTED,
+                        NO_ICON,
+                        eye,
+                    ),
+                );
+            }
+            if unit.is_structure {
+                // Drawn a little inside its footprint, on a foundation as wide as all of it, so that
+                // a strip of floor shows between neighbors, where adjacency wiring runs. Walls fill
+                // theirs, to join up.
+                let footprint = size;
+                // On a slope it stands level, on top of its foundation, which reaches from the highest
+                // ground under it down below the lowest, rather than sinking into the hill on one side.
+                let half = f64::from(footprint) * 0.5 * f64::from(APRON_WIDTH);
+                let slab = motion.ground_under(center[0], center[1], half);
+                if let Some((_, high)) = slab {
+                    let foot = center[2] - f64::from(unit.radius) * RAW_TO_WORLD;
+                    center[2] += (high - foot).max(0.0);
                 }
-                out.push(shape, top);
-                if let Some(look) = look {
-                    let aim = |weapon| turned(weapon_aim(unit, weapon), before.map(|before| weapon_aim(before, weapon)), alpha);
-                    for ((turret, at, facing), mount) in mounted_turrets(look, center, [drawn; 3], body, aim).zip(look.turrets.into_iter().flatten()) {
-                        let mut part = animated(painted(at, [drawn; 3], facing, color, hull, glow, UNIT_ICON_PX, eye), 0);
-                        // A laser turret flashes as it fires itself, not as the ship's other one does.
-                        if turret == Shape::LaserTurret {
-                            part.glow[3] = byte(motion.beam_flash(unit.id, mount.weapon));
+                let size = if shape == Shape::Wall {
+                    footprint
+                } else {
+                    footprint * STRUCTURE_SHARE
+                };
+                // A structure rises from the ground as it is built, and looks unfinished until then.
+                let built = f32::from(unit.built_permille) / 1000.0;
+                let height_share = look.map_or(0.6, |look| look.height_share);
+                let height = size * height_share * (0.25 + 0.75 * built);
+                center[2] += f64::from(height - footprint) * 0.5;
+                let shade = 0.55 + 0.45 * built;
+                let (trim, hull) = (
+                    color.map(|channel| channel * shade),
+                    hull.map(|channel| channel * shade),
+                );
+                // One remembered out of sight is faded: darker, its team color half grey, and unlit.
+                let (trim, hull) = if unit.remembered {
+                    (remembered_color(trim), remembered_color(hull))
+                } else {
+                    (trim, hull)
+                };
+                // Its foundation and scaffolding too.
+                let color = if unit.remembered {
+                    remembered_color(color)
+                } else {
+                    color
+                };
+                // Nothing glows until it is finished.
+                let glow = if unit.built_permille >= 1000 && !unit.remembered {
+                    glow
+                } else {
+                    hull
+                };
+                // A structure's base stays put, and its gun, if any, turns to aim. Far off, where it
+                // is only a dot, one box draws it.
+                // A gun the simulation does not turn, such as a missile launcher's, turns to its latest shot.
+                let aim = match unit_vector(unit.aim) {
+                    Some(aim) => aim,
+                    None if look.is_some_and(|look| look.guns[0].is_some_and(|gun| !gun.aims))
+                        && unit.built_permille >= 1000 =>
+                    {
+                        motion.swing(unit.id, 0, NORTH)
+                    }
+                    None => NORTH,
+                };
+                let mut body = animated(
+                    painted(
+                        center,
+                        [size, size, height],
+                        aim,
+                        trim,
+                        hull,
+                        glow,
+                        UNIT_ICON_PX * 1.6,
+                        eye,
+                    ),
+                    spin,
+                );
+                if is_dot(&body) {
+                    out.push(Shape::Cube, body);
+                } else {
+                    if let Some(base) = look.and_then(|look| look.base) {
+                        out.push(
+                            base,
+                            animated(
+                                painted(
+                                    center,
+                                    [size, size, height],
+                                    NORTH,
+                                    trim,
+                                    hull,
+                                    glow,
+                                    UNIT_ICON_PX * 1.6,
+                                    eye,
+                                ),
+                                0,
+                            ),
+                        );
+                    }
+                    if let (Some(look), true) = (look, unit.built_permille >= 1000) {
+                        let mut muzzles = Vec::new();
+                        gun_muzzles(
+                            motion,
+                            unit,
+                            look,
+                            shape,
+                            &mut body,
+                            None,
+                            eye,
+                            &mut muzzles,
+                        );
+                        motion.fire_from(unit, &muzzles);
+                    }
+                    out.push(shape, body);
+                }
+                // The foundation it stands on, laid before it rises, a little wider than it: a level
+                // slab from the highest ground under it to below the lowest.
+                if look.is_some_and(|look| look.apron) {
+                    let ground = center[2] - f64::from(height) * 0.5;
+                    let (bottom, top) = slab.map_or(
+                        (
+                            ground - f64::from(APRON_HEIGHT) * 0.5,
+                            ground + f64::from(APRON_HEIGHT) * 0.5,
+                        ),
+                        |(low, _)| {
+                            (
+                                low - f64::from(APRON_HEIGHT) * 0.5,
+                                ground + f64::from(APRON_HEIGHT) * 0.5,
+                            )
+                        },
+                    );
+                    let thick = (top - bottom) as f32;
+                    out.push(
+                        Shape::Apron,
+                        painted(
+                            [center[0], center[1], (top + bottom) * 0.5],
+                            [footprint * APRON_WIDTH, footprint * APRON_WIDTH, thick],
+                            NORTH,
+                            color,
+                            hull,
+                            hull,
+                            NO_ICON,
+                            eye,
+                        ),
+                    );
+                }
+                // Scaffolding stands around the whole of what it will be until it is finished.
+                if unit.built_permille < 1000 {
+                    let full = size * height_share;
+                    let ground = center[2] - f64::from(height) * 0.5;
+                    let frame = [center[0], center[1], ground + f64::from(full) * 0.5];
+                    out.push(
+                        Shape::Scaffold,
+                        painted(
+                            frame,
+                            [size * 1.04, size * 1.04, full],
+                            NORTH,
+                            color,
+                            hull,
+                            glow,
+                            NO_ICON,
+                            eye,
+                        ),
+                    );
+                }
+                // An upgrade shows the next tier going up through the structure as it progresses,
+                // unlit, inside scaffolding as tall as it will be.
+                if let (Some((into, permille)), true) = (unit.upgrade, unit.built_permille >= 1000)
+                {
+                    if let Some(next) = looks.get(usize::from(into)) {
+                        let progress = f32::from(permille) / 1000.0;
+                        let ground = center[2] - f64::from(height) * 0.5;
+                        let full = size * next.height_share;
+                        let rising = full * (0.1 + 0.9 * progress);
+                        let at = [center[0], center[1], ground + f64::from(rising) * 0.5];
+                        let next_hull =
+                            FACTION_HULL.map(|channel| channel * (0.6 + 0.4 * progress));
+                        let next_trim = color.map(|channel| channel * (0.6 + 0.4 * progress));
+                        let grown = size * 1.02;
+                        if let Some(base) = next.base {
+                            out.push(
+                                base,
+                                painted(
+                                    at,
+                                    [grown, grown, rising],
+                                    NORTH,
+                                    next_trim,
+                                    next_hull,
+                                    next_hull,
+                                    NO_ICON,
+                                    eye,
+                                ),
+                            );
                         }
-                        out.push(turret, part);
+                        out.push(
+                            next.shape,
+                            painted(
+                                at,
+                                [grown, grown, rising],
+                                NORTH,
+                                next_trim,
+                                next_hull,
+                                next_hull,
+                                NO_ICON,
+                                eye,
+                            ),
+                        );
+                        let frame = [center[0], center[1], ground + f64::from(full) * 0.5];
+                        out.push(
+                            Shape::Scaffold,
+                            painted(
+                                frame,
+                                [size * 1.06, size * 1.06, full],
+                                NORTH,
+                                color,
+                                hull,
+                                hull,
+                                NO_ICON,
+                                eye,
+                            ),
+                        );
+                    }
+                }
+                // What a factory is building stands in its bay, rising from the floor as it is built,
+                // in its team's colors but unlit and dim, until it drives or flies out.
+                if let (Some((item, permille)), Some(floor), true) = (
+                    unit.assembling,
+                    shape.bay_floor(),
+                    unit.built_permille >= 1000,
+                ) {
+                    if let Some(made) = looks.get(usize::from(item)).filter(|made| made.size > 0.0)
+                    {
+                        let ground = center[2] - f64::from(height) * 0.5;
+                        let progress = f32::from(permille) / 1000.0;
+                        let rise = made.size * (0.2 + 0.8 * progress);
+                        let at = [
+                            center[0],
+                            center[1],
+                            ground + f64::from(height * floor + rise * 0.5),
+                        ];
+                        let dim = 0.55 + 0.45 * progress;
+                        let made_trim = color.map(|channel| channel * dim);
+                        let made_hull = FACTION_HULL.map(|channel| channel * dim);
+                        let extent = [made.size, made.size, rise];
+                        if let Some(base) = made.base {
+                            out.push(
+                                base,
+                                painted(
+                                    at, extent, EAST, made_trim, made_hull, made_hull, NO_ICON, eye,
+                                ),
+                            );
+                        }
+                        out.push(
+                            made.shape,
+                            painted(
+                                at, extent, EAST, made_trim, made_hull, made_hull, NO_ICON, eye,
+                            ),
+                        );
+                        for (turret, turret_at, facing, turret_extent) in
+                            mounted_turrets(made, at, extent, EAST, |_| None)
+                        {
+                            out.push(
+                                turret,
+                                painted(
+                                    turret_at,
+                                    turret_extent,
+                                    facing,
+                                    made_trim,
+                                    made_hull,
+                                    made_hull,
+                                    NO_ICON,
+                                    eye,
+                                ),
+                            );
+                        }
+                    }
+                }
+            } else {
+                // The body faces the way the simulation says. Units that turn instantly, such as the
+                // stress test's cubes, have no facing, so they are turned here as before.
+                let (body, upper) = match body_facing(unit, before, alpha) {
+                    Some(body) => {
+                        // Work comes first, then the weapon's aim, and otherwise straight ahead. A gun the
+                        // simulation does not turn turns to its latest shot.
+                        let fixed = look.is_some_and(|look| {
+                            look.guns[0].is_some_and(|gun| !gun.aims) && look.base.is_some()
+                        });
+                        let rest = unit_vector(unit.aim).unwrap_or_else(|| {
+                            if fixed {
+                                motion.swing(unit.id, 0, body)
+                            } else {
+                                body
+                            }
+                        });
+                        let upper = if look.is_some_and(|look| look.base.is_some()) {
+                            update_heading(
+                                &mut motion.headings,
+                                unit,
+                                before,
+                                working_on,
+                                Some(rest),
+                            )
+                        } else {
+                            body
+                        };
+                        (body, upper)
+                    }
+                    None => {
+                        // The stress test's plain cubes have no front, and skip this to save time.
+                        let heading = if look.is_some() {
+                            update_heading(&mut motion.headings, unit, before, working_on, None)
+                        } else {
+                            NORTH
+                        };
+                        (heading, heading)
+                    }
+                };
+                // A ship, vehicle, or aircraft may be drawn longer or shorter than its footprint.
+                let drawn = look
+                    .map(|look| look.length)
+                    .filter(|&length| length > 0.0)
+                    .unwrap_or(size);
+                // Far off, where it is only a dot, one box draws all of it: hull, body, and turrets.
+                let mut top = animated(
+                    painted(
+                        center,
+                        [drawn; 3],
+                        upper,
+                        color,
+                        hull,
+                        glow,
+                        UNIT_ICON_PX,
+                        eye,
+                    ),
+                    spin,
+                );
+                if is_dot(&top) {
+                    out.push(Shape::Cube, top);
+                } else {
+                    if let Some(base) = look.and_then(|look| look.base) {
+                        let stride = if base.walks() {
+                            byte(motion.stride(unit.id, center, drawn))
+                        } else {
+                            0
+                        };
+                        out.push(
+                            base,
+                            animated(
+                                painted(
+                                    center,
+                                    [drawn; 3],
+                                    body,
+                                    color,
+                                    hull,
+                                    glow,
+                                    UNIT_ICON_PX,
+                                    eye,
+                                ),
+                                stride,
+                            ),
+                        );
+                    }
+                    if let Some(look) = look {
+                        let mut muzzles = Vec::new();
+                        gun_muzzles(motion, unit, look, shape, &mut top, None, eye, &mut muzzles);
+                        out.push(shape, top);
+                        // A gun that the simulation turns to aim faces its aim; one it does not, its
+                        // latest shot.
+                        let mut aims = [None; 4];
+                        for mount in look.turrets.iter().flatten() {
+                            let weapon = usize::from(mount.weapon).min(3);
+                            let rest = if mount.aft {
+                                [-body[0], -body[1]]
+                            } else {
+                                body
+                            };
+                            aims[weapon] = match look.guns[weapon] {
+                                Some(gun) if !gun.aims => {
+                                    Some(motion.swing(unit.id, mount.weapon, rest))
+                                }
+                                // A turret drawn aft whose gun the simulation rests facing the bow, as
+                                // the destroyer's second gun, rests facing the stern while it has not
+                                // fired lately, rather than over its own ship.
+                                Some(gun)
+                                    if mount.aft
+                                        && !gun.aft
+                                        && !motion.fired_lately(unit.id, mount.weapon) =>
+                                {
+                                    let aim = turned(
+                                        weapon_aim(unit, mount.weapon),
+                                        before.map(|before| weapon_aim(before, mount.weapon)),
+                                        alpha,
+                                    );
+                                    aim.filter(|aim| aim[0] * body[0] + aim[1] * body[1] < 0.95)
+                                }
+                                _ => turned(
+                                    weapon_aim(unit, mount.weapon),
+                                    before.map(|before| weapon_aim(before, mount.weapon)),
+                                    alpha,
+                                ),
+                            };
+                        }
+                        let aim = |weapon: u8| aims[usize::from(weapon).min(3)];
+                        let parts: Vec<_> = mounted_turrets(look, center, [drawn; 3], body, aim)
+                            .zip(look.turrets.into_iter().flatten())
+                            .collect();
+                        for ((turret, at, facing, extent), mount) in parts {
+                            let mut part = animated(
+                                painted(at, extent, facing, color, hull, glow, UNIT_ICON_PX, eye),
+                                0,
+                            );
+                            // A laser turret flashes as it fires itself, not as the ship's other one
+                            // does, and a gun on a turret of its own kicks back as it fires itself.
+                            part.glow[3] = byte(if turret == Shape::LaserTurret {
+                                motion.beam_flash(unit.id, mount.weapon)
+                            } else {
+                                motion.gun_recoil(unit.id, mount.weapon)
+                            });
+                            gun_muzzles(
+                                motion,
+                                unit,
+                                look,
+                                turret,
+                                &mut part,
+                                Some(mount.weapon),
+                                eye,
+                                &mut muzzles,
+                            );
+                            out.push(turret, part);
+                        }
+                        motion.fire_from(unit, &muzzles);
+                    } else {
+                        out.push(shape, top);
                     }
                 }
             }
-        }
+        },
+    );
+    motion.fire_the_rest(current);
+}
+
+/// A point in a part's own box, in the world, where the part is drawn.
+fn part_point(part: &UnitInstanceRaw, local: [f32; 3], eye: [f64; 3]) -> [f64; 3] {
+    let m = part.model_matrix;
+    std::array::from_fn(|axis| {
+        eye[axis]
+            + f64::from(
+                m[0][axis] * local[0] + m[1][axis] * local[1] + m[2][axis] * local[2] + m[3][axis],
+            )
+    })
+}
+
+/// How long a part is drawn along an axis of its own box, as the model matrix stretches it.
+fn part_extent(part: &UnitInstanceRaw, axis: usize) -> f32 {
+    let [x, y, z, _] = part.model_matrix[axis];
+    (x * x + y * y + z * z).sqrt()
+}
+
+/// Raises a gun part's barrels to its latest shot, and notes where its muzzles are drawn, as
+/// `(weapon, where, bore)`. `mount` is the weapon of a turret drawn on its own; for the unit's
+/// own shape, each muzzle is its weapon's, but for those on turrets of their own. An aircraft's
+/// guns on its airframe are fixed, and not raised.
+#[allow(clippy::too_many_arguments)]
+fn gun_muzzles(
+    motion: &mut Motion,
+    unit: &UnitView,
+    look: &UnitLook,
+    shape: Shape,
+    part: &mut UnitInstanceRaw,
+    mount: Option<u8>,
+    eye: [f64; 3],
+    out: &mut Vec<(u8, [f64; 3], f32)>,
+) {
+    let on_turret = |weapon: u8| {
+        look.turrets
+            .iter()
+            .flatten()
+            .any(|turret| turret.weapon == weapon)
+    };
+    let muzzles = super::meshes::muzzles(shape);
+    let weapon_of = |muzzle: &super::meshes::Muzzle| mount.unwrap_or(muzzle.weapon);
+    let theirs = |muzzle: &&super::meshes::Muzzle| mount.is_some() || !on_turret(muzzle.weapon);
+    // The barrels in one part are raised together, to the shot of the first gun in it that is raised.
+    let (along, up) = (part_extent(part, 1), part_extent(part, 2));
+    let raised = muzzles.iter().filter(theirs).find(|muzzle| {
+        let weapon = weapon_of(muzzle);
+        muzzle.hinge != muzzle.at
+            && (mount.is_some() || !look.flies)
+            && look
+                .guns
+                .get(usize::from(weapon))
+                .copied()
+                .flatten()
+                .is_some_and(|gun| gun.raised)
     });
+    let mut pitch = 0.0;
+    if let Some(muzzle) = raised {
+        let modeled = muzzle.modeled_pitch();
+        // From the part's own box, stretched by its drawn size, to the world, and back.
+        let rest = (modeled.sin() * up).atan2(modeled.cos() * along);
+        // A gun on a turret in the simulation is drawn raised as far as it has laid its barrels.
+        let weapon = weapon_of(muzzle);
+        let turns = weapon_aim(unit, weapon) != [0, 0];
+        let laid = turns.then(|| (f64::from(unit.pitches.get(usize::from(weapon)).copied().unwrap_or(0)) / 4096.0).clamp(-1.0, 1.0).asin() as f32);
+        let world = motion.raise(unit.id, weapon, rest, laid);
+        pitch = (world.sin() / up.max(1e-6)).atan2(world.cos() / along.max(1e-6)) - modeled;
+        part.model_matrix[0][3] = pitch;
+    }
+    for muzzle in muzzles.iter().filter(theirs) {
+        out.push((
+            weapon_of(muzzle),
+            part_point(part, muzzle.raised(pitch), eye),
+            muzzle.bore * along,
+        ));
+    }
 }
 
 /// The way a missile flies, up and down too, or for one just fired, with no position before,
@@ -1013,10 +2032,24 @@ fn missile_instance(center: [f64; 3], direction: [f32; 3], length: f32, width: f
     missile
 }
 
+/// A muzzle flash, `length` out along `direction` and `width` across, centered at `center`:
+/// its mesh lies along y, from its muzzle at -y. Use with `Shape::MuzzleFlash`.
+pub(super) fn flash_instance(
+    center: [f64; 3],
+    direction: [f32; 3],
+    length: f32,
+    width: f32,
+    color: [f32; 3],
+    eye: [f64; 3],
+) -> UnitInstanceRaw {
+    missile_instance(center, direction, length, width, color, NO_ICON, eye)
+}
+
 /// Draws the projectiles in flight, and those that struck since the last tick (`landed`) on the
 /// way from where they were to where they struck, so that a shell is seen to reach its target.
-/// `shot` says what each shell looks like (`Effects::shot`), and `water` is the water's height,
-/// under which a torpedo is not drawn.
+/// `shot` says what each shell looks like (`Effects::shot`), `water` is the water's height,
+/// under which a torpedo is not drawn, and `launched` how far from its path one lately fired is
+/// drawn, as it leaves its muzzle (`Motion::launch_offset`).
 #[allow(clippy::too_many_arguments)]
 pub fn build_projectile_instances(
     previous: &[ProjectileView],
@@ -1025,14 +2058,21 @@ pub fn build_projectile_instances(
     alpha: f64,
     eye: [f64; 3],
     shot: &dyn Fn(&ProjectileView) -> ShotStyle,
+    launched: &dyn Fn(SimId) -> Option<[f64; 3]>,
     water: Option<f64>,
     out: &mut InstanceBatches,
 ) {
     let mut draw = |before: Option<&ProjectileView>, projectile: &ProjectileView| {
         let now = [projectile.x, projectile.y, projectile.z];
         // One just fired is drawn leaving its gun.
-        let from = before.map_or(projectile.from.unwrap_or(now), |before| [before.x, before.y, before.z]);
-        let center = interpolate(from, now, alpha);
+        let from = before.map_or(projectile.from.unwrap_or(now), |before| {
+            [before.x, before.y, before.z]
+        });
+        let mut center = interpolate(from, now, alpha);
+        // The simulation fires from the top of the unit; it is drawn leaving the muzzle.
+        if let Some(offset) = launched(projectile.id) {
+            center = std::array::from_fn(|axis| center[axis] + offset[axis]);
+        }
         // A missile points the way it is flying along the ground.
         let heading = {
             let (dx, dy) = (f64::from(now[0] - from[0]), f64::from(now[1] - from[1]));
@@ -1120,8 +2160,22 @@ pub fn wreck_model_instances(center: [f64; 3], radius: f64, look: &UnitLook, fac
     for shape in look.base.into_iter().chain([look.shape]) {
         push(shape, part);
     }
-    for (turret, turret_at, turret_facing) in mounted_turrets(look, at, [size, size, height], facing, |_| None) {
-        push(turret, painted(turret_at, [size, size, height], turret_facing, char_dark, char_light, char_dark, PROJECTILE_ICON_PX, eye));
+    for (turret, turret_at, turret_facing, turret_extent) in
+        mounted_turrets(look, at, [size, size, height], facing, |_| None)
+    {
+        push(
+            turret,
+            painted(
+                turret_at,
+                turret_extent,
+                turret_facing,
+                char_dark,
+                char_light,
+                char_dark,
+                PROJECTILE_ICON_PX,
+                eye,
+            ),
+        );
     }
 }
 
@@ -1247,7 +2301,7 @@ mod tests {
             health_permille: 1000,
             built_permille: 1000,
             is_structure: false,
-            facing: [0, 0], aim: [0, 0], extra_aims: [[0; 2]; 3],
+            facing: [0, 0], aim: [0, 0], extra_aims: [[0; 2]; 3], pitches: [0; 4],
             working: false,
             assembling: None,
             upgrade: None,
@@ -1565,7 +2619,10 @@ mod tests {
         let set = super::super::meshes::MeshSet::build();
         let fires = |shape: Shape| {
             let range = set.ranges[shape as usize].clone();
-            set.indices[range.start as usize..range.end as usize].iter().any(|&index| set.vertices[index as usize].material & (motion::RECOIL | motion::FLASH) != 0)
+            !super::super::meshes::muzzles(shape).is_empty()
+                || set.indices[range.start as usize..range.end as usize]
+                    .iter()
+                    .any(|&index| set.vertices[index as usize].material & motion::RECOIL != 0)
         };
         let mut unarmed = Vec::new();
         for unit in db.iter().filter(|unit| unit.class != crate::sim::blueprints::UnitClass::Ammo && !unit.is_air()) {
@@ -1648,9 +2705,21 @@ mod tests {
 
     /// A unit's parts as `meshes::tests::view` draws them: its base, what turns on it facing the
     /// same way, and its turrets where they sit, at rest.
-    pub(crate) fn look_parts(look: &UnitLook) -> Vec<(Shape, f32, [f32; 3])> {
-        let turrets = look.turrets.into_iter().flatten().map(|mount| (mount.shape, if mount.aft { std::f32::consts::PI } else { 0.0 }, mount.at));
-        look.base.into_iter().chain([look.shape]).map(|shape| (shape, 0.0, [0.0; 3])).chain(turrets).collect()
+    pub(crate) fn look_parts(look: &UnitLook) -> Vec<(Shape, f32, [f32; 3], f32)> {
+        let turrets = look.turrets.into_iter().flatten().map(|mount| {
+            (
+                mount.shape,
+                if mount.aft { std::f32::consts::PI } else { 0.0 },
+                mount.at,
+                mount.scale,
+            )
+        });
+        look.base
+            .into_iter()
+            .chain([look.shape])
+            .map(|shape| (shape, 0.0, [0.0; 3], 1.0))
+            .chain(turrets)
+            .collect()
     }
 
     /// What share of a unit, as the camera sees it close up, is each material: its base and
@@ -1691,13 +2760,13 @@ mod tests {
             out.shape(Shape::Tank)[0].glow[3]
         };
         let mut motion = Motion::new();
-        motion.note_shots(&[], &[]);
+        motion.note_shots(&[], &[], &[], &[]);
         assert_eq!(action(&mut motion), 0, "nothing fired yet");
-        motion.note_shots(&[], &[shell(10, 1), shell(11, 2)]);
+        motion.note_shots(&[], &[shell(10, 1), shell(11, 2)], &[], &[]);
         assert_eq!(action(&mut motion), 255, "it has just fired");
         motion.time = RECOIL_SECONDS * 0.5;
         // The same shell, a frame later, is not a new shot.
-        motion.note_shots(&[], &[shell(10, 1)]);
+        motion.note_shots(&[], &[shell(10, 1)], &[], &[]);
         let halfway = action(&mut motion);
         assert!(halfway > 64 && halfway < 192, "half settled: {halfway}");
         motion.time = RECOIL_SECONDS * 2.0;
@@ -1737,7 +2806,7 @@ mod tests {
         motion.note_doors(&[], &[]);
         assert_eq!(action(&mut motion, 0.5), 0, "shut with no launch");
         // A shot of its own, such as the missile leaving, does not move them.
-        motion.note_shots(&[], &[shell(10, 3)]);
+        motion.note_shots(&[], &[shell(10, 3)], &[], &[]);
         assert_eq!(action(&mut motion, 0.5), 0, "no recoil on a silo");
         motion.note_doors(&[(SimId(3), 400)], &[(SimId(3), 600)]);
         let (start, middle, end) = (action(&mut motion, 0.0), action(&mut motion, 0.5), action(&mut motion, 1.0));
@@ -1980,12 +3049,33 @@ mod tests {
             let look = &looks[usize::from(unit.id.0)];
             let weapons: Vec<_> = unit.weapon.iter().chain(&unit.extra_weapons).collect();
             for mount in look.turrets.iter().flatten() {
-                let weapon = weapons.get(usize::from(mount.weapon)).unwrap_or_else(|| panic!("{} has no weapon {}", unit.key, mount.weapon));
-                assert!(weapon.turn_rate.is_some() && usize::from(mount.weapon) <= 3, "{}'s weapon {} has a turret the view shows", unit.key, mount.weapon);
-                let [right, forward] = weapon.mount.map(|axis| axis.to_num::<f32>());
-                let drawn = [mount.at[0] * look.size, mount.at[1] * look.size];
-                assert!((drawn[0] - right).hypot(drawn[1] - forward) < 1.0, "{}'s turret {} is drawn at {drawn:?}, mounted at {right}, {forward}", unit.key, mount.weapon);
-                assert_eq!(mount.aft, weapon.aft, "{}'s turret {} rests the way its gun does", unit.key, mount.weapon);
+                let weapon = weapons
+                    .get(usize::from(mount.weapon))
+                    .unwrap_or_else(|| panic!("{} has no weapon {}", unit.key, mount.weapon));
+                assert!(
+                    usize::from(mount.weapon) <= 3,
+                    "{}'s weapon {} has a turret the view shows",
+                    unit.key,
+                    mount.weapon
+                );
+                // A gun the blueprint mounts somewhere is drawn there. One it fires from the middle
+                // may stand anywhere on the hull: its shots are drawn leaving its muzzle all the same.
+                if weapon.mount != [crate::math::fp::Fp::ZERO; 2] {
+                    let [right, forward] = weapon.mount.map(|axis| axis.to_num::<f32>());
+                    let drawn = [mount.at[0] * look.size, mount.at[1] * look.size];
+                    assert!(
+                        (drawn[0] - right).hypot(drawn[1] - forward) < 1.0,
+                        "{}'s turret {} is drawn at {drawn:?}, mounted at {right}, {forward}",
+                        unit.key,
+                        mount.weapon
+                    );
+                }
+                assert!(
+                    mount.aft || !weapon.aft,
+                    "{}'s turret {} rests the way its gun does",
+                    unit.key,
+                    mount.weapon
+                );
             }
             for (index, _) in weapons.iter().enumerate().filter(|(_, weapon)| weapon.mount != [crate::math::fp::Fp::ZERO; 2]) {
                 assert!(look.turrets.iter().flatten().any(|mount| usize::from(mount.weapon) == index), "{}'s weapon {index} is mounted but not drawn on a turret", unit.key);
@@ -2160,7 +3250,7 @@ mod tests {
         }
         // Turned east, the hull carries its turrets round with it.
         ship.facing = [4096, 0];
-        let east = draw(UnitView { aim: [0, 0], extra_aims: [[0; 2]; 3], ..ship });
+        let east = draw(UnitView { aim: [0, 0], extra_aims: [[0; 2]; 3], pitches: [0; 4], ..ship });
         let front = look.turrets[0].expect("a front turret").at[1] * look.size;
         assert!((east[0].1[0] - front).abs() < 1e-3 && east[0].1[1].abs() < 1e-3, "the front turret is east of the middle: {:?}", east[0].1);
     }
@@ -2193,9 +3283,24 @@ mod tests {
         let projectile = ProjectileView { splash: weapon.splash_radius.to_bits(), x: 4096 * 10, ..shell(1, 1) };
         let style = ShotStyle::resolve(&projectile, looks.get(usize::from(unit.id.0)), under_water);
         let mut out = InstanceBatches::default();
-        build_projectile_instances(&[shell(1, 1)], &[projectile], &[], 0.5, [0.0; 3], &|_| style, None, &mut out);
-        let (shape, part) = [Shape::Shell, Shape::Round].into_iter().find_map(|shape| out.shape(shape).first().map(|part| (shape, *part))).expect("it is drawn");
-        let length = part.model_matrix[0][0].hypot(part.model_matrix[0][1]).hypot(part.model_matrix[0][2]);
+        build_projectile_instances(
+            &[shell(1, 1)],
+            &[projectile],
+            &[],
+            0.5,
+            [0.0; 3],
+            &|_| style,
+            &|_| None,
+            None,
+            &mut out,
+        );
+        let (shape, part) = [Shape::Shell, Shape::Round]
+            .into_iter()
+            .find_map(|shape| out.shape(shape).first().map(|part| (shape, *part)))
+            .expect("it is drawn");
+        let length = part.model_matrix[0][0]
+            .hypot(part.model_matrix[0][1])
+            .hypot(part.model_matrix[0][2]);
         (style, shape, length)
     }
 
@@ -2238,7 +3343,17 @@ mod tests {
             let before = ProjectileView { kind, ..shell(1, 1) };
             let after = ProjectileView { x: 4096 * dx, z: 4096 * dz, ..before };
             let mut out = InstanceBatches::default();
-            build_projectile_instances(&[before], &[after], &[], 0.5, [0.0; 3], &|projectile| ShotStyle::guess(projectile, false), None, &mut out);
+            build_projectile_instances(
+                &[before],
+                &[after],
+                &[],
+                0.5,
+                [0.0; 3],
+                &|projectile| ShotStyle::guess(projectile, false),
+                &|_| None,
+                None,
+                &mut out,
+            );
             let nose = out.shape(Shape::Missile)[0].model_matrix[1];
             let length = nose[0].hypot(nose[1]).hypot(nose[2]);
             [nose[0] / length, nose[1] / length, nose[2] / length]
@@ -2258,12 +3373,332 @@ mod tests {
         let fired = ProjectileView { x: 4096 * 60, from: Some([4096 * 10, 0, 0]), ..shell(1, 1) };
         let draw = |alpha: f64| {
             let mut out = InstanceBatches::default();
-            build_projectile_instances(&[], &[fired], &[], alpha, [0.0; 3], &|projectile| ShotStyle::guess(projectile, false), None, &mut out);
+            build_projectile_instances(
+                &[],
+                &[fired],
+                &[],
+                alpha,
+                [0.0; 3],
+                &|projectile| ShotStyle::guess(projectile, false),
+                &|_| None,
+                None,
+                &mut out,
+            );
             out.shape(Shape::Shell)[0].model_matrix[3][0]
         };
         assert!((draw(0.0) - 10.0).abs() < 1e-3, "at the gun: {}", draw(0.0));
         assert!((draw(0.5) - 35.0).abs() < 1e-3, "halfway out: {}", draw(0.5));
         assert!((draw(1.0) - 60.0).abs() < 1e-3, "where the tick took it: {}", draw(1.0));
+    }
+
+    /// Every weapon that fires something drawn, on every unit and structure, has somewhere it
+    /// is seen to leave from: a muzzle or a launcher's mouth on the part that carries it, so
+    /// that its shots leave the gun, with a flash and smoke there, and not the top of the unit.
+    /// The strategic silos fire out of their open doors, at the middle of their roofs, where the
+    /// simulation fires from.
+    #[test]
+    fn every_weapon_has_a_muzzle_drawn() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let mut bare = Vec::new();
+        for unit in db.iter() {
+            let look = &looks[usize::from(unit.id.0)];
+            for (index, gun) in look.guns.iter().enumerate() {
+                let Some(gun) = gun else { continue };
+                if gun.kind == ProjectileKind::StrategicMissile
+                    && matches!(look.shape, Shape::NukeSilo)
+                {
+                    continue;
+                }
+                // Torpedoes go into the water from under the unit that looses them, where the
+                // simulation does, with a ring of foam: there is no barrel to see them leave.
+                let weapons: Vec<_> = std::iter::once(unit.weapon.as_ref())
+                    .chain(unit.extra_weapons.iter().map(Some))
+                    .collect();
+                if weapons[index].is_some_and(|weapon| weapon.targets == Targets::Naval)
+                    && !unit.is_air()
+                {
+                    continue;
+                }
+                let weapon = index as u8;
+                let mounted: Vec<_> = look
+                    .turrets
+                    .iter()
+                    .flatten()
+                    .filter(|mount| mount.weapon == weapon)
+                    .collect();
+                let drawn = if mounted.is_empty() {
+                    look.base.into_iter().chain([look.shape]).any(|shape| {
+                        super::super::meshes::muzzles(shape)
+                            .iter()
+                            .any(|muzzle| muzzle.weapon == weapon)
+                    })
+                } else {
+                    mounted
+                        .iter()
+                        .all(|mount| !super::super::meshes::muzzles(mount.shape).is_empty())
+                };
+                if !drawn {
+                    bare.push(format!("{} weapon {index}", unit.key));
+                }
+            }
+        }
+        assert!(bare.is_empty(), "these fire from nowhere drawn: {bare:?}");
+    }
+
+    /// A unit with its gun on top, firing a shell: what it looks like at its muzzle, drawn.
+    fn fire(
+        key: &str,
+        aim: [f32; 2],
+        flight: [f64; 3],
+    ) -> (
+        Motion,
+        Vec<UnitLook>,
+        UnitView,
+        ProjectileView,
+        InstanceBatches,
+    ) {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let mut gun = unit(1, 0);
+        gun.blueprint = db.id(key).0;
+        gun.radius = 4096 * 8;
+        gun.facing = [4096, 0];
+        gun.aim = aim.map(|axis| (axis * 4096.0) as i32);
+        let from = [0, 0, gun.radius];
+        let raw = |value: f64| (value * 4096.0) as i32;
+        let splash = looks[usize::from(gun.blueprint)].guns[0].map_or(0, |gun| gun.splash);
+        let projectile = ProjectileView {
+            x: raw(flight[0]),
+            y: raw(flight[1]),
+            z: from[2] + raw(flight[2]),
+            from: Some(from),
+            splash,
+            ..shell(7, 1)
+        };
+        let mut motion = Motion::new();
+        let mut out = InstanceBatches::default();
+        // Drawn a while first, for its turret to turn to its aim.
+        for _ in 0..60 {
+            build_unit_instances(
+                &[gun],
+                &[gun],
+                1.0,
+                [0.0; 3],
+                &[],
+                &looks,
+                &[],
+                &mut motion,
+                &mut out,
+            );
+            out.clear();
+        }
+        motion.note_shots(&[], &[projectile], &[gun], &looks);
+        build_unit_instances(
+            &[gun],
+            &[gun],
+            1.0,
+            [0.0; 3],
+            &[],
+            &looks,
+            &[],
+            &mut motion,
+            &mut out,
+        );
+        (motion, looks, gun, projectile, out)
+    }
+
+    /// A shell is drawn leaving the muzzle of the gun that fired it, out in front of the turret,
+    /// not the top of its unit where the simulation fires it from, and closes onto the path the
+    /// simulation flies it on within a moment; and the gun flashes there as it fires.
+    #[test]
+    fn a_shell_leaves_its_guns_muzzle_and_closes_onto_its_path() {
+        let (mut motion, _, gun, projectile, _) =
+            fire("t1_medium_tank", [1.0, 0.0], [60.0, 0.0, 0.0]);
+        let launches = motion.take_launches();
+        assert_eq!(launches.len(), 1, "one shot leaves its gun");
+        let muzzle = launches[0].at;
+        let size = f64::from(gun.radius) * RAW_TO_WORLD * 2.0;
+        assert!(
+            muzzle[0] > size * 0.3,
+            "out in front of the turret, the way it aims: {muzzle:?}"
+        );
+        assert!(
+            muzzle[1].abs() < size * 0.2,
+            "on the turret's line: {muzzle:?}"
+        );
+        assert!(
+            muzzle[2] < f64::from(gun.radius) * RAW_TO_WORLD,
+            "below the top of the unit: {muzzle:?}"
+        );
+        assert!(launches[0].bore > 0.0, "its bore as drawn");
+        let drawn = |motion: &Motion| {
+            let mut out = InstanceBatches::default();
+            build_projectile_instances(
+                &[],
+                &[projectile],
+                &[],
+                0.0,
+                [0.0; 3],
+                &|projectile| ShotStyle::guess(projectile, false),
+                &|id| motion.launch_offset(id),
+                None,
+                &mut out,
+            );
+            let at = out.shape(Shape::Shell)[0].model_matrix[3];
+            [f64::from(at[0]), f64::from(at[1]), f64::from(at[2])]
+        };
+        let leaving = drawn(&motion);
+        assert!(
+            (0..3).all(|axis| (leaving[axis] - muzzle[axis]).abs() < 1e-3),
+            "drawn at the muzzle as it leaves: {leaving:?}, {muzzle:?}"
+        );
+        motion.time += LAUNCH_BLEND_SECONDS;
+        let later = drawn(&motion);
+        let top = f64::from(gun.radius) * RAW_TO_WORLD;
+        assert!(
+            later[0].abs() < 1e-3 && (later[2] - top).abs() < 1e-3,
+            "on the simulation's path once it has closed: {later:?}"
+        );
+    }
+
+    /// A gun is drawn raised as far as the simulation has laid it, as an artillery piece lobbing
+    /// its rounds high is, and follows it as it is laid down again.
+    #[test]
+    fn a_gun_is_drawn_raised_as_the_simulation_lays_it() {
+        let pitch = |motion: &mut Motion, looks: &[UnitLook], gun: UnitView| {
+            let mut out = InstanceBatches::default();
+            build_unit_instances(
+                &[gun],
+                &[gun],
+                1.0,
+                [0.0; 3],
+                &[],
+                looks,
+                &[],
+                motion,
+                &mut out,
+            );
+            out.shape(Shape::Artillery)[0].model_matrix[0][3]
+        };
+        let (mut motion, looks, mut gun, _, _) =
+            fire("t1_light_artillery", [1.0, 0.0], [20.0, 0.0, 20.0]);
+        assert_ne!(gun.aim, [0, 0], "the simulation turns it");
+        gun.pitches[0] = 2896;
+        motion.time += 0.5;
+        let raised = pitch(&mut motion, &looks, gun);
+        let muzzle = super::super::meshes::muzzles(Shape::Artillery)[0];
+        let elevation = raised + muzzle.modeled_pitch();
+        assert!(
+            (elevation - std::f32::consts::FRAC_PI_4).abs() < 0.05,
+            "raised to the 45 degrees it is laid at: {elevation}"
+        );
+        gun.pitches[0] = 0;
+        motion.time += GUN_HOLD_SECONDS + 3.0;
+        let level = pitch(&mut motion, &looks, gun) + muzzle.modeled_pitch();
+        assert!(level.abs() < 0.02, "and level once it is laid level: {level}");
+    }
+
+    /// The battleship's broadside, its three guns firing at once from where each is mounted,
+    /// is drawn as each turret firing its own shell, and turrets fired from kick back.
+    #[test]
+    fn a_broadside_is_drawn_from_each_turret_that_fires_it() {
+        let db = BlueprintDb::standard();
+        let looks = unit_looks(&db);
+        let mut ship = unit(1, 0);
+        ship.blueprint = db.id("t3_battleship").0;
+        ship.radius = db.get(db.id("t3_battleship")).radius.to_bits();
+        ship.facing = [0, 4096];
+        let look = &looks[usize::from(ship.blueprint)];
+        let shells: Vec<ProjectileView> = (0..3)
+            .map(|weapon| {
+                let mount = look.guns[weapon].expect("a gun").mount;
+                let from = [
+                    (mount[0] * 4096.0) as i32,
+                    (mount[1] * 4096.0) as i32,
+                    ship.radius,
+                ];
+                ProjectileView {
+                    id: SimId(10 + weapon as u32),
+                    x: from[0] + 4096 * 40,
+                    y: from[1],
+                    z: from[2] + 4096 * 20,
+                    from: Some(from),
+                    splash: look.guns[weapon].expect("a gun").splash,
+                    ..shell(0, 1)
+                }
+            })
+            .collect();
+        let mut motion = Motion::new();
+        motion.note_shots(&[], &shells, &[ship], &looks);
+        let weapons: Vec<u8> = motion.new_shots.iter().map(|shot| shot.weapon).collect();
+        assert_eq!(
+            weapons,
+            vec![0, 1, 2],
+            "each shell from the turret mounted where it left"
+        );
+        let mut out = InstanceBatches::default();
+        build_unit_instances(
+            &[ship],
+            &[ship],
+            1.0,
+            [0.0; 3],
+            &[],
+            &looks,
+            &[],
+            &mut motion,
+            &mut out,
+        );
+        let launches = motion.take_launches();
+        assert_eq!(launches.len(), 3);
+        for launch in &launches {
+            let weapon = (launch.projectile.id.0 - 10) as usize;
+            let mount = look.guns[weapon].expect("a gun").mount;
+            // Out along its barrels, which rest facing the bow, or the stern for the aft one.
+            assert!(
+                (launch.at[1] - f64::from(mount[1])).abs() < 16.0,
+                "shell {weapon} leaves its own turret: {:?} against {mount:?}",
+                launch.at
+            );
+        }
+        assert!(
+            out.shape(Shape::NavalTurret)
+                .iter()
+                .all(|turret| turret.glow[3] > 200),
+            "all three kick back"
+        );
+        assert!(
+            out.shape(Shape::ShipAntiAir)
+                .iter()
+                .all(|gun| gun.glow[3] == 0),
+            "and the anti-air guns, which did not fire, do not"
+        );
+    }
+
+    /// A gun on an aircraft turns in the simulation, so a gunship's chin turret is drawn turned
+    /// as it is, not as the gunship faces.
+    #[test]
+    fn a_gunships_turret_is_drawn_as_the_simulation_turns_it() {
+        let (mut motion, looks, mut gun, _, _) = fire("t2_gunship", [0.0, 0.0], [0.0, -40.0, -20.0]);
+        gun.aim = [0, -4096];
+        motion.time += 0.5;
+        let mut out = InstanceBatches::default();
+        build_unit_instances(
+            &[gun],
+            &[gun],
+            1.0,
+            [0.0; 3],
+            &[],
+            &looks,
+            &[],
+            &mut motion,
+            &mut out,
+        );
+        let turret = facing(&out.shape(Shape::ChinTurret)[0]);
+        assert!(
+            turret[1] < -0.95,
+            "turned south, though the gunship faces east: {turret:?}"
+        );
     }
 
     #[test]

@@ -28,6 +28,8 @@ pub struct Visibility {
     deep_scan: [Vec<u32>; 2],
     sonar: [Vec<u32>; 2],
     current_tick: u32,
+    /// Half the map across, as raw `Fp` bits: the middle the map is a mirror image about.
+    middle: i32,
 }
 
 /// How out-of-sight ground is drawn: one grey for all of it.
@@ -36,7 +38,7 @@ pub const FOG_OUT_OF_SIGHT: u8 = 90;
 impl Visibility {
     pub fn new(map_units: i32) -> Self {
         let side = (map_units / VISIBILITY_CELL_UNITS) as usize + 1;
-        Self { side, stamps: [vec![0; side * side], vec![0; side * side]], radar: [Vec::new(), Vec::new()], deep_scan: [Vec::new(), Vec::new()], sonar: [Vec::new(), Vec::new()], current_tick: 0 }
+        Self { side, stamps: [vec![0; side * side], vec![0; side * side]], radar: [Vec::new(), Vec::new()], deep_scan: [Vec::new(), Vec::new()], sonar: [Vec::new(), Vec::new()], current_tick: 0, middle: (map_units << FP_FRAC_BITS) / 2 }
     }
 
     fn cells_mut(&mut self, sense: Sense, team: Team) -> &mut Vec<u32> {
@@ -62,15 +64,24 @@ impl Visibility {
         }
     }
 
+    /// The cell a point is in, along one axis. A point exactly on the line between two cells, as
+    /// a structure standing on a cell corner is, is in the one nearer the middle of the map, so
+    /// that its mirror image across the middle is in the mirror-image cell: with each line in
+    /// the cell after it, one team found a structure on radar that the other's mirror-image
+    /// radar did not.
+    fn cell_of(&self, raw: i32) -> usize {
+        let last = self.side as i32 - 1;
+        let raw = if raw > self.middle && raw % CELL_RAW == 0 { raw - 1 } else { raw };
+        (raw / CELL_RAW).clamp(0, last) as usize
+    }
+
     /// Whether a team has a recent sighting of this kind at a point.
     pub fn senses(&self, sense: Sense, team: Team, x: i32, y: i32) -> bool {
         let cells = self.cells(sense, team);
         if cells.is_empty() {
             return false;
         }
-        let last = self.side as i32 - 1;
-        let cell_x = (x / CELL_RAW).clamp(0, last) as usize;
-        let cell_y = (y / CELL_RAW).clamp(0, last) as usize;
+        let (cell_x, cell_y) = (self.cell_of(x), self.cell_of(y));
         let stamp = cells[cell_y * self.side + cell_x];
         stamp != 0 && stamp + VISION_REFRESH_TICKS > self.current_tick + 1
     }
@@ -121,9 +132,7 @@ impl Visibility {
     }
 
     pub fn is_visible(&self, team: Team, x: i32, y: i32) -> bool {
-        let last = self.side as i32 - 1;
-        let cell_x = (x / CELL_RAW).clamp(0, last) as usize;
-        let cell_y = (y / CELL_RAW).clamp(0, last) as usize;
+        let (cell_x, cell_y) = (self.cell_of(x), self.cell_of(y));
         let stamp = self.stamps[team.index()][cell_y * self.side + cell_x];
         stamp != 0 && stamp + VISION_REFRESH_TICKS > self.current_tick + 1
     }

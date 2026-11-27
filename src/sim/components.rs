@@ -584,6 +584,9 @@ pub struct Turret {
     pub mount: [Fp; 2],
     /// It faces the stern while it has nothing to aim at, as a ship's aft guns do.
     pub aft: bool,
+    /// How far its barrels are raised, as a unit vector `(across, up)`: level is `(1, 0)`. It
+    /// raises and lowers them as fast as it turns, and keeps them where they were last laid.
+    pub elevation: Vec2Fp,
 }
 
 /// About cos(6 degrees): a turret pointing this close to its target can fire.
@@ -593,14 +596,16 @@ impl Turret {
     /// From a turn rate in degrees per second.
     pub fn new(facing: Vec2Fp, degrees_per_second: u32) -> Self {
         let max_turn = radians_from_tenths_of_degree(degrees_per_second.min(900));
-        Self { facing, max_turn: Fp::from_bits((max_turn.to_bits() >> 12) as i32), mount: [Fp::ZERO; 2], aft: false }
+        Self { facing, max_turn: Fp::from_bits((max_turn.to_bits() >> 12) as i32), mount: [Fp::ZERO; 2], aft: false, elevation: Vec2Fp::new(Fp::ONE, Fp::ZERO) }
     }
 
     /// A turret as a blueprint's weapon has it, on a unit facing `facing`: where it sits, and
     /// facing the way it rests.
-    pub fn mounted(facing: Vec2Fp, degrees_per_second: u32, mount: [Fp; 2], aft: bool) -> Self {
+    /// Its barrels start laid along `laid`, a shot's velocity: for its full range, as it waits.
+    pub fn mounted(facing: Vec2Fp, degrees_per_second: u32, mount: [Fp; 2], aft: bool, laid: Vec3Fp) -> Self {
         let rest = if aft { Vec2Fp::new(-facing.x, -facing.y) } else { facing };
-        Self { mount, aft, ..Self::new(rest, degrees_per_second) }
+        let elevation = elevation_of(laid).unwrap_or(Vec2Fp::new(Fp::ONE, Fp::ZERO));
+        Self { mount, aft, elevation, ..Self::new(rest, degrees_per_second) }
     }
 
     /// Where it sits on a unit at `(x, y)` facing `front`, as raw `Fp` bits.
@@ -626,6 +631,31 @@ impl Turret {
         self.facing = rotate_toward(self.facing, toward, self.max_turn);
         self.facing.x * toward.x + self.facing.y * toward.y >= AIMED
     }
+
+    /// Swivels and raises its barrels towards the way a shot leaves them, its launch velocity,
+    /// as far as a tick allows each, and returns whether they now point along it closely enough
+    /// to fire: within `AIMED` in three dimensions, so that a gun firing nearly straight up
+    /// need hardly turn.
+    pub fn lay(&mut self, velocity: Vec3Fp) -> bool {
+        let Some(elevation) = elevation_of(velocity) else {
+            return true;
+        };
+        let heading = velocity.xy().normalized();
+        if heading != Vec2Fp::ZERO {
+            self.facing = rotate_toward(self.facing, heading, self.max_turn);
+        }
+        self.elevation = rotate_toward(self.elevation, elevation, self.max_turn);
+        let across = mul_toward_zero(self.elevation.x, elevation.x);
+        let along = if heading == Vec2Fp::ZERO { Fp::ZERO } else { self.facing.x * heading.x + self.facing.y * heading.y };
+        mul_toward_zero(across, along) + mul_toward_zero(self.elevation.y, elevation.y) >= AIMED
+    }
+}
+
+/// How steeply a velocity climbs, as a unit vector `(across, up)`, or nothing for no velocity.
+pub fn elevation_of(velocity: Vec3Fp) -> Option<Vec2Fp> {
+    let across = sqrt_wide(velocity.xy().length_squared());
+    let elevation = Vec2Fp::new(across, velocity.z).normalized();
+    (elevation != Vec2Fp::ZERO).then_some(elevation)
 }
 
 /// In a tight turn, a vehicle slows to this share of its speed.
@@ -1174,6 +1204,25 @@ mod tests {
         }
         assert!((19..=21).contains(&ticks), "took {ticks} ticks");
         assert!(turret.aim(behind), "it stays on target");
+    }
+
+    #[test]
+    fn a_turret_raises_its_barrels_to_the_shot_before_it_fires() {
+        // A shot climbing at 45 degrees, straight ahead: laid level, at 9 degrees a tick, the
+        // barrels are within 6 degrees of it only after 5 ticks.
+        let mut turret = Turret::new(east(), 90);
+        let climb = Vec3Fp::new(fp_int(10), Fp::ZERO, fp_int(10));
+        let mut ticks = 1;
+        while !turret.lay(climb) {
+            ticks += 1;
+            assert!(ticks < 20, "it never came up");
+        }
+        assert_eq!(ticks, 5, "took {ticks} ticks");
+        assert!(turret.lay(climb), "it stays on it");
+        // Nearly straight up, it need hardly turn: the barrels point up either way.
+        let mut turret = Turret::new(east(), 90);
+        turret.elevation = Vec2Fp::new(Fp::from_bits(200), Fp::ONE).normalized();
+        assert!(turret.lay(Vec3Fp::new(-Fp::from_bits(200), Fp::ZERO, fp_int(4))), "a gun pointing up fires straight up, whichever way it faces");
     }
 
     #[test]

@@ -2428,7 +2428,12 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                         let (previous, current) = (&session.previous, &session.current);
                         scene_instances.clear();
                         motion.time = (f64::from(previous.tick) + alpha) * TICK_DURATION.as_secs_f64();
-                        motion.note_shots(&previous.projectiles, &current.projectiles);
+                        motion.note_shots(
+                            &previous.projectiles,
+                            &current.projectiles,
+                            &current.units,
+                            &looks,
+                        );
                         motion.note_doors(&previous.silo_doors, &current.silo_doors);
                         motion.note_beams(&current.landed, &current.units, &looks);
                         instances::build_unit_instances(&previous.units, &current.units, alpha, eye, selection.selected(), &looks, &current.work_links, &mut motion, &mut scene_instances);
@@ -2439,10 +2444,22 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                         effects.note_events(previous, current, motion.time, &|x, y| map.heights.height_at(x, y), water, &looks);
                         let drawn_units_and_shells = {
                             let units = scene_instances.total();
-                            instances::build_projectile_instances(&previous.projectiles, &current.projectiles, &current.landed, alpha, eye, &|projectile| effects.shot(projectile), water, &mut scene_instances);
+                            instances::build_projectile_instances(
+                                &previous.projectiles,
+                                &current.projectiles,
+                                &current.landed,
+                                alpha,
+                                eye,
+                                &|projectile| effects.shot(projectile),
+                                &|projectile| motion.launch_offset(projectile),
+                                water,
+                                &mut scene_instances,
+                            );
                             units + current.projectiles.len()
                         };
                         effects.trail(previous, current, alpha, &looks, Some(f64::from(map.water_level)), motion.time);
+                        // Each shot leaving its gun flashes at the muzzle and puffs smoke.
+                        effects.muzzle(&motion.take_launches(), motion.time, water);
                         effects.build(motion.time, eye, &mut scene_instances);
                         // Builders' beams and adjacency wiring are in the world, and only up close:
                         // zoomed out to icons, they would be clutter.

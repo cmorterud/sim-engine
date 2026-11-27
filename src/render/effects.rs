@@ -6,7 +6,9 @@
 
 use std::collections::VecDeque;
 
-use super::instances::{merge_by_id, painted, InstanceBatches, ShotLook, ShotStyle, UnitLook, RAW_TO_WORLD};
+use super::instances::{
+    merge_by_id, painted, InstanceBatches, Launch, ShotLook, ShotStyle, UnitLook, RAW_TO_WORLD,
+};
 use super::meshes::Shape;
 use crate::sim::components::{SimId, WreckKind};
 use crate::sim::world::{ProjectileKind, ProjectileView, SimSnapshot, UnitView, WreckMotion, WreckView};
@@ -234,7 +236,82 @@ pub struct Effects {
     shots: Vec<(SimId, ShotStyle)>,
     /// When each wreck sinking in the water last sent up foam, smoke, or bubbles, by wreck.
     sinking_puffs: Vec<(SimId, f64)>,
+    /// Muzzle flashes, each for a moment as a gun fires.
+    flashes: VecDeque<Flash>,
+    /// Gunsmoke, and the smoke a missile throws out as it leaves its launcher, blown out the way
+    /// the shot went and slowing as it spreads.
+    drifts: VecDeque<Drift>,
 }
+
+/// A gun's muzzle flash: a star of flame out from its muzzle the way the shot left.
+#[derive(Copy, Clone, Debug, PartialEq)]
+struct Flash {
+    at: [f64; 3],
+    direction: [f32; 3],
+    length: f32,
+    width: f32,
+    born: f64,
+    life: f64,
+    color: [f32; 3],
+}
+
+/// A puff of smoke blown out of a muzzle or a launcher at `velocity`, which slows as the puff
+/// spreads and rises.
+#[derive(Copy, Clone, Debug, PartialEq)]
+struct Drift {
+    at: [f64; 3],
+    velocity: [f64; 3],
+    rise: f64,
+    born: f64,
+    life: f64,
+    size: f32,
+    growth: f32,
+    color: [f32; 3],
+    fade_to: [f32; 3],
+    opacity: f32,
+}
+
+impl Drift {
+    /// Where it is, how big, what color, and how opaque, at `time`, or `None` once it has gone
+    /// or before it is due.
+    fn at_time(&self, time: f64) -> Option<([f64; 3], f32, [f32; 3], f32)> {
+        let age = time - self.born;
+        if !(0.0..self.life).contains(&age) {
+            return None;
+        }
+        let t = (age / self.life) as f32;
+        let carried = DRIFT_SLOWING * (1.0 - (-age / DRIFT_SLOWING).exp());
+        let at = [
+            self.at[0] + self.velocity[0] * carried,
+            self.at[1] + self.velocity[1] * carried,
+            self.at[2] + self.velocity[2] * carried + self.rise * age,
+        ];
+        let size = self.size * (1.0 + self.growth * t);
+        let color = std::array::from_fn(|channel| {
+            self.color[channel] + (self.fade_to[channel] - self.color[channel]) * t
+        });
+        Some((at, size, color, self.opacity * (1.0 - t.powf(1.5))))
+    }
+}
+
+/// How long smoke blown out of a muzzle takes to slow down, in seconds: it carries this long
+/// times its first speed in all.
+const DRIFT_SLOWING: f64 = 0.35;
+/// The most muzzle flashes, and puffs of gunsmoke, kept at once, the oldest going first.
+const MAX_FLASHES: usize = 1_000;
+const MAX_DRIFTS: usize = 3_000;
+/// A muzzle flash's colors: white-hot from a gun, orange from a launcher's rocket motor, and
+/// blue-white from a discharge.
+const MUZZLE_HOT: [f32; 3] = [1.0, 0.86, 0.52];
+const ROCKET_FIRE: [f32; 3] = [1.0, 0.62, 0.22];
+const DISCHARGE_FLASH: [f32; 3] = [0.7, 0.9, 1.0];
+/// Gunsmoke: pale grey from a gun, near white from a rocket, dark from flak.
+const GUNSMOKE: [f32; 3] = [0.62, 0.61, 0.58];
+const GUNSMOKE_OLD: [f32; 3] = [0.70, 0.70, 0.68];
+const ROCKET_SMOKE: [f32; 3] = [0.88, 0.87, 0.84];
+/// How wide a gun's bore is taken to be, in units, when its barrel is not drawn: out of sight,
+/// or as far off as a dot.
+const UNSEEN_BORE: f32 = 0.6;
 
 /// A laser's beam, which the simulation fires and lands within one tick: drawn for a moment
 /// after, thinning out, so that it is seen.
@@ -256,6 +333,207 @@ const MAX_BEAMS: usize = 512;
 impl Effects {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn add_flash(&mut self, flash: Flash) {
+        if self.flashes.len() >= MAX_FLASHES {
+            self.flashes.pop_front();
+        }
+        self.flashes.push_back(flash);
+    }
+
+    fn add_drift(&mut self, drift: Drift) {
+        if self.drifts.len() >= MAX_DRIFTS {
+            self.drifts.pop_front();
+        }
+        self.drifts.push_back(drift);
+    }
+
+    /// The flash and smoke of each shot leaving its gun, by what it is: a gun flashes at its
+    /// muzzle and puffs smoke out after the shell, more the heavier the gun, a long gun's in a
+    /// great blast; flak's smoke is dark; a missile leaves its launcher in a burst of rocket fire
+    /// and a cloud of white smoke blown back out of the tube, a nuclear missile's in a great
+    /// billow round its silo; a torpedo goes in with a ring of foam; a bomb falls quietly. Sized
+    /// by the gun's bore as it is drawn (`Launch::bore`). Call after `note_events`, which works
+    /// out what each new shell looks like.
+    pub fn muzzle(&mut self, launches: &[Launch], time: f64, water: Option<f64>) {
+        for launch in launches {
+            let seed = u64::from(launch.projectile.id.0).wrapping_mul(0x2545_f491_4f6c_dd1d);
+            let direction = launch.direction;
+            let along = direction.map(f64::from);
+            let at = launch.at;
+            let bore = if launch.bore > 0.0 {
+                launch.bore * 2.0
+            } else {
+                UNSEEN_BORE * 2.0
+            };
+            match launch.projectile.kind {
+                ProjectileKind::Shell => {
+                    let style = self.shot(&launch.projectile);
+                    let (flash, smoke, puffs, life, dark, blast) = match style.look {
+                        ShotLook::Bomb => continue,
+                        ShotLook::Torpedo => {
+                            // Under the water, a ring of foam where it goes in.
+                            if let Some(water) = water.filter(|water| at[2] <= *water + 1.0) {
+                                self.ring(
+                                    [at[0], at[1], water],
+                                    bore.max(2.0) * 3.0,
+                                    1.2,
+                                    true,
+                                    time,
+                                );
+                            }
+                            continue;
+                        }
+                        ShotLook::Tracer => (3.5, 1.4, 1, 0.5, false, false),
+                        ShotLook::Cannon => (4.5, 2.0, 2, 1.1, false, false),
+                        ShotLook::Flak => (4.5, 2.2, 2, 1.3, true, false),
+                        ShotLook::Artillery | ShotLook::HeavyGun => (5.5, 2.8, 4, 2.4, false, true),
+                    };
+                    let flash_life = 0.05 + 0.02 * f64::from(flash);
+                    self.add_flash(Flash {
+                        at,
+                        direction,
+                        length: bore * flash,
+                        width: bore * flash * 0.55,
+                        born: time,
+                        life: flash_life,
+                        color: MUZZLE_HOT,
+                    });
+                    if blast {
+                        // A long gun's blast: a ball of fire at the muzzle, and smoke blown far out.
+                        let ball = [
+                            at[0] + along[0] * f64::from(bore) * 1.5,
+                            at[1] + along[1] * f64::from(bore) * 1.5,
+                            at[2] + along[2] * f64::from(bore) * 1.5,
+                        ];
+                        self.add(Puff {
+                            shape: Shape::Fireball,
+                            at: ball,
+                            rise: 0.0,
+                            born: time,
+                            life: 0.18,
+                            size: bore * 2.2,
+                            growth: 0.6,
+                            height_share: 1.0,
+                            color: FLASH_WHITE,
+                            fade_to: FIRE_HOT,
+                            dense: false,
+                        });
+                    }
+                    let (color, fade_to) = if dark {
+                        (FLAK_BLACK.map(|channel| channel * 2.5), SMOKE_DARK)
+                    } else {
+                        (GUNSMOKE, GUNSMOKE_OLD)
+                    };
+                    for index in 0..puffs {
+                        let vary = |salt: u64| noise(seed ^ (index * 31 + salt)) - 0.5;
+                        // Out after the shell, and a little to either side, the first fastest.
+                        let speed =
+                            f64::from(bore) * (7.0 - 1.2 * index as f64) * (1.0 + vary(1) * 0.4);
+                        let side = [vary(2) * 0.6, vary(3) * 0.6, vary(4) * 0.3];
+                        let velocity =
+                            std::array::from_fn(|axis| (along[axis] + side[axis]) * speed);
+                        self.add_drift(Drift {
+                            at,
+                            velocity,
+                            rise: f64::from(bore) * 0.6,
+                            born: time,
+                            life: life * (0.8 + 0.4 * (vary(5) + 0.5)),
+                            size: bore * smoke * (0.8 + 0.4 * (vary(6) + 0.5)) as f32,
+                            growth: 1.6,
+                            color,
+                            fade_to,
+                            opacity: 0.45,
+                        });
+                    }
+                }
+                ProjectileKind::Discharge => {
+                    self.add_flash(Flash {
+                        at,
+                        direction,
+                        length: bore * 5.0,
+                        width: bore * 3.5,
+                        born: time,
+                        life: 0.1,
+                        color: DISCHARGE_FLASH,
+                    });
+                }
+                ProjectileKind::TacticalMissile | ProjectileKind::Interceptor => {
+                    let bore = bore.max(1.5);
+                    self.add_flash(Flash {
+                        at,
+                        direction,
+                        length: bore * 3.5,
+                        width: bore * 2.0,
+                        born: time,
+                        life: 0.15,
+                        color: ROCKET_FIRE,
+                    });
+                    // Smoke blown back out of the tube, and round its mouth.
+                    for index in 0..5 {
+                        let vary = |salt: u64| noise(seed ^ (index * 37 + salt)) - 0.5;
+                        let back = if index == 0 { 0.0 } else { -2.5 };
+                        let velocity = [
+                            (along[0] * back + vary(1) * 2.5) * f64::from(bore),
+                            (along[1] * back + vary(2) * 2.5) * f64::from(bore),
+                            (along[2] * back + vary(3)) * f64::from(bore),
+                        ];
+                        self.add_drift(Drift {
+                            at,
+                            velocity,
+                            rise: f64::from(bore) * 0.8,
+                            born: time + 0.02 * index as f64,
+                            life: 1.6 + 0.6 * (vary(4) + 0.5),
+                            size: bore * 2.4,
+                            growth: 1.8,
+                            color: ROCKET_SMOKE,
+                            fade_to: GUNSMOKE_OLD,
+                            opacity: 0.5,
+                        });
+                    }
+                }
+                ProjectileKind::StrategicMissile => {
+                    // A great billow round the silo, rolling out over the ground.
+                    let size = 14.0_f32;
+                    self.add(Puff {
+                        shape: Shape::Fireball,
+                        at,
+                        rise: 0.0,
+                        born: time,
+                        life: 0.6,
+                        size: size * 0.8,
+                        growth: 0.5,
+                        height_share: 1.0,
+                        color: FLASH_WHITE,
+                        fade_to: FIRE_HOT,
+                        dense: false,
+                    });
+                    for index in 0..10 {
+                        let vary = |salt: u64| noise(seed ^ (index * 41 + salt));
+                        let angle = (index as f64 + vary(1) * 0.7) / 10.0 * std::f64::consts::TAU;
+                        let speed = f64::from(size) * (2.0 + 1.5 * vary(2));
+                        self.add_drift(Drift {
+                            at,
+                            velocity: [
+                                angle.cos() * speed,
+                                angle.sin() * speed,
+                                f64::from(size) * 0.3,
+                            ],
+                            rise: f64::from(size) * 0.15,
+                            born: time + 0.05 * vary(3),
+                            life: 4.0 + 2.0 * vary(4),
+                            size: size * (0.8 + 0.5 * vary(5) as f32),
+                            growth: 1.5,
+                            color: ROCKET_SMOKE,
+                            fade_to: GUNSMOKE_OLD,
+                            opacity: 0.6,
+                        });
+                    }
+                }
+                ProjectileKind::Beam => {}
+            }
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -967,11 +1245,64 @@ impl Effects {
     /// Forgets puffs and scars that have gone, and draws the rest.
     pub fn build(&mut self, time: f64, eye: [f64; 3], out: &mut InstanceBatches) {
         // A clock that went backwards is a new game: start clean.
-        self.puffs.retain(|puff| time - puff.born < puff.life && puff.born - time < 10.0);
-        self.scars.retain(|scar| time - scar.born < SCAR_LIFE && scar.born - time < 10.0);
-        self.tracks.retain(|track| time - track.born < TRACK_LIFE && track.born - time < 10.0);
-        self.wake_stretches.retain(|wake| time - wake.born < WAKE_LIFE && wake.born - time < 10.0);
-        self.beams.retain(|beam| time - beam.born < LASER_LIFE && beam.born - time < 10.0);
+        self.puffs
+            .retain(|puff| time - puff.born < puff.life && puff.born - time < 10.0);
+        self.scars
+            .retain(|scar| time - scar.born < SCAR_LIFE && scar.born - time < 10.0);
+        self.tracks
+            .retain(|track| time - track.born < TRACK_LIFE && track.born - time < 10.0);
+        self.wake_stretches
+            .retain(|wake| time - wake.born < WAKE_LIFE && wake.born - time < 10.0);
+        self.beams
+            .retain(|beam| time - beam.born < LASER_LIFE && beam.born - time < 10.0);
+        self.flashes
+            .retain(|flash| time - flash.born < flash.life && flash.born - time < 10.0);
+        self.drifts
+            .retain(|drift| time - drift.born < drift.life && drift.born - time < 10.0);
+        for flash in &self.flashes {
+            let age = (time - flash.born) / flash.life;
+            if !(0.0..1.0).contains(&age) {
+                continue;
+            }
+            // It bursts out full at once, and dies down.
+            let share = (1.0 - age * age) as f32;
+            let (length, width) = (flash.length * (0.7 + 0.3 * share), flash.width * share);
+            let center = std::array::from_fn(|axis| {
+                flash.at[axis] + f64::from(flash.direction[axis] * length * 0.5)
+            });
+            out.push(
+                Shape::MuzzleFlash,
+                super::instances::flash_instance(
+                    center,
+                    flash.direction,
+                    length,
+                    width,
+                    flash.color,
+                    eye,
+                ),
+            );
+        }
+        for drift in &self.drifts {
+            let Some((at, size, color, opacity)) = drift.at_time(time) else {
+                continue;
+            };
+            let seed = drift.at[0].to_bits()
+                ^ drift.at[1].to_bits().rotate_left(21)
+                ^ drift.born.to_bits().rotate_left(42);
+            let angle = noise(seed) as f32 * std::f32::consts::TAU;
+            let mut instance = painted(
+                at,
+                [size, size, size * 0.9],
+                [angle.cos(), angle.sin()],
+                color,
+                color,
+                color,
+                0.0,
+                eye,
+            );
+            instance.hull[3] = (opacity * 255.0).round().clamp(0.0, 255.0) as u8;
+            out.push(Shape::Smoke, instance);
+        }
         for beam in &self.beams {
             let age = ((time - beam.born) / LASER_LIFE).clamp(0.0, 1.0) as f32;
             // Not yet due: its snapshot is still ahead of what is drawn.
@@ -1063,7 +1394,7 @@ mod tests {
             built_permille: 1000,
             is_structure: false,
             facing: [0, 0],
-            aim: [0, 0], extra_aims: [[0; 2]; 3],
+            aim: [0, 0], extra_aims: [[0; 2]; 3], pitches: [0; 4],
             working: false,
             assembling: None,
             upgrade: None,
@@ -1099,7 +1430,17 @@ mod tests {
         assert_eq!(fireballs.len(), 1);
         assert_eq!(fireballs[0].model_matrix[3][0], 155.0, "where it struck, not 55 short");
         let mut drawn = InstanceBatches::default();
-        crate::render::instances::build_projectile_instances(&before.projectiles, &after.projectiles, &after.landed, 0.5, [0.0; 3], &|projectile| effects.shot(projectile), None, &mut drawn);
+        crate::render::instances::build_projectile_instances(
+            &before.projectiles,
+            &after.projectiles,
+            &after.landed,
+            0.5,
+            [0.0; 3],
+            &|projectile| effects.shot(projectile),
+            &|_| None,
+            None,
+            &mut drawn,
+        );
         let shells = drawn.shape(Shape::Shell);
         assert_eq!(shells.len(), 1, "drawn on its way to where it struck");
         assert!((shells[0].model_matrix[3][0] - 127.5).abs() < 0.01, "halfway there");
@@ -1473,5 +1814,100 @@ mod tests {
         assert!(size(0.99).expect("alive") < size(0.5).expect("alive"));
         assert_eq!(size(1.0), None);
         assert_eq!(puff.at_time(0.5).expect("alive").0[2], 0.5, "it rises");
+    }
+
+    fn launch(kind: ProjectileKind, splash: i32) -> Launch {
+        let projectile = ProjectileView {
+            splash,
+            from: Some([0, 0, 0]),
+            ..shell(5, kind)
+        };
+        Launch {
+            projectile,
+            at: [10.0, 0.0, 5.0],
+            direction: [1.0, 0.0, 0.0],
+            bore: 0.5,
+            blueprint: u16::MAX,
+        }
+    }
+
+    /// A gun flashes at its muzzle for a moment as it fires, out the way the shell goes, and
+    /// puffs smoke out after it, which drifts on and thins away over a second or two; the
+    /// heavier the gun, the bigger both. A bomb falls with neither.
+    #[test]
+    fn a_gun_flashes_and_smokes_at_its_muzzle_as_it_fires() {
+        let flash_at = |effects: &mut Effects, time: f64| {
+            let mut out = InstanceBatches::default();
+            effects.build(time, [0.0; 3], &mut out);
+            out.shape(Shape::MuzzleFlash)
+                .first()
+                .map(|flash| (flash.model_matrix[3], flash.model_matrix[1][0]))
+        };
+        let mut gun = Effects::new();
+        gun.muzzle(&[launch(ProjectileKind::Shell, 0)], 1.0, None);
+        let (center, length) = flash_at(&mut gun, 1.0).expect("a flash as it fires");
+        assert!(
+            center[0] > 10.0 && length > 0.0,
+            "out from the muzzle the way the shell goes: {center:?}"
+        );
+        assert!(flash_at(&mut gun, 1.2).is_none(), "gone in a moment");
+        let smoke = |effects: &mut Effects, time: f64| {
+            let mut out = InstanceBatches::default();
+            effects.build(time, [0.0; 3], &mut out);
+            out.shape(Shape::Smoke)
+                .iter()
+                .map(|puff| (puff.model_matrix[3][0], puff.hull[3]))
+                .collect::<Vec<_>>()
+        };
+        let early = smoke(&mut gun, 1.05);
+        let late = smoke(&mut gun, 1.4);
+        assert!(
+            !early.is_empty() && !late.is_empty(),
+            "smoke after the shot"
+        );
+        assert!(
+            late[0].0 > early[0].0 && late[0].1 < early[0].1,
+            "drifting on after the shell and thinning: {early:?} then {late:?}"
+        );
+        assert!(smoke(&mut gun, 4.0).is_empty(), "gone in a few seconds");
+        let mut heavy = Effects::new();
+        heavy.muzzle(&[launch(ProjectileKind::Shell, 4096 * 80)], 1.0, None);
+        let (_, heavy_length) = flash_at(&mut heavy, 1.0).expect("a flash");
+        assert!(
+            heavy_length > length,
+            "a long gun's flash is bigger: {heavy_length} against {length}"
+        );
+        assert!(
+            count(&mut heavy, 1.02, Shape::Fireball) > 0,
+            "with a ball of fire at its muzzle"
+        );
+        let mut bomber = Effects::new();
+        let mut bomb = launch(ProjectileKind::Shell, 4096 * 30);
+        bomber.shots.push((
+            bomb.projectile.id,
+            ShotStyle {
+                look: ShotLook::Bomb,
+                scale: 1.0,
+            },
+        ));
+        bomb.bore = 0.0;
+        bomber.muzzle(&[bomb], 1.0, None);
+        assert_eq!(
+            count(&mut bomber, 1.02, Shape::MuzzleFlash) + count(&mut bomber, 1.02, Shape::Smoke),
+            0,
+            "a bomb just falls"
+        );
+    }
+
+    /// A missile leaves its launcher in a burst of rocket fire and a cloud of smoke.
+    #[test]
+    fn a_missile_leaves_its_launcher_in_fire_and_smoke() {
+        let mut effects = Effects::new();
+        effects.muzzle(&[launch(ProjectileKind::TacticalMissile, 0)], 1.0, None);
+        assert_eq!(count(&mut effects, 1.0, Shape::MuzzleFlash), 1);
+        assert!(
+            count(&mut effects, 1.3, Shape::Smoke) >= 4,
+            "a cloud of smoke"
+        );
     }
 }
