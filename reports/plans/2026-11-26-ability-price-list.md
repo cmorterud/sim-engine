@@ -118,9 +118,7 @@ Held, with reasons:
   is: at the list's cost torpedo bombers broke the T2 fleet at 0.95 times its cost, against
   `torpedo_bombers_to_break_fleet_t2` of 2 to 5. 240 is the least that meets it (2.08), and a
   battleship-heavy fleet still breaks under 1.0 (0.80).
-- **Interceptor and T1 Bomber** keep their costs, held by `[air] strike_seconds_t1`. The list
-  prices them at about a third of that, which says it is missing something about aircraft against
-  land, most likely that only anti-air reaches them. That is open.
+- **Interceptor and T1 Bomber** kept their costs until T1 air was priced (2026-11-27, below).
 
 What changed with it: flak's per-cost checks against the cheaper aircraft. Massed flak that all
 but brings down a Strategic Bomber is now seven times its cost (three times the borrowed 3,381,
@@ -128,3 +126,34 @@ about the same flak), and static flak takes half as much again as a heavy gunshi
 one down. The commander snipe, four Strategic Bombers in one pass, costs about 5,000 (13,500
 before): no fight price can value a game's end, and its counters, eight SAM missiles or a T3
 fighter, are unchanged. The air scenarios in data/scenarios.toml (`air_*`) play these by hand.
+
+## T1 air (2026-11-27)
+
+At each tier one number had no target: how deadly anti-air is next to what aircraft cost. Anti-air
+guns are set by `[air] anti_air_escort_share` (an army a fifth anti-air comes out even with an
+equal cost of aircraft) against the aircraft's cost. The T1 Bomber's cost was the inspiration's,
+and Mobile Anti-Air's gun was set from it. T2 flak hits about four times harder for its health
+than Mobile Anti-Air (0.128 a second a point of health against 0.034), so air's base, held at T2,
+priced the Interceptor at 60 and the Bomber at 88: at those costs Mobile Anti-Air's gun would have
+had to rise 4.8 times, to 99.9, and bombers would have cleared ten undefended tanks in 11 s, twice
+as fast as T2 strike aircraft.
+
+The design owner's rule fixes T1's: one Mobile Anti-Air destroys one T1 Bomber hanging in the air
+in about 24 seconds (`[kill_times] mobile_aa_t1_bomber`), as it did. Then, in
+`balance::derive_t1_air`:
+
+1. Mobile Anti-Air's gun is the bomber's 500 health over 24 s: 20.8 a second (20.9 before).
+2. The Bomber's cost is where the escorted army breaks even with an equal cost of bombers,
+   averaged over five fight sizes (10 to 14 bombers against 3,000) as one fight's answer jumps by
+   about a tenth from one count to the next: 249.5 (250 before).
+3. The T1 air base is what prices the Bomber at that cost: 0.318 (`[price_list] domain_base`
+   `air_t1`). The Interceptor is priced at it, landing 0.91 of its gun: 162 (184 before).
+
+| Unit | Before | Now |
+| --- | --- | --- |
+| Attack Bomber | 250 | 249.5 |
+| Interceptor | 184 | 162 |
+| Mobile Anti-Air gun | 20.9 a second | 20.8 a second |
+
+A T4 aircraft's cost needs the same: a T4 anti-air kill time. T2 and T3 can follow the same way,
+from flak's time on a Gunship and the SAM's kill times, with 0.902 expected to stay about where it is.
