@@ -136,6 +136,25 @@ fn the_missile_submarine_costs_its_share_of_the_launcher() {
     assert!(pricing.drift().abs() < 0.01, "it costs {:.1}, the list {:.1}", pricing.actual, pricing.list);
 }
 
+/// The Field Rig (2026-11-27, the design owner's plan): its gun, its build power, and its income,
+/// what it makes a second paid back in T3's payback, energy at T3's rate, as an extractor's is.
+#[test]
+fn the_field_rig_costs_its_gun_its_build_power_and_its_income() {
+    let db = BlueprintDb::standard();
+    let table = targets();
+    let rig = db.get(db.id("field_rig"));
+    let pricing = price_list::price(&db, "field_rig").expect("the list prices the Field Rig");
+    let per_second = |income: sim_engine::sim::blueprints::Res| income.to_num::<f64>() * sim_engine::sim::blueprints::TICKS_PER_SECOND as f64;
+    let number = |value: &toml::Value| value.as_float().or_else(|| value.as_integer().map(|value| value as f64)).expect("a number");
+    let (rate, payback) = (number(&table["economy"]["energy_per_materiel"][2]), number(&table["economy"]["payback_seconds"][2]));
+    let land_share = 1.0 + number(&table["anchor"]["energy"]) / number(&table["anchor"]["materiel"]) / rate;
+    let wanted = (per_second(rig.mass_income) + per_second(rig.energy_income) / rate) * payback / land_share;
+    assert!((pricing.income / wanted - 1.0).abs() < 1e-9, "its income costs {:.1}, not {wanted:.1}", pricing.income);
+    assert!(pricing.build_power > 0.0 && pricing.jobs.len() == 1, "it pays for its build power and its gun");
+    assert!(pricing.drift().abs() < 0.01, "it costs {:.1}, the list {:.1}", pricing.actual, pricing.list);
+    assert!(price_list::held_reason("field_rig").is_none(), "nothing holds it");
+}
+
 /// T4, for experimentals (2026-11-27): every per-tier table has a T4 entry, and a unit made T4 is
 /// priced by them: its fights last the T4 time to kill, 1.45 of T1's, and it is measured against
 /// T3's line, at T3's energy price and, in the air, T3's base.
@@ -143,7 +162,7 @@ fn the_missile_submarine_costs_its_share_of_the_launcher() {
 fn an_experimental_is_priced_by_the_t4_constants() {
     let targets: toml::Table = include_str!("../data/balance_targets.toml").parse().expect("valid targets");
     let tiers = usize::from(sim_engine::balance::MAX_TIER);
-    for (section, key) in [("model", "time_to_kill_tier"), ("model", "closing_share_land"), ("price_list", "tier_efficiency"), ("economy", "energy_per_materiel")] {
+    for (section, key) in [("model", "time_to_kill_tier"), ("model", "closing_share_land"), ("price_list", "tier_efficiency"), ("economy", "energy_per_materiel"), ("economy", "payback_seconds")] {
         assert_eq!(targets[section][key].as_array().map(Vec::len), Some(tiers), "[{section}] {key} has an entry for each tier");
     }
     assert!((sim_engine::balance::model_time_to_kill(4, "land") / sim_engine::balance::model_time_to_kill(1, "land") - 1.45).abs() < 1e-9);

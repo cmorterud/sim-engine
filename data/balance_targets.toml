@@ -80,6 +80,11 @@ artillery = [1.0, 1.3]
 # inspiration, where going air means building power; this only counts them.
 # T4 (experimentals) at T3's (2026-11-27).
 energy_per_materiel = [5, 100, 100, 100]
+# What income is worth (2026-11-27, the design owner's plan): a tier's extractors and generators
+# pay back what they cost, energy at the tier's rate, in about this many seconds of what they
+# make, an upgraded extractor of what it adds (today T1's 54 and 56, T2's 238 and 264, the T3
+# extractor's 410), so a unit's own income is priced at its tier's ([price_list]). T4 at T3's.
+payback_seconds = [55, 250, 400, 400]
 # One T1 extractor's income buys an anchor every this many seconds: cheaper units for their
 # income than the inspiration's, for bigger armies.
 t1_extractor_seconds_per_anchor = [17, 21]
@@ -309,6 +314,17 @@ flak_t3_heavy_transport = [54.2, 55.8]
 # The cruiser's anti-air, its volleys timed by tests/kill_times_test.rs.
 cruiser_two_volleys_seconds_max = 4
 cruiser_six_volleys_seconds_max = 12
+
+[commander]
+# The Command Rig's gun (2026-11-27, the design owner's plan): holding its ground, it comes out
+# ahead of this many Medium Tanks attack-moving into it, and behind two more. Its damage is the
+# least that does: a Medium Tank in six shots, 70 (at seven shots, 60, it loses to them; measured
+# again, 69.9 loses). Its reach, 1.26 times the tank's, and its reload are the design owner's.
+holds_against_medium_tanks = 16
+# Discharge destroys any T1 land unit in one: its least damage is at least the toughest one's
+# health (the T1 Mobile Anti-Air's, 615). Its 1,250, its store and its scaling are the design
+# owner's.
+discharge_kills_every_t1_land_unit = true
 
 [air]
 # Air against land (2026-11-21). T1 air is set by these rules and [kills], one number each, not by
@@ -843,8 +859,9 @@ t3_mobile_artillery = "the T3 line's micro cell: the middle of the costs where i
 t2_torpedo_bomber = "the duel it wins ([counters]): the least that needs twice the T2 fleet's cost to break it"
 t2_torpedo_boat = "the duel it wins ([counters]): the most that keeps 0.70 against an equal cost of submarines"
 t1_point_defense = "the hold rule ([premiums]): the most it can cost and still hold, under the list's price"
-command_rig = "not derived yet: the snipe rules, its gun and enhancements"
-field_rig = "not derived yet: build power, income and its gun"
+# The commander is never built: its cost sets only its wreck and what destroying it is worth. Its
+# health is set by the snipe rules ([kills]), its gun by [commander] (2026-11-27).
+command_rig = "the design owner's cost: the commander is never built"
 # The Spy Plane can look anywhere, which the list prices only through what its radar sees past
 # its vision (42 at the T3 air base). Its cost is the design owner's until a price for seeing
 # anywhere exists (2026-11-27, the plan's pick).

@@ -70,12 +70,14 @@ fn a_gateway_builds_a_field_rig_with_heavy_armor_and_build_power() {
     let gateway = world.spawn_finished_structure(world.blueprints.id("rig_yard"), Team::Blue, 50, 50).unwrap();
     let support = world.blueprints.id("field_rig");
     world.advance_tick(&[SimCommand::QueueUnit { factory: gateway, blueprint: support, count: 1 }]);
-    // 14,400 build time at the gateway's 120 build power is 120 seconds.
-    run(&mut world, 1_190);
+    // Its build time at the gateway's build power: 11,033 at 120 is about 92 seconds.
+    let power = world.blueprints.get(world.blueprints.id("rig_yard")).build_power.to_num::<f64>();
+    let ticks = (world.blueprints.get(support).build_time.to_num::<f64>() / power * 10.0).ceil() as u32;
+    run(&mut world, ticks - 10);
     let made = |world: &SimWorld| world.units.iter().find(|&&(id, _)| key_of(world, id) == "field_rig").map(|unit| unit.0);
-    assert!(made(&world).is_none(), "not before 120 seconds");
+    assert!(made(&world).is_none(), "not before {ticks} ticks");
     run(&mut world, 20);
-    let unit = made(&world).expect("a field rig after 120 seconds");
+    let unit = made(&world).expect("a field rig after its build time");
     let entity = world.unit_entity(unit).unwrap();
     assert_eq!(world.unit_health(unit), Some(fp_int(16_000)));
     assert_eq!(world.ecs.get::<&Builder>(entity).unwrap().power, fp_int(56));

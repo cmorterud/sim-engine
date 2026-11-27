@@ -486,9 +486,11 @@ id = "field_rig"
 name = "Field Rig"
 class = "field_rig"
 tier = 3
-mass = 2100
-energy = 25200
-build_time = 14400
+# Cost by the ability price list (2026-11-27, the design owner's plan): its gun, its build power at
+# the cheapest builder's rate, and its income paid back in T3's payback ([economy]): 2,240 to 1,716.
+mass = 1609
+energy = 19308
+build_time = 11033
 health = 16000
 speed = "4.4"
 turn_rate = 150
