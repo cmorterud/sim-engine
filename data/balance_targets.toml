@@ -690,6 +690,27 @@ air_speed = 30
 # Every unit whose cost is not the list's names what holds it ([price_list.held]); the rest
 # must come within this of the list's price (tests/price_list_test.rs).
 drift_max = 0.07
+# A dome is priced by the strength it adds to the group it covers ([price_list.shield_groups],
+# 2026-11-27): the group's cost x (sqrt(1 + E / H) - 1), H the group's health and E the dome's
+# health, its regeneration over the [model] time to kill at its tier in its domain, and its hull's.
+# A dome that cannot move is worth this much more for its cost, as a point defense is ([premiums]
+# point_defense_holds_against_line_units).
+immobile = 1.5
+
+# Each dome's group (2026-11-27): a force in [domains.forces], less the dome itself, or a position
+# below. The Mobile Shield covers the standard T2 land army; the Escort Corvette the T2 fleet's
+# destroyers and cruisers; the Shield Generator the [siege] T2 position's three point defenses; the
+# Heavy Shield Generator the T3 position's. The Corvette's anti-torpedo charge is not priced yet.
+[price_list.shield_groups]
+t2_mobile_shield = "t2_land_army"
+t2_escort_corvette = "t2_fleet"
+shield_generator = "position:t2"
+t3_heavy_shield = "position:t3"
+
+# The positions a static dome covers, as balance::T2_POSITION and T3_POSITION have them.
+[price_list.positions]
+t2 = { t2_point_defense = 3 }
+t3 = { t3_heavy_point_defense = 3 }
 
 # Splash, measured on a standing or marching formation of its tier's line (2026-11-26): the damage
 # one shot does across it over its listed damage. A unit not listed pays none.

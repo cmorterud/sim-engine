@@ -12,7 +12,7 @@
 //! unit the list prices drifts from it.
 
 use crate::balance::{cost_at, damage_per_second, TARGETS};
-use crate::sim::blueprints::{Blueprint, BlueprintDb, Targets, WeaponDef, WeaponKind, TICKS_PER_SECOND};
+use crate::sim::blueprints::{Blueprint, BlueprintDb, BlueprintId, Targets, WeaponDef, WeaponKind, TICKS_PER_SECOND};
 use crate::sim::components::MoveClass;
 
 /// A kind of target a weapon is for. Separate weapons firing at once each do their own job; one
@@ -236,6 +236,61 @@ fn sensors(db: &BlueprintDb, table: &toml::Table, unit: &Blueprint) -> Vec<(&'st
     out
 }
 
+/// A dome's price (`[price_list.shield_groups]`, 2026-11-27): the strength it adds to the group it
+/// covers. The list counts strength as √(health × damage a second), so a dome that adds `E` to a
+/// group's health `H` adds `√(1 + E / H) − 1` of the group's strength, and costs that share of
+/// the group's cost. `E` is the dome's health, its regeneration over the [model] time to kill at
+/// its tier in its domain, and the unarmed hull's own health. A dome that cannot move is worth
+/// more for its cost (`[price_list] immobile`, as `[premiums]`), and a ship's sensors are paid
+/// for as the list pays for them.
+#[derive(Clone, Debug)]
+pub struct ShieldPricing {
+    pub key: String,
+    pub group: String,
+    pub group_cost: f64,
+    pub group_health: f64,
+    pub effective_health: f64,
+    pub sensors: Vec<(&'static str, f64)>,
+    pub list: f64,
+    pub actual: f64,
+}
+
+impl ShieldPricing {
+    /// How far its cost is from its price, as a share of the price.
+    pub fn drift(&self) -> f64 {
+        self.actual / self.list - 1.0
+    }
+}
+
+/// A dome's price by the strength it adds to its group, if `[price_list.shield_groups]` names one.
+pub fn shield_price(db: &BlueprintDb, key: &str) -> Option<ShieldPricing> {
+    let table = table();
+    let list = &table["price_list"];
+    let group_name = list["shield_groups"].get(key)?.as_str().expect("a shield group names a force or a position");
+    let unit = db.get(db.find(key)?);
+    let dome = unit.shield?;
+    let tier = unit.tier.clamp(1, 3);
+    let group: Vec<(BlueprintId, u32)> = match group_name.strip_prefix("position:") {
+        Some(position) => {
+            let units = table["price_list"]["positions"][position].as_table().unwrap_or_else(|| panic!("[price_list.positions] has {position}"));
+            units.iter().map(|(name, count)| (db.id(name), number(count) as u32)).collect()
+        }
+        None => crate::balance::domain_force(db, group_name).into_iter().filter(|&(id, _)| db.get(id).key != unit.key).collect(),
+    };
+    let group_cost: f64 = group.iter().map(|&(id, count)| f64::from(count) * cost_at(db.get(id), tier)).sum();
+    let group_health: f64 = group.iter().map(|&(id, count)| f64::from(count) * db.get(id).health.to_num::<f64>()).sum();
+    let domain = match domain_of(unit) {
+        Domain::Navy => "navy",
+        _ => "land",
+    };
+    let regen_per_second = dome.regen_per_tick.to_num::<f64>() * TICKS_PER_SECOND as f64;
+    let effective_health = dome.health.to_num::<f64>() + regen_per_second * crate::balance::model_time_to_kill(tier, domain) + unit.health.to_num::<f64>();
+    let immobile = if unit.is_structure() { number(&list["immobile"]) } else { 1.0 };
+    let sensors = sensors(db, &table, unit);
+    let price = group_cost * ((1.0 + effective_health / group_health).sqrt() - 1.0) / immobile + sensors.iter().map(|(_, cost)| cost).sum::<f64>();
+    Some(ShieldPricing { key: key.to_string(), group: group_name.to_string(), group_cost, group_health, effective_health, sensors, list: price, actual: cost_at(unit, tier) })
+}
+
 /// A unit's price by the list. `None` for one with no fighting weapon, whose jobs (building,
 /// seeing, carrying) the list does not price yet, and for structures, which pay the immobile
 /// premium instead (`[premiums]`).
@@ -347,7 +402,20 @@ pub fn unit_report(db: &BlueprintDb, key: &str) {
     }
     let table = table();
     let Some(pricing) = price_with(db, &table, key) else {
-        println!("{key}: the list does not price it yet (no fighting weapon, or a structure).");
+        match shield_price(db, key) {
+            Some(dome) => println!(
+                "{key}: its dome adds {:.0} effective health to {} ({:.0} health, cost {:.0}): {:.1}, sensors {:.1}, against its cost {:.1} ({:+.1}%)",
+                dome.effective_health,
+                dome.group,
+                dome.group_health,
+                dome.group_cost,
+                dome.list,
+                dome.sensors.iter().map(|(_, cost)| cost).sum::<f64>(),
+                dome.actual,
+                dome.drift() * 100.0
+            ),
+            None => println!("{key}: the list does not price it yet (no fighting weapon, or a structure)."),
+        }
         return;
     };
     let unit = db.get(db.id(key));
@@ -380,6 +448,8 @@ pub fn list_report(db: &BlueprintDb) {
         if let Some(pricing) = price_with(db, &table, &unit.key) {
             let held = table["price_list"]["held"].get(&unit.key).and_then(toml::Value::as_str).unwrap_or("");
             println!("| {} | {:.1} | {:.1} | {:+.1}% | {held} |", unit.key, pricing.list, pricing.actual, pricing.drift() * 100.0);
+        } else if let Some(pricing) = shield_price(db, &unit.key) {
+            println!("| {} | {:.1} | {:.1} | {:+.1}% | its dome over {} |", unit.key, pricing.list, pricing.actual, pricing.drift() * 100.0, pricing.group);
         }
     }
 }

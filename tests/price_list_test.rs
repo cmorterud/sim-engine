@@ -49,3 +49,17 @@ fn the_list_reproduces_the_aircraft_it_priced() {
         assert!(pricing.drift().abs() < 0.01, "{key} costs {:.1}, the list {:.1}", pricing.actual, pricing.list);
     }
 }
+
+/// Every dome costs the strength it adds to the group it covers (`[price_list.shield_groups]`,
+/// 2026-11-27), within rounding.
+#[test]
+fn every_dome_costs_the_strength_it_adds() {
+    let targets: toml::Table = include_str!("../data/balance_targets.toml").parse().expect("valid targets");
+    let groups = targets["price_list"]["shield_groups"].as_table().expect("[price_list.shield_groups]");
+    assert!(groups.len() >= 4);
+    let db = BlueprintDb::standard();
+    for key in groups.keys() {
+        let pricing = price_list::shield_price(&db, key).unwrap_or_else(|| panic!("{key} has a dome"));
+        assert!(pricing.drift().abs() < 0.01, "{key} costs {:.1}, the strength its dome adds {:.1}", pricing.actual, pricing.list);
+    }
+}
