@@ -881,10 +881,11 @@ t3_spy_plane = "the design owner's cost until a price for seeing anywhere exists
 # Aircraft pay for the damage they land, not their card's (2026-11-26): anti-air against a bomber
 # flying its run (the Strategic Bomber at T3, the T1 Bomber below), bombs, guns and torpedoes against
 # a target holding still. The share each lands, as tests/kill_times_test.rs measures it (measured
-# again 2026-11-27, with turrets that fire only once laid on their target).
+# again 2026-11-27, with turrets that fire only once laid on their target; the Fighter-Bomber's anti-air
+# again once its guns were fixed to its nose, 0.98 to 0.90).
 [price_list.landed_share]
 t1_interceptor = 0.91
-t2_fighter_bomber_anti_air = 0.98
+t2_fighter_bomber_anti_air = 0.90
 t3_air_superiority = 1.0
 t1_bomber = 0.54
 t2_fighter_bomber = 0.92

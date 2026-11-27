@@ -555,7 +555,8 @@ fn a_fighter_bomber_fights_an_aircraft_from_its_tail() {
         }
     }
     let per_second = dealt / (f64::from(ticks) / 10.0);
-    assert!(per_second > 0.9 * 174.0, "it lands nearly all of its 174 a second: {per_second:.0}");
+    // Its guns are fixed to its nose (2026-11-27), so it lands less than all: about 0.87.
+    assert!(per_second > 0.8 * 174.0, "it lands most of its 174 a second: {per_second:.0}");
     assert!(farthest <= 600, "and keeps within its gun's reach once firing: {farthest}");
 }
 
@@ -721,5 +722,143 @@ fn aircraft_obey_orders_over_open_sea() {
     for id in [gunship, fighter] {
         let x = world.unit_position(id).expect("still flying").x.to_num::<i32>();
         assert!(x > 3_000, "it should fly out over the sea, not stay at {x}");
+    }
+}
+
+/// New shots from `source` this tick, among the projectiles now in flight.
+fn new_shots(world: &SimWorld, source: SimId, seen: &mut Vec<SimId>) -> usize {
+    use sim_engine::sim::components::Projectile;
+    let now: Vec<SimId> = world.projectiles.iter().filter(|&&(_, entity)| world.ecs.get::<&Projectile>(entity).is_ok_and(|projectile| projectile.source == source)).map(|&(id, _)| id).collect();
+    let fresh = now.iter().filter(|id| !seen.contains(id)).count();
+    *seen = now;
+    fresh
+}
+
+/// No aircraft fires any weapon on the ground, with no exceptions (the design owner,
+/// 2026-11-27): each armed aircraft, landed beside what it can hit, takes off and climbs to its
+/// height before its first shot, and every shot after leaves it at that height.
+#[test]
+fn no_aircraft_fires_on_the_ground() {
+    let armed: Vec<String> = {
+        let world = world();
+        world.blueprints.iter().filter(|unit| unit.flight.is_some() && (unit.weapon.is_some() || !unit.extra_weapons.is_empty())).map(|unit| unit.key.clone()).collect()
+    };
+    assert!(armed.len() >= 8, "every armed aircraft: {armed:?}");
+    for key in &armed {
+        let mut world = world();
+        let plane = spawn(&mut world, key, Team::Blue, point(2_500, 2_500));
+        run(&mut world, 80);
+        assert_eq!(flight(&world, plane).altitude, Fp::ZERO, "{key} lands with nothing to do");
+        // Beside it, something of each kind it could hit: a tank, a ship, and an aircraft flying by.
+        let landed = world.unit_position(plane).unwrap().xy();
+        let tank = spawn(&mut world, "t1_medium_tank", Team::Red, landed + point(250, 0));
+        let scout = spawn(&mut world, "t1_air_scout", Team::Red, landed + point(-200, 0));
+        world.advance_tick(&[SimCommand::Move { units: vec![scout], goal: landed + point(-200, 2_000) }]);
+        world.advance_tick(&[SimCommand::Move { units: vec![tank], goal: landed + point(250, 2_000) }]);
+        let mut seen = Vec::new();
+        let mut fired = 0;
+        for _ in 0..300 {
+            world.advance_tick(&[]);
+            let Some(entity) = world.unit_entity(plane) else { break };
+            let shots = new_shots(&world, plane, &mut seen);
+            let flight = *world.ecs.get::<&sim_engine::sim::components::Flight>(entity).unwrap();
+            assert!(shots == 0 || flight.altitude >= flight.cruising_height(), "{key} fired {shots} at altitude {} of {}", flight.altitude, flight.cruising_height());
+            fired += shots;
+        }
+        let _ = fired;
+    }
+}
+
+/// An idle fighter, landed, takes off after an enemy aircraft that passes within its gun's reach,
+/// as if told to attack it, keeps after it beyond that reach, and shoots it down (the design
+/// owner, 2026-11-27). Each of the three fighters.
+#[test]
+fn idle_fighters_take_off_after_aircraft_that_pass_by() {
+    for key in ["t1_interceptor", "t2_fighter_bomber", "t3_air_superiority"] {
+        let mut world = world();
+        let fighter = spawn(&mut world, key, Team::Blue, point(2_000, 1_000));
+        run(&mut world, 80);
+        assert_eq!(flight(&world, fighter).altitude, Fp::ZERO, "{key} lands with nothing to do");
+        let landed = world.unit_position(fighter).unwrap().xy();
+        // A bomber flying by, a little to one side, on its way across the map.
+        let bomber = spawn(&mut world, "t1_bomber", Team::Red, landed + point(-1_400, 300));
+        world.advance_tick(&[SimCommand::Move { units: vec![bomber], goal: landed + point(2_800, 300) }]);
+        let scrambled = (0..300).find(|_| {
+            world.advance_tick(&[]);
+            world.unit_order(fighter).unwrap().kind == OrderKind::Attack
+        });
+        assert!(scrambled.is_some(), "{key} goes after the bomber");
+        let down = (0..900).find(|_| {
+            world.advance_tick(&[]);
+            world.unit_health(bomber).is_none()
+        });
+        assert!(down.is_some(), "{key} shoots the bomber down");
+        // And with nothing more to do, it lands again.
+        run(&mut world, 300);
+        assert_eq!(world.unit_order(fighter).unwrap().kind, OrderKind::Idle, "{key} is idle again");
+    }
+}
+
+/// A fighter gives up an aircraft it went after by itself once its team loses sight of it.
+#[test]
+fn a_fighter_gives_up_an_aircraft_its_team_cannot_see() {
+    let config = SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: true, ..SimConfig::default() };
+    let mut world = SimWorld::new(config, 1);
+    let fighter = spawn(&mut world, "t1_interceptor", Team::Blue, point(1_000, 1_000));
+    run(&mut world, 80);
+    let landed = world.unit_position(fighter).unwrap().xy();
+    // A spy plane is far faster than an interceptor, and soon out of its sight.
+    let spy = spawn(&mut world, "t3_spy_plane", Team::Red, landed + point(-300, 200));
+    world.advance_tick(&[SimCommand::Move { units: vec![spy], goal: point(5_000, 5_000) }]);
+    let scrambled = (0..100).any(|_| {
+        world.advance_tick(&[]);
+        world.unit_order(fighter).unwrap().kind == OrderKind::Attack
+    });
+    assert!(scrambled, "it goes after the spy plane");
+    let gave_up = (0..400).any(|_| {
+        world.advance_tick(&[]);
+        world.unit_order(fighter).unwrap().kind == OrderKind::Idle
+    });
+    assert!(gave_up, "and gives up once it cannot see it");
+}
+
+/// Fighters' guns are fixed to their noses: every shot leaves at an aircraft within the gun's
+/// arc of straight ahead, never to the side or behind (the design owner, 2026-11-27). Each
+/// fighter chases a bomber with an interceptor on its own tail.
+#[test]
+fn fighters_fire_only_within_their_nose_arc() {
+    use sim_engine::sim::components::{Health, Turning};
+    let generator_at = (40, 40);
+    for (key, arc_degrees) in [("t1_interceptor", 30.0f64), ("t2_fighter_bomber", 35.0), ("t3_air_superiority", 40.0)] {
+        let mut world = world();
+        let generator = world.spawn_finished_structure(world.blueprints.id("power_generator"), Team::Blue, generator_at.0, generator_at.1).unwrap();
+        let bomber = spawn(&mut world, "t1_bomber", Team::Red, point(2_500, 2_500));
+        let fighter = spawn(&mut world, key, Team::Blue, point(1_800, 2_300));
+        let tail = spawn(&mut world, "t1_interceptor", Team::Red, point(1_500, 2_300));
+        world.advance_tick(&[SimCommand::Attack { units: vec![bomber], target: generator }, SimCommand::Attack { units: vec![fighter], target: bomber }, SimCommand::Follow { units: vec![tail], target: fighter }]);
+        let mut seen = Vec::new();
+        let mut fired = 0;
+        for _ in 0..600 {
+            // All kept alive, so that the fight goes on.
+            for id in [bomber, fighter, tail, generator] {
+                world.ecs.get::<&mut Health>(world.unit_entity(id).unwrap()).unwrap().current = fp_int(30_000);
+            }
+            world.advance_tick(&[]);
+            if new_shots(&world, fighter, &mut seen) == 0 {
+                continue;
+            }
+            fired += 1;
+            let facing = world.ecs.get::<&Turning>(world.unit_entity(fighter).unwrap()).unwrap().facing;
+            let at = world.unit_position(fighter).unwrap();
+            let off = |enemy: SimId| {
+                let target = world.unit_position(enemy).unwrap();
+                let (dx, dy) = ((target.x - at.x).to_num::<f64>(), (target.y - at.y).to_num::<f64>());
+                let cos = (facing.x.to_num::<f64>() * dx + facing.y.to_num::<f64>() * dy) / (dx * dx + dy * dy).sqrt();
+                cos.clamp(-1.0, 1.0).acos().to_degrees()
+            };
+            let nearest = off(bomber).min(off(tail));
+            assert!(nearest <= arc_degrees + 1.0, "{key} fired {nearest:.0} degrees off its nose");
+        }
+        assert!(fired >= 3, "{key} fired {fired} shots");
     }
 }
