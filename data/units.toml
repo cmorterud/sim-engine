@@ -1712,9 +1712,13 @@ id = "t3_missile_sub"
 name = "Strategic Missile Submarine"
 class = "factory"
 tier = 3
-mass = 9500
-energy = 152000
-build_time = 20000
+# Cost by the ability price list (2026-11-27, the design owner's pick): its share of the
+# Strategic Missile Launcher, half by build power (1,080 of 1,500) and half by stock (3 of 5),
+# 12,964; its cruise missiles, fired from under the water, with the submerged price, 750; and its
+# sonar, 37: 10,495 to 13,751, mass, energy and build time together.
+mass = 12447
+energy = 199150
+build_time = 26204
 health = 4000
 speed = "6.6"
 turn_rate = 50

@@ -6,6 +6,7 @@
 //!        + what its sensors cost at the cheapest building's price per area / domain base
 //!        + its build power at the cheapest builder's rate / domain base
 //!        + its cargo: the Light Air Transport's share of a full load of its tier's line units
+//!        + its strategic launching: a share of the Strategic Missile Launcher's cost
 //! σ_job = anchor × tier efficiency × domain base / (1 + Σ the job's prices)
 //! ```
 //!
@@ -81,6 +82,8 @@ pub struct Pricing {
     pub build_power: f64,
     /// What its room for cargo costs (`cargo_share`).
     pub cargo: f64,
+    /// What launching strategic missiles costs, for a unit that is not a launcher (`launching`).
+    pub launching: f64,
     /// The list's price.
     pub list: f64,
     /// What it costs, at its tier's prices.
@@ -99,9 +102,10 @@ impl Pricing {
     }
 
     /// The part of its price that does not go with the domain base: cargo, whose load is land
-    /// units priced as they are. Sensors go with it, as every other job does (2026-11-27).
-    const fn fixed_cost(&self) -> f64 {
-        self.cargo
+    /// units priced as they are, and strategic launching, priced in minutes of a T3 economy as the
+    /// launcher is. Sensors go with it, as every other job does (2026-11-27).
+    fn fixed_cost(&self) -> f64 {
+        self.cargo + self.launching
     }
 
     /// The list's price at another domain base: each job's part goes as one over the base.
@@ -444,25 +448,48 @@ fn price_with(db: &BlueprintDb, table: &toml::Table, key: &str) -> Option<Pricin
         }
         if job == Job::Torpedo {
             prices.push(("more than one kind of target", number(&list["torpedo_flexibility"])));
-            if unit.movement == MoveClass::Submarine {
-                prices.push(("submerged", number(&list["submerged_t1"])));
-            }
+        }
+        // A submarine's torpedoes and missiles fire from under the water, out of cannons' reach;
+        // its deck gun fires only on the surface.
+        if unit.movement == MoveClass::Submarine && at_job.iter().all(|weapon| weapon.kind != WeaponKind::Shell || job == Job::Torpedo) {
+            prices.push(("submerged", number(&list["submerged_t1"])));
         }
         let sigma = anchor * tier_efficiency * base / (1.0 + prices.iter().map(|(_, price)| price).sum::<f64>());
         jobs.push(JobPrice { job, damage_per_second: damage, strength, prices, sigma, cost: strength / sigma });
     }
     // Build power, a utility job (2026-11-27): what the cheapest builder that does nothing else
-    // pays for a point, over the domain base, as any other job.
-    let build_power = if points > 0.0 { points * build_power_rate(db, key) / base } else { 0.0 };
+    // pays for a point, over the domain base, as any other job. A unit that builds strategic
+    // missiles to launch pays for that instead (`launching`).
+    let launching = launching(db, unit);
+    let build_power = if points > 0.0 && launching == 0.0 { points * build_power_rate(db, key) / base } else { 0.0 };
     // Cargo, a utility job (2026-11-27): the share of a full load that the only unit that only
     // carries pays. Not over the base: the load is land units, priced as they are.
     let cargo = if unit.transport.is_some() { cargo_share(db, table) * full_load(db, table, unit) } else { 0.0 };
-    let mut total = jobs.iter().map(|job| job.cost).sum::<f64>() + sensors.iter().map(|(_, cost)| cost).sum::<f64>() + build_power + cargo;
+    let mut total = jobs.iter().map(|job| job.cost).sum::<f64>() + sensors.iter().map(|(_, cost)| cost).sum::<f64>() + build_power + cargo + launching;
     // What cannot move is worth more for its cost, as a dome is (`[price_list] immobile`).
     if unit.is_structure() {
         total /= number(&list["immobile"]);
     }
-    Some(Pricing { key: key.to_string(), tier, domain, base, jobs, sensors, build_power, cargo, list: total, actual: cost_at(unit, tier) })
+    Some(Pricing { key: key.to_string(), tier, domain, base, jobs, sensors, build_power, cargo, launching, list: total, actual: cost_at(unit, tier) })
+}
+
+/// What launching strategic missiles costs a unit that is not a launcher (2026-11-27, the design
+/// owner's pick, for the Strategic Missile Submarine): the share of the cheapest Strategic Missile
+/// Launcher that its build power and its stock make, half the launcher's cost for each,
+/// `launcher × ½ (points / launcher's + stock / launcher's)`. Not over the domain base: the
+/// launcher's cost is set in minutes of a standard T3 economy (`[economy]`), not by a fight.
+fn launching(db: &BlueprintDb, unit: &Blueprint) -> f64 {
+    let launches = |unit: &Blueprint| unit.weapon.iter().chain(&unit.extra_weapons).any(|weapon| weapon.kind == WeaponKind::StrategicMissile);
+    if unit.is_structure() || !launches(unit) {
+        return 0.0;
+    }
+    let Some(launcher) = db.iter().filter(|other| other.is_structure() && launches(other)).min_by(|a, b| cost_at(a, a.tier).total_cmp(&cost_at(b, b.tier))) else {
+        return 0.0;
+    };
+    let share = |own: f64, theirs: f64| own / theirs;
+    let points = share(unit.build_power.to_num(), launcher.build_power.to_num());
+    let stock = share(f64::from(unit.max_stock), f64::from(launcher.max_stock));
+    cost_at(launcher, launcher.tier) * (points + stock) / 2.0
 }
 
 /// What a shield of its own adds to a unit's health (2026-11-27): the shield's health and its
@@ -546,6 +573,9 @@ pub fn unit_report(db: &BlueprintDb, key: &str) {
     }
     if pricing.cargo > 0.0 {
         println!("  cargo, {:.3} of a full load of {:.1}: {:8.1}", cargo_share(db, &table), full_load(db, &table, unit), pricing.cargo);
+    }
+    if pricing.launching > 0.0 {
+        println!("  launching, its share of the Strategic Missile Launcher by build power and stock: {:8.1}", pricing.launching);
     }
     let shield = own_shield_health(&table, unit);
     if shield > 0.0 {

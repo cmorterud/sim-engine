@@ -121,6 +121,21 @@ fn strategic_weapons_cost_their_minutes_of_a_t3_economy() {
     }
 }
 
+/// Strategic launching (2026-11-27, the design owner's pick): the Strategic Missile Submarine pays
+/// half the Strategic Missile Launcher's cost by its share of the launcher's build power and half
+/// by its share of its stock, its build power no builder's, and costs the list's price.
+#[test]
+fn the_missile_submarine_costs_its_share_of_the_launcher() {
+    let db = BlueprintDb::standard();
+    let (sub, launcher) = (db.get(db.id("t3_missile_sub")), db.get(db.id("strategic_missile_launcher")));
+    let pricing = price_list::price(&db, "t3_missile_sub").expect("the list prices the Missile Submarine");
+    let share = (sub.build_power.to_num::<f64>() / launcher.build_power.to_num::<f64>() + f64::from(sub.max_stock) / f64::from(launcher.max_stock)) / 2.0;
+    let wanted = share * sim_engine::balance::cost_at(launcher, 3);
+    assert!((pricing.launching / wanted - 1.0).abs() < 1e-9, "it pays {:.1} for launching, not {wanted:.1}", pricing.launching);
+    assert_eq!(pricing.build_power, 0.0, "its build power is the launching job's");
+    assert!(pricing.drift().abs() < 0.01, "it costs {:.1}, the list {:.1}", pricing.actual, pricing.list);
+}
+
 /// T4, for experimentals (2026-11-27): every per-tier table has a T4 entry, and a unit made T4 is
 /// priced by them: its fights last the T4 time to kill, 1.45 of T1's, and it is measured against
 /// T3's line, at T3's energy price and, in the air, T3's base.

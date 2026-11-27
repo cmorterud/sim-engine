@@ -736,7 +736,10 @@ first_volley_share = 0.5
 undodgeable = 0.34
 # Out of cannons' reach (submerged): sqrt(1 / (1 - f)) - 1, f the share of its tier's fleet's
 # anti-ship damage that cannot reach it. The T1 fleet for this is two frigates and two submarines,
-# f 0.63, so 0.65. A submarine's deck gun fires only on the surface and pays no premium.
+# f 0.63, so 0.65. A submarine's torpedoes and missiles fire from under the water and pay it; its
+# deck gun fires only on the surface and pays no premium. At every tier at T1's (2026-11-27, for
+# the Strategic Missile Submarine's cruise missiles), until a tier has a sub hunter of its own to
+# measure the share against.
 submerged_t1 = 0.65
 # A weapon with more than one kind of target: sqrt(1 / the largest share of the enemy mix a
 # single-target weapon could hit) - 1. A navy is taken as half ships, half submarines, so a torpedo
@@ -753,6 +756,11 @@ torpedo_flexibility = 0.41
 # Build power (2026-11-27), a utility job: its points at the least any unit that only builds pays
 # for one (the T1 and T3 Engineers, 10.4), over the domain base. Each engineer is priced by the
 # others. The Field Rig and the Command Rig carry it in their lists, still held.
+# Strategic launching (2026-11-27, the design owner's pick), for a unit that builds strategic
+# missiles and is not the launcher: the launcher's cost, half by its share of the launcher's build
+# power and half by its share of its stock. Not over the domain base: the launcher is priced in
+# minutes of a T3 economy ([economy]), not by a fight. Its build power is this job's, not a
+# builder's.
 # A sensor pays only for what it sees past its own vision, at the price per area of the cheapest
 # building that has it: (range^2 - vision^2) / building range^2 x building cost. A ship's radar is
 # shared by the radar ships of its tier's standard fleet, whose cover overlaps, so it pays that
@@ -837,7 +845,6 @@ t2_torpedo_boat = "the duel it wins ([counters]): the most that keeps 0.70 again
 t1_point_defense = "the hold rule ([premiums]): the most it can cost and still hold, under the list's price"
 command_rig = "not derived yet: the snipe rules, its gun and enhancements"
 field_rig = "not derived yet: build power, income and its gun"
-t3_missile_sub = "not derived yet: the launcher's share, its cruise missiles, submerged at T3 (left for the design owner, 2026-11-27)"
 # The Spy Plane can look anywhere, which the list prices only through what its radar sees past
 # its vision (42 at the T3 air base). Its cost is the design owner's until a price for seeing
 # anywhere exists (2026-11-27, the plan's pick).

@@ -402,6 +402,12 @@ out close and why: evidence about the process, not a target.
   T2 aircraft moves. The navy base re-solves on the battle line to 0.709 (0.702): ships move -1%
   to +1.3%, the Torpedo Boat 748 to 758 by the duel it wins. T3 air, at a base of about one,
   does not move.
+* 2026-11-27: the Strategic Missile Submarine priced by the list (the design owner's pick): its
+  strategic launching is half the Strategic Missile Launcher's cost by its share of the launcher's
+  build power (1,080 of 1,500) and half by its share of its stock (3 of 5), 12,964, not over the
+  navy base, since the launcher is priced in minutes of a T3 economy; its cruise missiles, which
+  fire from under the water, pay the submerged price at T1's, 750; and its sonar, 37. 10,495 to
+  13,751. The AI does not build it.
 
 ## Order of work
 
