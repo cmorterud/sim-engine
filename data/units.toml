@@ -817,7 +817,6 @@ flight = { elevation = 352, turn_rate = 70, break_off = 1000, fuel = 1500, min_s
 # 1,080 short and must fly as far past to turn and line up again, a bomb every 13.5 seconds
 # however short its break-off; 12 seconds is the longest reload that does not lengthen that pass.
 weapon = { kind = "bomb", range = 1800, reload_ticks = 120, projectile_speed = 40, damage = 5200, splash_radius = 83 }
-# Its two railguns, of 16 each every 0.7 seconds, as one.
 
 # With an anti-air gun.
 # Cost, build time, health, and damage set against the Medium Tank as the inspiration has its

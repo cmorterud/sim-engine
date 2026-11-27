@@ -614,7 +614,8 @@ fn every_aircraft_that_makes_passes_fires_whenever_its_target_is_in_reach() {
             }
         }
     }
-    assert!(checked >= 5, "only {checked} cases were checked");
+    // 4 since the Strategic Bomber lost its railguns (2026-11-26).
+    assert!(checked >= 4, "only {checked} cases were checked");
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
