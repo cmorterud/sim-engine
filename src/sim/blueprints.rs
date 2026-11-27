@@ -247,7 +247,7 @@ pub struct FlightDef {
     pub break_off: Fp,
     /// Ticks of flight on a full tank.
     pub fuel_ticks: u32,
-    /// A gunship hovers over what it attacks, instead of making passes.
+    /// A gunship circles what it attacks, instead of making passes.
     pub hovers: bool,
     /// The slowest it eases off to, to turn tighter onto what it heads for. Its top speed
     /// turns only at full speed; half its top speed when the data gives none.

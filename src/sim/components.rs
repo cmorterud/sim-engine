@@ -327,7 +327,7 @@ pub struct Flight {
     /// On the pad, and which of the four pads.
     pub docked: bool,
     pub pad: u8,
-    /// Hovers over what it attacks, like a gunship, instead of making passes.
+    /// Circles what it attacks, like a gunship, instead of making passes.
     pub hovers: bool,
     /// The slowest it eases off to, to turn tighter (`FlightDef::min_speed`).
     pub min_speed: Fp,

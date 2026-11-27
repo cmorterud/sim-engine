@@ -81,6 +81,24 @@ fn inside_turn(facing: Vec2Fp, offset: Vec2Fp, radius: Fp) -> bool {
     wide_mul(along, along) + wide_mul(side, side) < wide_mul(radius, radius)
 }
 
+/// Which way a gunship circling `center` at `radius` heads from `here`: along the circle,
+/// anticlockwise, and in or out across it by how far off it is, so that it comes onto it and keeps
+/// to it. Anticlockwise for both teams, since a half turn of the map keeps it anticlockwise.
+/// Rounded toward zero, so that mirror images circle in mirror image.
+fn orbit_heading(here: Vec2Fp, center: Vec2Fp, radius: Fp) -> Vec2Fp {
+    let out = here - center;
+    if out == Vec2Fp::ZERO || radius <= Fp::ZERO {
+        return Vec2Fp::new(Fp::ONE, Fp::ZERO);
+    }
+    let distance = crate::math::fp::sqrt_wide(out.length_squared());
+    let out = out.normalized();
+    // How far off the circle, as a share of its radius: out beyond it, in inside it, at most one.
+    let off = (distance - radius).saturating_div(radius).clamp(-Fp::ONE, Fp::ONE);
+    let along = Vec2Fp::new(-out.y, out.x);
+    let across = out.scaled(off);
+    Vec2Fp::new(along.x - across.x, along.y - across.y).normalized()
+}
+
 /// Below this share of a full tank, a patrolling aircraft goes to refuel.
 const REFUEL_SHARE_PERCENT: u32 = 20;
 /// Ticks of fuel gained each tick on the ground, the inspiration's recharge rate of 5, and on an
@@ -290,7 +308,9 @@ impl SimWorld {
                 }
             }
 
-            // A gunship stops over what it attacks, well within range, and turns to face it.
+            // A gunship circles what it attacks once well within range, at full speed and half its
+            // range out, rather than make passes (the design owner, 2026-11-27; it hovered over it
+            // until then).
             let hold = flight.hovers
                 && attacking
                 && heading_for.is_some_and(|point| {
@@ -343,7 +363,7 @@ impl SimWorld {
                 flight.speed = down(flight.speed, stats.max_speed, Fp::ZERO);
                 flight.altitude = down(flight.altitude, flight.elevation, Fp::ZERO);
             } else if hold {
-                flight.speed = down(flight.speed, stats.max_speed, Fp::ZERO);
+                flight.speed = up(flight.speed, stats.max_speed, top_speed);
                 flight.altitude = up(flight.altitude, flight.elevation, height);
             } else {
                 flight.speed = up(flight.speed, stats.max_speed, tailing.unwrap_or(top_speed).min(turning_in.unwrap_or(top_speed)));
@@ -395,10 +415,12 @@ impl SimWorld {
                         let half = break_off / 2;
                         flight.breaking_off = behind && distance_squared < wide_mul(half, half);
                     }
-                    // A gunship can turn on the spot, so nothing is out of its reach. Easing off
+                    // A gunship turns tight enough that nothing is out of its reach. Easing off
                     // to turn in, it turns as tight as its speed allows.
                     let unreachable = !flight.hovers && inside_turn(facing, offset, if turning_in.is_some() { turn_radius(speed, turning.max_turn) } else { radius });
-                    if flight.breaking_off || offset == Vec2Fp::ZERO || unreachable {
+                    if hold {
+                        rotate_toward(facing, orbit_heading(here, point, combat.range / 2), turning.max_turn)
+                    } else if flight.breaking_off || offset == Vec2Fp::ZERO || unreachable {
                         facing
                     } else {
                         rotate_toward(facing, offset.normalized(), turning.max_turn)

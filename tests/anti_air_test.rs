@@ -223,7 +223,7 @@ fn flak_mostly_misses_fast_t3_aircraft_unless_massed() {
     assert!(failures.is_empty(), "{failures:#?}");
 }
 
-/// Gunships hover over what they attack, too slow to outfly flak: as much flak as a gunship cost
+/// Gunships circle what they attack, too slow to outfly flak: as much flak as a gunship cost
 /// brings it down over its attack, and half as much again for the heavy gunship since the price
 /// list halved its cost (2026-11-26), less flak than its borrowed cost bought. Cost is at the
 /// gunship's tier's prices, energy and all (2026-11-27; mass alone until then, which leaves out
