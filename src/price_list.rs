@@ -21,6 +21,14 @@
 //! σ_job = anchor × tier efficiency × domain base / (1 + Σ the job's prices)
 //! ```
 //!
+//! A factory costs its build power, its hull and its tech (`factory_price`, 2026-11-27):
+//!
+//! ```text
+//! cost = its build power at the build-power price (the engineers' 10.4 a point)
+//!        + its health at the hull price, the Wall Section's cost over its health
+//!        + its tech price: what opening its tier costs, for a headquarters and the Rig Yard
+//! ```
+//!
 //! Health is the hull's, and a shield of its own adds its health and its regeneration over the
 //! [model] time to kill, as a dome's does to its group (`shield_price`).
 //!
@@ -673,6 +681,74 @@ pub fn build_power_rate(db: &BlueprintDb, except: &str) -> f64 {
         .filter(|unit| !unit.is_structure() && unit.key != except && unit.build_power.to_num::<f64>() > 0.0 && fighting_weapons(unit).is_empty())
         .map(|unit| cost_at(unit, unit.tier.clamp(1, MAX_TIER)) / unit.build_power.to_num::<f64>())
         .fold(f64::INFINITY, f64::min)
+}
+
+/// What a factory costs, by part, against what it costs at its tier's prices.
+#[derive(Clone, Debug)]
+pub struct FactoryPricing {
+    pub key: String,
+    pub tier: u8,
+    /// Its build power at the build-power price.
+    pub build_power: f64,
+    /// Its health at the hull price.
+    pub hull: f64,
+    /// What opening its tier costs (`[price_list.factories] tech`), for a headquarters and the
+    /// Rig Yard; none for a T1 or support factory.
+    pub tech: f64,
+    pub list: f64,
+    pub actual: f64,
+}
+
+impl FactoryPricing {
+    /// Its cost over the list's price, less one.
+    pub fn drift(&self) -> f64 {
+        self.actual / self.list - 1.0
+    }
+}
+
+/// What a factory costs (2026-11-27, the design owner's pick): its build power at the build-power
+/// price, what any unit that only builds pays at the least for a point, wherever the point sits;
+/// its health at the hull price, the cost of a point of health in the plainest structure
+/// (`[price_list.factories] hull`, the Wall Section); and, for a headquarters and the Rig Yard,
+/// its tech price, what opening its tier costs, the design owner's knob
+/// (`[price_list.factories] tech`). Not over a domain base: a factory is priced by an economy,
+/// not by a fight. None for a unit that is not a land, air or naval factory, or the Rig Yard.
+pub fn factory_price(db: &BlueprintDb, key: &str) -> Option<FactoryPricing> {
+    let table = table();
+    let factories = &table["price_list"]["factories"];
+    let unit = db.get(db.find(key)?);
+    let tech = factories["tech"].get(key).map(number);
+    if unit.factory_kind.is_none() && tech.is_none() {
+        return None;
+    }
+    let wall = db.get(db.id(factories["hull"].as_str().expect("[price_list.factories] hull")));
+    let per_health = cost_at(wall, wall.tier) / wall.health.to_num::<f64>();
+    let build_power = unit.build_power.to_num::<f64>() * build_power_rate(db, key);
+    let hull = unit.health.to_num::<f64>() * per_health;
+    let tech = tech.unwrap_or(0.0);
+    let tier = unit.tier.clamp(1, MAX_TIER);
+    Some(FactoryPricing { key: key.to_string(), tier, build_power, hull, tech, list: build_power + hull + tech, actual: cost_at(unit, tier) })
+}
+
+/// The `--balance-derive factories` report: every factory's parts, against its cost.
+pub fn factory_report(db: &BlueprintDb) {
+    println!("| Factory | Tier | Build power | Hull | Tech | List | Costs | Drift |");
+    println!("| :-- | --: | --: | --: | --: | --: | --: | --: |");
+    for unit in db.iter() {
+        if let Some(pricing) = factory_price(db, &unit.key) {
+            println!(
+                "| {} | T{} | {:.1} | {:.1} | {:.1} | {:.1} | {:.1} | {:+.1}% |",
+                pricing.key,
+                pricing.tier,
+                pricing.build_power,
+                pricing.hull,
+                pricing.tech,
+                pricing.list,
+                pricing.actual,
+                pricing.drift() * 100.0
+            );
+        }
+    }
 }
 
 /// The `--balance-derive unit <key>` report: one unit's price, job by job.

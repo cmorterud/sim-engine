@@ -867,6 +867,19 @@ t2_destroyer = 0.07
 snipe = "t3_strategic_bomber"
 held = {}
 
+# Factories (2026-11-27, the design owner's pick): a factory's cost is its build power, its hull
+# and, for a headquarters and the Rig Yard, its tech. Build power at the build-power price, the
+# least any unit that only builds pays for a point (the engineers' 10.4), wherever the point sits;
+# health at the hull price, the plainest structure's cost a point of health (the Wall Section's,
+# 0.007); not over a domain base, since a factory is priced by an economy, not by a fight. The tech
+# price is what opening a tier costs: the design owner's knob, in materiel at its tier's prices,
+# kept at what it was when the split was made (a headquarters' cost over its support factory's,
+# the Rig Yard's over its build power and hull), to be tuned against [pace] with the AI's upgrade
+# rules. T1 and support factories have none. Mass, energy and build time go together.
+[price_list.factories]
+hull = "wall"
+tech = { land_factory_t2 = 851, air_factory_t2 = 486, naval_factory_t2 = 900, land_factory_t3 = 3941, air_factory_t3 = 3080, naval_factory_t3 = 7276, rig_yard = 1825 }
+
 [price_list.held]
 t1_medium_tank = "the anchor"
 t1_light_walker = "the land solver's targets ([roles])"
