@@ -199,15 +199,22 @@ fn an_ordered_attack_fires_even_into_a_wall() {
 }
 
 #[test]
+/// A shot flies on past the map's edge, as aircraft do (the design owner, 2026-11-27), and is
+/// removed at the outer margin, half the map's width past it.
 fn projectile_leaving_the_map_is_removed() {
     let mut world = flat_world(false);
     let source = passive_unit(&mut world, Team::Blue, point(100, 100));
     let start = Vec3Fp::new(fp_int(5_100), fp_int(100), fp_int(50));
-    let velocity = Vec3Fp::new(fp_int(30), Fp::ZERO, fp_int(5));
+    let velocity = Vec3Fp::new(fp_int(100), Fp::ZERO, fp_int(5));
     world.spawn_projectile(start, Projectile { velocity, damage: fp_int(1), source, source_team: Team::Blue, lifetime_ticks: 1_000, splash_radius: Fp::ZERO, allied_safe_ticks: 0 });
     world.advance_tick(&[]);
     world.advance_tick(&[]);
-    assert!(world.projectiles.is_empty());
+    assert_eq!(world.projectiles.len(), 1, "past the edge it flies on");
+    // From 5,100 at 100 a tick it passes 5,120 + 2,560 within 27 ticks.
+    for _ in 0..30 {
+        world.advance_tick(&[]);
+    }
+    assert!(world.projectiles.is_empty(), "and is gone past the outer margin");
 }
 
 #[test]
