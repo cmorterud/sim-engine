@@ -426,6 +426,9 @@ pub struct ExtraWeapon {
     pub missile_height: Option<Fp>,
     pub target: Option<SimId>,
     pub turret: Option<Turret>,
+    /// A gun fixed to the nose, as `NoseGun`: it fires only at what is within this of straight
+    /// ahead, the cosine of the half-angle. None for one that fires in any direction.
+    pub arc: Option<Fp>,
     /// How far from where it aims its shots land, as `Scatter`. Fixed from the blueprint.
     pub spread: Fp,
     /// What it hits is stunned this many ticks.

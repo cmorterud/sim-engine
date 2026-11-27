@@ -102,6 +102,7 @@ fn battlefield() -> Effects {
             upgrade: None,
             remembered: false,
             ally: false,
+            owner: None,
         });
         after.wrecks.push(WreckView { id: SimId(3_000 + index), x: raw(x), y: raw(y), z: raw(z), radius: raw(radius), mass: 1, energy: 0, kind: WreckKind::Debris, motion: WreckMotion::Still });
     }
@@ -280,7 +281,7 @@ fn main() {
             camera.update(0.0, &heights);
         }
         let mut instances = InstanceBatches::default();
-        build_unit_instances(&snapshot.units, &snapshot.units, 1.0, camera.eye(), &[], &looks, &[], &mut motion, &mut instances);
+        build_unit_instances(&snapshot.units, &snapshot.units, 1.0, camera.eye(), &[], &looks, &[], &sim_engine::player_colors::Palette::default(), &mut motion, &mut instances);
         for dome in &domes {
             instances.push(sim_engine::render::meshes::Shape::Dome, sim_engine::render::instances::dome_instance(dome, camera.eye()));
         }

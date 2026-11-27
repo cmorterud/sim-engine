@@ -108,6 +108,7 @@ fn main() {
             upgrade: None,
             remembered: false,
             ally: false,
+            owner: None,
         };
         // In flight: from the west, coming down at the target, over two ticks.
         let shot = |id: u32, along: f64, height: f64| ProjectileView {

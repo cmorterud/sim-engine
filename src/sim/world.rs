@@ -184,6 +184,9 @@ pub struct UnitView {
     /// Whether it belongs to an ally: a player of its team other than the team's first, the
     /// one a person plays. Theirs to command, not the person's, so it cannot be selected.
     pub ally: bool,
+    /// Whose it is, where the viewer knows: not for an enemy structure remembered out of sight.
+    /// The interface shows it in that player's color.
+    pub owner: Option<PlayerId>,
 }
 
 /// A factory's production state, for the build menu. Only for the viewer's team.
@@ -2324,6 +2327,27 @@ impl SimWorld {
         }
     }
 
+    /// Sends idle fighters after the enemy aircraft they spotted (`step_combat`), as if told to
+    /// attack them. Once it is destroyed, or out of their team's sight, they are idle again.
+    /// `scrambles` lists (target, fighter) pairs.
+    fn start_scrambles(&mut self, mut scrambles: Vec<(SimId, SimId)>) {
+        scrambles.sort_unstable();
+        for group in scrambles.chunk_by(|first, second| first.0 == second.0) {
+            let target = group[0].0;
+            if self.unit_position(target).is_none() {
+                continue;
+            }
+            let units: Vec<SimId> = group.iter().map(|&(_, unit)| unit).collect();
+            let position = self.unit_position(target).expect("just found").xy();
+            self.assign_route(&units, OrderKind::Attack, position, Some(target));
+            for &id in &units {
+                let (_, entity) = self.find_unit(id).expect("it just spotted its target");
+                let mut combat = self.ecs.get::<&mut Combat>(entity).expect("it has a weapon");
+                (combat.forced_target, combat.chasing) = (Some(target), true);
+            }
+        }
+    }
+
     /// Finishes cancelling orders that cannot be reached. A forced target goes with its order,
     /// and a patrol ends, since it would only try the same thing again. Builders drop the task
     /// that led there later this tick.
@@ -2594,6 +2618,8 @@ impl SimWorld {
         let mut finished_attacks: Vec<SimId> = Vec::new();
         let mut finished_discharges: Vec<SimId> = Vec::new();
         let mut fired_nukes: Vec<SimId> = Vec::new();
+        // Idle fighters taking off after enemy aircraft: (target, fighter).
+        let mut scrambles: Vec<(SimId, SimId)> = Vec::new();
         // How each unit is moving and turning, for the guns that lead it, read before the units'
         // weapons are borrowed: as the shots will read them when they are fired.
         let courses: Vec<(Vec3Fp, Vec2Fp)> = units
@@ -2740,6 +2766,15 @@ impl SimWorld {
             });
             // A tractor beam holds one unit at a time.
             let loaded = launcher.as_ref().is_none_or(|launcher| launcher.automatic || launcher.stock > 0) && tractor.is_none_or(|beam| beam.holding.is_none());
+            // An aircraft fires nothing on the ground: not until it has taken off and climbed to
+            // the height it flies at, and nothing once it comes down to land, whatever its weapon
+            // (the design owner, 2026-11-27). Half its height out of fuel.
+            let aloft = flight.is_none_or(|flight| flight.altitude >= flight.cruising_height());
+            // A fighter, whose anti-air is fixed to its nose: the reach of that gun.
+            let fighter_reach = flight.and_then(|_| {
+                let main = (nose_gun.is_some() && hits_air).then_some(combat.range);
+                main.or_else(|| extras.as_deref().and_then(|extras| extras.0.iter().find(|weapon| weapon.arc.is_some() && weapon.hits_air).map(|weapon| weapon.range)))
+            });
 
             // A ground attack takes over the gun, so the unit looks for nothing else.
             let ground = combat.ground_target;
@@ -2749,7 +2784,10 @@ impl SimWorld {
             if ground.is_some() {
                 combat.target = None;
             } else if let Some(forced) = combat.forced_target {
-                match locate(forced) {
+                // A fighter that went after an aircraft by itself gives up once its team loses
+                // sight of it, and goes back to what it was doing.
+                let scrambled = combat.chasing && flight.is_some();
+                match locate(forced).filter(|entry| !scrambled || (sensed(entry) && !hidden(entry.id))) {
                     Some(entry) => {
                         combat.target = can_engage(entry).then_some(forced);
                         if combat.target.is_none() {
@@ -2843,6 +2881,31 @@ impl SimWorld {
                 }
             }
 
+            // An idle fighter, landed or circling, takes off after an enemy aircraft that comes
+            // within its gun's reach across the ground, as if told to attack it (the design
+            // owner, 2026-11-27).
+            let idle_fighter = fighter_reach.filter(|_| {
+                order.kind == OrderKind::Idle && combat.forced_target.is_none() && ground.is_none() && flight.is_some_and(|flight| flight.refit.is_none())
+            });
+            if let Some(reach) = idle_fighter.filter(|_| stats.phase.wrapping_add(tick).is_multiple_of(TARGET_SEARCH_INTERVAL)) {
+                let reach = i64::from(reach.to_bits());
+                let mut best: Option<(i64, SimId)> = None;
+                let mut consider = |other: &super::spatial::GridEntry| {
+                    let distance = squared_distance(other.x, other.y);
+                    let within = reach + i64::from(other.radius);
+                    if other.is_air && distance <= within * within && sensed(other) && !hidden(other.id) {
+                        let candidate = (distance, other.id);
+                        if best.is_none_or(|current| candidate < current) {
+                            best = Some(candidate);
+                        }
+                    }
+                };
+                grid.for_each_candidate(Some(stats.team.enemy()), Layer::Air, me.x, me.y, reach as i32 + max_mobile, &mut consider);
+                if let Some((_, found)) = best {
+                    scrambles.push((found, id));
+                }
+            }
+
             // A Discharge order takes over the gun, until it fires or its target is gone.
             let discharge_target = discharge_order.map(|order| order.target);
             if let Some(target) = discharge_target {
@@ -2913,7 +2976,7 @@ impl SimWorld {
             // A gun fixed to the nose never lets a shot go by: ready, with its own target outside
             // its arc or none at all, it fires at the nearest it can hit inside the arc, and keeps
             // steering for its own (the design owner, 2026-11-26).
-            let snap = nose_gun.zip(front).filter(|_| !aimed && !turreted && ground.is_none() && discharge_target.is_none() && can_fire && combat.ticks_until_ready == 0).and_then(|(arc, front)| {
+            let snap = nose_gun.zip(front).filter(|_| aloft && !aimed && !turreted && ground.is_none() && discharge_target.is_none() && can_fire && combat.ticks_until_ready == 0).and_then(|(arc, front)| {
                 let mut best: Option<(i64, SimId)> = None;
                 let mut consider = |other: &super::spatial::GridEntry| {
                     let away = Vec2Fp::new(Fp::from_bits(other.x - gun.0), Fp::from_bits(other.y - gun.1));
@@ -2943,7 +3006,7 @@ impl SimWorld {
             });
             let aimed = aimed || snap.is_some();
             // Discharge fires in range, once aimed and reloaded, if the team has the energy stored.
-            if let (Some(target), Some(weapon), true) = (discharge_target, discharge.as_mut(), can_fire) {
+            if let (Some(target), Some(weapon), true) = (discharge_target, discharge.as_mut(), can_fire && aloft) {
                 let economy = &mut economies[stats.owner.index()];
                 if let Some(entry) = locate(target).filter(|entry| can_engage(entry)) {
                     // By the inspiration's rule, nothing is spent until the shell lands.
@@ -2984,7 +3047,7 @@ impl SimWorld {
             });
             // It bombs only from the height it is flying at, half its elevation out of fuel, not
             // while taking off or landing.
-            let at_height = flight.is_none_or(|flight| flight.altitude >= flight.cruising_height());
+            let at_height = aloft;
             let raw = |x: i32, y: i32, z: i32| Vec3Fp::new(Fp::from_bits(x), Fp::from_bits(y), Fp::from_bits(z));
             // A bomber lets go only when its bomb would land on the target. It falls to the
             // ground, or over the sea to the water's surface, where it bursts.
@@ -3007,7 +3070,7 @@ impl SimWorld {
                 _ => combat.reload_ticks,
             };
             let spread = artillery.map_or_else(|| scatter.map_or(Fp::ZERO, |scatter| scatter.0), |artillery| artillery.spread);
-            if combat.ticks_until_ready == 0 && aimed && gun_free && loaded && charged && can_fire && set_up {
+            if combat.ticks_until_ready == 0 && aimed && gun_free && loaded && charged && can_fire && set_up && aloft {
                 if let Some(target) = snap.or(combat.target) {
                     let entry = locate(target).expect("target was just validated or found");
                     let (from, to) = (raw(gun.0, gun.1, launch_height(muzzle, torpedo)), raw(entry.x, entry.y, entry.z));
@@ -3096,7 +3159,7 @@ impl SimWorld {
                         combat.closing = None;
                     }
                 }
-                if combat.ticks_until_ready == 0 && aimed && loaded && in_reach && charged && can_fire && set_up && !combat.line_blocked {
+                if combat.ticks_until_ready == 0 && aimed && loaded && in_reach && charged && can_fire && set_up && aloft && !combat.line_blocked {
                     shots.push(PendingShot {
                         source: id,
                         team: stats.team,
@@ -3146,6 +3209,21 @@ impl SimWorld {
                         salvo.tick();
                     }
                     let reach = i64::from(weapon.range.to_bits());
+                    // A gun fixed to the nose, as a fighter-bomber's, hits only what is within its
+                    // arc of straight ahead, so the aircraft must turn to aim it. With its target
+                    // outside the arc, it fires at the nearest it can hit inside, as a nose gun does.
+                    let arc = weapon.arc;
+                    let ahead = |entry: &super::spatial::GridEntry| {
+                        arc.is_none_or(|arc| {
+                            front.is_some_and(|front| {
+                                let away = Vec2Fp::new(Fp::from_bits(entry.x - me.x), Fp::from_bits(entry.y - me.y));
+                                away != Vec2Fp::ZERO && {
+                                    let away = away.normalized();
+                                    front.x * away.x + front.y * away.y >= arc
+                                }
+                            })
+                        })
+                    };
                     let usable = |entry: &super::spatial::GridEntry| {
                         let within = reach + i64::from(entry.radius);
                         let hit = if entry.is_sub {
@@ -3159,6 +3237,7 @@ impl SimWorld {
                             && hit
                             && sensed(entry)
                             && !hidden(entry.id)
+                            && ahead(entry)
                     };
                     let spot = ground.filter(|spot| weapon.hits_ground && squared_distance(spot.x.to_bits(), spot.y.to_bits()) <= reach * reach);
                     let forced = combat.forced_target.and_then(locate).filter(|entry| usable(entry)).map(|entry| entry.id);
@@ -3168,7 +3247,9 @@ impl SimWorld {
                         weapon.target = forced;
                     } else if !weapon.target.and_then(locate).is_some_and(usable) {
                         weapon.target = None;
-                        if stats.phase.wrapping_add(tick).is_multiple_of(TARGET_SEARCH_INTERVAL) {
+                        // A nose gun looks every tick it is ready, as its target comes and goes from its arc.
+                        let looks = (arc.is_some() && weapon.ticks_until_ready == 0 && aloft) || stats.phase.wrapping_add(tick).is_multiple_of(TARGET_SEARCH_INTERVAL);
+                        if looks {
                             let mut best: Option<(bool, i64, SimId)> = None;
                             let mut consider = |other: &super::spatial::GridEntry| {
                                 if usable(other) {
@@ -3234,7 +3315,7 @@ impl SimWorld {
                         },
                     };
                     weapon.aimed = aimed;
-                    if weapon.ticks_until_ready > 0 || !aimed || (weapon.broadside && !weapon.due) || (me.is_sub && !weapon.torpedo && weapon.missile_height.is_none()) {
+                    if !aloft || weapon.ticks_until_ready > 0 || !aimed || (weapon.broadside && !weapon.due) || (me.is_sub && !weapon.torpedo && weapon.missile_height.is_none()) {
                         continue;
                     }
                     let from = raw(gun.0, gun.1, launch_height(muzzle, weapon.torpedo));
@@ -3284,6 +3365,7 @@ impl SimWorld {
         for id in finished_attacks {
             self.set_order(id, Order::IDLE);
         }
+        self.start_scrambles(scrambles);
         // Each order to fire a nuclear missile fires one.
         for id in fired_nukes {
             let (_, entity) = self.find_unit(id).expect("it just fired");
@@ -4921,6 +5003,7 @@ impl SimWorld {
                     id,
                     team: stats.team,
                     ally: stats.owner != self.first_player(stats.team),
+                    owner: Some(stats.owner),
                     x,
                     y,
                     z,
@@ -4977,6 +5060,7 @@ impl SimWorld {
                     id: record.id,
                     team: viewer.enemy(),
                     ally: false,
+                    owner: None,
                     x: record.x,
                     y: record.y,
                     z: record.z,

@@ -1,0 +1,37 @@
+# Units out of the standard roster since 2026-11-27 (the design owner's pick), as they were, kept
+# so that the engine's assisting stations, a structure whose build power helps whatever is within
+# its reach, stay tested for data that uses them. Tests append this to data/units.toml
+# (tests/common/mod.rs).
+
+# Engineering stations: a drone that helps whatever is building, being upgraded, or damaged within
+# reach, on its own. The T3 station, an upgrade of the T2, flies two. The inspiration's build rates: 20 and 30.
+[[unit]]
+id = "field_workshop"
+name = "Field Workshop"
+class = "economy"
+tier = 2
+mass = 525
+energy = 2625
+build_time = 1000
+health = 1000
+footprint = 1
+vision = 280
+build_power = 20
+build_range = 300
+assists = true
+upgrades_to = "field_workshop_t3"
+
+[[unit]]
+id = "field_workshop_t3"
+name = "Field Workshop (T3)"
+class = "economy"
+tier = 3
+mass = 1050
+energy = 5250
+build_time = 2000
+health = 2500
+footprint = 1
+vision = 280
+build_power = 30
+build_range = 300
+assists = true

@@ -8,6 +8,16 @@
 //!        + its cargo: the Light Air Transport's share of a full load of its tier's line units
 //!        + its strategic launching: a share of the Strategic Missile Launcher's cost
 //!        + its income: what it makes a second, paid back in its tier's payback
+//! ```
+//!
+//! A rig's enhancement costs what it adds to its rig (`enhancement_price`, 2026-11-27):
+//!
+//! ```text
+//! cost = what its gun, sensors and build power add to the rig's price on the list
+//!        + its health, regeneration and shields at the snipe price a point
+//!        + stealth: the cheapest Stealth Field Generator
+//!        + its income, paid back in its tier's payback
+//!        − the same for the enhancement it builds on, which it replaces
 //! σ_job = anchor × tier efficiency × domain base / (1 + Σ the job's prices)
 //! ```
 //!
@@ -20,7 +30,8 @@
 //! unit the list prices drifts from it.
 
 use crate::balance::{cost_at, damage_per_second, MAX_TIER, TARGETS};
-use crate::sim::blueprints::{Blueprint, BlueprintDb, BlueprintId, Targets, WeaponDef, WeaponKind, TICKS_PER_SECOND};
+use crate::math::fp::Fp;
+use crate::sim::blueprints::{Blueprint, BlueprintDb, BlueprintId, EnhancementEffects, Targets, WeaponDef, WeaponKind, TICKS_PER_SECOND};
 use crate::sim::components::MoveClass;
 
 /// A kind of target a weapon is for. Separate weapons firing at once each do their own job; one
@@ -478,23 +489,128 @@ fn price_with(db: &BlueprintDb, table: &toml::Table, key: &str) -> Option<Pricin
     Some(Pricing { key: key.to_string(), tier, domain, base, jobs, sensors, build_power, cargo, launching, income, list: total, actual: cost_at(unit, tier) })
 }
 
+/// Energy's rate at a tier (`[economy] energy_per_materiel`), and what a land unit's cost is over
+/// its mass there, as `balance::cost_at` counts them.
+fn energy_rate(table: &toml::Table, tier: u8) -> (f64, f64) {
+    let rate = numbers(&table["economy"]["energy_per_materiel"])[usize::from(tier.clamp(1, MAX_TIER)) - 1];
+    let anchor = &table["anchor"];
+    (rate, 1.0 + number(&anchor["energy"]) / number(&anchor["materiel"]) / rate)
+}
+
+/// What income costs at a tier: materiel and energy a second, energy at the tier's rate, over its
+/// payback (`[economy] payback_seconds`), in materiel at the tier's prices.
+fn income_at(table: &toml::Table, materiel: f64, energy: f64, tier: u8) -> f64 {
+    let (rate, land_share) = energy_rate(table, tier);
+    let payback = numbers(&table["economy"]["payback_seconds"])[usize::from(tier.clamp(1, MAX_TIER)) - 1];
+    (materiel + energy / rate) * payback / land_share
+}
+
+fn per_second(amount: crate::sim::blueprints::Res) -> f64 {
+    amount.to_num::<f64>() * TICKS_PER_SECOND as f64
+}
+
 /// What a unit's own income costs (2026-11-27, the design owner's plan, for the field rig): what it
 /// makes a second, its energy at its tier's rate (`[economy] energy_per_materiel`), over its tier's
 /// payback (`[economy] payback_seconds`), as an extractor's or a generator's cost pays it back, in
 /// materiel at its tier's prices as `balance::cost_at` counts them. Not over the domain base: it
 /// is priced by an economy, not by a fight. Structures that make income are not on the list.
 pub fn income(table: &toml::Table, unit: &Blueprint) -> f64 {
-    let per_second = |income: crate::sim::blueprints::Res| income.to_num::<f64>() * TICKS_PER_SECOND as f64;
     let (materiel, energy) = (per_second(unit.mass_income), per_second(unit.energy_income));
     if unit.is_structure() || materiel + energy <= 0.0 {
         return 0.0;
     }
-    let tier = usize::from(unit.tier.clamp(1, MAX_TIER)) - 1;
-    let rate = numbers(&table["economy"]["energy_per_materiel"])[tier];
-    let payback = numbers(&table["economy"]["payback_seconds"])[tier];
-    let anchor = &table["anchor"];
-    let land_share = 1.0 + number(&anchor["energy"]) / number(&anchor["materiel"]) / rate;
-    (materiel + energy / rate) * payback / land_share
+    income_at(table, materiel, energy, unit.tier)
+}
+
+/// What a rig's enhancement costs, by part, against what it costs at the tier it is priced at.
+#[derive(Clone, Debug)]
+pub struct EnhancementPricing {
+    pub key: String,
+    /// The rig that takes it.
+    pub carrier: String,
+    /// The tier whose prices it is priced at (`enhancement_tier`).
+    pub tier: u8,
+    /// What each part adds, less what the enhancement it builds on adds.
+    pub parts: Vec<(&'static str, f64)>,
+    pub list: f64,
+    /// What it costs at that tier's prices.
+    pub actual: f64,
+}
+
+impl EnhancementPricing {
+    /// Its cost over the list's price, less one.
+    pub fn drift(&self) -> f64 {
+        self.actual / self.list - 1.0
+    }
+}
+
+/// The tier an enhancement is priced at: its rig's, but no lower than T2, since a commander fits
+/// them once it has a T2 economy; a fabrication pack at the tier it unlocks.
+fn enhancement_tier(carrier: &Blueprint, effects: &EnhancementEffects) -> u8 {
+    carrier.tier.max(effects.build_tier).clamp(2, MAX_TIER)
+}
+
+/// What a set of enhancement effects adds to its rig, by part, at `tier`'s prices.
+fn effects_value(db: &BlueprintDb, table: &toml::Table, carrier: BlueprintId, effects: &EnhancementEffects, tier: u8) -> Vec<(&'static str, f64)> {
+    let rig = db.get(carrier);
+    let list = |changed: &BlueprintDb| price_with(changed, table, &rig.key).expect("the list prices a rig").list;
+    let before = list(db);
+    let gun = list(&db.with_unit(carrier, |unit| {
+        let Some(weapon) = unit.weapon.as_mut() else { return };
+        weapon.range = effects.weapon_range.unwrap_or(weapon.range);
+        weapon.damage = effects.weapon_damage.unwrap_or(weapon.damage);
+        weapon.reload_ticks = effects.weapon_reload_ticks.unwrap_or(weapon.reload_ticks);
+        weapon.splash_radius = effects.weapon_splash.unwrap_or(weapon.splash_radius);
+    })) - before;
+    let sensors = list(&db.with_unit(carrier, |unit| {
+        unit.vision = effects.vision.unwrap_or(unit.vision);
+        unit.deep_scan = effects.deep_scan.unwrap_or(unit.deep_scan);
+    })) - before;
+    let build_power = list(&db.with_unit(carrier, |unit| unit.build_power = effects.build_power.unwrap_or(unit.build_power))) - before;
+    // Health, regeneration and shields at the snipe price: what the cheapest force that destroys
+    // the rig in one pass pays for a point of its health, the snipe weapon's cost over its damage.
+    let snipe = db.get(db.id(table["price_list"]["enhancements"]["snipe"].as_str().expect("[price_list.enhancements] snipe")));
+    let per_point = cost_at(snipe, snipe.tier) / snipe.weapon.expect("the snipe weapon").damage.to_num::<f64>();
+    let fight = crate::balance::model_time_to_kill(rig.tier.clamp(1, MAX_TIER), "land");
+    let health = (effects.health.to_num::<f64>() + effects.regen_per_tick.to_num::<f64>() * TICKS_PER_SECOND as f64 * fight) * per_point;
+    let shields = effects.shield.map_or(0.0, |shield| shield.health.to_num::<f64>() + shield.regen_per_tick.to_num::<f64>() * TICKS_PER_SECOND as f64 * fight) * per_point;
+    // Hidden from radar: the cheapest building that hides it.
+    let stealth = if effects.stealth_upkeep.is_some() {
+        db.iter().filter(|unit| unit.is_structure() && unit.stealth_field > Fp::ZERO).map(|unit| cost_at(unit, unit.tier)).min_by(f64::total_cmp).unwrap_or(0.0)
+    } else {
+        0.0
+    };
+    let income = income_at(table, per_second(effects.mass_income), per_second(effects.energy_income), tier);
+    vec![("gun", gun), ("sensors", sensors), ("build power", build_power), ("health", health), ("shields", shields), ("stealth", stealth), ("income", income)]
+}
+
+/// What a rig's enhancement costs (2026-11-27, the design owner's pick): what it adds to its rig at
+/// the tier it is priced at, less what the enhancement it builds on adds, since it replaces it.
+/// Its gun, sensors and build power are what they add to the rig's price on the list; its health,
+/// its regeneration over the [model] time to kill and its shields go at the snipe price; hiding
+/// it from radar costs the cheapest Stealth Field Generator; and its income is paid back in its
+/// tier's payback, as a unit's own is. None for an enhancement `[price_list.enhancements] held`
+/// holds, or one the list cannot price.
+pub fn enhancement_price(db: &BlueprintDb, key: &str) -> Option<EnhancementPricing> {
+    let table = table();
+    if table["price_list"]["enhancements"]["held"].get(key).is_some() {
+        return None;
+    }
+    let enhancement = db.enhancement(db.find_enhancement(key)?);
+    let carrier = *enhancement.units.first()?;
+    let rig = db.get(carrier);
+    let tier = enhancement_tier(rig, &enhancement.effects);
+    let mut parts = effects_value(db, &table, carrier, &enhancement.effects, tier);
+    if let Some(earlier) = enhancement.requires {
+        let replaced = effects_value(db, &table, carrier, &db.enhancement(earlier).effects, tier);
+        for ((_, value), (_, before)) in parts.iter_mut().zip(replaced) {
+            *value -= before;
+        }
+    }
+    parts.retain(|(_, value)| value.abs() > 1e-6);
+    let (rate, land_share) = energy_rate(&table, tier);
+    let actual = (enhancement.mass.to_num::<f64>() + enhancement.energy.to_num::<f64>() / rate) / land_share;
+    Some(EnhancementPricing { key: key.to_string(), carrier: rig.key.clone(), tier, list: parts.iter().map(|(_, value)| value).sum(), parts, actual })
 }
 
 /// What launching strategic missiles costs a unit that is not a launcher (2026-11-27, the design
@@ -618,6 +734,21 @@ pub fn held_reason(key: &str) -> Option<String> {
 
 fn held_note(table: &toml::Table, key: &str) -> String {
     table["price_list"]["held"].get(key).and_then(toml::Value::as_str).map_or(String::new(), |reason| format!("; held: {reason}"))
+}
+
+/// The `--balance-derive enhancements` report: every rig's enhancement, its parts, against its cost.
+pub fn enhancement_report(db: &BlueprintDb) {
+    println!("| Enhancement | Rig | Tier | Parts | List | Costs | Drift |");
+    println!("| :-- | :-- | --: | :-- | --: | --: | --: |");
+    for enhancement in db.enhancements() {
+        match enhancement_price(db, &enhancement.key) {
+            Some(pricing) => {
+                let parts = pricing.parts.iter().map(|(name, value)| format!("{name} {value:.1}")).collect::<Vec<_>>().join(", ");
+                println!("| {} | {} | T{} | {parts} | {:.1} | {:.1} | {:+.1}% |", pricing.key, pricing.carrier, pricing.tier, pricing.list, pricing.actual, pricing.drift() * 100.0);
+            }
+            None => println!("| {} | | | held | | | |", enhancement.key),
+        }
+    }
 }
 
 /// The `--balance-derive list` report: every unit the list prices, against its cost.

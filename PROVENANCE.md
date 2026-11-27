@@ -66,7 +66,8 @@ Taken so far:
   short of its target is worked out here from its fall.
 * The rest of the UEF's non-experimental units and structures: the Mobile Shield Generator, Combat Engineer, Heavy and Siege Walkers, Torpedo Boat,
   Heavy Point Defense, Heavy Shield Generator, Wall Section, and Field Workshops. The workshops'
-  drones are folded into the workshop's own build power.
+  drones are folded into the workshop's own build power. The workshops left the roster on
+  2026-11-27, the design owner's pick; their data stays as a test fixture.
 * The three air transports and their room by size class, from FAF's UEF units.
 * Veterancy, wreckage, turn rates, firing randomness, and missile speeds (§6, §11, §18.4), from
   FAF's rules and blueprints.
@@ -126,7 +127,7 @@ Replaced on 2026-11-15, in display names, ids, code, tests, and documentation:
 | Quantum teleportation, Personal Teleporter | Orbital Redeploy |
 | Hydrocarbon Power Plant | Geothermal Plant |
 | Omni Sensor, omni | Deep Scan Array, deep scan |
-| Engineering Station | Field Workshop |
+| Engineering Station | Field Workshop (out of the roster since 2026-11-27) |
 | Air Staging Facility | Airfield |
 | Anti-Nuke Interceptor | Strategic Interceptor |
 | Amphibious Tank | Assault Hovercraft |

@@ -502,6 +502,7 @@ impl SimWorld {
                     missile_height: (weapon.kind == WeaponKind::TacticalMissile).then_some(weapon.cruise_height),
                     target: None,
                     turret: weapon.turn_rate.map(|rate| Turret::mounted(facing, rate, weapon.mount, weapon.aft, weapon.laid_for_range())),
+                    arc: weapon.arc,
                     spread: weapon.spread,
                     stun_ticks: weapon.stun_ticks,
                     salvo: weapon.salvo.map(super::components::Salvo::new),
