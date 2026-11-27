@@ -1,0 +1,49 @@
+//! The ability price list as code (`sim_engine::price_list`, `[price_list]` in
+//! data/balance_targets.toml): every unit with a fighting weapon costs the list's price, or names
+//! what else sets its cost (`[price_list.held]`).
+
+use sim_engine::price_list;
+use sim_engine::sim::blueprints::BlueprintDb;
+
+const TARGETS: &str = include_str!("../data/balance_targets.toml");
+
+fn targets() -> toml::Table {
+    TARGETS.parse().expect("data/balance_targets.toml is valid")
+}
+
+#[test]
+fn every_unit_the_list_prices_costs_its_price_or_names_what_holds_it() {
+    let db = BlueprintDb::standard();
+    let table = targets();
+    let drift_max = table["price_list"]["drift_max"].as_float().expect("[price_list] drift_max");
+    let mut off = Vec::new();
+    for unit in db.iter() {
+        let Some(pricing) = price_list::price(&db, &unit.key) else { continue };
+        let held = price_list::held_reason(&unit.key);
+        println!("{:28} list {:8.1}, costs {:8.1} ({:+5.1}%){}", unit.key, pricing.list, pricing.actual, pricing.drift() * 100.0, held.as_deref().map_or(String::new(), |reason| format!(", held: {reason}")));
+        if held.is_none() && pricing.drift().abs() > drift_max {
+            off.push(format!("{} costs {:.1}, {:+.1}% off the list's {:.1}, and nothing in [price_list.held] holds it", unit.key, pricing.actual, pricing.drift() * 100.0, pricing.list));
+        }
+    }
+    assert!(off.is_empty(), "{off:#?}");
+}
+
+#[test]
+fn every_held_unit_is_one_the_list_prices() {
+    let db = BlueprintDb::standard();
+    let table = targets();
+    let held = table["price_list"]["held"].as_table().expect("[price_list.held]");
+    let stale: Vec<&String> = held.keys().filter(|key| price_list::price(&db, key).is_none()).collect();
+    assert!(stale.is_empty(), "[price_list.held] names units the list does not price: {stale:?}");
+}
+
+/// The list as worked by hand reproduces: the Interceptor at the T1 air base, the Gunship and the
+/// Heavy Gunship at T2 and T3's (2026-11-26 and 27), within rounding.
+#[test]
+fn the_list_reproduces_the_aircraft_it_priced() {
+    let db = BlueprintDb::standard();
+    for key in ["t1_interceptor", "t2_gunship", "t3_heavy_gunship", "t3_air_superiority"] {
+        let pricing = price_list::price(&db, key).expect("an aircraft with a gun");
+        assert!(pricing.drift().abs() < 0.01, "{key} costs {:.1}, the list {:.1}", pricing.actual, pricing.list);
+    }
+}
