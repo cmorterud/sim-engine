@@ -89,6 +89,12 @@ changes past those ratios for its fights between domains. And the Battleship, Ba
 Heavy Gunship (`reports/balance/2026-11-24-t3-air-navy.md`), keeping this game's own damage for
 the battleship's turrets and the battlecruiser's lasers.
 
+Written down on 2026-11-27 as this game's own, at the numbers they had (`[constants]` in
+`data/balance_targets.toml`, `tests/constants_test.rs`): veterancy and wreckage, and the speeds of
+ship guns, torpedoes, tactical and strategic missiles, and fighter guns, and the radius the
+fighters turn on, each now a rule every unit of its family follows. The design owner keeps them,
+with each hull's turn rate and each weapon's spread, as their own; none is read from FAF again.
+
 ## Balance targets
 
 `data/balance_targets.toml` (BALANCE.md) is this game's own design intent. Its feel was set on

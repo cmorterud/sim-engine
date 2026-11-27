@@ -408,6 +408,16 @@ out close and why: evidence about the process, not a target.
   navy base, since the launcher is priced in minutes of a T3 economy; its cruise missiles, which
   fire from under the water, pay the submerged price at T1's, 750; and its sonar, 37. 10,495 to
   13,751. The AI does not build it.
+* 2026-11-27: shared constants (`[constants]`, tests/constants_test.rs), each at the number it has,
+  so no unit moves: family rules every unit of a family follows (ship guns at 60 a tick but the
+  battleship's lobbed shells, torpedoes at 30, tactical missiles by their launcher, 28 from a
+  structure, 32 from a ship and 40 from a vehicle, strategic missiles at 25, fighter guns at 180,
+  and the Interceptor, Bomber and Fighter-Bomber on one 64-unit turn radius), and veterancy and
+  wreckage, the simulation's rules, written down and checked against the code. Each hull's turn
+  rate, each unit's speed, each weapon's spread and each ship's and aircraft's split of mass and
+  energy stay identity knobs. Not made one: the T3 fighter's turn radius (87.6, 37% wider than the
+  family's) and one energy share a tier for aircraft (the T3 fighter spends 114 energy a materiel,
+  the Interceptor 45); each would be a dramatic shift, so each stays its own.
 
 ## Order of work
 
