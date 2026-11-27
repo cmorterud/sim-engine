@@ -392,6 +392,16 @@ out close and why: evidence about the process, not a target.
   by the twentieth minute (any cost under about 385 did), its mass store full all the while, so the
   AI now builds the yards and air factories its income wants before more extractors when its store
   runs over with no land route (GAME_SPECIFICATION.md).
+* 2026-11-27: every sensor priced over its unit's domain base, as every other job is (the design
+  owner's pick), so that one radar is priced by one rule on a scout and on a warship; a unit that
+  only sees costs its sensors. The Air Scout lists by its radar past its vision: 78 to 62. The
+  Spy Plane lists at 42 by its radar alone, and keeps its 257 as the design owner's cost until a
+  price for seeing anywhere exists (`[price_list.held]`). The Bomber's radar now goes with the T1
+  air base, so the base that prices the Bomber at its cost is 0.315 (0.294), and the Interceptor
+  costs 164 (175). The T2 base that holds the strike aircraft at their cost is 0.904 (0.902); no
+  T2 aircraft moves. The navy base re-solves on the battle line to 0.709 (0.702): ships move -1%
+  to +1.3%, the Torpedo Boat 748 to 758 by the duel it wins. T3 air, at a base of about one,
+  does not move.
 
 ## Order of work
 

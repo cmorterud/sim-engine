@@ -2,7 +2,8 @@
 //! unit costs from what it can do, in materiel at its tier's prices (`balance::cost_at`).
 //!
 //! ```text
-//! cost = Σ over jobs √(health × damage a second at the job) / σ_job + what its sensors cost
+//! cost = Σ over jobs √(health × damage a second at the job) / σ_job
+//!        + what its sensors cost at the cheapest building's price per area / domain base
 //!        + its build power at the cheapest builder's rate / domain base
 //!        + its cargo: the Light Air Transport's share of a full load of its tier's line units
 //! σ_job = anchor × tier efficiency × domain base / (1 + Σ the job's prices)
@@ -97,9 +98,10 @@ impl Pricing {
         self.sensors.iter().map(|(_, cost)| cost).sum()
     }
 
-    /// The part of its price that does not go with the domain base: sensors and cargo.
-    fn fixed_cost(&self) -> f64 {
-        self.sensor_cost() + self.cargo
+    /// The part of its price that does not go with the domain base: cargo, whose load is land
+    /// units priced as they are. Sensors go with it, as every other job does (2026-11-27).
+    const fn fixed_cost(&self) -> f64 {
+        self.cargo
     }
 
     /// The list's price at another domain base: each job's part goes as one over the base.
@@ -234,8 +236,10 @@ type SensorRange = fn(&Blueprint) -> f64;
 
 /// What a unit's sensors cost: each pays only for what it sees past the unit's own vision, at the
 /// price per area of the cheapest building that has it, `(range² − vision²) / building range² ×
-/// building cost`, shared across a fleet's cover.
-fn sensors(db: &BlueprintDb, table: &toml::Table, unit: &Blueprint) -> Vec<(&'static str, f64)> {
+/// building cost`, shared across a fleet's cover, over the unit's domain base (2026-11-27, the
+/// design owner's pick: every sensor, so that a radar's price on a scout and on a warship comes
+/// from one rule, as every other job's does).
+fn sensors(db: &BlueprintDb, table: &toml::Table, unit: &Blueprint, base: f64) -> Vec<(&'static str, f64)> {
     let vision = unit.vision.to_num::<f64>();
     let kinds: [(&'static str, SensorRange); 3] = [("radar", |unit| unit.radar.to_num()), ("sonar", |unit| unit.sonar.to_num()), ("deep scan", |unit| unit.deep_scan.to_num())];
     let mut out = Vec::new();
@@ -245,7 +249,7 @@ fn sensors(db: &BlueprintDb, table: &toml::Table, unit: &Blueprint) -> Vec<(&'st
             continue;
         }
         let Some((building_cost, building_range)) = cheapest_building(db, sensor) else { continue };
-        let price = (range * range - vision * vision) / (building_range * building_range) * building_cost / sharing(db, table, unit, &sensor);
+        let price = (range * range - vision * vision) / (building_range * building_range) * building_cost / sharing(db, table, unit, &sensor) / base;
         out.push((name, price));
     }
     out
@@ -301,14 +305,14 @@ pub fn shield_price(db: &BlueprintDb, key: &str) -> Option<ShieldPricing> {
     let regen_per_second = dome.regen_per_tick.to_num::<f64>() * TICKS_PER_SECOND as f64;
     let effective_health = dome.health.to_num::<f64>() + regen_per_second * crate::balance::model_time_to_kill(tier, domain) + unit.health.to_num::<f64>();
     let immobile = if unit.is_structure() { number(&list["immobile"]) } else { 1.0 };
-    let sensors = sensors(db, &table, unit);
+    let sensors = sensors(db, &table, unit, number(&list["domain_base"][base_key(domain_of(unit), tier)]));
     let price = group_cost * ((1.0 + effective_health / group_health).sqrt() - 1.0) / immobile + sensors.iter().map(|(_, cost)| cost).sum::<f64>();
     Some(ShieldPricing { key: key.to_string(), group: group_name.to_string(), group_cost, group_health, effective_health, sensors, list: price, actual: cost_at(unit, tier) })
 }
 
-/// A unit's price by the list. `None` for one with no fighting weapon and no build power, whose
-/// jobs (seeing, carrying) the list does not price yet, and for structures but point defenses
-/// (`priced_structure`).
+/// A unit's price by the list. `None` for one with no fighting weapon, no build power and no
+/// sensor past its vision (the Light Air Transport, which sets the price of cargo), and for
+/// structures but point defenses (`priced_structure`).
 pub fn price(db: &BlueprintDb, key: &str) -> Option<Pricing> {
     price_with(db, &table(), key)
 }
@@ -357,13 +361,20 @@ fn price_with(db: &BlueprintDb, table: &toml::Table, key: &str) -> Option<Pricin
     let unit = db.get(db.find(key)?);
     let weapons = fighting_weapons(unit);
     let points = unit.build_power.to_num::<f64>();
-    if (unit.is_structure() && !priced_structure(db, table, unit, &weapons)) || (weapons.is_empty() && points <= 0.0) {
+    if unit.is_structure() && !priced_structure(db, table, unit, &weapons) {
         return None;
     }
     let list = &table["price_list"];
     let domain = domain_of(unit);
     let tier = unit.tier.clamp(1, MAX_TIER);
     let base = number(&list["domain_base"][base_key(domain, tier)]);
+    let sensors = sensors(db, table, unit, base);
+    // A unit that only sees (a scout) is priced by its sensors (2026-11-27); an unarmed dome by
+    // its group (`shield_price`).
+    let dome = weapons.is_empty() && list["shield_groups"].get(key).is_some();
+    if dome || (weapons.is_empty() && points <= 0.0 && sensors.is_empty()) {
+        return None;
+    }
     let tier_efficiency = numbers(&list["tier_efficiency"])[usize::from(tier) - 1];
     let anchor = number(&list["anchor_strength_per_cost"]);
     let health = unit.health.to_num::<f64>() + own_shield_health(table, unit);
@@ -440,7 +451,6 @@ fn price_with(db: &BlueprintDb, table: &toml::Table, key: &str) -> Option<Pricin
         let sigma = anchor * tier_efficiency * base / (1.0 + prices.iter().map(|(_, price)| price).sum::<f64>());
         jobs.push(JobPrice { job, damage_per_second: damage, strength, prices, sigma, cost: strength / sigma });
     }
-    let sensors = sensors(db, table, unit);
     // Build power, a utility job (2026-11-27): what the cheapest builder that does nothing else
     // pays for a point, over the domain base, as any other job.
     let build_power = if points > 0.0 { points * build_power_rate(db, key) / base } else { 0.0 };
@@ -518,7 +528,7 @@ pub fn unit_report(db: &BlueprintDb, key: &str) {
                 dome.actual,
                 dome.drift() * 100.0
             ),
-            None => println!("{key}: the list does not price it yet (no fighting weapon, or a structure)."),
+            None => println!("{key}: the list does not price it (no fighting weapon, build power or sensor past its vision, or a structure it does not price)."),
         }
         return;
     };
