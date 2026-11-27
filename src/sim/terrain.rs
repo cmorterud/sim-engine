@@ -251,6 +251,27 @@ impl Terrain {
         (self.map_units << FP_FRAC_BITS) - 1
     }
 
+    /// How far past the map's edge a unit may go, in raw units: half its width. Aircraft fly on
+    /// past the edge after a pass, a Strategic Bomber some 2,000 units, and turn back; this is
+    /// only a limit on a runaway.
+    pub const fn outer_margin_raw(&self) -> i32 {
+        (self.map_units / 2) << FP_FRAC_BITS
+    }
+
+    /// Whether a point is on the map or within the outer margin around it, where the simulation
+    /// still runs: units may be there, though no order can send them there.
+    pub fn in_play(&self, point: Vec2Fp) -> bool {
+        let (x, y) = (point.x.to_bits(), point.y.to_bits());
+        let (low, high) = (-self.outer_margin_raw(), self.max_coordinate_raw() + self.outer_margin_raw());
+        (low..=high).contains(&x) && (low..=high).contains(&y)
+    }
+
+    /// The point, moved onto the map if it is off it: where an order meant for it can go.
+    pub fn onto_map(&self, point: Vec2Fp) -> Vec2Fp {
+        let max = self.max_coordinate_raw();
+        Vec2Fp::new(Fp::from_bits(point.x.to_bits().clamp(0, max)), Fp::from_bits(point.y.to_bits().clamp(0, max)))
+    }
+
     pub fn in_bounds(&self, point: Vec2Fp) -> bool {
         let (x, y) = (point.x.to_bits(), point.y.to_bits());
         let max = self.max_coordinate_raw();
