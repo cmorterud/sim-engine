@@ -63,3 +63,41 @@ fn every_dome_costs_the_strength_it_adds() {
         assert!(pricing.drift().abs() < 0.01, "{key} costs {:.1}, the strength its dome adds {:.1}", pricing.actual, pricing.list);
     }
 }
+
+/// Build power is a utility job (2026-11-27): the engineers and the Combat Engineer cost what the
+/// list prices them at, the engineers' 10.4 a point with the Combat Engineer's gun and radar, but
+/// for any `[price_list.held]` holds (the T2 Engineer, for the design owner).
+#[test]
+fn builders_cost_their_build_power() {
+    let db = BlueprintDb::standard();
+    for key in ["t1_engineer", "t2_engineer", "t3_engineer", "t2_combat_engineer"] {
+        let pricing = price_list::price(&db, key).unwrap_or_else(|| panic!("the list prices {key}"));
+        assert!(pricing.build_power > 0.0, "{key} builds");
+        if price_list::held_reason(key).is_none() {
+            assert!(pricing.drift().abs() < 0.01, "{key} costs {:.1}, the list {:.1}", pricing.actual, pricing.list);
+        }
+    }
+}
+
+/// `[missiles] strategic_minutes` (2026-11-27): each game-ending weapon costs its minutes of a
+/// standard T3 economy's income, at T3 prices, and each missile defense its share of the missile
+/// it stops (`defense_over_missile`), within 1%.
+#[test]
+fn strategic_weapons_cost_their_minutes_of_a_t3_economy() {
+    let targets: toml::Table = include_str!("../data/balance_targets.toml").parse().expect("valid targets");
+    let missiles = &targets["missiles"];
+    let number = |value: &toml::Value| value.as_float().or_else(|| value.as_integer().map(|value| value as f64)).expect("a number");
+    let db = BlueprintDb::standard();
+    let cost = |key: &str| sim_engine::balance::cost_at(db.get(db.id(key)), 3);
+    let per_minute = number(&missiles["t3_economy_extractors"]) * db.get(db.id("mass_extractor_t3")).mass_income.to_num::<f64>() * sim_engine::sim::blueprints::TICKS_PER_SECOND as f64 * 60.0;
+    for (key, minutes) in missiles["strategic_minutes"].as_table().expect("[missiles] strategic_minutes") {
+        let wanted = number(minutes) * per_minute;
+        assert!((cost(key) / wanted - 1.0).abs() < 0.01, "{key} costs {:.0}, {minutes} minutes of a T3 economy {wanted:.0}", cost(key));
+    }
+    for (key, missile) in [("strategic_interceptor", "strategic_missile"), ("tactical_missile_defense", "tactical_missile")] {
+        let share = number(&missiles["defense_over_missile"][key]);
+        let tier = db.get(db.id(key)).tier;
+        let (own, stops) = (sim_engine::balance::cost_at(db.get(db.id(key)), tier), sim_engine::balance::cost_at(db.get(db.id(missile)), tier));
+        assert!((own / stops / share - 1.0).abs() < 0.01, "{key} costs {:.2} of a {missile}, not {share}", own / stops);
+    }
+}

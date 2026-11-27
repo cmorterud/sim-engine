@@ -369,6 +369,9 @@ id = "t2_engineer"
 name = "Engineer (T2)"
 class = "engineer"
 tier = 2
+# Its build power at the rate the T1 and T3 Engineers pay, 10.4 a point, lists it at 125 (the
+# price list's build power, 2026-11-27). Held at 130 for the design owner: at 125, one saddleback
+# soak match (seed 3) ran to 4077 s, past the 4000 s limit for an unfinished match.
 mass = 130
 energy = 650
 build_time = 650
@@ -2024,9 +2027,11 @@ id = "t2_combat_engineer"
 name = "Combat Engineer"
 class = "engineer"
 tier = 2
-mass = 225
-energy = 1000
-build_time = 1000
+# Cost by the price list (2026-11-27): its build power at the engineers' 10.4 a point, 182, with
+# its gun and radar, 70: 224 to 253.
+mass = 254
+energy = 1128
+build_time = 1128
 health = 1040
 speed = 6
 turn_rate = 160
