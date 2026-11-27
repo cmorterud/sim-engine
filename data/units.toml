@@ -205,9 +205,12 @@ id = "t1_point_defense"
 name = "Point Defense"
 class = "defense"
 tier = 1
-mass = 250
-energy = 2000
-build_time = 250
+# Cost (2026-11-27): the most it can cost and still hold, three against half again their cost
+# in Medium Tanks ([premiums]), 404, under the price list's 429, which prices its damage above
+# what the hold allows: 325 to 404.
+mass = 311
+energy = 2487
+build_time = 311
 health = 3900
 footprint = 1
 vision = 480
@@ -227,10 +230,11 @@ name = "Shield Generator"
 class = "defense"
 tier = 2
 # Cost by the strength its dome adds to the three point defenses of the T2 position, as a
-# structure worth half again its cost ([price_list.shield_groups], 2026-11-27): 629 to 932.
-mass = 889
-energy = 8892
-build_time = 1704
+# structure worth half again its cost ([price_list.shield_groups], 2026-11-27): 629 to 932, and
+# to 1,080 with the point defenses priced by their reach.
+mass = 1031
+energy = 10311
+build_time = 1976
 health = 250
 footprint = 3
 vision = 400
@@ -1046,9 +1050,11 @@ id = "t2_point_defense"
 name = "Point Defense (T2)"
 class = "defense"
 tier = 2
-mass = 540
-energy = 3780
-build_time = 675
+# Cost by the price list, its reach priced at a structure's closing share ([price_list]
+# structure_closing_share, 2026-11-27): 550 to 638.
+mass = 626
+energy = 4379
+build_time = 782
 health = 2250
 footprint = 1
 vision = 560
@@ -2121,9 +2127,12 @@ id = "t3_heavy_point_defense"
 name = "Heavy Point Defense"
 class = "defense"
 tier = 3
-mass = 2000
-energy = 17600
-build_time = 2000
+# Cost by the price list, its reach priced at a structure's closing share, which this one sets:
+# the most it can cost and still hold ([price_list] structure_closing_share, 2026-11-27): 2,072
+# to 2,437.
+mass = 2352
+energy = 20696
+build_time = 2352
 health = 6500
 footprint = 1
 vision = 480
@@ -2142,10 +2151,11 @@ name = "Heavy Shield Generator"
 class = "defense"
 tier = 3
 # Cost by the strength its dome adds to the three heavy point defenses of the T3 position, as a
-# structure worth half again its cost ([price_list.shield_groups], 2026-11-27): 3,667 to 3,104.
-mass = 2793
-energy = 46557
-build_time = 4232
+# structure worth half again its cost ([price_list.shield_groups], 2026-11-27): 3,667 to 3,104,
+# and to 3,650 with the heavy point defenses priced by their reach.
+mass = 3285
+energy = 54757
+build_time = 4977
 health = 500
 footprint = 3
 vision = 400

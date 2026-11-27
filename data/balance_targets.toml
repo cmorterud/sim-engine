@@ -731,6 +731,13 @@ drift_max = 0.07
 # A dome that cannot move is worth this much more for its cost, as a point defense is ([premiums]
 # point_defense_holds_against_line_units).
 immobile = 1.5
+# A structure's reach (2026-11-27, the design owner's pick): priced as a unit's, past its tier's
+# line, at its own closing share, the same at every tier, since the line must close on it alone
+# under its fire. Solved (balance::derive_structure_closing_share): the share at which the list
+# prices the T3 Heavy Point Defense at the most it can cost and still hold ([premiums]
+# point_defense_holds_against_line_units), where the hold rule is tightest. The list prices the
+# point defenses by it; other armed structures keep their own rules.
+structure_closing_share = 0.535
 
 # Each dome's group (2026-11-27): a force in [domains.forces], less the dome itself, or a position
 # below. The Mobile Shield covers the standard T2 land army; the Escort Corvette the T2 fleet's
@@ -782,6 +789,7 @@ t2_mobile_flak = "not derived yet: its cost is borrowed, its gun set by the esco
 t3_mobile_artillery = "the T3 line's micro cell: the middle of the costs where it holds"
 t2_torpedo_bomber = "the duel it wins ([counters]): the least that needs twice the T2 fleet's cost to break it"
 t2_torpedo_boat = "the duel it wins ([counters]): the most that keeps 0.70 against an equal cost of submarines"
+t1_point_defense = "the hold rule ([premiums]): the most it can cost and still hold, under the list's price"
 command_rig = "not derived yet: the snipe rules, its gun and enhancements"
 field_rig = "not derived yet: build power, income and its gun"
 t3_missile_sub = "not derived yet: the launcher's share, its cruise missiles, submerged at T3 (left for the design owner, 2026-11-27)"

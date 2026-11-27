@@ -307,17 +307,40 @@ pub fn shield_price(db: &BlueprintDb, key: &str) -> Option<ShieldPricing> {
 }
 
 /// A unit's price by the list. `None` for one with no fighting weapon and no build power, whose
-/// jobs (seeing, carrying) the list does not price yet, and for structures, which pay the immobile
-/// premium instead (`[premiums]`).
+/// jobs (seeing, carrying) the list does not price yet, and for structures but point defenses
+/// (`priced_structure`).
 pub fn price(db: &BlueprintDb, key: &str) -> Option<Pricing> {
     price_with(db, &table(), key)
+}
+
+/// A unit's price by the list with structures' reach priced at another closing share, for
+/// solving `[price_list] structure_closing_share`.
+pub fn price_at_structure_closing(db: &BlueprintDb, key: &str, closing: f64) -> Option<Pricing> {
+    let mut table = table();
+    table["price_list"].as_table_mut().expect("[price_list]").insert("structure_closing_share".to_string(), toml::Value::Float(closing));
+    price_with(db, &table, key)
+}
+
+/// A structure the list prices (2026-11-27): one whose fighting weapons are all shells at what is
+/// on the ground or the water, out-reaching its tier's line by less than the line closes in a time
+/// to kill: the point defenses. Anti-air, torpedo launchers, artillery and missile launchers are
+/// set by their own rules.
+fn priced_structure(db: &BlueprintDb, table: &toml::Table, unit: &Blueprint, weapons: &[WeaponDef]) -> bool {
+    let Some(line) = line_of(db, table, domain_of(unit), unit.tier.clamp(1, MAX_TIER)) else { return false };
+    let line_reach = line.weapon.expect("a line unit has a weapon").range.to_num::<f64>();
+    let closing = number(&table["price_list"]["structure_closing_share"]);
+    !weapons.is_empty()
+        && weapons.iter().all(|weapon| {
+            let reach = weapon.range.to_num::<f64>();
+            job_of(weapon) == Job::Surface && !matches!(weapon.kind, WeaponKind::TacticalMissile | WeaponKind::StrategicMissile) && reach >= line_reach && closing * (reach / line_reach - 1.0) < 1.0
+        })
 }
 
 fn price_with(db: &BlueprintDb, table: &toml::Table, key: &str) -> Option<Pricing> {
     let unit = db.get(db.find(key)?);
     let weapons = fighting_weapons(unit);
     let points = unit.build_power.to_num::<f64>();
-    if unit.is_structure() || (weapons.is_empty() && points <= 0.0) {
+    if (unit.is_structure() && !priced_structure(db, table, unit, &weapons)) || (weapons.is_empty() && points <= 0.0) {
         return None;
     }
     let list = &table["price_list"];
@@ -379,11 +402,13 @@ fn price_with(db: &BlueprintDb, table: &toml::Table, key: &str) -> Option<Pricin
             if let Some(n) = per_unit(table, "splash", key) {
                 prices.push(("splash", n.sqrt() - 1.0));
             }
-            // Reach, against the line's: shells pay for reach past it, missiles reach it free.
-            if let (Some(line), true) = (line, speed > 0.0) {
+            // Reach, against the line's: shells pay for reach past it, missiles reach it free. A
+            // structure pays at its own closing share (`structure_closing_share`, 2026-11-27): the
+            // line must close on it alone, under its fire.
+            if let (Some(line), true) = (line, speed > 0.0 || unit.is_structure()) {
                 let line_reach = line.weapon.expect("a line unit has a weapon").range.to_num::<f64>();
                 let reach = first.range.to_num::<f64>();
-                let closing = closing_share(table, domain, tier);
+                let closing = if unit.is_structure() { number(&list["structure_closing_share"]) } else { closing_share(table, domain, tier) };
                 let shell = if matches!(first.kind, WeaponKind::TacticalMissile | WeaponKind::StrategicMissile) { 0.0 } else { 1.0 };
                 let price = if reach >= line_reach {
                     let x = closing * (reach / line_reach - 1.0) * shell;
@@ -413,7 +438,11 @@ fn price_with(db: &BlueprintDb, table: &toml::Table, key: &str) -> Option<Pricin
     // Cargo, a utility job (2026-11-27): the share of a full load that the only unit that only
     // carries pays. Not over the base: the load is land units, priced as they are.
     let cargo = if unit.transport.is_some() { cargo_share(db, table) * full_load(db, table, unit) } else { 0.0 };
-    let total = jobs.iter().map(|job| job.cost).sum::<f64>() + sensors.iter().map(|(_, cost)| cost).sum::<f64>() + build_power + cargo;
+    let mut total = jobs.iter().map(|job| job.cost).sum::<f64>() + sensors.iter().map(|(_, cost)| cost).sum::<f64>() + build_power + cargo;
+    // What cannot move is worth more for its cost, as a dome is (`[price_list] immobile`).
+    if unit.is_structure() {
+        total /= number(&list["immobile"]);
+    }
     Some(Pricing { key: key.to_string(), tier, domain, base, jobs, sensors, build_power, cargo, list: total, actual: cost_at(unit, tier) })
 }
 

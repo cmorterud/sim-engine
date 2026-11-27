@@ -1498,10 +1498,15 @@ pub fn torpedo_bombers_to_break_t2_fleet(db: &Arc<BlueprintDb>) -> f64 {
 /// edge where `meets` turns: the last cost that meets it when `meets_below` (it holds at low cost),
 /// else the first. Returns the copy at that cost and the measure there.
 fn bisect_cost(base: &BlueprintDb, key: &str, meets_below: bool, measure: impl Fn(&Arc<BlueprintDb>) -> f64, meets: impl Fn(f64) -> bool) -> (BlueprintDb, f64) {
+    bisect_cost_at(base, key, 2, meets_below, measure, meets)
+}
+
+/// `bisect_cost`, with costs at a tier's prices.
+fn bisect_cost_at(base: &BlueprintDb, key: &str, tier: u8, meets_below: bool, measure: impl Fn(&Arc<BlueprintDb>) -> f64, meets: impl Fn(f64) -> bool) -> (BlueprintDb, f64) {
     let id = base.id(key);
-    let now = cost_at(base.get(id), 2);
+    let now = cost_at(base.get(id), tier);
     let at = |cost: f64| {
-        let db = Arc::new(scaled_to(base, id, 2, cost));
+        let db = Arc::new(scaled_to(base, id, tier, cost));
         let value = measure(&db);
         (db, value)
     };
@@ -1550,6 +1555,85 @@ pub fn derive_counters_report() {
         let unit = derived.get(derived.id(key));
         println!("  {key}: cost {:.1}, from {:.1} (mass = {}, energy = {}, build_time = {}; the duel there {measure:.3})", cost_at(unit, 2), cost_at(base.get(base.id(key)), 2), unit.mass, unit.energy, unit.build_time);
     }
+}
+
+/// The most a point defense can cost and still hold (`[premiums]`
+/// point_defense_holds_against_line_units): three of it against that many times their cost in
+/// their tier's line unit attack-moving into them, found within a fifth of `start`.
+pub fn point_defense_at_its_most(base: &BlueprintDb, tier: u8, key: &str, start: f64) -> (BlueprintDb, f64) {
+    let times = as_number(&premium("point_defense_holds_against_line_units"));
+    let from = scaled_to(base, base.id(key), tier, start);
+    let (db, _) = bisect_cost_at(&from, key, tier, true, |db| if defenses_against_line(db, tier, times).broken { 0.0 } else { 1.0 }, |held| held > 0.5);
+    let cost = cost_at(db.get(db.id(key)), tier);
+    (db, cost)
+}
+
+/// The T3 Heavy Point Defense at its most, from its cost.
+pub fn heavy_point_defense_at_its_most(base: &BlueprintDb) -> (BlueprintDb, f64) {
+    let now = cost_at(base.get(base.id("t3_heavy_point_defense")), 3);
+    point_defense_at_its_most(base, 3, "t3_heavy_point_defense", now)
+}
+
+/// A point defense's cost (2026-11-27): the list's price, or the most it can cost and still hold
+/// where that is less (the T1 one, whose damage the list prices above what the hold allows).
+pub fn point_defense_cost(base: &BlueprintDb, tier: u8, key: &str) -> f64 {
+    let times = as_number(&premium("point_defense_holds_against_line_units"));
+    let list = crate::price_list::price(base, key).expect("the list prices point defenses").list;
+    let at_list = Arc::new(scaled_to(base, base.id(key), tier, list));
+    if defenses_against_line(&at_list, tier, times).broken {
+        point_defense_at_its_most(base, tier, key, list).1
+    } else {
+        list
+    }
+}
+
+/// `[price_list] structure_closing_share` (2026-11-27): the closing share at which the list
+/// prices the T3 Heavy Point Defense at the most it can cost and still hold.
+pub fn derive_structure_closing_share(base: &BlueprintDb) -> f64 {
+    let (_, most) = heavy_point_defense_at_its_most(base);
+    // Past where its reach is more than the line closes in a time to kill, the list cannot price it.
+    let list = |closing: f64| crate::price_list::price_at_structure_closing(base, "t3_heavy_point_defense", closing).map_or(f64::INFINITY, |pricing| pricing.list);
+    let (mut low, mut high) = (0.2, 0.95);
+    assert!(list(low) < most && list(high) > most, "the closing share is not between {low} and {high}");
+    while high - low > 1e-4 {
+        let middle = (low + high) / 2.0;
+        if list(middle) < most {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    (low + high) / 2.0
+}
+
+/// The `--balance-derive structures` report: the closing share, and each point defense's price
+/// by it, against its cost, and its cost: the list's, or the most it can cost and still hold.
+pub fn derive_structures_report() {
+    let base = BlueprintDb::standard();
+    let (_, most) = heavy_point_defense_at_its_most(&base);
+    println!("The T3 Heavy Point Defense at its most, still holding: {most:.1}");
+    let closing = derive_structure_closing_share(&base);
+    println!("structure_closing_share = {closing:.4} (the targets have {:.4})", as_number(&price_list_value("structure_closing_share")));
+    for (tier, key) in [(1u8, "t1_point_defense"), (2, "t2_point_defense"), (3, "t3_heavy_point_defense")] {
+        let pricing = crate::price_list::price_at_structure_closing(&base, key, closing).expect("the list prices point defenses");
+        let cost = point_defense_cost(&base, tier, key);
+        let db = scaled_to(&base, base.id(key), tier, cost);
+        let unit = db.get(db.id(key));
+        println!(
+            "  {key}: list {:.1}, cost {cost:.1}, from {:.1} ({:+.1}%): mass = {}, energy = {}, build_time = {}",
+            pricing.list,
+            pricing.actual,
+            (cost / pricing.actual - 1.0) * 100.0,
+            unit.mass,
+            unit.energy,
+            unit.build_time
+        );
+    }
+}
+
+fn price_list_value(key: &str) -> toml::Value {
+    let table: toml::Table = TARGETS.parse().expect("data/balance_targets.toml is valid");
+    table["price_list"][key].clone()
 }
 
 // Fights between domains (BALANCE.md, 2026-11-24): `[domains]` in the targets.
