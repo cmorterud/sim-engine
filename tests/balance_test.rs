@@ -514,12 +514,13 @@ fn point_defenses_are_worth_more_and_hovercraft_less_for_their_cost() {
     assert!((band[0]..=band[1]).contains(&efficiency), "the hovercraft is {efficiency:.2} as strong per materiel as the Heavy Tank on land");
 }
 
-/// `[domains] strength_over_anchor` (2026-11-25): the fighters are as strong per cost against
-/// aircraft, against the anchor, as the inspiration has its own, within the band, with the damage
-/// `[air]` fixes for them (an interceptor kills a bomber in about ten seconds; the T3 fighter has
-/// nine to eleven times its damage and destroys one with a shot).
+/// `[domains] strength_over_anchor`: the fighters are as strong per cost against aircraft, against
+/// the anchor, as their ratios, within the band: the T3 fighter's by the ability price list's cost
+/// (2026-11-26), the interceptor's the inspiration's while T1 aircraft keep their costs. Their
+/// damage is set by `[air]` and `[kill_times]`, and the T3 fighter destroys an interceptor with a
+/// shot.
 #[test]
-fn fighters_are_as_strong_per_cost_as_the_inspirations() {
+fn fighters_are_as_strong_per_cost_as_their_ratios() {
     let db = db();
     let band = domains(&["strength_band"]).as_array().expect("a band").iter().map(number).collect::<Vec<f64>>();
     for key in ["t1_interceptor", "t3_air_superiority"] {
