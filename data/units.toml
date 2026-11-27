@@ -369,12 +369,11 @@ id = "t2_engineer"
 name = "Engineer (T2)"
 class = "engineer"
 tier = 2
-# Its build power at the rate the T1 and T3 Engineers pay, 10.4 a point, lists it at 125 (the
-# price list's build power, 2026-11-27). Held at 130 for the design owner: at 125, one saddleback
-# soak match (seed 3) ran to 4077 s, past the 4000 s limit for an unfinished match.
-mass = 130
-energy = 650
-build_time = 650
+# Cost by its build power, at the rate the T1 and T3 Engineers pay, 10.4 a point (the price
+# list's build power, 2026-11-27): 130 to 125.
+mass = 125
+energy = 624
+build_time = 624
 health = 400
 speed = "3.8"
 # Engineers float over water, so they can build out on it.
@@ -1646,10 +1645,10 @@ vision = 415
 movement = "hover"
 weapon = { range = 438, reload_ticks = 16, projectile_speed = 80, damage = 145, splash_radius = 10, turn_rate = 90, spread = 4 }
 
-# A fleet escort: a small dome that moves with it, over the ships around it, and an anti-torpedo
-# charge, one torpedo within 600 every 3 seconds (every 6 until 2026-11-24, when torpedo bombers
-# broke a fleet at a little over twice its cost and this gave a margin). Sturdier and cheaper than a dome boat alone would
-# be, since it sails with the fleet rather than behind it. This game's own numbers. Its dome is
+# A fleet escort: a small dome that moves with it, over the ships around it. Its anti-torpedo
+# charge was taken off (the design owner, 2026-11-27): the destroyers' and battlecruisers' charges
+# guard a fleet from torpedoes, and the escort only from what falls on it from above. Sturdier and
+# cheaper than a dome boat alone would be, since it sails with the fleet rather than behind it. This game's own numbers. Its dome is
 # flattened, 150 high over its 400 across (2026-11-24): a half sphere rose to 400, over the
 # heights every attacking aircraft flies at, gunships lowest at 198, so they flew inside it and
 # fired from under it. Now their fire must come down through it.
@@ -1659,7 +1658,7 @@ name = "Escort Corvette"
 class = "defense"
 tier = 2
 # Cost by the strength its dome and hull add to the T2 fleet's destroyers and cruisers
-# ([price_list.shield_groups], 2026-11-27): 733 to 913. Its anti-torpedo charge is not priced yet.
+# ([price_list.shield_groups], 2026-11-27): 733 to 913.
 mass = 871
 energy = 8714
 build_time = 3735
@@ -1671,7 +1670,6 @@ radius = 16
 vision = 640
 sonar = 720
 movement = "naval"
-torpedo_defense = { range = 600, reload_ticks = 30 }
 # Back 20 seconds after it falls, as the other domes (the design owner's rule, 2026-11-25; 30 until then).
 shield = { radius = 400, height = 150, health = 4000, regen = 80, recharge_seconds = 20, upkeep = 80 }
 

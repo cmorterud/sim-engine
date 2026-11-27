@@ -507,8 +507,9 @@ fn a_escort_corvettes_dome_moves_with_it_and_stops_shells() {
 
 #[test]
 fn anti_torpedo_charges_shoot_torpedoes_down() {
-    // The destroyer's charge, and the escort corvette's.
-    for key in ["t2_destroyer", "t2_escort_corvette"] {
+    // The destroyer's charge, and the battlecruiser's. The escort corvette's was taken off
+    // (2026-11-27).
+    for key in ["t2_destroyer", "t3_battlecruiser"] {
         let damage_taken = |charges: bool| {
             let mut world = lake_world();
             let ship = spawn(&mut world, key, Team::Blue, point(2_000, 1_000));
@@ -525,7 +526,7 @@ fn anti_torpedo_charges_shoot_torpedoes_down() {
             }
             world.spawn_finished_structure(world.blueprints.id("t1_torpedo_launcher"), Team::Red, 120, 50).unwrap();
             let full = world.unit_health(ship).unwrap();
-            // Short enough that the corvette, the lighter of the two, is still afloat with them.
+            // Short enough that the destroyer, the lighter of the two, is still afloat with them.
             run_ticks(&mut world, 200);
             full - world.unit_health(ship).unwrap_or(Fp::ZERO)
         };

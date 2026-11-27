@@ -331,10 +331,15 @@ out close and why: evidence about the process, not a target.
 * 2026-11-27: build power in the price list, a utility job: its points at the least any unit that
   only builds pays for one, over the domain base, each engineer priced by the others. The T1 and
   T3 Engineers pay 10.4 a point and come out at their costs; the Combat Engineer, its 17.5
-  points with its gun and radar, 224 to 253. The T2 Engineer lists at 125 and is held at 130 for
-  the design owner: at 125 one saddleback soak match (seed 3) ran to 4077 s, past the 4000 s limit,
-  where both sides' strategic missiles flatten both bases at about 2,100 s and both rebuild. The
-  Field Rig and the Command Rig carry it in their lists and stay held.
+  points with its gun and radar, 224 to 253. The T2 Engineer lists at 125 and was held at 130 at
+  first: at 125 one saddleback soak match (seed 3) ran to 4077 s, past the 4000 s limit, where
+  both sides' strategic missiles flatten both bases at about 2,100 s and both rebuild. The Field
+  Rig and the Command Rig carry it in their lists and stay held.
+* 2026-11-27: the T2 Engineer at its list's 125 (the design owner's call), and the soak's 1v1
+  limit 4000 s to 4500 s, since the match that ran long finished: the limit is for stalemates.
+  The Escort Corvette's anti-torpedo charge taken off (the design owner): the T2 fleet still takes
+  2.06 times its cost of torpedo bombers to break, so the Torpedo Bomber and the Torpedo Boat
+  re-solve to their costs.
 * 2026-11-27: game-ending weapons in minutes of a standard T3 economy, eight T3 extractors, 144 a
   second (`[missiles] strategic_minutes`): the Strategic Missile 2.98, its launcher 2.27, the
   Strategic Interceptor 0.79, today's costs written down; and each missile defense a share of the
