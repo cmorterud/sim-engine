@@ -113,8 +113,12 @@ impl Visibility {
         let stamp = self.current_tick + 1;
         let side = self.side;
         let cells = self.cells_mut(sense, team);
-        let min_y = ((y - radius) / cell).clamp(0, last);
-        let max_y = ((y + radius) / cell).clamp(0, last);
+        // A unit past the map's edge sees only as much of the map as its disc reaches.
+        let (min_y, max_y) = ((y - radius).div_euclid(cell), (y + radius).div_euclid(cell));
+        if max_y < 0 || min_y > last {
+            return;
+        }
+        let (min_y, max_y) = (min_y.max(0), max_y.min(last));
         for row in min_y..=max_y {
             // The width of the disc at this row's center decides the columns to mark.
             let center_y = row * cell + cell / 2;
@@ -124,8 +128,11 @@ impl Visibility {
                 continue;
             }
             let span = (span_squared as u64).isqrt() as i64;
-            let min_x = ((x - span) / cell).clamp(0, last);
-            let max_x = ((x + span) / cell).clamp(0, last);
+            let (min_x, max_x) = ((x - span).div_euclid(cell), (x + span).div_euclid(cell));
+            if max_x < 0 || min_x > last {
+                continue;
+            }
+            let (min_x, max_x) = (min_x.max(0), max_x.min(last));
             let start = row as usize * side;
             cells[start + min_x as usize..=start + max_x as usize].fill(stamp);
         }

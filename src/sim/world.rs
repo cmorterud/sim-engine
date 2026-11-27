@@ -1315,6 +1315,9 @@ impl SimWorld {
 
     pub fn step_commands(&mut self, commands: &[SimCommand]) {
         for command in commands {
+            // No order sends a unit off the map: a place past its edge is taken as the nearest
+            // point on it. Units can still be out there, aircraft after a pass, and come back.
+            let command = &self.onto_map(command);
             match command {
                 SimCommand::Move { units, goal } => {
                     self.clear_unit_plans(units);
@@ -1365,6 +1368,23 @@ impl SimWorld {
             }
         }
         self.step_order_queues();
+    }
+
+    /// The command with every place it names moved onto the map.
+    fn onto_map(&self, command: &SimCommand) -> SimCommand {
+        let on = |point: &Vec2Fp| self.terrain.onto_map(*point);
+        let mut command = command.clone();
+        match &mut command {
+            SimCommand::Move { goal, .. }
+            | SimCommand::AttackMove { goal, .. }
+            | SimCommand::QueueMove { goal, .. }
+            | SimCommand::FormationMove { goal, .. }
+            | SimCommand::MoveOrder { goal, .. } => *goal = on(goal),
+            SimCommand::AttackGround { point, .. } | SimCommand::Unload { point, .. } | SimCommand::Teleport { point, .. } | SimCommand::SetRally { point, .. } => *point = on(point),
+            SimCommand::Patrol { points, .. } => points.iter_mut().for_each(|point| *point = on(point)),
+            _ => {}
+        }
+        command
     }
 
     fn queue_move(&mut self, units: &[SimId], goal: Vec2Fp, attack: bool, formation: bool) {
@@ -4222,7 +4242,8 @@ impl SimWorld {
                     dead.push(id);
                 }
                 _ => {
-                    if projectile.lifetime_ticks == 0 || !terrain.in_bounds(end.xy()) {
+                    // Past the map's edge it flies on, as aircraft do, to the outer margin.
+                    if projectile.lifetime_ticks == 0 || !terrain.in_play(end.xy()) {
                         dead.push(id);
                     }
                 }

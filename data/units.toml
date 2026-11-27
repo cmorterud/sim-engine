@@ -664,10 +664,11 @@ name = "Interceptor"
 class = "air"
 tier = 1
 # 175 to 164 once every sensor was priced over its domain base, which moved the T1 air base, the
-# one that prices the Bomber at its cost, to 0.315 (2026-11-27).
+# one that prices the Bomber at its cost, to 0.315 (2026-11-27), and 0.318 once aircraft flew on
+# past the map's edge after a pass rather than stop on it (2026-11-27).
 mass = 33
-energy = 1469
-build_time = 366
+energy = 1456
+build_time = 363
 health = 445
 speed = 30
 radius = 10
@@ -679,16 +680,17 @@ weapon = { range = 500, reload_ticks = 10, projectile_speed = 180, damage = "48.
 # Its cost is what brings an army a fifth anti-air even with an equal cost of bombers, with
 # Mobile Anti-Air's gun set by [kill_times] mobile_aa_t1_bomber (2026-11-27,
 # `--balance-derive t1-air`): 250 to 249.5, then 255 once guns fired only when laid, and 253
-# with the Interceptor's gun at its [model] time to kill. That sets the T1 air base
+# with the Interceptor's gun at its [model] time to kill, then 251 once aircraft flew on past the
+# map's edge after a pass rather than stop on it (2026-11-27). That sets the T1 air base
 # ([price_list]). Its health is ten seconds of an Interceptor's gun ([air]).
 [[unit]]
 id = "t1_bomber"
 name = "Attack Bomber"
 class = "air"
 tier = 1
-mass = 91
-energy = 2071
-build_time = 505
+mass = 90
+energy = 2056
+build_time = 501
 health = 489
 speed = 20
 radius = 10
