@@ -7,6 +7,7 @@
 //!        + its build power at the cheapest builder's rate / domain base
 //!        + its cargo: the Light Air Transport's share of a full load of its tier's line units
 //!        + its strategic launching: a share of the Strategic Missile Launcher's cost
+//!        + its income: what it makes a second, paid back in its tier's payback
 //! σ_job = anchor × tier efficiency × domain base / (1 + Σ the job's prices)
 //! ```
 //!
@@ -84,6 +85,8 @@ pub struct Pricing {
     pub cargo: f64,
     /// What launching strategic missiles costs, for a unit that is not a launcher (`launching`).
     pub launching: f64,
+    /// What its own income costs (`income`).
+    pub income: f64,
     /// The list's price.
     pub list: f64,
     /// What it costs, at its tier's prices.
@@ -102,10 +105,11 @@ impl Pricing {
     }
 
     /// The part of its price that does not go with the domain base: cargo, whose load is land
-    /// units priced as they are, and strategic launching, priced in minutes of a T3 economy as the
-    /// launcher is. Sensors go with it, as every other job does (2026-11-27).
+    /// units priced as they are, strategic launching, priced in minutes of a T3 economy as the
+    /// launcher is, and income, priced as an extractor's is. Sensors go with it, as every other
+    /// job does (2026-11-27).
     fn fixed_cost(&self) -> f64 {
-        self.cargo + self.launching
+        self.cargo + self.launching + self.income
     }
 
     /// The list's price at another domain base: each job's part goes as one over the base.
@@ -465,12 +469,32 @@ fn price_with(db: &BlueprintDb, table: &toml::Table, key: &str) -> Option<Pricin
     // Cargo, a utility job (2026-11-27): the share of a full load that the only unit that only
     // carries pays. Not over the base: the load is land units, priced as they are.
     let cargo = if unit.transport.is_some() { cargo_share(db, table) * full_load(db, table, unit) } else { 0.0 };
-    let mut total = jobs.iter().map(|job| job.cost).sum::<f64>() + sensors.iter().map(|(_, cost)| cost).sum::<f64>() + build_power + cargo + launching;
+    let income = income(table, unit);
+    let mut total = jobs.iter().map(|job| job.cost).sum::<f64>() + sensors.iter().map(|(_, cost)| cost).sum::<f64>() + build_power + cargo + launching + income;
     // What cannot move is worth more for its cost, as a dome is (`[price_list] immobile`).
     if unit.is_structure() {
         total /= number(&list["immobile"]);
     }
-    Some(Pricing { key: key.to_string(), tier, domain, base, jobs, sensors, build_power, cargo, launching, list: total, actual: cost_at(unit, tier) })
+    Some(Pricing { key: key.to_string(), tier, domain, base, jobs, sensors, build_power, cargo, launching, income, list: total, actual: cost_at(unit, tier) })
+}
+
+/// What a unit's own income costs (2026-11-27, the design owner's plan, for the field rig): what it
+/// makes a second, its energy at its tier's rate (`[economy] energy_per_materiel`), over its tier's
+/// payback (`[economy] payback_seconds`), as an extractor's or a generator's cost pays it back, in
+/// materiel at its tier's prices as `balance::cost_at` counts them. Not over the domain base: it
+/// is priced by an economy, not by a fight. Structures that make income are not on the list.
+pub fn income(table: &toml::Table, unit: &Blueprint) -> f64 {
+    let per_second = |income: crate::sim::blueprints::Res| income.to_num::<f64>() * TICKS_PER_SECOND as f64;
+    let (materiel, energy) = (per_second(unit.mass_income), per_second(unit.energy_income));
+    if unit.is_structure() || materiel + energy <= 0.0 {
+        return 0.0;
+    }
+    let tier = usize::from(unit.tier.clamp(1, MAX_TIER)) - 1;
+    let rate = numbers(&table["economy"]["energy_per_materiel"])[tier];
+    let payback = numbers(&table["economy"]["payback_seconds"])[tier];
+    let anchor = &table["anchor"];
+    let land_share = 1.0 + number(&anchor["energy"]) / number(&anchor["materiel"]) / rate;
+    (materiel + energy / rate) * payback / land_share
 }
 
 /// What launching strategic missiles costs a unit that is not a launcher (2026-11-27, the design
@@ -576,6 +600,9 @@ pub fn unit_report(db: &BlueprintDb, key: &str) {
     }
     if pricing.launching > 0.0 {
         println!("  launching, its share of the Strategic Missile Launcher by build power and stock: {:8.1}", pricing.launching);
+    }
+    if pricing.income > 0.0 {
+        println!("  income, paid back in its tier's payback: {:8.1}", pricing.income);
     }
     let shield = own_shield_health(&table, unit);
     if shield > 0.0 {

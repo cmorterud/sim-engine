@@ -418,6 +418,15 @@ out close and why: evidence about the process, not a target.
   energy stay identity knobs. Not made one: the T3 fighter's turn radius (87.6, 37% wider than the
   family's) and one energy share a tier for aircraft (the T3 fighter spends 114 energy a materiel,
   the Interceptor 45); each would be a dramatic shift, so each stays its own.
+* 2026-11-27: the Field Rig priced by the list (the design owner's plan): its gun, 677; its build
+  power at the cheapest builder's rate, 582; and its income, a new utility job, what it makes a
+  second, energy at its tier's rate, paid back in its tier's payback (`[economy] payback_seconds`,
+  55, 250 and 400 seconds, about what each tier's extractors and generators pay back in), 457.
+  2,240 to 1,716. The Command Rig's gun is a rule (`[commander]`, tests/commander_test.rs):
+  holding its ground, it comes out ahead of 16 Medium Tanks attack-moving into it and behind 18,
+  at the least damage that does, a tank in six shots, 70, as it has; and Discharge's least, 1,250,
+  destroys any T1 land unit in one. The commander's cost stays the design owner's: it is never
+  built, so its cost sets only its wreck and what destroying it is worth.
 
 ## Order of work
 
