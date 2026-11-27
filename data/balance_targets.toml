@@ -309,6 +309,12 @@ commander_seconds_five_bombers_t1 = [55, 85]
 anti_air_health_over_bomb = 1.5
 # One interceptor on a bomber's tail destroys it in about this long: what sets a bomber's health.
 interceptor_seconds_per_bomber_t1 = 10
+# An equal cost of Interceptors clears an equal cost of T1 Bombers, check_materiel a side, in
+# about the time it takes (2026-11-27, the design owner's rule, at what it measured: 8.9 s, and
+# 10.3 s once guns fired only when laid on their target): the Interceptor's size,
+# √(health × damage a second), which every T1 air number above scales with. Its health over its
+# damage a second is the [model] time to kill in air-to-air fights.
+interceptors_clear_bombers_seconds = [9, 11]
 # A land army this share anti-air, by materiel, comes out about even with an equal materiel of
 # bombers ([counters] even_margin): what sets the T1 Bomber's cost, with Mobile Anti-Air's gun set
 # by [kill_times] mobile_aa_t1_bomber (2026-11-27; until then this set the gun, against a bomber
