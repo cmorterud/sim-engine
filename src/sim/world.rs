@@ -44,6 +44,9 @@ const TORPEDO_SPEED_UP_TICKS: i32 = 20;
 const CROWD_SETTLE_RADII: i32 = 30;
 /// The gap between formation spots, in halves of the largest unit's radius.
 const FORMATION_SPACING_RADII: i32 = 5;
+/// The gap between the spots aircraft land on together, in the largest one's radius: a radius
+/// clear between two of them, as models are about two radii long.
+const AIR_FORMATION_SPACING_RADII: i32 = 3;
 const SLOT_EXTRA_TICKS: i64 = 40;
 /// How long a formation waits for members that have fallen behind, before going on without them.
 const FORMATION_PATIENCE_TICKS: u32 = 100;
@@ -1731,6 +1734,8 @@ impl SimWorld {
         let mut members = Vec::with_capacity(units.len());
         let mut walkers = Vec::with_capacity(units.len());
         let mut largest_radius = 0;
+        let mut fliers = Vec::new();
+        let mut largest_flier = 0;
         // Whose units they are, whose share of the field builds their route draws on.
         let mut owner = 0;
         for &id in units {
@@ -1744,8 +1749,11 @@ impl SimWorld {
                     owner = stats.owner.index();
                 }
                 largest_radius = largest_radius.max(stats.radius.to_bits());
-                // Aircraft fly straight to the goal itself, and keep no formation.
-                if !stats.is_structure && stats.move_class != MoveClass::Air {
+                // Aircraft fly straight to their own spots, and keep no formation on the way.
+                if stats.move_class == MoveClass::Air {
+                    largest_flier = largest_flier.max(stats.radius.to_bits());
+                    fliers.push((id, self.ecs.get::<&Position>(entity).expect("units have positions").0.xy()));
+                } else if !stats.is_structure {
                     let here = self.ecs.get::<&Position>(entity).expect("units have positions").0.xy();
                     let start = if from_planned_end { self.planned_end(entity, here) } else { here };
                     walkers.push((id, start, stats.max_speed));
@@ -1781,6 +1789,16 @@ impl SimWorld {
                 // Time to cross the whole approach twice, plus a margin for crowding.
                 let crossing = i64::from(arrive_radius.to_bits()) * 4 / i64::from(speed.to_bits().max(1));
                 slots.push((id, slot, (crossing + SLOT_EXTRA_TICKS).min(i64::from(u32::MAX)) as u32));
+            }
+        }
+        // Aircraft moved to a place together land in a grid there, of their own, each on its own
+        // spot (the design owner, 2026-11-27). They fly to it straight from wherever they are,
+        // so that they cross paths only as their ways there happen to. An attack-move sweeps to
+        // its goal, and each lands on the nearest free spot after.
+        if follow.is_none() && kind == OrderKind::Move && fliers.len() >= 2 {
+            let formation = plan_formation(&fliers, goal, Fp::from_bits(largest_flier.saturating_mul(AIR_FORMATION_SPACING_RADII)));
+            for (&(id, _), &slot) in fliers.iter().zip(&formation.slots) {
+                slots.push((id, slot, 0));
             }
         }
         let route = self.flow_field.create_route_for(class, &self.terrain, self.current_tick, goal, members.len() as u32, arrive_radius, follow, owner).or_else(|| {

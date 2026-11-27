@@ -338,6 +338,9 @@ pub struct Flight {
     /// How its heading turned over the last tick, as the cosine and sine of the angle: for
     /// anti-air guns and flak, which aim along a steady turn.
     pub turn: Vec2Fp,
+    /// The spot on the ground it has taken to land on, or rests on: its own, which no other
+    /// aircraft lands on or within reach of. None while it has somewhere else to go.
+    pub spot: Option<Vec2Fp>,
 }
 
 impl Flight {

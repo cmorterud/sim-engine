@@ -464,6 +464,7 @@ impl SimWorld {
                 break_off: flight.break_off,
                 breaking_off: false,
                 turn: Vec2Fp::new(Fp::ONE, Fp::ZERO),
+                spot: None,
             };
             self.ecs.insert_one(entity, airborne).expect("entity was just spawned");
             let mut position = self.ecs.get::<&mut Position>(entity).expect("units have positions");
@@ -2578,6 +2579,12 @@ impl SimWorld {
                 hasher.write(&value.to_le_bytes());
             }
             hasher.write(&flight.break_off.to_bits().to_le_bytes());
+            if let Some(spot) = flight.spot {
+                hasher.write(&[26]);
+                for value in [spot.x, spot.y] {
+                    hasher.write(&value.to_bits().to_le_bytes());
+                }
+            }
         }
         if let Ok(anti_air) = self.ecs.get::<&AntiAir>(entity) {
             hasher.write(&[26, u8::from(anti_air.also_ground)]);

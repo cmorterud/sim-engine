@@ -64,12 +64,12 @@ fn aircraft_fly_over_walls_at_their_height_and_land_where_they_were_sent() {
         idle
     });
     assert!(arrived.is_some(), "it should get there");
-    assert!(distance(&world, scout, goal) < 200);
-    // With nothing to do, it slows, comes down, and stays on the ground nearby.
-    run(&mut world, 40);
+    assert!(distance(&world, scout, goal) < 800, "close enough to slow down onto it");
+    // It slows, comes down, and rests on the goal itself.
+    run(&mut world, 60);
     let landed = world.unit_position(scout).unwrap();
     assert_eq!(landed.z, world.terrain.height_at(landed.xy()) + fp_int(8), "it rests on the ground");
-    assert!(distance(&world, scout, goal) < 600);
+    assert!(distance(&world, scout, goal) < 2, "on the goal: {landed:?}");
     run(&mut world, 50);
     assert_eq!(world.unit_position(scout), Some(landed), "landed, it stays put");
     // Given an order, it takes off again.
@@ -82,8 +82,9 @@ fn aircraft_fly_over_walls_at_their_height_and_land_where_they_were_sent() {
 #[test]
 fn aircraft_with_nowhere_to_land_circle() {
     let mut world = world();
-    // A wall too wide to land on, under a scout with nothing to do.
-    world.add_box_obstacle(RectFp::new(point(1_500, 1_500), point(3_500, 3_500)));
+    // A wall too wide to land on, under a scout with nothing to do, wider than the circle it
+    // flies and the furthest it looks for somewhere to land.
+    world.add_box_obstacle(RectFp::new(point(600, 600), point(4_400, 4_400)));
     world.prepare_map();
     let scout = spawn(&mut world, "t1_air_scout", Team::Blue, point(2_500, 2_500));
     let mut moved = 0;
@@ -608,24 +609,91 @@ fn a_fighter_bomber_bombs_under_fog_of_war_on_attack_and_attack_move() {
     }
 }
 
-/// Aircraft in flight keep apart: two sent the same way from the same spot spread out instead
-/// of flying as one.
+/// In the air, aircraft do nothing to keep apart: two sent the same way from the same spot fly
+/// as one, overlapping as their routes happen to make them (the design owner, 2026-11-27).
 #[test]
-fn aircraft_in_flight_keep_apart() {
+fn aircraft_in_flight_fly_through_one_another() {
     let mut world = world();
     let first = spawn(&mut world, "t1_interceptor", Team::Blue, point(1_000, 1_000));
     let second = spawn(&mut world, "t1_interceptor", Team::Blue, point(1_002, 1_000));
-    world.advance_tick(&[SimCommand::Move { units: vec![first, second], goal: point(4_000, 3_000) }]);
-    let mut closest = i64::MAX;
-    for tick in 0..200 {
+    // Two orders of their own, so that each flies for the goal itself.
+    let goal = point(4_000, 3_000);
+    world.advance_tick(&[SimCommand::Move { units: vec![first], goal }, SimCommand::Move { units: vec![second], goal }]);
+    for _ in 0..200 {
         world.advance_tick(&[]);
-        if tick > 60 {
-            let (a, b) = (world.unit_position(first).unwrap().xy(), world.unit_position(second).unwrap().xy());
-            closest = closest.min(sim_engine::math::fp::sqrt_wide(a.distance_squared(&b)).to_num::<i64>());
+        if distance(&world, first, goal) < 1_000 {
+            // Coming down, each takes a spot of its own.
+            break;
+        }
+        let (a, b) = (world.unit_position(first).unwrap().xy(), world.unit_position(second).unwrap().xy());
+        assert!(a.distance_squared(&b) < fp_int(3) * fp_int(3), "they are not pushed apart: {a:?} and {b:?}");
+    }
+}
+
+/// Every aircraft resting on the ground, and of those that are, whether any two overlap.
+fn landed_overlaps(world: &SimWorld, ids: &[SimId]) -> (bool, Vec<(SimId, SimId)>) {
+    let all_down = ids.iter().all(|&id| !flight(world, id).airborne() && flight(world, id).speed == Fp::ZERO);
+    let mut overlaps = Vec::new();
+    for (index, &a) in ids.iter().enumerate() {
+        for &b in &ids[index + 1..] {
+            let (at_a, at_b) = (world.unit_position(a).unwrap().xy(), world.unit_position(b).unwrap().xy());
+            let radius = |id: SimId| *world.ecs.get::<&sim_engine::sim::components::UnitStats>(world.unit_entity(id).unwrap()).unwrap();
+            let radius = |id: SimId| radius(id).radius;
+            let contact = radius(a) + radius(b);
+            if at_a.distance_squared(&at_b) < sim_engine::math::fp::wide_mul(contact, contact) {
+                overlaps.push((a, b));
+            }
         }
     }
-    let radius = world.blueprints.get(world.blueprints.id("t1_interceptor")).radius.to_num::<i64>();
-    assert!(closest >= radius * 2, "they stay at least their width apart, not {closest}");
+    (all_down, overlaps)
+}
+
+/// A group ordered to a place lands in a grid there, each aircraft on its own spot, three
+/// radii from the next, all within a few spots of the goal.
+#[test]
+fn aircraft_ordered_somewhere_together_land_in_a_grid() {
+    let mut world = world();
+    let group: Vec<SimId> = (0..9).map(|index| spawn(&mut world, "t1_interceptor", Team::Blue, point(1_000 + index % 3 * 6, 1_000 + index / 3 * 6))).collect();
+    let goal = point(3_000, 2_600);
+    world.advance_tick(&[SimCommand::Move { units: group.clone(), goal }]);
+    run(&mut world, 900);
+    let (all_down, overlaps) = landed_overlaps(&world, &group);
+    assert!(all_down, "they have all landed");
+    assert!(overlaps.is_empty(), "none overlap: {overlaps:?}");
+    let spacing = world.blueprints.get(world.blueprints.id("t1_interceptor")).radius.to_num::<i64>() * 3;
+    for &id in &group {
+        let at = world.unit_position(id).unwrap().xy();
+        // Nine take a grid five wide, so the corners are two and a half spots out.
+        assert!(distance(&world, id, goal) <= spacing * 3, "{id:?} landed at {at:?}, {} from the goal", distance(&world, id, goal));
+        // Its nearest neighbor is one spot away: a grid, not a heap.
+        let nearest = group.iter().filter(|&&other| other != id).map(|&other| distance(&world, other, at)).min().unwrap();
+        assert!((nearest - spacing).abs() <= 2, "{id:?}'s nearest neighbor is {nearest} away, not {spacing}");
+    }
+}
+
+/// Aircraft that come down at the same place on orders of their own, or with nothing to do,
+/// still never land on one another.
+#[test]
+fn aircraft_never_overlap_on_the_ground() {
+    let mut world = world();
+    let kinds = ["t1_interceptor", "t1_bomber", "t2_gunship", "t2_fighter_bomber", "t3_strategic_bomber", "t3_heavy_gunship", "t1_air_scout", "t2_transport"];
+    let goal = point(2_500, 2_500);
+    let mut ids = Vec::new();
+    let mut orders = Vec::new();
+    for (index, kind) in kinds.iter().enumerate() {
+        let id = spawn(&mut world, kind, Team::Blue, point(800 + index as i32 * 50, 900));
+        orders.push(SimCommand::Move { units: vec![id], goal });
+        ids.push(id);
+    }
+    // And three with no orders, made at one spot, which land where they come to a stop.
+    for _ in 0..3 {
+        ids.push(spawn(&mut world, "t1_bomber", Team::Blue, point(3_600, 3_600)));
+    }
+    world.advance_tick(&orders);
+    run(&mut world, 1_500);
+    let (all_down, overlaps) = landed_overlaps(&world, &ids);
+    assert!(all_down, "they have all landed");
+    assert!(overlaps.is_empty(), "none overlap: {overlaps:?}");
 }
 
 /// Aircraft exactly together part side by side, across the way they face, so that a group and
@@ -831,6 +899,14 @@ fn fighters_fire_only_within_their_nose_arc() {
     let generator_at = (40, 40);
     for (key, arc_degrees) in [("t1_interceptor", 30.0f64), ("t2_fighter_bomber", 35.0), ("t3_air_superiority", 40.0)] {
         let mut world = world();
+        // Slow shots, so that each is seen in flight: right on a bomber's tail, nothing pushing
+        // it about, a fighter's shots land the tick they are fired.
+        let id = world.blueprints.id(key);
+        world.blueprints = std::sync::Arc::new(world.blueprints.with_unit(id, |unit| {
+            for weapon in unit.weapon.iter_mut().chain(unit.extra_weapons.iter_mut()).filter(|weapon| weapon.projectile_speed == fp_int(180)) {
+                weapon.projectile_speed = fp_int(20);
+            }
+        }));
         let generator = world.spawn_finished_structure(world.blueprints.id("power_generator"), Team::Blue, generator_at.0, generator_at.1).unwrap();
         let bomber = spawn(&mut world, "t1_bomber", Team::Red, point(2_500, 2_500));
         let fighter = spawn(&mut world, key, Team::Blue, point(1_800, 2_300));

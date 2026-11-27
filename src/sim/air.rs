@@ -8,7 +8,7 @@ use super::config::GRAVITY_RAW;
 use super::spatial::GridEntry;
 use super::terrain::Terrain;
 use super::world::SimWorld;
-use crate::math::fp::{fp_int, wide_mul, Fp, Vec2Fp, Vec3Fp, FP_FRAC_BITS};
+use crate::math::fp::{fp_int, mul_toward_zero, sqrt_wide, wide_mul, Fp, FpWide, Vec2Fp, Vec3Fp};
 
 /// Bombs fall at the inspiration's gravity, 4.9 map units a second squared, which is ten times
 /// what shells use here.
@@ -62,6 +62,53 @@ pub fn bomb_lands_on(from: Vec3Fp, facing: Vec2Fp, speed: Fp, target: Vec3Fp, ve
     let short = drop - along;
     let reach = i64::from(reach.to_bits());
     along > 0 && short * short + across * across <= reach * reach
+}
+
+/// How far an aircraft flying at `speed` goes while it slows to a stop at the rate it lands at,
+/// from top speed to none in `LANDING_TICKS`: speed² · LANDING_TICKS / (2 · top).
+fn stopping_distance(speed: Fp, top: Fp) -> Fp {
+    if top <= Fp::ZERO {
+        return Fp::ZERO;
+    }
+    let raw = wide_mul(speed, speed).to_bits() * i64::from(LANDING_TICKS) / 2 / i64::from(top.to_bits());
+    Fp::from_bits(raw.clamp(0, i64::from(i32::MAX)) as i32)
+}
+
+/// The speed an aircraft slowing at its landing rate has with `distance` to go to a stop:
+/// the inverse of `stopping_distance`.
+fn speed_to_stop_in(distance: Fp, top: Fp) -> Fp {
+    sqrt_wide(FpWide::from_bits(wide_mul(top, distance).to_bits().max(0) * 2 / i64::from(LANDING_TICKS)))
+}
+
+/// Between two aircraft on the ground, past their radii, in units.
+const GROUND_GAP_UNITS: i32 = 4;
+/// How far out, in spots, a landing aircraft looks for a free one.
+const SPOT_SEARCH_RINGS: i32 = 6;
+
+/// A spot to land on at or near `wanted`: the nearest free one of a grid three radii apart
+/// about it, laid along the way the aircraft faces so that it turns with the map, nearer the
+/// front first and then nearer its right. Free means clear of every other aircraft's spot by
+/// both radii and a gap, and `fits`. None if there is none within reach.
+fn free_spot(id: SimId, wanted: Vec2Fp, facing: Vec2Fp, radius: Fp, taken: &[(SimId, Vec2Fp, Fp)], fits: impl Fn(Vec2Fp) -> bool) -> Option<Vec2Fp> {
+    let free = |point: Vec2Fp| {
+        taken.iter().all(|&(other, at, other_radius)| {
+            let contact = radius + other_radius + fp_int(GROUND_GAP_UNITS);
+            other == id || point.distance_squared(&at) >= wide_mul(contact, contact)
+        })
+    };
+    let spacing = radius.saturating_mul(fp_int(3));
+    let right = Vec2Fp::new(facing.y, -facing.x);
+    let mut offsets: Vec<(i32, i32)> = (-SPOT_SEARCH_RINGS..=SPOT_SEARCH_RINGS).flat_map(|along| (-SPOT_SEARCH_RINGS..=SPOT_SEARCH_RINGS).map(move |across| (along, across))).collect();
+    offsets.sort_unstable_by_key(|&(along, across)| (along * along + across * across, -along, -across));
+    offsets.into_iter().find_map(|(along, across)| {
+        // Rounded toward zero, so that mirror images find mirror-image spots.
+        let (ahead, aside) = (spacing.saturating_mul(fp_int(along)), spacing.saturating_mul(fp_int(across)));
+        let point = Vec2Fp::new(
+            wanted.x + mul_toward_zero(facing.x, ahead) + mul_toward_zero(right.x, aside),
+            wanted.y + mul_toward_zero(facing.y, ahead) + mul_toward_zero(right.y, aside),
+        );
+        (fits(point) && free(point)).then_some(point)
+    })
 }
 
 /// The tightest circle an aircraft can fly, in units.
@@ -194,6 +241,16 @@ impl SimWorld {
         let max = terrain.max_coordinate_raw();
         let center = Vec2Fp::new(Fp::from_bits(max / 2), Fp::from_bits(max / 2));
         let locate = |target: SimId| -> Option<GridEntry> { units.binary_search_by_key(&target, |unit| unit.0).ok().map(|index| *grid.entry(index)) };
+        // The spots aircraft have taken on the ground, to land on or resting on, so that no two
+        // land on one another. Those taken this tick are added as they are.
+        let mut taken: Vec<(SimId, Vec2Fp, Fp)> = self
+            .aircraft
+            .iter()
+            .filter_map(|&(id, entity)| {
+                let spot = self.ecs.get::<&Flight>(entity).ok()?.spot?;
+                Some((id, spot, self.ecs.get::<&UnitStats>(entity).ok()?.radius))
+            })
+            .collect();
         let mut query = self.ecs.query_mut::<(
             &mut Position,
             &mut Velocity,
@@ -205,10 +262,11 @@ impl SimWorld {
             &mut super::components::Health,
             Option<&super::components::Patrol>,
             Option<&super::components::BombBay>,
+            Option<&super::components::OrderQueue>,
         )>();
         let mut view = query.view();
-        for &(_, entity) in &self.aircraft {
-            let (position, velocity, stats, order, combat, turning, flight, health, patrol, bomb_bay) = view.get_mut(entity).expect("aircraft are live units");
+        for &(id, entity) in &self.aircraft {
+            let (position, velocity, stats, order, combat, turning, flight, health, patrol, bomb_bay, queue) = view.get_mut(entity).expect("aircraft are live units");
             let here = position.0.xy();
             let radius = turn_radius(stats.max_speed, turning.max_turn);
             let patrolling = patrol.is_some();
@@ -263,6 +321,8 @@ impl SimWorld {
             let mut heading_for = if staging.is_some() { None } else { target.or(ground_target) };
             let attacking = heading_for.is_some();
             let close = Fp::from_bits(stats.max_speed.to_bits().saturating_mul(ARRIVE_TICKS));
+            // Where a move it has just finished was to: its spot to land on.
+            let mut arrived_at = None;
             if let Some(index) = staging {
                 let spot = &mut stagings[index];
                 if here.distance_squared(&spot.center) > wide_mul(close, close) {
@@ -282,11 +342,19 @@ impl SimWorld {
                 let goal = flow.goal(order.route).unwrap_or(here);
                 // Following a unit never ends: it keeps making passes over it.
                 let ends = order.kind != OrderKind::Attack && !flow.is_following(order.route);
-                if ends && here.distance_squared(&goal) <= wide_mul(close, close) {
+                // A move is to its own spot, in its group's grid or the goal itself. The last one,
+                // which it lands at, is over once it is close enough to slow down onto it; one on a
+                // patrol, or with more to come, once it is there. An attack-move is over at its
+                // goal, as it always was: it is a sweep, and fighting it lands only where it can.
+                let spot = if ends { order.slot.unwrap_or(goal) } else { goal };
+                let last = order.kind == OrderKind::Move && !patrolling && queue.is_none_or(|queue| queue.0.is_empty());
+                let reach = if last { stopping_distance(stats.max_speed, stats.max_speed) + close } else { close };
+                if ends && here.distance_squared(&spot) <= wide_mul(reach, reach) {
                     flow.release(order.route);
                     *order = Order::IDLE;
+                    arrived_at = Some(spot);
                 } else {
-                    heading_for = Some(goal);
+                    heading_for = Some(spot);
                 }
             }
 
@@ -302,10 +370,44 @@ impl SimWorld {
             let margin = radius.saturating_mul(fp_int(3));
             let near_edge = [here.x, here.y].iter().any(|&value| value < margin || Fp::from_bits(max) - value < margin);
             let idle = heading_for.is_none() && !patrolling && flight.refit.is_none();
-            let landing = idle && !near_edge && terrain.is_passable(here);
-            // Over a structure, such as the facility it has just left, it flies on to land beyond it.
-            let (cell_x, cell_y) = terrain.cell_of(here);
-            let over_structure = idle && occupancy.contains_key(&((cell_y * terrain.cells_per_side() + cell_x) as u32));
+            // It lands on a spot of its own, on open ground, off any structure (such as the
+            // facility it has just left) and clear of the other aircraft down or coming down:
+            // where it finished its move, or else where it would come to a stop flying straight
+            // on. In the air, aircraft fly through one another as their ways cross; on the
+            // ground they never overlap (the design owner, 2026-11-27). One already resting
+            // keeps where it is.
+            if !idle {
+                flight.spot = None;
+            } else if flight.spot.is_none() {
+                let fits = |point: Vec2Fp| {
+                    let on_map = [point.x, point.y].iter().all(|&value| value >= margin && Fp::from_bits(max) - value >= margin);
+                    // The cell as units count it, so that mirror-image spots on a cell's edge
+                    // are in mirror-image cells.
+                    let (cell_x, cell_y) = terrain.unit_cell_of(point);
+                    on_map && terrain.is_passable(point) && !occupancy.contains_key(&((cell_y * terrain.cells_per_side() + cell_x) as u32))
+                };
+                flight.spot = if !flight.airborne() && flight.speed == Fp::ZERO && fits(here) {
+                    Some(here)
+                } else {
+                    let ahead = turning.facing.scaled(stopping_distance(flight.speed, stats.max_speed));
+                    let wanted = arrived_at.unwrap_or(Vec2Fp::new(here.x + ahead.x, here.y + ahead.y));
+                    free_spot(id, wanted, turning.facing, stats.radius, &taken, fits)
+                };
+                if let Some(spot) = flight.spot {
+                    taken.push((id, spot, stats.radius));
+                }
+            }
+            // On its way to its spot, it slows as it nears it so as to stop on it, and comes
+            // down once it is slowing.
+            let mut final_speed = None;
+            if let (true, Some(spot)) = (idle, flight.spot) {
+                if spot != here {
+                    heading_for = Some(spot);
+                    let distance = sqrt_wide(here.distance_squared(&spot));
+                    final_speed = Some((speed_to_stop_in(distance, stats.max_speed).max(stats.max_speed / LANDING_TICKS), distance));
+                }
+            }
+            let landing = idle && flight.spot == Some(here);
             // Out of fuel, it flies at half its height and speed.
             let (top_speed, height) = (if flight.out_of_fuel() { stats.max_speed / 2 } else { stats.max_speed }, flight.cruising_height());
             // A fighter in range behind an aircraft it attacks eases off to the speed its target
@@ -339,15 +441,18 @@ impl SimWorld {
             });
             let down = |value: Fp, full: Fp, floor: Fp| (value - full / LANDING_TICKS).max(floor);
             let up = |value: Fp, full: Fp, ceiling: Fp| if value > ceiling { down(value, full, ceiling) } else { (value + full / LANDING_TICKS).min(ceiling) };
+            let coming_down = final_speed.is_some_and(|(speed, _)| speed < top_speed);
             if landing {
-                flight.speed = down(flight.speed, stats.max_speed, Fp::ZERO);
+                // On its spot, it has stopped, and settles onto it.
+                flight.speed = Fp::ZERO;
                 flight.altitude = down(flight.altitude, flight.elevation, Fp::ZERO);
             } else if hold {
                 flight.speed = down(flight.speed, stats.max_speed, Fp::ZERO);
                 flight.altitude = up(flight.altitude, flight.elevation, height);
             } else {
-                flight.speed = up(flight.speed, stats.max_speed, tailing.unwrap_or(top_speed).min(turning_in.unwrap_or(top_speed)));
-                flight.altitude = up(flight.altitude, flight.elevation, height);
+                let slowing = final_speed.map_or(top_speed, |(speed, _)| speed);
+                flight.speed = up(flight.speed, stats.max_speed, tailing.unwrap_or(top_speed).min(turning_in.unwrap_or(top_speed)).min(slowing));
+                flight.altitude = if coming_down { down(flight.altitude, flight.elevation, Fp::ZERO) } else { up(flight.altitude, flight.elevation, height) };
             }
             // Flying burns fuel, and on the ground it slowly comes back.
             if flight.airborne() {
@@ -397,15 +502,15 @@ impl SimWorld {
                     }
                     // A gunship can turn on the spot, so nothing is out of its reach. Easing off
                     // to turn in, it turns as tight as its speed allows.
-                    let unreachable = !flight.hovers && inside_turn(facing, offset, if turning_in.is_some() { turn_radius(speed, turning.max_turn) } else { radius });
+                    let unreachable = !flight.hovers && inside_turn(facing, offset, if turning_in.is_some() || final_speed.is_some() { turn_radius(speed, turning.max_turn) } else { radius });
                     if flight.breaking_off || offset == Vec2Fp::ZERO || unreachable {
                         facing
                     } else {
                         rotate_toward(facing, offset.normalized(), turning.max_turn)
                     }
                 }
-                // Coming down, it flies straight on as it slows, as it does to clear a structure.
-                None if landing || (over_structure && !near_edge) => {
+                // On its spot, it stays facing the way it came in.
+                None if landing => {
                     flight.breaking_off = false;
                     facing
                 }
@@ -418,91 +523,29 @@ impl SimWorld {
                 }
             };
 
+            // Held at the map's edge and facing off it, it stops breaking off and turns back
+            // toward the middle, rather than fly along the edge: two aircraft chasing each other
+            // there once ended up held on one point in a corner for good, once they were no
+            // longer pushed apart in flight.
+            let off_map = |at: Fp, way: Fp| (at.to_bits() <= 0 && way < Fp::ZERO) || (at.to_bits() >= max && way > Fp::ZERO);
+            if !landing && (off_map(here.x, turning.facing.x) || off_map(here.y, turning.facing.y)) {
+                flight.breaking_off = false;
+                turning.facing = rotate_toward(turning.facing, (center - here).normalized(), turning.max_turn);
+            }
             // How far it has been turning a tick, over the last few, for aiming at it along its
             // turn: aircraft that follow or circle turn on some ticks and not others.
             let now = turning.facing;
             let turned = Vec2Fp::new(facing.x * now.x + facing.y * now.y, facing.x * now.y - facing.y * now.x);
             flight.turn = Vec2Fp::new((flight.turn.x * 3 + turned.x) / 4, (flight.turn.y * 3 + turned.y) / 4);
-            let step = turning.facing.scaled(speed);
+            // The last stretch onto its spot it covers exactly.
+            let step = match (final_speed, flight.spot) {
+                (Some((_, distance)), Some(spot)) if speed >= distance => spot - here,
+                _ => turning.facing.scaled(speed),
+            };
             let next = Vec2Fp::new(Fp::from_bits((here.x + step.x).to_bits().clamp(0, max)), Fp::from_bits((here.y + step.y).to_bits().clamp(0, max)));
             // Landed, it rests on the ground like any other unit.
             position.0 = Vec3Fp::new(next.x, next.y, flying_height(terrain, next, flight.altitude.max(stats.radius)));
             velocity.0 = Vec3Fp::new(step.x, step.y, Fp::ZERO);
-        }
-        self.separate_aircraft();
-    }
-
-    /// Aircraft in flight keep a little apart, so that two sent the same way do not fly as one:
-    /// any two closer than their radii and a margin are pushed apart, a third of the overlap a
-    /// tick, so that they spread without jittering. In order along x, so only near neighbors are
-    /// compared. Divisions round toward zero, so mirror-image pairs move in mirror image.
-    /// Two exactly together part side by side, the lower id to the right of the way it faces,
-    /// which turns with the map as a compass direction does not. They parted along x, the lower
-    /// id to the east on both sides, so that aircraft taking off together from one spot flew in
-    /// one order and their mirror images in the other; once fighters were repriced, a Saddleback
-    /// 3v3 stopped mirroring for it (2026-11-25).
-    fn separate_aircraft(&mut self) {
-        const MARGIN_RAW: i64 = 4 << 12;
-        let mut flying: Vec<(i64, i64, i64, SimId, hecs::Entity, Vec2Fp)> = self
-            .aircraft
-            .iter()
-            .filter_map(|&(id, entity)| {
-                let flight = self.ecs.get::<&Flight>(entity).ok()?;
-                if flight.altitude <= Fp::ZERO {
-                    return None;
-                }
-                let position = self.ecs.get::<&Position>(entity).ok()?.0;
-                let radius = self.ecs.get::<&UnitStats>(entity).ok()?.radius;
-                let facing = self.ecs.get::<&Turning>(entity).ok()?.facing;
-                Some((i64::from(position.x.to_bits()), i64::from(position.y.to_bits()), i64::from(radius.to_bits()), id, entity, facing))
-            })
-            .collect();
-        if flying.len() < 2 {
-            return;
-        }
-        flying.sort_unstable_by_key(|&(x, _, _, id, _, _)| (x, id));
-        let widest = flying.iter().map(|aircraft| aircraft.2).max().unwrap_or(0);
-        let mut pushes = vec![(0_i64, 0_i64); flying.len()];
-        for first in 0..flying.len() {
-            let (x, y, radius, id, _, facing) = flying[first];
-            for second in first + 1..flying.len() {
-                let (other_x, other_y, other_radius, other_id, _, other_facing) = flying[second];
-                if other_x - x > radius + widest + MARGIN_RAW {
-                    break;
-                }
-                let contact = radius + other_radius + MARGIN_RAW;
-                let (dx, dy) = (x - other_x, y - other_y);
-                let distance_squared = dx * dx + dy * dy;
-                if distance_squared >= contact * contact {
-                    continue;
-                }
-                let distance = (distance_squared as u64).isqrt() as i64;
-                let overlap = contact - distance;
-                let (push_x, push_y) = if distance == 0 {
-                    // Exactly together: the lower id to the right of the way it faces.
-                    let (sign, facing) = if id < other_id { (1, facing) } else { (-1, other_facing) };
-                    let (fx, fy) = (i64::from(facing.x.to_bits()), i64::from(facing.y.to_bits()));
-                    let one = 1_i64 << FP_FRAC_BITS;
-                    (sign * fy * overlap / one / 6, -sign * fx * overlap / one / 6)
-                } else {
-                    (dx * overlap / distance / 6, dy * overlap / distance / 6)
-                };
-                pushes[first].0 += push_x;
-                pushes[first].1 += push_y;
-                pushes[second].0 -= push_x;
-                pushes[second].1 -= push_y;
-            }
-        }
-        let max = i64::from(self.terrain.max_coordinate_raw());
-        for (index, &(_, _, _, _, entity, _)) in flying.iter().enumerate() {
-            let (push_x, push_y) = pushes[index];
-            if push_x == 0 && push_y == 0 {
-                continue;
-            }
-            let mut position = self.ecs.get::<&mut Position>(entity).expect("aircraft are live units");
-            let x = (i64::from(position.0.x.to_bits()) + push_x).clamp(0, max) as i32;
-            let y = (i64::from(position.0.y.to_bits()) + push_y).clamp(0, max) as i32;
-            position.0 = Vec3Fp::new(Fp::from_bits(x), Fp::from_bits(y), position.0.z);
         }
     }
 }
