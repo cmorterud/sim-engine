@@ -48,6 +48,13 @@ const FORMATION_SPACING_RADII: i32 = 5;
 /// clear between two of them, as models are about two radii long.
 const AIR_FORMATION_SPACING_RADII: i32 = 3;
 const SLOT_EXTRA_TICKS: i64 = 40;
+/// A rally point's grid is this many spots wide, and holds this many in all.
+const RALLY_COLUMNS: i32 = 5;
+const RALLY_SPOTS: i32 = RALLY_COLUMNS * 16;
+/// The gap between a rally grid's spots, in halves of the unit's radius: wider than a group
+/// order's, so that a unit walking to its spot passes those already standing without shoving
+/// them off theirs.
+const RALLY_SPACING_RADII: i32 = 6;
 /// How long a formation waits for members that have fallen behind, before going on without them.
 const FORMATION_PATIENCE_TICKS: u32 = 100;
 /// How often a moving unit looks whether the way straight to its goal is clear, in ticks: often
@@ -175,8 +182,10 @@ pub struct UnitView {
     /// A factory making something, or a builder at work, with the power to do it. For drawing.
     pub working: bool,
     /// What a factory is building, as a raw blueprint id, and how far along it is in
-    /// thousandths, so that it shows in the bay. Anyone who can see the factory sees it.
-    pub assembling: Option<(u16, u16)>,
+    /// thousandths, so that it shows in the bay, and which way it faces there, in quarter
+    /// turns from east toward north: 0 east, 1 north, 2 west, 3 south. Anyone who can see the
+    /// factory sees it.
+    pub assembling: Option<(u16, u16, u8)>,
     /// What a structure is upgrading into, as a raw blueprint id, and how far along it is in
     /// thousandths, so that it shows changing as it goes. A factory's upgrade is the head of its
     /// queue. Anyone who can see it sees it.
@@ -534,6 +543,9 @@ pub struct SimSnapshot {
     /// How far open the doors of silos in `units` are, in thousandths, while a launch is under
     /// way, sorted by `SimId`. Drawing only (`SimWorld::silo_doors`).
     pub silo_doors: Vec<(SimId, u16)>,
+    /// How far out the arms of builders in `units` are, in thousandths, for those with them out
+    /// at all, sorted by `SimId`. Drawing only (`SimWorld::builder_arms`).
+    pub arms: Vec<(SimId, u16)>,
     /// How many units each of the viewer's transports carries, sorted by `SimId`. Everyone's,
     /// for a viewer who sees everything.
     pub cargo: Vec<(SimId, u32)>,
@@ -1831,9 +1843,87 @@ impl SimWorld {
                         let passable = |point: Vec2Fp| self.terrain.passable_for(stats.move_class, point);
                         straight_way_is_clear(&passable, position.0.xy(), route_goal, stats.radius)
                     });
-                (id, Order { kind, route, slot, slot_ticks, direct })
+                (id, Order { kind, route, slot, slot_ticks, settles: false, direct })
             })
             .collect()
+    }
+
+    /// Sends a unit just out of its factory to the rally point, to a spot of its own in a neat
+    /// grid there: the first free spot, in a fixed order, that no unit already stands on or is
+    /// walking to. Without one, each unit made for the same point would try to stand on it,
+    /// and they would push into each other until the crowd settled them in a blob.
+    ///
+    /// The grid faces the way out of the factory. Its front row is centered on the rally point
+    /// and filled from the middle out, and each row after it lies a spacing further back toward
+    /// the factory, so that units walking to a later row do not cross an earlier one.
+    fn send_to_rally(&mut self, id: SimId, entity: hecs::Entity, exit: Vec2Fp, rally: Vec2Fp) {
+        let (here, radius, speed, class, owner) = {
+            let stats = self.ecs.get::<&UnitStats>(entity).expect("units have stats");
+            let here = self.ecs.get::<&Position>(entity).expect("units have positions").0.xy();
+            (here, stats.radius, stats.max_speed, stats.move_class, stats.owner)
+        };
+        let Some(slot) = self.free_rally_spot(id, exit, rally, radius, class, owner) else {
+            self.assign_route(&[id], OrderKind::Move, rally, None);
+            return;
+        };
+        // It leaves the shared route for its own spot once it is as close to the rally point as
+        // the spot is, with room to spare, as a member of a group order does.
+        let spacing = Fp::from_bits(radius.to_bits() * RALLY_SPACING_RADII / 2);
+        let arrive_radius = sqrt_wide(rally.distance_squared(&slot)) + spacing * 4;
+        let route = self.flow_field.create_route_for(class, &self.terrain, self.current_tick, rally, 1, arrive_radius, None, owner.index());
+        let Some(route) = route else {
+            return;
+        };
+        // Its time runs from the start, not from when it reaches the rally point: a unit that
+        // cannot get there, such as one hemmed in by structures built round its factory's door,
+        // stops once it is up, rather than stand pushing for the rest of the match.
+        let trip = sqrt_wide(here.distance_squared(&slot)) + arrive_radius;
+        let crossing = i64::from(trip.to_bits()) * 4 / i64::from(speed.to_bits().max(1));
+        let slot_ticks = (crossing + SLOT_EXTRA_TICKS).min(i64::from(u32::MAX)) as u32;
+        let passable = |point: Vec2Fp| self.terrain.passable_for(class, point);
+        let direct = straight_way_is_clear(&passable, here, self.flow_field.goal(route).unwrap_or(rally), radius);
+        self.set_order(id, Order { kind: OrderKind::Move, route, slot: Some(slot), slot_ticks, settles: true, direct });
+    }
+
+    /// The first spot of a rally grid (see `send_to_rally`) that is open ground, with no unit
+    /// on it and none of the owner's units on its way to it.
+    fn free_rally_spot(&self, me: SimId, exit: Vec2Fp, rally: Vec2Fp, radius: Fp, class: MoveClass, owner: PlayerId) -> Option<Vec2Fp> {
+        let away = (rally - exit).normalized();
+        let forward = if away == Vec2Fp::ZERO { Vec2Fp::new(Fp::ZERO, Fp::ONE) } else { away };
+        let right = Vec2Fp::new(forward.y, -forward.x);
+        let spacing = Fp::from_bits(radius.to_bits() * RALLY_SPACING_RADII / 2);
+        let spot = |index: i32| {
+            let (row, column) = (index / RALLY_COLUMNS, index % RALLY_COLUMNS);
+            // The middle, then one to the right, one to the left, two to the right, and so on.
+            let side = if column % 2 == 1 { (column + 1) / 2 } else { -(column / 2) };
+            rally + right.scaled(spacing * side) - forward.scaled(spacing * row)
+        };
+        let furthest = sqrt_wide(rally.distance_squared(&spot(RALLY_SPOTS - 1))) + spacing * 2;
+        // Who stands, or is headed, near the grid, and how much room each needs.
+        let mut taken: Vec<(Vec2Fp, Fp)> = Vec::new();
+        for &(other, entity) in &self.units {
+            let (Ok(stats), Ok(position), Ok(order)) = (self.ecs.get::<&UnitStats>(entity), self.ecs.get::<&Position>(entity), self.ecs.get::<&Order>(entity)) else {
+                continue;
+            };
+            if other == me || stats.is_structure || stats.move_class == MoveClass::Air {
+                continue;
+            }
+            let room = radius + stats.radius;
+            if let Some(slot) = order.slot.filter(|_| stats.owner == owner) {
+                if within(rally, slot, furthest) {
+                    taken.push((slot, room));
+                }
+            }
+            let at = position.0.xy();
+            if order.kind == OrderKind::Idle && within(rally, at, furthest) {
+                taken.push((at, room));
+            }
+        }
+        (0..RALLY_SPOTS).map(spot).find(|&point| {
+            self.terrain.in_bounds(point)
+                && self.terrain.passable_for(class, point)
+                && taken.iter().all(|&(other, room)| !within(point, other, room))
+        })
     }
 
     /// The point itself if units of this class can be there and it is on the map, or else the
@@ -2126,18 +2216,34 @@ impl SimWorld {
                 // submarine's deck gun at something on land its torpedoes cannot reach.
                 let extra_engaged = combat.forced_target.is_some() && extras.is_some_and(|extras| extras.0.iter().any(|weapon| weapon.target == combat.forced_target));
                 let may_walk = (order.kind == OrderKind::Move || (combat.target.is_none() && !extra_engaged) || combat.line_blocked) && !shelling_ground;
+                if let (Some(_), true, false) = (order.slot, order.settles, arrived) {
+                    // On its way to a rally point, its time runs all the way (`send_to_rally`).
+                    if order.slot_ticks == 0 {
+                        flow.release(order.route);
+                        *order = Order::IDLE;
+                    } else {
+                        order.slot_ticks -= 1;
+                    }
+                }
                 if let Some(slot) = order.slot {
                     // Close enough to the group's goal to leave the route and walk to its own spot.
                     if arrived {
                         let close_enough = stats.radius / 2;
                         if order.slot_ticks == 0 || here.distance_squared(&slot) <= wide_mul(close_enough, close_enough) {
+                            // One sent to a rally point stops on its spot, rather than coast
+                            // on past it as its velocity eases off.
+                            if order.settles {
+                                velocity.0 = Vec3Fp::ZERO;
+                            }
                             flow.release(order.route);
                             *order = Order::IDLE;
                         } else if may_walk {
                             order.slot_ticks -= 1;
                             let direction = (slot - here).normalized();
                             let remaining = sqrt_wide(here.distance_squared(&slot));
-                            let speed = stats.max_speed.min(remaining);
+                            // One sent to a rally point brakes as it nears, so that its velocity,
+                            // which eases toward this, cannot carry it past its spot to circle back.
+                            let speed = stats.max_speed.min(if order.settles { remaining / 2 } else { remaining });
                             desired = direction.scaled(speed);
                         }
                     } else if may_walk {
@@ -2307,10 +2413,10 @@ impl SimWorld {
         }
         // Out of the factory: to the rally point, unless given an order on the way out.
         for (id, entity, rally) in left_factory {
-            let _ = self.ecs.remove_one::<LeavingFactory>(entity);
+            let exit = self.ecs.remove_one::<LeavingFactory>(entity).map_or(Vec2Fp::ZERO, |leaving| leaving.exit);
             let idle = self.ecs.get::<&Order>(entity).is_ok_and(|order| order.kind == OrderKind::Idle);
             if let (Some(point), true) = (rally, idle) {
-                self.assign_route(&[id], OrderKind::Move, point, None);
+                self.send_to_rally(id, entity, exit, point);
             }
         }
         self.step_aircraft();
@@ -4904,7 +5010,7 @@ impl SimWorld {
             write_fp(hasher, slot.y);
         }
         hasher.write(&order.slot_ticks.to_le_bytes());
-        hasher.write(&[u8::from(order.direct)]);
+        hasher.write(&[u8::from(order.direct), u8::from(order.settles)]);
         drop(query);
         self.hash_unit_extras(entity, hasher);
     }
@@ -5047,8 +5153,15 @@ impl SimWorld {
                         let item = *factory.queue.first()?;
                         // Upgrades and missiles are not built in the bay.
                         let made = self.blueprints.get(item);
+                        let (x, y) = self.bay_heading_of(entity, item, position.0.xy(), self.rally_of(factory));
+                        let heading = match (x, y) {
+                            (1, _) => 0,
+                            (_, 1) => 1,
+                            (-1, _) => 2,
+                            _ => 3,
+                        };
                         (!made.is_factory() && made.class != UnitClass::Ammo)
-                            .then(|| (item.0, (factory.progress.to_bits() * 1000 / Res::ONE.to_bits()).clamp(0, 1000) as u16))
+                            .then(|| (item.0, (factory.progress.to_bits() * 1000 / Res::ONE.to_bits()).clamp(0, 1000) as u16, heading))
                     }),
                     upgrade: {
                         let share = |progress: Res| (progress.to_bits() * 1000 / Res::ONE.to_bits()).clamp(0, 1000) as u16;
@@ -5373,6 +5486,9 @@ impl SimWorld {
         let mut silo_doors: Vec<(SimId, u16)> =
             self.silo_doors().into_iter().filter(|(id, _)| units.binary_search_by_key(id, |unit| unit.id).is_ok_and(|index| !units[index].remembered)).collect();
         silo_doors.sort_unstable();
+        let mut arms: Vec<(SimId, u16)> =
+            self.builder_arms().into_iter().filter(|(id, _)| units.binary_search_by_key(id, |unit| unit.id).is_ok_and(|index| !units[index].remembered)).collect();
+        arms.sort_unstable();
         SimSnapshot {
             tick: self.current_tick,
             units,
@@ -5385,6 +5501,7 @@ impl SimWorld {
             decoys,
             stocks,
             silo_doors,
+            arms,
             cargo,
             adjacency,
             blips,

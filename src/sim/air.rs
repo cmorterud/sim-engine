@@ -527,7 +527,7 @@ impl SimWorld {
             // toward the middle, rather than fly along the edge: two aircraft chasing each other
             // there once ended up held on one point in a corner for good, once they were no
             // longer pushed apart in flight.
-            let off_map = |at: Fp, way: Fp| (at.to_bits() <= 0 && way < Fp::ZERO) || (at.to_bits() >= max && way > Fp::ZERO);
+            let off_map = |at: Fp, way: Fp| (at.to_bits() <= 1 && way < Fp::ZERO) || (at.to_bits() >= max && way > Fp::ZERO);
             if !landing && (off_map(here.x, turning.facing.x) || off_map(here.y, turning.facing.y)) {
                 flight.breaking_off = false;
                 turning.facing = rotate_toward(turning.facing, (center - here).normalized(), turning.max_turn);
@@ -542,7 +542,7 @@ impl SimWorld {
                 (Some((_, distance)), Some(spot)) if speed >= distance => spot - here,
                 _ => turning.facing.scaled(speed),
             };
-            let next = Vec2Fp::new(Fp::from_bits((here.x + step.x).to_bits().clamp(0, max)), Fp::from_bits((here.y + step.y).to_bits().clamp(0, max)));
+            let next = Vec2Fp::new(Fp::from_bits((here.x + step.x).to_bits().clamp(1, max)), Fp::from_bits((here.y + step.y).to_bits().clamp(1, max)));
             // Landed, it rests on the ground like any other unit.
             position.0 = Vec3Fp::new(next.x, next.y, flying_height(terrain, next, flight.altitude.max(stats.radius)));
             velocity.0 = Vec3Fp::new(step.x, step.y, Fp::ZERO);

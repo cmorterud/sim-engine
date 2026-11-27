@@ -19,6 +19,10 @@ use crate::math::fp::{fp_int, wide_mul, Fp, FpWide, Vec2Fp};
 
 /// A new site starts with this share of its health, so that it exists to be shot at.
 const SITE_STARTING_HEALTH_PERMILLE: i32 = 10;
+/// How long an engineer's arms take to reach out from stowed into their build pose, in ticks:
+/// half a second, long enough to be seen. It starts work only once they are out, and they fold
+/// back as it drives off, so it pays this again only after moving, not between jobs in reach.
+pub const ENGINEER_ARM_TICKS: u8 = 5;
 
 /// One team's resources. Everything is per tick, except for stored amounts and capacities.
 #[derive(Copy, Clone, Debug, Default)]
@@ -162,6 +166,36 @@ fn exit_order(center: Vec2Fp, toward: Vec2Fp) -> [(i32, i32); 4] {
         _ => -along_y,
     };
     exits.sort_by_key(|&(x, y)| (x == 0, std::cmp::Reverse(pick(x, y, dx, dy)), std::cmp::Reverse(pick(x, y, dy, -dx))));
+    exits
+}
+
+/// Which way a unit stands in its factory's bay while it is built, and drives or flies out:
+/// along the bay, the way that leaves it least to turn to face `toward`. A land factory's bay
+/// is open east and west, a dock's slip north and south, and an air factory's pad all round.
+/// Ties go to the way to the right of `toward`, so that a side turned half about the map
+/// picks the turned way.
+pub(super) fn bay_heading(on_water: bool, flies: bool, center: Vec2Fp, toward: Vec2Fp) -> (i32, i32) {
+    let (dx, dy) = (toward.x - center.x, toward.y - center.y);
+    let ways: &[(i32, i32)] = if flies {
+        &[(1, 0), (0, 1), (-1, 0), (0, -1)]
+    } else if on_water {
+        &[(0, 1), (0, -1)]
+    } else {
+        &[(1, 0), (-1, 0)]
+    };
+    // With unit sides, the dot and cross products need no multiplication.
+    let along = |(x, y): (i32, i32), ax: Fp, ay: Fp| ax * x + ay * y;
+    *ways
+        .iter()
+        .max_by_key(|&&way| (along(way, dx, dy), along(way, dy, -dx)))
+        .expect("every bay has a way out")
+}
+
+/// The ways out of a bay after `heading`, best first: the other ways along the bay, then the
+/// sides, for when the way ahead is blocked.
+fn exits_after(heading: (i32, i32), center: Vec2Fp, toward: Vec2Fp) -> Vec<(i32, i32)> {
+    let mut exits = vec![heading];
+    exits.extend(exit_order(center, toward).into_iter().filter(|&way| way != heading));
     exits
 }
 
@@ -600,7 +634,8 @@ impl SimWorld {
         } else if power > Fp::ZERO && (!unit.is_structure() || unit.assists) {
             // A structure's build power only drives its own upgrades, but for an engineering
             // station's, which helps whatever is in reach.
-            self.ecs.insert_one(entity, Builder { power, range, tasks: Vec::new() }).expect("entity was just spawned");
+            let arm_ticks = if unit.class == UnitClass::Engineer { ENGINEER_ARM_TICKS } else { 0 };
+            self.ecs.insert_one(entity, Builder { power, range, tasks: Vec::new(), arm_ticks, arms: 0, arms_held: false }).expect("entity was just spawned");
             self.builders.push((id, entity));
         }
     }
@@ -1118,6 +1153,7 @@ impl SimWorld {
         for index in 0..self.builders.len() {
             let (id, entity) = self.builders[index];
             self.step_builder(id, entity, &mut power_by_target);
+            self.fold_unheld_arms(entity);
         }
         for index in 0..self.upgrading.len() {
             let (id, entity) = self.upgrading[index];
@@ -1301,6 +1337,42 @@ impl SimWorld {
         paid
     }
 
+    /// Reaches a builder's arms out a tick further, as it stands at its work: whether they were
+    /// already all the way out, so that it can work this tick.
+    fn reach_out_arms(&mut self, entity: hecs::Entity) -> bool {
+        let mut builder = self.ecs.get::<&mut Builder>(entity).expect("builder list only holds builders");
+        builder.arms_held = true;
+        if builder.arms >= builder.arm_ticks {
+            return true;
+        }
+        builder.arms += 1;
+        false
+    }
+
+    /// Folds a builder's arms back a tick, if it did not stand at its work this tick and is
+    /// moving or has nothing left to do. One waiting by its task, such as a factory it helps
+    /// that has nothing queued yet, keeps them out.
+    fn fold_unheld_arms(&mut self, entity: hecs::Entity) {
+        let moving = self.ecs.get::<&Order>(entity).is_ok_and(|order| order.kind != OrderKind::Idle);
+        let mut builder = self.ecs.get::<&mut Builder>(entity).expect("builder list only holds builders");
+        if !builder.arms_held && builder.arms > 0 && (moving || builder.tasks.is_empty()) {
+            builder.arms -= 1;
+        }
+        builder.arms_held = false;
+    }
+
+    /// How far out each builder's arms are that has them out at all, as a share in thousandths,
+    /// sorted by `SimId`. Drawing only.
+    pub fn builder_arms(&self) -> Vec<(SimId, u16)> {
+        self.builders
+            .iter()
+            .filter_map(|&(id, entity)| {
+                let builder = self.ecs.get::<&Builder>(entity).ok()?;
+                (builder.arms > 0).then(|| (id, (u32::from(builder.arms) * 1_000 / u32::from(builder.arm_ticks.max(1))) as u16))
+            })
+            .collect()
+    }
+
     fn step_builder(&mut self, id: SimId, entity: hecs::Entity, power_by_target: &mut BTreeMap<(SimId, WorkKind), Fp>) {
         // Upgrading takes all of its build power, and its other work waits, as does a teleport.
         if self.is_busy_in_place(entity) {
@@ -1345,12 +1417,18 @@ impl SimWorld {
             }
             TaskStep::Work { target, kind } => {
                 self.halt(id, entity);
+                if !self.reach_out_arms(entity) {
+                    return;
+                }
                 *power_by_target.entry((target, kind)).or_insert(Fp::ZERO) += power;
                 self.work_sources.push((target, kind, id, power));
                 self.work_links.push(WorkLink { builder: id, target, reclaim: false });
             }
             TaskStep::Reclaim { target, entity: wreck_entity } => {
                 self.halt(id, entity);
+                if !self.reach_out_arms(entity) {
+                    return;
+                }
                 self.work_links.push(WorkLink { builder: id, target, reclaim: true });
                 let per_tick = |rate: i64| fp_to_res(power) * rate / TICKS_PER_SECOND;
                 let mut wreck = self.ecs.get::<&mut Wreck>(wreck_entity).expect("task checked the wreck");
@@ -1728,6 +1806,27 @@ impl SimWorld {
         limit > 0 && stock >= limit
     }
 
+    /// Where a factory's units go: its rally point, or else the middle of the map.
+    fn bay_target(&self, rally: Option<Vec2Fp>) -> Vec2Fp {
+        rally.unwrap_or_else(|| {
+            let middle = fp_int(self.terrain.map_units() / 2);
+            Vec2Fp::new(middle, middle)
+        })
+    }
+
+    /// Which way what `factory` is building stands in its bay (`bay_heading`).
+    pub(super) fn bay_heading_of(&self, factory: hecs::Entity, item: BlueprintId, center: Vec2Fp, rally: Option<Vec2Fp>) -> (i32, i32) {
+        let on_water = self.ecs.get::<&Blueprinted>(factory).is_ok_and(|blueprint| self.blueprints.get(blueprint.0).on_water);
+        let flies = self.blueprints.get(item).move_class() == super::components::MoveClass::Air;
+        bay_heading(on_water, flies, center, self.bay_target(rally))
+    }
+
+    /// Where a factory sends what it makes: its own rally point, or else, while it helps
+    /// another factory, that one's.
+    pub(super) fn rally_of(&self, factory: &Factory) -> Option<Vec2Fp> {
+        factory.rally.or_else(|| factory.assisting.and_then(|helped| self.factory_entity(helped)).and_then(|entity| self.ecs.get::<&Factory>(entity).ok().and_then(|factory| factory.rally)))
+    }
+
     fn finish_factory_item(&mut self, entity: hecs::Entity, finished: BlueprintId, rally: Option<Vec2Fp>) {
         let unit = self.blueprints.get(finished);
         // A silo keeps the missiles it builds, until it fires them.
@@ -1754,24 +1853,29 @@ impl SimWorld {
         let center = self.ecs.get::<&Position>(entity).expect("units have positions").0.xy();
         let factory_radius = self.ecs.get::<&UnitStats>(entity).expect("units have stats").radius;
         let reach = factory_radius + unit.radius + fp_int(6);
-        let exits = exit_order(center, rally.unwrap_or_else(|| {
-            let middle = fp_int(self.terrain.map_units() / 2);
-            Vec2Fp::new(middle, middle)
-        }));
-        let exit = exits
-            .iter()
-            .map(|&(x, y)| center + Vec2Fp::new(reach * x, reach * y))
-            .find(|point| self.terrain.in_bounds(*point) && self.terrain.passable_for(unit.move_class(), *point))
+        let toward = self.bay_target(rally);
+        let heading = self.bay_heading_of(entity, finished, center, rally);
+        // Out the way it faces, unless that is blocked.
+        let exit = exits_after(heading, center, toward)
+            .into_iter()
+            .map(|(x, y)| ((x, y), center + Vec2Fp::new(reach * x, reach * y)))
+            .find(|(_, point)| self.terrain.in_bounds(*point) && self.terrain.passable_for(unit.move_class(), *point))
+            .map(|(way, point)| (Some(way), point))
             .or_else(|| {
-                super::flowfield::nearest_passable_cell_for(&self.terrain, unit.move_class(), center).map(|(x, y)| cell_center(x as u32, y as u32, 1))
+                super::flowfield::nearest_passable_cell_for(&self.terrain, unit.move_class(), center).map(|(x, y)| (None, cell_center(x as u32, y as u32, 1)))
             });
-        let Some(exit) = exit else {
+        let Some((way, exit)) = exit else {
             return;
         };
         // It is built in the bay, so it starts there. An aircraft lifts off and flies; anything
         // else drives out of the open end first (`LeavingFactory`), then heads for the rally.
         let flies = unit.move_class() == super::components::MoveClass::Air;
         let id = self.spawn_mobile_inner(finished, self.owner_of(entity), center, true);
+        // It faces the way it stood in the bay, which is the way it leaves.
+        let (x, y) = way.unwrap_or(heading);
+        if let Ok(mut turning) = self.ecs.get::<&mut Turning>(self.find_unit(id).expect("just spawned").1) {
+            turning.facing = Vec2Fp::new(fp_int(x), fp_int(y));
+        }
         if flies {
             // With no rally point, it clears the pad for the next.
             self.assign_route(&[id], OrderKind::Move, rally.unwrap_or(exit), None);
@@ -2479,6 +2583,10 @@ impl SimWorld {
             hasher.write(&[5]);
             hasher.write(&builder.power.to_bits().to_le_bytes());
             hasher.write(&builder.range.to_bits().to_le_bytes());
+            // Only for builders with arms to reach out, so that checksums without engineers hold.
+            if builder.arm_ticks > 0 {
+                hasher.write(&[builder.arms]);
+            }
             for task in &builder.tasks {
                 let (kind, first, second, third, fourth) = match *task {
                     BuildTask::Build { blueprint, cell_x, cell_y, site } => {
@@ -2556,6 +2664,7 @@ impl SimWorld {
                 hasher.write(&[order.kind as u8]);
                 hasher.write(&order.route.to_le_bytes());
                 hasher.write(&order.slot_ticks.to_le_bytes());
+                hasher.write(&[u8::from(order.settles)]);
                 hash_slot(hasher, order.slot);
             }
         }

@@ -3,7 +3,7 @@
 //! them, and as large as the world around them. Both are left out once the view is zoomed out
 //! to icons, where they would only be clutter.
 
-use super::instances::{painted, InstanceBatches, UnitInstanceRaw, BLUE, RED, STRUCTURE_SHARE};
+use super::instances::{painted, InstanceBatches, Motion, UnitInstanceRaw, BLUE, RED, STRUCTURE_SHARE};
 use super::meshes::Shape;
 use crate::sim::components::{SimId, Team};
 use crate::sim::world::{SimSnapshot, UnitView};
@@ -75,6 +75,20 @@ pub fn work_beams(previous: &SimSnapshot, current: &SimSnapshot, alpha: f64) -> 
             Some(WorkBeam { builder: link.builder, from: [center[0] + forward_x, center[1] + forward_y, center[2]], to, reclaim: link.reclaim })
         })
         .collect()
+}
+
+/// Moves each beam to leave from the tools its builder was drawn with this frame, one beam from
+/// each tool: a commander's from the emitter on its left arm, an engineer's from the end of each
+/// of its arms. A builder drawn with none keeps its beam leaving from its front.
+pub fn from_tools(beams: Vec<WorkBeam>, motion: &Motion) -> Vec<WorkBeam> {
+    let mut placed = Vec::with_capacity(beams.len());
+    for beam in beams {
+        match motion.tool_tips(beam.builder) {
+            Some(tips) if !tips.is_empty() => placed.extend(tips.iter().map(|&from| WorkBeam { from, ..beam })),
+            _ => placed.push(beam),
+        }
+    }
+    placed
 }
 
 /// How far along its beam each pulse is, from 0 at the builder to 1 at the work. Pulses
