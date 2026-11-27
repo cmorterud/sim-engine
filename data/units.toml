@@ -154,9 +154,11 @@ id = "mass_extractor"
 name = "Materiel Extractor"
 class = "economy"
 tier = 1
-mass = 36
-energy = 360
-build_time = 60
+# Cost by its payback (2026-11-27, [economy] payback_seconds): what it makes in T1's 55 seconds,
+# energy at T1's rate: 108 to 110.
+mass = 37
+energy = 365
+build_time = 61
 health = 400
 footprint = 1
 vision = 300
@@ -173,9 +175,11 @@ id = "power_generator"
 name = "Power Generator"
 class = "economy"
 tier = 1
-mass = 75
-energy = 750
-build_time = 125
+# Cost by its payback (2026-11-27, [economy] payback_seconds): what it makes in T1's 55 seconds,
+# energy at T1's rate: 225 to 220.
+mass = 73
+energy = 735
+build_time = 122
 health = 600
 footprint = 1
 vision = 300
@@ -517,9 +521,11 @@ id = "mass_extractor_t2"
 name = "Materiel Extractor (T2)"
 class = "economy"
 tier = 2
-mass = 900
-energy = 5400
-build_time = 900
+# Cost by its payback (2026-11-27, [economy] payback_seconds): what it adds over the T1 extractor
+# in T2's 250 seconds, energy at T2's rate: 954 to 1,000.
+mass = 943
+energy = 5700
+build_time = 943
 health = 2000
 footprint = 1
 vision = 400
@@ -535,9 +541,11 @@ id = "mass_extractor_t3"
 name = "Materiel Extractor (T3)"
 class = "economy"
 tier = 3
-mass = 4600
-energy = 31625
-build_time = 2875
+# Cost by its payback (2026-11-27, [economy] payback_seconds): what it adds over the T2 extractor
+# in T3's 400 seconds, energy at T3's rate: 4,916 to 4,800.
+mass = 4491
+energy = 30900
+build_time = 2807
 health = 7000
 footprint = 1
 vision = 400
@@ -594,7 +602,9 @@ health = 6000
 footprint = 3
 vision = 400
 mass_income = 16
-upkeep = 1500
+# Turns energy into materiel at T3's rate, 100 a materiel, as the T2 one does at T2's (2026-11-27,
+# [economy] energy_per_materiel; 1,500 until then).
+upkeep = 1600
 death_explosion = { damage = 5000, radius = 200, only_while_running = true }
 
 # Aircraft (GAME_SPECIFICATION.md §10), with the inspiration's numbers for its T1 aircraft.
@@ -1008,9 +1018,11 @@ id = "power_generator_t2"
 name = "Power Generator (T2)"
 class = "economy"
 tier = 2
-mass = 1200
-energy = 12000
-build_time = 2198
+# Cost by its payback (2026-11-27, [economy] payback_seconds): what it makes in T2's 250 seconds,
+# energy at T2's rate: 1,320 to 1,250.
+mass = 1136
+energy = 11400
+build_time = 2081
 health = 2500
 footprint = 3
 vision = 400

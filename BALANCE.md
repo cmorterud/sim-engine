@@ -427,6 +427,15 @@ out close and why: evidence about the process, not a target.
   at the least damage that does, a tank in six shots, 70, as it has; and Discharge's least, 1,250,
   destroys any T1 land unit in one. The commander's cost stays the design owner's: it is never
   built, so its cost sets only its wreck and what destroying it is worth.
+* 2026-11-27: every extractor and generator costs its tier's payback of what it makes, an upgrade
+  of what it adds, energy at the tier's rate (`[economy] payback_seconds`, tests/payback_test.rs):
+  T1's extractor 108 to 110 and generator 225 to 220; T2's extractor 954 to 1,000 and generator
+  1,320 to 1,250; T3's extractor 4,916 to 4,800, in materiel with energy at the tier's rate. The
+  T3 Power Generator keeps its 153-second payback, the design owner's pick (400 seconds would
+  make it 10,000, from 3,816), and the Geothermal Plant its 16, since a vent is scarce
+  (`payback_held`). Build time stays each unit's own, an identity knob (the design owner's pick:
+  one number a domain would have had the T1 Bomber build 75% slower and the Gunship 46% faster). The T3 Mass Fabricator turns energy into materiel at T3's rate, as the T2 one
+  does at T2's: 1,600 energy a second for its 16, from 1,500.
 
 ## Order of work
 

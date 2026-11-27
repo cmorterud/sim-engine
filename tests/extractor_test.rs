@@ -53,28 +53,38 @@ fn a_t1_extractor_makes_two_mass_a_second_for_two_energy() {
 fn an_extractor_upgrades_to_t2_and_then_t3_while_it_keeps_working() {
     let mut world = world();
     let mex = extractor(&mut world, 50, 50);
+    // An upgrade takes its build time at the extractor's own build power, and spends its mass
+    // evenly over it.
+    let upgrade = |world: &SimWorld, from: &str, to: &str| {
+        let (from, to) = (world.blueprints.get(world.blueprints.id(from)), world.blueprints.get(world.blueprints.id(to)));
+        let seconds = to.build_time.to_num::<f64>() / from.build_power.to_num::<f64>();
+        (seconds, to.mass.to_num::<f64>() / seconds)
+    };
+    let (seconds, spends) = upgrade(&world, "mass_extractor", "mass_extractor_t2");
     world.advance_tick(&[SimCommand::Upgrade { units: vec![mex] }]);
-    // While it upgrades it still makes its 2 a second, and the upgrade costs 900 mass over
-    // 90 seconds: 10 a second.
+    // While it upgrades it still makes its 2 a second, and the upgrade's mass goes in at its
+    // rate: 943 over 94.3 seconds, 10 a second.
     let (mass, _) = one_tick(&mut world);
-    assert!((mass - (Res::from_num(2) / 10 - Res::from_num(1))).abs() < Res::from_num(0.001), "{mass}");
-    // 900 build time at its own 10 build power is 90 seconds.
-    let took = (0..1_000).position(|_| {
+    assert!((mass.to_num::<f64>() - (0.2 - spends / 10.0)).abs() < 0.001, "{mass}");
+    let ticks = (seconds * 10.0).round() as usize;
+    let took = (0..ticks + 100).position(|_| {
         world.advance_tick(&[]);
         key_of(&world, mex) == "mass_extractor_t2"
     });
-    assert!(took.is_some_and(|ticks| (890..=905).contains(&ticks)), "{took:?}");
+    assert!(took.is_some_and(|took| (ticks - 10..=ticks + 5).contains(&took)), "{took:?}, not about {ticks}");
     world.advance_tick(&[]);
     assert_eq!(one_tick(&mut world), (Res::from_num(6) / 10, -Res::from_num(9) / 10), "6 materiel a second, for 9 energy");
     assert_eq!(world.unit_health(mex), Some(fp_int(2_000)), "full health kept at the same share");
 
-    // And on to T3: 2,875 build time at the T2's 15 build power, about 192 seconds.
+    // And on to T3: 2,807 build time at the T2's 15 build power, about 187 seconds.
+    let (seconds, _) = upgrade(&world, "mass_extractor_t2", "mass_extractor_t3");
     world.advance_tick(&[SimCommand::Upgrade { units: vec![mex] }]);
-    let took = (0..2_100).position(|_| {
+    let ticks = (seconds * 10.0).round() as usize;
+    let took = (0..ticks + 200).position(|_| {
         world.advance_tick(&[]);
         key_of(&world, mex) == "mass_extractor_t3"
     });
-    assert!(took.is_some_and(|ticks| (1_900..=1_930).contains(&ticks)), "{took:?}");
+    assert!(took.is_some_and(|took| (ticks - 10..=ticks + 30).contains(&took)), "{took:?}, not about {ticks}");
     world.advance_tick(&[]);
     assert_eq!(one_tick(&mut world), (Res::from_num(18) / 10, -Res::from_num(54) / 10), "18 materiel a second, for 54 energy");
     world.advance_tick(&[SimCommand::Upgrade { units: vec![mex] }]);

@@ -4865,7 +4865,7 @@ mod tests {
     fn hovering_an_item_shows_its_cost_and_what_it_does() {
         let db = BlueprintDb::standard();
         let generator = item_details(&db, db.id("power_generator"));
-        assert!(generator.contains("Costs 75 materiel and 750 energy"), "{generator}");
+        assert!(generator.contains("Costs 73 materiel and 735 energy"), "{generator}");
         assert!(generator.contains("Makes 20 energy a second"), "{generator}");
         let interceptor = item_details(&db, db.id("t1_interceptor"));
         assert!(interceptor.contains("at aircraft only"), "{interceptor}");

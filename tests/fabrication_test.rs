@@ -52,7 +52,7 @@ fn fabricators_turn_energy_into_mass() {
     structure(&mut world, "mass_fabricator_t3", 50, 50).unwrap();
     world.advance_tick(&[]);
     let (mass, energy) = one_tick(&mut world);
-    assert!(near(mass, Res::from_num(16) / 10) && near(energy, -Res::from_num(150)), "16 materiel a second for 1,500 energy: {mass}, {energy}");
+    assert!(near(mass, Res::from_num(16) / 10) && near(energy, -Res::from_num(160)), "16 materiel a second for 1,600 energy: {mass}, {energy}");
 }
 
 #[test]

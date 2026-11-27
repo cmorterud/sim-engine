@@ -48,12 +48,15 @@ fn an_engineer_captures_an_enemy_structure_in_half_its_build_time_for_its_energy
     let engineer = engineer(&mut world, point(1_150, 1_010));
     let energy = world.economies[0].energy;
     world.advance_tick(&[SimCommand::Capture { units: vec![engineer], target: generator }]);
-    // A generator's 125 build time at an engineer's 5 build power is 25 seconds, and half that 12.5.
+    // Half the generator's build time at an engineer's 5 build power: 122 at 5 is 24.4 seconds,
+    // and half that 12.2.
+    let blueprint = world.blueprints.get(world.blueprints.id("power_generator"));
+    let (cost, wanted) = (blueprint.energy, (blueprint.build_time.to_num::<f64>() / 5.0 / 2.0 * 10.0).round() as u32);
     let took = ticks_to_capture(&mut world, generator, 200).expect("it should change hands");
-    assert!((120..=130).contains(&took), "it took {took} ticks");
-    // It cost the generator's 750 energy, less what came in meanwhile.
+    assert!((wanted - 4..=wanted + 6).contains(&took), "it took {took} ticks, not about {wanted}");
+    // It cost the generator's energy, less what came in meanwhile.
     let spent = energy - world.economies[0].energy + world.economies[0].energy_income * i64::from(took + 1);
-    assert!((spent - Res::from_num(750)).abs() < Res::from_num(10), "it cost {spent}");
+    assert!((spent - cost).abs() < Res::from_num(10), "it cost {spent}, not {cost}");
     // Now Blue's, its income is Blue's.
     world.advance_tick(&[]);
     assert_eq!(world.economies[0].energy_income, Res::from_num(2));
