@@ -1,6 +1,6 @@
 # sim-engine
 
-**A free real-time strategy game where every unit's stats and cost come from a mathematical model, not guesswork.**
+**A free real-time strategy game where unit stats and costs are derived from a mathematical model, not guesswork.**
 
 Build an economy, out-produce your opponent across land, sea and air, and destroy their commander to win. It runs in your browser, with nothing to install.
 
@@ -24,7 +24,7 @@ Build an economy, out-produce your opponent across land, sea and air, and destro
 
 ## What makes it different
 
-- **Balance you can read.** A designer sets a few dozen targets, such as "a tank destroys a copy of itself in 14 seconds", and a model works out every unit's health, damage, range and cost from them. A headless harness then fights every pair of units at equal cost to check the math. [How balance works](docs/how-balance-works.md) explains it in a few minutes.
+- **Balance you can read.** A designer sets a few dozen targets, such as "a tank destroys a copy of itself in 14 seconds", and a model works out each unit's health, damage, range and cost from them. A headless harness then fights every pair of units at equal cost to check the math. [How balance works](docs/how-balance-works.md) explains it in a few minutes.
 - **Big battles.** The engine is tested to 5,000 units and 2,000 physical shells at once, with every shell flying a real arc and leading its target.
 - **Fully deterministic.** The same map and seed replay an AI match exactly, checked on both x86 and ARM, so any of them can be watched again from its seed.
 - **Land, sea and air.** Tanks and walkers, fleets with shield domes and submarines, bombers and fighters, artillery, shields and strategic missiles.
