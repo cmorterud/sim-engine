@@ -812,9 +812,10 @@ class = "air"
 tier = 3
 # Cost by the ability price list (2026-11-26): 675 to 879 (reports/plans/2026-11-26-ability-price-list.md).
 # At the T3 air base from the battle line ([battle_line] t3_air, 2026-11-27): 879 to 790.
-mass = 388
-energy = 44134
-build_time = 3702
+# With hovering gunships that drift back and forth (2026-11-27), at the bases re-derived from the battle line.
+mass = 401
+energy = 45637
+build_time = 3828
 # T3 aircraft are tough and fast enough that T1 anti-air barely scratches them and flak mostly
 # misses them; it takes T3 anti-air, cruisers, or massed flak.
 health = 3520
@@ -841,9 +842,10 @@ class = "air"
 tier = 3
 # Cost by the ability price list (2026-11-26): 3,381 to 1,254 (reports/plans/2026-11-26-ability-price-list.md).
 # At the T3 air base from the battle line ([battle_line] t3_air, 2026-11-27): 1,254 to 1,138.
-mass = 589
-energy = 60543
-build_time = 4037
+# With hovering gunships that drift back and forth (2026-11-27), at the bases re-derived from the battle line.
+mass = 609
+energy = 62583
+build_time = 4173
 # A little over four Gunships': four volleys of the cruiser's anti-air, and eight SAM missiles,
 # about 11 seconds of one SAM ([volleys], [kill_times], 2026-11-25).
 health = 6400
@@ -869,9 +871,10 @@ class = "air"
 tier = 3
 # Cost by the ability price list (2026-11-26): 1,491 to 756 (reports/plans/2026-11-26-ability-price-list.md).
 # At the T3 air base from the battle line ([battle_line] t3_air, 2026-11-27): 756 to 678.
-mass = 497
-energy = 21532
-build_time = 2399
+# With hovering gunships that drift back and forth (2026-11-27), at the bases re-derived from the battle line.
+mass = 514
+energy = 22270
+build_time = 2481
 health = 9600
 speed = 20
 radius = 16
@@ -1245,9 +1248,10 @@ tier = 1
 # With the first-volley price ([price_list], 2026-11-26): 398 to 392.
 # At the navy base from the battle line ([battle_line] navy, 2026-11-27): 392 to 386.
 # At the navy base with every sensor over it (2026-11-27, 0.709): 386 to 389.
-mass = 260
-energy = 2586
-build_time = 1446
+# With hovering gunships that drift back and forth (2026-11-27), at the bases re-derived from the battle line.
+mass = 248
+energy = 2464
+build_time = 1378
 health = 2949
 speed = 12
 turn_rate = 60
@@ -1353,9 +1357,10 @@ tier = 2
 # At the navy base from the battle line ([battle_line] navy, 2026-11-27), on the list: 1,605 to
 # 1,579.
 # At the navy base with every sensor over it (2026-11-27, 0.709): 1,579 to 1,563.
-mass = 1539
-energy = 10258
-build_time = 7650
+# With hovering gunships that drift back and forth (2026-11-27), at the bases re-derived from the battle line.
+mass = 1467
+energy = 9778
+build_time = 7292
 health = 10990
 speed = "10.4"
 turn_rate = 55
@@ -1398,9 +1403,10 @@ tier = 2
 # With the first-volley price ([price_list], 2026-11-26): 1,588 to 1,608.
 # At the navy base from the battle line ([battle_line] navy, 2026-11-27): 1,608 to 1,529.
 # At the navy base with every sensor over it (2026-11-27, 0.709): 1,529 to 1,536.
-mass = 1480
-energy = 13318
-build_time = 6620
+# With hovering gunships that drift back and forth (2026-11-27), at the bases re-derived from the battle line.
+mass = 1411
+energy = 12696
+build_time = 6311
 health = 4404
 speed = 9
 turn_rate = 40
@@ -1462,9 +1468,10 @@ tier = 3
 # At the navy base from the battle line ([battle_line] navy, 2026-11-27), on the list: 6,442 to
 # 6,244.
 # At the navy base with every sensor over it (2026-11-27, 0.709): 6,244 to 6,180.
-mass = 6110
-energy = 37886
-build_time = 21811
+# With hovering gunships that drift back and forth (2026-11-27), at the bases re-derived from the battle line.
+mass = 5825
+energy = 36117
+build_time = 20793
 health = 90314
 speed = "7.2"
 turn_rate = 27
@@ -1506,9 +1513,10 @@ tier = 3
 # At the navy base from the battle line ([battle_line] navy, 2026-11-27), on the list, which it
 # had drifted 6% under: 4,987 to 5,070.
 # At the navy base with every sensor over it (2026-11-27, 0.709): 5,070 to 5,018.
-mass = 4853
-energy = 41597
-build_time = 19567
+# With hovering gunships that drift back and forth (2026-11-27), at the bases re-derived from the battle line.
+mass = 4627
+energy = 39657
+build_time = 18655
 health = 31516
 speed = "10.8"
 turn_rate = 35
@@ -1556,9 +1564,10 @@ tier = 1
 # With the first-volley price ([price_list], 2026-11-26): 411 to 402.
 # At the navy base from the battle line ([battle_line] navy, 2026-11-27): 402 to 379.
 # At the navy base with every sensor over it (2026-11-27, 0.709): 379 to 383.
-mass = 295
-energy = 2359
-build_time = 1319
+# With hovering gunships that drift back and forth (2026-11-27), at the bases re-derived from the battle line.
+mass = 281
+energy = 2248
+build_time = 1257
 health = 1279
 speed = 12
 turn_rate = 80
@@ -1584,9 +1593,10 @@ tier = 2
 # 246 to 240, and 243 once the Escort Corvette was priced by its dome (2026-11-27). The price
 # list's 131 is only a check (reports/plans/2026-11-26-ability-price-list.md).
 # Re-solved with the T2 fleet at the navy base from the battle line (2026-11-27): 243 to 234.
-mass = 190
-energy = 5621
-build_time = 1257
+# Re-solved with the ships at the navy base re-derived for hovering gunships that drift (2026-11-27).
+mass = 181
+energy = 5349
+build_time = 1196
 health = 1252
 speed = 30
 radius = 12
@@ -1709,9 +1719,10 @@ tier = 2
 # ([price_list.shield_groups], 2026-11-27): 733 to 913.
 # Its group cheaper at the navy base from the battle line (2026-11-27): 913 to 882.
 # Its group at the navy base with every sensor over it (2026-11-27): 882 to 880.
-mass = 840
-energy = 8406
-build_time = 3604
+# With hovering gunships that drift back and forth (2026-11-27), at the bases re-derived from the battle line.
+mass = 801
+energy = 8014
+build_time = 3436
 health = 1500
 speed = 10
 turn_rate = 45
@@ -1735,9 +1746,10 @@ tier = 3
 # Strategic Missile Launcher, half by build power (1,080 of 1,500) and half by stock (3 of 5),
 # 12,964; its cruise missiles, fired from under the water, with the submerged price, 750; and its
 # sonar, 37: 10,495 to 13,751, mass, energy and build time together.
-mass = 12447
-energy = 199150
-build_time = 26204
+# With hovering gunships that drift back and forth (2026-11-27), at the bases re-derived from the battle line.
+mass = 12413
+energy = 198612
+build_time = 26133
 health = 4000
 speed = "6.6"
 turn_rate = 50
@@ -2136,9 +2148,10 @@ tier = 2
 # Re-solved with the submarines at the navy base from the battle line (2026-11-27): 794 to 748.
 # The most that keeps 0.70 against an equal cost of submarines, once every sensor was priced over
 # its domain base made the Attack Submarine dearer (2026-11-27): 748 to 758.
-mass = 737
-energy = 5901
-build_time = 3305
+# Re-solved with the ships at the navy base re-derived for hovering gunships that drift (2026-11-27).
+mass = 702
+energy = 5624
+build_time = 3150
 health = 3040
 speed = 12
 turn_rate = 100
@@ -2266,9 +2279,10 @@ tier = 3
 # counted in its health, 616: 1,833 to 2,056.
 # Its weapons at the T3 air base from the battle line ([battle_line] t3_air, 2026-11-27): 2,056
 # to 1,993.
-mass = 1522
-energy = 57074
-build_time = 5707
+# With hovering gunships that drift back and forth (2026-11-27), at the bases re-derived from the battle line.
+mass = 1536
+energy = 57607
+build_time = 5760
 # The T2 Flak Cannon destroys it in about 55 seconds, through its shield and the shield's
 # regeneration ([kill_times], the design owner's number, 2026-11-27): 4,500 to 9,800.
 health = 9800
