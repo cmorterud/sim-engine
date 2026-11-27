@@ -690,11 +690,15 @@ impl Turning {
         let left = facing.x * toward.y - facing.y * toward.x >= Fp::ZERO;
         // At full turn rate it drives a circle of radius forward / max_turn. With the goal inside
         // that circle it only goes round it, as a scout did its patrol point for good, and a
-        // walker, turning as it went, stepped past its own and back (2026-11-27): it slows until
-        // the circle it can turn in reaches the goal.
+        // walker, turning as it went, stepped past its own and back (2026-11-27): a vehicle slows
+        // until the circle it can turn in reaches the goal, and one that can turn on the spot
+        // does that instead. Crawling round the arc, walkers fought on worse, and fleets lost
+        // half again as many ships in AI matches.
         let reaching = self.max_turn.saturating_mul(self.widest_turn_to(toward, goal_distance, left));
         let (forward, turn) = if self.radius == Fp::ZERO {
-            ((speed * dot.max(Fp::ZERO)).min(reaching), self.max_turn)
+            // One that can turn on the spot does so, rather than crawl round a tight arc.
+            let forward = speed * dot.max(Fp::ZERO);
+            if forward > reaching && dot < ROUGHLY_FACING { (Fp::ZERO, self.max_turn) } else { (forward.min(reaching), self.max_turn) }
         } else if dot < ROUGHLY_FACING && self.goal_is_inside_turn(toward, goal_distance, left) {
             (Fp::ZERO, self.max_turn * PIVOT_SHARE)
         } else {
