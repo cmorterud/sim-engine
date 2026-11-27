@@ -685,17 +685,35 @@ impl Turning {
         let dot = facing.x * toward.x + facing.y * toward.y;
         // Exactly behind has no shorter side, so it turns the positive way.
         let left = facing.x * toward.y - facing.y * toward.x >= Fp::ZERO;
+        // At full turn rate it drives a circle of radius forward / max_turn. With the goal inside
+        // that circle it only goes round it, as a scout did its patrol point for good, and a
+        // walker, turning as it went, stepped past its own and back (2026-11-27): it slows until
+        // the circle it can turn in reaches the goal.
+        let reaching = self.max_turn.saturating_mul(self.widest_turn_to(toward, goal_distance, left));
         let (forward, turn) = if self.radius == Fp::ZERO {
-            (speed * dot.max(Fp::ZERO), self.max_turn)
+            ((speed * dot.max(Fp::ZERO)).min(reaching), self.max_turn)
         } else if dot < ROUGHLY_FACING && self.goal_is_inside_turn(toward, goal_distance, left) {
             (Fp::ZERO, self.max_turn * PIVOT_SHARE)
         } else {
-            let forward = speed * dot.clamp(TURNING_SPEED_SHARE, Fp::ONE);
+            let forward = (speed * dot.clamp(TURNING_SPEED_SHARE, Fp::ONE)).min(reaching);
             (forward, self.max_turn.min(forward / self.radius))
         };
         self.facing = rotate_toward(facing, toward, turn);
         let ahead = if self.radius == Fp::ZERO { forward.min(speed * (self.facing.x * toward.x + self.facing.y * toward.y).max(Fp::ZERO)) } else { forward };
         self.facing.scaled(ahead)
+    }
+
+    /// The widest turning circle on that side that still reaches the goal, `goal_distance`
+    /// along `toward`: |goal|² / (2 goal·side), never tighter than its own turn radius.
+    fn widest_turn_to(&self, toward: Vec2Fp, goal_distance: Fp, left: bool) -> Fp {
+        let (side_x, side_y) = if left { (-self.facing.y, self.facing.x) } else { (self.facing.y, -self.facing.x) };
+        let across = (toward.x * side_x + toward.y * side_y).max(Fp::ZERO);
+        // across * goal_distance is goal·side; the widest radius is goal_distance / (2 across).
+        let twice = across * 2;
+        if twice == Fp::ZERO {
+            return Fp::MAX;
+        }
+        goal_distance.saturating_div(twice).max(self.radius)
     }
 
     /// Whether the goal is inside the circle this unit would turn in on that side, where
