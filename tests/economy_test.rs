@@ -108,9 +108,9 @@ fn construction_takes_build_time_divided_by_build_power() {
     let mut world = test_world();
     set_resources(&mut world, Team::Blue, 10_000, 100_000);
     let (_, site) = engineer_at_site(&mut world);
-    // Its build time at 5 power: 122 is 24.4 s, or 244 ticks.
+    // Its build time at 5 power: 122 is 24.4 s, or 244 ticks, once the engineer's arms are out.
     let (mass, build_time) = site_cost(&world);
-    let wanted = (build_time / 5.0 * 10.0).round() as i32;
+    let wanted = (build_time / 5.0 * 10.0).round() as i32 + i32::from(sim_engine::sim::production::ENGINEER_ARM_TICKS);
     let mut ticks = 0;
     while !is_finished(&world, site) {
         world.advance_tick(&[]);
