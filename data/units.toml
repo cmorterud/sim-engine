@@ -1190,9 +1190,11 @@ name = "Fighter-Bomber"
 class = "air"
 tier = 2
 # Cost by the ability price list (2026-11-26): 343 to 530 (reports/plans/2026-11-26-ability-price-list.md).
-mass = 412
-energy = 14429
-build_time = 3153
+# 530 to 521 once its railguns were fixed to its nose (2026-11-27): it lands 0.90 of their damage
+# on a bomber flying its run, not 0.98 ([price_list.landed_share]).
+mass = 405
+energy = 14195
+build_time = 3102
 health = 1696
 speed = 30
 radius = 12
@@ -1202,7 +1204,10 @@ flight = { elevation = 352, turn_rate = 270, break_off = 400, fuel = 500 }
 weapon = { kind = "bomb", range = 1200, reload_ticks = 100, projectile_speed = 30, damage = 1256, splash_radius = 36 }
 # Its anti-air destroys an interceptor in about 2 seconds, so 174 a second (two and a half shots: the first lands at once) (2026-11-26, the design
 # owner's rule, [kill_times]).
-extra_weapons = [{ range = 600, reload_ticks = 10, projectile_speed = 180, damage = 174, targets = "air" }]
+# Its railguns are fixed to its nose, as every fighter's guns are, so it must turn to aim them
+# (the design owner, 2026-11-27): within 35 degrees of straight ahead, between the T1
+# Interceptor's 30 and the T3 fighter's 40.
+extra_weapons = [{ range = 600, reload_ticks = 10, projectile_speed = 180, damage = 174, targets = "air", arc = 35 }]
 
 # Naval units (GAME_SPECIFICATION.md §10), with the inspiration's numbers. The naval factory goes on water
 # deep enough for ships, and its ships sail only there.
