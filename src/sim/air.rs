@@ -308,9 +308,9 @@ impl SimWorld {
                 }
             }
 
-            // A gunship circles what it attacks once well within range, at full speed and half its
-            // range out, rather than make passes (the design owner, 2026-11-27; it hovered over it
-            // until then).
+            // A gunship circles what it attacks once well within range, at half its top speed and half
+            // its range out, rather than make passes (the design owner, 2026-11-27; it hovered over
+            // it until then).
             let hold = flight.hovers
                 && attacking
                 && heading_for.is_some_and(|point| {
@@ -363,7 +363,7 @@ impl SimWorld {
                 flight.speed = down(flight.speed, stats.max_speed, Fp::ZERO);
                 flight.altitude = down(flight.altitude, flight.elevation, Fp::ZERO);
             } else if hold {
-                flight.speed = up(flight.speed, stats.max_speed, top_speed);
+                flight.speed = up(flight.speed, stats.max_speed, top_speed / 2);
                 flight.altitude = up(flight.altitude, flight.elevation, height);
             } else {
                 flight.speed = up(flight.speed, stats.max_speed, tailing.unwrap_or(top_speed).min(turning_in.unwrap_or(top_speed)));

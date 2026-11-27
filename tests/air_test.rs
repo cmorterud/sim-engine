@@ -389,7 +389,7 @@ fn patrolling_aircraft_stay_up_refuel_when_low_and_go_back_to_their_patrol() {
     assert!(after.fuel > after.max_fuel * 9 / 10);
 }
 
-/// A gunship circles what it attacks, anticlockwise, about half its range out, rather than make
+/// A gunship circles what it attacks, anticlockwise, at half its top speed and about half its range out, rather than make
 /// passes, and its turret keeps on the target all the way round: once it is circling it lands
 /// every shot its reload allows (the design owner, 2026-11-27). Both gunships, and the heavy
 /// gunship's railgun too, which only fires at aircraft, is left out here.
@@ -412,7 +412,7 @@ fn gunships_circle_what_they_attack_and_keep_firing() {
         // Until it is in range and up to speed.
         let settled = (0..600).find(|_| {
             world.advance_tick(&[]);
-            distance(&world, gunship, at) < range * 3 / 4 && flight(&world, gunship).speed == def.speed
+            distance(&world, gunship, at) < range * 3 / 4 && flight(&world, gunship).speed == def.speed / 2
         });
         assert!(settled.is_some(), "{key} should come round onto its circle");
         run(&mut world, 50);
@@ -435,7 +435,7 @@ fn gunships_circle_what_they_attack_and_keep_firing() {
             (turned, last) = (turned + step, now);
             let off = distance(&world, gunship, at);
             assert!(off > range / 4 && off < range * 3 / 4, "{key} should keep about half its range out, not {off} of {range}");
-            assert_eq!(flight(&world, gunship).speed, def.speed, "{key} should keep flying as it circles");
+            assert_eq!(flight(&world, gunship).speed, def.speed / 2, "{key} should keep flying as it circles");
         }
         assert!(turned > std::f64::consts::TAU, "{key} should go right round its target anticlockwise, not {:.0} degrees", turned.to_degrees());
         let dealt = (before - world.unit_health(target).unwrap()).to_num::<f64>();
