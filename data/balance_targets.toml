@@ -562,8 +562,9 @@ time_to_kill_tier = [1.0, 1.15, 1.3]
 time_to_kill_domain = { land = 1.0, navy = 3.0, air_to_air = 0.65 }
 # Roles, as a factor on the line's time to kill and its closing share. The destroyer is the navy
 # line, measured on its guns, its torpedo a sub-hunting ability; the frigate a brawler; the
-# torpedo boat the sub hunter archetype; the cruiser and the escort corvette support.
-role_time_to_kill = { line = 1.0, sub_hunter = 0.4 }
+# torpedo boat the sub hunter archetype; the cruiser and the escort corvette support. Gun
+# artillery takes the Light Artillery's factor (2026-11-27), the missile launcher the line's.
+role_time_to_kill = { line = 1.0, sub_hunter = 0.4, artillery = 1.15 }
 # Reach: closing share x speed x time to kill. Navy closes at 0.57 of land's share.
 closing_share_land = [0.35, 0.44, 0.47]
 closing_share_navy_over_land = 0.57
@@ -585,6 +586,23 @@ missile_over_cannon = 2.0
 cruiser_min_range_share = 0.15
 # An aircraft's gun at ground targets reaches 0.7 of its tier's anti-air (T3: the Mobile Flak).
 aircraft_gun_over_anti_air = 0.7
+#
+# Secondary reaches (2026-11-27, BALANCE.md), each a
+# rule that already held at two tiers or comes from one above, tests/reach_test.rs:
+# - Mobile anti-air reaches 1.83 times its tier's line (the T1 and T2 lines both met it); static
+#   anti-air 1.25 times its tier's mobile anti-air (at T3, which has none, 1.83 times the T3 line);
+#   a ship's anti-air 1.2 times its tier's static anti-air, and the fleet's anti-air ship's 1.4.
+# - An aircraft's anti-air reaches its tier's fighter (T2: the Fighter-Bomber's).
+# - A sub-hunting torpedo reaches its tier's sub hunter: closing_share_role sub_hunter x
+#   speed_navy x the sub hunter's time to kill (T3 as T2, a tier up).
+# - A torpedo launcher reaches point_defense_over_direct_fire_min times its tier's navy direct
+#   fire; a support ship's gun reaches its tier's navy line.
+mobile_anti_air_over_line = 1.83
+static_anti_air_over_mobile = 1.25
+ship_anti_air_over_static = 1.2
+cruiser_anti_air_over_static = 1.4
+aircraft_anti_air_at_fighter = 1.0
+support_gun_at_line = 1.0
 # The battleship's broadside every 13.5 seconds, the model's damage a second in faster volleys.
 battleship_broadside_seconds = 13.5
 
@@ -684,7 +702,7 @@ t3_heavy_walker = "the land solver's targets ([roles])"
 t3_siege_walker = "the land solver's targets ([roles])"
 t1_mobile_aa = "its health per mass is the anchor's ([air] anti_air_health_over_bomb)"
 t2_mobile_flak = "not derived yet: its cost is borrowed, its gun set by the escort rule"
-t3_mobile_artillery = "not derived yet: borrowed, until its micro cell prices it"
+t3_mobile_artillery = "the T3 line's micro cell: the middle of the costs where it holds"
 t1_bomber = "the escort rule ([air] anti_air_escort_share); the T1 air base is to price it at that"
 t2_torpedo_bomber = "the fleet cells: the least that needs twice the T2 fleet's cost to break it"
 t2_torpedo_boat = "the cell torpedo_boats_beat_submarines"

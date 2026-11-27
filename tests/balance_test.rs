@@ -540,3 +540,26 @@ fn fighters_are_as_strong_per_cost_as_their_ratios() {
     let fighter = db.get(db.id("t3_air_superiority"));
     assert!(fighter.weapon.expect("a gun").damage >= interceptor.health, "the T3 fighter destroys an interceptor with a shot");
 }
+
+/// Mobile Heavy Artillery (2026-11-27): its reload is the [model] time to kill at T3 with the gun
+/// artillery's factor, and its cost sits where the T3 line's micro cell holds ([counters]
+/// micro_cells): Heavy Walkers attack-moving into an equal cost of it lose by at least
+/// micro_cell_flip_min, and with micro win by as much.
+#[test]
+fn mobile_heavy_artillery_is_what_its_time_to_kill_and_micro_cell_derive() {
+    use sim_engine::balance::{damage_per_second, model_time_to_kill, target_number};
+    let db = db();
+    let artillery = db.get(db.id("t3_mobile_artillery"));
+    let targets: toml::Table = include_str!("../data/balance_targets.toml").parse().expect("valid targets");
+    let factor = number(&targets["model"]["role_time_to_kill"]["artillery"]);
+    let wanted = model_time_to_kill(3, "land") * factor;
+    let seconds = artillery.health.to_num::<f64>() / damage_per_second(&artillery.weapon.expect("a gun"));
+    assert!((seconds / wanted - 1.0).abs() < 0.01, "it takes {seconds:.1} s to kill a copy, its rule {wanted:.1}");
+    let flip = target_number("counters", "micro_cell_flip_min");
+    let walkers = (3_600.0 / db.get(db.id("t3_heavy_walker")).mass.to_num::<f64>()).round() as u32;
+    let count = (3_600.0 / artillery.mass.to_num::<f64>()).round() as u32;
+    let guns = Side { unit: db.id("t3_mobile_artillery"), count, tactics: Tactics::AttackMove };
+    let walk = mirrored(&db, Side { unit: db.id("t3_heavy_walker"), count: walkers, tactics: Tactics::AttackMove }, guns, 1.0);
+    let micro = mirrored(&db, Side { unit: db.id("t3_heavy_walker"), count: walkers, tactics: Tactics::Micro }, guns, 1.0);
+    assert!(walk.score <= -flip && micro.score >= flip, "Heavy Walkers score {:+.2} walking in and {:+.2} with micro against {count} of it", walk.score, micro.score);
+}
