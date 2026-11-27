@@ -239,6 +239,7 @@ impl SimWorld {
         let economies = &mut self.economies;
         let occupancy = &self.occupancy;
         let max = terrain.max_coordinate_raw();
+        let outer = terrain.outer_margin_raw();
         let center = Vec2Fp::new(Fp::from_bits(max / 2), Fp::from_bits(max / 2));
         let locate = |target: SimId| -> Option<GridEntry> { units.binary_search_by_key(&target, |unit| unit.0).ok().map(|index| *grid.entry(index)) };
         // The spots aircraft have taken on the ground, to land on or resting on, so that no two
@@ -366,9 +367,12 @@ impl SimWorld {
                     here.distance_squared(&point) <= wide_mul(reach, reach)
                 });
             // With nothing to do, it lands, if there is open ground below to land on. Patrols
-            // and trips to refuel keep it in the air.
-            let margin = radius.saturating_mul(fp_int(3));
-            let near_edge = [here.x, here.y].iter().any(|&value| value < margin || Fp::from_bits(max) - value < margin);
+            // and trips to refuel keep it in the air. It lands on the map, just inside the edge
+            // if that is where it is: only where it is over the map and would still be once it
+            // has glided to a stop, half its speed for the ticks it takes to slow; past the edge,
+            // or heading out over it, it turns back in first.
+            let glide = turning.facing.scaled(flight.speed.saturating_mul(fp_int(LANDING_TICKS / 2 + 1)));
+            let near_edge = !terrain.in_bounds(here) || !terrain.in_bounds(here + glide);
             let idle = heading_for.is_none() && !patrolling && flight.refit.is_none();
             // It lands on a spot of its own, on open ground, off any structure (such as the
             // facility it has just left) and clear of the other aircraft down or coming down:
@@ -380,7 +384,7 @@ impl SimWorld {
                 flight.spot = None;
             } else if flight.spot.is_none() {
                 let fits = |point: Vec2Fp| {
-                    let on_map = [point.x, point.y].iter().all(|&value| value >= margin && Fp::from_bits(max) - value >= margin);
+                    let on_map = terrain.in_bounds(point);
                     // The cell as units count it, so that mirror-image spots on a cell's edge
                     // are in mirror-image cells.
                     let (cell_x, cell_y) = terrain.unit_cell_of(point);
@@ -493,8 +497,18 @@ impl SimWorld {
                         flight.breaking_off = false;
                     } else if flight.breaking_off {
                         let out = unready_reach.map_or(break_off, |reach| reach.max(break_off));
-                        flight.breaking_off = distance_squared < wide_mul(out, out);
+                        // At the outer margin past the map's edge it turns back whatever its run.
+                        let at_limit = [here.x, here.y].iter().any(|&value| value.to_bits() <= 1 - outer || value.to_bits() >= max + outer);
+                        // And once it has flown twice that, however near the target still is: an
+                        // aircraft on its tail stays near, and once nothing pushed aircraft apart
+                        // in flight a fighter-bomber broke off from the interceptor behind it for
+                        // good (2026-11-27).
+                        flight.breaking_off_ticks = flight.breaking_off_ticks.saturating_add(1);
+                        let flown = i64::from(speed.to_bits()) * i64::from(flight.breaking_off_ticks);
+                        let long_enough = flown >= 2 * i64::from(out.to_bits());
+                        flight.breaking_off = distance_squared < wide_mul(out, out) && !at_limit && !long_enough;
                     } else {
+                        flight.breaking_off_ticks = 0;
                         // Once over the target and past it, fly on for a run-up to the next pass.
                         let behind = facing.x * offset.x + facing.y * offset.y <= Fp::ZERO;
                         let half = break_off / 2;
@@ -515,7 +529,7 @@ impl SimWorld {
                     facing
                 }
                 // Over water or cliffs, or waiting for a pad, it circles where it is, unless that
-                // would take it off the map.
+                // would take it off the map, and past the edge it turns back onto it.
                 None => {
                     flight.breaking_off = false;
                     let toward = if near_edge { (center - here).normalized() } else { Vec2Fp::new(-facing.y, facing.x) };
@@ -523,15 +537,6 @@ impl SimWorld {
                 }
             };
 
-            // Held at the map's edge and facing off it, it stops breaking off and turns back
-            // toward the middle, rather than fly along the edge: two aircraft chasing each other
-            // there once ended up held on one point in a corner for good, once they were no
-            // longer pushed apart in flight.
-            let off_map = |at: Fp, way: Fp| (at.to_bits() <= 1 && way < Fp::ZERO) || (at.to_bits() >= max && way > Fp::ZERO);
-            if !landing && (off_map(here.x, turning.facing.x) || off_map(here.y, turning.facing.y)) {
-                flight.breaking_off = false;
-                turning.facing = rotate_toward(turning.facing, (center - here).normalized(), turning.max_turn);
-            }
             // How far it has been turning a tick, over the last few, for aiming at it along its
             // turn: aircraft that follow or circle turn on some ticks and not others.
             let now = turning.facing;
@@ -542,7 +547,7 @@ impl SimWorld {
                 (Some((_, distance)), Some(spot)) if speed >= distance => spot - here,
                 _ => turning.facing.scaled(speed),
             };
-            let next = Vec2Fp::new(Fp::from_bits((here.x + step.x).to_bits().clamp(1, max)), Fp::from_bits((here.y + step.y).to_bits().clamp(1, max)));
+            let next = Vec2Fp::new(Fp::from_bits((here.x + step.x).to_bits().clamp(1 - outer, max + outer)), Fp::from_bits((here.y + step.y).to_bits().clamp(1 - outer, max + outer)));
             // Landed, it rests on the ground like any other unit.
             position.0 = Vec3Fp::new(next.x, next.y, flying_height(terrain, next, flight.altitude.max(stats.radius)));
             velocity.0 = Vec3Fp::new(step.x, step.y, Fp::ZERO);

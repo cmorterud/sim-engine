@@ -1318,6 +1318,9 @@ impl SimWorld {
 
     pub fn step_commands(&mut self, commands: &[SimCommand]) {
         for command in commands {
+            // No order sends a unit off the map: a place past its edge is taken as the nearest
+            // point on it. Units can still be out there, aircraft after a pass, and come back.
+            let command = &self.onto_map(command);
             match command {
                 SimCommand::Move { units, goal } => {
                     self.clear_unit_plans(units);
@@ -1368,6 +1371,23 @@ impl SimWorld {
             }
         }
         self.step_order_queues();
+    }
+
+    /// The command with every place it names moved onto the map.
+    fn onto_map(&self, command: &SimCommand) -> SimCommand {
+        let on = |point: &Vec2Fp| self.terrain.onto_map(*point);
+        let mut command = command.clone();
+        match &mut command {
+            SimCommand::Move { goal, .. }
+            | SimCommand::AttackMove { goal, .. }
+            | SimCommand::QueueMove { goal, .. }
+            | SimCommand::FormationMove { goal, .. }
+            | SimCommand::MoveOrder { goal, .. } => *goal = on(goal),
+            SimCommand::AttackGround { point, .. } | SimCommand::Unload { point, .. } | SimCommand::Teleport { point, .. } | SimCommand::SetRally { point, .. } => *point = on(point),
+            SimCommand::Patrol { points, .. } => points.iter_mut().for_each(|point| *point = on(point)),
+            _ => {}
+        }
+        command
     }
 
     fn queue_move(&mut self, units: &[SimId], goal: Vec2Fp, attack: bool, formation: bool) {
@@ -2352,9 +2372,18 @@ impl SimWorld {
                 let distance = (distance_squared as u64).isqrt() as i64;
                 let overlap = contact - distance;
                 if distance == 0 {
-                    // Exactly overlapping units push apart along a direction from their ids.
+                    // Exactly overlapping units push apart along the line from the map's center
+                    // to where they are, which turns with the map, so that mirror images part in
+                    // mirror image; at the center itself, along a direction from their ids. It was
+                    // the ids everywhere until a transport came to rest exactly on its drop point
+                    // and set its first rider down on its own spot (2026-11-27), and the ids of
+                    // the two sides' pairs pushed them different ways.
+                    let from_center = |at: i32| (2 * i64::from(at) - (i64::from(max_coordinate) + 1)).signum();
                     let pair = (me.id.0.min(other.id.0) ^ me.id.0.max(other.id.0)) as usize % 8;
-                    let (nx, ny) = [(1, 0), (0, 1), (1, 1), (1, -1), (2, 1), (1, 2), (2, -1), (1, -2)][pair];
+                    let (nx, ny) = match (from_center(me.x), from_center(me.y)) {
+                        (0, 0) => [(1, 0), (0, 1), (1, 1), (1, -1), (2, 1), (1, 2), (2, -1), (1, -2)][pair],
+                        away => away,
+                    };
                     let sign = if me.id > other.id { 1 } else { -1 };
                     push_x += sign * nx * overlap / 2;
                     push_y += sign * ny * overlap / 2;
@@ -4240,7 +4269,8 @@ impl SimWorld {
                     dead.push(id);
                 }
                 _ => {
-                    if projectile.lifetime_ticks == 0 || !terrain.in_bounds(end.xy()) {
+                    // Past the map's edge it flies on, as aircraft do, to the outer margin.
+                    if projectile.lifetime_ticks == 0 || !terrain.in_play(end.xy()) {
                         dead.push(id);
                     }
                 }

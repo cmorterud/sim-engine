@@ -153,7 +153,7 @@ ground = "water"
 target = "domains.cells.fleet_without_anti_air_loses_to_torpedo_bombers"
 shows = "Destroyers with no cruisers or corvettes, against an equal cost of torpedo bombers. Their anti-torpedo charges stop only a few of the torpedoes a wing drops, and they have next to no anti-air: the bombers win easily. A fleet that skips anti-air loses to the air."
 try = "Attack-move in, and compare with the T2 fleet against twice its cost in torpedo bombers."
-blue = [{ unit = "t2_torpedo_bomber", count = 50, at = [1_200, 2_560], columns = 10 }]
+blue = [{ unit = "t2_torpedo_bomber", count = 57, at = [1_200, 2_560], columns = 10 }]
 red = [{ unit = "t2_destroyer", count = 8, at = [3_000, 2_560], columns = 4 }]
 
 [[scenario]]

@@ -793,6 +793,75 @@ fn aircraft_obey_orders_over_open_sea() {
     }
 }
 
+fn on_map(at: Vec2Fp) -> bool {
+    [at.x, at.y].iter().all(|&value| value >= Fp::ZERO && value < fp_int(5_120))
+}
+
+/// Aircraft fly on past the map's edge after a pass and turn back of themselves (the design
+/// owner, 2026-11-27, after bombers stayed stuck on the edge): bombing ground close to the east
+/// edge, a Strategic Bomber goes out past it and keeps coming back over the ground, never far out.
+#[test]
+fn a_bomber_flies_on_past_the_map_edge_after_a_pass_and_comes_back() {
+    for x in [4_700, 4_850, 5_000, 5_100] {
+        let target = point(x, 2_560);
+        let mut world = world();
+        let bomber = spawn(&mut world, "t3_strategic_bomber", Team::Blue, point(2_000, 2_560));
+        world.advance_tick(&[SimCommand::AttackGround { units: vec![bomber], point: target }]);
+        let (mut off, mut longest, mut ever_off, mut farthest, mut passes, mut was_near) = (0u32, 0u32, false, 0i64, 0u32, false);
+        for _ in 0..3_000 {
+            world.advance_tick(&[]);
+            let at = world.unit_position(bomber).unwrap().xy();
+            off = if on_map(at) { 0 } else { off + 1 };
+            (longest, ever_off) = (longest.max(off), ever_off || off > 0);
+            farthest = farthest.max(i64::from(at.x.to_num::<i32>()) - 5_120);
+            let near = distance(&world, bomber, target) < 300;
+            passes += u32::from(near && !was_near);
+            was_near = near;
+        }
+        assert_eq!(world.unit_order(bomber).unwrap().kind, OrderKind::Attack, "by {x} it keeps its order");
+        assert!(passes >= 3, "by {x} it should keep making passes over the ground, made {passes}");
+        assert!(longest < 200, "by {x} it should turn back from past the edge, was out for {longest} ticks");
+        assert!(farthest < 2_500, "by {x} it should turn back short of the outer limit, went {farthest} units");
+        if x >= 5_000 {
+            assert!(ever_off, "by {x} its passes take it past the edge");
+        }
+    }
+}
+
+/// An aircraft past the map's edge with nothing to do comes back and lands just inside it.
+#[test]
+fn an_aircraft_left_past_the_map_edge_with_no_order_lands_just_inside_it() {
+    let mut world = world();
+    let bomber = spawn(&mut world, "t3_strategic_bomber", Team::Blue, point(2_000, 2_560));
+    world.advance_tick(&[SimCommand::AttackGround { units: vec![bomber], point: point(5_100, 2_560) }]);
+    let out = (0..1_000).find(|_| {
+        world.advance_tick(&[]);
+        !on_map(world.unit_position(bomber).unwrap().xy())
+    });
+    assert!(out.is_some(), "its pass takes it past the edge");
+    world.advance_tick(&[SimCommand::Stop { units: vec![bomber] }]);
+    run(&mut world, 1_000);
+    let at = world.unit_position(bomber).unwrap().xy();
+    assert!(on_map(at), "it comes back onto the map, at {at:?}");
+    assert!(!flight(&world, bomber).airborne(), "and lands");
+    assert!(at.x > fp_int(4_500), "just inside the edge it flew out over, at {at:?}");
+}
+
+/// No order sends a unit off the map: a place past the edge is taken as the nearest on it.
+#[test]
+fn an_order_past_the_map_edge_goes_to_the_nearest_point_on_it() {
+    let mut world = world();
+    let scout = spawn(&mut world, "t1_air_scout", Team::Blue, point(4_000, 2_560));
+    let tank = spawn(&mut world, "t1_light_walker", Team::Blue, point(4_600, 1_000));
+    world.advance_tick(&[SimCommand::Move { units: vec![scout, tank], goal: point(7_000, 2_560) }]);
+    for _ in 0..1_500 {
+        world.advance_tick(&[]);
+        assert!(on_map(world.unit_position(tank).unwrap().xy()), "the tank stays on the map");
+    }
+    let at = world.unit_position(scout).unwrap().xy();
+    assert!(on_map(at) && at.x > fp_int(4_400), "the scout lands within a glide of the east edge, at {at:?}");
+}
+
 /// New shots from `source` this tick, among the projectiles now in flight.
 fn new_shots(world: &SimWorld, source: SimId, seen: &mut Vec<SimId>) -> usize {
     use sim_engine::sim::components::Projectile;
@@ -920,7 +989,10 @@ fn fighters_fire_only_within_their_nose_arc() {
                 world.ecs.get::<&mut Health>(world.unit_entity(id).unwrap()).unwrap().current = fp_int(30_000);
             }
             world.advance_tick(&[]);
-            if new_shots(&world, fighter, &mut seen) == 0 {
+            // A shot fired from close behind can land the tick it is fired, and is gone before
+            // it is seen, so a hit on either enemy counts too: nothing else here hits them.
+            let hit = [bomber, tail].iter().any(|&id| world.ecs.get::<&Health>(world.unit_entity(id).unwrap()).unwrap().current < fp_int(30_000));
+            if new_shots(&world, fighter, &mut seen) == 0 && !hit {
                 continue;
             }
             fired += 1;

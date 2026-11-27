@@ -2657,7 +2657,10 @@ impl AiBrain {
         if world.terrain.height_at(at) < world.terrain.water_level() {
             return;
         }
-        // Only what is already in range, so that a shot never draws the commander forward.
+        // Only what is already in range, so that a shot never draws the commander forward, and
+        // nothing under the water, where the shot cannot go: a commander on the shore of the lake
+        // on Stillwater (seed 2, 2026-11-27) followed a submarine it had chosen onto the lakebed,
+        // where it cannot fire, and stood beside it for the last half hour with both armies idle.
         let Some(reach) = world.ecs.get::<&Combat>(entity).ok().map(|combat| combat.range) else {
             return;
         };
@@ -2667,7 +2670,7 @@ impl AiBrain {
         };
         let target = sightings
             .iter()
-            .filter(|enemy| !enemy.is_structure && !enemy.is_air && Some(enemy.id) != enemy_commander && enemy.position.distance_squared(&at) <= wide_mul(reach, reach))
+            .filter(|enemy| !enemy.is_structure && !enemy.is_air && !enemy.is_submerged && Some(enemy.id) != enemy_commander && enemy.position.distance_squared(&at) <= wide_mul(reach, reach))
             .max_by_key(|enemy| (worth(enemy.id), std::cmp::Reverse(enemy.position.distance_squared(&at)), std::cmp::Reverse(enemy.id)));
         if let Some(enemy) = target {
             commands.push(SimCommand::Discharge { unit: commander, target: enemy.id });

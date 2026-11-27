@@ -336,8 +336,9 @@ pub struct Flight {
     pub min_speed: Fp,
     /// Having flown over its target, how far it flies on before it turns back for another pass.
     pub break_off: Fp,
-    /// Flying on, away from its target.
+    /// Flying on, away from its target, and for how many ticks.
     pub breaking_off: bool,
+    pub breaking_off_ticks: u32,
     /// How its heading turned over the last tick, as the cosine and sine of the angle: for
     /// anti-air guns and flak, which aim along a steady turn.
     pub turn: Vec2Fp,
