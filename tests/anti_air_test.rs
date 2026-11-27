@@ -198,10 +198,13 @@ fn t1_anti_air_cannot_bring_down_t3_aircraft() {
 
 /// Flak mostly misses fast T3 aircraft: as much of it as the aircraft cost takes under half its
 /// health, flying over or as it usually goes about its work, though it cannot shoot back here.
-/// Massed, it all but brings down a strategic bomber attacking it: seven times its cost since the
-/// price list set it at 1,253 (2026-11-26), about the same flak as three times its borrowed 3,381.
+/// Massed, it all but brings down a strategic bomber attacking it: seven times its mass since the
+/// price list set it at 1,253 (2026-11-26), about the same flak as three times its borrowed 3,381;
+/// nine since the Mobile Flak's shell was set by the escort rule (58 to 45, 2026-11-27), at which
+/// eight takes 74% off it.
 #[test]
 fn flak_mostly_misses_fast_t3_aircraft_unless_massed() {
+    const MASSED: i64 = 9;
     let mut failures = Vec::new();
     for shooter in ["t2_flak", "t2_mobile_flak"] {
         for plane in FAST_T3 {
@@ -212,9 +215,9 @@ fn flak_mostly_misses_fast_t3_aircraft_unless_massed() {
                 }
             }
         }
-        let massed = health_lost(shooter, mass("t3_strategic_bomber") * 7, "t3_strategic_bomber", Approach::Attack);
+        let massed = health_lost(shooter, mass("t3_strategic_bomber") * MASSED, "t3_strategic_bomber", Approach::Attack);
         if massed < 0.8 {
-            failures.push(format!("three times a strategic bomber's worth of {shooter} took only {:.0}% off it", massed * 100.0));
+            failures.push(format!("{MASSED} times a strategic bomber's mass of {shooter} took only {:.0}% off it", massed * 100.0));
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");

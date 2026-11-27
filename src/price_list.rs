@@ -82,6 +82,21 @@ impl Pricing {
     pub fn drift(&self) -> f64 {
         self.actual / self.list - 1.0
     }
+
+    /// What its sensors cost, together.
+    pub fn sensor_cost(&self) -> f64 {
+        self.sensors.iter().map(|(_, cost)| cost).sum()
+    }
+
+    /// The list's price at another domain base: each job's part goes as one over the base.
+    pub fn at_base(&self, base: f64) -> f64 {
+        (self.list - self.sensor_cost()) * self.base / base + self.sensor_cost()
+    }
+
+    /// The domain base at which the list prices it at `cost`.
+    pub fn base_for(&self, cost: f64) -> f64 {
+        self.base * (self.list - self.sensor_cost()) / (cost - self.sensor_cost())
+    }
 }
 
 fn table() -> toml::Table {
@@ -241,7 +256,8 @@ fn price_with(db: &BlueprintDb, table: &toml::Table, key: &str) -> Option<Pricin
         Domain::Land => "land",
         Domain::Navy => "navy",
         Domain::Air if tier == 1 => "air_t1",
-        Domain::Air => "air",
+        Domain::Air if tier == 2 => "air_t2",
+        Domain::Air => "air_t3",
     };
     let base = number(&list["domain_base"][base_key]);
     let tier_efficiency = numbers(&list["tier_efficiency"])[usize::from(tier) - 1];

@@ -295,6 +295,19 @@ out close and why: evidence about the process, not a target.
   tier's fighter (the Heavy Gunship 880 to 600, the Heavy Air Transport 1,000 to 600), and the
   transports' guns 0.7 of the anti-air they fly against, as the gunships' do (400 to 448, 500 to
   560). Frigates still lose to the T1 launcher, and torpedo boats still beat submarines.
+* 2026-11-27: air bases, the design owner's picks. At T2 the standard land army, about a third
+  Mobile Flak by materiel (labelled a fifth since 2026-11-24, which it never was), and an equal
+  cost of the T2 strike aircraft break even (`[air] escort_forces`, `balance::derive_t2_flak`):
+  the Mobile Flak's shell 58 to 45, with the aircraft as they are. Measured as the mean
+  break-even over armies of three to six squadrons, each unit in its own block, shortest reach in
+  front and the anti-air behind. The Flak Cannon keeps its shell, 1.85 times as strong per cost as
+  the Mobile Flak, inside `[premiums]`; massed flak now takes nine times a Strategic Bomber's mass
+  to all but bring one down. At T1 the air base is now the one that prices the Bomber at its cost,
+  0.294 (`balance::t1_air_base`): the Interceptor costs 175, from 162, and an equal cost of them
+  clears an equal cost of bombers in 11.2 s (the band is 9 to 12 s). Each air tier has its own base
+  (`air_t1`, `air_t2`, `air_t3`); T3 stays at T2's for now, since against a fifth flak the answer
+  turned on the army's other units and the order they march in (Heavy Gunships 0.94 to 1.66 times
+  the better buy).
 
 ## Order of work
 

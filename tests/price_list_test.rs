@@ -37,12 +37,14 @@ fn every_held_unit_is_one_the_list_prices() {
     assert!(stale.is_empty(), "[price_list.held] names units the list does not price: {stale:?}");
 }
 
-/// The list as worked by hand reproduces: the Interceptor at the T1 air base, the Gunship and the
-/// Heavy Gunship at T2 and T3's (2026-11-26 and 27), within rounding.
+/// The list reproduces the aircraft each tier's air base is solved from or priced at, within
+/// rounding: the T1 Bomber, whose cost the escort rule sets and the T1 base prices, and the
+/// Interceptor at it; the Gunship, the Heavy Gunship and the T3 fighter at T2's (2026-11-26 and
+/// 27).
 #[test]
 fn the_list_reproduces_the_aircraft_it_priced() {
     let db = BlueprintDb::standard();
-    for key in ["t1_interceptor", "t2_gunship", "t3_heavy_gunship", "t3_air_superiority"] {
+    for key in ["t1_bomber", "t1_interceptor", "t2_gunship", "t3_heavy_gunship", "t3_air_superiority"] {
         let pricing = price_list::price(&db, key).expect("an aircraft with a gun");
         assert!(pricing.drift().abs() < 0.01, "{key} costs {:.1}, the list {:.1}", pricing.actual, pricing.list);
     }

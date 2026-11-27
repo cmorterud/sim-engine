@@ -313,13 +313,27 @@ interceptor_seconds_per_bomber_t1 = 10
 # about the time it takes (2026-11-27, the design owner's rule, at what it measured: 8.9 s, and
 # 10.3 s once guns fired only when laid on their target): the Interceptor's size,
 # √(health × damage a second), which every T1 air number above scales with. Its health over its
-# damage a second is the [model] time to kill in air-to-air fights.
-interceptors_clear_bombers_seconds = [9, 11]
+# damage a second is the [model] time to kill in air-to-air fights. With the T1 air base pricing
+# the Bomber at its cost (0.294), the Interceptor costs 8% more and they take 11.2 s: the design
+# owner kept its size and took the dearer Interceptor (2026-11-27; 9 to 11 s until then).
+interceptors_clear_bombers_seconds = [9, 12]
 # A land army this share anti-air, by materiel, comes out about even with an equal materiel of
 # bombers ([counters] even_margin): what sets the T1 Bomber's cost, with Mobile Anti-Air's gun set
 # by [kill_times] mobile_aa_t1_bomber (2026-11-27; until then this set the gun, against a bomber
 # cost taken from the inspiration).
 anti_air_escort_share = 0.2
+# At T2 (2026-11-27, the design owner's pick), the tier's standard land army, about a third
+# anti-air by materiel, as the AI's T2 army has been measured since 2026-11-24, and an equal cost
+# of the tier's strike aircraft (the price list's T2 air force without its fighters, at the T2 air
+# base) break even, by efficiency within escort_efficiency, the mean over armies of
+# escort_squadrons squadrons (two to four tier fights' worth, [pace]), each unit in its own block,
+# the shortest reach in front and the anti-air behind. What sets the Mobile Flak's gun
+# (balance::derive_t2_flak, `--balance-derive air-bases`). T3 has no escort rule yet: measured the
+# same way, against a fifth flak, the answer turns on which units make up the rest of the army and
+# in what order they march (Heavy Gunships 0.94 to 1.66 times the better buy, 2026-11-27).
+escort_forces = { t2 = ["t2_land_army", "t2_strike_aircraft"] }
+escort_squadrons = { t2 = [3, 6] }
+escort_efficiency = [0.85, 1.15]
 # Checks. Bombers destroy an equal materiel with no anti-air within a tier fight's time ([pace]),
 # at a tier fight's size, ten anchors a side: bigger groups of bombers take longer, as more of
 # their bombs fall on the same targets. Pure anti-air keeps at least this share against an equal materiel of bombers.
@@ -444,10 +458,10 @@ t2_fighter_bomber = 0.31
 t3_heavy_gunship = 0.88
 t3_air_superiority = 0.79
 # The interceptor by the ability price list at the T1 air base (2026-11-27, [price_list]
-# domain_base): its strength per cost at 162.
-t1_interceptor = 0.33
+# domain_base): its strength per cost at 175 (0.33 at 162, until the base priced the Bomber).
+t1_interceptor = 0.31
 # The mobile flak is not here: like the T1 mobile anti-air, it is set by the anti-air share rule
-# (air_force_against_land_army_t2_even), not by a ratio.
+# ([air] escort_forces), not by a ratio.
 
 # Standard forces, by how many of each a squadron has, bought by whole squadrons to the materiel of
 # a fight. The fleets are what a player fields: a T2 fleet is two destroyers, a couple of cruisers
@@ -477,8 +491,12 @@ t1_frigates = { t1_frigate = 1 }
 t1_bombers = { t1_bomber = 1 }
 t2_hovercraft = { t2_assault_hovercraft = 1 }
 t2_heavy_tanks = { t2_heavy_tank = 1 }
-# A T2 land army with a fifth anti-air by materiel, as [air] anti_air_escort_share has it at T1.
+# The standard T2 land army: about a third anti-air by materiel (two Mobile Flak, 320 of 884). It
+# was labelled a fifth from 2026-11-24 to 2026-11-27, which it never was; the design owner kept it
+# as it is ([air] escort_forces).
 t2_land_army = { t2_heavy_tank = 2, t2_grenadier_walker = 1, t2_mobile_missile_launcher = 1, t2_mobile_flak = 2 }
+# The T2 air force's strike aircraft, which hold the T2 air base ([price_list] domain_base).
+t2_strike_aircraft = { t2_gunship = 4, t2_fighter_bomber = 2 }
 
 [domains.cells]
 # Each a fight at equal cost unless it says otherwise, scored as [counters] scores it: the first
@@ -516,8 +534,8 @@ torpedo_boats_beat_submarines = 0.40
 fleet_without_anti_air_loses_to_torpedo_bombers = -0.40
 submarines_beat_fleet_without_anti_submarine = 0.40
 submarines_beat_destroyers = 0.40
-# Air against a land army with a fifth anti-air, at T2: about even, as at T1 ([air]).
-air_force_against_land_army_t2_even = true
+# Air against the standard T2 land army is [air] escort_forces (2026-11-27; until then the T2 air
+# force, fighters and all, about even with it by an equal-cost score).
 # The hovercraft loses clearly to an equal cost of a fleet on the water. Its strength on land is
 # in [premiums], with the other capabilities a unit pays for.
 hovercraft_loses_to_fleet = -0.40
@@ -618,16 +636,18 @@ battleship_broadside_seconds = 13.5
 # flexibility price. The anchor is the Medium Tank's strength per cost.
 anchor_strength_per_cost = 2.806
 tier_efficiency = [1.0, 1.0, 1.0]
-# The navy's base, solved by holding the T2 fleet (two destroyers, two cruisers) at its cost. Air's,
-# as the navy's, by holding the T2 air force's strike aircraft (four gunships, two fighter-bombers)
-# at their cost (2026-11-26). A price every aircraft would pay alike, for flying, cancels in it.
-# Each tier's air base comes from how deadly its anti-air is, which nothing else sets: anti-air
-# guns are set by [air] anti_air_escort_share against the aircraft's cost. T2 flak hits about four
-# times harder for its health than T1 Mobile Anti-Air, so air's base, held at T2, priced T1
-# aircraft at about a third of their cost. At T1 (2026-11-27), Mobile Anti-Air downs a bomber in
-# [kill_times] mobile_aa_t1_bomber, anti_air_escort_share then sets the T1 Bomber's cost (249.5),
-# and the T1 base is what prices the bomber at that: 0.318. The Interceptor is priced at it (162).
-domain_base = { land = 1.0, navy = 0.669, air = 0.902, air_t1 = 0.318 }
+# The navy's base, solved by holding the T2 fleet (two destroyers, two cruisers) at its cost. Air's
+# at T2, as the navy's, by holding the T2 air force's strike aircraft (four gunships, two
+# fighter-bombers) at their cost (2026-11-26). A price every aircraft would pay alike, for flying,
+# cancels in it. Each tier's air base comes from how deadly its anti-air is, which nothing else
+# sets: anti-air guns and aircraft costs are set by the escort rules ([air]). At T1 (2026-11-27),
+# Mobile Anti-Air downs a bomber in [kill_times] mobile_aa_t1_bomber, anti_air_escort_share then
+# sets the T1 Bomber's cost, and the T1 base is what prices the bomber at that
+# (balance::t1_air_base): 0.318, then 0.294 once the landed shares were measured again with turrets
+# that fire only once laid (2026-11-27). The Interceptor is priced at it. At T2 the escort rule sets the
+# Mobile Flak's gun against the strike aircraft as they are. T3 aircraft are priced at T2's base
+# until T3 has an escort rule.
+domain_base = { land = 1.0, navy = 0.669, air_t1 = 0.294, air_t2 = 0.902, air_t3 = 0.902 }
 # Reach past the line's: x = c (r / r_line - 1), price x h / (1 - x h), h about 1 for shells and
 # 0 for missiles. Short of it: -c (1 - r / r_line) (v_line / v). Speed: speed_share (1 - v_line / v).
 speed_share = 0.3
@@ -703,7 +723,6 @@ t3_siege_walker = "the land solver's targets ([roles])"
 t1_mobile_aa = "its health per mass is the anchor's ([air] anti_air_health_over_bomb)"
 t2_mobile_flak = "not derived yet: its cost is borrowed, its gun set by the escort rule"
 t3_mobile_artillery = "the T3 line's micro cell: the middle of the costs where it holds"
-t1_bomber = "the escort rule ([air] anti_air_escort_share); the T1 air base is to price it at that"
 t2_torpedo_bomber = "the fleet cells: the least that needs twice the T2 fleet's cost to break it"
 t2_torpedo_boat = "the cell torpedo_boats_beat_submarines"
 command_rig = "not derived yet: the snipe rules, its gun and enhancements"
