@@ -218,7 +218,7 @@ fn main() {
     for unit in &mut snapshot.units {
         let made = blueprints.get(sim_engine::sim::blueprints::BlueprintId(unit.blueprint));
         if made.is_factory() {
-            unit.assembling = made.builds.iter().find(|item| !blueprints.get(**item).is_factory()).map(|item| (item.0, 660));
+            unit.assembling = made.builds.iter().find(|item| !blueprints.get(**item).is_factory()).map(|item| (item.0, 660, u8::from(made.on_water)));
             let (x, y, radius) = (f64::from(unit.x) / 4096.0, f64::from(unit.y) / 4096.0, f64::from(unit.radius) / 4096.0);
             if unit.team == Team::Blue && rows.iter().all(|row| row.0 != format!("{}_bay", made.key)) {
                 rows.push((format!("{}_bay", made.key), [x, y], radius * 5.0, 0.0));

@@ -208,13 +208,16 @@ pub struct Order {
     pub slot: Option<Vec2Fp>,
     /// How long it may spend walking to its spot, so that a blocked spot cannot trap it.
     pub slot_ticks: u32,
+    /// It brakes onto its spot and stops dead there, as a unit sent to a rally point does,
+    /// rather than coast past it as its velocity eases off.
+    pub settles: bool,
     /// The way straight to its route's goal is clear, so it walks straight there rather than
     /// along the route's eight directions and through the middles of its sectors' edges.
     pub direct: bool,
 }
 
 impl Order {
-    pub const IDLE: Self = Self { kind: OrderKind::Idle, route: 0, slot: None, slot_ticks: 0, direct: false };
+    pub const IDLE: Self = Self { kind: OrderKind::Idle, route: 0, slot: None, slot_ticks: 0, settles: false, direct: false };
 }
 
 /// Marks a unit made from a blueprint. PoC stress-test units have none.

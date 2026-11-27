@@ -128,7 +128,13 @@ fn a_naval_factory_goes_on_the_water_and_launches_its_ships_onto_it() {
         world.units.iter().map(|unit| unit.0).find(|&id| world.ecs.get::<&Blueprinted>(world.unit_entity(id).unwrap()).is_ok_and(|unit| unit.0 == frigate))
     });
     let ship = built.expect("it should build a frigate");
-    // It is built in the dock, then sails out of its open end onto the water.
+    // It is built in the dock, facing along the slip, north or south, and sails out of the
+    // open end it faces onto the water.
+    let center = world.unit_position(factory).unwrap().xy();
+    let exit = world.ecs.get::<&LeavingFactory>(world.unit_entity(ship).unwrap()).unwrap().exit;
+    assert_eq!(exit.x, center.x, "out of the north or south end: {exit:?} from {center:?}");
+    let facing = world.ecs.get::<&sim_engine::sim::components::Turning>(world.unit_entity(ship).unwrap()).unwrap().facing;
+    assert_eq!((facing.x, facing.y.signum()), (Fp::ZERO, (exit.y - center.y).signum()), "facing the way out");
     for _ in 0..100 {
         if world.ecs.get::<&LeavingFactory>(world.unit_entity(ship).unwrap()).is_err() {
             break;
