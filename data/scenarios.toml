@@ -199,7 +199,7 @@ id = "navy_cruiser_against_a_coast"
 title = "From the sea: two Cruisers against a coastal T2 position"
 ground = "shore"
 target = "domains.cells.coastal_seconds_max"
-blue_over_red = 1.25
+blue_over_red = 1.07
 shows = "Two Cruisers at sea against point defenses under a shield, ashore. Their cruise missiles outrange the point defenses three times over, so they break the position without loss, in about a minute. It takes two: the shield heals as fast as one cruiser's missiles strike it, so one alone never gets through. Inland, beyond their reach, is safe from ships: that is navy's limit."
 try = "Attack-move at the position and time it. Then send one cruiser alone and watch the shield hold. Then sail in within the point defenses' reach."
 blue = [{ unit = "t2_cruiser", count = 2, at = [600, 2_560], columns = 2 }]
@@ -307,7 +307,7 @@ id = "navy_battleship_against_a_coast"
 title = "From the sea at T3: two Battleships against a coastal T3 position"
 ground = "shore"
 target = "domains.cells.coastal_seconds_max"
-blue_over_red = 1.38
+blue_over_red = 1.18
 shows = "Two Battleships at sea against heavy point defenses under a heavy shield, ashore. They outrange them twice over and break the position without loss, in under a minute and a half. It takes two: the heavy shield heals faster than one battleship's guns strike it."
 try = "Attack-move at the position and time it. Then send one battleship alone and watch the shield hold. Then sail in within the heavy point defenses' reach."
 blue = [{ unit = "t3_battleship", count = 2, at = [600, 2_560], columns = 2 }]
@@ -355,8 +355,8 @@ title = "Immobile: three T1 point defenses against half again their cost in tank
 target = "premiums.point_defense_holds_against_line_units"
 blue_over_red = 1.5
 shows = "A point defense cannot move, so it is worth more for its cost than the tank it stands in for. Three of them hold against half again their cost in Medium Tanks attack-moving in: the tanks are cut down before they break them."
-try = "Attack-move in, then try spreading out and rushing one point defense from the side. It should take about twice their cost in tanks to break them."
-blue = [{ unit = "t1_medium_tank", count = 37, at = [1_000, 2_560], columns = 8 }]
+try = "Attack-move in, then try spreading out and rushing one point defense from the side. They cost the most they can and still hold, so a few tanks more break them."
+blue = [{ unit = "t1_medium_tank", count = 45, at = [1_000, 2_560], columns = 8 }]
 red = [
     { unit = "t1_point_defense", cell = [124, 128] },
     { unit = "t1_point_defense", cell = [132, 128] },
@@ -369,8 +369,8 @@ title = "Immobile: three T3 point defenses against half again their cost in Heav
 target = "premiums.point_defense_holds_against_line_units"
 blue_over_red = 1.5
 shows = "Three heavy point defenses hold against half again their cost in Heavy Walkers walking into them. Artillery, which outranges them, is still what breaks them: see the T3 siege."
-try = "Attack-move in, then try closing from several sides at once."
-blue = [{ unit = "t3_heavy_walker", count = 26, at = [1_000, 2_560], columns = 7 }]
+try = "Attack-move in, then try closing from several sides at once. They cost the most they can and still hold, so a few walkers more break them."
+blue = [{ unit = "t3_heavy_walker", count = 30, at = [1_000, 2_560], columns = 7 }]
 red = [
     { unit = "t3_heavy_point_defense", cell = [124, 128] },
     { unit = "t3_heavy_point_defense", cell = [132, 128] },

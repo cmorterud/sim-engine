@@ -359,6 +359,19 @@ out close and why: evidence about the process, not a target.
   the air, T3's base until a T4 anti-air unit exists. A unit made T4 is measured against T3's line.
   No unit is T4 yet, so nothing moves. The size and overkill prices and the equal-cost-answer check
   wait for the first experimental.
+* 2026-11-27: structure reach priced as a unit's is (the design owner's pick), at a closing share
+  of its own (`[price_list] structure_closing_share`, `balance::derive_structure_closing_share`,
+  `--balance-derive structures`), and over `immobile` as the rest of a structure's list is. It
+  is priced for structures whose every weapon is a surface shell that outreaches the line, so the
+  point defenses. The share, 0.535 at every tier, is the one at which the T3 Heavy Point Defense
+  lists at the most it can cost and still hold, three against half again their cost in Heavy
+  Walkers: 2,072 to 2,437. The T2 Point Defense lists at 638, from 550, and holds there. The T1
+  Point Defense lists at 429, more than holding allows, so it costs the most that still holds,
+  404, from 325, and is held. The shield generators follow their groups: the Shield Generator 932
+  to 1,080, the Heavy Shield Generator 3,104 to 3,650. The playtest positions take 45 Medium
+  Tanks (from 37) and 30 Heavy Walkers (from 26) to break, and the two coast duels' cost ratios
+  are written down again. Easy's land cap 16 to 15 (GAME_SPECIFICATION.md, Difficulty), so that
+  Normal still fields half as many units again on every test map.
 
 ## Order of work
 

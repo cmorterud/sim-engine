@@ -491,7 +491,7 @@ impl Difficulty {
                 max_point_defenses: 1,
                 first_wave: 6,
                 largest_wave: 12,
-                max_army: 16,
+                max_army: 15,
                 max_aircraft: 4,
                 max_fleet: 3,
                 first_attack_tick: 7_200,

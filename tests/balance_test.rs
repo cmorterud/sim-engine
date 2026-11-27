@@ -3,7 +3,8 @@
 use std::sync::Arc;
 
 use sim_engine::balance::{
-    anti_air_strength, break_even, break_even_forces, cost_at, defenses_against_line, derive_torpedo_boat, derive_torpedo_bomber, domain_force, duel, force_materiel, mirrored, mirrored_on,
+    anti_air_strength, break_even, break_even_forces, cost_at, defenses_against_line, derive_structure_closing_share, derive_torpedo_boat, derive_torpedo_bomber, domain_force, duel, force_materiel,
+    mirrored, mirrored_on, point_defense_cost,
     position_materiel_at, purpose_strength, siege_on, squadrons, Field, Ground, Side, Tactics,
     T1_TORPEDO_POSITION, T2_POSITION, T3_POSITION, TORPEDO_POSITION,
 };
@@ -368,6 +369,23 @@ fn counters_cost_what_the_duels_they_win_derive() {
     for (key, (derived, _)) in [("t2_torpedo_boat", derive_torpedo_boat(&base)), ("t2_torpedo_bomber", derive_torpedo_bomber(&base))] {
         let (cost, solved) = (cost_at(base.get(base.id(key)), 2), cost_at(derived.get(derived.id(key)), 2));
         assert!((cost / solved - 1.0).abs() < 0.005, "{key} costs {cost:.1}, the duel it wins {solved:.1}");
+    }
+}
+
+/// `[price_list] structure_closing_share` (2026-11-27): it re-solves to the share at which the list
+/// prices the T3 Heavy Point Defense at the most it can cost and still hold, and each point defense
+/// costs the list's price, or the most it can cost and still hold where that is less.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release only")]
+fn point_defenses_cost_their_reach_or_their_hold() {
+    let base = BlueprintDb::standard();
+    let targets: toml::Table = include_str!("../data/balance_targets.toml").parse().expect("valid targets");
+    let written = number(&targets["price_list"]["structure_closing_share"]);
+    let solved = derive_structure_closing_share(&base);
+    assert!((solved / written - 1.0).abs() < 0.005, "structure_closing_share is {written}, solved {solved:.4}");
+    for (tier, key) in [(1u8, "t1_point_defense"), (2, "t2_point_defense"), (3, "t3_heavy_point_defense")] {
+        let (cost, wanted) = (cost_at(base.get(base.id(key)), tier), point_defense_cost(&base, tier, key));
+        assert!((cost / wanted - 1.0).abs() < 0.005, "{key} costs {cost:.1}, its reach or its hold {wanted:.1}");
     }
 }
 

@@ -581,8 +581,8 @@ fn mobile_units(world: &SimWorld, team: Team) -> usize {
 #[test]
 #[cfg_attr(debug_assertions, ignore = "release only")]
 fn an_easy_ai_keeps_a_small_army() {
-    // 16 land units, 4 aircraft, 3 ships, 3 engineers, and the commander.
-    const EASY_MOST: usize = 27;
+    // 15 land units, 4 aircraft, 3 ships, 3 engineers, and the commander.
+    const EASY_MOST: usize = 26;
     for seed in [1, 2, 3] {
         for easy in [Team::Blue, Team::Red] {
             let mut world = scenario::skirmish(seed).world;
