@@ -460,6 +460,7 @@ impl SimWorld {
                 docked: false,
                 pad: 0,
                 hovers: flight.hovers,
+                min_speed: flight.min_speed,
                 break_off: flight.break_off,
                 breaking_off: false,
                 turn: Vec2Fp::new(Fp::ONE, Fp::ZERO),

@@ -488,7 +488,8 @@ fn no_weapon_targets_what_it_is_not_for() {
             failures.push(format!("{name} hurt {hurt:?}"));
         }
     }
-    assert!(checked >= 60, "only {checked} weapons were checked");
+    // 59 since the Strategic Bomber lost its railguns (2026-11-26).
+    assert!(checked >= 59, "only {checked} weapons were checked");
     assert!(
         failures.is_empty(),
         "{} of {checked} weapons:\n{failures:#?}",

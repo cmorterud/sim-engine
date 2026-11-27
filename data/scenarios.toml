@@ -258,8 +258,8 @@ target = "domains.cells.fleet_beats_air_force_t3"
 shows = "A massed T3 fleet, a Battleship and a Battlecruiser with cruisers, destroyers, and shield corvettes seven-tenths of its cost, against an equal cost of the T3 air force: air superiority fighters and heavy gunships. The escorts keep the air off the capital ships, and the fleet keeps nearly all of itself."
 try = "Attack-move in. Then send the heavy gunships at the cruisers, one at a time, before going for the battleship."
 blue = [
-    { unit = "t3_air_superiority", count = 15, at = [1_300, 2_560], columns = 8 },
-    { unit = "t3_heavy_gunship", count = 20, at = [1_220, 2_560], columns = 10 },
+    { unit = "t3_air_superiority", count = 21, at = [1_300, 2_560], columns = 7 },
+    { unit = "t3_heavy_gunship", count = 28, at = [1_220, 2_560], columns = 14 },
 ]
 red = [
     { unit = "t2_destroyer", count = 4, at = [3_000, 2_560], columns = 4 },
@@ -528,4 +528,68 @@ red = [
     { unit = "t3_heavy_point_defense", cell = [182, 63] },
     { unit = "t3_heavy_point_defense", cell = [188, 63] },
     { unit = "t3_sam", cell = [185, 76] },
+]
+
+# Air at the ability price list's costs (2026-11-26): to try by hand, for the feel of what they buy.
+# The Strategic Bomber costs about a third of what it did, the heavy gunship about half, the T3
+# fighter and the fighter-bomber about half again more. These play no balance target.
+
+[[scenario]]
+id = "air_strategic_bombers_snipe_a_commander"
+title = "A snipe: four Strategic Bombers against a commander and one SAM"
+shows = "Four Strategic Bombers, about two and a half commanders' worth since the price list (nearly seven before), against a commander holding its ground with one SAM beside it. Four bombs destroy a commander, so if all four arrive together it falls in one pass, and their splash takes the SAM with it. The SAM gets only a few missiles off before they let go, not enough to bring one down."
+try = "Order all four to attack the commander at once. Then send them in one at a time, and watch the SAM pick them off before the fourth bomb. Then go for the SAM first."
+blue = [{ unit = "t3_strategic_bomber", count = 4, at = [700, 2_560], columns = 4 }]
+red = [
+    { unit = "command_rig", count = 1, at = [3_600, 2_560] },
+    { unit = "t3_sam", cell = [176, 132] },
+]
+
+[[scenario]]
+id = "air_strategic_bombers_against_sams"
+title = "Base defense: Strategic Bombers against an equal cost of SAMs"
+shows = "Six Strategic Bombers against SAMs worth as much, round a T3 power generator. Each SAM fires a missile every 1.4 seconds and eight bring a bomber down, and the bombers let go inside their reach, so nine of them are firing from the first pass. In one group the bombers get the generator but lose most of themselves: what a SAM is worth against bombers at their new price."
+try = "Attack-move at the generator in one group. Then come in from the side with the fewest SAMs, and try two waves of three."
+blue = [{ unit = "t3_strategic_bomber", count = 6, at = [700, 2_560], columns = 6 }]
+red = [
+    { unit = "power_generator_t3", cell = [178, 126] },
+    { unit = "t3_sam", cell = [172, 122] },
+    { unit = "t3_sam", cell = [172, 128] },
+    { unit = "t3_sam", cell = [172, 134] },
+    { unit = "t3_sam", cell = [178, 120] },
+    { unit = "t3_sam", cell = [178, 134] },
+    { unit = "t3_sam", cell = [184, 120] },
+    { unit = "t3_sam", cell = [184, 134] },
+    { unit = "t3_sam", cell = [186, 124] },
+    { unit = "t3_sam", cell = [186, 130] },
+]
+
+[[scenario]]
+id = "air_t3_fighters_against_heavy_gunships"
+title = "Air superiority: T3 fighters against an equal cost of heavy gunships"
+shows = "T3 fighters, which now cost more than heavy gunships, against an equal cost of them, coming at you. A T3 fighter destroys a heavy gunship in about 15 seconds on its own, and a gunship's own anti-air barely scratches it, so the fighters should win and keep most of themselves."
+try = "Attack-move in. Then put all the fighters on one gunship at a time, and see how much quicker it goes."
+blue = [{ unit = "t3_air_superiority", count = 6, at = [1_200, 2_560], columns = 6 }]
+red = [{ unit = "t3_heavy_gunship", count = 7, at = [3_200, 2_560], columns = 7, order = "attack" }]
+
+[[scenario]]
+id = "air_fighter_bombers_against_interceptors"
+title = "Two jobs: Fighter-bombers against interceptors over a tank column"
+shows = "Four fighter-bombers against six interceptors coming at them, over a column of Medium Tanks. Since 2026-11-26 a fighter-bomber fights a plane as a fighter does, on its tail inside its gun's reach, rather than on bombing passes, and its gun destroys an interceptor in about two seconds. Then it carpets the tanks. That is why it costs half again more than it did."
+try = "Attack-move at the tanks and let the interceptors come to you. Then order them onto the interceptors first, and onto the tanks once the sky is clear."
+blue = [{ unit = "t2_fighter_bomber", count = 4, at = [1_200, 2_560], columns = 4 }]
+red = [
+    { unit = "t1_interceptor", count = 6, at = [3_000, 2_560], columns = 6, order = "attack" },
+    { unit = "t1_medium_tank", count = 12, at = [3_400, 2_560], columns = 6 },
+]
+
+[[scenario]]
+id = "air_heavy_gunships_against_a_t3_army"
+title = "Gunships at half price: heavy gunships against a T3 army a fifth flak"
+shows = "Eight heavy gunships, at about half what they cost before the price list, against as much of a T3 army: Heavy Walkers with a fifth of its cost in Mobile Flak, as the T2 anti-air rule has it. Gunships hover over what they attack, too slow to outfly flak, so the flak is the fight."
+try = "Attack-move in. Then go for the flak first, from one side, and bring the rest in once it's down."
+blue = [{ unit = "t3_heavy_gunship", count = 8, at = [1_200, 2_560], columns = 8 }]
+red = [
+    { unit = "t3_heavy_walker", count = 13, at = [3_200, 2_560], columns = 7 },
+    { unit = "t2_mobile_flak", count = 8, at = [3_300, 2_560], columns = 4 },
 ]

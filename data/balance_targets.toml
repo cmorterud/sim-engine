@@ -270,6 +270,18 @@ battleship_breaks_t3_shield = [40, 52]
 # check its health (between six bombs and twelve); its cost is then the price list's.
 frigate_anti_air_t1_bomber = [20, 22]
 six_t1_bombers_sink_a_frigate_passes = 2
+# Air against air and the commander (2026-11-26, the design owner's rules): they set the T3
+# fighter's gun (1,070 a shot every second, in a 40-degree cone) and health (3,520), the heavy gunship's health (9,600, also the cruiser's six volleys) and gun (360
+# a second), and the fighter-bomber's anti-air (174 a second). Timed from the first shot, which
+# lands at once, so health is set at half a shot past the time. The Strategic Bomber has no anti-air.
+# With its gun in a 40-degree cone (2026-11-26) it lands a shot about every 2 seconds, so its
+# kill times step by 2 seconds; the design owner took 1,070 damage, which puts a Strategic Bomber
+# down in 8.7 s (6 shots), and the band's low end with it.
+t3_fighter_strategic_bomber = [8.5, 11]
+t3_fighter_t3_fighter = [4.5, 5.5]
+t3_fighter_heavy_gunship = [14, 16]
+heavy_gunship_commander_on_land = [45, 55]
+fighter_bomber_interceptor = [1.5, 2.5]
 sam_t2_gunship = [1.5, 3.0]
 sam_t3_strategic_bomber = [9.5, 12.5]
 # The cruiser's anti-air, its volleys timed by tests/kill_times_test.rs.
@@ -314,10 +326,11 @@ fighters = ["t1_interceptor", "t2_fighter_bomber", "t3_air_superiority"]
 # that it can take on a swarm. In a fight at T3 prices ([economy]), it beats an equal materiel of
 # interceptors by at least this score.
 [air.t3_fighter]
-dps_over_interceptor = [9, 11]
+# Its damage a second is set by [kill_times] (2026-11-26; nine to eleven times the interceptor's
+# until then). It is 30% faster than the Strategic Bomber.
+speed_over_strategic_bomber = 1.3
 range_over_interceptor = [1.05, 1.25]
 turn_over_interceptor = 1.25
-beats_interceptors_by = 0.2
 
 # Flying heights, as shares of the T3 spy plane's, the highest (2026-11-22): the spy plane far up,
 # fighters and the heavy bombers below it, light aircraft lower, and what hovers lowest.
@@ -406,15 +419,18 @@ t3_battleship = 0.44
 # lasers at twice a battleship turret's damage a second, its cost paying for lasers that cannot
 # be dodged (reports/plans/2026-11-26-derived-stats.md).
 t3_battlecruiser = 0.45
-t2_gunship = 0.62
-t2_torpedo_bomber = 0.55
-t2_fighter_bomber = 0.45
-t3_heavy_gunship = 0.38
-# The fighters (2026-11-25), by their anti-air: they had been set by [air] rules alone, which fix
-# their damage and the interceptor's health ceiling, and sat at about half and three-quarters of
-# these. Priced and built as the inspiration has them; their damage is kept for those rules.
+# T2 and T3 aircraft by the ability price list's costs (2026-11-26, [price_list]): their strength
+# per cost at those costs, their stats set by [kill_times] and [volleys].
+t2_gunship = 0.93
+# The torpedo bomber is a counter, its cost held by its cells (2026-11-26): this is its strength per
+# cost at 240, the price list's 131 only a check.
+t2_torpedo_bomber = 0.51
+t2_fighter_bomber = 0.31
+t3_heavy_gunship = 0.88
+t3_air_superiority = 0.79
+# The interceptor keeps the inspiration's ratio while T1 aircraft keep their costs
+# ([price_list] domain_base).
 t1_interceptor = 0.31
-t3_air_superiority = 0.76
 # The mobile flak is not here: like the T1 mobile anti-air, it is set by the anti-air share rule
 # (air_force_against_land_army_t2_even), not by a ratio.
 
@@ -426,6 +442,20 @@ t3_air_superiority = 0.76
 # seven-tenths of its cost (2026-11-24): they carry its anti-air and its anti-torpedo charges, as in the
 # inspiration, whose battleships have next to no anti-air and no anti-torpedo charge, so a fleet
 # is as safe from the air as it is escorted. The AI's T3 naval factories build this mix.
+# Aircraft pay for the damage they land, not their card's (2026-11-26): anti-air against a bomber
+# flying its run (the Strategic Bomber at T3, the T1 Bomber below), bombs, guns and torpedoes against
+# a target holding still. The share each lands, as tests/kill_times_test.rs measures it.
+[price_list.landed_share]
+t1_interceptor = 0.91
+t2_fighter_bomber_anti_air = 1.0
+t3_air_superiority = 1.0
+t1_bomber = 0.52
+t2_fighter_bomber = 0.95
+t3_strategic_bomber = 0.89
+t2_torpedo_bomber = 0.82
+t2_gunship = 1.0
+t3_heavy_gunship = 1.0
+
 [domains.forces]
 t1_fleet = { t1_frigate = 3, t1_attack_sub = 1 }
 t2_fleet = { t2_destroyer = 2, t2_cruiser = 2, t2_escort_corvette = 1 }
@@ -569,14 +599,26 @@ battleship_broadside_seconds = 13.5
 # flexibility price. The anchor is the Medium Tank's strength per cost.
 anchor_strength_per_cost = 2.806
 tier_efficiency = [1.0, 1.0, 1.0]
-# The navy's base, solved by holding the T2 fleet (two destroyers, two cruisers) at its cost. Air's
-# is not set yet: its prices for flight and air-to-air fights are missing, so air keeps its costs.
-domain_base = { land = 1.0, navy = 0.648 }
+# The navy's base, solved by holding the T2 fleet (two destroyers, two cruisers) at its cost. Air's,
+# as the navy's, by holding the T2 air force's strike aircraft (four gunships, two fighter-bombers)
+# at their cost (2026-11-26). A price every aircraft would pay alike, for flying, cancels in it.
+# T1 aircraft keep their costs, held by [air] strike_seconds_t1: the list prices them at about a
+# third of them, which says it is missing something about aircraft against land, most likely that
+# only anti-air reaches them. That is open.
+domain_base = { land = 1.0, navy = 0.669, air = 0.902 }
 # Reach past the line's: x = c (r / r_line - 1), price x h / (1 - x h), h about 1 for shells and
 # 0 for missiles. Short of it: -c (1 - r / r_line) (v_line / v). Speed: speed_share (1 - v_line / v).
 speed_share = 0.3
 # Splash: sqrt(n) - 1, n the damage one shot does across a standing or marching formation over its
 # listed damage, measured.
+# First volley (2026-11-26, for the Strategic Bomber's one great bomb a pass, and every weapon
+# alike): a weapon's first volley lands as a fight starts, so over a fight it lands about half a
+# volley more than its damage a second, the half shot [kill_times] counts. Its price is
+# sqrt(1 + share x gap / fight) - 1: gap the seconds between its volleys (a bomber's pass), fight
+# the [model] time to kill at its tier in the domain of what it hits (land's for the ground, the
+# navy's at sea, air_to_air for aircraft). The Strategic Bomber's bomb every 13.5 seconds against
+# 18.2 pays 0.17; a gun firing every second, next to nothing.
+first_volley_share = 0.5
 # Undodgeable weapons: sqrt(1 / (1 - d)) - 1, d the cost-weighted share of shell damage the
 # standard T3 fleet dodges, turning back 0.3 s after each shell leaves: 0.44, so 0.34.
 undodgeable = 0.34

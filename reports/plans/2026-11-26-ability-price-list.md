@@ -78,5 +78,53 @@ times the destroyer's, as its torpedoes do three times the destroyer's damage a 
   targets; the list charges reach in every matchup, which pays only against the line.
 - **Land**: within about 10% (Light Walker −10%, scout +5%, Siege Walker −9%), costs the land
   solver's targets pin. The list is a check on them here.
-- **Air**: swings of −63% to +78% mean flight itself (only anti-air reaches a plane) and air-to-air
-  fights are unpriced. Air keeps its costs until its own pass.
+- **Air**: priced in its own pass, below.
+
+## Air (2026-11-26)
+
+T2 and T3 aircraft take the list's costs, with the design owner's air rules ([kill_times],
+[volleys]) setting their stats. Three things were added first.
+
+- **Landed damage.** A plane pays for what it lands, not its card's damage: anti-air against a
+  bomber flying its run, bombs, guns and torpedoes against a target holding still.
+  `[price_list.landed_share]` keeps the shares, and tests/kill_times_test.rs measures them: the
+  interceptor 0.91, fighter-bomber and T3 fighter guns 1.0, T1 Bomber 0.52, fighter-bomber bomb
+  0.95, Strategic Bomber 0.89, torpedo bomber 0.82, gunships 1.0.
+- **The fighter-bomber fights a plane as a fighter**, on its tail within its gun's reach, rather
+  than on bombing passes, which had landed 42% of its anti-air.
+- **First volley.** A weapon's first volley lands as a fight starts, so over a fight it lands
+  about half a volley more than its damage a second suggests, the half shot [kill_times] counts:
+  √(1 + 0.5 × volley gap / fight) − 1, the fight being the [model] time to kill at the weapon's
+  tier, in the domain of what it hits. The Strategic Bomber's bomb every 13.5 s, in an 18.2 s
+  fight, pays 0.17; a gun firing every second, next to nothing. Ships move by about 2% with it,
+  and the navy base to 0.669.
+
+The air base, 0.902, holds the T2 air force's strike aircraft (four gunships, two fighter-bombers)
+at their cost, as the navy's holds its T2 fleet. A price every plane pays alike, for flying,
+cancels in it.
+
+| Aircraft | Cost before | Cost now | Why |
+| --- | --- | --- | --- |
+| Strategic Bomber | 3,381 | 1,254 | One 5,200 bomb every 13.5 s on 6,400 health |
+| Heavy Gunship | 1,491 | 756 | 9,600 health and 360 a second, slow |
+| Gunship | 226 | 133 | 1,590 health and 75 a second, about a Heavy Tank |
+| Fighter-Bomber | 343 | 530 | Two full jobs: a T2 bomber's, and a fighter's that destroys an interceptor in 2 s |
+| T3 Fighter | 675 | 879 | 1,070 a shot every second, all landing on planes in flight, and the fastest |
+| Torpedo Bomber | 246 | 240 | Held by its cells (list 131), below |
+
+Held, with reasons:
+
+- **Torpedo Bomber, 240** (list: 131). A counter to ships, held by its cells as the Torpedo Boat
+  is: at the list's cost torpedo bombers broke the T2 fleet at 0.95 times its cost, against
+  `torpedo_bombers_to_break_fleet_t2` of 2 to 5. 240 is the least that meets it (2.08), and a
+  battleship-heavy fleet still breaks under 1.0 (0.80).
+- **Interceptor and T1 Bomber** keep their costs, held by `[air] strike_seconds_t1`. The list
+  prices them at about a third of that, which says it is missing something about aircraft against
+  land, most likely that only anti-air reaches them. That is open.
+
+What changed with it: flak's per-cost checks against the cheaper aircraft. Massed flak that all
+but brings down a Strategic Bomber is now seven times its cost (three times the borrowed 3,381,
+about the same flak), and static flak takes half as much again as a heavy gunship's cost to bring
+one down. The commander snipe, four Strategic Bombers in one pass, costs about 5,000 (13,500
+before): no fight price can value a game's end, and its counters, eight SAM missiles or a T3
+fighter, are unchanged. The air scenarios in data/scenarios.toml (`air_*`) play these by hand.

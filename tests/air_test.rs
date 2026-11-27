@@ -487,8 +487,10 @@ fn sam_launchers_and_air_superiority_fighters_down_heavy_aircraft() {
     assert!(world.unit_health(bomber).is_none(), "one shot of 500 against 215");
 }
 
+/// The Strategic Bomber has no anti-air (2026-11-26, the design owner's rule): a scout on its tail
+/// is left alone while its bomb takes the generator.
 #[test]
-fn a_strategic_bomber_bombs_with_its_main_weapon_and_shoots_aircraft_with_its_guns() {
+fn a_strategic_bomber_bombs_with_its_main_weapon_and_has_no_guns() {
     let mut world = world();
     let generator = world.spawn_finished_structure(world.blueprints.id("power_generator"), Team::Red, 150, 125).unwrap();
     let bomber = spawn(&mut world, "t3_strategic_bomber", Team::Blue, point(1_000, 1_000));
@@ -496,7 +498,7 @@ fn a_strategic_bomber_bombs_with_its_main_weapon_and_shoots_aircraft_with_its_gu
     world.advance_tick(&[SimCommand::Follow { units: vec![scout], target: bomber }]);
     world.advance_tick(&[SimCommand::Attack { units: vec![bomber], target: generator }]);
     run(&mut world, 600);
-    assert!(world.unit_health(scout).is_none(), "its guns should down the scout on its tail");
+    assert!(world.unit_health(scout).is_some(), "it has no guns to down the scout on its tail");
     assert!(world.unit_health(generator).is_none(), "while its bomb takes the generator");
 }
 
@@ -524,6 +526,37 @@ fn a_fighter_bomber_carpets_the_ground_and_fights_aircraft() {
     run(&mut world, 700);
     assert!(world.unit_health(interceptor).is_none(), "150 a second against 295");
     assert!(generators.iter().all(|&id| world.unit_health(id).is_none()), "1,600 within 60 takes both");
+}
+
+/// A fighter-bomber after an aircraft flies as a fighter, on its tail within its gun's reach,
+/// rather than out on bombing passes: its bomb is for the ground, and its gun reaches 600.
+#[test]
+fn a_fighter_bomber_fights_an_aircraft_from_its_tail() {
+    use sim_engine::sim::components::Health;
+    let mut world = world();
+    let generator = world.spawn_finished_structure(world.blueprints.id("power_generator"), Team::Blue, 150, 125).unwrap();
+    let bomber = spawn(&mut world, "t1_bomber", Team::Red, point(4_000, 2_500));
+    world.advance_tick(&[SimCommand::Attack { units: vec![bomber], target: generator }]);
+    run(&mut world, 60);
+    let fighter_bomber = spawn(&mut world, "t2_fighter_bomber", Team::Blue, point(1_500, 2_500));
+    world.advance_tick(&[SimCommand::Attack { units: vec![fighter_bomber], target: bomber }]);
+    let full = Fp::from_num(30_000);
+    let (mut dealt, mut ticks, mut farthest) = (0.0f64, 0u32, 0i64);
+    for _ in 0..600 {
+        for id in [generator, bomber] {
+            world.ecs.get::<&mut Health>(world.unit_entity(id).unwrap()).unwrap().current = full;
+        }
+        world.advance_tick(&[]);
+        let lost = (full - world.ecs.get::<&Health>(world.unit_entity(bomber).unwrap()).unwrap().current).to_num::<f64>();
+        if lost > 0.0 || ticks > 0 {
+            dealt += lost;
+            ticks += 1;
+            farthest = farthest.max(distance(&world, fighter_bomber, world.unit_position(bomber).unwrap().xy()));
+        }
+    }
+    let per_second = dealt / (f64::from(ticks) / 10.0);
+    assert!(per_second > 0.9 * 174.0, "it lands nearly all of its 174 a second: {per_second:.0}");
+    assert!(farthest <= 600, "and keeps within its gun's reach once firing: {farthest}");
 }
 
 /// On an attack-move, a bomber keeps to the target it picks, pass after pass, as if told to

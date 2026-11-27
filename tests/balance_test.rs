@@ -211,9 +211,9 @@ fn anti_air_is_no_better_a_shield_and_fighters_out_turn_bombers() {
     }
 }
 
-/// The T3 fighter against the T1 interceptor ([air.t3_fighter]): ten times the damage a second,
-/// one shot to destroy one, more range and speed, a quicker turn, and the better buy in a fight
-/// at T3 prices, so that spamming interceptors against it loses.
+/// The T3 fighter against the T1 interceptor ([air.t3_fighter]): more damage a second,
+/// one shot to destroy one, more range and speed, a quicker turn. An equal cost of interceptors
+/// may beat it (the design owner, 2026-11-26), so that fight is reported, not held.
 #[test]
 fn the_t3_fighter_outclasses_the_t1_interceptor() {
     use sim_engine::balance::{bought_at, cost_at};
@@ -229,8 +229,10 @@ fn the_t3_fighter_outclasses_the_t1_interceptor() {
     let (fighter, interceptor) = (db.get(db.id("t3_air_superiority")), db.get(db.id("t1_interceptor")));
     let (gun, small) = (fighter.weapon.expect("a gun"), interceptor.weapon.expect("a gun"));
     let dps = |weapon: sim_engine::sim::blueprints::WeaponDef| weapon.damage.to_num::<f64>() * 10.0 / f64::from(weapon.reload_ticks.max(1));
-    let (low, high) = range("dps_over_interceptor");
-    assert!((low..=high).contains(&(dps(gun) / dps(small))), "{} times the damage a second", dps(gun) / dps(small));
+    assert!(dps(gun) > dps(small), "{} times the damage a second", dps(gun) / dps(small));
+    let bomber = db.get(db.id("t3_strategic_bomber"));
+    let over = fighter.speed.to_num::<f64>() / bomber.speed.to_num::<f64>();
+    assert!((over - number("speed_over_strategic_bomber")).abs() < 0.02, "{over} times the Strategic Bomber's speed");
     assert!(gun.damage >= interceptor.health, "a shot of {} against {} health", gun.damage, interceptor.health);
     let (low, high) = range("range_over_interceptor");
     let reach = gun.range.to_num::<f64>() / small.range.to_num::<f64>();
@@ -238,10 +240,22 @@ fn the_t3_fighter_outclasses_the_t1_interceptor() {
     assert!(fighter.speed > interceptor.speed, "faster");
     let turn = |unit: &sim_engine::sim::blueprints::Blueprint| f64::from(unit.flight.expect("flies").turn_rate);
     assert!(turn(fighter) >= turn(interceptor) * number("turn_over_interceptor"), "turns at {}", turn(fighter));
-    assert!(gun.arc.is_none(), "its guns fire off its nose");
+    // Its guns fire off its nose, within 40 degrees of straight ahead (the design owner,
+    // 2026-11-26), wider than the interceptor's 30.
+    let (cone, narrow) = (gun.arc.expect("a gun on its nose"), small.arc.expect("a gun on its nose"));
+    assert!(cone < narrow, "a cone as wide as the cosine {cone}");
+    // It eases off slower than the interceptor to turn tighter; the T1 bomber never eases off,
+    // and the Strategic Bomber only slightly (the design owner, 2026-11-26).
+    let slowest = |unit: &sim_engine::sim::blueprints::Blueprint| unit.flight.expect("flies").min_speed;
+    assert!(slowest(fighter) < slowest(interceptor), "eases off to {}", slowest(fighter));
+    let t1_bomber = db.get(db.id("t1_bomber"));
+    assert_eq!(slowest(t1_bomber), t1_bomber.speed, "the T1 bomber never eases off");
+    assert!(slowest(bomber) < bomber.speed && slowest(bomber) >= bomber.speed * 4 / 5, "the Strategic Bomber eases off to {}", slowest(bomber));
     let materiel = 6.0 * cost_at(fighter, 3);
     let fight = mirrored(&db, bought_at(&db, "t3_air_superiority", materiel, 3), bought_at(&db, "t1_interceptor", materiel, 3), 1.0);
-    assert!(fight.score >= number("beats_interceptors_by"), "six fighters score {} against as much in interceptors", fight.score);
+    // It may lose to as much in interceptors (the design owner, 2026-11-26: the cheaper plane
+    // must be worth its cost), so the fight is only reported.
+    println!("six fighters score {:+.2} against as much in interceptors", fight.score);
 }
 
 /// The sea grounds (2026-11-24, for fights between domains) are as fair as the land: equal fleets
@@ -500,12 +514,13 @@ fn point_defenses_are_worth_more_and_hovercraft_less_for_their_cost() {
     assert!((band[0]..=band[1]).contains(&efficiency), "the hovercraft is {efficiency:.2} as strong per materiel as the Heavy Tank on land");
 }
 
-/// `[domains] strength_over_anchor` (2026-11-25): the fighters are as strong per cost against
-/// aircraft, against the anchor, as the inspiration has its own, within the band, with the damage
-/// `[air]` fixes for them (an interceptor kills a bomber in about ten seconds; the T3 fighter has
-/// nine to eleven times its damage and destroys one with a shot).
+/// `[domains] strength_over_anchor`: the fighters are as strong per cost against aircraft, against
+/// the anchor, as their ratios, within the band: the T3 fighter's by the ability price list's cost
+/// (2026-11-26), the interceptor's the inspiration's while T1 aircraft keep their costs. Their
+/// damage is set by `[air]` and `[kill_times]`, and the T3 fighter destroys an interceptor with a
+/// shot.
 #[test]
-fn fighters_are_as_strong_per_cost_as_the_inspirations() {
+fn fighters_are_as_strong_per_cost_as_their_ratios() {
     let db = db();
     let band = domains(&["strength_band"]).as_array().expect("a band").iter().map(number).collect::<Vec<f64>>();
     for key in ["t1_interceptor", "t3_air_superiority"] {

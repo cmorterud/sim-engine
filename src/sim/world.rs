@@ -2839,6 +2839,7 @@ impl SimWorld {
                 (Some(turret), Some(front)) => turret.position((me.x, me.y), front),
                 _ => (me.x, me.y),
             };
+            let turreted = turret.is_some();
             // A turret swivels to its target, or back to where it rests without one, and only fires once it points there.
             let aimed = match turret {
                 // A gun fixed to the nose fires only at what is within its arc of straight ahead.
@@ -2870,6 +2871,38 @@ impl SimWorld {
             // A broadside goes off all at once: the main weapon waits until each of its guns that
             // has a target points at it (as they did last tick), so that the first volley is whole.
             let aimed = aimed && extras.as_deref().is_none_or(|extras| extras.0.iter().all(|weapon| !weapon.broadside || weapon.aimed || weapon.target.is_none()));
+            // A gun fixed to the nose never lets a shot go by: ready, with its own target outside
+            // its arc or none at all, it fires at the nearest it can hit inside the arc, and keeps
+            // steering for its own (the design owner, 2026-11-26).
+            let snap = nose_gun.zip(front).filter(|_| !aimed && !turreted && ground.is_none() && discharge_target.is_none() && can_fire && combat.ticks_until_ready == 0).and_then(|(arc, front)| {
+                let mut best: Option<(i64, SimId)> = None;
+                let mut consider = |other: &super::spatial::GridEntry| {
+                    let away = Vec2Fp::new(Fp::from_bits(other.x - gun.0), Fp::from_bits(other.y - gun.1));
+                    let ahead = away != Vec2Fp::ZERO && {
+                        let away = away.normalized();
+                        front.x * away.x + front.y * away.y >= arc.0
+                    };
+                    if ahead && can_engage(other) {
+                        let candidate = (reach_distance(other), other.id);
+                        if best.is_none_or(|current| candidate < current) {
+                            best = Some(candidate);
+                        }
+                    }
+                };
+                let enemy = Some(stats.team.enemy());
+                let reach = range as i32 + max_mobile;
+                if hits_air {
+                    grid.for_each_candidate(enemy, Layer::Air, me.x, me.y, reach, &mut consider);
+                }
+                if hits_ground {
+                    grid.for_each_candidate(enemy, Layer::Mobile, me.x, me.y, reach, &mut consider);
+                    if max_structure > 0 {
+                        grid.for_each_candidate(enemy, Layer::Structure, me.x, me.y, range as i32 + max_structure, &mut consider);
+                    }
+                }
+                best.map(|(_, found)| found)
+            });
+            let aimed = aimed || snap.is_some();
             // Discharge fires in range, once aimed and reloaded, if the team has the energy stored.
             if let (Some(target), Some(weapon), true) = (discharge_target, discharge.as_mut(), can_fire) {
                 let economy = &mut economies[stats.owner.index()];
@@ -2934,7 +2967,7 @@ impl SimWorld {
             };
             let spread = artillery.map_or_else(|| scatter.map_or(Fp::ZERO, |scatter| scatter.0), |artillery| artillery.spread);
             if combat.ticks_until_ready == 0 && aimed && gun_free && loaded && charged && can_fire && set_up {
-                if let Some(target) = combat.target {
+                if let Some(target) = snap.or(combat.target) {
                     let entry = locate(target).expect("target was just validated or found");
                     let (from, to) = (raw(gun.0, gun.1, launch_height(muzzle, torpedo)), raw(entry.x, entry.y, entry.z));
                     // Missiles at aircraft steer themselves to them; guns' and flak's shells fly

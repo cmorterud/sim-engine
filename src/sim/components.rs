@@ -329,6 +329,8 @@ pub struct Flight {
     pub pad: u8,
     /// Hovers over what it attacks, like a gunship, instead of making passes.
     pub hovers: bool,
+    /// The slowest it eases off to, to turn tighter (`FlightDef::min_speed`).
+    pub min_speed: Fp,
     /// Having flown over its target, how far it flies on before it turns back for another pass.
     pub break_off: Fp,
     /// Flying on, away from its target.

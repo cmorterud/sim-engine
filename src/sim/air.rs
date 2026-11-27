@@ -251,10 +251,13 @@ impl SimWorld {
 
             // A target to make passes over, a facility to land on, the end of its move, or nowhere.
             let chasing = if order.kind == OrderKind::Move { None } else { combat.target.or(combat.forced_target) };
+            // A bomber with a gun, after an aircraft, flies as a fighter: its bomb is for the
+            // ground, so it makes no bombing passes at a plane.
+            let bombing = bomb_bay.is_some() && !chasing.and_then(locate).is_some_and(|entry| entry.is_air);
             // A bomber heads for where the target will be when its bomb lands.
             let target = chasing.and_then(locate).map(|entry| {
                 let at = Vec2Fp::new(Fp::from_bits(entry.x), Fp::from_bits(entry.y));
-                if bomb_bay.is_some() { bomb_lead(at, entry.velocity, flight.elevation) } else { at }
+                if bombing { bomb_lead(at, entry.velocity, flight.elevation) } else { at }
             });
             let ground_target = combat.ground_target.filter(|_| order.kind == OrderKind::Attack);
             let mut heading_for = if staging.is_some() { None } else { target.or(ground_target) };
@@ -308,15 +311,31 @@ impl SimWorld {
             // A fighter in range behind an aircraft it attacks eases off to the speed its target
             // flies away from it, to stay on its tail rather than overshoot and loop round; never
             // below half its own, and it still turns no faster than it can.
-            let tailing = chasing.filter(|_| bomb_bay.is_none() && !flight.hovers).and_then(locate).filter(|entry| entry.is_air).and_then(|entry| {
+            let tailing = chasing.filter(|_| !bombing && !flight.hovers).and_then(locate).filter(|entry| entry.is_air).and_then(|entry| {
                 let offset = Vec2Fp::new(Fp::from_bits(entry.x), Fp::from_bits(entry.y)) - here;
                 let facing = turning.facing;
                 let reach = combat.range * 3 / 4;
                 let behind = facing.x * offset.x + facing.y * offset.y > Fp::ZERO && offset.length_squared() <= wide_mul(reach, reach);
                 behind.then(|| {
                     let away = facing.x * Fp::from_bits(entry.velocity[0]) + facing.y * Fp::from_bits(entry.velocity[1]);
-                    away.clamp(top_speed / 2, top_speed)
+                    away.clamp(flight.min_speed.min(top_speed), top_speed)
                 })
+            });
+            // A point inside its turn at full speed it reaches by easing off just enough to turn
+            // onto it, rather than fly on and loop round, as long as that is no slower than its
+            // slowest (`min_speed`): tighter still, it flies on at full speed. A turn it can make at
+            // full speed it makes at full speed. In a dogfight too (the design owner, 2026-11-26).
+            // Not while a bomber breaks off, which flies on on purpose.
+            let floor = flight.min_speed.min(top_speed);
+            let turning_in = heading_for.filter(|_| floor < top_speed && !flight.hovers && !flight.breaking_off && !hold && !landing).and_then(|point| {
+                let offset = point - here;
+                let facing = turning.facing;
+                (offset != Vec2Fp::ZERO && inside_turn(facing, offset, turn_radius(top_speed, turning.max_turn))).then_some(())?;
+                let across = (facing.x * offset.y - facing.y * offset.x).abs();
+                // The circle through it that leaves along its heading, d² / 2·across.
+                let fits = Fp::from_bits(i32::try_from((wide_mul(offset.x, offset.x) + wide_mul(offset.y, offset.y)).to_bits() / (2 * i64::from(across.to_bits().max(1)))).unwrap_or(i32::MAX));
+                let speed = fits.saturating_mul(turning.max_turn);
+                (speed >= floor).then_some(speed.min(top_speed))
             });
             let down = |value: Fp, full: Fp, floor: Fp| (value - full / LANDING_TICKS).max(floor);
             let up = |value: Fp, full: Fp, ceiling: Fp| if value > ceiling { down(value, full, ceiling) } else { (value + full / LANDING_TICKS).min(ceiling) };
@@ -327,7 +346,7 @@ impl SimWorld {
                 flight.speed = down(flight.speed, stats.max_speed, Fp::ZERO);
                 flight.altitude = up(flight.altitude, flight.elevation, height);
             } else {
-                flight.speed = up(flight.speed, stats.max_speed, tailing.unwrap_or(top_speed));
+                flight.speed = up(flight.speed, stats.max_speed, tailing.unwrap_or(top_speed).min(turning_in.unwrap_or(top_speed)));
                 flight.altitude = up(flight.altitude, flight.elevation, height);
             }
             // Flying burns fuel, and on the ground it slowly comes back.
@@ -341,7 +360,7 @@ impl SimWorld {
             // A bomber lets go well short of its target, its bomb's throw ahead, so it flies on
             // far enough past to turn round and line up for that again: twice round its turn,
             // then the throw, then a run-up to settle on the line.
-            let throw = bomb_bay.map(|_| bomb_throw(flight.elevation, stats.max_speed));
+            let throw = bombing.then(|| bomb_throw(flight.elevation, stats.max_speed));
             let break_off = match throw {
                 Some(throw) => {
                     // Room to line up again, however tight its turn: a target moving across its
@@ -376,8 +395,9 @@ impl SimWorld {
                         let half = break_off / 2;
                         flight.breaking_off = behind && distance_squared < wide_mul(half, half);
                     }
-                    // A gunship can turn on the spot, so nothing is out of its reach.
-                    let unreachable = !flight.hovers && inside_turn(facing, offset, radius);
+                    // A gunship can turn on the spot, so nothing is out of its reach. Easing off
+                    // to turn in, it turns as tight as its speed allows.
+                    let unreachable = !flight.hovers && inside_turn(facing, offset, if turning_in.is_some() { turn_radius(speed, turning.max_turn) } else { radius });
                     if flight.breaking_off || offset == Vec2Fp::ZERO || unreachable {
                         facing
                     } else {

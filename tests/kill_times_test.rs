@@ -232,6 +232,25 @@ fn a_sam_launcher_destroys_a_gunship_and_a_strategic_bomber_in_time() {
     }
 }
 
+/// Aircraft against aircraft hanging in the air, and the heavy gunship against a commander on
+/// land, each alone, in about the design owner's times (2026-11-26).
+#[test]
+fn aircraft_destroy_their_targets_in_time() {
+    for (name, shooter, prey) in [
+        ("t3_fighter_strategic_bomber", "t3_air_superiority", "t3_strategic_bomber"),
+        ("t3_fighter_t3_fighter", "t3_air_superiority", "t3_air_superiority"),
+        ("t3_fighter_heavy_gunship", "t3_air_superiority", "t3_heavy_gunship"),
+        ("fighter_bomber_interceptor", "t2_fighter_bomber", "t1_interceptor"),
+        ("heavy_gunship_commander_on_land", "t3_heavy_gunship", "command_rig"),
+    ] {
+        let mut world = world();
+        let target = target(&mut world, prey, (7_600, 5_000));
+        let plane = place(&mut world, shooter, Team::Blue, (6_400, 5_000));
+        world.advance_tick(&[SimCommand::Attack { units: vec![plane], target }]);
+        assert_within(name, ticks_to_kill(&mut world, &[plane], target, 2_000));
+    }
+}
+
 /// A frigate's anti-air destroys one T1 bomber hanging in the air in about 21 seconds
 /// (2026-11-26, the design owner's number).
 #[test]
@@ -603,4 +622,71 @@ fn a_microed_commander_only_just_walks_out_of_a_battleships_broadsides_at_its_fu
     assert!(survived && fired >= 15, "from the edge of its reach the commander walked out of {fired} shells: {survived}");
     let (survived, fired) = survives_from(2_200);
     assert!(!survived, "from 2,200 the commander walked out of all {fired} shells");
+}
+
+/// `[price_list.landed_share]` (2026-11-26): each aircraft lands the share of its card's damage a
+/// second that its price assumes. Anti-air is measured against a bomber flying its runs at a tank,
+/// everything else against a target holding still; both are kept alive, and the share is counted
+/// over two minutes from the first hit.
+#[test]
+fn aircraft_land_the_share_of_their_damage_their_price_assumes() {
+    use sim_engine::sim::components::Health;
+    let table = targets();
+    let shares = table["price_list"]["landed_share"].as_table().expect("[price_list.landed_share]");
+    let full = Fp::from_num(30_000);
+    let per_second = |weapon: &WeaponDef| weapon.damage.to_num::<f64>() * f64::from(weapon.salvo.map_or(1, |salvo| salvo.shots)) * TICKS_PER_SECOND as f64 / f64::from(weapon.reload_ticks.max(1));
+    // (the share's key, the aircraft, the target, where the target is, whether the target flies a bomber's runs)
+    let cases = [
+        ("t1_bomber", "t1_bomber", "t1_medium_tank", (7_600, 5_000), false),
+        ("t2_fighter_bomber", "t2_fighter_bomber", "t1_medium_tank", (7_600, 5_000), false),
+        ("t3_strategic_bomber", "t3_strategic_bomber", "t2_heavy_tank", (7_600, 5_000), false),
+        ("t2_torpedo_bomber", "t2_torpedo_bomber", "t2_destroyer", (3_000, 5_000), false),
+        ("t2_gunship", "t2_gunship", "t1_medium_tank", (7_600, 5_000), false),
+        ("t3_heavy_gunship", "t3_heavy_gunship", "t2_heavy_tank", (7_600, 5_000), false),
+        ("t1_interceptor", "t1_interceptor", "t1_bomber", (8_800, 5_000), true),
+        ("t2_fighter_bomber_anti_air", "t2_fighter_bomber", "t1_bomber", (8_800, 5_000), true),
+        ("t3_air_superiority", "t3_air_superiority", "t3_strategic_bomber", (8_800, 5_000), true),
+    ];
+    let mut off = Vec::new();
+    for (key, shooter, prey, at, flying) in cases {
+        let share = number(&shares[key]);
+        let mut world = world();
+        let (target, kept) = if flying {
+            let tank = target(&mut world, "t2_heavy_tank", (7_600, 5_000));
+            let bomber = place(&mut world, prey, Team::Red, at);
+            world.advance_tick(&[SimCommand::Attack { units: vec![bomber], target: tank }]);
+            for _ in 0..60 {
+                world.advance_tick(&[]);
+            }
+            (bomber, vec![tank, bomber])
+        } else {
+            let target = target(&mut world, prey, at);
+            (target, vec![target])
+        };
+        let plane = place(&mut world, shooter, Team::Blue, (at.0 - 1_200, at.1));
+        world.advance_tick(&[SimCommand::Attack { units: vec![plane], target }]);
+        let (mut dealt, mut ticks) = (0.0f64, 0u32);
+        for _ in 0..2_400 {
+            for &id in &kept {
+                world.ecs.get::<&mut Health>(world.unit_entity(id).expect("kept alive")).unwrap().current = full;
+            }
+            world.advance_tick(&[]);
+            let lost = (full - world.ecs.get::<&Health>(world.unit_entity(target).unwrap()).unwrap().current).to_num::<f64>();
+            if lost > 0.0 || ticks > 0 {
+                dealt += lost;
+                ticks += 1;
+            }
+            if ticks == 1_200 {
+                break;
+            }
+        }
+        let blueprint = world.blueprints.get(world.blueprints.id(shooter));
+        let listed: f64 = blueprint.weapon.iter().chain(&blueprint.extra_weapons).filter(|weapon| (weapon.targets == Targets::Air) == flying).map(per_second).sum();
+        let landed = dealt / (f64::from(ticks) / TICKS_PER_SECOND as f64) / listed;
+        println!("{key}: lands {landed:.2} of {listed:.1} a second ([price_list] {share:.2})");
+        if (landed - share).abs() > 0.05 {
+            off.push(format!("{key} lands {landed:.2} of its damage a second, and its price assumes {share:.2}"));
+        }
+    }
+    assert!(off.is_empty(), "{off:#?}");
 }

@@ -197,8 +197,9 @@ fn t1_anti_air_cannot_bring_down_t3_aircraft() {
 }
 
 /// Flak mostly misses fast T3 aircraft: as much of it as the aircraft cost takes under half its
-/// health, flying over or as it usually goes about its work, though it cannot shoot back here. Massed, three times as much, it
-/// all but brings down a strategic bomber attacking it.
+/// health, flying over or as it usually goes about its work, though it cannot shoot back here.
+/// Massed, it all but brings down a strategic bomber attacking it: seven times its cost since the
+/// price list set it at 1,253 (2026-11-26), about the same flak as three times its borrowed 3,381.
 #[test]
 fn flak_mostly_misses_fast_t3_aircraft_unless_massed() {
     let mut failures = Vec::new();
@@ -211,7 +212,7 @@ fn flak_mostly_misses_fast_t3_aircraft_unless_massed() {
                 }
             }
         }
-        let massed = health_lost(shooter, mass("t3_strategic_bomber") * 3, "t3_strategic_bomber", Approach::Attack);
+        let massed = health_lost(shooter, mass("t3_strategic_bomber") * 7, "t3_strategic_bomber", Approach::Attack);
         if massed < 0.8 {
             failures.push(format!("three times a strategic bomber's worth of {shooter} took only {:.0}% off it", massed * 100.0));
         }
@@ -220,13 +221,15 @@ fn flak_mostly_misses_fast_t3_aircraft_unless_massed() {
 }
 
 /// Gunships hover over what they attack, too slow to outfly flak: as much flak as a gunship cost
-/// brings it down over its attack, T2 or T3.
+/// brings it down over its attack, and half as much again for the heavy gunship since the price
+/// list halved its cost (2026-11-26), less flak than its borrowed cost bought.
 #[test]
 fn flak_brings_down_gunships() {
     let mut failures = Vec::new();
     for shooter in ["t2_flak", "t2_mobile_flak"] {
         for plane in GUNSHIPS {
-            let lost = health_lost(shooter, mass(plane), plane, Approach::Attack);
+            let worth = if plane == "t3_heavy_gunship" { mass(plane) * 3 / 2 } else { mass(plane) };
+            let lost = health_lost(shooter, worth, plane, Approach::Attack);
             if lost < 1.0 {
                 failures.push(format!("{shooter} took only {:.0}% off a {plane} attacking it", lost * 100.0));
             }
