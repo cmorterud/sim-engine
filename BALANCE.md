@@ -262,6 +262,16 @@ out close and why: evidence about the process, not a target.
   defenses; missiles reach twice their role's cannon; aircraft guns 0.7 of their tier's
   anti-air. The battleship broadsides every 13.5 seconds, and six submarines now take about 39
   seconds to sink a destroyer.
+* 2026-11-27: the ability price list as code (`src/price_list.rs`, `[price_list]`). It prints
+  any unit's price job by job (`--balance-derive unit <key>`, or every unit with `list`), and
+  tests/price_list_test.rs fails when a unit it prices drifts more than `drift_max` from it,
+  unless `[price_list.held]` names what else sets its cost. Worked as the list was by hand: each
+  tier's line in its domain for reach and speed (aircraft against the T1 Interceptor's speed), a
+  bomb's first-volley gap between passes, and a ship's sensors shared across its tier's fleet.
+  The aircraft come within 1% of their costs, the ships within 7% (the Battlecruiser furthest,
+  the Destroyer at 3% with its decoys now counted), until the navy base is solved from it.
+  Landed shares measured again with turrets that fire only once laid: the T1 Bomber 0.54, the
+  Fighter-Bomber's bomb 0.92 and its anti-air 0.98, the Strategic Bomber 0.90.
 
 ## Order of work
 

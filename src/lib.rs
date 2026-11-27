@@ -9,6 +9,7 @@ pub mod hud;
 pub mod icons;
 pub mod input;
 pub mod minimap;
+pub mod price_list;
 pub mod math;
 pub mod render;
 pub mod scenario_page;

@@ -628,25 +628,78 @@ submerged_t1 = 0.65
 # single-target weapon could hit) - 1. A navy is taken as half ships, half submarines, so a torpedo
 # pays sqrt(2) - 1.
 torpedo_flexibility = 0.41
-# Torpedo decoys: as undodgeable, d the share of a submarine group's damage they stop, measured.
-# The sub hunter's decoys fire 3x as often as the destroyer's (its torpedoes do 3x the damage
-# a second): 33% stopped, so 0.22.
-torpedo_boat_decoys = 0.22
+# Torpedo decoys: as undodgeable, d the share of a submarine group's damage they stop, measured
+# ([price_list.decoy_share]), on every job the unit does. The sub hunter's decoys fire 3x as often
+# as the destroyer's (its torpedoes do 3x the damage a second): 33% stopped, so 0.22.
 # A sensor pays only for what it sees past its own vision, at the price per area of the cheapest
 # building that has it: (range^2 - vision^2) / building range^2 x building cost. A ship's radar is
 # shared by the radar ships of its tier's standard fleet, whose cover overlaps, so it pays that
 # over their number (2026-11-26).
 
+# Each tier's line, in its domain, which reach and speed are measured against (2026-11-27, as the
+# list was worked by hand): the land line, and the navy's ships of each tier's line (the
+# frigate at T1, the destroyer, the battleship). Aircraft have no line: speed is measured against
+# air_speed, the T1 Interceptor's and the Fighter-Bomber's (units a tick, as the unit data).
+line = { land = ["t1_medium_tank", "t2_heavy_tank", "t3_heavy_walker"], navy = ["t1_frigate", "t2_destroyer", "t3_battleship"] }
+air_speed = 30
+# A bomb's first-volley gap is between passes: its reload over the share it lands.
+# Every unit whose cost is not the list's names what holds it ([price_list.held]); the rest
+# must come within this of the list's price (tests/price_list_test.rs).
+drift_max = 0.07
+
+# Splash, measured on a standing or marching formation of its tier's line (2026-11-26): the damage
+# one shot does across it over its listed damage. A unit not listed pays none.
+[price_list.splash]
+t2_grenadier_walker = 1.5
+t1_light_artillery = 1.5
+t3_mobile_artillery = 6.5
+t1_bomber = 1.88
+t2_fighter_bomber = 2.18
+t3_strategic_bomber = 3.03
+
+# The share of a submarine group's torpedo damage a unit's decoys stop, measured (2026-11-26): the
+# Torpedo Boat's of three attack submarines', the destroyer's of six.
+[price_list.decoy_share]
+t2_torpedo_boat = 0.33
+t2_destroyer = 0.07
+
+# Units with a fighting weapon whose cost something other than the list sets, and what. Every
+# other such unit costs the list's price (tests/price_list_test.rs).
+[price_list.held]
+t1_medium_tank = "the anchor"
+t1_light_walker = "the land solver's targets ([roles])"
+t1_light_artillery = "the land solver's targets ([roles])"
+t1_land_scout = "the land solver's targets ([roles])"
+t2_heavy_tank = "the land solver's targets ([roles])"
+t2_grenadier_walker = "the land solver's targets ([roles])"
+t2_mobile_missile_launcher = "the land solver's targets ([roles])"
+t2_assault_hovercraft = "the land solver's targets ([roles])"
+t3_heavy_walker = "the land solver's targets ([roles])"
+t3_siege_walker = "the land solver's targets ([roles])"
+t1_mobile_aa = "its health per mass is the anchor's ([air] anti_air_health_over_bomb)"
+t2_mobile_flak = "not derived yet: its cost is borrowed, its gun set by the escort rule"
+t3_mobile_artillery = "not derived yet: borrowed, until its micro cell prices it"
+t1_bomber = "the escort rule ([air] anti_air_escort_share); the T1 air base is to price it at that"
+t2_torpedo_bomber = "the fleet cells: the least that needs twice the T2 fleet's cost to break it"
+t2_torpedo_boat = "the cell torpedo_boats_beat_submarines"
+command_rig = "not derived yet: the snipe rules, its gun and enhancements"
+field_rig = "not derived yet: build power, income and its gun"
+t2_combat_engineer = "not derived yet: build power, its gun and radar"
+t2_transport = "not derived yet: cargo, and its guns"
+t3_heavy_transport = "not derived yet: cargo, its guns and shield"
+t3_missile_sub = "not derived yet: the launcher's share, its cruise missiles, submerged at T3"
+
 # Aircraft pay for the damage they land, not their card's (2026-11-26): anti-air against a bomber
 # flying its run (the Strategic Bomber at T3, the T1 Bomber below), bombs, guns and torpedoes against
-# a target holding still. The share each lands, as tests/kill_times_test.rs measures it.
+# a target holding still. The share each lands, as tests/kill_times_test.rs measures it (measured
+# again 2026-11-27, with turrets that fire only once laid on their target).
 [price_list.landed_share]
 t1_interceptor = 0.91
-t2_fighter_bomber_anti_air = 1.0
+t2_fighter_bomber_anti_air = 0.98
 t3_air_superiority = 1.0
-t1_bomber = 0.52
-t2_fighter_bomber = 0.95
-t3_strategic_bomber = 0.89
+t1_bomber = 0.54
+t2_fighter_bomber = 0.92
+t3_strategic_bomber = 0.90
 t2_torpedo_bomber = 0.82
 t2_gunship = 1.0
 t3_heavy_gunship = 1.0
