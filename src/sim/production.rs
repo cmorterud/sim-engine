@@ -169,6 +169,36 @@ fn exit_order(center: Vec2Fp, toward: Vec2Fp) -> [(i32, i32); 4] {
     exits
 }
 
+/// Which way a unit stands in its factory's bay while it is built, and drives or flies out:
+/// along the bay, the way that leaves it least to turn to face `toward`. A land factory's bay
+/// is open east and west, a dock's slip north and south, and an air factory's pad all round.
+/// Ties go to the way to the right of `toward`, so that a side turned half about the map
+/// picks the turned way.
+pub(super) fn bay_heading(on_water: bool, flies: bool, center: Vec2Fp, toward: Vec2Fp) -> (i32, i32) {
+    let (dx, dy) = (toward.x - center.x, toward.y - center.y);
+    let ways: &[(i32, i32)] = if flies {
+        &[(1, 0), (0, 1), (-1, 0), (0, -1)]
+    } else if on_water {
+        &[(0, 1), (0, -1)]
+    } else {
+        &[(1, 0), (-1, 0)]
+    };
+    // With unit sides, the dot and cross products need no multiplication.
+    let along = |(x, y): (i32, i32), ax: Fp, ay: Fp| ax * x + ay * y;
+    *ways
+        .iter()
+        .max_by_key(|&&way| (along(way, dx, dy), along(way, dy, -dx)))
+        .expect("every bay has a way out")
+}
+
+/// The ways out of a bay after `heading`, best first: the other ways along the bay, then the
+/// sides, for when the way ahead is blocked.
+fn exits_after(heading: (i32, i32), center: Vec2Fp, toward: Vec2Fp) -> Vec<(i32, i32)> {
+    let mut exits = vec![heading];
+    exits.extend(exit_order(center, toward).into_iter().filter(|&way| way != heading));
+    exits
+}
+
 pub(super) fn cell_center(cell_x: u32, cell_y: u32, size: u32) -> Vec2Fp {
     let half_cells = |cell: u32| fp_int(cell as i32 * TERRAIN_CELL_UNITS) + fp_int(size as i32 * TERRAIN_CELL_UNITS) / 2;
     Vec2Fp::new(half_cells(cell_x), half_cells(cell_y))
@@ -1775,6 +1805,27 @@ impl SimWorld {
         limit > 0 && stock >= limit
     }
 
+    /// Where a factory's units go: its rally point, or else the middle of the map.
+    fn bay_target(&self, rally: Option<Vec2Fp>) -> Vec2Fp {
+        rally.unwrap_or_else(|| {
+            let middle = fp_int(self.terrain.map_units() / 2);
+            Vec2Fp::new(middle, middle)
+        })
+    }
+
+    /// Which way what `factory` is building stands in its bay (`bay_heading`).
+    pub(super) fn bay_heading_of(&self, factory: hecs::Entity, item: BlueprintId, center: Vec2Fp, rally: Option<Vec2Fp>) -> (i32, i32) {
+        let on_water = self.ecs.get::<&Blueprinted>(factory).is_ok_and(|blueprint| self.blueprints.get(blueprint.0).on_water);
+        let flies = self.blueprints.get(item).move_class() == super::components::MoveClass::Air;
+        bay_heading(on_water, flies, center, self.bay_target(rally))
+    }
+
+    /// Where a factory sends what it makes: its own rally point, or else, while it helps
+    /// another factory, that one's.
+    pub(super) fn rally_of(&self, factory: &Factory) -> Option<Vec2Fp> {
+        factory.rally.or_else(|| factory.assisting.and_then(|helped| self.factory_entity(helped)).and_then(|entity| self.ecs.get::<&Factory>(entity).ok().and_then(|factory| factory.rally)))
+    }
+
     fn finish_factory_item(&mut self, entity: hecs::Entity, finished: BlueprintId, rally: Option<Vec2Fp>) {
         let unit = self.blueprints.get(finished);
         // A silo keeps the missiles it builds, until it fires them.
@@ -1801,24 +1852,29 @@ impl SimWorld {
         let center = self.ecs.get::<&Position>(entity).expect("units have positions").0.xy();
         let factory_radius = self.ecs.get::<&UnitStats>(entity).expect("units have stats").radius;
         let reach = factory_radius + unit.radius + fp_int(6);
-        let exits = exit_order(center, rally.unwrap_or_else(|| {
-            let middle = fp_int(self.terrain.map_units() / 2);
-            Vec2Fp::new(middle, middle)
-        }));
-        let exit = exits
-            .iter()
-            .map(|&(x, y)| center + Vec2Fp::new(reach * x, reach * y))
-            .find(|point| self.terrain.in_bounds(*point) && self.terrain.passable_for(unit.move_class(), *point))
+        let toward = self.bay_target(rally);
+        let heading = self.bay_heading_of(entity, finished, center, rally);
+        // Out the way it faces, unless that is blocked.
+        let exit = exits_after(heading, center, toward)
+            .into_iter()
+            .map(|(x, y)| ((x, y), center + Vec2Fp::new(reach * x, reach * y)))
+            .find(|(_, point)| self.terrain.in_bounds(*point) && self.terrain.passable_for(unit.move_class(), *point))
+            .map(|(way, point)| (Some(way), point))
             .or_else(|| {
-                super::flowfield::nearest_passable_cell_for(&self.terrain, unit.move_class(), center).map(|(x, y)| cell_center(x as u32, y as u32, 1))
+                super::flowfield::nearest_passable_cell_for(&self.terrain, unit.move_class(), center).map(|(x, y)| (None, cell_center(x as u32, y as u32, 1)))
             });
-        let Some(exit) = exit else {
+        let Some((way, exit)) = exit else {
             return;
         };
         // It is built in the bay, so it starts there. An aircraft lifts off and flies; anything
         // else drives out of the open end first (`LeavingFactory`), then heads for the rally.
         let flies = unit.move_class() == super::components::MoveClass::Air;
         let id = self.spawn_mobile_inner(finished, self.owner_of(entity), center, true);
+        // It faces the way it stood in the bay, which is the way it leaves.
+        let (x, y) = way.unwrap_or(heading);
+        if let Ok(mut turning) = self.ecs.get::<&mut Turning>(self.find_unit(id).expect("just spawned").1) {
+            turning.facing = Vec2Fp::new(fp_int(x), fp_int(y));
+        }
         if flies {
             // With no rally point, it clears the pad for the next.
             self.assign_route(&[id], OrderKind::Move, rally.unwrap_or(exit), None);
@@ -2607,6 +2663,7 @@ impl SimWorld {
                 hasher.write(&[order.kind as u8]);
                 hasher.write(&order.route.to_le_bytes());
                 hasher.write(&order.slot_ticks.to_le_bytes());
+                hasher.write(&[u8::from(order.settles)]);
                 hash_slot(hasher, order.slot);
             }
         }

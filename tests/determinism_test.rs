@@ -438,7 +438,7 @@ fn every_hashed_field_changes_the_checksum() {
     assert_changes(
         "queued orders",
         &mut world,
-        &|w| w.ecs.insert_one(entity, OrderQueue(vec![Order { kind: OrderKind::Move, route: 1, slot: None, slot_ticks: 0, direct: false }])).unwrap(),
+        &|w| w.ecs.insert_one(entity, OrderQueue(vec![Order { kind: OrderKind::Move, route: 1, slot: None, slot_ticks: 0, settles: false, direct: false }])).unwrap(),
         &|w| {
             w.ecs.remove_one::<OrderQueue>(entity).unwrap();
         },

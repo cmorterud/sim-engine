@@ -2,10 +2,10 @@
 //! drives out of one of its two open ends, or for aircraft lifts off its pad, and goes on to the
 //! rally point.
 
-use sim_engine::math::fp::{fp_int, Vec2Fp};
+use sim_engine::math::fp::{fp_int, Fp, Vec2Fp};
 use sim_engine::sim::blueprints::{BlueprintId, Res};
 use sim_engine::sim::commands::SimCommand;
-use sim_engine::sim::components::{LeavingFactory, OrderKind, Position, SimId, Team};
+use sim_engine::sim::components::{LeavingFactory, OrderKind, Position, SimId, Team, Turning};
 use sim_engine::sim::config::{SimConfig, TerrainStyle};
 use sim_engine::sim::world::SimWorld;
 
@@ -142,4 +142,92 @@ fn anyone_who_sees_a_factory_sees_it_upgrading_and_how_far_along() {
         world.advance_tick(&[]);
     }
     assert!(upgrade(&world).expect("still upgrading").1 > early.1, "and how far along it is");
+}
+
+fn facing(world: &SimWorld, unit: SimId) -> Vec2Fp {
+    world.ecs.get::<&Turning>(world.unit_entity(unit).unwrap()).unwrap().facing
+}
+
+/// Which way the factory's current item faces in the bay, as the renderer is told: 0 east,
+/// 1 north, 2 west, 3 south.
+fn bay_heading(world: &SimWorld, factory: SimId) -> u8 {
+    world.snapshot_for(Some(Team::Blue)).units.iter().find(|unit| unit.id == factory).and_then(|unit| unit.assembling).expect("it is building something").2
+}
+
+#[test]
+fn a_bot_in_the_bay_faces_the_open_end_nearer_its_rally_and_drives_out_that_way() {
+    for (rally, heading, east) in [(point(1_400, 2_000), 0, true), (point(300, 300), 2, false)] {
+        let mut world = test_world();
+        let factory = world.spawn_finished_structure(id(&world, "land_factory_t1"), Team::Blue, 50, 50).unwrap();
+        let center = position(&world, factory);
+        world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: id(&world, "t1_light_walker"), count: 1 }, SimCommand::SetRally { factory, point: rally }]);
+        // Even with the rally well to the north or south, a land bay opens only east and west.
+        assert_eq!(bay_heading(&world, factory), heading, "rally {rally:?}");
+        let bot = first_built(&mut world, factory);
+        let out = leaving(&world, bot).expect("it drives out first");
+        assert_eq!(out.exit.y, center.y);
+        assert_eq!(out.exit.x > center.x, east, "out of the end it faces");
+        let way = facing(&world, bot);
+        assert_eq!(way.x > Fp::ZERO, east, "facing the way out: {way:?}");
+        assert_eq!(way.y, Fp::ZERO);
+    }
+}
+
+#[test]
+fn an_aircraft_on_its_pad_faces_whichever_of_the_four_ways_is_nearest_its_rally() {
+    for (rally, heading) in [(point(3_000, 1_000), 0), (point(1_000, 3_000), 1), (point(100, 900), 2), (point(1_100, 100), 3)] {
+        let mut world = test_world();
+        let factory = world.spawn_finished_structure(id(&world, "air_factory"), Team::Blue, 50, 50).unwrap();
+        world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: id(&world, "t1_air_scout"), count: 1 }, SimCommand::SetRally { factory, point: rally }]);
+        assert_eq!(bay_heading(&world, factory), heading, "rally {rally:?}");
+        let scout = first_built(&mut world, factory);
+        let way = facing(&world, scout);
+        let expected = [(1, 0), (0, 1), (-1, 0), (0, -1)][usize::from(heading)];
+        assert_eq!((way.x, way.y), (fp_int(expected.0), fp_int(expected.1)), "it lifts off facing the way it stood");
+    }
+}
+
+#[test]
+fn units_from_a_factory_gather_in_a_neat_grid_at_the_rally_point() {
+    let mut world = test_world();
+    let factory = world.spawn_finished_structure(id(&world, "land_factory_t1"), Team::Blue, 50, 50).unwrap();
+    // Due east of the factory, so that the grid lines up with the map.
+    let rally = Vec2Fp::new(fp_int(1_400), position(&world, factory).y);
+    let bot = id(&world, "t1_light_walker");
+    world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: bot, count: 12 }, SimCommand::SetRally { factory, point: rally }]);
+    let mut built: Vec<SimId> = Vec::new();
+    for _ in 0..20_000 {
+        world.advance_tick(&[]);
+        for &(unit, _) in &world.units {
+            if unit != factory && !built.contains(&unit) {
+                built.push(unit);
+            }
+        }
+        let settled = built.len() == 12 && built.iter().all(|&unit| leaving(&world, unit).is_none() && world.unit_order(unit).unwrap().kind == OrderKind::Idle);
+        if settled {
+            break;
+        }
+    }
+    assert_eq!(built.len(), 12, "the factory should finish all twelve");
+    assert!(built.iter().all(|&unit| world.unit_order(unit).unwrap().kind == OrderKind::Idle), "every bot should settle");
+    let radius = world.blueprints.get(bot).radius;
+    let spacing = radius * 3;
+    let at: Vec<Vec2Fp> = built.iter().map(|&unit| position(&world, unit)).collect();
+    for (index, here) in at.iter().enumerate() {
+        // Each on a spot of the grid: rows a spacing apart back toward the factory, in the west,
+        // and columns a spacing apart across.
+        let (back, across) = (rally.x - here.x, here.y - rally.y);
+        let near_line = |offset: Fp| {
+            let steps = (offset / spacing).round();
+            (offset - steps * spacing).abs() <= radius / 2
+        };
+        assert!(near_line(back) && near_line(across), "bot {index} at {here:?} is off the grid: {at:?}, spacing {spacing}");
+        assert!(back >= -(radius / 2) && across.abs() <= spacing * 2 + radius / 2, "bot {index} at {here:?} is outside the five columns");
+        for other in &at[index + 1..] {
+            assert!(sim_engine::math::fp::sqrt_wide(here.distance_squared(other)) >= spacing - radius, "two bots ended up crowded: {here:?} and {other:?} in {at:?}");
+        }
+    }
+    // Twelve fill the front two rows and two of the third.
+    let rows = at.iter().map(|here| ((rally.x - here.x) / spacing).round().to_num::<i32>()).max().unwrap();
+    assert_eq!(rows, 2, "three rows of five: {at:?}");
 }
