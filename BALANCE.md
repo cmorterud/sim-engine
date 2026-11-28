@@ -549,6 +549,24 @@ out close and why: evidence about the process, not a target.
   1,044, the Heavy 3,650 to 3,531). Massed raiders attack-moving into massed artillery now draw
   (-0.14 to +0.05), the Light Artillery slower to swing between them. Nine land templates'
   timing is now derived, so 450 unit families are not derived yet.
+* 2026-11-28: shell speeds by family, and reload left to the hit sizes. Reload proved
+  load-bearing: halving or doubling every held reload, at the same damage a second, moved the T3
+  air base by 9 to 15%, the navy base by 5 to 15% and the T1 Point Defense's price by 9 to 15%,
+  since kills come in whole hits. The design owner's pick: it waits for Pass 9, where it becomes
+  hit size over damage a second. Shells (`balance::shell_speed`, `[shells]`): a direct-fire gun at
+  the ground reaches its full range in the anchor's flight time, `[anchor] range` over `[anchor]
+  projectile_speed`, as a line weapon's shell does (the commander 50 to 80, the T1 Point Defense
+  70 to 91, the T2 70 to 200, the Heavy 64 to 240, the Gunship 160 to 82, the Heavy Gunship 70 to
+  102, the Combat Engineer 120 to 66, the transports 120 to 82 and 102). Ships' guns, torpedoes
+  and fighters' guns keep their `[constants]` speeds. Every other gun at aircraft flies at one
+  anchor, `[shells] anti_air_speed` = 90, and flak at `[shells] flak_speed` = 40: a quarter slower
+  or a third quicker on every anti-air shell moved the T3 air base from 0.99 to 1.55 or 0.80, while
+  bringing the destroyer's, the battleship's and the heavy transport's to 90 moved nothing. The
+  closing share re-solves 0.5306 to 0.5350: the T1 Point Defense 413 to 404, the T2 617 to 638,
+  the Heavy 2,357 to 2,437, the Shield Generator 1,044 to 1,080, the Heavy 3,531 to 3,650; and the
+  T3 air base 0.988 to 0.946, the T3 aircraft 4% dearer (the transport 1%). The commander's timing
+  is now derived, so 449 unit families are not derived yet. The Mobile Anti-Air's gun now takes
+  its kill time over its own reload, not over a one-second one (the same today).
 
 ## Order of work
 

@@ -301,6 +301,20 @@ t3_battleship = { mass_extractor_t3 = 1, command_rig = 2 }
 # and any rule that moved it moved the air and navy bases by 9 to 22%.
 anti_air_degrees_a_second = 180
 
+[shells]
+# How fast shells fly, by family (2026-11-28, the derivation plan's Pass 2; balance::shell_speed).
+# A direct-fire gun at the ground reaches its full range in the anchor's flight time, as a line
+# weapon's shell does: [anchor] range over [anchor] projectile_speed. Ships' guns, torpedoes and
+# fighters' guns fly at their families' speeds in [constants]. Every other gun at aircraft flies at
+# this anchor, the speed most of them had, and a flak shell at its own. Measured first: a quarter
+# slower or a third quicker on every anti-air shell moved the T3 air base from 0.99 to 1.55 or 0.80
+# and the navy base from 0.67 to 0.82 or 0.62, so anti-air speed is anchored; the three anti-air
+# guns brought to it (the destroyer's and heavy transport's from 120, the battleship's from 180)
+# moved neither. Ground guns by the rule moved the T3 air base 1.5% and the T1 point defense's
+# price 2%.
+anti_air_speed = 90
+flak_speed = 40
+
 [kill_times]
 # Seconds for these attackers, alone, to destroy one target that holds still and does not fire
 # back, timed from the first shot (2026-11-25, the design owner's numbers): a commander with no
@@ -793,8 +807,9 @@ tier_efficiency = [1.0, 1.0, 1.0, 1.0]
 # standard T3 army as the T2 strike aircraft against the T2 army, both standing in ranks; T2's
 # 0.902 until then.
 # With gunships hovering in a drifting blob (2026-11-27), re-derived: navy 0.709 to 0.744, air_t3
-# 1.005 to 0.972.
-domain_base = { land = 1.0, navy = 0.670, air_t1 = 0.323, air_t2 = 0.904, air_t3 = 0.988 }
+# 1.005 to 0.972. With every shell flying by its family's rule ([shells], 2026-11-28), air_t3 0.988
+# to 0.946: the gunships' guns slower, the point defenses dearer.
+domain_base = { land = 1.0, navy = 0.670, air_t1 = 0.323, air_t2 = 0.904, air_t3 = 0.946 }
 # Reach past the line's: x = c (r / r_line - 1), price x h / (1 - x h), h about 1 for shells and
 # 0 for missiles. Short of it: -c (1 - r / r_line) (v_line / v). Speed: speed_share (1 - v_line / v).
 speed_share = 0.3
@@ -867,8 +882,9 @@ immobile = 1.5
 # prices the T3 Heavy Point Defense at the most it can cost and still hold ([premiums]
 # point_defense_holds_against_line_units), where the hold rule is tightest. The list prices the
 # point defenses by it; other armed structures keep their own rules. 0.535 until every gun turned
-# by the turret rule (2026-11-28).
-structure_closing_share = 0.5306
+# by the turret rule, then 0.5306 until every direct-fire shell flew by the shell rule ([shells],
+# 2026-11-28).
+structure_closing_share = 0.5350
 
 # Each dome's group (2026-11-27): a force in [domains.forces], less the dome itself, or a position
 # below. The Mobile Shield covers the standard T2 land army; the Escort Corvette the T2 fleet's

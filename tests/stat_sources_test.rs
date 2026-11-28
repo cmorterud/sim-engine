@@ -2,7 +2,7 @@
 //! rule, its anchor, or why it is not derived yet; every citation resolves; the rules the table
 //! claims that no other test checks are checked here; and what is still to derive can only fall.
 
-use sim_engine::balance::{damage_per_second, model_time_to_kill, t1_land_roles, t2_land_roles, t3_land_roles, turret_swivel, Anchor, Role};
+use sim_engine::balance::{damage_per_second, model_time_to_kill, t1_land_roles, t2_land_roles, t3_land_roles, shell_speed, turret_swivel, Anchor, Role};
 use sim_engine::sim::blueprints::{Blueprint, BlueprintDb, Targets, WeaponDef, WeaponKind};
 use sim_engine::stat_sources::{cited_code, cited_targets, derived, stat_source, Family, Kind, Reason, SOURCES};
 
@@ -11,7 +11,7 @@ const BALANCE: &str = include_str!("../src/balance.rs");
 const PRICE_LIST: &str = include_str!("../src/price_list.rs");
 
 /// Unit families not derived yet. A pass that derives some lowers this; nothing raises it.
-const NOT_DERIVED_YET: usize = 450;
+const NOT_DERIVED_YET: usize = 449;
 
 fn targets() -> toml::Table {
     TARGETS.parse().expect("data/balance_targets.toml is valid")
@@ -272,4 +272,25 @@ fn every_turret_swivels_by_the_rule() {
         }
     }
     assert!(turrets >= 37, "only {turrets} turrets");
+}
+
+/// Pass 2's shell rule (balance::shell_speed): a direct-fire gun at the ground reaches its full
+/// range in the anchor's flight time; ships' guns, torpedoes, fighters' guns, anti-air and flak
+/// fly at their families' speeds.
+#[test]
+fn every_shell_flies_by_its_familys_rule() {
+    let db = BlueprintDb::standard();
+    let (mut ground, mut anti_air) = (0, 0);
+    for unit in db.iter() {
+        for weapon in weapons(unit) {
+            let Some(speed) = shell_speed(unit, weapon) else { continue };
+            assert_eq!(weapon.projectile_speed.to_num::<f64>(), speed, "{}'s shell flies by its family's rule", unit.key);
+            match weapon.targets {
+                Targets::Air => anti_air += 1,
+                Targets::Naval => {}
+                _ => ground += 1,
+            }
+        }
+    }
+    assert!(ground >= 15 && anti_air >= 12, "only {ground} guns at the ground and {anti_air} at aircraft");
 }
