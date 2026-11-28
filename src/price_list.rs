@@ -712,13 +712,15 @@ impl FactoryPricing {
 /// (`[price_list.factories] hull`, the Wall Section); and, for a headquarters and the Rig Yard,
 /// its tech price, what opening its tier costs, the design owner's knob
 /// (`[price_list.factories] tech`). Not over a domain base: a factory is priced by an economy,
-/// not by a fight. None for a unit that is not a land, air or naval factory, or the Rig Yard.
+/// not by a fight. A Tactical Missile Launcher is a factory for its missiles (2026-11-28): they
+/// carry the damage and pay for it, so it pays for its build power and its hull. None for a unit
+/// that is not a land, air or naval factory, the Rig Yard, or a tactical missile factory.
 pub fn factory_price(db: &BlueprintDb, key: &str) -> Option<FactoryPricing> {
     let table = table();
     let factories = &table["price_list"]["factories"];
     let unit = db.get(db.find(key)?);
     let tech = factories["tech"].get(key).map(number);
-    if unit.factory_kind.is_none() && tech.is_none() {
+    if unit.factory_kind.is_none() && tech.is_none() && !builds_tactical_missiles(unit) {
         return None;
     }
     let wall = db.get(db.id(factories["hull"].as_str().expect("[price_list.factories] hull")));
@@ -728,6 +730,72 @@ pub fn factory_price(db: &BlueprintDb, key: &str) -> Option<FactoryPricing> {
     let tech = tech.unwrap_or(0.0);
     let tier = unit.tier.clamp(1, MAX_TIER);
     Some(FactoryPricing { key: key.to_string(), tier, build_power, hull, tech, list: build_power + hull + tech, actual: cost_at(unit, tier) })
+}
+
+/// A structure that builds the tactical missiles it fires.
+fn builds_tactical_missiles(unit: &Blueprint) -> bool {
+    unit.is_structure() && unit.max_stock > 0 && unit.weapon.is_some_and(|weapon| weapon.kind == WeaponKind::TacticalMissile)
+}
+
+/// What sets a unit's cost by a rule (2026-11-28): the list's price, or what holds it; a dome's
+/// group; the factory recipe; minutes of a T3 economy, for a game-ending weapon and what answers
+/// it; a share of the missile it stops; or its tier's payback, for an extractor or a generator.
+/// None for a unit no rule prices, which `[price_list.unlisted]` must name.
+pub fn cost_rule(db: &BlueprintDb, key: &str) -> Option<String> {
+    let table = table();
+    let unit = db.get(db.find(key)?);
+    if let Some(pricing) = price_with(db, &table, key) {
+        let held = table["price_list"]["held"].get(key).and_then(toml::Value::as_str);
+        return Some(held.map_or_else(|| format!("the list, {:.1}", pricing.list), |reason| format!("held: {reason}")));
+    }
+    if let Some(pricing) = shield_price(db, key) {
+        return Some(format!("its dome over {}", pricing.group));
+    }
+    if let Some(pricing) = factory_price(db, key) {
+        return Some(if pricing.tech > 0.0 { "its build power, hull and tech, as a factory".to_string() } else { "its build power and hull, as a factory".to_string() });
+    }
+    let missiles = &table["missiles"];
+    if let Some(minutes) = missiles["strategic_minutes"].get(key) {
+        return Some(format!("{} minutes of a T3 economy ([missiles] strategic_minutes)", number(minutes)));
+    }
+    if let Some(share) = missiles["defense_over_missile"].get(key) {
+        return Some(format!("{} of the missile it stops ([missiles] defense_over_missile)", number(share)));
+    }
+    let makes = unit.mass_income.to_num::<f64>() + unit.energy_income.to_num::<f64>() > 0.0;
+    let converts = unit.mass_income.to_num::<f64>() > 0.0 && unit.upkeep > unit.mass_income * 10;
+    if unit.is_structure() && makes && !converts {
+        let held = table["economy"]["payback_held"].get(key).map(number);
+        return Some(held.map_or_else(|| "its tier's payback of what it makes ([economy])".to_string(), |seconds| format!("its own payback, {seconds} s ([economy] payback_held)")));
+    }
+    None
+}
+
+/// What sets a unit's cost (2026-11-28): its rule (`cost_rule`), or the reason
+/// `[price_list.unlisted]` gives, which starts "not derived yet" for a unit whose rule is still to
+/// come. None for a unit with neither, which tests/price_list_test.rs forbids.
+pub fn cost_source(db: &BlueprintDb, key: &str) -> Option<String> {
+    cost_rule(db, key).or_else(|| table()["price_list"]["unlisted"].get(key).and_then(toml::Value::as_str).map(str::to_string))
+}
+
+/// Whether a unit's cost still waits for its rule: held or unlisted as "not derived yet".
+pub fn not_derived_yet(db: &BlueprintDb, key: &str) -> bool {
+    cost_source(db, key).is_some_and(|source| source.trim_start_matches("held: ").starts_with("not derived yet"))
+}
+
+/// The `--balance-derive sources` report: every unit, its cost, and what sets it, with the units
+/// still to be derived counted at the end.
+pub fn sources_report(db: &BlueprintDb) {
+    println!("| Unit | Tier | Costs | What sets it |");
+    println!("| :-- | --: | --: | :-- |");
+    let mut waiting = Vec::new();
+    for unit in db.iter() {
+        let source = cost_source(db, &unit.key).unwrap_or_else(|| "**nothing**".to_string());
+        println!("| {} | T{} | {:.1} | {source} |", unit.key, unit.tier, cost_at(unit, unit.tier.clamp(1, MAX_TIER)));
+        if not_derived_yet(db, &unit.key) {
+            waiting.push(unit.key.as_str());
+        }
+    }
+    println!("\n{} units not derived yet: {}", waiting.len(), waiting.join(", "));
 }
 
 /// The `--balance-derive factories` report: every factory's parts, against its cost.

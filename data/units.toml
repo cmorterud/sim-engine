@@ -258,9 +258,12 @@ id = "tactical_missile_launcher"
 name = "Tactical Missile Launcher"
 class = "factory"
 tier = 2
-mass = 800
-energy = 4000
-build_time = 800
+# A factory for its missiles, which carry the damage and pay for it: its build power at the
+# build-power price and its hull at the Wall Section's (price_list::factory_price, 2026-11-28),
+# 838, from 800.
+mass = 838
+energy = 4190
+build_time = 838
 health = 900
 footprint = 1
 vision = 480
