@@ -920,7 +920,8 @@ tier_efficiency = [1.0, 1.0, 1.0, 1.0]
 # rather than stop on it (2026-11-27), then 0.323 once aircraft stopped keeping apart in flight
 # (2026-11-27), then 0.345 once Mobile Anti-Air moved at the T1 line's speed and so kept up with
 # the tanks it escorts (2026-11-28), then 0.348 once no weapon held fire with an enemy in its
-# reach (2026-11-28). The Interceptor is priced at it. At T2 the escort rule sets the
+# reach (2026-11-28), then 0.331 once ground units and ships turned on their tier's line unit's
+# circle (2026-11-28). The Interceptor is priced at it. At T2 the escort rule sets the
 # Mobile Flak's gun against the strike aircraft as they are. At T3 (2026-11-27), from the battle
 # line ([battle_line] t3_air): the base at which the Heavy Gunships are as good a buy against the
 # standard T3 army as the T2 strike aircraft against the T2 army, both standing in ranks; T2's
@@ -932,7 +933,7 @@ tier_efficiency = [1.0, 1.0, 1.0, 1.0]
 # their roles (2026-11-28), air_t3 0.946 to 0.922. With aircraft at the speeds of their roles
 # ([air] strike_speed_thirds, 2026-11-28), air_t3 0.922 to 0.885: the Gunship slower, so the T2
 # strike aircraft do less against the T2 army, and the T3 ones are priced to match.
-domain_base = { land = 1.0, navy = 0.664, air_t1 = 0.348, air_t2 = 0.904, air_t3 = 0.885 }
+domain_base = { land = 1.0, navy = 0.664, air_t1 = 0.331, air_t2 = 0.904, air_t3 = 0.885 }
 # Reach past the line's: x = c (r / r_line - 1), price x h / (1 - x h), h about 1 for shells and
 # 0 for missiles. Short of it: -c (1 - r / r_line) (v_line / v). Speed: speed_share (1 - v_line / v).
 speed_share = 0.3
@@ -1151,9 +1152,15 @@ fighter_gun_speed = 180
 # Interceptor did too until it flew at 26 (2026-11-28, [air] strike_speed_thirds): it keeps its
 # turn rate, as [air] fighter_turn_over_t1_bomber asks, and so turns tighter, on 55.
 fighter_turn_radius = 64
+# Every unit on the ground or at sea turns on its tier's line unit's circle ([price_list] line;
+# the design owner's pick, 2026-11-28, Pass 5): its turn rate is the line unit's times its speed
+# over the line unit's, to a whole degree a second, so that a faster unit turns faster and all
+# take the same room to come about. The six line units' turn rates are the anchors. The builders,
+# whose speed is held, keep their own.
+hull_turning = { holds = ["command_rig", "field_rig", "t1_engineer", "t2_engineer", "t3_engineer"] }
 #
-# Identity knobs, the design owner's, kept in data/units.toml: each hull's turn rate and turn
-# radius; each unit's speed, under [air]'s ratio rules; each aircraft's turn rate outside the
+# Identity knobs, the design owner's, kept in data/units.toml: each line unit's turn rate and each
+# builder's; each hull's turn radius; each unit's speed, under [air]'s ratio rules; each aircraft's turn rate outside the
 # radius family (the T3 fighter's, the gunships', the Strategic Bomber's, the scouts' and the
 # transports'); each anti-air gun's shell speed outside the fighters'; each weapon's spread; each
 # reload that no [kills], [volleys] or broadside rule sets; and the split of a ship's or an

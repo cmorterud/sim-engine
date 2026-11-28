@@ -75,7 +75,7 @@ energy = 120
 build_time = 144
 health = 151
 speed = "13"
-turn_rate = 50
+turn_rate = 163
 radius = 7
 vision = 335
 weapon = { range = 210, reload_ticks = 5, projectile_speed = 42, damage = "10.8", turn_rate = 900 }
@@ -94,7 +94,7 @@ energy = 240
 build_time = 288
 health = 451
 speed = "5.8"
-turn_rate = 90
+turn_rate = 73
 turn_radius = 30
 radius = 9
 vision = 385
@@ -651,9 +651,9 @@ tier = 1
 # Cost by the ability price list (2026-11-27): its radar past its vision, over the T1 air base, as
 # every sensor is priced: 78 to 62.
 # Its health by hit count (2026-11-28, [kills] t1_mobile_aa): a Mobile Anti-Air brings it down in 2, 35 to 31.
-mass = 29
-energy = 417
-build_time = 144
+mass = 30
+energy = 435
+build_time = 150
 health = 31
 speed = "33.8"
 radius = 8
@@ -679,10 +679,11 @@ tier = 1
 # one that prices the Bomber at its cost, to 0.315 (2026-11-27), and 0.318 once aircraft flew on
 # past the map's edge after a pass rather than stop on it (2026-11-27), and 0.323, and the
 # Interceptor 159, once aircraft stopped keeping apart in flight (2026-11-27).
-# 149.5 to 148 with the Bomber's 231 to 229 (2026-11-28), then 141 flying at 26 (2026-11-28).
-mass = 29
-energy = 1267
-build_time = 316
+# 149.5 to 148 with the Bomber's 231 to 229 (2026-11-28), then 141 flying at 26, and 149 with
+# the Bomber's 241 (2026-11-28).
+mass = 31
+energy = 1331
+build_time = 333
 health = 445
 speed = 26
 radius = 10
@@ -701,15 +702,17 @@ weapon = { range = 500, reload_ticks = 10, projectile_speed = 180, damage = "48.
 # map's edge after a pass rather than stop on it (2026-11-27), and 247 once aircraft stopped
 # keeping apart in flight (2026-11-27). That sets the T1 air base
 # ([price_list]). Its health is ten seconds of an Interceptor's gun ([air]). 231 to 229 once no
-# weapon held fire with an enemy in its reach (2026-11-28).
+# weapon held fire with an enemy in its reach (2026-11-28), then 241 once ground units and ships
+# turned on their tier's line unit's circle and the rule's window of fights weighed its end
+# counts, so that it settles (2026-11-28).
 [[unit]]
 id = "t1_bomber"
 name = "Attack Bomber"
 class = "air"
 tier = 1
-mass = 82
-energy = 1877
-build_time = 458
+mass = 86
+energy = 1977
+build_time = 483
 health = 489
 speed = 20
 radius = 10
@@ -753,7 +756,7 @@ energy = 295
 build_time = 236
 health = 615
 speed = "7.2"
-turn_rate = 80
+turn_rate = 90
 turn_radius = 10
 radius = 8
 vision = 400
@@ -1217,7 +1220,7 @@ energy = 3000
 build_time = 3600
 health = 1300
 speed = "5.8"
-turn_rate = 75
+turn_rate = 114
 turn_radius = 20
 radius = 12
 vision = 1010
@@ -1468,7 +1471,7 @@ energy = 14800
 build_time = 7357
 health = 4610
 speed = "9.6"
-turn_rate = 40
+turn_rate = 51
 turn_radius = 60
 radius = 20
 vision = 1280
@@ -1580,7 +1583,7 @@ energy = 45449
 build_time = 21380
 health = 33000
 speed = "10.8"
-turn_rate = 35
+turn_rate = 41
 turn_radius = 80
 radius = 40
 vision = 800
@@ -1632,7 +1635,7 @@ energy = 2523
 build_time = 1410
 health = 1286
 speed = "12.1"
-turn_rate = 80
+turn_rate = 60
 turn_radius = 30
 radius = 12
 vision = 640
@@ -1664,9 +1667,10 @@ tier = 2
 # needing twice their cost of it (the design owner's OK to that shift); the price list's check says 131.
 # Re-solved with the navy's sizes set by hit counts (2026-11-28): 132.5 to 131.
 # Its size by hit counts (2026-11-28): a destroyer's anti-air brings it down in 81 ([secondary_kills]), health 1,252 to 1,248; its torpedoes sink a destroyer in 57 ([kills]), 189 to 187.6; 131.2 to 139.6 by its duel over the battle line's fleet sizes.
-mass = 119
-energy = 3365
-build_time = 753
+# Re-solved once ground units and ships turned on their tier's line unit's circle (2026-11-28): 145.4 to 142.8.
+mass = 117
+energy = 3293
+build_time = 737
 health = 1248
 speed = 30
 radius = 12
@@ -1773,7 +1777,7 @@ energy = 1200
 build_time = 1440
 health = 2534
 speed = "7.2"
-turn_rate = 60
+turn_rate = 105
 turn_radius = 40
 radius = 13
 vision = 415
@@ -1803,7 +1807,7 @@ energy = 9131
 build_time = 3915
 health = 1488
 speed = "10.4"
-turn_rate = 45
+turn_rate = 55
 turn_radius = 40
 radius = 16
 vision = 640
@@ -1831,7 +1835,7 @@ energy = 200054
 build_time = 26322
 health = 4085
 speed = "9.6"
-turn_rate = 50
+turn_rate = 36
 turn_radius = 50
 radius = 20
 vision = 320
@@ -1857,7 +1861,7 @@ energy = 900
 build_time = 1080
 health = 1353
 speed = "5.8"
-turn_rate = 90
+turn_rate = 84
 turn_radius = 20
 radius = 11
 vision = 650
@@ -2092,7 +2096,7 @@ energy = 60
 build_time = 72
 health = 40
 speed = "14.4"
-turn_rate = 90
+turn_rate = 180
 turn_radius = 10
 radius = 6
 vision = 695
@@ -2129,7 +2133,7 @@ energy = 720
 build_time = 864
 health = 1131
 speed = "6.2"
-turn_rate = 80
+turn_rate = 90
 radius = 10
 vision = 555
 # A skirmisher: one grenade launcher lobbing a grenade every 2 seconds a fifth farther than the
@@ -2148,7 +2152,7 @@ energy = 891
 build_time = 654
 health = 138
 speed = "6.2"
-turn_rate = 120
+turn_rate = 90
 turn_radius = 20
 radius = 8
 vision = 400
@@ -2168,7 +2172,7 @@ energy = 1132
 build_time = 1132
 health = 1080
 speed = "6.2"
-turn_rate = 160
+turn_rate = 90
 turn_radius = 10
 radius = 8
 # Sight: a little past its longest gun, as the land line sees (balance::gun_sight).
@@ -2214,7 +2218,7 @@ energy = 3600
 build_time = 4320
 health = 11010
 speed = "4.3"
-turn_rate = 70
+turn_rate = 85
 radius = 15
 vision = 520
 weapon = { range = 578, reload_ticks = 40, projectile_speed = 96, damage = "1429.9", turn_rate = 511, splash_radius = 12 }
@@ -2234,12 +2238,13 @@ tier = 2
 # Re-solved once aircraft stopped keeping apart in flight moved the navy base (2026-11-28): 722 to 779.
 # Re-solved with the navy's sizes set by hit counts (2026-11-28): 801 to 809.
 # Re-solved by its duel (2026-11-28): 808.5 to 809.6.
-mass = 787
-energy = 6307
-build_time = 3534
+# Re-solved once ground units and ships turned on their tier's line unit's circle (2026-11-28): 809.6 to 782.9.
+mass = 761
+energy = 6100
+build_time = 3418
 health = 3040
 speed = "12.1"
-turn_rate = 100
+turn_rate = 64
 turn_radius = 40
 radius = 15
 vision = 640

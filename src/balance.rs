@@ -1284,8 +1284,11 @@ pub fn derive_t1_air(base: &BlueprintDb) -> BlueprintDb {
     // even. So many bombers, each costing the army's materiel over their number, break even where
     // the army's health is scaled by `h`, at a cost of that times `h` (their cost counts in the
     // fight through the veterancy their kills give). Whole bombers and whole bombs make one
-    // fight's answer jump by about a tenth from one count to the next, so it is the mean over
-    // five counts round the materiel's, recentred until it stays.
+    // fight's answer jump by about a tenth from one count to the next, so it is the mean over a
+    // window five counts wide round the materiel's, recentred until it stays. The counts at the
+    // window's ends weigh by how much of them it covers, so that the mean moves smoothly with the
+    // cost: with whole counts only, it jumped by 4% where the materiel's count crossed a half
+    // (2026-11-28), and no cost came back to itself.
     let materiel = target_number("air", "check_materiel");
     let share = target_number("air", "anti_air_escort_share");
     let costing = |db: &BlueprintDb, cost: f64| {
@@ -1304,11 +1307,18 @@ pub fn derive_t1_air(base: &BlueprintDb) -> BlueprintDb {
         let bombers = Side { unit: bomber, count, tactics: Tactics::AttackMove };
         each * break_even_forces(&trial, Field::LAND, &army, &[bombers]).health_factor
     };
+    let window = |cost: f64| {
+        let middle = materiel / cost;
+        let (low, high) = (middle - 2.5, middle + 2.5);
+        let counts = (low.round() as u32).max(1)..=(high.round() as u32);
+        let weighed: Vec<(u32, f64)> = counts.map(|count| (count, (high.min(f64::from(count) + 0.5) - low.max(f64::from(count) - 0.5)).max(0.0))).filter(|&(_, weight)| weight > 1e-9).collect();
+        let total: f64 = weighed.iter().map(|&(_, weight)| weight).sum();
+        weighed.into_iter().map(|(count, weight)| even_at(count) * weight).sum::<f64>() / total
+    };
     let mut cost = cost_at(db.get(bomber), 1);
-    for _ in 0..3 {
-        let middle = (materiel / cost).round() as u32;
-        let next = (middle - 2..=middle + 2).map(even_at).sum::<f64>() / 5.0;
-        let settled = (materiel / next).round() as u32 == middle;
+    for _ in 0..4 {
+        let next = window(cost);
+        let settled = (next / cost - 1.0).abs() < 0.005;
         cost = next;
         if settled {
             break;

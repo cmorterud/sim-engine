@@ -666,6 +666,22 @@ out close and why: evidence about the process, not a target.
   puts T2 Fabrication 7.3% under the list, and it is repriced to it (801 to 864). The Interceptor
   keeps easing off to 15, half its old top speed, so the T3 fighter (13) still eases off slower;
   turning comes next. Every domains check still holds. 339 unit families are not derived yet.
+- Pass 5, turning (2026-11-28, the design owner's pick): every unit on the ground or at sea turns
+  on its tier's line unit's circle, its turn rate the line unit's times its speed over the line
+  unit's (`[constants] hull_turning`). The six line units are the anchors, and the builders keep
+  their own. The most moved are the Light Walker (50 to 163), the Land Scout (90 to 180), the
+  Assault Hovercraft (60 to 105), the Combat Engineer (160 to 90), the Torpedo Boat (100 to 64)
+  and the Missile Sub (50 to 36); the Battlecruiser goes 35 to 41, still faster than the
+  Battleship's 27. A circle per domain or a turn rate per domain each slowed the Heavy Walker and
+  broke the T3 point defenses' hold. The T1 Bomber's escort rule had taken the mean of five whole
+  counts of bombers round the materiel's, and so jumped by 4% where that count crossed a half:
+  with the new turning it went from 240 to 246 and from 241 to 236, and no cost came back to
+  itself. Its window now weighs its end counts by how much of them it covers, and it settles at
+  241 from any start (229 before). So the T1 air base goes 0.348 to 0.331, the Interceptor 141
+  to 149, and the Air Scout to the list, 56.2 to 58.6. The Torpedo Boat's duel prices it 809.6 to
+  782.9 and the Torpedo Bomber's 145.4 to 142.8. The T2 strike aircraft's escort efficiency
+  against the T2 army falls from 0.96 to 0.85, at the floor of its band. 335 unit families are
+  not derived yet.
 
 ## Order of work
 
