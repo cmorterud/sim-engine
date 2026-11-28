@@ -2256,7 +2256,10 @@ impl SimWorld {
                 // So does an attack, once any weapon is firing at what it was told to attack: a
                 // submarine's deck gun at something on land its torpedoes cannot reach.
                 let extra_engaged = combat.forced_target.is_some() && extras.is_some_and(|extras| extras.0.iter().any(|weapon| weapon.target == combat.forced_target));
-                let may_walk = (order.kind == OrderKind::Move || (combat.target.is_none() && !extra_engaged) || combat.line_blocked) && !shelling_ground;
+                // What it fires at on the way to what it was told to attack, or to the spot it
+                // was told to shell, does not stop it.
+                let stops_for = combat.target.filter(|&target| combat.ground_target.is_none() && combat.forced_target.is_none_or(|forced| forced == target));
+                let may_walk = (order.kind == OrderKind::Move || (stops_for.is_none() && !extra_engaged) || combat.line_blocked) && !shelling_ground;
                 if let (Some(_), true, false) = (order.slot, order.settles, arrived) {
                     // On its way to a rally point, its time runs all the way (`send_to_rally`).
                     if order.slot_ticks == 0 {
@@ -2955,40 +2958,57 @@ impl SimWorld {
                 main.or_else(|| extras.as_deref().and_then(|extras| extras.0.iter().find(|weapon| weapon.arc.is_some() && weapon.hits_air).map(|weapon| weapon.range)))
             });
 
-            // A ground attack takes over the gun, so the unit looks for nothing else.
+            // A unit follows its orders, but no weapon of it holds fire while it has something it
+            // could hit (the design owner, 2026-11-28): a ground attack's spot, or the target of
+            // an attack, is what the main weapon fires at while it is within reach; while it is
+            // not, the weapon fires at what else it can reach, and the order still decides where
+            // the unit goes.
             let ground = combat.ground_target;
             let patrolling = patrols.binary_search_by_key(&id, |patrol| patrol.0).is_ok();
             if ground.is_none() && combat.forced_target.is_none() {
                 (combat.line_blocked, combat.closing) = (false, None);
             }
-            if ground.is_some() {
-                combat.target = None;
+            if combat.blocked.is_some_and(|(_, until)| tick >= until) {
+                combat.blocked = None;
+            }
+            let blocked = combat.blocked.map(|(target, _)| target);
+            // Whether it may pick a target of its own, and whether one it keeps may be swapped for
+            // one within reach.
+            let mut may_pick = true;
+            let mut swap_kept = false;
+            if let Some(spot) = ground {
+                let distance = squared_distance(spot.x.to_bits(), spot.y.to_bits());
+                let spot_in_reach = bomb_bay.is_some() || !hits_ground || (distance <= range * range && far_enough(distance));
+                if spot_in_reach {
+                    (combat.target, may_pick) = (None, false);
+                } else if !combat.target.and_then(locate).is_some_and(|entry| can_engage(entry)) {
+                    combat.target = None;
+                }
             } else if let Some(forced) = combat.forced_target {
                 // A fighter that went after an aircraft by itself gives up once its team loses
                 // sight of it, and goes back to what it was doing. So does a unit on patrol that
                 // went after an intruder: it goes back to its patrol.
                 let scrambled = combat.chasing && (flight.is_some() || patrolling);
                 match locate(forced).filter(|entry| !scrambled || (sensed(entry) && !hidden(entry.id))) {
-                    Some(entry) => {
-                        combat.target = can_engage(entry).then_some(forced);
-                        if combat.target.is_none() {
-                            (combat.line_blocked, combat.closing) = (false, None);
-                        }
+                    Some(entry) if can_engage(entry) => {
+                        (combat.target, may_pick) = (Some(forced), false);
+                    }
+                    Some(_) => {
+                        (combat.line_blocked, combat.closing) = (false, None);
+                        let other = combat.target.filter(|&target| target != forced);
+                        combat.target = other.filter(|&target| locate(target).is_some_and(|entry| can_engage(entry)) && blocked != Some(target));
                     }
                     None => {
                         (combat.forced_target, combat.chasing) = (None, false);
-                        combat.target = None;
+                        (combat.target, may_pick) = (None, false);
                         finished_attacks.push(id);
                     }
                 }
             } else {
-                if combat.blocked.is_some_and(|(_, until)| tick >= until) {
-                    combat.blocked = None;
-                }
-                let blocked = combat.blocked.map(|(target, _)| target);
                 // Drop a target that has died, moved out of range, or gone out of sight. On an
                 // attack-move, a unit keeps its target until it dies, out of range or sight, as if
-                // told to attack it, and goes after it. So does a bomber on any order: each pass
+                // told to attack it, and goes after it, unless there is another within reach
+                // to fire at. So does a bomber on any order: each pass
                 // carries it past, out of range and out of its own sight, and dropping the target
                 // then sent the next bomb at whatever was nearest. A torpedo bomber, which makes a
                 // bomber's runs, keeps its ship so. Only a cloak, or a change that
@@ -2997,72 +3017,75 @@ impl SimWorld {
                 // their tasks, except one on patrol with nothing in hand. On patrol, a unit gives
                 // up a target its team has lost sight of, and goes back to its patrol.
                 let free_builder = builder.is_none_or(|builder| builder.tasks.is_empty() && patrolling);
-                let sticky = bomb_bay.is_some() || (torpedo && flight.is_some()) || (order.kind == OrderKind::AttackMove && free_builder);
+                let runs = bomb_bay.is_some() || (torpedo && flight.is_some());
+                let sticky = runs || (order.kind == OrderKind::AttackMove && free_builder);
                 if let Some(target) = combat.target {
                     // Not one too close for artillery, which could neither fire nor chase it.
-                    let keep = locate(target).is_some_and(|entry| {
-                        can_engage(entry)
-                            || (sticky && can_hit(entry) && !hidden(entry.id) && far_enough(squared_distance(entry.x, entry.y)) && (!patrolling || sensed(entry)))
-                    });
+                    let in_reach = locate(target).is_some_and(|entry| can_engage(entry));
+                    let keep = in_reach
+                        || locate(target).is_some_and(|entry| {
+                            sticky && can_hit(entry) && !hidden(entry.id) && far_enough(squared_distance(entry.x, entry.y)) && (!patrolling || sensed(entry))
+                        });
                     // Nor one it cannot fire at now: a commander walking the seabed on an
                     // attack-move stopped for a target it could never shoot, and stood there
                     // under the water for the rest of the match.
                     if !keep || !can_fire {
                         combat.target = None;
                     }
+                    swap_kept = !in_reach && !runs;
                 }
+            }
 
-                // Searches are spread across ticks. Rings grow outward, so units at the
-                // front of a battle stop early with the nearest enemy. Mobile units come first.
-                if combat.target.is_none() && picks_targets && can_fire && stats.phase.wrapping_add(tick).is_multiple_of(TARGET_SEARCH_INTERVAL) {
-                    // A missile flies to where its target was, so a launcher picking its own looks over
-                    // its whole reach at once, for structures first, then what has stopped, and only
-                    // then what is moving, which it would miss.
-                    let mut ring = if missile.is_some() { range } else { (8i64 << FP_FRAC_BITS).max(range / 8) };
-                    loop {
-                        let radius = ring.min(range);
-                        let mut best: Option<(u8, i64, SimId)> = None;
-                        let mut consider = |other: &super::spatial::GridEntry| {
-                            let distance = reach_distance(other);
-                            let reach = radius + i64::from(other.radius);
-                            let visible = sensed(other) && !hidden(other.id);
-                            if distance <= reach * reach && far_enough(distance) && visible && blocked != Some(other.id) && can_hit(other) {
-                                let rank = if missile.is_none() {
-                                    u8::from(other.is_structure)
-                                } else if other.is_structure {
-                                    0
-                                } else {
-                                    let (vx, vy) = (i64::from(other.velocity[0]), i64::from(other.velocity[1]));
-                                    1 + u8::from(vx * vx + vy * vy > MISSILE_STILL_SPEED_RAW * MISSILE_STILL_SPEED_RAW)
-                                };
-                                let candidate = (rank, distance, other.id);
-                                if best.is_none_or(|current| candidate < current) {
-                                    best = Some(candidate);
-                                }
+            // Searches are spread across ticks. Rings grow outward, so units at the
+            // front of a battle stop early with the nearest enemy. Mobile units come first.
+            if (combat.target.is_none() || swap_kept) && may_pick && picks_targets && can_fire && stats.phase.wrapping_add(tick).is_multiple_of(TARGET_SEARCH_INTERVAL) {
+                // A missile flies to where its target was, so a launcher picking its own looks over
+                // its whole reach at once, for structures first, then what has stopped, and only
+                // then what is moving, which it would miss.
+                let mut ring = if missile.is_some() { range } else { (8i64 << FP_FRAC_BITS).max(range / 8) };
+                loop {
+                    let radius = ring.min(range);
+                    let mut best: Option<(u8, i64, SimId)> = None;
+                    let mut consider = |other: &super::spatial::GridEntry| {
+                        let distance = reach_distance(other);
+                        let reach = radius + i64::from(other.radius);
+                        let visible = sensed(other) && !hidden(other.id);
+                        if distance <= reach * reach && far_enough(distance) && visible && blocked != Some(other.id) && can_hit(other) {
+                            let rank = if missile.is_none() {
+                                u8::from(other.is_structure)
+                            } else if other.is_structure {
+                                0
+                            } else {
+                                let (vx, vy) = (i64::from(other.velocity[0]), i64::from(other.velocity[1]));
+                                1 + u8::from(vx * vx + vy * vy > MISSILE_STILL_SPEED_RAW * MISSILE_STILL_SPEED_RAW)
+                            };
+                            let candidate = (rank, distance, other.id);
+                            if best.is_none_or(|current| candidate < current) {
+                                best = Some(candidate);
                             }
-                        };
-                        let enemy = Some(stats.team.enemy());
-                        if hits_air {
-                            grid.for_each_candidate(enemy, Layer::Air, me.x, me.y, radius as i32 + max_mobile, &mut consider);
                         }
-                        if hits_ground || torpedo {
-                            grid.for_each_candidate(enemy, Layer::Mobile, me.x, me.y, radius as i32 + max_mobile, &mut consider);
-                        }
-                        if hits_ground && max_structure > 0 {
-                            grid.for_each_candidate(enemy, Layer::Structure, me.x, me.y, radius as i32 + max_structure, &mut consider);
-                        }
-                        if torpedo {
-                            grid.for_each_candidate(enemy, Layer::Sub, me.x, me.y, radius as i32 + max_mobile, &mut consider);
-                        }
-                        if let Some((_, _, found)) = best {
-                            combat.target = Some(found);
-                            break;
-                        }
-                        if radius >= range {
-                            break;
-                        }
-                        ring *= 2;
+                    };
+                    let enemy = Some(stats.team.enemy());
+                    if hits_air {
+                        grid.for_each_candidate(enemy, Layer::Air, me.x, me.y, radius as i32 + max_mobile, &mut consider);
                     }
+                    if hits_ground || torpedo {
+                        grid.for_each_candidate(enemy, Layer::Mobile, me.x, me.y, radius as i32 + max_mobile, &mut consider);
+                    }
+                    if hits_ground && max_structure > 0 {
+                        grid.for_each_candidate(enemy, Layer::Structure, me.x, me.y, radius as i32 + max_structure, &mut consider);
+                    }
+                    if torpedo {
+                        grid.for_each_candidate(enemy, Layer::Sub, me.x, me.y, radius as i32 + max_mobile, &mut consider);
+                    }
+                    if let Some((_, _, found)) = best {
+                        combat.target = Some(found);
+                        break;
+                    }
+                    if radius >= range {
+                        break;
+                    }
+                    ring *= 2;
                 }
             }
 
@@ -3292,7 +3315,7 @@ impl SimWorld {
                     }
                     if bomb.is_some() && !bomb_on(Vec3Fp::new(to.x, to.y, surface(to.xy())), entry.radius, entry.velocity) {
                         // Not over it yet.
-                    } else if !clear && combat.forced_target.is_none() {
+                    } else if !clear && combat.forced_target != Some(target) {
                         // A target picked by the unit itself is passed over for a while.
                         combat.blocked = Some((target, tick + BLOCKED_TARGET_TICKS));
                         combat.target = None;

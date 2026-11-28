@@ -725,10 +725,11 @@ fn artillery_blasts_all_the_debris_it_lands_among_but_not_trees_or_rocks() {
 }
 
 #[test]
-fn a_ground_attack_walks_into_range_and_fires_into_the_fog_at_nothing_else() {
+fn a_ground_attack_walks_into_range_firing_at_what_it_passes_then_at_the_spot() {
     let mut world = flat_map(true);
     let bot = spawn_gunner(&mut world, "t1_light_walker");
-    // An enemy right behind, which it would otherwise turn and shoot.
+    // An enemy right behind. No weapon holds fire with something in reach, so the bot shoots it
+    // while the spot is out of reach, and walks on all the same (the design owner, 2026-11-28).
     let enemy = passive_unit(&mut world, Team::Red, point(900, 1_000));
     let enemy_health = world.unit_health(enemy).unwrap();
     let spot = point(2_000, 1_000);
@@ -751,7 +752,22 @@ fn a_ground_attack_walks_into_range_and_fires_into_the_fog_at_nothing_else() {
     let range = world.blueprints.get(world.blueprints.id("t1_light_walker")).weapon.unwrap().range.to_num::<f64>();
     assert!((range - 40.0..=range).contains(&distance), "it stopped {distance} from the spot, with a range of {range}");
     assert!(shots > 0, "it should fire at the spot");
-    assert_eq!(world.unit_health(enemy), Some(enemy_health), "it fires at the spot and nothing else");
+    assert!(world.unit_health(enemy).is_none_or(|health| health < enemy_health), "it fired at the enemy behind it on the way");
+}
+
+#[test]
+fn a_ground_attack_in_reach_fires_at_the_spot_and_nothing_else() {
+    let mut world = flat_map(true);
+    let bot = spawn_gunner(&mut world, "t1_light_walker");
+    let enemy = passive_unit(&mut world, Team::Red, point(900, 1_000));
+    let enemy_health = world.unit_health(enemy).unwrap();
+    let here = world.unit_position(bot).unwrap().xy();
+    let spot = Vec2Fp::new(here.x + fp_int(150), here.y);
+    world.advance_tick(&[SimCommand::AttackGround { units: vec![bot], point: spot }]);
+    for _ in 0..200 {
+        world.advance_tick(&[]);
+    }
+    assert_eq!(world.unit_health(enemy), Some(enemy_health), "the spot is in reach, so it fires at nothing else");
 }
 
 #[test]
@@ -820,6 +836,48 @@ fn an_attack_moving_unit_chases_its_target_until_it_is_destroyed_then_moves_on()
     let here = world.unit_position(bot).unwrap().xy();
     let goal = point(4_000, 2_500);
     assert!((here.x - goal.x).abs() < fp_int(200) && (here.y - goal.y).abs() < fp_int(200), "then went on to its goal, and is at {here:?}");
+}
+
+#[test]
+fn a_unit_told_to_attack_fires_at_what_it_passes_and_walks_on() {
+    // Its target is out of reach, so its gun fires at an enemy it passes, which does not stop it
+    // (the design owner, 2026-11-28).
+    let mut world = SimWorld::new(SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, ..SimConfig::default() }, 1);
+    let tank = world.spawn_mobile(world.blueprints.id("t1_medium_tank"), Team::Blue, point(1_000, 2_500));
+    let target = passive_unit(&mut world, Team::Red, point(3_500, 2_500));
+    let passed = passive_unit(&mut world, Team::Red, point(1_400, 2_650));
+    sturdy(&mut world, passed);
+    let passed_health = world.unit_health(passed).unwrap();
+    world.advance_tick(&[SimCommand::Attack { units: vec![tank], target }]);
+    for _ in 0..1_500 {
+        world.advance_tick(&[]);
+        if world.unit_health(target).is_none() {
+            break;
+        }
+    }
+    assert!(world.unit_health(passed).unwrap() < passed_health, "it fired at the enemy it passed");
+    assert!(world.unit_health(target).is_none(), "and went on to destroy its target");
+}
+
+#[test]
+fn an_attack_move_chasing_its_target_fires_at_another_in_reach() {
+    let (mut world, bot, engineer) = bot_meets_a_fleeing_engineer();
+    let entity = world.unit_entity(bot).unwrap();
+    // Until the engineer is out of range, and the bot has set off after it.
+    for _ in 0..2_000 {
+        world.advance_tick(&[]);
+        if world.unit_position(bot).unwrap().y > fp_int(2_520) {
+            break;
+        }
+    }
+    assert_eq!(world.ecs.get::<&Combat>(entity).unwrap().target, Some(engineer));
+    let here = world.unit_position(bot).unwrap().xy();
+    let other = passive_unit(&mut world, Team::Red, Vec2Fp::new(here.x - fp_int(150), here.y));
+    let other_health = world.unit_health(other).unwrap();
+    for _ in 0..100 {
+        world.advance_tick(&[]);
+    }
+    assert!(world.unit_health(other).is_none_or(|health| health < other_health), "it fired at the enemy in reach rather than hold fire");
 }
 
 #[test]
