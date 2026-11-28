@@ -95,8 +95,8 @@ pub struct Combat {
     pub target: Option<SimId>,
     /// Set by an Attack order. Other enemies are ignored until it dies.
     pub forced_target: Option<SimId>,
-    /// Whether the forced target is one this unit found on an attack-move and is chasing out of
-    /// range, rather than one it was told to attack. Its move waits at the front of its queue,
+    /// Whether the forced target is one this unit found by itself, on an attack-move or a patrol,
+    /// and is chasing, rather than one it was told to attack. Its move waits at the front of its queue,
     /// to go on with once the target is destroyed.
     pub chasing: bool,
     /// A target the ground stops this unit's shots at, and the tick until which it is passed

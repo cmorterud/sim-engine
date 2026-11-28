@@ -2104,6 +2104,7 @@ impl SimWorld {
         let surfaced = &self.surfaced;
         let mut unreachable = Vec::new();
         let mut chases = Vec::new();
+        let patrols = &self.patrols;
         // Units that have driven out of their factory, with where they were sent.
         let mut left_factory = Vec::new();
         let mut query = self.ecs.query_mut::<(&mut Position, &mut Velocity, &UnitStats, &mut Order, &Combat, Option<&mut Turning>, Option<&Builder>, Option<&LeavingFactory>, Option<&super::components::ExtraWeapons>)>();
@@ -2170,10 +2171,12 @@ impl SimWorld {
 
             // On an attack-move, a target that has left range is chased. While it is near and the
             // way to it open, the unit walks straight at it; otherwise it is given an attack order
-            // on it, which finds a way.
+            // on it, which finds a way. A builder's walks are among its tasks, so only one on
+            // patrol with nothing in hand chases.
+            let free_builder = builder.is_none_or(|builder| builder.tasks.is_empty() && patrols.binary_search_by_key(&id, |patrol| patrol.0).is_ok());
             let chasing_toward = combat
                 .target
-                .filter(|_| order.kind == OrderKind::AttackMove && builder.is_none())
+                .filter(|_| order.kind == OrderKind::AttackMove && free_builder)
                 .and_then(|target| {
                     let entry = grid.entry(units.binary_search_by_key(&target, |unit| unit.0).ok()?);
                     Some((target, Vec2Fp::new(Fp::from_bits(entry.x), Fp::from_bits(entry.y)), Fp::from_bits(entry.radius)))
@@ -2471,7 +2474,8 @@ impl SimWorld {
         self.cancel_unreachable(unreachable);
     }
 
-    /// Sends units on an attack-move after targets too far, or too hard, to walk straight at: each
+    /// Sends units on an attack-move after targets too far, or too hard, to walk straight at, and
+    /// units on patrol after what only another of their weapons has in range: each
     /// is given an attack order on its target, and its move waits at the front of its queue, still holding
     /// its route, until the target is destroyed. Units after the same target share a route.
     /// `chases` lists (target, unit) pairs.
@@ -2791,6 +2795,10 @@ impl SimWorld {
         let mut fired_nukes: Vec<SimId> = Vec::new();
         // Idle fighters taking off after enemy aircraft: (target, fighter).
         let mut scrambles: Vec<(SimId, SimId)> = Vec::new();
+        // Units on patrol going after what only one of their other weapons has in range:
+        // (target, unit).
+        let mut patrol_chases: Vec<(SimId, SimId)> = Vec::new();
+        let patrols = &self.patrols;
         // How each unit is moving and turning, for the guns that lead it, read before the units'
         // weapons are borrowed: as the shots will read them when they are fired.
         let courses: Vec<(Vec3Fp, Vec2Fp)> = units
@@ -2949,6 +2957,7 @@ impl SimWorld {
 
             // A ground attack takes over the gun, so the unit looks for nothing else.
             let ground = combat.ground_target;
+            let patrolling = patrols.binary_search_by_key(&id, |patrol| patrol.0).is_ok();
             if ground.is_none() && combat.forced_target.is_none() {
                 (combat.line_blocked, combat.closing) = (false, None);
             }
@@ -2956,8 +2965,9 @@ impl SimWorld {
                 combat.target = None;
             } else if let Some(forced) = combat.forced_target {
                 // A fighter that went after an aircraft by itself gives up once its team loses
-                // sight of it, and goes back to what it was doing.
-                let scrambled = combat.chasing && flight.is_some();
+                // sight of it, and goes back to what it was doing. So does a unit on patrol that
+                // went after an intruder: it goes back to its patrol.
+                let scrambled = combat.chasing && (flight.is_some() || patrolling);
                 match locate(forced).filter(|entry| !scrambled || (sensed(entry) && !hidden(entry.id))) {
                     Some(entry) => {
                         combat.target = can_engage(entry).then_some(forced);
@@ -2984,12 +2994,15 @@ impl SimWorld {
                 // bomber's runs, keeps its ship so. Only a cloak, or a change that
                 // puts the target beyond its weapon, breaks it off.
                 // Movement does the chasing. Builders are left out, since their walks are among
-                // their tasks.
-                let sticky = bomb_bay.is_some() || (torpedo && flight.is_some()) || (order.kind == OrderKind::AttackMove && builder.is_none());
+                // their tasks, except one on patrol with nothing in hand. On patrol, a unit gives
+                // up a target its team has lost sight of, and goes back to its patrol.
+                let free_builder = builder.is_none_or(|builder| builder.tasks.is_empty() && patrolling);
+                let sticky = bomb_bay.is_some() || (torpedo && flight.is_some()) || (order.kind == OrderKind::AttackMove && free_builder);
                 if let Some(target) = combat.target {
                     // Not one too close for artillery, which could neither fire nor chase it.
                     let keep = locate(target).is_some_and(|entry| {
-                        can_engage(entry) || (sticky && can_hit(entry) && !hidden(entry.id) && far_enough(squared_distance(entry.x, entry.y)))
+                        can_engage(entry)
+                            || (sticky && can_hit(entry) && !hidden(entry.id) && far_enough(squared_distance(entry.x, entry.y)) && (!patrolling || sensed(entry)))
                     });
                     // Nor one it cannot fire at now: a commander walking the seabed on an
                     // attack-move stopped for a target it could never shoot, and stood there
@@ -3052,6 +3065,21 @@ impl SimWorld {
                     }
                 }
             }
+
+            // On patrol, an enemy within reach of any of its weapons is fought and chased, not only
+            // one its main weapon can hit: a fighter-bomber goes after an interceptor in its gun's
+            // reach, wherever it is from its nose, as if told to attack it (the design owner,
+            // 2026-11-28). Its main weapon's own targets come first, and its attack-move chases
+            // those. Its other weapons look below.
+            let mut free_to_chase = patrolling
+                && order.kind == OrderKind::AttackMove
+                && combat.target.is_none()
+                && combat.forced_target.is_none()
+                && ground.is_none()
+                && discharge_order.is_none()
+                && builder.is_none_or(|builder| builder.tasks.is_empty())
+                && flight.is_none_or(|flight| flight.refit.is_none())
+                && stats.phase.wrapping_add(tick).is_multiple_of(TARGET_SEARCH_INTERVAL);
 
             // An idle fighter, landed or circling, takes off after an enemy aircraft that comes
             // within its gun's reach across the ground, as if told to attack it (the design
@@ -3447,6 +3475,43 @@ impl SimWorld {
                             weapon.target = best.map(|(_, _, found)| found);
                         }
                     }
+                    // On patrol, the nearest enemy in its reach, ahead or not, is one to go after.
+                    if free_to_chase {
+                        let mut best: Option<(bool, i64, SimId)> = None;
+                        let mut consider = |other: &super::spatial::GridEntry| {
+                            let within = reach + i64::from(other.radius);
+                            let hit = if other.is_sub {
+                                weapon.torpedo
+                            } else if other.is_air {
+                                weapon.hits_air
+                            } else {
+                                weapon.hits_ground || (weapon.torpedo && other.is_naval)
+                            };
+                            if hit && reach_distance(other) <= within * within && sensed(other) && !hidden(other.id) {
+                                let candidate = (other.is_structure, squared_distance(other.x, other.y), other.id);
+                                if best.is_none_or(|current| candidate < current) {
+                                    best = Some(candidate);
+                                }
+                            }
+                        };
+                        let enemy = Some(stats.team.enemy());
+                        if weapon.hits_air {
+                            grid.for_each_candidate(enemy, Layer::Air, me.x, me.y, reach as i32 + max_mobile, &mut consider);
+                        }
+                        if weapon.hits_ground || weapon.torpedo {
+                            grid.for_each_candidate(enemy, Layer::Mobile, me.x, me.y, reach as i32 + max_mobile, &mut consider);
+                        }
+                        if weapon.hits_ground && max_structure > 0 {
+                            grid.for_each_candidate(enemy, Layer::Structure, me.x, me.y, reach as i32 + max_structure, &mut consider);
+                        }
+                        if weapon.torpedo {
+                            grid.for_each_candidate(enemy, Layer::Sub, me.x, me.y, reach as i32 + max_mobile, &mut consider);
+                        }
+                        if let Some((_, _, found)) = best {
+                            patrol_chases.push((found, id));
+                            free_to_chase = false;
+                        }
+                    }
                     let target = weapon.target.and_then(locate);
                     let aim_at = match spot {
                         Some(spot) => Some((spot.x.to_bits(), spot.y.to_bits())),
@@ -3538,6 +3603,7 @@ impl SimWorld {
             self.set_order(id, Order::IDLE);
         }
         self.start_scrambles(scrambles);
+        self.start_chases(patrol_chases);
         // Each order to fire a nuclear missile fires one.
         for id in fired_nukes {
             let (_, entity) = self.find_unit(id).expect("it just fired");
