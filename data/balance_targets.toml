@@ -418,6 +418,9 @@ check_materiel = 3000
 # a bomber cannot shake one off its tail (2026-11-22).
 fighter_turn_over_t1_bomber = 1.5
 fighters = ["t1_interceptor", "t2_fighter_bomber", "t3_air_superiority"]
+# A transport's weapons are weak (2026-11-27, the design owner's rule): together they do this share
+# of their tier's gunship's damage a second (tests/price_list_test.rs).
+transport_weapons_over_gunship = 0.25
 
 # The T3 fighter against the T1 interceptor (2026-11-22), so that teching up is worth it: about
 # this many times its damage a second; a shot that destroys one; a little more range and speed;
@@ -738,6 +741,11 @@ aircraft_anti_air_at_fighter = 1.0
 support_gun_at_line = 1.0
 # The battleship's broadside every 13.5 seconds, the model's damage a second in faster volleys.
 battleship_broadside_seconds = 13.5
+# The battlecruiser (2026-11-26, the design owner's targets): each of its lasers does at least
+# twice the damage a second of each of the battleship's turrets, and it sails half again the
+# battleship's top speed (tests/stat_sources_test.rs).
+battlecruiser_laser_over_turret_min = 2.0
+battlecruiser_speed_over_battleship = 1.5
 
 [price_list]
 # Step 3 of the model (2026-11-26): what a unit costs, from what it can do.

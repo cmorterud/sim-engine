@@ -1,0 +1,781 @@
+# What sets each stat of each unit (2026-11-28; src/stat_sources.rs, `--balance-derive
+# stat-sources`), as `[price_list.unlisted]` and price_list::cost_rule say what sets each cost.
+#
+# Every number in data/units.toml other than cost is in one of ten families: health; body
+# (radius, footprint, adjacency size); damage; range; speed; turning (turn rate and radius, and an
+# aircraft's handling and height); timing (reload, volley, shell or missile speed, blast, spread,
+# turret swivel, firing arc, setup, cruise height); sensors; economy (income, storage, build power
+# and range, upkeep, energy a shot, adjacency); and special (domes, missile and torpedo defense,
+# cargo, pads, stock, blasts on death, the Discharge, stealth and jamming). A family is derived
+# only when every number in it is.
+#
+# Each unit names, for each family it has, what sets it, in words that start:
+# - "rule: " a rule of the model or a target the design owner set, citing it as
+#   `[section] key` in data/balance_targets.toml or as `module::function` in the code;
+# - "anchor: " the design owner's own number, which others are set from, cited the same way;
+# - "not derived yet: " and why: "held" (today's value, which no rule sets), "the
+#   inspiration's", "kept" (inside a band or past a floor that does not pin it), "today's value
+#   written down" (as a target), or "an identity knob" (one `[constants]` names, at today's).
+#
+# tests/stat_sources_test.rs holds this table to the unit data: every family a unit has is
+# named, every citation resolves, the rules no other test checks are checked there, and the count
+# not derived yet can only fall. Each pass of the derivation plan (2026-11-28, the design owner's
+# "Yes" to deriving every stat in passes) turns some of these into rules.
+
+[units.command_rig]
+health = "rule: the snipes that destroy it, [kills] t3_strategic_bomber.command_rig, [kills] tactical_missile_launcher.command_rig and [broadsides] t3_battleship.command_rig"
+body = "not derived yet: held, today's radius"
+damage = "rule: [commander] holds_against_medium_tanks, the least gun that does"
+range = "anchor: the design owner's reach, 1.26 times the Medium Tank's ([commander] holds_against_medium_tanks)"
+speed = "not derived yet: an identity knob ([constants]), today's top speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
+timing = "not derived yet: held, its shell speed and turret; its reload the design owner's ([commander] holds_against_medium_tanks)"
+sensors = "not derived yet: held, its vision and deep scan"
+economy = "not derived yet: held, its income, storage and build power"
+special = "anchor: the design owner's Discharge, at least [commander] discharge_kills_every_t1_land_unit; its reactor's blast is its own health"
+
+[units.t1_engineer]
+health = "not derived yet: held, its health and body"
+body = "not derived yet: held, today's radius"
+speed = "not derived yet: an identity knob ([constants]), today's top speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: held, today's build power and range"
+
+[units.t1_light_walker]
+health = "rule: its role's time to kill in balance::t1_land_roles, splitting the strength its duel target solves"
+body = "rule: its role's radius in balance::t1_land_roles"
+damage = "rule: its role's time to kill in balance::t1_land_roles, splitting the strength its duel target solves"
+range = "rule: its role's reach in balance::t1_land_roles, a multiple of [anchor] range"
+speed = "rule: its role's speed in balance::t1_land_roles, a multiple of [anchor] speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
+timing = "not derived yet: held, its turret's swivel; its reload, shell flight, blast and spread are its role's in balance::t1_land_roles"
+sensors = "rule: its role's sight over its reach in balance::t1_land_roles"
+
+[units.t1_light_artillery]
+health = "rule: its role's time to kill in balance::t1_land_roles, splitting the strength its duel target solves"
+body = "rule: its role's radius in balance::t1_land_roles"
+damage = "rule: its role's time to kill in balance::t1_land_roles, splitting the strength its duel target solves"
+range = "rule: its role's reach in balance::t1_land_roles, a multiple of [anchor] range"
+speed = "rule: its role's speed in balance::t1_land_roles, a multiple of [anchor] speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
+timing = "not derived yet: held, its turret's swivel; its reload, shell flight, blast and spread are its role's in balance::t1_land_roles"
+sensors = "rule: its role's sight over its reach in balance::t1_land_roles"
+
+[units.t2_heavy_tank]
+health = "rule: its role's time to kill in balance::t2_land_roles, splitting the strength its duel target solves"
+body = "rule: its role's radius in balance::t2_land_roles"
+damage = "rule: its role's time to kill in balance::t2_land_roles, splitting the strength its duel target solves"
+range = "rule: its role's reach in balance::t2_land_roles, a multiple of [anchor] range"
+speed = "rule: its role's speed in balance::t2_land_roles, a multiple of [anchor] speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
+timing = "not derived yet: held, its turret's swivel; its reload, shell flight, blast and spread are its role's in balance::t2_land_roles"
+sensors = "rule: its role's sight over its reach in balance::t2_land_roles"
+
+[units.land_factory_t1]
+health = "not derived yet: the inspiration's hull"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's build power"
+
+[units.land_factory_t2]
+health = "not derived yet: the inspiration's hull"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's build power"
+
+[units.mass_extractor]
+health = "not derived yet: the inspiration's"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's income, storage, upkeep and adjacency"
+
+[units.power_generator]
+health = "not derived yet: the inspiration's"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's income, storage, upkeep and adjacency"
+
+[units.mass_storage]
+health = "not derived yet: the inspiration's"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's income, storage, upkeep and adjacency"
+
+[units.t1_point_defense]
+health = "not derived yet: held, three times its earlier ([premiums] point_defense_holds_against_line_units prices it)"
+body = "not derived yet: held, its footprint"
+damage = "not derived yet: held, three times its earlier ([premiums] point_defense_holds_against_line_units prices it)"
+range = "rule: [model] point_defense_under_artillery, a fifth inside T1 artillery's"
+timing = "not derived yet: held, its reload, shell speed and turret"
+sensors = "not derived yet: held, today's vision"
+
+[units.shield_generator]
+health = "not derived yet: held, its generator's health and footprint"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+special = "not derived yet: held, its dome's size and upkeep; its health and regeneration are the design owner's, one cruiser held and two break it, one broadside takes it down ([broadsides] t3_battleship)"
+
+[units.tactical_missile_launcher]
+health = "not derived yet: held, its health and footprint"
+body = "not derived yet: held, its footprint"
+damage = "not derived yet: the inspiration's missile, inside [kills] tactical_missile_launcher, two to a commander or a field rig"
+range = "not derived yet: the inspiration's"
+timing = "not derived yet: held, its reload and cruise height; its missile at [constants] tactical_missile_speed"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: held, its build power"
+special = "not derived yet: the inspiration's stock"
+
+[units.tactical_missile_defense]
+health = "not derived yet: held, its health and footprint"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+special = "not derived yet: held, a mount's reach and reload, the same wherever it is carried"
+
+[units.strategic_missile_launcher]
+health = "not derived yet: held, its health and footprint"
+body = "not derived yet: held, its footprint"
+damage = "not derived yet: the inspiration's two rings"
+range = "not derived yet: the inspiration's"
+timing = "not derived yet: the inspiration's flight; its missile at [constants] strategic_missile_speed"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: held, its build power"
+special = "not derived yet: the inspiration's stock"
+
+[units.strategic_missile_defense]
+health = "not derived yet: held, its health and footprint"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: held, its build power"
+special = "not derived yet: the inspiration's reach and stock"
+
+[units.land_factory_t3]
+health = "not derived yet: the inspiration's hull"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's build power"
+
+[units.t2_engineer]
+health = "not derived yet: held, its health and body"
+body = "not derived yet: held, today's radius"
+speed = "not derived yet: an identity knob ([constants]), today's top speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: held, today's build power and range"
+
+[units.t3_engineer]
+health = "not derived yet: held, its health and body"
+body = "not derived yet: held, today's radius"
+speed = "not derived yet: an identity knob ([constants]), today's top speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: held, today's build power and range"
+
+[units.radar]
+health = "not derived yet: held, its health and footprint"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, its sensors' reach"
+economy = "not derived yet: held, its upkeep and the build power that drives its upgrade"
+
+[units.deep_scan_array]
+health = "not derived yet: held, its health and footprint"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, its sensors' reach"
+economy = "not derived yet: held, its upkeep"
+
+[units.stealth_field_generator]
+health = "not derived yet: held, its health and footprint"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: held, its upkeep"
+special = "not derived yet: held, its stealth field and decoys"
+
+[units.rig_yard]
+health = "not derived yet: the inspiration's hull"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's build power"
+
+[units.field_rig]
+health = "not derived yet: kept inside [kills] tactical_missile_launcher.field_rig, two missiles, which does not pin it"
+body = "not derived yet: held, today's radius"
+damage = "not derived yet: held, three times the commander's fire"
+range = "not derived yet: held, a little past the commander's"
+speed = "not derived yet: the inspiration's"
+turning = "not derived yet: the inspiration's"
+timing = "not derived yet: the inspiration's"
+sensors = "not derived yet: the inspiration's"
+economy = "not derived yet: the inspiration's"
+special = "not derived yet: held, its blast on death"
+
+[units.mass_extractor_t2]
+health = "not derived yet: the inspiration's"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's income, storage, upkeep and adjacency"
+
+[units.mass_extractor_t3]
+health = "not derived yet: the inspiration's"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's income, storage, upkeep and adjacency"
+
+[units.geothermal_plant]
+health = "not derived yet: the inspiration's"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's income, storage, upkeep and adjacency"
+
+[units.mass_fabricator]
+health = "not derived yet: the inspiration's"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's adjacency; its rate is [economy] energy_per_materiel, its tier's"
+special = "not derived yet: held, its blast on death while running"
+
+[units.mass_fabricator_t3]
+health = "not derived yet: the inspiration's"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's adjacency; its rate is [economy] energy_per_materiel, its tier's"
+special = "not derived yet: held, its blast on death while running"
+
+[units.air_factory]
+health = "not derived yet: the inspiration's hull"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's build power"
+
+[units.t1_air_scout]
+health = "not derived yet: held, its health and body"
+body = "not derived yet: held, today's radius"
+speed = "not derived yet: an identity knob ([constants]), today's top speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn and fuel; its height is [air.heights] t1_air_scout of the Spy Plane's, which is held"
+sensors = "not derived yet: held, its vision, radar and sonar"
+
+[units.t1_interceptor]
+health = "not derived yet: kept inside [air] interceptors_clear_bombers_seconds, its size, the root of health times damage a second, which the band does not pin; [model] time_to_kill_domain air_to_air splits it (balance::derive_t1_air)"
+body = "not derived yet: held, today's radius"
+damage = "not derived yet: kept inside [air] interceptors_clear_bombers_seconds, its size, which the band does not pin; [model] time_to_kill_domain air_to_air splits it (balance::derive_t1_air)"
+range = "not derived yet: held, its gun's reach"
+speed = "not derived yet: an identity knob ([constants]), today's top speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn rate, at least [air] fighter_turn_over_t1_bomber; its turn radius is [constants] fighter_turn_radius; its height [air.heights] t1_interceptor of the Spy Plane's, which is held"
+timing = "not derived yet: held, its reload and its 30-degree arc; its shell speed is [constants] fighter_gun_speed"
+sensors = "not derived yet: held, today's vision"
+
+[units.t1_bomber]
+health = "rule: [air] interceptor_seconds_per_bomber_t1, ten seconds of the Interceptor's gun (balance::derive_t1_air)"
+body = "not derived yet: held, today's radius"
+damage = "rule: [kills] t1_bomber.t1_medium_tank, at [air] line_health_over_bomb (balance::derive_t1_air)"
+range = "not derived yet: held, where it lets its bomb go"
+speed = "not derived yet: an identity knob ([constants]), today's top speed"
+turning = "not derived yet: the inspiration's turn; its turn radius is [constants] fighter_turn_radius; its height [air.heights] t1_bomber of the Spy Plane's, which is held"
+timing = "not derived yet: held, its reload and bomb speed; its blast is inside [splash] medium_reach_over_spacing"
+sensors = "not derived yet: held, its vision and radar"
+
+[units.t1_aa_turret]
+health = "not derived yet: held, mostly health for its premium ([premiums] static_anti_air_over_mobile prices it)"
+body = "not derived yet: held, its footprint"
+damage = "not derived yet: held, the inspiration's two shots as one"
+range = "rule: [model] static_anti_air_over_mobile"
+timing = "not derived yet: held, its reload, shell speed and turret"
+sensors = "not derived yet: held, today's vision"
+
+[units.t1_mobile_aa]
+health = "rule: [air] anti_air_health_over_bomb, a bomb and a half (balance::derive_t1_air)"
+body = "not derived yet: held, today's radius"
+damage = "rule: [kill_times] mobile_aa_t1_bomber (balance::derive_t1_air)"
+range = "rule: [model] mobile_anti_air_over_line"
+speed = "not derived yet: an identity knob ([constants]), today's top speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
+timing = "not derived yet: held, its reload, shell speed and turret"
+sensors = "not derived yet: held, today's vision"
+
+[units.air_factory_t2]
+health = "not derived yet: the inspiration's hull"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's build power"
+
+[units.air_factory_t3]
+health = "not derived yet: the inspiration's hull"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's build power"
+
+[units.t2_gunship]
+health = "rule: [volleys] t2_cruiser.t2_gunship and [kills] t3_sam.t2_gunship"
+body = "not derived yet: held, today's radius"
+damage = "not derived yet: the inspiration's ratio to its T1 tank"
+range = "rule: [model] aircraft_gun_over_anti_air, 0.7 of the Mobile Anti-Air's"
+speed = "not derived yet: an identity knob ([constants]), today's top speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn and fuel; its height is [air.heights] t2_gunship of the Spy Plane's, which is held"
+timing = "not derived yet: held, its reload, shell speed and spread"
+sensors = "not derived yet: held, today's vision"
+
+[units.t3_spy_plane]
+health = "not derived yet: held, its health and body"
+body = "not derived yet: held, today's radius"
+speed = "not derived yet: an identity knob ([constants]), today's top speed"
+turning = "not derived yet: held, its height, the highest, which every aircraft's is a share of; an identity knob ([constants]), its turn and fuel"
+sensors = "not derived yet: held, its vision, radar and deep scan"
+
+[units.t3_air_superiority]
+health = "rule: [kill_times] t3_fighter_t3_fighter and t3_fighter_strategic_bomber"
+body = "not derived yet: held, today's radius"
+damage = "rule: [kill_times] t3_fighter_strategic_bomber, t3_fighter_t3_fighter and t3_fighter_heavy_gunship"
+range = "not derived yet: kept inside [air.t3_fighter] range_over_interceptor, which does not pin it"
+speed = "rule: [air.t3_fighter] speed_over_strategic_bomber"
+turning = "not derived yet: held, its fuel and break-off; its turn is [air.t3_fighter] turn_over_interceptor, its least speed the design owner's quarter of its top, its height [air.heights] t3_air_superiority of the Spy Plane's"
+timing = "not derived yet: held, its reload; its 40-degree arc the design owner's, its shell [constants] fighter_gun_speed"
+sensors = "not derived yet: held, today's vision"
+
+[units.t3_strategic_bomber]
+health = "rule: [volleys] t2_cruiser.t3_strategic_bomber and [kill_times] sam_t3_strategic_bomber"
+body = "not derived yet: held, today's radius"
+damage = "rule: the hits it takes to destroy what it is for, [kills] t3_strategic_bomber"
+range = "not derived yet: held, where it lets its bomb go"
+speed = "not derived yet: an identity knob ([constants]), today's top speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn, fuel and break-off; its least speed the design owner's nine tenths, its height [air.heights] t3_strategic_bomber of the Spy Plane's"
+timing = "not derived yet: held, its bomb's speed; its reload is its pass, the design owner's rule, its blast [splash] wide_reach_over_spacing"
+sensors = "not derived yet: held, its vision and radar"
+
+[units.t3_heavy_gunship]
+health = "rule: [kill_times] t3_fighter_heavy_gunship and [volleys] t2_cruiser.t3_heavy_gunship"
+body = "not derived yet: held, today's radius"
+damage = "not derived yet: the inspiration's railgun; its gun is [kill_times] heavy_gunship_commander_on_land"
+range = "rule: [model] aircraft_gun_over_anti_air, 0.7 of the Mobile Flak's, and [model] aircraft_anti_air_at_fighter"
+speed = "not derived yet: an identity knob ([constants]), today's top speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn and fuel; its height is [air.heights] t3_heavy_gunship of the Spy Plane's, which is held"
+timing = "not derived yet: held, its reloads, shell speeds and spread"
+sensors = "not derived yet: held, today's vision"
+
+[units.t2_flak]
+health = "not derived yet: held, mostly health for its premium ([premiums] static_anti_air_over_mobile prices it)"
+body = "not derived yet: held, its footprint"
+damage = "not derived yet: held, its shell"
+range = "rule: [model] static_anti_air_over_mobile"
+timing = "not derived yet: held, its reload, slow shell, blast, spread and turret"
+sensors = "not derived yet: held, today's vision"
+
+[units.t3_sam]
+health = "not derived yet: held, its health and footprint"
+body = "not derived yet: held, its footprint"
+damage = "rule: [kills] t3_sam.t2_gunship and t3_sam.t3_strategic_bomber"
+range = "rule: [model] static_anti_air_over_mobile, over what T3's mobile anti-air would reach"
+timing = "not derived yet: held, its missile's speed, blast and turret; its reload [kill_times] sam_t2_gunship and sam_t3_strategic_bomber"
+sensors = "not derived yet: held, today's vision"
+
+[units.t2_mobile_flak]
+health = "not derived yet: held, its health and body"
+body = "not derived yet: held, today's radius"
+damage = "rule: [air] escort_forces, the T2 army and the T2 strike aircraft even (balance::derive_t2_flak)"
+range = "rule: [model] mobile_anti_air_over_line"
+speed = "not derived yet: an identity knob ([constants]), today's top speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
+timing = "not derived yet: the inspiration's slow shell, blast and spread"
+sensors = "not derived yet: held, today's vision"
+
+[units.land_factory_t2_support]
+health = "not derived yet: the inspiration's hull"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's build power"
+
+[units.land_factory_t3_support]
+health = "not derived yet: the inspiration's hull"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's build power"
+
+[units.air_factory_t2_support]
+health = "not derived yet: the inspiration's hull"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's build power"
+
+[units.air_factory_t3_support]
+health = "not derived yet: the inspiration's hull"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's build power"
+
+[units.power_generator_t2]
+health = "not derived yet: the inspiration's"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's income, storage, upkeep and adjacency"
+special = "not derived yet: held, its blast on death"
+
+[units.power_generator_t3]
+health = "not derived yet: the inspiration's"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's income, storage, upkeep and adjacency"
+special = "not derived yet: held, its blast on death"
+
+[units.radar_t2]
+health = "not derived yet: held, its health and footprint"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, its sensors' reach"
+economy = "not derived yet: held, its upkeep and the build power that drives its upgrade"
+
+[units.t2_point_defense]
+health = "not derived yet: the inspiration's"
+body = "not derived yet: held, its footprint"
+damage = "not derived yet: the inspiration's volley as one shot"
+range = "rule: [model] point_defense_under_artillery, a fifth inside T2 artillery's"
+timing = "not derived yet: the inspiration's"
+sensors = "not derived yet: held, today's vision"
+
+[units.airfield]
+health = "not derived yet: held, its health and footprint"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+special = "anchor: the design owner's pads and repair, a mechanic rule ([price_list.unlisted] airfield)"
+
+[units.energy_storage]
+health = "not derived yet: the inspiration's"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's income, storage, upkeep and adjacency"
+
+[units.t2_artillery]
+health = "not derived yet: the inspiration's, inside [kills] t3_strategic_bomber.t2_artillery, two bombs"
+body = "not derived yet: held, its footprint"
+damage = "not derived yet: the inspiration's"
+range = "not derived yet: held, past what the list's closing share prices ([domains.cells] battleship_over_t2_artillery_reach measures the battleship against it)"
+timing = "not derived yet: the inspiration's reload and shell; its blast [splash] wide_reach_over_spacing, its spread [kills] t2_artillery_spread"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's energy a shot"
+
+[units.t3_artillery]
+health = "not derived yet: held, its health and footprint"
+body = "not derived yet: held, its footprint"
+damage = "not derived yet: kept at least [kills] t3_artillery_kills_every_t3_land_unit, which does not pin it"
+range = "not derived yet: the inspiration's, across a map"
+timing = "not derived yet: the inspiration's reload and shell; its blast [splash] wide_reach_over_spacing, its spread [kills] t3_artillery_spread"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's energy a shot"
+
+[units.t3_mobile_artillery]
+health = "rule: [kills] t3_mobile_artillery.t3_mobile_artillery, it survives one of its own shells and not two"
+body = "not derived yet: held, today's radius"
+damage = "not derived yet: held, the shell a retired rule gave it, kept inside [kills] t3_mobile_artillery.t1_medium_tank and t3_mobile_artillery.t3_mobile_artillery"
+range = "rule: [model] artillery_over_line, three times the T3 line's reach, a quarter of it its least range"
+speed = "not derived yet: an identity knob ([constants]), today's top speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
+timing = "not derived yet: the inspiration's spread, with its shell speed, blast and setup held; its reload is [model] role_time_to_kill artillery"
+sensors = "not derived yet: held, today's vision"
+
+[units.t2_fighter_bomber]
+health = "not derived yet: the inspiration's ratio, inside [volleys] t2_cruiser.t2_fighter_bomber"
+body = "not derived yet: held, today's radius"
+damage = "not derived yet: the inspiration's ratio, its bomb; its railguns are [kill_times] fighter_bomber_interceptor"
+range = "not derived yet: held, its bomb's and its railguns' reach"
+speed = "not derived yet: an identity knob ([constants]), today's top speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn rate; its turn radius is [constants] fighter_turn_radius; its height [air.heights] t2_fighter_bomber of the Spy Plane's, which is held"
+timing = "not derived yet: held, its reloads and its 35-degree arc; its railguns' shell speed is [constants] fighter_gun_speed"
+sensors = "not derived yet: held, its vision and radar"
+
+[units.naval_factory]
+health = "not derived yet: the inspiration's hull"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's build power"
+
+[units.t1_frigate]
+health = "not derived yet: the inspiration's ratio to its T1 tank, split by the [model] time_to_kill_domain navy"
+body = "not derived yet: held, today's radius"
+damage = "not derived yet: the inspiration's ratio to its T1 tank, split by the [model] time_to_kill_domain navy; its anti-air [kill_times] frigate_anti_air_t1_bomber"
+range = "rule: [model] closing_share_role brawler, and its anti-air [model] ship_anti_air_over_static"
+speed = "not derived yet: an identity knob ([constants]), today's top speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
+timing = "not derived yet: held, its reloads, blast and turrets; its gun's shell speed is [constants] ship_gun_speed"
+sensors = "not derived yet: held, its vision, radar and sonar"
+
+[units.naval_factory_t2]
+health = "not derived yet: the inspiration's hull"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's build power"
+
+[units.naval_factory_t3]
+health = "not derived yet: the inspiration's hull"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's build power"
+
+[units.naval_factory_t2_support]
+health = "not derived yet: the inspiration's hull"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's build power"
+
+[units.naval_factory_t3_support]
+health = "not derived yet: the inspiration's hull"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+economy = "not derived yet: the inspiration's build power"
+
+[units.t2_destroyer]
+health = "rule: the [model] time_to_kill_domain navy, the navy line's, measured on its guns"
+body = "not derived yet: held, today's radius"
+damage = "not derived yet: held, its guns' and anti-air's; its torpedo is [kill_times] destroyer_torpedoes_t1_sub_submerged"
+range = "rule: [model] closing_share_navy_over_land, the navy line's reach; its anti-air [model] ship_anti_air_over_static; its torpedo [model] closing_share_role sub_hunter"
+speed = "rule: [model] speed_navy at the T2 line's share (balance::t2_land_roles)"
+turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
+timing = "not derived yet: held, its reloads, blasts, spread and turrets; its guns' shell speed is [constants] ship_gun_speed"
+sensors = "not derived yet: held, its vision, radar and sonar"
+special = "not derived yet: the inspiration's anti-torpedo charge"
+
+[units.t2_cruiser]
+health = "not derived yet: held, a support role's time to kill that no [model] role_time_to_kill has"
+body = "not derived yet: held, today's radius"
+damage = "not derived yet: held, its gun; its missiles [kill_times] cruiser_missiles_commander_on_land, its anti-air [volleys] t2_cruiser"
+range = "not derived yet: held, its missiles twice a cannon cruiser's reach that no table sets ([model] missile_over_cannon); its least range [model] cruiser_min_range_share, its gun [model] support_gun_at_line, its anti-air [model] cruiser_anti_air_over_static"
+speed = "not derived yet: an identity knob ([constants]), today's top speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
+timing = "not derived yet: the inspiration's missile speed and cruise height; its volleys [volleys] t2_cruiser"
+sensors = "not derived yet: held, its vision, radar and sonar"
+special = "not derived yet: held, its missile defense mounts"
+
+[units.t3_battleship]
+health = "rule: the [model] time_to_kill_domain navy at T3, the T3 heavy role's (balance::t3_land_roles)"
+body = "not derived yet: held, today's radius"
+damage = "not derived yet: held, its anti-air; its broadside [broadsides] t3_battleship"
+range = "rule: [domains.cells] battleship_over_t2_artillery_reach; its anti-air [model] ship_anti_air_over_static"
+speed = "rule: [model] speed_navy at the T3 heavy role's share (balance::t3_land_roles)"
+turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
+timing = "not derived yet: held, its turrets' swivel, its anti-air and its blast; its broadside [model] battleship_broadside_seconds, lobbed at the design owner's speed"
+sensors = "not derived yet: held, its vision, radar and sonar"
+special = "not derived yet: held, its missile defense mounts"
+
+[units.t3_battlecruiser]
+health = "not derived yet: held, what the price list left once its cost was held"
+body = "not derived yet: held, today's radius"
+damage = "not derived yet: held, its torpedo, and its lasers' damage past [model] battlecruiser_laser_over_turret_min"
+range = "rule: [model] closing_share_navy_over_land at its speed; its torpedo [model] closing_share_role sub_hunter a tier up"
+speed = "rule: [model] battlecruiser_speed_over_battleship, the design owner's"
+turning = "not derived yet: kept turning slightly faster than the battleship, the design owner's rule, which does not pin it"
+timing = "not derived yet: held, its reloads and turrets"
+sensors = "not derived yet: held, its vision, radar and sonar"
+special = "not derived yet: the inspiration's anti-torpedo charge and missile defense mount"
+
+[units.t1_attack_sub]
+health = "not derived yet: today's value written down, kept when the destroyer took the navy line's health ([kill_times] six_t1_subs_sink_a_destroyer)"
+body = "not derived yet: held, today's radius"
+damage = "not derived yet: held, from the derived-stats pass, which no [model] time_to_kill_domain reproduces today"
+range = "not derived yet: held, from the derived-stats pass, which no [model] closing_share_role reproduces today"
+speed = "not derived yet: an identity knob ([constants]), today's top speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
+timing = "not derived yet: the inspiration's deck gun; its torpedo at [constants] torpedo_speed"
+sensors = "not derived yet: held, its vision and sonar"
+
+[units.t2_torpedo_bomber]
+health = "not derived yet: the inspiration's ratio to its T1 tank"
+body = "not derived yet: held, today's radius"
+damage = "not derived yet: the inspiration's ratio to its T1 tank"
+range = "not derived yet: held, where it lets its torpedoes go"
+speed = "not derived yet: an identity knob ([constants]), today's top speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn and fuel; its height is held"
+timing = "not derived yet: the inspiration's run every 10 seconds; its five torpedoes within 10 degrees of its nose are the design owner's, at [constants] torpedo_speed"
+sensors = "not derived yet: held, its vision and sonar"
+
+[units.t1_sonar]
+health = "not derived yet: held, its health and footprint"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, its sensors' reach"
+economy = "not derived yet: held, its upkeep and the build power that drives its upgrade"
+
+[units.t2_sonar]
+health = "not derived yet: held, its health and footprint"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, its sensors' reach"
+economy = "not derived yet: held, its upkeep"
+
+[units.t1_torpedo_launcher]
+health = "not derived yet: today's value written down, [kills] t1_frigate.t1_torpedo_launcher"
+body = "not derived yet: held, its footprint"
+damage = "not derived yet: today's value written down, [kills] t1_torpedo_launcher.t1_frigate"
+range = "rule: [model] point_defense_over_direct_fire_min, past the frigate's gun"
+timing = "not derived yet: held, its reload; its torpedo at [constants] torpedo_speed"
+sensors = "not derived yet: held, its vision and sonar"
+
+[units.t2_torpedo_launcher]
+health = "not derived yet: today's value written down, [kills] t2_destroyer.t2_torpedo_launcher"
+body = "not derived yet: held, its footprint"
+damage = "not derived yet: today's value written down, [kills] t2_torpedo_launcher.t2_destroyer"
+range = "rule: [model] point_defense_over_direct_fire_min, past the destroyer's guns"
+timing = "not derived yet: held, its reload; its torpedoes at [constants] torpedo_speed"
+sensors = "not derived yet: held, its vision and sonar"
+
+[units.t2_assault_hovercraft]
+health = "rule: its role's time to kill in balance::t2_land_roles, splitting the strength its duel target solves"
+body = "rule: its role's radius in balance::t2_land_roles"
+damage = "rule: its role's time to kill in balance::t2_land_roles, splitting the strength its duel target solves"
+range = "rule: its role's reach in balance::t2_land_roles, a multiple of [anchor] range"
+speed = "rule: its role's speed in balance::t2_land_roles, a multiple of [anchor] speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
+timing = "not derived yet: held, its turret's swivel; its reload, shell flight, blast and spread are its role's in balance::t2_land_roles"
+sensors = "rule: its role's sight over its reach in balance::t2_land_roles"
+
+[units.t2_escort_corvette]
+health = "not derived yet: held, its health and body"
+body = "not derived yet: held, today's radius"
+speed = "not derived yet: an identity knob ([constants]), today's top speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
+sensors = "not derived yet: held, its vision and sonar"
+special = "not derived yet: held, its dome's size, health and regeneration; its recharge is the design owner's 20 seconds"
+
+[units.t3_missile_sub]
+health = "not derived yet: the inspiration's"
+body = "not derived yet: held, today's radius"
+damage = "not derived yet: the inspiration's"
+range = "not derived yet: the inspiration's"
+speed = "not derived yet: the inspiration's"
+turning = "not derived yet: the inspiration's"
+timing = "not derived yet: the inspiration's"
+sensors = "not derived yet: the inspiration's"
+economy = "not derived yet: the inspiration's"
+special = "not derived yet: the inspiration's"
+
+[units.t2_mobile_missile_launcher]
+health = "rule: its role's time to kill in balance::t2_land_roles, splitting the strength its duel target solves"
+body = "rule: its role's radius in balance::t2_land_roles"
+damage = "rule: its role's time to kill in balance::t2_land_roles, splitting the strength its duel target solves"
+range = "rule: [model] artillery_over_line, three times the T2 line's reach, its least range its role's share of it"
+speed = "rule: its role's speed in balance::t2_land_roles, a multiple of [anchor] speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
+timing = "not derived yet: held, its missile speed and cruise height; its reload and blast are its role's"
+sensors = "rule: its role's sight over its reach in balance::t2_land_roles"
+
+[units.t1_land_scout]
+health = "rule: its role's time to kill in balance::t1_land_roles, splitting the strength its duel target solves"
+body = "rule: its role's radius in balance::t1_land_roles"
+damage = "rule: its role's time to kill in balance::t1_land_roles, splitting the strength its duel target solves"
+range = "rule: its role's reach in balance::t1_land_roles, a multiple of [anchor] range"
+speed = "rule: its role's speed in balance::t1_land_roles, a multiple of [anchor] speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
+timing = "not derived yet: held, its turret's swivel; its reload, shell flight, blast and spread are its role's in balance::t1_land_roles"
+sensors = "not derived yet: held, its radar; its vision is its role's sight over its reach (balance::t1_land_roles)"
+
+[units.t1_medium_tank]
+health = "anchor: [anchor] health"
+body = "anchor: [anchor] radius"
+damage = "anchor: [anchor] dps, a copy of itself in [ratios] anchor_time_to_kill"
+range = "anchor: [anchor] range, its closing time [ratios] closing_over_time_to_kill of its time to kill"
+speed = "anchor: [anchor] speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
+timing = "not derived yet: held, its turret's swivel; its shell is [anchor] projectile_speed, a shot a second (balance::t1_land_roles)"
+sensors = "anchor: [anchor] vision"
+
+[units.t2_grenadier_walker]
+health = "rule: its role's time to kill in balance::t2_land_roles, splitting the strength its duel target solves"
+body = "rule: its role's radius in balance::t2_land_roles"
+damage = "rule: its role's time to kill in balance::t2_land_roles, splitting the strength its duel target solves"
+range = "rule: its role's reach in balance::t2_land_roles, a multiple of [anchor] range"
+speed = "rule: its role's speed in balance::t2_land_roles, a multiple of [anchor] speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
+timing = "not derived yet: held, its turret's swivel; its reload, shell flight, blast and spread are its role's in balance::t2_land_roles"
+sensors = "rule: its role's sight over its reach in balance::t2_land_roles"
+
+[units.t2_mobile_shield]
+health = "not derived yet: held, its health and body"
+body = "not derived yet: held, today's radius"
+speed = "not derived yet: an identity knob ([constants]), today's top speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
+sensors = "not derived yet: held, today's vision"
+special = "not derived yet: held, its dome's size, health and regeneration; its recharge is the design owner's 20 seconds"
+
+[units.t2_combat_engineer]
+health = "not derived yet: the inspiration's"
+body = "not derived yet: held, today's radius"
+damage = "not derived yet: the inspiration's"
+range = "not derived yet: the inspiration's"
+speed = "not derived yet: the inspiration's"
+turning = "not derived yet: the inspiration's"
+timing = "not derived yet: the inspiration's"
+sensors = "not derived yet: the inspiration's"
+economy = "not derived yet: the inspiration's"
+
+[units.t3_heavy_walker]
+health = "rule: its role's time to kill in balance::t3_land_roles, splitting the strength its duel target solves"
+body = "rule: its role's radius in balance::t3_land_roles"
+damage = "rule: its role's time to kill in balance::t3_land_roles, splitting the strength its duel target solves"
+range = "rule: its role's reach in balance::t3_land_roles, a multiple of [anchor] range"
+speed = "rule: its role's speed in balance::t3_land_roles, a multiple of [anchor] speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
+timing = "not derived yet: held, its turret's swivel; its reload, shell flight, blast and spread are its role's in balance::t3_land_roles"
+sensors = "rule: its role's sight over its reach in balance::t3_land_roles"
+special = "not derived yet: held, its personal shield"
+
+[units.t3_siege_walker]
+health = "rule: its role's time to kill in balance::t3_land_roles, splitting the strength its duel target solves"
+body = "rule: its role's radius in balance::t3_land_roles"
+damage = "rule: its role's time to kill in balance::t3_land_roles, splitting the strength its duel target solves"
+range = "rule: its role's reach in balance::t3_land_roles, a multiple of [anchor] range"
+speed = "rule: its role's speed in balance::t3_land_roles, a multiple of [anchor] speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
+timing = "not derived yet: held, its turret's swivel; its reload, shell flight, blast and spread are its role's in balance::t3_land_roles"
+sensors = "rule: its role's sight over its reach in balance::t3_land_roles"
+
+[units.t2_torpedo_boat]
+health = "rule: [model] role_time_to_kill sub_hunter, splitting its strength"
+body = "not derived yet: held, today's radius"
+damage = "rule: [kill_times] two_torpedo_boats_commander_under_water"
+range = "rule: [model] closing_share_role sub_hunter"
+speed = "not derived yet: an identity knob ([constants]), today's top speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
+timing = "not derived yet: held, its reload; its torpedo at [constants] torpedo_speed"
+sensors = "not derived yet: held, its vision and sonar"
+special = "rule: its decoys three times as often as the destroyer's, as its torpedoes do three times its damage a second ([price_list] decoy_share)"
+
+[units.t3_heavy_point_defense]
+health = "not derived yet: the inspiration's"
+body = "not derived yet: held, its footprint"
+damage = "not derived yet: held, two and a half times its earlier ([premiums] point_defense_holds_against_line_units prices it)"
+range = "rule: [model] point_defense_under_artillery, a fifth inside the Mobile Heavy Artillery's"
+timing = "not derived yet: the inspiration's"
+sensors = "not derived yet: held, today's vision"
+
+[units.t3_heavy_shield]
+health = "not derived yet: held, its generator's health and footprint"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+special = "not derived yet: held, its dome's size and upkeep; its health and regeneration [kill_times] battleship_breaks_t3_shield"
+
+[units.wall]
+health = "not derived yet: today's value written down, [kills] t1_medium_tank.wall, a Medium Tank's 17 shots"
+body = "not derived yet: held, its footprint"
+sensors = "not derived yet: held, today's vision"
+
+[units.t1_light_transport]
+health = "rule: [kill_times] flak_t1_light_transport"
+body = "not derived yet: held, today's radius"
+speed = "not derived yet: an identity knob ([constants]), today's top speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn and fuel; its height is [air.heights] t1_light_transport of the Spy Plane's, which is held"
+sensors = "not derived yet: held, today's vision"
+special = "not derived yet: the inspiration's cargo room"
+
+[units.t2_transport]
+health = "rule: [kill_times] flak_t2_transport"
+body = "not derived yet: held, today's radius"
+damage = "rule: a quarter of the Gunship's damage a second, [air] transport_weapons_over_gunship"
+range = "rule: [model] aircraft_gun_over_anti_air, 0.7 of the Mobile Anti-Air's"
+speed = "not derived yet: an identity knob ([constants]), today's top speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn and fuel; its height is [air.heights] t2_transport of the Spy Plane's, which is held"
+timing = "not derived yet: held, its reload and shell speed"
+sensors = "not derived yet: held, today's vision"
+special = "not derived yet: the inspiration's cargo room"
+
+[units.t3_heavy_transport]
+health = "rule: [kill_times] flak_t3_heavy_transport, through its shield"
+body = "not derived yet: held, today's radius"
+damage = "rule: a quarter of the Heavy Gunship's damage a second, [air] transport_weapons_over_gunship"
+range = "rule: [model] aircraft_gun_over_anti_air, 0.7 of the Mobile Flak's, and [model] aircraft_anti_air_at_fighter"
+speed = "not derived yet: an identity knob ([constants]), today's top speed"
+turning = "not derived yet: an identity knob ([constants]), today's turn and fuel; its height is [air.heights] t3_heavy_transport of the Spy Plane's, which is held"
+timing = "not derived yet: held, its reloads and shell speeds"
+sensors = "not derived yet: held, today's vision"
+special = "not derived yet: held, its cargo room and its shield's size and regeneration"
