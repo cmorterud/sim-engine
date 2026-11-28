@@ -332,7 +332,17 @@ impl SimWorld {
             }
 
             // A target to make passes over, a facility to land on, the end of its move, or nowhere.
-            let chasing = if order.kind == OrderKind::Move { None } else { combat.target.or(combat.forced_target) };
+            // What it was told to attack comes first: what its guns fire at on the way does not
+            // turn it, nor what they fire at on the way to a spot it was told to bomb.
+            let chasing = if order.kind == OrderKind::Move {
+                None
+            } else if combat.forced_target.is_some() {
+                combat.forced_target
+            } else if combat.ground_target.is_some() && order.kind == OrderKind::Attack {
+                None
+            } else {
+                combat.target
+            };
             // A bomber with a gun, after an aircraft, flies as a fighter: its bomb is for the
             // ground, so it makes no bombing passes at a plane.
             let bombing = bomb_bay.is_some() && !chasing.and_then(locate).is_some_and(|entry| entry.is_air);

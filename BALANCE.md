@@ -662,7 +662,7 @@ out close and why: evidence about the process, not a target.
   The slower Gunship does less against the T2 army, so the T3 air base re-derives 0.922 to 0.885
   and the T3 aircraft cost 4.2% more (the Heavy Gunship 738 to 770, the T3 fighter 861 to 897, the
   Strategic Bomber 1,240 to 1,292, the Heavy Transport 2,043 to 2,087). The Interceptor's T1 rule
-  prices it 149 to 143, and the Gunship goes to the list, 132.5 to 130.2. The dearer snipe price
+  prices it 148 to 141, and the Gunship goes to the list, 132.5 to 130.2. The dearer snipe price
   puts T2 Fabrication 7.3% under the list, and it is repriced to it (801 to 864). The Interceptor
   keeps easing off to 15, half its old top speed, so the T3 fighter (13) still eases off slower;
   turning comes next. Every domains check still holds. 339 unit families are not derived yet.

@@ -725,10 +725,11 @@ fn artillery_blasts_all_the_debris_it_lands_among_but_not_trees_or_rocks() {
 }
 
 #[test]
-fn a_ground_attack_walks_into_range_and_fires_into_the_fog_at_nothing_else() {
+fn a_ground_attack_walks_into_range_firing_at_what_it_passes_then_at_the_spot() {
     let mut world = flat_map(true);
     let bot = spawn_gunner(&mut world, "t1_light_walker");
-    // An enemy right behind, which it would otherwise turn and shoot.
+    // An enemy right behind. No weapon holds fire with something in reach, so the bot shoots it
+    // while the spot is out of reach, and walks on all the same (the design owner, 2026-11-28).
     let enemy = passive_unit(&mut world, Team::Red, point(900, 1_000));
     let enemy_health = world.unit_health(enemy).unwrap();
     let spot = point(2_000, 1_000);
@@ -751,7 +752,22 @@ fn a_ground_attack_walks_into_range_and_fires_into_the_fog_at_nothing_else() {
     let range = world.blueprints.get(world.blueprints.id("t1_light_walker")).weapon.unwrap().range.to_num::<f64>();
     assert!((range - 40.0..=range).contains(&distance), "it stopped {distance} from the spot, with a range of {range}");
     assert!(shots > 0, "it should fire at the spot");
-    assert_eq!(world.unit_health(enemy), Some(enemy_health), "it fires at the spot and nothing else");
+    assert!(world.unit_health(enemy).is_none_or(|health| health < enemy_health), "it fired at the enemy behind it on the way");
+}
+
+#[test]
+fn a_ground_attack_in_reach_fires_at_the_spot_and_nothing_else() {
+    let mut world = flat_map(true);
+    let bot = spawn_gunner(&mut world, "t1_light_walker");
+    let enemy = passive_unit(&mut world, Team::Red, point(900, 1_000));
+    let enemy_health = world.unit_health(enemy).unwrap();
+    let here = world.unit_position(bot).unwrap().xy();
+    let spot = Vec2Fp::new(here.x + fp_int(150), here.y);
+    world.advance_tick(&[SimCommand::AttackGround { units: vec![bot], point: spot }]);
+    for _ in 0..200 {
+        world.advance_tick(&[]);
+    }
+    assert_eq!(world.unit_health(enemy), Some(enemy_health), "the spot is in reach, so it fires at nothing else");
 }
 
 #[test]
@@ -823,6 +839,48 @@ fn an_attack_moving_unit_chases_its_target_until_it_is_destroyed_then_moves_on()
 }
 
 #[test]
+fn a_unit_told_to_attack_fires_at_what_it_passes_and_walks_on() {
+    // Its target is out of reach, so its gun fires at an enemy it passes, which does not stop it
+    // (the design owner, 2026-11-28).
+    let mut world = SimWorld::new(SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, ..SimConfig::default() }, 1);
+    let tank = world.spawn_mobile(world.blueprints.id("t1_medium_tank"), Team::Blue, point(1_000, 2_500));
+    let target = passive_unit(&mut world, Team::Red, point(3_500, 2_500));
+    let passed = passive_unit(&mut world, Team::Red, point(1_400, 2_650));
+    sturdy(&mut world, passed);
+    let passed_health = world.unit_health(passed).unwrap();
+    world.advance_tick(&[SimCommand::Attack { units: vec![tank], target }]);
+    for _ in 0..1_500 {
+        world.advance_tick(&[]);
+        if world.unit_health(target).is_none() {
+            break;
+        }
+    }
+    assert!(world.unit_health(passed).unwrap() < passed_health, "it fired at the enemy it passed");
+    assert!(world.unit_health(target).is_none(), "and went on to destroy its target");
+}
+
+#[test]
+fn an_attack_move_chasing_its_target_fires_at_another_in_reach() {
+    let (mut world, bot, engineer) = bot_meets_a_fleeing_engineer();
+    let entity = world.unit_entity(bot).unwrap();
+    // Until the engineer is out of range, and the bot has set off after it.
+    for _ in 0..2_000 {
+        world.advance_tick(&[]);
+        if world.unit_position(bot).unwrap().y > fp_int(2_520) {
+            break;
+        }
+    }
+    assert_eq!(world.ecs.get::<&Combat>(entity).unwrap().target, Some(engineer));
+    let here = world.unit_position(bot).unwrap().xy();
+    let other = passive_unit(&mut world, Team::Red, Vec2Fp::new(here.x - fp_int(150), here.y));
+    let other_health = world.unit_health(other).unwrap();
+    for _ in 0..100 {
+        world.advance_tick(&[]);
+    }
+    assert!(world.unit_health(other).is_none_or(|health| health < other_health), "it fired at the enemy in reach rather than hold fire");
+}
+
+#[test]
 fn a_new_order_calls_off_a_chase() {
     let (mut world, bot, engineer) = bot_meets_a_fleeing_engineer();
     let entity = world.unit_entity(bot).unwrap();
@@ -848,6 +906,75 @@ fn a_new_order_calls_off_a_chase() {
     assert!(world.unit_health(engineer).is_some(), "the engineer got away");
     let here = world.unit_position(bot).unwrap().xy();
     assert!(here.y < fp_int(1_000), "the bot went where it was told: {here:?}");
+}
+
+#[test]
+fn an_armed_builder_on_patrol_chases_an_intruder_then_goes_on() {
+    // A commander on patrol fights what comes within its range as any unit on patrol does: it
+    // goes after an enemy walking away, and once that is destroyed, on to its next patrol point
+    // (the design owner, 2026-11-28). It used to fire only while the enemy was in range.
+    let mut world = SimWorld::new(SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: true, ..SimConfig::default() }, 1);
+    let commander = world.spawn_mobile(world.blueprints.id("command_rig"), Team::Blue, point(1_000, 2_500));
+    let engineer = world.spawn_mobile(world.blueprints.id("t1_engineer"), Team::Red, point(1_300, 2_500));
+    // Enough health to walk out of range, and slower than the commander, so that it cannot walk
+    // out of the commander's sight.
+    {
+        let mut health = world.ecs.get::<&mut Health>(world.unit_entity(engineer).unwrap()).unwrap();
+        health.max = fp_int(4_000);
+        health.current = health.max;
+    }
+    let commander_speed = world.ecs.get::<&sim_engine::sim::components::UnitStats>(world.unit_entity(commander).unwrap()).unwrap().max_speed;
+    world.ecs.get::<&mut sim_engine::sim::components::UnitStats>(world.unit_entity(engineer).unwrap()).unwrap().max_speed = commander_speed / 2;
+    let points = vec![point(1_000, 2_500), point(3_000, 2_500)];
+    world.advance_tick(&[SimCommand::Patrol { units: vec![commander], points, queued: false }, SimCommand::Move { units: vec![engineer], goal: point(1_300, 5_000) }]);
+    let entity = world.unit_entity(commander).unwrap();
+    let mut north = fp_int(0);
+    for _ in 0..2_000 {
+        world.advance_tick(&[]);
+        north = north.max(world.unit_position(commander).unwrap().y);
+        if world.unit_health(engineer).is_none() {
+            break;
+        }
+    }
+    assert!(world.unit_health(engineer).is_none(), "the commander destroyed the engineer");
+    assert!(north > fp_int(2_700), "it went after the engineer, as far as {north:?}");
+    assert!(world.ecs.get::<&sim_engine::sim::components::Patrol>(entity).is_ok(), "and is still on patrol");
+    let mut east = fp_int(0);
+    for _ in 0..2_000 {
+        world.advance_tick(&[]);
+        east = east.max(world.unit_position(commander).unwrap().x);
+    }
+    assert!(east > fp_int(2_700), "it went back to patrolling, as far east as {east:?}");
+}
+
+#[test]
+fn a_patrol_gives_up_an_intruder_its_team_loses_sight_of() {
+    // A scout that dashes through a bot's range and away, faster than the bot can follow, is let
+    // go once out of sight, and the bot goes back to its patrol rather than wander after it.
+    let mut world = SimWorld::new(SimConfig { map_units: 5_120, terrain: TerrainStyle::Flat, fog_of_war: true, ..SimConfig::default() }, 1);
+    let bot = world.spawn_mobile(world.blueprints.id("t1_light_walker"), Team::Blue, point(1_000, 2_500));
+    let scout = world.spawn_mobile(world.blueprints.id("t1_land_scout"), Team::Red, point(1_150, 2_600));
+    sturdy(&mut world, scout);
+    world.ecs.get::<&mut Combat>(world.unit_entity(scout).unwrap()).unwrap().range = Fp::ZERO;
+    let points = vec![point(1_000, 2_500), point(3_000, 2_500)];
+    world.advance_tick(&[SimCommand::Patrol { units: vec![bot], points, queued: false }, SimCommand::Move { units: vec![scout], goal: point(1_150, 5_000) }]);
+    let entity = world.unit_entity(bot).unwrap();
+    let mut chased = false;
+    for _ in 0..600 {
+        world.advance_tick(&[]);
+        chased |= world.ecs.get::<&Combat>(entity).unwrap().target == Some(scout) && world.unit_position(bot).unwrap().y > fp_int(2_600);
+    }
+    assert!(chased, "the bot went after the scout");
+    assert!(world.unit_health(scout).is_some(), "the scout got away");
+    let combat = *world.ecs.get::<&Combat>(entity).unwrap();
+    assert_ne!(combat.target, Some(scout), "the bot let it go");
+    assert_ne!(combat.forced_target, Some(scout));
+    let mut east = fp_int(0);
+    for _ in 0..1_000 {
+        world.advance_tick(&[]);
+        east = east.max(world.unit_position(bot).unwrap().x);
+    }
+    assert!(east > fp_int(2_700), "it went back to patrolling, as far east as {east:?}");
 }
 
 #[test]
