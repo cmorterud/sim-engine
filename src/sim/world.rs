@@ -2964,11 +2964,12 @@ impl SimWorld {
                 // attack-move, a unit keeps its target until it dies, out of range or sight, as if
                 // told to attack it, and goes after it. So does a bomber on any order: each pass
                 // carries it past, out of range and out of its own sight, and dropping the target
-                // then sent the next bomb at whatever was nearest. Only a cloak, or a change that
+                // then sent the next bomb at whatever was nearest. A torpedo bomber, which makes a
+                // bomber's runs, keeps its ship so. Only a cloak, or a change that
                 // puts the target beyond its weapon, breaks it off.
                 // Movement does the chasing. Builders are left out, since their walks are among
                 // their tasks.
-                let sticky = bomb_bay.is_some() || (order.kind == OrderKind::AttackMove && builder.is_none());
+                let sticky = bomb_bay.is_some() || (torpedo && flight.is_some()) || (order.kind == OrderKind::AttackMove && builder.is_none());
                 if let Some(target) = combat.target {
                     // Not one too close for artillery, which could neither fire nor chase it.
                     let keep = locate(target).is_some_and(|entry| {

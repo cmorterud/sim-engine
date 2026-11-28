@@ -286,10 +286,11 @@ impl SimWorld {
             Option<&super::components::Patrol>,
             Option<&super::components::BombBay>,
             Option<&super::components::OrderQueue>,
+            Option<&super::components::Torpedo>,
         )>();
         let mut view = query.view();
         for &(id, entity) in &self.aircraft {
-            let (position, velocity, stats, order, combat, turning, flight, health, patrol, bomb_bay, queue) = view.get_mut(entity).expect("aircraft are live units");
+            let (position, velocity, stats, order, combat, turning, flight, health, patrol, bomb_bay, queue, torpedo) = view.get_mut(entity).expect("aircraft are live units");
             let here = position.0.xy();
             let radius = turn_radius(stats.max_speed, turning.max_turn);
             let patrolling = patrol.is_some();
@@ -335,6 +336,10 @@ impl SimWorld {
             // A bomber with a gun, after an aircraft, flies as a fighter: its bomb is for the
             // ground, so it makes no bombing passes at a plane.
             let bombing = bomb_bay.is_some() && !chasing.and_then(locate).is_some_and(|entry| entry.is_air);
+            // A torpedo bomber makes a bomber's runs too, letting its torpedoes go along its
+            // heading (the design owner, 2026-11-27), though its torpedoes home on their ship, so
+            // it heads for the ship itself and lets go anywhere within its reach.
+            let torpedo_runs = torpedo.is_some() && bomb_bay.is_none();
             // A bomber heads for where the target will be when its bomb lands.
             let target = chasing.and_then(locate).map(|entry| {
                 let at = Vec2Fp::new(Fp::from_bits(entry.x), Fp::from_bits(entry.y));
@@ -498,7 +503,9 @@ impl SimWorld {
             // A bomber lets go well short of its target, its bomb's throw ahead, so it flies on
             // far enough past to turn round and line up for that again: twice round its turn,
             // then the throw, then a run-up to settle on the line.
-            let throw = bombing.then(|| bomb_throw(flight.elevation, stats.max_speed));
+            // A torpedo bomber lets go from as far out as its reach, so it throws nothing: it
+            // needs only room to turn round and settle on the line.
+            let throw = if bombing { Some(bomb_throw(flight.elevation, stats.max_speed)) } else { torpedo_runs.then_some(Fp::ZERO) };
             let break_off = match throw {
                 Some(throw) => {
                     // Room to line up again, however tight its turn: a target moving across its
