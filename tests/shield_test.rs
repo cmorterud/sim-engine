@@ -65,7 +65,18 @@ fn a_dome_stops_enemy_shells_from_outside_and_takes_their_damage() {
     spawn(&mut world, "t2_heavy_tank", Team::Blue, point(1_020, 1_480), true);
     // Healing would hide hits, so it is off here, to count them.
     world.ecs.get::<&mut Shield>(world.unit_entity(generator).unwrap()).unwrap().regen_per_tick = Fp::ZERO;
-    run(&mut world, 120);
+    let mut contacts = 0;
+    for _ in 0..120 {
+        world.advance_tick(&[]);
+        let view = world.snapshot();
+        for hit in &view.shield_impacts {
+            let shell = view.landed.iter().find(|shell| shell.id == hit.projectile).expect("the stopped shell is reported at contact");
+            assert_eq!(hit.point, [shell.x, shell.y, shell.z]);
+            assert_eq!(hit.dome_team, Team::Red);
+            assert_eq!(hit.center, shield_view(&world, generator).center);
+            contacts += 1;
+        }
+    }
     assert_eq!(world.unit_health(sheltered), Some(full), "nothing should get through the dome");
     let now = shield(&world, generator);
     assert!(now.is_up());
@@ -73,6 +84,7 @@ fn a_dome_stops_enemy_shells_from_outside_and_takes_their_damage() {
     let shell = world.blueprints.get(world.blueprints.id("t2_heavy_tank")).weapon.expect("the tank has a gun").damage;
     let lost = now.max_health - now.health;
     let shells = (lost / shell).round();
+    assert_eq!(contacts, shells.to_num::<u32>(), "each stopped shell reports one contact");
     assert!(shells >= fp_int(7) && (lost - shells * shell).abs() < Fp::from_num(0.01), "the dome took {lost:?}, not whole shells of {shell:?}");
 }
 

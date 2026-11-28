@@ -433,6 +433,17 @@ pub struct ProjectileView {
     pub splash: i32,
 }
 
+/// A projectile stopped at a shield's surface, for effects. Positions are raw Fp bits.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct ShieldImpactView {
+    pub projectile: SimId,
+    pub team: Team,
+    pub dome_team: Team,
+    pub point: [i32; 3],
+    pub center: [i32; 3],
+    pub splash: i32,
+}
+
 /// A unit's blast as it is destroyed, where it was and how far it reaches, as raw `Fp` bits: for
 /// drawing an explosion as wide as the damage it does.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -528,6 +539,8 @@ pub struct SimSnapshot {
     pub projectiles: Vec<ProjectileView>,
     /// Projectiles gone since the last tick, at the point where they struck, or ran out.
     pub landed: Vec<ProjectileView>,
+    /// Direct contacts with a shield this tick, sorted by projectile ID.
+    pub shield_impacts: Vec<ShieldImpactView>,
     /// Blasts of units destroyed this tick that blow up as they go.
     pub blasts: Vec<BlastView>,
     pub wrecks: Vec<WreckView>,
@@ -1004,6 +1017,8 @@ pub struct SimWorld {
     /// Projectiles that struck something, or ran out, this tick, where they did: for drawing
     /// them all the way to what they hit. Not part of the game state.
     landed: Vec<ProjectileView>,
+    /// Direct shield contacts for drawing, outside the simulation checksum.
+    shield_impacts: Vec<ShieldImpactView>,
     /// Units' blasts as they were destroyed this tick, for drawing. Not part of the game state.
     blasts: Vec<BlastView>,
     /// Commanders' death blasts this tick, where, as raw `Fp` bits: heard wherever the camera is,
@@ -1137,6 +1152,7 @@ impl SimWorld {
             dead_units: Vec::new(),
             dead_projectiles: Vec::new(),
             landed: Vec::new(),
+            shield_impacts: Vec::new(),
             blasts: Vec::new(),
             commander_blasts: Vec::new(),
             launched: Vec::new(),
@@ -3966,6 +3982,7 @@ impl SimWorld {
 
     pub fn step_projectiles(&mut self) {
         self.landed.clear();
+        self.shield_impacts.clear();
         self.pending_shield_hits.clear();
         self.dead_projectiles.clear();
         // Interceptors in flight still arrive when their defense is gone.
@@ -3978,6 +3995,7 @@ impl SimWorld {
         self.shot_down.clone_from(&shot_down);
         let domes = if self.shields.is_empty() { Vec::new() } else { self.standing_domes() };
         let shield_hits = &mut self.pending_shield_hits;
+        let shield_impacts = &mut self.shield_impacts;
         let discharges = &mut self.pending_discharges;
         let terrain = &self.terrain;
         let grid = &self.spatial_grid;
@@ -4208,7 +4226,16 @@ impl SimWorld {
                 Vec3Fp::new(start.x + part(step.x), start.y + part(step.y), start.z + part(step.z))
             };
             if let Some((along, struck)) = dome_hit.filter(|(along, _)| first(*along)) {
-                position.0 = impact_at(along);
+                let impact = impact_at(along);
+                position.0 = impact;
+                shield_impacts.push(ShieldImpactView {
+                    projectile: id,
+                    team: projectile.source_team,
+                    dome_team: domes[struck].team,
+                    point: [impact.x.to_bits(), impact.y.to_bits(), impact.z.to_bits()],
+                    center: domes[struck].center,
+                    splash: projectile.splash_radius.to_bits(),
+                });
                 if let Some(discharged) = discharged {
                     discharges.push(DischargeImpact { def: discharged.def, source: projectile.source, team: projectile.source_team, point: point_at(along), dome: Some(domes[struck].id) });
                     dead.push(id);
@@ -5282,6 +5309,7 @@ impl SimWorld {
             .chain(self.commander_blasts.iter().map(|&[x, y]| Detonation { kind: DetonationKind::Commander, x, y }))
             .collect();
         let landed = self.landed.iter().filter(|view| seen(view.team, view.x, view.y)).copied().collect();
+        let shield_impacts = self.shield_impacts.iter().filter(|view| seen(view.team, view.point[0], view.point[1])).copied().collect();
         let blasts = self.blasts.iter().filter(|view| seen(view.team, view.x, view.y)).copied().collect();
         let wrecks = self
             .wrecks
@@ -5531,6 +5559,7 @@ impl SimWorld {
             units,
             projectiles,
             landed,
+            shield_impacts,
             blasts,
             wrecks,
             shields,
