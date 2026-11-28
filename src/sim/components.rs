@@ -604,10 +604,13 @@ pub struct Turret {
 /// About cos(6 degrees): a turret pointing this close to its target can fire.
 pub const AIMED: Fp = Fp::from_bits(4_074);
 
+/// The quickest anything turns, a turret or a hull, in degrees a second: a right angle a tick.
+pub const MOST_DEGREES_A_SECOND: u32 = 900;
+
 impl Turret {
     /// From a turn rate in degrees per second.
     pub fn new(facing: Vec2Fp, degrees_per_second: u32) -> Self {
-        let max_turn = radians_from_tenths_of_degree(degrees_per_second.min(900));
+        let max_turn = radians_from_tenths_of_degree(degrees_per_second.min(MOST_DEGREES_A_SECOND));
         Self { facing, max_turn: Fp::from_bits((max_turn.to_bits() >> 12) as i32), mount: [Fp::ZERO; 2], aft: false, elevation: Vec2Fp::new(Fp::ONE, Fp::ZERO) }
     }
 
@@ -681,7 +684,7 @@ impl Turning {
     /// From a turn rate in degrees per second, and a turn radius in units. At ten ticks a
     /// second, the rate is the turn per tick in tenths of a degree.
     pub fn new(facing: Vec2Fp, degrees_per_second: u32, radius: Fp) -> Self {
-        let max_turn = radians_from_tenths_of_degree(degrees_per_second.min(900));
+        let max_turn = radians_from_tenths_of_degree(degrees_per_second.min(MOST_DEGREES_A_SECOND));
         Self { facing, max_turn: Fp::from_bits((max_turn.to_bits() >> 12) as i32), radius }
     }
 

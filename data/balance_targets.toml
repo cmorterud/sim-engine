@@ -291,6 +291,16 @@ t2_cruiser = { t1_air_scout = 1, t1_interceptor = 1, t1_bomber = 1, t1_light_tra
 # the dome falls to the volley's last shell, and not before (tests/kill_times_test.rs).
 t3_battleship = { mass_extractor_t3 = 1, command_rig = 2 }
 
+[turrets]
+# The design owner's turret rule (2026-11-27): every gun that turns to its target turns fast enough
+# to stay laid on anything it shoots at (balance::turret_follow). A gun at the ground turns at
+# just that (2026-11-28): the quickest surface unit passing it at its least range, or brushing its
+# hull where it has none, while the gun drives the other way. A gun at aircraft turns at this
+# anchor, the design owner's (2026-11-28), above the 102 to 137 degrees a second that following
+# an aircraft straight overhead needs: anti-air is the part of a turret's turn the fights feel,
+# and any rule that moved it moved the air and navy bases by 9 to 22%.
+anti_air_degrees_a_second = 180
+
 [kill_times]
 # Seconds for these attackers, alone, to destroy one target that holds still and does not fire
 # back, timed from the first shot (2026-11-25, the design owner's numbers): a commander with no
@@ -856,8 +866,9 @@ immobile = 1.5
 # under its fire. Solved (balance::derive_structure_closing_share): the share at which the list
 # prices the T3 Heavy Point Defense at the most it can cost and still hold ([premiums]
 # point_defense_holds_against_line_units), where the hold rule is tightest. The list prices the
-# point defenses by it; other armed structures keep their own rules.
-structure_closing_share = 0.535
+# point defenses by it; other armed structures keep their own rules. 0.535 until every gun turned
+# by the turret rule (2026-11-28).
+structure_closing_share = 0.5306
 
 # Each dome's group (2026-11-27): a force in [domains.forces], less the dome itself, or a position
 # below. The Mobile Shield covers the standard T2 land army; the Escort Corvette the T2 fleet's

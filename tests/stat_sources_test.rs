@@ -2,7 +2,7 @@
 //! rule, its anchor, or why it is not derived yet; every citation resolves; the rules the table
 //! claims that no other test checks are checked here; and what is still to derive can only fall.
 
-use sim_engine::balance::{damage_per_second, model_time_to_kill, t1_land_roles, t2_land_roles, t3_land_roles, Anchor, Role};
+use sim_engine::balance::{damage_per_second, model_time_to_kill, t1_land_roles, t2_land_roles, t3_land_roles, turret_swivel, Anchor, Role};
 use sim_engine::sim::blueprints::{Blueprint, BlueprintDb, Targets, WeaponDef, WeaponKind};
 use sim_engine::stat_sources::{cited_code, cited_targets, derived, stat_source, Family, Kind, Reason, SOURCES};
 
@@ -11,7 +11,7 @@ const BALANCE: &str = include_str!("../src/balance.rs");
 const PRICE_LIST: &str = include_str!("../src/price_list.rs");
 
 /// Unit families not derived yet. A pass that derives some lowers this; nothing raises it.
-const NOT_DERIVED_YET: usize = 459;
+const NOT_DERIVED_YET: usize = 450;
 
 fn targets() -> toml::Table {
     TARGETS.parse().expect("data/balance_targets.toml is valid")
@@ -248,4 +248,28 @@ fn the_model_rules_the_table_claims_hold() {
     // The Torpedo Boat's decoys three times as often as the destroyer's.
     let decoys = |key: &str| f64::from(unit(&db, key).torpedo_defense.unwrap_or_else(|| panic!("{key} has decoys")).reload_ticks);
     assert_near("The Torpedo Boat's decoys", decoys("t2_destroyer") / decoys("t2_torpedo_boat"), 3.0, 0.02);
+}
+
+/// Every turret turns at the rule's rate (balance::turret_swivel): a gun at the ground at the
+/// least that stays laid on anything it shoots at, and a gun at aircraft at the [turrets] anchor,
+/// which is at least that.
+#[test]
+fn every_turret_swivels_by_the_rule() {
+    use sim_engine::balance::{target_number, turret_follow};
+    let db = BlueprintDb::standard();
+    let anchor = target_number("turrets", "anti_air_degrees_a_second") as u32;
+    let mut turrets = 0;
+    for unit in db.iter().filter(|unit| unit.flight.is_none()) {
+        for weapon in weapons(unit) {
+            if let Some(rate) = weapon.turn_rate {
+                assert_eq!(rate, turret_swivel(&db, unit, weapon), "{}'s turret turns {rate} degrees a second", unit.key);
+                assert!(rate >= turret_follow(&db, unit, weapon), "{}'s turret turns {rate} degrees a second, short of following what it shoots at", unit.key);
+                if weapon.targets == Targets::Air {
+                    assert_eq!(rate, anchor, "{}'s anti-air", unit.key);
+                }
+                turrets += 1;
+            }
+        }
+    }
+    assert!(turrets >= 37, "only {turrets} turrets");
 }

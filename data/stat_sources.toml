@@ -29,7 +29,7 @@ damage = "rule: [commander] holds_against_medium_tanks, the least gun that does"
 range = "anchor: the design owner's reach, 1.26 times the Medium Tank's ([commander] holds_against_medium_tanks)"
 speed = "not derived yet: an identity knob ([constants]), today's top speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
-timing = "not derived yet: held, its shell speed and turret; its reload the design owner's ([commander] holds_against_medium_tanks)"
+timing = "not derived yet: held, its shell speed; its reload the design owner's ([commander] holds_against_medium_tanks), its turret's swivel balance::turret_swivel"
 sensors = "not derived yet: held, its vision and deep scan"
 economy = "not derived yet: held, its income, storage and build power"
 special = "anchor: the design owner's Discharge, at least [commander] discharge_kills_every_t1_land_unit; its reactor's blast is its own health"
@@ -49,7 +49,7 @@ damage = "rule: its role's time to kill in balance::t1_land_roles, splitting the
 range = "rule: its role's reach in balance::t1_land_roles, a multiple of [anchor] range"
 speed = "rule: its role's speed in balance::t1_land_roles, a multiple of [anchor] speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
-timing = "not derived yet: held, its turret's swivel; its reload, shell flight, blast and spread are its role's in balance::t1_land_roles"
+timing = "rule: its reload, shell flight, blast and spread are its role's in balance::t1_land_roles, and its turret's swivel is balance::turret_swivel"
 sensors = "rule: its role's sight over its reach in balance::t1_land_roles"
 
 [units.t1_light_artillery]
@@ -59,7 +59,7 @@ damage = "rule: its role's time to kill in balance::t1_land_roles, splitting the
 range = "rule: its role's reach in balance::t1_land_roles, a multiple of [anchor] range"
 speed = "rule: its role's speed in balance::t1_land_roles, a multiple of [anchor] speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
-timing = "not derived yet: held, its turret's swivel; its reload, shell flight, blast and spread are its role's in balance::t1_land_roles"
+timing = "rule: its reload, shell flight, blast and spread are its role's in balance::t1_land_roles, and its turret's swivel is balance::turret_swivel"
 sensors = "rule: its role's sight over its reach in balance::t1_land_roles"
 
 [units.t2_heavy_tank]
@@ -69,7 +69,7 @@ damage = "rule: its role's time to kill in balance::t2_land_roles, splitting the
 range = "rule: its role's reach in balance::t2_land_roles, a multiple of [anchor] range"
 speed = "rule: its role's speed in balance::t2_land_roles, a multiple of [anchor] speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
-timing = "not derived yet: held, its turret's swivel; its reload, shell flight, blast and spread are its role's in balance::t2_land_roles"
+timing = "rule: its reload, shell flight, blast and spread are its role's in balance::t2_land_roles, and its turret's swivel is balance::turret_swivel"
 sensors = "rule: its role's sight over its reach in balance::t2_land_roles"
 
 [units.land_factory_t1]
@@ -107,7 +107,7 @@ health = "not derived yet: held, three times its earlier ([premiums] point_defen
 body = "not derived yet: held, its footprint"
 damage = "not derived yet: held, three times its earlier ([premiums] point_defense_holds_against_line_units prices it)"
 range = "rule: [model] point_defense_under_artillery, a fifth inside T1 artillery's"
-timing = "not derived yet: held, its reload, shell speed and turret"
+timing = "not derived yet: held, its reload and shell speed; its turret's swivel is balance::turret_swivel"
 sensors = "not derived yet: held, today's vision"
 
 [units.shield_generator]
@@ -203,7 +203,7 @@ damage = "not derived yet: held, three times the commander's fire"
 range = "not derived yet: held, a little past the commander's"
 speed = "not derived yet: the inspiration's"
 turning = "not derived yet: the inspiration's"
-timing = "not derived yet: the inspiration's"
+timing = "not derived yet: the inspiration's, but for its turret's swivel, balance::turret_swivel"
 sensors = "not derived yet: the inspiration's"
 economy = "not derived yet: the inspiration's"
 special = "not derived yet: held, its blast on death"
@@ -278,7 +278,7 @@ health = "not derived yet: held, mostly health for its premium ([premiums] stati
 body = "not derived yet: held, its footprint"
 damage = "not derived yet: held, the inspiration's two shots as one"
 range = "rule: [model] static_anti_air_over_mobile"
-timing = "not derived yet: held, its reload, shell speed and turret"
+timing = "not derived yet: held, its reload and shell speed; its turret's swivel is the [turrets] anti_air_degrees_a_second anchor (balance::turret_swivel)"
 sensors = "not derived yet: held, today's vision"
 
 [units.t1_mobile_aa]
@@ -288,7 +288,7 @@ damage = "rule: [kill_times] mobile_aa_t1_bomber (balance::derive_t1_air)"
 range = "rule: [model] mobile_anti_air_over_line"
 speed = "not derived yet: an identity knob ([constants]), today's top speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
-timing = "not derived yet: held, its reload, shell speed and turret"
+timing = "not derived yet: held, its reload and shell speed; its turret's swivel is the [turrets] anti_air_degrees_a_second anchor (balance::turret_swivel)"
 sensors = "not derived yet: held, today's vision"
 
 [units.air_factory_t2]
@@ -355,7 +355,7 @@ health = "not derived yet: held, mostly health for its premium ([premiums] stati
 body = "not derived yet: held, its footprint"
 damage = "not derived yet: held, its shell"
 range = "rule: [model] static_anti_air_over_mobile"
-timing = "not derived yet: held, its reload, slow shell, blast, spread and turret"
+timing = "not derived yet: held, its reload, slow shell, blast and spread; its turret's swivel is the [turrets] anti_air_degrees_a_second anchor (balance::turret_swivel)"
 sensors = "not derived yet: held, today's vision"
 
 [units.t3_sam]
@@ -363,7 +363,7 @@ health = "not derived yet: held, its health and footprint"
 body = "not derived yet: held, its footprint"
 damage = "rule: [kills] t3_sam.t2_gunship and t3_sam.t3_strategic_bomber"
 range = "rule: [model] static_anti_air_over_mobile, over what T3's mobile anti-air would reach"
-timing = "not derived yet: held, its missile's speed, blast and turret; its reload [kill_times] sam_t2_gunship and sam_t3_strategic_bomber"
+timing = "not derived yet: held, its missile's speed and blast; its reload [kill_times] sam_t2_gunship and sam_t3_strategic_bomber, its turret's swivel the [turrets] anti_air_degrees_a_second anchor (balance::turret_swivel)"
 sensors = "not derived yet: held, today's vision"
 
 [units.t2_mobile_flak]
@@ -373,7 +373,7 @@ damage = "rule: [air] escort_forces, the T2 army and the T2 strike aircraft even
 range = "rule: [model] mobile_anti_air_over_line"
 speed = "not derived yet: an identity knob ([constants]), today's top speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
-timing = "not derived yet: the inspiration's slow shell, blast and spread"
+timing = "not derived yet: the inspiration's slow shell, blast and spread; its turret's swivel is the [turrets] anti_air_degrees_a_second anchor (balance::turret_swivel)"
 sensors = "not derived yet: held, today's vision"
 
 [units.land_factory_t2_support]
@@ -425,7 +425,7 @@ health = "not derived yet: the inspiration's"
 body = "not derived yet: held, its footprint"
 damage = "not derived yet: the inspiration's volley as one shot"
 range = "rule: [model] point_defense_under_artillery, a fifth inside T2 artillery's"
-timing = "not derived yet: the inspiration's"
+timing = "not derived yet: the inspiration's, but for its turret's swivel, balance::turret_swivel"
 sensors = "not derived yet: held, today's vision"
 
 [units.airfield]
@@ -445,7 +445,7 @@ health = "not derived yet: the inspiration's, inside [kills] t3_strategic_bomber
 body = "not derived yet: held, its footprint"
 damage = "not derived yet: the inspiration's"
 range = "not derived yet: held, past what the list's closing share prices ([domains.cells] battleship_over_t2_artillery_reach measures the battleship against it)"
-timing = "not derived yet: the inspiration's reload and shell; its blast [splash] wide_reach_over_spacing, its spread [kills] t2_artillery_spread"
+timing = "not derived yet: the inspiration's reload and shell; its blast [splash] wide_reach_over_spacing, its spread [kills] t2_artillery_spread, its turret's swivel balance::turret_swivel"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's energy a shot"
 
@@ -454,7 +454,7 @@ health = "not derived yet: held, its health and footprint"
 body = "not derived yet: held, its footprint"
 damage = "not derived yet: kept at least [kills] t3_artillery_kills_every_t3_land_unit, which does not pin it"
 range = "not derived yet: the inspiration's, across a map"
-timing = "not derived yet: the inspiration's reload and shell; its blast [splash] wide_reach_over_spacing, its spread [kills] t3_artillery_spread"
+timing = "not derived yet: the inspiration's reload and shell; its blast [splash] wide_reach_over_spacing, its spread [kills] t3_artillery_spread, its turret's swivel balance::turret_swivel"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's energy a shot"
 
@@ -465,7 +465,7 @@ damage = "not derived yet: held, the shell a retired rule gave it, kept inside [
 range = "rule: [model] artillery_over_line, three times the T3 line's reach, a quarter of it its least range"
 speed = "not derived yet: an identity knob ([constants]), today's top speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
-timing = "not derived yet: the inspiration's spread, with its shell speed, blast and setup held; its reload is [model] role_time_to_kill artillery"
+timing = "not derived yet: the inspiration's spread, with its shell speed, blast and setup held; its reload is [model] role_time_to_kill artillery, its turret's swivel balance::turret_swivel"
 sensors = "not derived yet: held, today's vision"
 
 [units.t2_fighter_bomber]
@@ -491,7 +491,7 @@ damage = "not derived yet: the inspiration's ratio to its T1 tank, split by the 
 range = "rule: [model] closing_share_role brawler, and its anti-air [model] ship_anti_air_over_static"
 speed = "not derived yet: an identity knob ([constants]), today's top speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
-timing = "not derived yet: held, its reloads, blast and turrets; its gun's shell speed is [constants] ship_gun_speed"
+timing = "not derived yet: held, its reloads and blast; its gun's shell speed is [constants] ship_gun_speed, its turrets' swivel balance::turret_swivel, the anti-air's the [turrets] anti_air_degrees_a_second anchor"
 sensors = "not derived yet: held, its vision, radar and sonar"
 
 [units.naval_factory_t2]
@@ -525,7 +525,7 @@ damage = "not derived yet: held, its guns' and anti-air's; its torpedo is [kill_
 range = "rule: [model] closing_share_navy_over_land, the navy line's reach; its anti-air [model] ship_anti_air_over_static; its torpedo [model] closing_share_role sub_hunter"
 speed = "rule: [model] speed_navy at the T2 line's share (balance::t2_land_roles)"
 turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
-timing = "not derived yet: held, its reloads, blasts, spread and turrets; its guns' shell speed is [constants] ship_gun_speed"
+timing = "not derived yet: held, its reloads, blasts and spread; its guns' shell speed is [constants] ship_gun_speed, its turrets' swivel balance::turret_swivel, the anti-air's the [turrets] anti_air_degrees_a_second anchor"
 sensors = "not derived yet: held, its vision, radar and sonar"
 special = "not derived yet: the inspiration's anti-torpedo charge"
 
@@ -536,7 +536,7 @@ damage = "not derived yet: held, its gun; its missiles [kill_times] cruiser_miss
 range = "not derived yet: held, its missiles twice a cannon cruiser's reach that no table sets ([model] missile_over_cannon); its least range [model] cruiser_min_range_share, its gun [model] support_gun_at_line, its anti-air [model] cruiser_anti_air_over_static"
 speed = "not derived yet: an identity knob ([constants]), today's top speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
-timing = "not derived yet: the inspiration's missile speed and cruise height; its volleys [volleys] t2_cruiser"
+timing = "not derived yet: the inspiration's missile speed and cruise height, with its guns' reloads and shells held; its volleys [volleys] t2_cruiser, its turrets' swivel balance::turret_swivel, the anti-air's the [turrets] anti_air_degrees_a_second anchor"
 sensors = "not derived yet: held, its vision, radar and sonar"
 special = "not derived yet: held, its missile defense mounts"
 
@@ -547,7 +547,7 @@ damage = "not derived yet: held, its anti-air; its broadside [broadsides] t3_bat
 range = "rule: [domains.cells] battleship_over_t2_artillery_reach; its anti-air [model] ship_anti_air_over_static"
 speed = "rule: [model] speed_navy at the T3 heavy role's share (balance::t3_land_roles)"
 turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
-timing = "not derived yet: held, its turrets' swivel, its anti-air and its blast; its broadside [model] battleship_broadside_seconds, lobbed at the design owner's speed"
+timing = "not derived yet: held, its anti-air and its blast; its broadside [model] battleship_broadside_seconds, lobbed at the design owner's speed, its turrets' swivel balance::turret_swivel, the anti-air's the [turrets] anti_air_degrees_a_second anchor"
 sensors = "not derived yet: held, its vision, radar and sonar"
 special = "not derived yet: held, its missile defense mounts"
 
@@ -558,7 +558,7 @@ damage = "not derived yet: held, its torpedo, and its lasers' damage past [model
 range = "rule: [model] closing_share_navy_over_land at its speed; its torpedo [model] closing_share_role sub_hunter a tier up"
 speed = "rule: [model] battlecruiser_speed_over_battleship, the design owner's"
 turning = "not derived yet: kept turning slightly faster than the battleship, the design owner's rule, which does not pin it"
-timing = "not derived yet: held, its reloads and turrets"
+timing = "not derived yet: held, its reloads; its turrets' swivel is balance::turret_swivel"
 sensors = "not derived yet: held, its vision, radar and sonar"
 special = "not derived yet: the inspiration's anti-torpedo charge and missile defense mount"
 
@@ -569,7 +569,7 @@ damage = "not derived yet: held, from the derived-stats pass, which no [model] t
 range = "not derived yet: held, from the derived-stats pass, which no [model] closing_share_role reproduces today"
 speed = "not derived yet: an identity knob ([constants]), today's top speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
-timing = "not derived yet: the inspiration's deck gun; its torpedo at [constants] torpedo_speed"
+timing = "not derived yet: the inspiration's deck gun; its torpedo at [constants] torpedo_speed, its deck gun's swivel balance::turret_swivel"
 sensors = "not derived yet: held, its vision and sonar"
 
 [units.t2_torpedo_bomber]
@@ -617,7 +617,7 @@ damage = "rule: its role's time to kill in balance::t2_land_roles, splitting the
 range = "rule: its role's reach in balance::t2_land_roles, a multiple of [anchor] range"
 speed = "rule: its role's speed in balance::t2_land_roles, a multiple of [anchor] speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
-timing = "not derived yet: held, its turret's swivel; its reload, shell flight, blast and spread are its role's in balance::t2_land_roles"
+timing = "rule: its reload, shell flight, blast and spread are its role's in balance::t2_land_roles, and its turret's swivel is balance::turret_swivel"
 sensors = "rule: its role's sight over its reach in balance::t2_land_roles"
 
 [units.t2_escort_corvette]
@@ -657,7 +657,7 @@ damage = "rule: its role's time to kill in balance::t1_land_roles, splitting the
 range = "rule: its role's reach in balance::t1_land_roles, a multiple of [anchor] range"
 speed = "rule: its role's speed in balance::t1_land_roles, a multiple of [anchor] speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
-timing = "not derived yet: held, its turret's swivel; its reload, shell flight, blast and spread are its role's in balance::t1_land_roles"
+timing = "rule: its reload, shell flight, blast and spread are its role's in balance::t1_land_roles, and its turret's swivel is balance::turret_swivel"
 sensors = "not derived yet: held, its radar; its vision is its role's sight over its reach (balance::t1_land_roles)"
 
 [units.t1_medium_tank]
@@ -667,7 +667,7 @@ damage = "anchor: [anchor] dps, a copy of itself in [ratios] anchor_time_to_kill
 range = "anchor: [anchor] range, its closing time [ratios] closing_over_time_to_kill of its time to kill"
 speed = "anchor: [anchor] speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
-timing = "not derived yet: held, its turret's swivel; its shell is [anchor] projectile_speed, a shot a second (balance::t1_land_roles)"
+timing = "anchor: its shell is [anchor] projectile_speed, a shot a second (balance::t1_land_roles), and its turret's swivel is balance::turret_swivel"
 sensors = "anchor: [anchor] vision"
 
 [units.t2_grenadier_walker]
@@ -677,7 +677,7 @@ damage = "rule: its role's time to kill in balance::t2_land_roles, splitting the
 range = "rule: its role's reach in balance::t2_land_roles, a multiple of [anchor] range"
 speed = "rule: its role's speed in balance::t2_land_roles, a multiple of [anchor] speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
-timing = "not derived yet: held, its turret's swivel; its reload, shell flight, blast and spread are its role's in balance::t2_land_roles"
+timing = "rule: its reload, shell flight, blast and spread are its role's in balance::t2_land_roles, and its turret's swivel is balance::turret_swivel"
 sensors = "rule: its role's sight over its reach in balance::t2_land_roles"
 
 [units.t2_mobile_shield]
@@ -695,7 +695,7 @@ damage = "not derived yet: the inspiration's"
 range = "not derived yet: the inspiration's"
 speed = "not derived yet: the inspiration's"
 turning = "not derived yet: the inspiration's"
-timing = "not derived yet: the inspiration's"
+timing = "not derived yet: the inspiration's, but for its turret's swivel, balance::turret_swivel"
 sensors = "not derived yet: the inspiration's"
 economy = "not derived yet: the inspiration's"
 
@@ -706,7 +706,7 @@ damage = "rule: its role's time to kill in balance::t3_land_roles, splitting the
 range = "rule: its role's reach in balance::t3_land_roles, a multiple of [anchor] range"
 speed = "rule: its role's speed in balance::t3_land_roles, a multiple of [anchor] speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
-timing = "not derived yet: held, its turret's swivel; its reload, shell flight, blast and spread are its role's in balance::t3_land_roles"
+timing = "rule: its reload, shell flight, blast and spread are its role's in balance::t3_land_roles, and its turret's swivel is balance::turret_swivel"
 sensors = "rule: its role's sight over its reach in balance::t3_land_roles"
 special = "not derived yet: held, its personal shield"
 
@@ -717,7 +717,7 @@ damage = "rule: its role's time to kill in balance::t3_land_roles, splitting the
 range = "rule: its role's reach in balance::t3_land_roles, a multiple of [anchor] range"
 speed = "rule: its role's speed in balance::t3_land_roles, a multiple of [anchor] speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
-timing = "not derived yet: held, its turret's swivel; its reload, shell flight, blast and spread are its role's in balance::t3_land_roles"
+timing = "rule: its reload, shell flight, blast and spread are its role's in balance::t3_land_roles, and its turret's swivel is balance::turret_swivel"
 sensors = "rule: its role's sight over its reach in balance::t3_land_roles"
 
 [units.t2_torpedo_boat]
@@ -736,7 +736,7 @@ health = "not derived yet: the inspiration's"
 body = "not derived yet: held, its footprint"
 damage = "not derived yet: held, two and a half times its earlier ([premiums] point_defense_holds_against_line_units prices it)"
 range = "rule: [model] point_defense_under_artillery, a fifth inside the Mobile Heavy Artillery's"
-timing = "not derived yet: the inspiration's"
+timing = "not derived yet: the inspiration's, but for its turret's swivel, balance::turret_swivel"
 sensors = "not derived yet: held, today's vision"
 
 [units.t3_heavy_shield]
