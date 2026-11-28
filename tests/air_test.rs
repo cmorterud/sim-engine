@@ -108,7 +108,8 @@ fn a_landed_aircraft_is_hit_by_ground_fire_and_not_by_anti_air() {
     // Anti-air beside it does nothing to it.
     let mobile = spawn(&mut world, "t1_mobile_aa", Team::Blue, landed + point(150, 0));
     run(&mut world, 50);
-    assert_eq!(world.unit_health(scout), Some(fp_int(35)), "anti-air cannot hit a landed aircraft");
+    let full = world.blueprints.get(world.blueprints.id("t1_air_scout")).health;
+    assert_eq!(world.unit_health(scout), Some(full), "anti-air cannot hit a landed aircraft");
     assert!(world.unit_health(mobile).is_some());
     // A tank can.
     spawn(&mut world, "t2_heavy_tank", Team::Blue, landed + point(0, 150));
@@ -128,7 +129,7 @@ fn only_anti_air_weapons_hit_aircraft_and_most_hit_nothing_else() {
     world.advance_tick(&[SimCommand::Attack { units: vec![tank], target: scout }]);
     run(&mut world, 200);
     assert_eq!(world.unit_order(tank).unwrap().kind, OrderKind::Idle, "a tank cannot be told to attack an aircraft");
-    assert_eq!(world.unit_health(scout), Some(fp_int(35)), "ground guns cannot hit aircraft");
+    assert_eq!(world.unit_health(scout), Some(world.blueprints.get(world.blueprints.id("t1_air_scout")).health), "ground guns cannot hit aircraft");
     let tank_health = world.unit_health(tank).unwrap();
     let full = fp_int(world.blueprints.get(world.blueprints.id("t2_heavy_tank")).health.to_num::<i32>());
     assert_eq!(tank_health, full, "the interceptor does not shoot at the tank");

@@ -83,7 +83,7 @@ fn a_gateway_builds_a_field_rig_with_heavy_armor_and_build_power() {
     run(&mut world, 20);
     let unit = made(&world).expect("a field rig after its build time");
     let entity = world.unit_entity(unit).unwrap();
-    assert_eq!(world.unit_health(unit), Some(fp_int(16_000)));
+    assert_eq!(world.unit_health(unit), Some(world.blueprints.get(world.blueprints.id("field_rig")).health), "at its full health");
     assert_eq!(world.ecs.get::<&Builder>(entity).unwrap().power, fp_int(56));
     assert_eq!(world.commanders[0], None, "it is not the commander");
     let _ = world.ecs.get::<&Factory>(world.unit_entity(gateway).unwrap()).unwrap();
