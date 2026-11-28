@@ -4,12 +4,14 @@ name: Soak
 # Validate): hundreds of matches, too heavy to run on a laptop for every change. Here it is
 # split across runners, one shard of seeds each, all running the same release binary.
 on:
-  # The full soak, nightly on main's newest commit (2:17 AM Eastern standard time, 3:17 in
-  # summer, since cron keeps UTC), rather than on every push: it took about an hour, and the
-  # website no longer waits for it (pages.yml). A night it fails tells the repository's owner
-  # (the alert job).
+  # GitHub can delay or drop a scheduled event. Keep the 07:17 UTC slot and give
+  # the nightly soak a second chance at 09:43 UTC. Both compare main with the
+  # last successful scheduled run, so a second trigger on the same successful
+  # revision skips the build and matches. It can still pick up changes or retry
+  # a failed soak.
   schedule:
     - cron: "17 7 * * *"
+    - cron: "43 9 * * *"
   # A smaller soak for each pull request into main (the plan below): enough matches on every map
   # and team size to catch one that never ends, a replay that differs, or a panic, in a fraction
   # of the time, but too few to judge a side's lean. The full soak plays it that night.
@@ -48,11 +50,9 @@ permissions:
   # To find the last commit on main whose soak passed (the plan job).
   actions: read
 
-# One soak at a time for each branch, and only its newest commit waits: a newer push takes the
-# place of the one waiting, but never cuts off the soak running. Waiting in line for every
-# commit cost hours when main moved faster than a soak, and only main's newest commit is ever
-# published (pages.yml). A commit left unsoaked this way is still covered, since the next soak
-# plays every change since the last one that passed (the plan job).
+# One soak at a time per ref. A new run can replace a pending run, while the
+# running soak finishes. The next scheduled run compares against the last one
+# that passed, which also covers changes from a replaced run.
 concurrency:
   group: soak-${{ github.ref }}
 
@@ -81,6 +81,13 @@ jobs:
       shards: ${{ steps.plan.outputs.shards }}
       run: ${{ steps.changes.outputs.run }}
     steps:
+      - name: Record the scheduled slot
+        if: github.event_name == 'schedule'
+        env:
+          SOAK_CRON: ${{ github.event.schedule }}
+        run: |
+          printf 'Scheduled UTC cron: `%s`\n' "$SOAK_CRON" >> "$GITHUB_STEP_SUMMARY"
+
       # The merge commit and its first parent, main as it stands, are enough to see what the
       # pull request changes. A nightly run fetches the commit it is compared with below.
       - uses: actions/checkout@v7
