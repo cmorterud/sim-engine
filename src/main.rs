@@ -1306,7 +1306,7 @@ fn run_landscape(seed: u64, options: &Options, map_source: &MapSource, directory
     }
     let instances = InstanceBatches::default();
     for view in landscape_views(&map.heights, f64::from(map.water_level)) {
-        let mut camera = Camera::new(map.map_units, [f64::from(size.width), f64::from(size.height)]);
+        let mut camera = Camera::new(map.map_units, [f64::from(size.width.max(1)), f64::from(size.height.max(1))]);
         camera.look_at(view.focus[0], view.focus[1], view.altitude);
         if view.low_angle {
             camera.orbit(0.0, -90.0);
@@ -1412,7 +1412,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     if autotest.is_some() && options.capture_dir.is_none() {
         renderer.start_gpu_timing();
     }
-    let mut camera = Camera::new(map.map_units, [f64::from(size.width), f64::from(size.height)]);
+    let mut camera = Camera::new(map.map_units, [f64::from(size.width.max(1)), f64::from(size.height.max(1))]);
     if is_match {
         camera.set_min_altitude(SKIRMISH_MIN_ALTITUDE);
         camera.look_at(raw_to_world(player_start.x.to_bits()), raw_to_world(player_start.y.to_bits()), STARTING_ALTITUDE);
@@ -1536,6 +1536,8 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                     WindowEvent::Resized(new_size) => {
                         renderer.resize(new_size.width, new_size.height);
                         camera.set_viewport([f64::from(new_size.width.max(1)), f64::from(new_size.height.max(1))]);
+                        #[cfg(target_arch = "wasm32")]
+                        window.request_redraw();
                     }
                     WindowEvent::ModifiersChanged(modifiers) => {
                         alt_held = modifiers.state().alt_key();
@@ -1974,6 +1976,15 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                         }
                     }
                     WindowEvent::RedrawRequested => {
+                        let size = window.inner_size();
+                        if size.width == 0 || size.height == 0 {
+                            return;
+                        }
+                        if camera.viewport() != [f64::from(size.width), f64::from(size.height)] {
+                            renderer.resize(size.width, size.height);
+                            camera.set_viewport([f64::from(size.width), f64::from(size.height)]);
+                        }
+
                         let now = Instant::now();
                         let frame_time = now - last_frame;
                         last_frame = now;
