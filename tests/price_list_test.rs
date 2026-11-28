@@ -74,6 +74,22 @@ fn the_mobile_flak_pays_what_the_mobile_anti_air_pays_over_the_list() {
     assert!((flak.actual / (flak.list * premium) - 1.0).abs() < 0.01, "the Mobile Flak costs {:.1}, not {:.1} ({:.1} at {premium:.3})", flak.actual, flak.list * premium, flak.list);
 }
 
+/// Sensor buildings (2026-11-28, the design owner's pick): each that is not the cheapest with one
+/// of its sensors costs what its sensors see past its vision at that cheapest building's price per
+/// area, within 1%.
+#[test]
+fn every_sensor_building_costs_its_cover() {
+    let db = BlueprintDb::standard();
+    let mut priced = Vec::new();
+    for unit in db.iter() {
+        let Some(price) = price_list::sensor_building_price(&db, &unit.key) else { continue };
+        let cost = sim_engine::balance::cost_at(unit, unit.tier);
+        assert!((cost / price - 1.0).abs() < 0.01, "{} costs {cost:.1}, its cover {price:.1}", unit.key);
+        priced.push(unit.key.as_str());
+    }
+    assert_eq!(priced, ["radar_t2", "t2_sonar"], "the T2 Radar and the T2 Sonar; the Radar, the Sonar and the Deep Scan Array are anchors");
+}
+
 #[test]
 fn every_held_unit_is_one_the_list_prices() {
     let db = BlueprintDb::standard();

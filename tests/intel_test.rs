@@ -208,8 +208,8 @@ fn a_radar_upgrades_in_place_to_a_t2_radar_and_then_an_deep_scan_array() {
     let radar = structure(&mut world, "radar", Team::Blue, 50, 50);
     let key = |world: &SimWorld| world.blueprints.get(world.ecs.get::<&Blueprinted>(world.unit_entity(radar).unwrap()).unwrap().0).key.clone();
     world.advance_tick(&[SimCommand::Upgrade { units: vec![radar] }]);
-    // 780 build time at its own 10 build power is 78 seconds.
-    run(&mut world, 800);
+    // 1,244 build time at its own 10 build power is 124.4 seconds.
+    run(&mut world, 1_260);
     assert_eq!(key(&world), "radar_t2");
     world.advance_tick(&[SimCommand::Upgrade { units: vec![radar] }]);
     // 2,400 at the T2 radar's 20 is 120 seconds.

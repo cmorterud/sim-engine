@@ -947,8 +947,6 @@ mass_storage = "the design owner's: storage and adjacency keep their tables (the
 energy_storage = "the design owner's: storage and adjacency keep their tables (the plan's pick)"
 mass_fabricator = "the design owner's: at its tier's energy rate it makes nothing net ([economy])"
 mass_fabricator_t3 = "the design owner's: at its tier's energy rate it makes nothing net ([economy])"
-radar_t2 = "not derived yet: the sensor rule over the T1 Radar, with its upkeep counted"
-t2_sonar = "not derived yet: the sensor rule over the T1 Sonar, with its upkeep counted"
 deep_scan_array = "an anchor: the sensor rule's deep scan, the only building with it, the design owner's"
 airfield = "the design owner's: its repair slots are a mechanic rule, which no fight prices"
 

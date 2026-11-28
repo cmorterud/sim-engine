@@ -503,6 +503,11 @@ out close and why: evidence about the process, not a target.
   Mobile Anti-Air, whose health per mass sets its cost, at 0.68 of that cost, and the Mobile Flak
   at the same share of its own, so the Mobile Flak costs its list price times what the Mobile
   Anti-Air pays over its own, 1.48: 160, as it was.
+* 2026-11-28: sensor buildings priced by the sensor rule every mobile sensor follows (the design
+  owner's pick; `price_list::sensor_building_price`): what each sensor sees past the building's
+  vision at the price per area of the cheapest building with it, not over a domain base, upkeep
+  left out as it is for a mobile sensor. The T2 Radar 206 to 328, the T2 Sonar 354 to 644. The
+  Radar, the Sonar and the Deep Scan Array are the anchors the rule prices from.
 
 ## Order of work
 

@@ -286,6 +286,35 @@ fn sensors(db: &BlueprintDb, table: &toml::Table, unit: &Blueprint, base: f64) -
     out
 }
 
+/// What a sensor building costs (2026-11-28, the design owner's pick): what each of its sensors sees
+/// past its own vision, at the price per area of the cheapest building with that sensor, as a
+/// mobile unit's sensors are priced (`sensors`), but not over a domain base, since a building is
+/// priced by what it does for an economy, not by a fight. Its upkeep is a running cost the rule
+/// leaves out, as a mobile sensor's. None for a building with a weapon, with no sensor past its
+/// vision, or that is itself the cheapest with one of its sensors: an anchor.
+pub fn sensor_building_price(db: &BlueprintDb, key: &str) -> Option<f64> {
+    let unit = db.get(db.find(key)?);
+    if !unit.is_structure() || !fighting_weapons(unit).is_empty() {
+        return None;
+    }
+    let vision = unit.vision.to_num::<f64>();
+    let kinds: [SensorRange; 3] = [|unit| unit.radar.to_num(), |unit| unit.sonar.to_num(), |unit| unit.deep_scan.to_num()];
+    let own = cost_at(unit, unit.tier);
+    let mut price = 0.0;
+    for sensor in kinds {
+        let range = sensor(unit);
+        if range <= vision {
+            continue;
+        }
+        let (building_cost, building_range) = cheapest_building(db, sensor)?;
+        if building_cost == own {
+            return None;
+        }
+        price += (range * range - vision * vision) / (building_range * building_range) * building_cost;
+    }
+    (price > 0.0).then_some(price)
+}
+
 /// A dome's price (`[price_list.shield_groups]`, 2026-11-27): the strength it adds to the group it
 /// covers. The list counts strength as √(health × damage a second), so a dome that adds `E` to a
 /// group's health `H` adds `√(1 + E / H) − 1` of the group's strength, and costs that share of
@@ -750,9 +779,9 @@ fn builds_tactical_missiles(unit: &Blueprint) -> bool {
 }
 
 /// What sets a unit's cost by a rule (2026-11-28): the list's price, or what holds it; a dome's
-/// group; the factory recipe; static anti-air's premium over mobile; minutes of a T3 economy, for
-/// a game-ending weapon and what answers it; a share of the missile it stops; or its tier's
-/// payback, for an extractor or a generator.
+/// group; the factory recipe; static anti-air's premium over mobile; a sensor building's cover;
+/// minutes of a T3 economy, for a game-ending weapon and what answers it; a share of the missile it
+/// stops; or its tier's payback, for an extractor or a generator.
 /// None for a unit no rule prices, which `[price_list.unlisted]` must name.
 pub fn cost_rule(db: &BlueprintDb, key: &str) -> Option<String> {
     let table = table();
@@ -770,6 +799,9 @@ pub fn cost_rule(db: &BlueprintDb, key: &str) -> Option<String> {
     if let Some(mobile) = table["premiums"]["static_anti_air"].get(key).and_then(toml::Value::as_str) {
         let floor = number(&table["premiums"]["static_anti_air_over_mobile"][0]);
         return Some(format!("{floor} times the {mobile}'s strength per cost against aircraft ([premiums] static_anti_air)"));
+    }
+    if let Some(price) = sensor_building_price(db, key) {
+        return Some(format!("its sensors past its vision at the cheapest building's price per area, {price:.1}"));
     }
     let missiles = &table["missiles"];
     if let Some(minutes) = missiles["strategic_minutes"].get(key) {

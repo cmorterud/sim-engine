@@ -1077,9 +1077,11 @@ id = "radar_t2"
 name = "Radar (T2)"
 class = "economy"
 tier = 2
-mass = 180
-energy = 3600
-build_time = 780
+# Its radar past its vision at the Radar's price per area, as every sensor is priced
+# (price_list::sensor_building_price, 2026-11-28): 206 to 328.
+mass = 287
+energy = 5742
+build_time = 1244
 health = 50
 footprint = 1
 vision = 480
@@ -1659,9 +1661,11 @@ id = "t2_sonar"
 name = "Sonar (T2)"
 class = "economy"
 tier = 2
-mass = 300
-energy = 7200
-build_time = 780
+# Its sonar past its vision at the Sonar's price per area, as every sensor is priced
+# (price_list::sensor_building_price, 2026-11-28): 354 to 644.
+mass = 545
+energy = 13080
+build_time = 1417
 health = 800
 footprint = 1
 on_water = true
