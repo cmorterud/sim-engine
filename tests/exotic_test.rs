@@ -104,7 +104,13 @@ fn stunned(world: &SimWorld, id: SimId) -> bool {
 }
 
 fn shots_from(world: &SimWorld, source: SimId) -> usize {
-    world.projectiles.iter().filter(|&&(_, entity)| world.ecs.get::<&Projectile>(entity).is_ok_and(|shot| shot.source == source)).count()
+    shot_ids_from(world, source).len()
+}
+
+/// The shots in flight from `source`, by id.
+fn shot_ids_from(world: &SimWorld, source: SimId) -> Vec<SimId> {
+    let fired_by = |entity| world.ecs.get::<&Projectile>(entity).is_ok_and(|shot| shot.source == source);
+    world.projectiles.iter().filter(|&&(_, entity)| fired_by(entity)).map(|&(id, _)| id).collect()
 }
 
 /// Runs until `done` holds, and returns the tick it did.
@@ -222,12 +228,16 @@ fn a_tractor_beam_lifts_a_unit_draws_it_in_and_crushes_it() {
     assert_eq!(world.snapshot().tractor_beams.len(), 1);
     let held = if world.disabled.iter().any(|unit| unit.0 == bot) { bot } else { other };
     let start = position(&world, held).unwrap();
+    // Its gun swivels round quickly enough to have fired before it was lifted, and those shells
+    // fly on; it fires nothing new while held.
+    let already_flying = shot_ids_from(&world, held);
     let mut was_closer = false;
     let crushed = run_until(&mut world, 100, |world| {
         if let Some(now) = position(world, held) {
             let here = position(world, walker).unwrap();
             was_closer |= now.distance_squared(&here) < start.distance_squared(&here);
-            assert_eq!(shots_from(world, held), 0, "a held unit cannot fire");
+            let fired = shot_ids_from(world, held).into_iter().filter(|id| !already_flying.contains(id)).count();
+            assert_eq!(fired, 0, "a held unit cannot fire");
         }
         health(world, held).is_none()
     })
