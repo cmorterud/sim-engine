@@ -646,6 +646,10 @@ pub struct AiBrain {
     enemy_home: Vec2Fp,
     /// +1 for Blue, -1 for Red, whose plan is Blue's turned about the map's center.
     side: i32,
+    /// In sudden death with nothing left to fight with, its commander holds where it stands on
+    /// land, and the enemy's comes to it, rather than both going for each other: Blue on even
+    /// seeds, Red on odd ones, so that neither team is always the one waiting.
+    holds_last: bool,
     rng: SimRng,
     wave_size: usize,
     /// The most idle combat units seen since the last wave, and when that was first reached.
@@ -703,6 +707,7 @@ impl AiBrain {
             home: starts[team.index()],
             enemy_home: starts[team.enemy().index()],
             side: if team == Team::Blue { 1 } else { -1 },
+            holds_last: (team == Team::Blue) == seed.is_multiple_of(2),
             // Both teams draw the same numbers, so that on a mirrored map they make mirrored choices.
             rng: SimRng::new(seed ^ 0xA5A5_5A5A),
             wave_size: skill.first_wave,
@@ -2457,7 +2462,20 @@ impl AiBrain {
         // for the last 15 minutes.
         let nothing_left = forces.combat_units == 0 && forces.fleet.is_empty();
         let commander_idle = forces.idle_builders.iter().any(|builder| Some(builder.id) == forces.commander);
-        if sudden_death && (nothing_left || commander_idle) && !commander_attacking && !commander_enhancing(world, forces) {
+        // Left with nothing else, one side's commander stands its ground on land and the other's
+        // comes for it. Both going for each other, two mirror-image commanders on Twin Passes
+        // (seed 19, 2026-11-28) crossed the lake between them at the same time, passed each other
+        // on the lake bed, where neither can fire, came out on the far shores, and turned back,
+        // for the last hour of the match. On a mirrored map they always cross together, so only
+        // one of them may go.
+        let holds = sudden_death && nothing_left && self.holds_last;
+        if holds && commander_attacking {
+            let on_land = forces.commander.and_then(|id| world.unit_position(id)).is_some_and(|at| world.terrain.height_at(at.xy()) >= world.terrain.water_level());
+            if on_land {
+                commands.push(SimCommand::Stop { units: forces.commander.into_iter().collect() });
+            }
+        }
+        if sudden_death && !holds && (nothing_left || commander_idle) && !commander_attacking && !commander_enhancing(world, forces) {
             let goal = self.enemy_commander(world).and_then(|id| world.unit_position(id)).map_or(self.enemy_home, |at| at.xy());
             if let Some(commander) = forces.commander.filter(|_| world.terrain.height_at(goal) >= world.terrain.water_level()) {
                 commands.push(SimCommand::AttackMove { units: vec![commander], goal });
@@ -2466,7 +2484,7 @@ impl AiBrain {
         if sudden_death && world.current_tick.is_multiple_of(SUDDEN_DEATH_REAIM_TICKS) {
             let goal = self.enemy_commander(world).and_then(|id| world.unit_position(id)).map_or(self.enemy_home, |at| at.xy());
             let mut going = forces.attacking.clone();
-            if commander_attacking && world.terrain.height_at(goal) >= world.terrain.water_level() {
+            if commander_attacking && !holds && world.terrain.height_at(goal) >= world.terrain.water_level() {
                 going.extend(forces.commander);
             }
             if !going.is_empty() {
