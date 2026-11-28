@@ -25,7 +25,7 @@ build_power = 10
 build_range = 200
 # Its fabrication packs (the enhancements below) unlock the T2 and T3 structures on its list.
 builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "radar", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "stealth_field_generator", "strategic_missile_launcher", "strategic_missile_defense", "rig_yard", "geothermal_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "naval_factory", "t1_aa_turret", "airfield", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "deep_scan_array", "land_factory_t3_support", "air_factory_t3_support", "t2_artillery", "t3_artillery", "naval_factory_t2_support", "naval_factory_t3_support", "t1_sonar", "t1_torpedo_launcher", "t2_sonar", "t2_torpedo_launcher", "wall", "t3_heavy_point_defense", "t3_heavy_shield"]
-weapon = { range = 440, reload_ticks = 7, projectile_speed = 50, damage = 70, turn_rate = 180 }
+weapon = { range = 440, reload_ticks = 7, projectile_speed = 50, damage = 70, turn_rate = 464 }
 # The inspiration's Discharge: 7,500 in store to fire; on landing, up to 90% of the store at 6 energy a point,
 # from 1,250 to 15,000 damage, as much as the toughest enemy there takes; 400 to commanders, 800
 # to structures, a blast of 50, and a look 54 round for the toughest.
@@ -76,7 +76,7 @@ speed = "13"
 turn_rate = 50
 radius = 7
 vision = 335
-weapon = { range = 210, reload_ticks = 5, projectile_speed = 42, damage = "10.8", turn_rate = 300 }
+weapon = { range = 210, reload_ticks = 5, projectile_speed = 42, damage = "10.8", turn_rate = 900 }
 
 # Outranges everything at T1, and cannot hit what is within half its range. It beats line units
 # that attack-move into it, and loses to them, and to raiders, spread out and charging.
@@ -96,7 +96,7 @@ turn_rate = 90
 turn_radius = 30
 radius = 9
 vision = 385
-weapon = { range = 595, reload_ticks = 50, projectile_speed = 28, damage = 140, splash_radius = 16, turn_rate = 90, artillery = true, min_range = 298, spread = 20 }
+weapon = { range = 595, reload_ticks = 50, projectile_speed = 28, damage = 140, splash_radius = 16, turn_rate = 39, artillery = true, min_range = 298, spread = 20 }
 
 # The T2 line unit: three anchors' cost, a quarter more range, and fights a little longer, about
 # as strong per materiel as the anchor. Derived from the balance targets
@@ -115,7 +115,7 @@ turn_rate = 90
 turn_radius = 40
 radius = 11
 vision = 480
-weapon = { range = 438, reload_ticks = 12, projectile_speed = 80, damage = "102.9", turn_rate = 60 }
+weapon = { range = 438, reload_ticks = 12, projectile_speed = 80, damage = "102.9", turn_rate = 695 }
 
 [[unit]]
 id = "land_factory_t1"
@@ -212,15 +212,15 @@ name = "Point Defense"
 class = "defense"
 tier = 1
 # Cost (2026-11-27): the most it can cost and still hold, three against half again their cost
-# in Medium Tanks ([premiums]), 404, under the price list's 429, which prices its damage above
-# what the hold allows: 325 to 404.
-mass = 311
-energy = 2487
-build_time = 311
+# in Medium Tanks ([premiums]), under the price list's 428, which prices its damage above what
+# the hold allows: 325 to 404, and 413 once every gun turned by the turret rule (2026-11-28).
+mass = 318
+energy = 2541
+build_time = 318
 health = 3900
 footprint = 1
 vision = 480
-weapon = { range = 496, reload_ticks = 3, projectile_speed = 70, damage = 150, turn_rate = 120 }
+weapon = { range = 496, reload_ticks = 3, projectile_speed = 70, damage = 150, turn_rate = 516 }
 
 # A dome that stops enemy shells from outside, while those under it fire out freely
 # (GAME_SPECIFICATION.md §8.1). Tier 2. Upkeep is energy per second while the dome is up.
@@ -237,10 +237,11 @@ class = "defense"
 tier = 2
 # Cost by the strength its dome adds to the three point defenses of the T2 position, as a
 # structure worth half again its cost ([price_list.shield_groups], 2026-11-27): 629 to 932, and
-# to 1,080 with the point defenses priced by their reach.
-mass = 1031
-energy = 10311
-build_time = 1976
+# to 1,080 with the point defenses priced by their reach, and to 1,044 once every gun turned by
+# the turret rule (2026-11-28).
+mass = 996
+energy = 9964
+build_time = 1910
 health = 250
 footprint = 3
 vision = 400
@@ -511,7 +512,7 @@ build_power = 56
 build_range = 200
 builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "rig_yard", "geothermal_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "naval_factory", "t1_aa_turret", "airfield", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "deep_scan_array", "land_factory_t3_support", "air_factory_t3_support", "t2_artillery", "t3_artillery", "naval_factory_t2_support", "naval_factory_t3_support", "t1_sonar", "t1_torpedo_launcher", "t2_sonar", "t2_torpedo_launcher", "wall", "t3_heavy_point_defense", "t3_heavy_shield"]
 # Three times the commander's fire: 300 a second for its 100, and a little farther.
-weapon = { range = 500, reload_ticks = 10, projectile_speed = 50, damage = 300, turn_rate = 180 }
+weapon = { range = 500, reload_ticks = 10, projectile_speed = 50, damage = 300, turn_rate = 539 }
 mass_income = 1
 energy_income = 20
 mass_storage = 275
@@ -1098,14 +1099,15 @@ name = "Point Defense (T2)"
 class = "defense"
 tier = 2
 # Cost by the price list, its reach priced at a structure's closing share ([price_list]
-# structure_closing_share, 2026-11-27): 550 to 638.
-mass = 626
-energy = 4379
-build_time = 782
+# structure_closing_share, 2026-11-27): 550 to 638, and 617 once every gun turned by the turret
+# rule (2026-11-28).
+mass = 605
+energy = 4236
+build_time = 756
 health = 2250
 footprint = 1
 vision = 560
-weapon = { range = 1095, reload_ticks = 17, projectile_speed = 70, damage = 210, splash_radius = 40, turn_rate = 120, spread = 2 }
+weapon = { range = 1095, reload_ticks = 17, projectile_speed = 70, damage = 210, splash_radius = 40, turn_rate = 516, spread = 2 }
 
 # Aircraft land on its four pads to refuel at 50 times the rate on the ground, and are repaired
 # for energy. A T2 aircraft takes two pads, and a T3 one all four.
@@ -1154,7 +1156,7 @@ build_time = 1600
 health = 7000
 footprint = 1
 vision = 560
-weapon = { range = 2300, reload_ticks = 200, projectile_speed = "55.6", damage = 2000, splash_radius = 70, turn_rate = 6, artillery = true, min_range = 1000, spread = 50, energy_per_shot = 1000 }
+weapon = { range = 2300, reload_ticks = 200, projectile_speed = "55.6", damage = 2000, splash_radius = 70, turn_rate = 9, artillery = true, min_range = 1000, spread = 50, energy_per_shot = 1000 }
 
 [[unit]]
 id = "t3_artillery"
@@ -1203,7 +1205,7 @@ vision = 1010
 # for five to seven of it (720 to 514 each), so six: 600, as it was (2026-11-27).
 # It no longer wins a walk-in fight against bunched Medium Tanks of its cost, and is not meant
 # to: it is a siege piece, dearer than the line walker, that loses to what reaches it.
-weapon = { range = 1575, reload_ticks = 138, projectile_speed = 56, damage = "859.1", splash_radius = 83, turn_rate = 30, artillery = true, min_range = 394, spread = 60, setup_ticks = 10 }
+weapon = { range = 1575, reload_ticks = 138, projectile_speed = 56, damage = "859.1", splash_radius = 83, turn_rate = 28, artillery = true, min_range = 394, spread = 60, setup_ticks = 10 }
 
 # The inspiration's fighter-bomber: a carpet of napalm bombs, burning included, as one bomb, and two railguns at
 # aircraft, as one. Cost, build time, health, and damage set against the Medium Tank as the
@@ -1285,7 +1287,7 @@ vision = 640
 radar = 1600
 sonar = 320
 movement = "naval"
-weapon = { range = 607, reload_ticks = 17, projectile_speed = 60, damage = 119, splash_radius = 20, turn_rate = 120, spread = 4 }
+weapon = { range = 607, reload_ticks = 17, projectile_speed = 60, damage = 119, splash_radius = 20, turn_rate = 757, spread = 4 }
 # Its anti-air reaches 1.2 times its tier's static anti-air, the turret's 800 ([model]
 # ship_anti_air_over_static).
 extra_weapons = [{ range = 960, reload_ticks = 10, projectile_speed = 90, damage = "23.8", targets = "air", turn_rate = 180 }]
@@ -1401,9 +1403,9 @@ sonar = 720
 # 10 seconds (once a second from 2026-11-24 to 2026-11-25, when destroyers were to beat submarines).
 torpedo_defense = { range = 600, reload_ticks = 100 }
 movement = "naval"
-weapon = { range = 1255, reload_ticks = 40, projectile_speed = 60, damage = 455, splash_radius = 20, turn_rate = 90, spread = 7 }
+weapon = { range = 1255, reload_ticks = 40, projectile_speed = 60, damage = 455, splash_radius = 20, turn_rate = 547, spread = 7 }
 extra_weapons = [
-    { range = 1255, reload_ticks = 40, projectile_speed = 60, damage = 455, splash_radius = 20, turn_rate = 90, spread = 7 },
+    { range = 1255, reload_ticks = 40, projectile_speed = 60, damage = 455, splash_radius = 20, turn_rate = 547, spread = 7 },
     # Its anti-air reaches 1.2 times its tier's static anti-air, the Flak Cannon's 1,000
     # ([model] ship_anti_air_over_static).
     { range = 1200, reload_ticks = 14, projectile_speed = 120, damage = "15.6", targets = "air", turn_rate = 180 },
@@ -1453,7 +1455,7 @@ weapon = { kind = "tactical_missile", automatic = true, artillery = true, min_ra
 extra_weapons = [
     # Its gun reaches its tier's navy line, the destroyer's 1,255 ([model] support_gun_at_line;
     # 1,200 until 2026-11-27).
-    { range = 1255, reload_ticks = 40, projectile_speed = 60, damage = 226, splash_radius = 40, turn_rate = 90, spread = 10 },
+    { range = 1255, reload_ticks = 40, projectile_speed = 60, damage = 226, splash_radius = 40, turn_rate = 516, spread = 10 },
     # The fleet's anti-air missiles, which steer themselves: eight a volley over its first
     # second, a volley every two, set by how many volleys each aircraft takes ([volleys] in
     # data/balance_targets.toml, 2026-11-25): one for every T1 aircraft, the Torpedo Bomber and
@@ -1514,10 +1516,10 @@ movement = "naval"
 # the design owner's ask): from the edge of its reach they fly about 2.7 seconds, which a
 # commander that turns back as the broadside goes up only just walks out of; any closer, they hit.
 # They flew flat at 600 a second until then, slow enough to walk out of from half its reach.
-weapon = { range = 2990, reload_ticks = 135, projectile_speed = 110, damage = 4400, splash_radius = 40, turn_rate = 30, spread = 6, lobbed = true, mount = [0, 28] }
+weapon = { range = 2990, reload_ticks = 135, projectile_speed = 110, damage = 4400, splash_radius = 40, turn_rate = 238, spread = 6, lobbed = true, mount = [0, 28] }
 extra_weapons = [
-    { range = 2990, reload_ticks = 135, projectile_speed = 110, damage = 4400, splash_radius = 40, turn_rate = 30, spread = 6, lobbed = true, mount = [0, 10], broadside = true },
-    { range = 2990, reload_ticks = 135, projectile_speed = 110, damage = 4400, splash_radius = 40, turn_rate = 30, spread = 6, lobbed = true, mount = [0, -31], aft = true, broadside = true },
+    { range = 2990, reload_ticks = 135, projectile_speed = 110, damage = 4400, splash_radius = 40, turn_rate = 238, spread = 6, lobbed = true, mount = [0, 10], broadside = true },
+    { range = 2990, reload_ticks = 135, projectile_speed = 110, damage = 4400, splash_radius = 40, turn_rate = 238, spread = 6, lobbed = true, mount = [0, -31], aft = true, broadside = true },
     # Its anti-air reaches 1.2 times its tier's static anti-air, the SAM's 1,200, as the frigate's
     # and the destroyer's do theirs ([model] ship_anti_air_over_static): 1,440 (1,200 until 2026-11-27).
     { range = 1440, reload_ticks = 17, projectile_speed = 180, damage = 96, targets = "air", turn_rate = 180 },
@@ -1563,9 +1565,9 @@ movement = "naval"
 # (a fleet dodging each shot escapes 44% of shells at 60); its health, 31,516, is what is left of
 # its cost once its damage, reach, speed, and lasers are paid for
 # (reports/plans/2026-11-26-derived-stats.md).
-weapon = { kind = "laser", range = 1586, reload_ticks = 20, damage = 1304, turn_rate = 60, mount = [0, 27] }
+weapon = { kind = "laser", range = 1586, reload_ticks = 20, damage = 1304, turn_rate = 314, mount = [0, 27] }
 extra_weapons = [
-    { kind = "laser", range = 1586, reload_ticks = 20, damage = 1304, turn_rate = 60, mount = [0, -31], aft = true },
+    { kind = "laser", range = 1586, reload_ticks = 20, damage = 1304, turn_rate = 314, mount = [0, -31], aft = true },
     # Its torpedo reaches what a T3 sub hunter would: 0.35 x 120.5 x 21.8 = 921 ([model]
     # closing_share_role, the destroyer's rule a tier up; 1,200 until 2026-11-27).
     { range = 921, reload_ticks = 100, projectile_speed = 30, damage = 200, targets = "naval" },
@@ -1606,7 +1608,7 @@ sonar = 1200
 movement = "submarine"
 weapon = { range = 404, reload_ticks = 40, projectile_speed = 30, damage = 214, targets = "naval" }
 # The inspiration's deck gun, 25 a second out to 640, which fires only on the surface.
-extra_weapons = [{ range = 404, reload_ticks = 10, projectile_speed = 60, damage = 23, turn_rate = 90 }]
+extra_weapons = [{ range = 404, reload_ticks = 10, projectile_speed = 60, damage = 23, turn_rate = 841 }]
 
 # Five torpedoes a run, every 10 seconds: the inspiration's unit database counts its 3 projectiles a fire once,
 # not three times, so 15 a run was three times too many. Cost, build time, health, and damage set
@@ -1740,7 +1742,7 @@ turn_radius = 40
 radius = 13
 vision = 415
 movement = "hover"
-weapon = { range = 438, reload_ticks = 16, projectile_speed = 80, damage = 145, splash_radius = 10, turn_rate = 90, spread = 4 }
+weapon = { range = 438, reload_ticks = 16, projectile_speed = 80, damage = 145, splash_radius = 10, turn_rate = 652, spread = 4 }
 
 # A fleet escort: a small dome that moves with it, over the ships around it. Its anti-torpedo
 # charge was taken off (the design owner, 2026-11-27): the destroyers' and battlecruisers' charges
@@ -2057,7 +2059,7 @@ turn_radius = 10
 radius = 6
 vision = 695
 radar = 880
-weapon = { range = 210, reload_ticks = 10, projectile_speed = 53, damage = "7.1", turn_rate = 180 }
+weapon = { range = 210, reload_ticks = 10, projectile_speed = 53, damage = "7.1", turn_rate = 900 }
 
 # The anchor every other unit is measured against: kills a copy of itself in 14 seconds, and
 # closes its own range in 0.35 of that.
@@ -2077,7 +2079,7 @@ turn_rate = 90
 turn_radius = 30
 radius = 9
 vision = 385
-weapon = { range = 350, reload_ticks = 10, projectile_speed = 64, damage = 30, turn_rate = 90 }
+weapon = { range = 350, reload_ticks = 10, projectile_speed = 64, damage = 30, turn_rate = 826 }
 
 [[unit]]
 id = "t2_grenadier_walker"
@@ -2095,7 +2097,7 @@ vision = 555
 # A skirmisher: one grenade launcher lobbing a grenade every 2 seconds a fifth farther than the
 # Heavy Tank's gun, bursting over about one formation spacing. Derived from the balance targets
 # (reports/balance/2026-11-20-t2-land.md).
-weapon = { range = 529, reload_ticks = 20, projectile_speed = 44, damage = "161.6", splash_radius = "19.25", turn_rate = 120, spread = 10 }
+weapon = { range = 529, reload_ticks = 20, projectile_speed = 44, damage = "161.6", splash_radius = "19.25", turn_rate = 738, spread = 10 }
 
 [[unit]]
 id = "t2_mobile_shield"
@@ -2135,7 +2137,7 @@ upkeep = 15
 build_power = "17.5"
 build_range = 120
 # Builds forward defenses, artillery, and intel, and the T1 factories, and defends itself.
-weapon = { range = 360, reload_ticks = 5, projectile_speed = 120, damage = 15, turn_rate = 180 }
+weapon = { range = 360, reload_ticks = 5, projectile_speed = 120, damage = 15, turn_rate = 835 }
 builds = ["land_factory_t1", "air_factory", "naval_factory", "t1_point_defense", "t2_point_defense", "t1_aa_turret", "t2_flak", "shield_generator", "tactical_missile_defense", "t1_torpedo_launcher", "t2_torpedo_launcher", "t2_artillery", "tactical_missile_launcher", "radar", "radar_t2", "t1_sonar", "t2_sonar", "stealth_field_generator", "wall"]
 
 # The T3 line unit: three Heavy Tanks' cost, half again the anchor's range, and longer fights,
@@ -2157,7 +2159,7 @@ vision = 580
 # A personal shield that takes the first hits. Back 20 seconds after it falls, as every shield
 # (2026-11-27; 12 until then).
 shield = { radius = 25, health = 700, regen = 20, recharge_seconds = 20, upkeep = 25 }
-weapon = { range = 525, reload_ticks = 3, projectile_speed = 95, damage = "70.7", turn_rate = 120 }
+weapon = { range = 525, reload_ticks = 3, projectile_speed = 95, damage = "70.7", turn_rate = 619 }
 
 # Heavy: slow and very tough, one big cannon reaching a tenth past the Heavy Walker's gun, about
 # even with it for its materiel. Derived from the balance targets (reports/balance/2026-11-21-t3-land.md).
@@ -2174,7 +2176,7 @@ speed = "4.3"
 turn_rate = 70
 radius = 15
 vision = 520
-weapon = { range = 578, reload_ticks = 40, projectile_speed = 96, damage = "1429.9", turn_rate = 60, splash_radius = 12 }
+weapon = { range = 578, reload_ticks = 40, projectile_speed = 96, damage = "1429.9", turn_rate = 511, splash_radius = 12 }
 
 [[unit]]
 id = "t2_torpedo_boat"
@@ -2222,16 +2224,16 @@ class = "defense"
 tier = 3
 # Cost by the price list, its reach priced at a structure's closing share, which this one sets:
 # the most it can cost and still hold ([price_list] structure_closing_share, 2026-11-27): 2,072
-# to 2,437.
-mass = 2352
-energy = 20696
-build_time = 2352
+# to 2,437, and 2,357 once every gun turned by the turret rule (2026-11-28).
+mass = 2275
+energy = 20018
+build_time = 2275
 health = 6500
 footprint = 1
 vision = 480
 # A gatling cannon, about 626 damage a second. Its reach is the T3 defense window's: the Mobile
 # Heavy Artillery's divided by 1.2 (2026-11-26, reports/plans/2026-11-26-derived-stats.md).
-weapon = { range = 1313, reload_ticks = 7, projectile_speed = 64, damage = 438, splash_radius = 20, turn_rate = 90, spread = 4 }
+weapon = { range = 1313, reload_ticks = 7, projectile_speed = 64, damage = 438, splash_radius = 20, turn_rate = 516, spread = 4 }
 
 # The T3 dome: a little more regeneration a second than the T2 one, and far more health, so it
 # heals more slowly for its size, in about three minutes. One battleship, unassisted, wears it
@@ -2245,10 +2247,11 @@ class = "defense"
 tier = 3
 # Cost by the strength its dome adds to the three heavy point defenses of the T3 position, as a
 # structure worth half again its cost ([price_list.shield_groups], 2026-11-27): 3,667 to 3,104,
-# and to 3,650 with the heavy point defenses priced by their reach.
-mass = 3285
-energy = 54757
-build_time = 4977
+# to 3,650 with the heavy point defenses priced by their reach, and to 3,531 once every gun
+# turned by the turret rule (2026-11-28).
+mass = 3177
+energy = 52963
+build_time = 4814
 health = 500
 footprint = 3
 vision = 400

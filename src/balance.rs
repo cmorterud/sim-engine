@@ -1334,6 +1334,50 @@ pub fn model_time_to_kill(tier: u8, domain: &str) -> f64 {
     as_number(&model["time_to_kill_base_seconds"]) * as_number(&tiers[usize::from(tier.clamp(1, MAX_TIER)) - 1]) * as_number(&model["time_to_kill_domain"][domain])
 }
 
+/// The turret rule (the design owner, 2026-11-27): every gun that turns to its target turns fast
+/// enough to stay laid on anything it shoots at, wherever that is, so that waiting to be laid
+/// costs a shot only when it swings onto a new target. This is the least rate that does it, in
+/// whole degrees a second, rounded up, and at most the right angle a tick that anything can turn.
+/// Its hardest target is the one whose line of sight from the gun turns fastest: the quickest it
+/// shoots at, passing it as close as it can be hit, while the gun drives the other way at its own
+/// top speed. For a gun at aircraft, that is an aircraft flying straight over it at its height.
+/// For one at the ground, it is a surface unit at the gun's least range, or brushing past its
+/// hull where it has none.
+pub fn turret_follow(db: &BlueprintDb, unit: &Blueprint, weapon: &WeaponDef) -> u32 {
+    use crate::sim::blueprints::{Targets, UnitClass};
+    use crate::sim::components::{MoveClass, MOST_DEGREES_A_SECOND};
+    let own = unit.speed.to_num::<f64>();
+    let mut radians_a_tick = 0.0_f64;
+    if matches!(weapon.targets, Targets::Air | Targets::Both) {
+        for aircraft in db.iter() {
+            if let Some(flight) = &aircraft.flight {
+                radians_a_tick = radians_a_tick.max((aircraft.speed.to_num::<f64>() + own) / flight.elevation.to_num::<f64>());
+            }
+        }
+    }
+    if matches!(weapon.targets, Targets::Ground | Targets::Both) {
+        let surface = db.iter().filter(|other| other.flight.is_none() && other.speed > Fp::ZERO && other.class != UnitClass::Ammo && other.movement != MoveClass::Submarine);
+        for target in surface {
+            let nearest = if weapon.min_range > Fp::ZERO { weapon.min_range } else { unit.radius + target.radius };
+            radians_a_tick = radians_a_tick.max((target.speed.to_num::<f64>() + own) / nearest.to_num::<f64>());
+        }
+    }
+    let degrees = (radians_a_tick.to_degrees() * TICKS_PER_SECOND as f64).ceil() as u32;
+    degrees.min(MOST_DEGREES_A_SECOND)
+}
+
+/// How fast a turret turns (`[turrets]`, 2026-11-28): a gun at the ground at the least rate that
+/// follows anything it shoots at (`turret_follow`), and a gun at aircraft at the design owner's
+/// anchor, `[turrets] anti_air_degrees_a_second`, which tests/stat_sources_test.rs checks is at
+/// least that.
+pub fn turret_swivel(db: &BlueprintDb, unit: &Blueprint, weapon: &WeaponDef) -> u32 {
+    if matches!(weapon.targets, crate::sim::blueprints::Targets::Air) {
+        target_number("turrets", "anti_air_degrees_a_second") as u32
+    } else {
+        turret_follow(db, unit, weapon)
+    }
+}
+
 /// A copy with one unit's mass, energy and build time scaled together to a cost at a tier.
 pub fn scaled_to(db: &BlueprintDb, id: BlueprintId, tier: u8, cost: f64) -> BlueprintDb {
     let scale = cost / cost_at(db.get(id), tier);

@@ -258,6 +258,10 @@ fn tank_with_enemy_behind() -> (SimWorld, SimId, SimId) {
 fn a_turret_must_swivel_round_before_it_can_fire() {
     let (mut world, shooter, _) = tank_with_enemy_behind();
     let entity = world.unit_entity(shooter).unwrap();
+    // The turret rule turns the heavy tank's gun fast enough to follow anything alongside
+    // (balance::turret_follow), round in three ticks, so this one is slowed to 60 degrees a
+    // second to watch it swivel.
+    world.ecs.get::<&mut Turret>(entity).unwrap().max_turn = Turret::new(Vec2Fp::new(Fp::ONE, Fp::ZERO), 60).max_turn;
     let mut first_shot = None;
     for tick in 0..60 {
         world.advance_tick(&[]);

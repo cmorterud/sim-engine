@@ -532,6 +532,23 @@ out close and why: evidence about the process, not a target.
   since every T1 air number scales with it and no fight pins it: sizes a tenth either side clear
   an equal cost of bombers in 8.0 to 9.2 s, jumping with whole units, so the 9 to 12 s band stays
   a check. Nothing moves; 459 unit families are not derived yet.
+* 2026-11-28: turret swivel by rule, the design owner's pick. Every gun at the ground turns at the
+  least rate that stays laid on anything it shoots at (`balance::turret_follow`, `[turrets]`):
+  the quickest surface unit passing it at its least range, or brushing its hull where it has
+  none, while the gun drives the other way, in whole degrees a second and at most a right angle a
+  tick (`components::MOST_DEGREES_A_SECOND`). Direct-fire turrets turn 3 to 9 times as fast (the
+  Medium Tank 90 to 826, the battleship's guns 30 to 238, the Light Walker and Land Scout at the
+  900 cap), and artillery follows from its least range (the Light Artillery 90 to 39, T2
+  Artillery 6 to 9, Mobile Heavy Artillery 30 to 28, T3 Artillery 3). Every gun at aircraft turns
+  at one anchor, `[turrets] anti_air_degrees_a_second` = 180, as it did, above the 102 to 137
+  that following an aircraft straight overhead needs. Anti-air is the part of a turn the fights
+  feel: the follow rule there moved the T3 air base by 22% and the navy base by 9%, and a half
+  turn a reload by 16% and 9%. With the ground guns by rule, the battle line does not move. The
+  point defenses reprice: the closing share 0.535 to 0.5306, the T1 Point Defense 404 to 413, the
+  T2 638 to 617, the Heavy 2,437 to 2,357, and the domes over them (the Shield Generator 1,080 to
+  1,044, the Heavy 3,650 to 3,531). Massed raiders attack-moving into massed artillery now draw
+  (-0.14 to +0.05), the Light Artillery slower to swing between them. Nine land templates'
+  timing is now derived, so 450 unit families are not derived yet.
 
 ## Order of work
 
