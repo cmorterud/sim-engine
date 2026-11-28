@@ -1511,8 +1511,14 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     // The stress test's units have no blueprints, and stay plain cubes.
     let looks = instances::unit_looks(&map.blueprints);
 
+    #[cfg(not(target_arch = "wasm32"))]
     event_loop.set_control_flow(ControlFlow::Poll);
+    #[cfg(target_arch = "wasm32")]
+    event_loop.set_control_flow(ControlFlow::Wait);
     let handle_event = move |event: Event<()>, target: &winit::event_loop::EventLoopWindowTarget<()>| match event {
+            #[cfg(target_arch = "wasm32")]
+            Event::NewEvents(winit::event::StartCause::Init) => window.request_redraw(),
+            #[cfg(not(target_arch = "wasm32"))]
             Event::AboutToWait => window.request_redraw(),
             Event::WindowEvent { event, .. } => {
                 let response = egui_state.on_window_event(&window, &event);
@@ -2518,7 +2524,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                         // Builders' beams and adjacency wiring are in the world, and only up close:
                         // zoomed out to icons, they would be clutter.
                         if camera.altitude() < ICON_ALTITUDE {
-                            links::build_work_beam_instances(&links::from_tools(beams.clone(), &motion), beam_time, eye, &mut scene_instances);
+                            links::build_work_beam_instances(&links::from_tools(beams, &motion), beam_time, eye, &mut scene_instances);
                             links::build_wiring_instances(&snapshot.adjacency, &snapshot.units, beam_time, eye, &mut scene_instances);
                         }
                         let cell = f64::from(TERRAIN_CELL_UNITS);
@@ -2632,6 +2638,8 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                             title_timer = Instant::now();
                             title_frames = 0;
                         }
+                        #[cfg(target_arch = "wasm32")]
+                        window.request_redraw();
                     }
                     _ => {}
                 }
