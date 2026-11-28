@@ -135,8 +135,9 @@ fn transports_cost_their_cargo_and_weak_weapons() {
 }
 
 /// `[missiles] strategic_minutes` (2026-11-27): each game-ending weapon costs its minutes of a
-/// standard T3 economy's income, at T3 prices, and each missile defense its share of the missile
-/// it stops (`defense_over_missile`), within 1%.
+/// standard T3 economy's income, at T3 prices, T2's siege weapons theirs of a T2 economy
+/// (`t2_minutes`, 2026-11-28), and each missile defense its share of the missile it stops
+/// (`defense_over_missile`), within 1%.
 #[test]
 fn strategic_weapons_cost_their_minutes_of_a_t3_economy() {
     let targets: toml::Table = include_str!("../data/balance_targets.toml").parse().expect("valid targets");
@@ -148,6 +149,13 @@ fn strategic_weapons_cost_their_minutes_of_a_t3_economy() {
     for (key, minutes) in missiles["strategic_minutes"].as_table().expect("[missiles] strategic_minutes") {
         let wanted = number(minutes) * per_minute;
         assert!((cost(key) / wanted - 1.0).abs() < 0.01, "{key} costs {:.0}, {minutes} minutes of a T3 economy {wanted:.0}", cost(key));
+    }
+    // T2's siege weapons in minutes of a T2 economy, as many T2 extractors, at T2 prices.
+    let per_minute_t2 = number(&missiles["t3_economy_extractors"]) * db.get(db.id("mass_extractor_t2")).mass_income.to_num::<f64>() * sim_engine::sim::blueprints::TICKS_PER_SECOND as f64 * 60.0;
+    for (key, minutes) in missiles["t2_minutes"].as_table().expect("[missiles] t2_minutes") {
+        let wanted = number(minutes) * per_minute_t2;
+        let cost = sim_engine::balance::cost_at(db.get(db.id(key)), 2);
+        assert!((cost / wanted - 1.0).abs() < 0.01, "{key} costs {cost:.0}, {minutes} minutes of a T2 economy {wanted:.0}");
     }
     for (key, missile) in [("strategic_interceptor", "strategic_missile"), ("tactical_missile_defense", "tactical_missile")] {
         let share = number(&missiles["defense_over_missile"][key]);

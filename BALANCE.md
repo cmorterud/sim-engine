@@ -488,6 +488,12 @@ out close and why: evidence about the process, not a target.
   health stay as first set, written down as hit counts (`[kills]`): a T1 launcher sinks a frigate
   in 7 volleys and a frigate breaks it in 26 shells; a T2 launcher sinks a destroyer in 49
   torpedoes and a destroyer breaks it in 27 shells.
+* 2026-11-28: T2's siege weapons in minutes of a standard T2 economy, as many T2 extractors as the
+  T3 one has T3 extractors, 48 a second (`[missiles] t2_minutes`), today's costs written down: the
+  T2 Artillery Installation 0.673, its reach past what the list's closing share prices; the
+  Tactical Missile 0.0946, which the Tactical Missile Defense is priced from. The Deep Scan Array
+  is the deep scan anchor, the only building with it; the Airfield's cost stays the design
+  owner's, its repair slots a mechanic rule. Nothing moves.
 
 ## Order of work
 

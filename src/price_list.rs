@@ -770,6 +770,9 @@ pub fn cost_rule(db: &BlueprintDb, key: &str) -> Option<String> {
     if let Some(minutes) = missiles["strategic_minutes"].get(key) {
         return Some(format!("{} minutes of a T3 economy ([missiles] strategic_minutes)", number(minutes)));
     }
+    if let Some(minutes) = missiles["t2_minutes"].get(key) {
+        return Some(format!("{} minutes of a T2 economy ([missiles] t2_minutes)", number(minutes)));
+    }
     if let Some(share) = missiles["defense_over_missile"].get(key) {
         return Some(format!("{} of the missile it stops ([missiles] defense_over_missile)", number(share)));
     }
