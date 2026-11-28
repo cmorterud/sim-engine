@@ -11,7 +11,7 @@ const BALANCE: &str = include_str!("../src/balance.rs");
 const PRICE_LIST: &str = include_str!("../src/price_list.rs");
 
 /// Unit families not derived yet. A pass that derives some lowers this; nothing raises it.
-const NOT_DERIVED_YET: usize = 443;
+const NOT_DERIVED_YET: usize = 427;
 
 fn targets() -> toml::Table {
     TARGETS.parse().expect("data/balance_targets.toml is valid")
@@ -239,10 +239,13 @@ fn the_model_rules_the_table_claims_hold() {
     assert_near("The battleship's speed", speed("t3_battleship"), navy * share(&t3_land_roles(), "heavy"), 0.01);
     assert_near("The battlecruiser's speed", speed("t3_battlecruiser"), model("battlecruiser_speed_over_battleship") * speed("t3_battleship"), 0.005);
 
-    // Each laser at least twice a battleship turret's damage a second.
+    // Each laser at least twice a battleship turret's damage a second, and no more than the
+    // least whole hit that is.
     let turret = damage_per_second(&unit(&db, "t3_battleship").weapon.expect("turrets"));
     for laser in weapons(unit(&db, "t3_battlecruiser")).filter(|weapon| weapon.kind == WeaponKind::Laser) {
         assert!(damage_per_second(laser) >= model("battlecruiser_laser_over_turret_min") * turret, "a laser does {:.0} a second, a turret {turret:.0}", damage_per_second(laser));
+        let least = (model("battlecruiser_laser_over_turret_min") * turret * f64::from(laser.reload_ticks) / 10.0).ceil();
+        assert_eq!(laser.damage.to_num::<f64>(), least, "a laser hits for the least whole damage that is twice a turret's");
     }
 
     // The Torpedo Boat's decoys three times as often as the destroyer's.

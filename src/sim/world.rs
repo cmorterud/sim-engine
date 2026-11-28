@@ -4457,8 +4457,11 @@ impl SimWorld {
                             if let Ok(record) = self.ecs.get::<&super::components::VetDamage>(target) {
                                 if record.total > Fp::ZERO {
                                     let total = i64::from(record.total.to_bits());
+                                    // Widened, as a big ship's mass times the damage dealt it
+                                    // overflows the 64 bits it is kept in.
                                     for &(attacker, dealt) in &record.by {
-                                        kills.push((attacker, team, worth * i64::from(dealt.to_bits()) / total));
+                                        let share = i128::from(worth.to_bits()) * i128::from(dealt.to_bits()) / i128::from(total);
+                                        kills.push((attacker, team, Res::from_bits(share as i64)));
                                     }
                                 }
                             }

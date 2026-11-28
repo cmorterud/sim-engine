@@ -496,7 +496,8 @@ fn broadside_guns(unit: &Blueprint) -> usize {
 }
 
 /// Each [broadsides] rule holds in the sim: a battleship offshore destroys each target in its
-/// number of broadsides, every shell landing, and a commander within [kill_times]
+/// number of broadsides, every shell landing (an extractor in one, a commander in two, a
+/// battlecruiser out at sea in three), and a commander within [kill_times]
 /// battleship_commander_on_land. Its guns fire as one volley, a ripple apart.
 #[test]
 fn a_battleships_broadsides_destroy_an_extractor_in_one_and_a_commander_in_two() {
@@ -511,7 +512,8 @@ fn a_battleships_broadsides_destroy_an_extractor_in_one_and_a_commander_in_two()
         let broadsides = usize::try_from(broadsides.as_integer().expect("a count")).unwrap();
         let mut world = world();
         let battleship = place(&mut world, "t3_battleship", Team::Blue, (SHORE_X - 600, 5_000));
-        let at = (SHORE_X + 800, 5_000);
+        // A ship on the water, out at sea from it; anything else ashore.
+        let at = if db.get(db.id(&key)).move_class() == sim_engine::sim::components::MoveClass::Naval { (SHORE_X - 2_000, 5_000) } else { (SHORE_X + 800, 5_000) };
         if db.get(db.id(&key)).requires_deposit {
             world.deposits.push((at.0 as u32 / 20, at.1 as u32 / 20));
         }

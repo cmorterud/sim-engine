@@ -2,7 +2,7 @@
 //! heavy artillery destroy in how many hits, how wide each splash weapon's blast is, and how far
 //! the installations scatter, all checked against the unit data the game plays with.
 
-use sim_engine::sim::blueprints::{Blueprint, BlueprintDb};
+use sim_engine::sim::blueprints::{Blueprint, BlueprintDb, Targets, WeaponDef, WeaponKind};
 use sim_engine::sim::components::MoveClass;
 
 const TARGETS: &str = include_str!("../data/balance_targets.toml");
@@ -43,6 +43,45 @@ fn every_kills_rule_holds_exactly() {
         }
     }
     assert!(checked >= 9, "only {checked} rules");
+}
+
+/// A unit's weapon for a job, by `[secondary_kills]`: the one at the surface, at aircraft, or under
+/// water that is not its first weapon and not a missile.
+fn secondary(unit: &Blueprint, job: &str) -> WeaponDef {
+    let fits = |weapon: &&WeaponDef| {
+        let at = match weapon.targets {
+            Targets::Ground | Targets::Both => "surface",
+            Targets::Air => "air",
+            Targets::Naval => "naval",
+        };
+        at == job && !matches!(weapon.kind, WeaponKind::TacticalMissile | WeaponKind::StrategicMissile)
+    };
+    let found: Vec<&WeaponDef> = unit.extra_weapons.iter().filter(fits).collect();
+    assert_eq!(found.len(), 1, "{} has one {job} weapon past its first", unit.key);
+    *found[0]
+}
+
+/// Each weapon in [secondary_kills] destroys each unit listed in exactly that many direct hits.
+#[test]
+fn every_secondary_kills_rule_holds_exactly() {
+    let db = BlueprintDb::standard();
+    let table = targets();
+    let kills = table["secondary_kills"].as_table().expect("[secondary_kills]");
+    let mut checked = 0;
+    for (shooter, jobs) in kills {
+        let shooter = db.get(db.id(shooter));
+        for (job, rule) in jobs.as_table().expect("weapons by job") {
+            let weapon = secondary(shooter, job);
+            for (target, hits) in rule.as_table().expect("targets and hits") {
+                let unit = db.get(db.id(target));
+                let wanted = hits.as_integer().expect("a count of hits");
+                let took = (toughness(unit) / weapon.damage.to_num::<f64>()).ceil() as i64;
+                assert_eq!(took, wanted, "{}'s {job} weapon ({} a hit) destroys {target} ({}) in {took} hits, not {wanted}", shooter.key, weapon.damage, toughness(unit));
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked >= 6, "only {checked} rules");
 }
 
 /// The T3 Artillery Installation destroys every T3 land unit with a direct hit, the Field Rig
