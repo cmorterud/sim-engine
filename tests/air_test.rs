@@ -392,6 +392,46 @@ fn patrolling_aircraft_stay_up_refuel_when_low_and_go_back_to_their_patrol() {
 }
 
 #[test]
+fn a_patrolling_fighter_bomber_goes_after_an_interceptor_its_gun_can_reach() {
+    // Its bomb is its main weapon and cannot hit aircraft; its nose gun can. An interceptor
+    // within the gun's reach, off to its side, is chased down as if it had been told to attack it,
+    // and then it goes back to its patrol (the design owner, 2026-11-28).
+    let mut world = world();
+    let bomber = spawn(&mut world, "t2_fighter_bomber", Team::Blue, point(1_000, 1_500));
+    world.advance_tick(&[SimCommand::Patrol { units: vec![bomber], points: vec![point(1_000, 1_500), point(4_000, 1_500)], queued: false }]);
+    run(&mut world, 30);
+    let here = world.unit_position(bomber).unwrap().xy();
+    let side = Vec2Fp::new(here.x + fp_int(300), here.y + fp_int(300));
+    let interceptor = spawn(&mut world, "t1_interceptor", Team::Red, side);
+    {
+        let entity = world.unit_entity(interceptor).unwrap();
+        world.ecs.get::<&mut sim_engine::sim::components::Combat>(entity).unwrap().range = Fp::ZERO;
+        let mut health = world.ecs.get::<&mut sim_engine::sim::components::Health>(entity).unwrap();
+        health.max = fp_int(3_000);
+        health.current = health.max;
+    }
+    world.advance_tick(&[SimCommand::Move { units: vec![interceptor], goal: Vec2Fp::new(side.x, fp_int(4_800)) }]);
+    let mut north = fp_int(0);
+    for _ in 0..600 {
+        world.advance_tick(&[]);
+        north = north.max(world.unit_position(bomber).unwrap().y);
+        if world.unit_health(interceptor).is_none() {
+            break;
+        }
+    }
+    assert!(world.unit_health(interceptor).is_none(), "it shot the interceptor down");
+    assert!(north > fp_int(2_500), "after chasing it north, as far as {north:?}");
+    let mut back = false;
+    for _ in 0..600 {
+        world.advance_tick(&[]);
+        back |= world.unit_position(bomber).unwrap().y < fp_int(1_700);
+    }
+    let entity = world.unit_entity(bomber).unwrap();
+    assert!(world.ecs.get::<&sim_engine::sim::components::Patrol>(entity).is_ok(), "still on patrol");
+    assert!(back, "and back on its patrol line");
+}
+
+#[test]
 fn gunships_hover_over_what_they_attack() {
     let mut world = world();
     let generator = world.spawn_finished_structure(world.blueprints.id("power_generator"), Team::Red, 150, 125).unwrap();

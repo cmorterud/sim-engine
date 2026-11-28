@@ -2048,7 +2048,9 @@ impl SimWorld {
                 continue;
             }
             let phase = self.ecs.get::<&UnitStats>(entity).map_or(0, |stats| stats.phase);
-            if is_builder && phase.wrapping_add(self.current_tick).is_multiple_of(PATROL_SEARCH_INTERVAL) {
+            // One after an intruder finishes with it before it looks for work.
+            let attacking = self.ecs.get::<&Combat>(entity).is_ok_and(|combat| combat.forced_target.is_some() || combat.target.is_some());
+            if is_builder && !attacking && phase.wrapping_add(self.current_tick).is_multiple_of(PATROL_SEARCH_INTERVAL) {
                 if let Some(task) = self.find_patrol_work(entity) {
                     self.set_order(id, Order::IDLE);
                     self.ecs.get::<&mut Builder>(entity).expect("just checked").tasks.push(task);
@@ -2063,7 +2065,11 @@ impl SimWorld {
             let goal = patrol.points[patrol.next as usize];
             patrol.next = (patrol.next + 1) % patrol.points.len() as u32;
             drop(patrol);
-            let kind = if is_builder { OrderKind::Move } else { OrderKind::AttackMove };
+            // Each leg is an attack-move: an enemy that comes within range is fought, and chased
+            // until it is destroyed or out of sight, and then the unit goes on to the point it was
+            // heading for (the design owner, 2026-11-28). An unarmed builder only walks.
+            let armed = self.ecs.get::<&Combat>(entity).is_ok_and(|combat| combat.range > Fp::ZERO);
+            let kind = if is_builder && !armed { OrderKind::Move } else { OrderKind::AttackMove };
             self.assign_route(&[id], kind, goal, None);
         }
     }
