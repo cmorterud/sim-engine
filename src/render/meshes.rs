@@ -3228,7 +3228,7 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
 
             // Team color on the armored crown, with a small lit vent visible from overhead.
             mesh.paint(Material::Trim);
-            mesh.bevel([-0.255, -0.255, 0.26], [0.255, 0.255, 0.39], 0.07);
+            mesh.bevel([-0.29, -0.29, 0.24], [0.29, 0.29, 0.39], 0.07);
             mesh.paint(Material::Metal);
             mesh.frustum([0.0, 0.0], [0.39, 0.47], [0.17, 0.13], 8);
             mesh.paint(Material::Glow);
