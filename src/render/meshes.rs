@@ -3198,19 +3198,41 @@ fn build_shape(shape: Shape, mesh: &mut MeshBuilder) {
             mesh.frustum([0.0, 0.0], [-0.3, -0.05], [0.1, 0.07], 8);
         }
         Shape::GeneratorT3 => {
-            mesh.paint(Material::Hull);
-            mesh.frustum([0.0, 0.0], [-0.5, -0.2], [0.5, 0.46], 14);
-            mesh.paint(Material::Glow);
-            mesh.frustum([0.0, 0.0], [-0.2, -0.1], [0.4, 0.4], 14);
-            // A dome in three steps.
-            mesh.paint(Material::Trim);
-            mesh.frustum([0.0, 0.0], [-0.1, 0.15], [0.38, 0.32], 14);
-            mesh.frustum([0.0, 0.0], [0.15, 0.35], [0.32, 0.2], 14);
-            mesh.frustum([0.0, 0.0], [0.35, 0.5], [0.2, 0.0], 14);
+            // The dark, wide footing carries a tall reactor with four braced cooling towers.
             mesh.paint(Material::Metal);
-            for (x, y) in [(0.36_f32, 0.36_f32), (-0.36, 0.36), (-0.36, -0.36), (0.36, -0.36)] {
-                mesh.frustum([x, y], [-0.5, -0.05], [0.07, 0.06], 6);
+            mesh.bevel([-0.49, -0.49, -0.5], [0.49, 0.49, -0.38], 0.09);
+            mesh.bevel([-0.29, -0.29, -0.38], [0.29, 0.29, -0.23], 0.05);
+            for x in [-0.33_f32, 0.33] {
+                for y in [-0.33_f32, 0.33] {
+                    mesh.paint(Material::Hull);
+                    mesh.frustum([x, y], [-0.38, -0.07], [0.13, 0.085], 6);
+                    mesh.paint(Material::Metal);
+                    mesh.frustum([x, y], [-0.07, 0.12], [0.085, 0.068], 6);
+                    mesh.paint(Material::Glow);
+                    mesh.frustum([x, y], [0.12, 0.15], [0.052, 0.045], 6);
+                }
             }
+
+            // Paired vertical light slots on each face identify the core from any approach.
+            mesh.paint(Material::Metal);
+            mesh.bevel([-0.215, -0.215, -0.29], [0.215, 0.215, 0.30], 0.04);
+            mesh.paint(Material::Glow);
+            for side in [-0.215_f32, 0.215] {
+                for center in [-0.085_f32, 0.085] {
+                    let low = center - 0.035;
+                    let high = center + 0.035;
+                    mesh.block([low, side - 0.012, -0.20], [high, side + 0.012, 0.25]);
+                    mesh.block([side - 0.012, low, -0.20], [side + 0.012, high, 0.25]);
+                }
+            }
+
+            // Team color on the armored crown, with a small lit vent visible from overhead.
+            mesh.paint(Material::Trim);
+            mesh.bevel([-0.255, -0.255, 0.26], [0.255, 0.255, 0.39], 0.07);
+            mesh.paint(Material::Metal);
+            mesh.frustum([0.0, 0.0], [0.39, 0.47], [0.17, 0.13], 8);
+            mesh.paint(Material::Glow);
+            mesh.frustum([0.0, 0.0], [0.47, 0.5], [0.085, 0.075], 8);
         }
         Shape::ExtractorT2 => {
             mesh.frustum([0.0, 0.0], [-0.5, -0.1], [0.5, 0.36], 6);
