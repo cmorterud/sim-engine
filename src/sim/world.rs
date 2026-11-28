@@ -2981,7 +2981,7 @@ impl SimWorld {
                 let spot_in_reach = bomb_bay.is_some() || !hits_ground || (distance <= range * range && far_enough(distance));
                 if spot_in_reach {
                     (combat.target, may_pick) = (None, false);
-                } else if !combat.target.and_then(locate).is_some_and(&can_engage) {
+                } else if !combat.target.and_then(locate).is_some_and(can_engage) {
                     combat.target = None;
                 }
             } else if let Some(forced) = combat.forced_target {
@@ -2996,7 +2996,7 @@ impl SimWorld {
                     Some(_) => {
                         (combat.line_blocked, combat.closing) = (false, None);
                         let other = combat.target.filter(|&target| target != forced);
-                        combat.target = other.filter(|&target| locate(target).is_some_and(&can_engage) && blocked != Some(target));
+                        combat.target = other.filter(|&target| locate(target).is_some_and(can_engage) && blocked != Some(target));
                     }
                     None => {
                         (combat.forced_target, combat.chasing) = (None, false);
@@ -3021,7 +3021,7 @@ impl SimWorld {
                 let sticky = runs || (order.kind == OrderKind::AttackMove && free_builder);
                 if let Some(target) = combat.target {
                     // Not one too close for artillery, which could neither fire nor chase it.
-                    let in_reach = locate(target).is_some_and(&can_engage);
+                    let in_reach = locate(target).is_some_and(can_engage);
                     let keep = in_reach
                         || locate(target).is_some_and(|entry| {
                             sticky && can_hit(entry) && !hidden(entry.id) && far_enough(squared_distance(entry.x, entry.y)) && (!patrolling || sensed(entry))
