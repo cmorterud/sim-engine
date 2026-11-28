@@ -215,7 +215,7 @@ id = "navy_destroyer_against_torpedo_launchers"
 title = "Defending a coast: a Destroyer closing on T2 torpedo launchers"
 ground = "shore"
 target = "domains.cells.destroyers_break_torpedo_launchers"
-blue_over_red = 0.62
+blue_over_red = 0.63
 shows = "Torpedo launchers are the coast's answer to ships. A Destroyer, which must close to fight, sails in on three of them: its anti-torpedo charge stops one torpedo at a time, and each launcher fires four at once, so it is sunk before it breaks them. One destroyer is about three-fifths of their cost, as the harness buys whole ships."
 try = "Attack-move in. Then try to pick off one launcher from the edge of the others' reach."
 blue = [{ unit = "t2_destroyer", count = 1, at = [600, 2_560] }]
@@ -230,10 +230,10 @@ id = "navy_frigates_against_torpedo_launchers"
 title = "Defending a coast at T1: Frigates closing on T1 torpedo launchers"
 ground = "shore"
 target = "domains.cells.frigates_break_t1_torpedo_launchers"
-blue_over_red = 0.90
-shows = "Frigates against about an equal cost of T1 torpedo launchers. Frigates cannot hurt anything under the water from range, and the launchers sink them as they close."
-try = "Attack-move in, then try to rush one launcher with every frigate at once."
-blue = [{ unit = "t1_frigate", count = 3, at = [600, 2_560], columns = 3 }]
+blue_over_red = 0.87
+shows = "Two Frigates against about an equal cost of T1 torpedo launchers, as the harness buys whole ships. Frigates cannot hurt anything under the water from range, and the launchers sink them as they close."
+try = "Attack-move in, then try to rush one launcher with both frigates at once."
+blue = [{ unit = "t1_frigate", count = 2, at = [600, 2_560], columns = 2 }]
 red = [
     { unit = "t1_torpedo_launcher", cell = [107, 124] },
     { unit = "t1_torpedo_launcher", cell = [107, 131] },

@@ -160,6 +160,10 @@ fn per_unit(table: &toml::Table, name: &str, key: &str) -> Option<f64> {
 }
 
 pub fn domain_of(unit: &Blueprint) -> Domain {
+    // A structure on the water fights ships (2026-11-28): the torpedo launchers, and the sonars.
+    if unit.is_structure() && unit.on_water {
+        return Domain::Navy;
+    }
     match unit.move_class() {
         MoveClass::Air => Domain::Air,
         MoveClass::Naval | MoveClass::Submarine => Domain::Navy,
@@ -353,9 +357,9 @@ pub fn price_at_structure_closing(db: &BlueprintDb, key: &str, closing: f64) -> 
 }
 
 /// A structure the list prices (2026-11-27): one whose fighting weapons are all shells at what is
-/// on the ground or the water, out-reaching its tier's line by less than the line closes in a time
-/// to kill: the point defenses. Anti-air, torpedo launchers, artillery and missile launchers are
-/// set by their own rules.
+/// on the ground or the water, or torpedoes (2026-11-28), out-reaching its tier's line by less
+/// than the line closes in a time to kill: the point defenses and the torpedo launchers.
+/// Anti-air, artillery and missile launchers are set by their own rules.
 fn priced_structure(db: &BlueprintDb, table: &toml::Table, unit: &Blueprint, weapons: &[WeaponDef]) -> bool {
     let Some(line) = line_of(db, table, domain_of(unit), unit.tier.clamp(1, MAX_TIER)) else { return false };
     let line_reach = line.weapon.expect("a line unit has a weapon").range.to_num::<f64>();
@@ -363,7 +367,12 @@ fn priced_structure(db: &BlueprintDb, table: &toml::Table, unit: &Blueprint, wea
     !weapons.is_empty()
         && weapons.iter().all(|weapon| {
             let reach = weapon.range.to_num::<f64>();
-            job_of(weapon) == Job::Surface && !matches!(weapon.kind, WeaponKind::TacticalMissile | WeaponKind::StrategicMissile) && reach >= line_reach && closing * (reach / line_reach - 1.0) < 1.0
+            let fires = match job_of(weapon) {
+                Job::Surface => !matches!(weapon.kind, WeaponKind::TacticalMissile | WeaponKind::StrategicMissile),
+                Job::Torpedo => true,
+                Job::Air => false,
+            };
+            fires && reach >= line_reach && closing * (reach / line_reach - 1.0) < 1.0
         })
 }
 
@@ -449,9 +458,12 @@ fn price_with(db: &BlueprintDb, table: &toml::Table, key: &str) -> Option<Pricin
             if let Some(n) = per_unit(table, "splash", key) {
                 prices.push(("splash", n.sqrt() - 1.0));
             }
-            // Reach, against the line's: shells pay for reach past it, missiles reach it free. A
-            // structure pays at its own closing share (`structure_closing_share`, 2026-11-27): the
-            // line must close on it alone, under its fire.
+        }
+        // Reach, against the line's: shells pay for reach past it, missiles reach it free. A
+        // structure pays at its own closing share (`structure_closing_share`, 2026-11-27): the
+        // line must close on it alone, under its fire; a torpedo launcher's torpedoes, past the
+        // guns of the ships that close on it (2026-11-28).
+        if job == Job::Surface || (job == Job::Torpedo && unit.is_structure()) {
             if let (Some(line), true) = (line, speed > 0.0 || unit.is_structure()) {
                 let line_reach = line.weapon.expect("a line unit has a weapon").range.to_num::<f64>();
                 let reach = first.range.to_num::<f64>();

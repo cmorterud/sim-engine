@@ -166,6 +166,7 @@ seconds_max = 60
 # is most of what it has over the line: by that measure alone the T2 one is a third the Heavy
 # Tank's, yet holds against twice its cost of them. Raised by damage at T3, where health would
 # slow the sieges `[siege]` and `[domains]` time, and by both at T1, which no siege measures.
+# The torpedo launchers too (2026-11-28), against their tier's line ship closing on them.
 point_defense_holds_against_line_units = 1.5
 # Immobile: static anti-air's strength per cost against aircraft, √(anti-air damage a second ×
 # health) / cost, over the mobile anti-air of its tier's (T1 and T2; T3 has no mobile anti-air).
@@ -251,6 +252,14 @@ t3_mobile_artillery = { t3_mobile_artillery = 2, t1_medium_tank = 1 }
 # A Medium Tank breaks a Wall Section in 17 shots, about 17 seconds (2026-11-28, the plan's pick,
 # today's written down): a wall slows an attack; it does not stop one.
 t1_medium_tank = { wall = 17 }
+# The torpedo launchers and the line ships they answer, their damage and health as first set
+# (2026-11-24), written down (2026-11-28, the plan's pick: today's hit counts): a T1 launcher's
+# volley sinks a frigate in 7, a T2 launcher's torpedo a destroyer in 49; a frigate's gun breaks a
+# T1 launcher in 26 shells, a destroyer's a T2 launcher in 27.
+t1_torpedo_launcher = { t1_frigate = 7 }
+t2_torpedo_launcher = { t2_destroyer = 49 }
+t1_frigate = { t1_torpedo_launcher = 26 }
+t2_destroyer = { t2_torpedo_launcher = 27 }
 t3_artillery_kills_every_t3_land_unit = true
 t3_artillery_spread = [150, 200]
 t2_artillery_spread = [40, 60]
@@ -498,8 +507,6 @@ strength_band = [0.80, 1.25]
 # at the navy base from the battle line (2026-11-27).
 t1_frigate = 0.44
 t1_attack_sub = 0.25
-t1_torpedo_launcher = 0.45
-t2_torpedo_launcher = 0.64
 t2_destroyer = 0.36
 t2_cruiser = 0.24
 t2_torpedo_boat = 0.32
@@ -934,8 +941,6 @@ radar_t2 = "not derived yet: the sensor rule over the T1 Radar, with its upkeep 
 t2_sonar = "not derived yet: the sensor rule over the T1 Sonar, with its upkeep counted"
 deep_scan_array = "not derived yet: the sensor rule over the T1 Radar, with its upkeep counted; the deep scan anchor"
 airfield = "not derived yet: what its repair slots save"
-t1_torpedo_launcher = "not derived yet: the list at the navy base, under the hold rule ([premiums])"
-t2_torpedo_launcher = "not derived yet: the list at the navy base, under the hold rule ([premiums])"
 t1_aa_turret = "not derived yet: static over mobile anti-air ([premiums] static_anti_air_over_mobile)"
 t2_flak = "not derived yet: static over mobile anti-air ([premiums] static_anti_air_over_mobile), after the Mobile Flak's cost"
 t3_sam = "not derived yet: static over the Mobile Flak ([premiums] static_anti_air_over_mobile), after the Mobile Flak's cost"

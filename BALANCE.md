@@ -480,6 +480,14 @@ out close and why: evidence about the process, not a target.
   derived yet, each named with the rule to come: the torpedo launchers, the static anti-air and the
   Mobile Flak, the T2 Artillery Installation, the Tactical Missile, the T2 Radar, the T2 Sonar,
   the Deep Scan Array and the Airfield.
+* 2026-11-28: the torpedo launchers priced by the list (the design owner's pick): at the navy base,
+  since they fight ships, their torpedoes' reach priced past the guns of the ships that close on
+  them at the structure closing share, over the immobile premium, as a point defense is. The T1
+  Torpedo Launcher 431 to 315, the T2 one 821 to 879, at the navy base of 0.670. Three of either
+  hold against half again their cost in frigates or destroyers (`[premiums]`). Their damage and
+  health stay as first set, written down as hit counts (`[kills]`): a T1 launcher sinks a frigate
+  in 7 volleys and a frigate breaks it in 26 shells; a T2 launcher sinks a destroyer in 49
+  torpedoes and a destroyer breaks it in 27 shells.
 
 ## Order of work
 
