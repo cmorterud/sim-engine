@@ -11,7 +11,7 @@ const BALANCE: &str = include_str!("../src/balance.rs");
 const PRICE_LIST: &str = include_str!("../src/price_list.rs");
 
 /// Unit families not derived yet. A pass that derives some lowers this; nothing raises it.
-const NOT_DERIVED_YET: usize = 361;
+const NOT_DERIVED_YET: usize = 350;
 
 fn targets() -> toml::Table {
     TARGETS.parse().expect("data/balance_targets.toml is valid")
@@ -238,6 +238,30 @@ fn the_model_rules_the_table_claims_hold() {
     assert_near("The destroyer's speed", speed("t2_destroyer"), navy * share(&t2_land_roles(), "line"), 0.01);
     assert_near("The battleship's speed", speed("t3_battleship"), navy * share(&t3_land_roles(), "heavy"), 0.01);
     assert_near("The battlecruiser's speed", speed("t3_battlecruiser"), model("battlecruiser_speed_over_battleship") * speed("t3_battleship"), 0.005);
+
+    // Every other ship and land unit with a role (Pass 5, 2026-11-28) moves at the share of the
+    // role it plays, on its domain's base, rounded to a tenth a tick. T3 has no artillery role,
+    // so its artillery takes T2's.
+    let land = number(&targets()["anchor"]["speed"]) * 10.0;
+    let (t1, t2) = (t1_land_roles(), t2_land_roles());
+    let by_role = [
+        ("t1_frigate", navy, share(&t1, "line")),
+        ("t1_attack_sub", navy, share(&t1, "line")),
+        ("t2_torpedo_boat", navy, share(&t2, "assault")),
+        ("t2_escort_corvette", navy, share(&t2, "line")),
+        ("t2_cruiser", navy, share(&t2, "artillery")),
+        ("t3_missile_sub", navy, share(&t2, "artillery")),
+        ("t1_mobile_aa", land, share(&t1, "line")),
+        ("t2_mobile_flak", land, share(&t2, "line")),
+        ("t2_mobile_shield", land, share(&t2, "line")),
+        ("t2_combat_engineer", land, share(&t2, "line")),
+        ("t3_mobile_artillery", land, share(&t2, "artillery")),
+    ];
+    for (key, base, multiple) in by_role {
+        let wanted = (base * multiple).round();
+        assert!((speed(key) - wanted).abs() < 0.01, "{key} moves at {}, its role's share of its domain's base is {wanted}", speed(key));
+        assert!(derived(key, Family::Speed), "{key}'s speed cites its rule");
+    }
 
     // Each laser at least twice a battleship turret's damage a second, and no more than the
     // least whole hit that is.

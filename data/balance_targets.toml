@@ -907,7 +907,8 @@ tier_efficiency = [1.0, 1.0, 1.0, 1.0]
 # that fire only once laid, then 0.315 once every sensor, the Bomber's radar too, was priced over
 # its domain base (2026-11-27), then 0.318 once aircraft flew on past the map's edge after a pass
 # rather than stop on it (2026-11-27), then 0.323 once aircraft stopped keeping apart in flight
-# (2026-11-27). The Interceptor is priced at it. At T2 the escort rule sets the
+# (2026-11-27), then 0.345 once Mobile Anti-Air moved at the T1 line's speed and so kept up with
+# the tanks it escorts (2026-11-28). The Interceptor is priced at it. At T2 the escort rule sets the
 # Mobile Flak's gun against the strike aircraft as they are. At T3 (2026-11-27), from the battle
 # line ([battle_line] t3_air): the base at which the Heavy Gunships are as good a buy against the
 # standard T3 army as the T2 strike aircraft against the T2 army, both standing in ranks; T2's
@@ -915,8 +916,9 @@ tier_efficiency = [1.0, 1.0, 1.0, 1.0]
 # With gunships hovering in a drifting blob (2026-11-27), re-derived: navy 0.709 to 0.744, air_t3
 # 1.005 to 0.972. With every shell flying by its family's rule ([shells], 2026-11-28), air_t3 0.988
 # to 0.946: the gunships' guns slower, the point defenses dearer. With the navy's sizes set by hit
-# counts ([kills], 2026-11-28), navy 0.670 to 0.664.
-domain_base = { land = 1.0, navy = 0.664, air_t1 = 0.323, air_t2 = 0.904, air_t3 = 0.946 }
+# counts ([kills], 2026-11-28), navy 0.670 to 0.664. With ships and land units at the speeds of
+# their roles (2026-11-28), air_t3 0.946 to 0.922.
+domain_base = { land = 1.0, navy = 0.664, air_t1 = 0.345, air_t2 = 0.904, air_t3 = 0.922 }
 # Reach past the line's: x = c (r / r_line - 1), price x h / (1 - x h), h about 1 for shells and
 # 0 for missiles. Short of it: -c (1 - r / r_line) (v_line / v). Speed: speed_share (1 - v_line / v).
 speed_share = 0.3
@@ -1066,7 +1068,7 @@ t2_assault_hovercraft = "the land solver's targets ([roles])"
 t3_heavy_walker = "the land solver's targets ([roles])"
 t3_siege_walker = "the land solver's targets ([roles])"
 t1_mobile_aa = "its health per mass is the anchor's ([air] anti_air_health_over_bomb)"
-t2_mobile_flak = "ground anti-air: the list's price times what the Mobile Anti-Air pays over it, which its health per mass sets (1.48)"
+t2_mobile_flak = "ground anti-air: the list's price times what the Mobile Anti-Air pays over it, which its health per mass sets (1.44)"
 t3_mobile_artillery = "the T3 line's micro cell: the middle of the costs where it holds"
 t2_torpedo_bomber = "the duel it wins ([counters]): the least that needs twice the T2 fleet's cost, and the massed T3 fleet's, to break it"
 t2_torpedo_boat = "the duel it wins ([counters]): the most that keeps 0.70 against an equal cost of submarines"

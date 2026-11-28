@@ -4,7 +4,7 @@
 use sim_engine::math::fp::{fp_int, Fp, Vec2Fp};
 use sim_engine::sim::blueprints::Res;
 use sim_engine::sim::commands::SimCommand;
-use sim_engine::sim::components::{Blueprinted, LeavingFactory, OrderKind, SimId, Team};
+use sim_engine::sim::components::{Blueprinted, LeavingFactory, MoveClass, OrderKind, SimId, Team};
 use sim_engine::sim::config::{SimConfig, TerrainStyle};
 use sim_engine::sim::terrain::{Terrain, HEIGHT_FRAC_BITS};
 use sim_engine::sim::world::SimWorld;
@@ -62,10 +62,13 @@ fn distance(world: &SimWorld, id: SimId, to: Vec2Fp) -> i64 {
     (dx * dx + dy * dy).isqrt()
 }
 
+/// Whether a ship is on navigable water, by the sim's own rule for the cell a unit is in
+/// (`Terrain::unit_cell_of`): a ship that comes to rest a few raw bits over a cell's edge, as a
+/// frigate stopped at a shore did at 12.1 a tick (2026-11-28), is in the cell on the map
+/// center's side of it.
 fn on_water(world: &SimWorld, id: SimId) -> bool {
     let at = world.unit_position(id).unwrap().xy();
-    let (x, y) = world.terrain.cell_of(at);
-    world.terrain.cell_is_navigable(x as u32, y as u32)
+    world.terrain.passable_for(MoveClass::Naval, at)
 }
 
 #[test]
@@ -642,7 +645,6 @@ fn a_missile_sub_builds_nuclear_missiles_only_on_order_and_fires_cruise_missiles
 /// and rests facing the bow, or the stern for a turret aft: for every ship with mounted guns.
 #[test]
 fn every_mounted_gun_fires_from_its_own_turret() {
-    use sim_engine::sim::components::MoveClass;
     let db = sim_engine::sim::blueprints::BlueprintDb::standard();
     let ships: Vec<_> = db.iter().filter(|unit| unit.movement == MoveClass::Naval && unit.weapon.iter().chain(&unit.extra_weapons).any(|weapon| weapon.mount != [Fp::ZERO; 2])).collect();
     assert!(!ships.is_empty(), "the battleship's turrets are mounted");
@@ -826,7 +828,6 @@ fn the_battleships_turrets_fire_as_one_broadside_and_outrange_the_battlecruisers
 #[test]
 fn ships_domes_stay_beneath_the_aircraft_that_attack_them() {
     use sim_engine::sim::blueprints::{BlueprintDb, Targets};
-    use sim_engine::sim::components::MoveClass;
     let db = BlueprintDb::standard();
     let attacks_below = |unit: &sim_engine::sim::blueprints::Blueprint| unit.weapon.iter().chain(&unit.extra_weapons).any(|weapon| weapon.targets != Targets::Air);
     let mut checked = 0;
