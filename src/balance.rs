@@ -1988,24 +1988,36 @@ pub fn torpedo_boats_against_submarines(db: &Arc<BlueprintDb>) -> f64 {
     sizes.iter().map(|&n| score_against(db, Field::new(Ground::Water, 2), "t2_torpedo_boats", n, "t1_submarines")).sum::<f64>() / sizes.len() as f64
 }
 
-/// The torpedo bombers it takes to break the T2 fleet (two squadrons of it), as a multiple of its
-/// cost: the fleet's break-even efficiency against them.
-pub fn torpedo_bombers_to_break_t2_fleet(db: &Arc<BlueprintDb>) -> f64 {
-    let fleet = domain_force(db, "t2_fleet");
-    let one = force_materiel(db, &squadrons(db, &fleet, 0.0, 2, Tactics::AttackMove), 2);
-    let fleet = squadrons(db, &fleet, one * 2.0, 2, Tactics::AttackMove);
-    let bombers = squadrons(db, &domain_force(db, "t2_torpedo_bombers"), force_materiel(db, &fleet, 2), 2, Tactics::AttackMove);
-    break_even_forces(db, Field::new(Ground::Water, 2), &fleet, &bombers).efficiency
+/// The torpedo bombers it takes to break `squadrons_of_it` squadrons of a fleet, as a multiple of
+/// its cost: the fleet's break-even against an equal cost of them, its efficiency over theirs.
+pub fn torpedo_bombers_to_break(db: &Arc<BlueprintDb>, fleet: &str, tier: u8, squadrons_of_it: f64) -> BreakEven {
+    let squadron = domain_force(db, fleet);
+    let one = force_materiel(db, &squadrons(db, &squadron, 0.0, tier, Tactics::AttackMove), tier);
+    let fleet = squadrons(db, &squadron, one * squadrons_of_it, tier, Tactics::AttackMove);
+    let bombers = squadrons(db, &domain_force(db, "t2_torpedo_bombers"), force_materiel(db, &fleet, tier), tier, Tactics::AttackMove);
+    break_even_forces(db, Field::new(Ground::Water, tier), &fleet, &bombers)
 }
 
-/// The torpedo bombers it takes to break the massed T3 fleet (two squadrons of it), as a multiple
-/// of its cost, as `torpedo_bombers_to_break_t2_fleet` has it at T2.
+/// `torpedo_bombers_to_break`, the mean over the fleet sizes the battle line measures a fleet at
+/// (`[battle_line] squadrons`, 2026-11-28, the design owner's pick): at one size it swung from 1.6
+/// to 2.7 as the bomber's cost moved a few percent, rising and falling, so its cost followed the
+/// noise.
+fn torpedo_bombers_to_break_over_sizes(db: &Arc<BlueprintDb>, fleet: &str, tier: u8) -> f64 {
+    let sizes = battle_line_squadrons(fleet);
+    let count = sizes.clone().count() as f64;
+    sizes.map(|size| torpedo_bombers_to_break(db, fleet, tier, f64::from(size)).efficiency).sum::<f64>() / count
+}
+
+/// The torpedo bombers it takes to break the T2 fleet, as a multiple of its cost, over the battle
+/// line's T2 fleet sizes.
+pub fn torpedo_bombers_to_break_t2_fleet(db: &Arc<BlueprintDb>) -> f64 {
+    torpedo_bombers_to_break_over_sizes(db, "t2_fleet", 2)
+}
+
+/// The torpedo bombers it takes to break the massed T3 fleet, as a multiple of its cost, over the
+/// battle line's T3 fleet sizes.
 pub fn torpedo_bombers_to_break_t3_fleet(db: &Arc<BlueprintDb>) -> f64 {
-    let fleet = domain_force(db, "t3_fleet");
-    let one = force_materiel(db, &squadrons(db, &fleet, 0.0, 3, Tactics::AttackMove), 3);
-    let fleet = squadrons(db, &fleet, one * 2.0, 3, Tactics::AttackMove);
-    let bombers = squadrons(db, &domain_force(db, "t2_torpedo_bombers"), force_materiel(db, &fleet, 3), 3, Tactics::AttackMove);
-    break_even_forces(db, Field::new(Ground::Water, 3), &fleet, &bombers).efficiency
+    torpedo_bombers_to_break_over_sizes(db, "t3_fleet", 3)
 }
 
 /// Bisects a unit's cost at T2, between a fifth under and a fifth over what it costs, for the
@@ -2368,12 +2380,16 @@ pub fn derive_domains_report() {
             met: Some((low..=high).contains(&efficiency)),
         });
     }
-    // The torpedo bombers it takes to break a fleet, at T2 and a massed T3 one.
-    for (tier, fleet_name, squadrons_of_it, cell) in [(2, "t2_fleet", 2.0, "torpedo_bombers_to_break_fleet_t2"), (3, "t3_fleet", 2.0, "torpedo_bombers_to_break_fleet_t3"), (3, "t3_battleship_heavy_fleet", 2.0, "battleship_heavy_fleet_breaks_to_torpedo_bombers_at_most")] {
-        let fleet = force(fleet_name, squadron_cost(fleet_name, tier) * squadrons_of_it, tier);
-        let materiel = force_materiel(&db, &fleet, tier);
-        let bombers = force("t2_torpedo_bombers", materiel, tier);
-        let even = break_even_forces(&db, water(tier), &fleet, &bombers);
+    // The torpedo bombers it takes to break a fleet: the T2 and the massed T3 fleet over the battle
+    // line's sizes, the battleship-heavy one at two squadrons.
+    for (tier, fleet_name, cell) in [(2, "t2_fleet", "torpedo_bombers_to_break_fleet_t2"), (3, "t3_fleet", "torpedo_bombers_to_break_fleet_t3"), (3, "t3_battleship_heavy_fleet", "battleship_heavy_fleet_breaks_to_torpedo_bombers_at_most")] {
+        let (efficiency, how) = if fleet_name == "t3_battleship_heavy_fleet" {
+            let even = torpedo_bombers_to_break(&db, fleet_name, tier, 2.0);
+            (even.efficiency, format!("two squadrons of it, even after {:.0} s{}", even.seconds, if even.at_limit { ", at the search's limit" } else { "" }))
+        } else {
+            let sizes = battle_line_squadrons(fleet_name);
+            (torpedo_bombers_to_break_over_sizes(&db, fleet_name, tier), format!("the mean over {} to {} squadrons of it", sizes.start(), sizes.end()))
+        };
         // A band, or for the battleship-heavy fleet a ceiling.
         let band = match domain_cell(cell).as_array() {
             Some(band) => band.iter().map(as_number).collect::<Vec<f64>>(),
@@ -2383,8 +2399,8 @@ pub fn derive_domains_report() {
         cells.push(Cell {
             name: format!("Torpedo bombers it takes to break the {which}, as a multiple of its cost"),
             target: if band[0] > 0.0 { format!("{:.1}–{:.1}", band[0], band[1]) } else { format!("at most {:.1}", band[1]) },
-            measured: format!("{:.2}{} (the fleet's strength per materiel over theirs; even after {:.0} s)", even.efficiency, if even.at_limit { ", at the search's limit" } else { "" }, even.seconds),
-            met: Some((band[0]..=band[1]).contains(&even.efficiency)),
+            measured: format!("{efficiency:.2} (the fleet's strength per materiel over theirs; {how})"),
+            met: Some((band[0]..=band[1]).contains(&efficiency)),
         });
     }
     // The hovercraft on land, against the Heavy Tank.

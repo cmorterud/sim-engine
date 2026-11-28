@@ -435,10 +435,8 @@ fn a_t2_fleet_rules_the_water() {
     let cell = |key: &str| number(&domains(&["cells", key]));
     let air = fight(&db, water, "t2_fleet", 2.0, "t2_air_force");
     assert!(air >= cell("fleet_beats_air_force_t2"), "the T2 fleet scores {air:+.2} against an equal cost of the T2 air force");
-    let fleet = squadrons(&db, &domain_force(&db, "t2_fleet"), 0.0, 2, Tactics::AttackMove);
-    let fleet = squadrons(&db, &domain_force(&db, "t2_fleet"), force_materiel(&db, &fleet, 2) * 2.0, 2, Tactics::AttackMove);
-    let bombers = squadrons(&db, &domain_force(&db, "t2_torpedo_bombers"), force_materiel(&db, &fleet, 2), 2, Tactics::AttackMove);
-    let multiple = break_even_forces(&db, water, &fleet, &bombers).efficiency;
+    // Over the battle line's fleet sizes (2026-11-28), as the Torpedo Bomber's cost is solved.
+    let multiple = sim_engine::balance::torpedo_bombers_to_break_t2_fleet(&db);
     let band = domains(&["cells", "torpedo_bombers_to_break_fleet_t2"]).as_array().expect("a band").iter().map(number).collect::<Vec<f64>>();
     assert!((band[0]..=band[1]).contains(&multiple), "torpedo bombers break the T2 fleet at {multiple:.2} times its cost");
     let hunters = fight(&db, water, "t2_destroyers", 4.0, "t1_submarines");
@@ -489,17 +487,10 @@ fn a_massed_t3_fleet_is_as_safe_from_the_air_as_it_is_escorted() {
     let water = Field::new(Ground::Water, 3);
     let air = fight(&db, water, "t3_fleet", 1.0, "t3_air_force");
     assert!(air >= number(&domains(&["cells", "fleet_beats_air_force_t3"])), "the massed T3 fleet scores {air:+.2} against an equal cost of the T3 air force");
-    let multiple = |name: &str| {
-        let squadron = domain_force(&db, name);
-        let one = force_materiel(&db, &squadrons(&db, &squadron, 0.0, 3, Tactics::AttackMove), 3);
-        let fleet = squadrons(&db, &squadron, one * 2.0, 3, Tactics::AttackMove);
-        let bombers = squadrons(&db, &domain_force(&db, "t2_torpedo_bombers"), force_materiel(&db, &fleet, 3), 3, Tactics::AttackMove);
-        break_even_forces(&db, water, &fleet, &bombers).efficiency
-    };
     let band = domains(&["cells", "torpedo_bombers_to_break_fleet_t3"]).as_array().expect("a band").iter().map(number).collect::<Vec<f64>>();
-    let escorted = multiple("t3_fleet");
+    let escorted = sim_engine::balance::torpedo_bombers_to_break_t3_fleet(&db);
     assert!((band[0]..=band[1]).contains(&escorted), "torpedo bombers break the massed T3 fleet at {escorted:.2} times its cost");
-    let heavy = multiple("t3_battleship_heavy_fleet");
+    let heavy = sim_engine::balance::torpedo_bombers_to_break(&db, "t3_battleship_heavy_fleet", 3, 2.0).efficiency;
     let most = number(&domains(&["cells", "battleship_heavy_fleet_breaks_to_torpedo_bombers_at_most"]));
     assert!(heavy <= most, "torpedo bombers break a battleship-heavy fleet at {heavy:.2} times its cost");
 }

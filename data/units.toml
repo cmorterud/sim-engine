@@ -45,10 +45,11 @@ id = "t1_engineer"
 name = "Engineer"
 class = "engineer"
 tier = 1
+# Its health by hit count (2026-11-28, [kills] t1_medium_tank): a Medium Tank destroys it in 5, 150 to 135.
 mass = 52
 energy = 260
 build_time = 260
-health = 150
+health = 135
 speed = "3.8"
 # Engineers float over water, so they can build out on it.
 movement = "hover"
@@ -388,10 +389,11 @@ class = "engineer"
 tier = 2
 # Cost by its build power, at the rate the T1 and T3 Engineers pay, 10.4 a point (the price
 # list's build power, 2026-11-27): 130 to 125.
+# Its health by hit count (2026-11-28, [kills] t2_heavy_tank): a Heavy Tank destroys it in 4, 400 to 360.
 mass = 125
 energy = 624
 build_time = 624
-health = 400
+health = 360
 speed = "3.8"
 # Engineers float over water, so they can build out on it.
 movement = "hover"
@@ -408,10 +410,11 @@ id = "t3_engineer"
 name = "Engineer (T3)"
 class = "engineer"
 tier = 3
+# Its health by hit count (2026-11-28, [kills] t3_heavy_walker): a Heavy Walker destroys it in 12, 800 to 813.
 mass = 312
 energy = 1560
 build_time = 1560
-health = 800
+health = 813
 speed = "3.8"
 # Engineers float over water, so they can build out on it.
 movement = "hover"
@@ -501,10 +504,11 @@ class = "field_rig"
 tier = 3
 # Cost by the ability price list (2026-11-27, the design owner's plan): its gun, its build power at
 # the cheapest builder's rate, and its income paid back in T3's payback ([economy]): 2,240 to 1,716.
-mass = 1609
-energy = 19308
-build_time = 11033
-health = 16000
+# Its size by hit counts (2026-11-28, [kills]): a Heavy Walker destroys it in 227, health 16,000 to 16,013; its gun breaks a Heavy Walker in 17 through its shield, 300 to 302.8; 1,716 to 1,720.
+mass = 1612
+energy = 19351
+build_time = 11058
+health = 16013
 speed = "4.4"
 turn_rate = 150
 radius = 14
@@ -515,7 +519,7 @@ build_power = 56
 build_range = 200
 builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "rig_yard", "geothermal_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "naval_factory", "t1_aa_turret", "airfield", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "deep_scan_array", "land_factory_t3_support", "air_factory_t3_support", "t2_artillery", "t3_artillery", "naval_factory_t2_support", "naval_factory_t3_support", "t1_sonar", "t1_torpedo_launcher", "t2_sonar", "t2_torpedo_launcher", "wall", "t3_heavy_point_defense", "t3_heavy_shield"]
 # Three times the commander's fire: 300 a second for its 100, and a little farther.
-weapon = { range = 500, reload_ticks = 10, projectile_speed = 91, damage = 300, turn_rate = 539 }
+weapon = { range = 500, reload_ticks = 10, projectile_speed = 91, damage = "302.8", turn_rate = 539 }
 mass_income = 1
 energy_income = 20
 mass_storage = 275
@@ -646,10 +650,11 @@ class = "air"
 tier = 1
 # Cost by the ability price list (2026-11-27): its radar past its vision, over the T1 air base, as
 # every sensor is priced: 78 to 62.
+# Its health by hit count (2026-11-28, [kills] t1_mobile_aa): a Mobile Anti-Air brings it down in 2, 35 to 31.
 mass = 32
 energy = 458
 build_time = 158
-health = 35
+health = 31
 speed = 38
 radius = 8
 vision = 840
@@ -794,9 +799,10 @@ name = "Gunship"
 class = "air"
 tier = 2
 # Cost by the ability price list (2026-11-26): 226 to 133 (reports/plans/2026-11-26-ability-price-list.md).
+# Its gun by hit count (2026-11-28, [kills] t2_gunship): a Heavy Tank in 62, 22.6 to 22.5; 132.6 to 132.5.
 mass = 116
-energy = 2321
-build_time = 865
+energy = 2314
+build_time = 862
 # One volley of the cruiser's anti-air, and two SAM missiles ([volleys], [kills], 2026-11-25).
 health = 1590
 speed = 27
@@ -804,17 +810,18 @@ radius = 12
 # Sight: a little past its longest gun, as the land line sees (balance::gun_sight).
 vision = 495
 flight = { elevation = 198, turn_rate = 90, fuel = 400, hovers = true }
-weapon = { range = 448, reload_ticks = 3, projectile_speed = 82, damage = "22.6", spread = 4 }
+weapon = { range = 448, reload_ticks = 3, projectile_speed = 82, damage = "22.5", spread = 4 }
 
 [[unit]]
 id = "t3_spy_plane"
 name = "Spy Plane"
 class = "air"
 tier = 3
+# Its health by hit count (2026-11-28, [kills] t3_sam): a SAM brings it down in 3, 2,000 to 2,125.
 mass = 195
 energy = 7500
 build_time = 900
-health = 2000
+health = 2125
 speed = 54
 radius = 10
 vision = 1280
@@ -897,9 +904,10 @@ tier = 3
 # At the T3 air base from the battle line ([battle_line] t3_air, 2026-11-27): 756 to 678.
 # With hovering gunships that drift back and forth (2026-11-27), at the bases re-derived from the battle line.
 # With every shell flying by its family's rule (2026-11-28), at the T3 air base re-derived: 690 to 721.
-mass = 528
-energy = 22860
-build_time = 2546
+# Its gun at the middle of [kill_times] heavy_gunship_commander_on_land (2026-11-28): 126 shots, 144 to 143.4; 720.6 to 719.3.
+mass = 527
+energy = 22831
+build_time = 2543
 health = 9600
 speed = 20
 radius = 16
@@ -909,7 +917,7 @@ flight = { elevation = 198, turn_rate = 60, fuel = 800, hovers = true }
 # A T3 fighter destroys it in about 15 seconds (14, its fifteenth shot), so health 9,600, which is also the
 # cruiser's six volleys ([volleys]), and it destroys a commander with no
 # enhancements in about 50, so 360 a second (2026-11-26, the design owner's rules, [kill_times]).
-weapon = { range = 560, reload_ticks = 4, projectile_speed = 102, damage = 144, spread = 6 }
+weapon = { range = 560, reload_ticks = 4, projectile_speed = 102, damage = "143.4", spread = 6 }
 # Its railgun, two shots of 8 every 1.3 seconds, as one. It reaches its tier's fighter, the Air
 # Superiority Fighter's 600 ([model] aircraft_anti_air_at_fighter; 880 until 2026-11-27).
 extra_weapons = [{ range = 600, reload_ticks = 13, projectile_speed = 90, damage = "18.4", targets = "air" }]
@@ -963,10 +971,11 @@ id = "t2_mobile_flak"
 name = "Mobile Flak"
 class = "tank"
 tier = 2
-mass = 160
-energy = 800
-build_time = 800
-health = 1000
+# Its health by hit count (2026-11-28, [kills] t2_heavy_tank): a Heavy Tank destroys it in 10, 1,000 to 978; 160 to 158 by its health per mass.
+mass = 158
+energy = 791
+build_time = 791
+health = 978
 speed = "6.2"
 turn_rate = 90
 turn_radius = 20
@@ -1198,6 +1207,7 @@ id = "t3_mobile_artillery"
 name = "Mobile Heavy Artillery"
 class = "artillery"
 tier = 3
+# Its shell by hit count (2026-11-28, [kills] t3_mobile_artillery): a Siege Walker in 13, 859.1 to 882.2; its reload 13.8 to 14.2 s by the [model] time to kill.
 mass = 600
 energy = 3000
 build_time = 3600
@@ -1216,7 +1226,7 @@ vision = 1010
 # for five to seven of it (720 to 514 each), so six: 600, as it was (2026-11-27).
 # It no longer wins a walk-in fight against bunched Medium Tanks of its cost, and is not meant
 # to: it is a siege piece, dearer than the line walker, that loses to what reaches it.
-weapon = { range = 1575, reload_ticks = 138, projectile_speed = 56, damage = "859.1", splash_radius = 83, turn_rate = 28, artillery = true, min_range = 394, spread = 60, setup_ticks = 10 }
+weapon = { range = 1575, reload_ticks = 142, projectile_speed = 56, damage = "882.2", splash_radius = 83, turn_rate = 28, artillery = true, min_range = 394, spread = 60, setup_ticks = 10 }
 
 # The inspiration's fighter-bomber: a carpet of napalm bombs, burning included, as one bomb, and two railguns at
 # aircraft, as one. Cost, build time, health, and damage set against the Medium Tank as the
@@ -1229,16 +1239,17 @@ tier = 2
 # Cost by the ability price list (2026-11-26): 343 to 530 (reports/plans/2026-11-26-ability-price-list.md).
 # 530 to 521 once its railguns were fixed to its nose (2026-11-27): it lands 0.90 of their damage
 # on a bomber flying its run, not 0.98 ([price_list.landed_share]).
-mass = 405
-energy = 14195
-build_time = 3102
-health = 1696
+# Its size by hit counts (2026-11-28, [kills]): an Interceptor brings it down in 35, health 1,696 to 1,687; its bombs destroy a commander in 15, 1,256 to 1,242.9; 520.9 to 518.4.
+mass = 403
+energy = 14127
+build_time = 3087
+health = 1687
 speed = 30
 radius = 12
 vision = 640
 radar = 1280
 flight = { elevation = 352, turn_rate = 270, break_off = 400, fuel = 500 }
-weapon = { kind = "bomb", range = 1200, reload_ticks = 100, projectile_speed = 30, damage = 1256, splash_radius = 36 }
+weapon = { kind = "bomb", range = 1200, reload_ticks = 100, projectile_speed = 30, damage = "1242.9", splash_radius = 36 }
 # Its anti-air destroys an interceptor in about 2 seconds, so 174 a second (two and a half shots: the first lands at once) (2026-11-26, the design
 # owner's rule, [kill_times]).
 # Its railguns are fixed to its nose, as every fighter's guns are, so it must turn to aim them
@@ -1648,16 +1659,17 @@ tier = 2
 # by its cells, 229 to 132, the least that keeps both the T2 fleet and the massed T3 fleet
 # needing twice their cost of it (the design owner's OK to that shift); the price list's check says 131.
 # Re-solved with the navy's sizes set by hit counts (2026-11-28): 132.5 to 131.
-mass = 107
-energy = 3076
-build_time = 688
-health = 1252
+# Its size by hit counts (2026-11-28): a destroyer's anti-air brings it down in 81 ([secondary_kills]), health 1,252 to 1,248; its torpedoes sink a destroyer in 57 ([kills]), 189 to 187.6; 131.2 to 139.6 by its duel over the battle line's fleet sizes.
+mass = 114
+energy = 3263
+build_time = 730
+health = 1248
 speed = 30
 radius = 12
 vision = 640
 sonar = 880
 flight = { elevation = 240, turn_rate = 90, break_off = 400, fuel = 600 }
-weapon = { range = 840, reload_ticks = 100, projectile_speed = 30, damage = 189, targets = "naval", arc = 10, salvo = { shots = 5, ticks = 5 } }
+weapon = { range = 840, reload_ticks = 100, projectile_speed = 30, damage = "187.6", targets = "naval", arc = 10, salvo = { shots = 5, ticks = 5 } }
 
 [[unit]]
 id = "t1_sonar"
@@ -2126,10 +2138,11 @@ id = "t2_mobile_shield"
 name = "Mobile Shield Generator"
 class = "tank"
 tier = 2
-mass = 220
+# Its hull by hit count (2026-11-28, [kills] t2_heavy_tank): a Heavy Tank destroys it through its dome in 31, 150 to 138; 218.1 to 219.0 with the army it covers repriced.
+mass = 221
 energy = 900
-build_time = 660
-health = 150
+build_time = 661
+health = 138
 speed = 7
 turn_rate = 120
 turn_radius = 20
@@ -2145,10 +2158,11 @@ class = "engineer"
 tier = 2
 # Cost by the price list (2026-11-27): its build power at the engineers' 10.4 a point, 182, with
 # its gun and radar, 70: 224 to 253.
-mass = 254
-energy = 1128
-build_time = 1128
-health = 1040
+# Its size by hit counts (2026-11-28, [kills]): a Heavy Tank destroys it in 11, health 1,040 to 1,080; its gun breaks a Heavy Tank in 93, 15 to 14.9; 252.6 to 253.6.
+mass = 255
+energy = 1132
+build_time = 1132
+health = 1080
 speed = 6
 turn_rate = 160
 turn_radius = 10
@@ -2160,7 +2174,7 @@ upkeep = 15
 build_power = "17.5"
 build_range = 120
 # Builds forward defenses, artillery, and intel, and the T1 factories, and defends itself.
-weapon = { range = 360, reload_ticks = 5, projectile_speed = 66, damage = 15, turn_rate = 835 }
+weapon = { range = 360, reload_ticks = 5, projectile_speed = 66, damage = "14.9", turn_rate = 835 }
 builds = ["land_factory_t1", "air_factory", "naval_factory", "t1_point_defense", "t2_point_defense", "t1_aa_turret", "t2_flak", "shield_generator", "tactical_missile_defense", "t1_torpedo_launcher", "t2_torpedo_launcher", "t2_artillery", "tactical_missile_launcher", "radar", "radar_t2", "t1_sonar", "t2_sonar", "stealth_field_generator", "wall"]
 
 # The T3 line unit: three Heavy Tanks' cost, half again the anchor's range, and longer fights,
@@ -2215,9 +2229,10 @@ tier = 2
 # Re-solved with the ships at the navy base re-derived for hovering gunships that drift (2026-11-27).
 # Re-solved once aircraft stopped keeping apart in flight moved the navy base (2026-11-28): 722 to 779.
 # Re-solved with the navy's sizes set by hit counts (2026-11-28): 801 to 809.
-mass = 786
-energy = 6297
-build_time = 3528
+# Re-solved by its duel (2026-11-28): 808.5 to 809.6.
+mass = 787
+energy = 6307
+build_time = 3534
 health = 3040
 speed = 12
 turn_rate = 100
