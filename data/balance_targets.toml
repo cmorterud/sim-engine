@@ -451,7 +451,8 @@ artillery_counters_without_micro = ["artillery", "mobile_shield", "heavy", "bomb
 # the top of winner_survivors against an equal cost of submarines, as the mean score over fleets of
 # these many squadrons of it: one size alone turns on how the submarines round, a step of a tenth
 # of the boat's cost. The Torpedo Bomber costs the least that keeps torpedo bombers needing twice
-# the T2 fleet's cost to break it ([domains.cells] torpedo_bombers_to_break_fleet_t2).
+# the T2 fleet's cost to break it ([domains.cells] torpedo_bombers_to_break_fleet_t2), and twice the
+# massed T3 fleet's (torpedo_bombers_to_break_fleet_t3, since its bomber's runs, 2026-11-27).
 counter_squadrons = [4, 5, 6, 7]
 
 [strategy]
@@ -512,8 +513,9 @@ t3_battlecruiser = 0.45
 # the T3 air base from the battle line (2026-11-27).
 t2_gunship = 0.93
 # The torpedo bomber is a counter, its cost held by its cells (2026-11-26): this is its strength per
-# cost at 240, the price list's 131 only a check.
-t2_torpedo_bomber = 0.51
+# cost at 240, the price list's 131 only a check; 0.92 at 132 once it flew a bomber's runs and let
+# its torpedoes go along its heading (the design owner, 2026-11-27).
+t2_torpedo_bomber = 0.92
 t2_fighter_bomber = 0.31
 t3_heavy_gunship = 0.98
 t3_air_superiority = 0.88
@@ -903,7 +905,7 @@ t3_siege_walker = "the land solver's targets ([roles])"
 t1_mobile_aa = "its health per mass is the anchor's ([air] anti_air_health_over_bomb)"
 t2_mobile_flak = "not derived yet: its cost is borrowed, its gun set by the escort rule"
 t3_mobile_artillery = "the T3 line's micro cell: the middle of the costs where it holds"
-t2_torpedo_bomber = "the duel it wins ([counters]): the least that needs twice the T2 fleet's cost to break it"
+t2_torpedo_bomber = "the duel it wins ([counters]): the least that needs twice the T2 fleet's cost, and the massed T3 fleet's, to break it"
 t2_torpedo_boat = "the duel it wins ([counters]): the most that keeps 0.70 against an equal cost of submarines"
 t1_point_defense = "the hold rule ([premiums]): the most it can cost and still hold, under the list's price"
 # The commander is never built: its cost sets only its wreck and what destroying it is worth. Its
@@ -952,7 +954,8 @@ t3_air_superiority = 1.0
 t1_bomber = 0.54
 t2_fighter_bomber = 0.92
 t3_strategic_bomber = 0.90
-t2_torpedo_bomber = 0.82
+# The torpedo bomber flying a bomber's runs, five torpedoes a pass (2026-11-27): 0.82 to 0.87.
+t2_torpedo_bomber = 0.87
 t2_gunship = 1.0
 t3_heavy_gunship = 1.0
 

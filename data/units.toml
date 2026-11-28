@@ -1617,16 +1617,21 @@ tier = 2
 # Re-solved with the T2 fleet at the navy base from the battle line (2026-11-27): 243 to 234.
 # Re-solved with the ships at the navy base re-derived for hovering gunships that drift (2026-11-27).
 # Re-solved once aircraft stopped keeping apart in flight (2026-11-27), with the bases re-derived for it.
-mass = 186
-energy = 5465
-build_time = 1222
+# It flies a bomber's runs and lets its five torpedoes go along its heading, within 10 degrees of
+# its nose, rather than at any angle (the design owner, 2026-11-27): it lands 0.87 of its damage on
+# one ship, but its long passes leave fleets needing over four times their cost of it, so re-solved
+# by its cells, 229 to 132, the least that keeps both the T2 fleet and the massed T3 fleet
+# needing twice their cost of it (the design owner's OK to that shift); the price list's check says 131.
+mass = 108
+energy = 3115
+build_time = 697
 health = 1252
 speed = 30
 radius = 12
 vision = 640
 sonar = 880
 flight = { elevation = 240, turn_rate = 90, break_off = 400, fuel = 600 }
-weapon = { range = 840, reload_ticks = 20, projectile_speed = 30, damage = 189, targets = "naval" }
+weapon = { range = 840, reload_ticks = 100, projectile_speed = 30, damage = 189, targets = "naval", arc = 10, salvo = { shots = 5, ticks = 5 } }
 
 [[unit]]
 id = "t1_sonar"

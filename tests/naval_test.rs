@@ -306,6 +306,55 @@ fn a_torpedo_bomber_sinks_a_ship() {
     assert!(sunk, "a torpedo bomber should sink an undefended destroyer within three minutes");
 }
 
+/// A torpedo bomber drops its torpedoes as a bomber drops its bombs (the design owner,
+/// 2026-11-27): only with its ship dead ahead, along its heading, five to a run; then it flies on
+/// past, turns round, and comes back for another run, rather than launch at any angle.
+#[test]
+fn a_torpedo_bomber_makes_runs_and_drops_along_its_heading() {
+    use sim_engine::sim::components::{Projectile, Turning};
+    let mut world = lake_world();
+    let destroyer = spawn(&mut world, "t2_destroyer", Team::Red, point(2_600, 1_000));
+    let entity = world.unit_entity(destroyer).unwrap();
+    world.ecs.get::<&mut sim_engine::sim::components::ExtraWeapons>(entity).unwrap().0.clear();
+    world.ecs.get::<&mut sim_engine::sim::components::TorpedoDefense>(entity).unwrap().range = Fp::ZERO;
+    let bomber = spawn(&mut world, "t2_torpedo_bomber", Team::Blue, point(1_600, 1_000));
+    world.advance_tick(&[SimCommand::Attack { units: vec![bomber], target: destroyer }]);
+    let ship = world.unit_position(destroyer).unwrap().xy();
+    let (mut seen, mut drops, mut farthest) = (Vec::<SimId>::new(), Vec::new(), Vec::new());
+    for tick in 0..1_200 {
+        world.advance_tick(&[]);
+        let Some(at) = world.unit_position(bomber) else { break };
+        let facing = world.ecs.get::<&Turning>(world.unit_entity(bomber).unwrap()).unwrap().facing;
+        let fresh: Vec<SimId> = world.projectiles.iter().filter(|&&(id, e)| !seen.contains(&id) && world.ecs.get::<&Projectile>(e).is_ok_and(|shot| shot.source == bomber)).map(|&(id, _)| id).collect();
+        if !fresh.is_empty() {
+            let to = (ship - at.xy()).normalized();
+            let ahead = (facing.x * to.x + facing.y * to.y).to_num::<f64>();
+            // A run is the torpedoes let go within a second of one another.
+            if drops.last().is_none_or(|&(last, _, _)| tick > last + 10) {
+                farthest.push(0f64);
+            }
+            drops.push((tick, fresh.len(), ahead));
+        }
+        seen.extend(fresh);
+        // How far it flew out from the ship after each run.
+        if let Some(out) = farthest.last_mut() {
+            *out = out.max(at.xy().distance_squared(&ship).to_num::<f64>().sqrt());
+        }
+    }
+    let mut runs: Vec<usize> = Vec::new();
+    for (index, &(tick, count, _)) in drops.iter().enumerate() {
+        if index == 0 || tick > drops[index - 1].0 + 10 {
+            runs.push(0);
+        }
+        *runs.last_mut().unwrap() += count;
+    }
+    let ten_degrees = 10f64.to_radians().cos();
+    assert!(drops.iter().all(|&(_, _, ahead)| ahead >= ten_degrees - 1e-3), "it let go off its heading: {drops:?}");
+    assert!(runs.len() >= 5, "it made {} runs in two minutes: {drops:?}", runs.len());
+    assert!(runs[..runs.len() - 1].iter().all(|&count| count == 5), "not five torpedoes a run: {runs:?}");
+    assert!(farthest.iter().rev().skip(1).all(|&out| out > 400.0), "it did not fly on past the ship between runs: {farthest:.0?}");
+}
+
 #[test]
 fn sonar_and_torpedo_launchers_go_on_the_water() {
     let mut world = lake_world();

@@ -594,7 +594,8 @@ fn every_aircraft_that_makes_passes_fires_whenever_its_target_is_in_reach() {
                 let ahead = if toward == Vec2Fp::ZERO { Fp::ONE } else { let toward = toward.normalized(); facing.x * toward.x + facing.y * toward.y };
                 // Each weapon fires on the first tick it is reloaded with its target in reach, so
                 // replaying its reload over those ticks counts the shots it has: a fighter circling
-                // has its target before its guns for a few ticks at a time, and fires on each.
+                // has its target before its guns for a few ticks at a time, and fires on each. A
+                // volley's shots (a torpedo bomber's run) count with the volley that starts them.
                 for ((count, timer), weapon) in in_reach.iter_mut().zip(timers.iter_mut()).zip(&counted) {
                     *timer = timer.saturating_sub(1);
                     if apart <= weapon.range.to_num::<f64>() + target_radius && weapon.arc.is_none_or(|arc| ahead >= arc) && *timer == 0 {
@@ -603,7 +604,7 @@ fn every_aircraft_that_makes_passes_fires_whenever_its_target_is_in_reach() {
                     }
                 }
             }
-            let expected: f64 = counted.iter().zip(&in_reach).map(|(weapon, &shots)| weapon.damage.to_num::<f64>() * f64::from(shots)).sum();
+            let expected: f64 = counted.iter().zip(&in_reach).map(|(weapon, &shots)| weapon.damage.to_num::<f64>() * f64::from(weapon.salvo.map_or(1, |salvo| salvo.shots)) * f64::from(shots)).sum();
             let done = f64::from(damage(&world, target));
             if expected < 1.0 {
                 failures.push(format!("{name}: its target was never in reach"));
