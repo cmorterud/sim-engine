@@ -300,7 +300,9 @@ fn aircraft_burn_fuel_in_the_air_and_fly_low_and_slow_without_it() {
     let at = world.unit_position(scout).unwrap();
     assert!(flight(&world, scout).out_of_fuel());
     assert_eq!(at.z, world.terrain.height_at(at.xy()) + scout_height(&world) / 2, "half its height");
-    assert_eq!(flight(&world, scout).speed, fp_int(19), "half its speed");
+    let db = sim_engine::sim::blueprints::BlueprintDb::standard();
+    let top = db.get(db.id("t1_air_scout")).speed;
+    assert_eq!(flight(&world, scout).speed, top / 2, "half its speed");
     // Landed, the tank slowly fills again.
     world.advance_tick(&[SimCommand::Stop { units: vec![scout] }]);
     run(&mut world, 60);

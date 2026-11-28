@@ -650,6 +650,22 @@ out close and why: evidence about the process, not a target.
   491, the commander's Field Shield 4,249 to 4,629 and Area Shield 1,277 to 1,392, the Field Rig's
   5,887 to 6,414 and 6,086 to 6,631). Every domains check still holds. 350 unit families are not
   derived yet.
+- Pass 5, aircraft speeds (2026-11-28, the design owner's pick): aircraft move by the role each
+  plays, on the bombers' tiers (`[air] strike_speed_thirds`). Strike aircraft fly at 20, 30 and 40
+  by tier, as the bombers did. Fighters fly 1.3 times their tier's strike speed (the T3 fighter's
+  rule), so the Interceptor goes 30 to 26. Scouts fly 1.3 times their tier's fighter, so the Air
+  Scout goes 38 to 33.8 and the Spy Plane 54 to 67.6. The Gunship flies at the T2 line's share of
+  the T2 strike speed, 27 to 25.8, and the transports at their tier's strike speed (21.5, 29 and
+  35 to 20, 30 and 40). The Heavy Gunship keeps its 20: at the T3 heavy role's share, 24, it did
+  so much more against the T3 army that the T3 air base fell to 0.831, its price rose 21% (738 to
+  891) and its strength per cost fell to 0.76 of the inspiration's ratio, under the 0.80 floor.
+  The slower Gunship does less against the T2 army, so the T3 air base re-derives 0.922 to 0.885
+  and the T3 aircraft cost 4.2% more (the Heavy Gunship 738 to 770, the T3 fighter 861 to 897, the
+  Strategic Bomber 1,240 to 1,292, the Heavy Transport 2,043 to 2,087). The Interceptor's T1 rule
+  prices it 149 to 143, and the Gunship goes to the list, 132.5 to 130.2. The dearer snipe price
+  puts T2 Fabrication 7.3% under the list, and it is repriced to it (801 to 864). The Interceptor
+  keeps easing off to 15, half its old top speed, so the T3 fighter (13) still eases off slower;
+  turning comes next. Every domains check still holds. 339 unit families are not derived yet.
 
 ## Order of work
 

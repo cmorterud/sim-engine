@@ -548,6 +548,17 @@ check_materiel = 3000
 # a bomber cannot shake one off its tail (2026-11-22).
 fighter_turn_over_t1_bomber = 1.5
 fighters = ["t1_interceptor", "t2_fighter_bomber", "t3_air_superiority"]
+# Aircraft move by the role each plays, on the bombers' tiers (2026-11-28, Pass 5, the design
+# owner's pick). A strike aircraft (a bomber, the Fighter-Bomber, the Torpedo Bomber) flies at
+# [price_list] air_speed times its tier's thirds here: 20, 30 and 40. A fighter flies [air.t3_fighter]
+# speed_over_strategic_bomber times its tier's strike speed, and a scout that again over its tier's
+# fighter. The Fighter-Bomber, both, flies at the strike speed. The Gunship flies at the T2 strike
+# speed times the T2 line's share in balance::t2_land_roles, and a transport at the strike speed.
+# All are rounded to a tenth a tick (tests/stat_sources_test.rs). The Heavy Gunship keeps today's
+# 20 (the design owner's pick, 2026-11-28): at the T3 heavy role's 24 it was so much the better
+# against the T3 army that its price rose 21%, out of its [domains] strength_band.
+strike_speed_thirds = [2, 3, 4]
+gunship_roles = { t2_gunship = "line" }
 # A transport's weapons are weak (2026-11-27, the design owner's rule): together they do this share
 # of their tier's gunship's damage a second (tests/price_list_test.rs).
 transport_weapons_over_gunship = 0.25
@@ -917,8 +928,10 @@ tier_efficiency = [1.0, 1.0, 1.0, 1.0]
 # 1.005 to 0.972. With every shell flying by its family's rule ([shells], 2026-11-28), air_t3 0.988
 # to 0.946: the gunships' guns slower, the point defenses dearer. With the navy's sizes set by hit
 # counts ([kills], 2026-11-28), navy 0.670 to 0.664. With ships and land units at the speeds of
-# their roles (2026-11-28), air_t3 0.946 to 0.922.
-domain_base = { land = 1.0, navy = 0.664, air_t1 = 0.345, air_t2 = 0.904, air_t3 = 0.922 }
+# their roles (2026-11-28), air_t3 0.946 to 0.922. With aircraft at the speeds of their roles
+# ([air] strike_speed_thirds, 2026-11-28), air_t3 0.922 to 0.885: the Gunship slower, so the T2
+# strike aircraft do less against the T2 army, and the T3 ones are priced to match.
+domain_base = { land = 1.0, navy = 0.664, air_t1 = 0.345, air_t2 = 0.904, air_t3 = 0.885 }
 # Reach past the line's: x = c (r / r_line - 1), price x h / (1 - x h), h about 1 for shells and
 # 0 for missiles. Short of it: -c (1 - r / r_line) (v_line / v). Speed: speed_share (1 - v_line / v).
 speed_share = 0.3
@@ -972,7 +985,7 @@ torpedo_flexibility = 0.41
 # Each tier's line, in its domain, which reach and speed are measured against (2026-11-27, as the
 # list was worked by hand): the land line, and the navy's ships of each tier's line (the
 # frigate at T1, the destroyer, the battleship). Aircraft have no line: speed is measured against
-# air_speed, the T1 Interceptor's and the Fighter-Bomber's (units a tick, as the unit data).
+# air_speed, the T2 strike aircraft's ([air] strike_speed_thirds; units a tick, as the unit data).
 line = { land = ["t1_medium_tank", "t2_heavy_tank", "t3_heavy_walker"], navy = ["t1_frigate", "t2_destroyer", "t3_battleship"] }
 air_speed = 30
 # A bomb's first-volley gap is between passes: its reload over the share it lands.
