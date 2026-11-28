@@ -508,6 +508,23 @@ out close and why: evidence about the process, not a target.
   vision at the price per area of the cheapest building with it, not over a domain base, upkeep
   left out as it is for a mobile sensor. The T2 Radar 206 to 328, the T2 Sonar 354 to 644. The
   Radar, the Sonar and the Deep Scan Array are the anchors the rule prices from.
+* 2026-11-28: every unit names what sets each of its other stats (the design owner's "Yes" to an
+  audit of every stat, then deriving them in passes; data/stat_sources.toml,
+  `src/stat_sources.rs`, `--balance-derive stat-sources`, tests/stat_sources_test.rs). Its
+  numbers fall in ten families: health, body, damage, range, speed, turning, timing, sensors,
+  economy and special. A family is derived only when every number in it is: by a rule or a
+  target, cited in data/balance_targets.toml or the code, or by an anchor of the design owner's.
+  The rest say why not: held, the inspiration's, kept inside a band that does not pin it, today's
+  value written down, or an identity knob ([constants]). Of 572 unit families, 111 are derived and
+  461 are not: no turning, timing or economy family yet, since a turret's swivel, a hull's turn and
+  every income are set by no rule. The test checks the rules no other test did: the land
+  templates, the defense window's reaches, the navy line's and the brawler's reach, the navy's
+  times to kill and speeds, and the battlecruiser's targets, written as `[model]`
+  battlecruiser_speed_over_battleship and battlecruiser_laser_over_turret_min. The transports'
+  weak weapons are `[air] transport_weapons_over_gunship`. Nothing moves. Checked against the
+  data, some the first reading counted derived are not: the cruiser's hull and its missiles'
+  reach, the Attack Submarine's torpedo and reach, which no `[model]` rule reproduces today; where
+  the bombers let go; the Mobile Heavy Artillery's shell; and the domes, whose sizes are held.
 
 ## Order of work
 

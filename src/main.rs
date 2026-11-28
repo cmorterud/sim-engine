@@ -136,7 +136,7 @@ Usage: sim-engine [options]
                        With --soak, the strategies Blue and Red play (default
                        balanced,balanced)
   --balance            Measure the unit data with the balance harness's duels (BALANCE.md)
-  --balance-derive <t1|t2|t3|t1-air|air-bases|counters|structures|battle-line|domains|list|enhancements|factories|sources|unit <key>>
+  --balance-derive <t1|t2|t3|t1-air|air-bases|counters|structures|battle-line|domains|list|enhancements|factories|sources|stat-sources|family <name>|unit <key>>
                        Derive a tier of land units' numbers, or T1 air's, from
                        data/balance_targets.toml, priced by duels against the tiers below as
                        the unit data has them; with air-bases, the Mobile Flak's gun from
@@ -147,7 +147,9 @@ Usage: sim-engine [options]
                        air base and the navy base from the battle line; or, with domains, measure the
                        fights between land, air, navy, and hovercraft against [domains];
                        with list, print every unit's price by the ability price list against
-                       its cost; with unit <key>, one unit's price, job by job
+                       its cost; with unit <key>, one unit's price, job by job; with
+                       stat-sources, what sets each family of each unit's stats
+                       (data/stat_sources.toml), and with family <name>, one family's sources
   --no-tick-gate       With --soak, report tick times without failing on them, for
                        shared machines such as CI runners
   --seed <number>      Scenario seed
@@ -440,7 +442,11 @@ fn parse_options() -> Result<Option<Options>, String> {
             "--balance" => options.balance = true,
             "--balance-derive" => {
                 let what = value("--balance-derive")?;
-                options.balance_derive = Some(if what == "unit" { format!("unit {}", value("--balance-derive unit")?) } else { what });
+                options.balance_derive = Some(match what.as_str() {
+                    "unit" => format!("unit {}", value("--balance-derive unit")?),
+                    "family" => format!("family {}", value("--balance-derive family")?),
+                    _ => what,
+                });
             }
             "--threads" => options.threads = Some(number("--threads", value("--threads")?)? as usize),
             "--no-tick-gate" => options.no_tick_gate = true,
@@ -642,8 +648,10 @@ fn main() {
             "enhancements" => sim_engine::price_list::enhancement_report(&sim_engine::sim::blueprints::BlueprintDb::standard()),
             "factories" => sim_engine::price_list::factory_report(&sim_engine::sim::blueprints::BlueprintDb::standard()),
             "sources" => sim_engine::price_list::sources_report(&sim_engine::sim::blueprints::BlueprintDb::standard()),
+            "stat-sources" => sim_engine::stat_sources::sources_report(&sim_engine::sim::blueprints::BlueprintDb::standard(), None),
+            other if other.starts_with("family ") => sim_engine::stat_sources::sources_report(&sim_engine::sim::blueprints::BlueprintDb::standard(), Some(&other["family ".len()..])),
             other if other.starts_with("unit ") => sim_engine::price_list::unit_report(&sim_engine::sim::blueprints::BlueprintDb::standard(), &other["unit ".len()..]),
-            other => println!("--balance-derive takes t1, t2, t3, t1-air, air-bases, counters, structures, battle-line, domains, list, enhancements, factories, sources, or unit <key>, not {other}"),
+            other => println!("--balance-derive takes t1, t2, t3, t1-air, air-bases, counters, structures, battle-line, domains, list, enhancements, factories, sources, stat-sources, family <name>, or unit <key>, not {other}"),
         }
         return;
     }

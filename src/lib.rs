@@ -16,5 +16,6 @@ pub mod render;
 pub mod scenario_page;
 pub mod sim;
 pub mod soak;
+pub mod stat_sources;
 pub mod ui;
 pub mod unit_database;

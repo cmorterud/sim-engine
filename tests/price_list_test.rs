@@ -143,7 +143,7 @@ fn builders_cost_their_build_power() {
 
 /// Cargo is a utility job (2026-11-27): the armed transports cost their cargo, at the share of a
 /// full load the Light Air Transport pays, and their weapons, which do a quarter of their tier's
-/// gunship's damage a second (the design owner's rule).
+/// gunship's damage a second (the design owner's rule, `[air] transport_weapons_over_gunship`).
 #[test]
 fn transports_cost_their_cargo_and_weak_weapons() {
     let db = BlueprintDb::standard();
@@ -151,12 +151,13 @@ fn transports_cost_their_cargo_and_weak_weapons() {
         let unit = db.get(db.id(key));
         unit.weapon.iter().chain(&unit.extra_weapons).map(sim_engine::balance::damage_per_second).sum::<f64>()
     };
+    let wanted = sim_engine::balance::target_number("air", "transport_weapons_over_gunship");
     for (key, gunship) in [("t2_transport", "t2_gunship"), ("t3_heavy_transport", "t3_heavy_gunship")] {
         let pricing = price_list::price(&db, key).unwrap_or_else(|| panic!("the list prices {key}"));
         assert!(pricing.cargo > 0.0, "{key} carries");
         assert!(pricing.drift().abs() < 0.01, "{key} costs {:.1}, the list {:.1}", pricing.actual, pricing.list);
         let share = dps(key) / dps(gunship);
-        assert!((share - 0.25).abs() < 0.01, "{key}'s weapons do {share:.3} of the {gunship}'s damage a second, not a quarter");
+        assert!((share - wanted).abs() < 0.01, "{key}'s weapons do {share:.3} of the {gunship}'s damage a second, not {wanted}");
     }
 }
 
