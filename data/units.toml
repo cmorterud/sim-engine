@@ -2169,9 +2169,10 @@ tier = 2
 # The most that keeps 0.70 against an equal cost of submarines, once every sensor was priced over
 # its domain base made the Attack Submarine dearer (2026-11-27): 748 to 758.
 # Re-solved with the ships at the navy base re-derived for hovering gunships that drift (2026-11-27).
-mass = 702
-energy = 5624
-build_time = 3150
+# Re-solved once aircraft stopped keeping apart in flight moved the navy base (2026-11-28): 722 to 779.
+mass = 779
+energy = 6239
+build_time = 3495
 health = 3040
 speed = 12
 turn_rate = 100
