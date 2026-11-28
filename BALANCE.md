@@ -567,6 +567,16 @@ out close and why: evidence about the process, not a target.
   T3 air base 0.988 to 0.946, the T3 aircraft 4% dearer (the transport 1%). The commander's timing
   is now derived, so 449 unit families are not derived yet. The Mobile Anti-Air's gun now takes
   its kill time over its own reload, not over a one-second one (the same today).
+* 2026-11-28: sight for units that close on what they fire at (`balance::gun_sight`). A mobile
+  land unit whose guns all fire straight at the ground, and an aircraft armed only with guns, see
+  their longest gun's reach times the land line's 1.1, inside `[ratios] sight_over_range_line`:
+  the Command Rig 520 to 485, the Field Rig 520 to 550, the Combat Engineer 400 to 395, the
+  Interceptor 560 to 550, the Air Superiority Fighter, Heavy Gunship and Heavy Transport 640 to
+  660, the Gunship and the Transport 640 to 495. Duels run without fog, so no fight moves, and the
+  Combat Engineer's radar costs 0.1 more. The same rule for every armed unit would let the
+  Destroyer, the Battleship, the defenses and the artillery see 1.5 to 3 times farther in fog
+  games, where they lean on radar and the Cruiser to spot past their sight; their sight is left
+  for the radar and sonar pass. 443 unit families are not derived yet.
 
 ## Order of work
 

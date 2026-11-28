@@ -2,7 +2,7 @@
 //! rule, its anchor, or why it is not derived yet; every citation resolves; the rules the table
 //! claims that no other test checks are checked here; and what is still to derive can only fall.
 
-use sim_engine::balance::{damage_per_second, model_time_to_kill, t1_land_roles, t2_land_roles, t3_land_roles, shell_speed, turret_swivel, Anchor, Role};
+use sim_engine::balance::{damage_per_second, gun_sight, model_time_to_kill, t1_land_roles, t2_land_roles, t3_land_roles, shell_speed, turret_swivel, Anchor, Role};
 use sim_engine::sim::blueprints::{Blueprint, BlueprintDb, Targets, WeaponDef, WeaponKind};
 use sim_engine::stat_sources::{cited_code, cited_targets, derived, stat_source, Family, Kind, Reason, SOURCES};
 
@@ -11,7 +11,7 @@ const BALANCE: &str = include_str!("../src/balance.rs");
 const PRICE_LIST: &str = include_str!("../src/price_list.rs");
 
 /// Unit families not derived yet. A pass that derives some lowers this; nothing raises it.
-const NOT_DERIVED_YET: usize = 449;
+const NOT_DERIVED_YET: usize = 443;
 
 fn targets() -> toml::Table {
     TARGETS.parse().expect("data/balance_targets.toml is valid")
@@ -293,4 +293,28 @@ fn every_shell_flies_by_its_familys_rule() {
         }
     }
     assert!(ground >= 15 && anti_air >= 12, "only {ground} guns at the ground and {anti_air} at aircraft");
+}
+
+/// Pass 3's sight rule (balance::gun_sight): a mobile land unit whose guns all fire straight at
+/// the ground, and an aircraft armed only with guns, see their longest gun's reach times the land
+/// line's sight over range, which sits inside `[ratios] sight_over_range_line`. Every unit whose
+/// sensors cite the rule is one it covers.
+#[test]
+fn every_gun_unit_sees_a_little_past_its_longest_gun() {
+    let db = BlueprintDb::standard();
+    let line = t1_land_roles().into_iter().find(|role| role.role == "line").expect("T1 has a line role").sight_over_range;
+    let band = targets()["ratios"]["sight_over_range_line"].as_array().expect("[ratios] sight_over_range_line is a band").iter().map(number).collect::<Vec<_>>();
+    assert!(band[0] <= line && line <= band[1], "the line's sight over range {line} is inside {band:?}");
+    let mut covered = 0;
+    for unit in db.iter() {
+        let cites = stat_source(&unit.key, Family::Sensors).is_some_and(|source| source.contains("balance::gun_sight"));
+        let Some(sight) = gun_sight(unit) else {
+            assert!(!cites, "{}'s sensors cite balance::gun_sight, which does not cover it", unit.key);
+            continue;
+        };
+        assert!(cites, "{}'s sensors do not cite balance::gun_sight, which sets its vision", unit.key);
+        assert_eq!(unit.vision.to_num::<f64>(), sight, "{} sees a little past its longest gun", unit.key);
+        covered += 1;
+    }
+    assert!(covered >= 9, "only {covered} units see by the rule");
 }

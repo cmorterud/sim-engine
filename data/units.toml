@@ -18,7 +18,8 @@ health = 18000
 speed = "3.4"
 turn_rate = 90
 radius = 16
-vision = 520
+# Sight: a little past its longest gun, as the land line sees (balance::gun_sight).
+vision = 485
 # It walks the seabed too.
 movement = "seabed"
 build_power = 10
@@ -507,7 +508,8 @@ health = 16000
 speed = "4.4"
 turn_rate = 150
 radius = 14
-vision = 520
+# Sight: a little past its longest gun, as the land line sees (balance::gun_sight).
+vision = 550
 movement = "seabed"
 build_power = 56
 build_range = 200
@@ -678,7 +680,8 @@ build_time = 357
 health = 445
 speed = 30
 radius = 10
-vision = 560
+# Sight: a little past its longest gun, as the land line sees (balance::gun_sight).
+vision = 550
 flight = { elevation = 264, turn_rate = 270, break_off = 200, fuel = 300 }
 weapon = { range = 500, reload_ticks = 10, projectile_speed = 180, damage = "48.9", targets = "air", arc = 30 }
 
@@ -798,7 +801,8 @@ build_time = 865
 health = 1590
 speed = 27
 radius = 12
-vision = 640
+# Sight: a little past its longest gun, as the land line sees (balance::gun_sight).
+vision = 495
 flight = { elevation = 198, turn_rate = 90, fuel = 400, hovers = true }
 weapon = { range = 448, reload_ticks = 3, projectile_speed = 82, damage = "22.6", spread = 4 }
 
@@ -839,7 +843,8 @@ build_time = 3939
 health = 3520
 speed = 52
 radius = 12
-vision = 640
+# Sight: a little past its longest gun, as the land line sees (balance::gun_sight).
+vision = 660
 # Eases off slower than the interceptor (15), to turn tighter (the design owner, 2026-11-26):
 # a quarter of its top speed.
 flight = { elevation = 352, turn_rate = 340, break_off = 300, fuel = 1000, min_speed = 13 }
@@ -898,7 +903,8 @@ build_time = 2546
 health = 9600
 speed = 20
 radius = 16
-vision = 640
+# Sight: a little past its longest gun, as the land line sees (balance::gun_sight).
+vision = 660
 flight = { elevation = 198, turn_rate = 60, fuel = 800, hovers = true }
 # A T3 fighter destroys it in about 15 seconds (14, its fifteenth shot), so health 9,600, which is also the
 # cruiser's six volleys ([volleys]), and it destroys a commander with no
@@ -2136,7 +2142,8 @@ speed = 6
 turn_rate = 160
 turn_radius = 10
 radius = 8
-vision = 400
+# Sight: a little past its longest gun, as the land line sees (balance::gun_sight).
+vision = 395
 radar = 880
 upkeep = 15
 build_power = "17.5"
@@ -2313,7 +2320,8 @@ build_time = 3316
 health = 1810
 speed = 29
 radius = 16
-vision = 640
+# Sight: a little past its longest gun, as the land line sees (balance::gun_sight).
+vision = 495
 flight = { elevation = 198, turn_rate = 90, fuel = 600, hovers = true }
 transport = { small = 14, medium = 6, large = 3 }
 weapon = { range = 448, reload_ticks = 5, projectile_speed = 82, damage = "9.4" }
@@ -2338,7 +2346,8 @@ build_time = 5806
 health = 9800
 speed = 35
 radius = 20
-vision = 640
+# Sight: a little past its longest gun, as the land line sees (balance::gun_sight).
+vision = 660
 flight = { elevation = 198, turn_rate = 80, fuel = 800, hovers = true }
 transport = { small = 28, medium = 12, large = 6 }
 # Back 20 seconds after it falls, as every shield (2026-11-27; 35 until then).

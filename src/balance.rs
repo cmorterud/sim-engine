@@ -1380,6 +1380,37 @@ pub fn turret_swivel(db: &BlueprintDb, unit: &Blueprint, weapon: &WeaponDef) -> 
     }
 }
 
+/// The sight of a unit that fights by closing on what it fires at (2026-11-28, the derivation
+/// plan's Pass 3), or None where something else sets it: a land role's own sight
+/// (`balance::t1_land_roles` and on), or a unit that fires past its own sight and leans on radar
+/// and spotters (ships, defenses, anti-air on the ground, bombers, torpedoes, artillery and
+/// missiles), whose sight is set with its radar and sonar (Pass 6, the design owner's pick).
+/// A mobile land unit whose guns all fire straight at the ground, and an aircraft whose weapons
+/// are all guns, see a little past their longest gun, as the land line does: that reach times the
+/// line role's sight over range (`balance::t1_land_roles`, inside `[ratios]
+/// sight_over_range_line`), to the nearest 5, as a role's sight is rounded.
+pub fn gun_sight(unit: &Blueprint) -> Option<f64> {
+    use crate::price_list::{domain_of, fighting_weapons, Domain};
+    use crate::sim::blueprints::{Targets, WeaponKind};
+    let roles = [t1_land_roles(), t2_land_roles(), t3_land_roles()];
+    if unit.is_structure() || roles.iter().flatten().any(|role| role.unit == unit.key) {
+        return None;
+    }
+    let weapons = fighting_weapons(unit);
+    let gun = |weapon: &WeaponDef| weapon.kind == WeaponKind::Shell && !weapon.artillery && !weapon.lobbed && weapon.targets != Targets::Naval;
+    let closes = match domain_of(unit) {
+        Domain::Air => unit.flight.is_some(),
+        Domain::Land => weapons.iter().all(|weapon| weapon.targets != Targets::Air),
+        Domain::Navy => false,
+    };
+    if weapons.is_empty() || !closes || !weapons.iter().all(gun) {
+        return None;
+    }
+    let line = t1_land_roles().into_iter().find(|role| role.role == "line").expect("T1 has a line role").sight_over_range;
+    let reach = weapons.iter().map(|weapon| weapon.range.to_num::<f64>()).fold(0.0, f64::max);
+    Some((reach * line / 5.0).round() * 5.0)
+}
+
 /// The speed a gun's shell flies at, in units a tick, by its family's rule (2026-11-28, the
 /// derivation plan's Pass 2), or None where something else sets it: a land role's own flight
 /// (`balance::t1_land_roles` and on), artillery, a lobbed broadside, a missile, a bomb, a laser.

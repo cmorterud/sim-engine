@@ -30,7 +30,7 @@ range = "anchor: the design owner's reach, 1.26 times the Medium Tank's ([comman
 speed = "not derived yet: an identity knob ([constants]), today's top speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
 timing = "rule: its shell reaches full range in the anchor's flight time (balance::shell_speed), its reload is the design owner's ([commander] holds_against_medium_tanks), its turret's swivel balance::turret_swivel"
-sensors = "not derived yet: held, its vision and deep scan"
+sensors = "not derived yet: held, its deep scan; its vision is a little past its longest gun, as the land line sees (balance::gun_sight)"
 economy = "not derived yet: held, its income, storage and build power"
 special = "anchor: the design owner's Discharge, at least [commander] discharge_kills_every_t1_land_unit; its reactor's blast is its own health"
 
@@ -204,7 +204,7 @@ range = "not derived yet: held, a little past the commander's"
 speed = "not derived yet: the inspiration's"
 turning = "not derived yet: the inspiration's"
 timing = "not derived yet: the inspiration's reload; its shell is balance::shell_speed, its turret's swivel balance::turret_swivel"
-sensors = "not derived yet: the inspiration's"
+sensors = "not derived yet: the inspiration's deep scan; its vision is a little past its longest gun, as the land line sees (balance::gun_sight)"
 economy = "not derived yet: the inspiration's"
 special = "not derived yet: held, its blast on death"
 
@@ -261,7 +261,7 @@ range = "not derived yet: held, its gun's reach"
 speed = "not derived yet: an identity knob ([constants]), today's top speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn rate, at least [air] fighter_turn_over_t1_bomber; its turn radius is [constants] fighter_turn_radius; its height [air.heights] t1_interceptor of the Spy Plane's, which is held"
 timing = "not derived yet: held, its reload and its 30-degree arc; its shell speed is [constants] fighter_gun_speed"
-sensors = "not derived yet: held, today's vision"
+sensors = "rule: it sees a little past its longest gun, as the land line does (balance::gun_sight)"
 
 [units.t1_bomber]
 health = "rule: [air] interceptor_seconds_per_bomber_t1, ten seconds of the Interceptor's gun (balance::derive_t1_air)"
@@ -311,7 +311,7 @@ range = "rule: [model] aircraft_gun_over_anti_air, 0.7 of the Mobile Anti-Air's"
 speed = "not derived yet: an identity knob ([constants]), today's top speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn and fuel; its height is [air.heights] t2_gunship of the Spy Plane's, which is held"
 timing = "not derived yet: held, its reload and spread; its shell is balance::shell_speed"
-sensors = "not derived yet: held, today's vision"
+sensors = "rule: it sees a little past its longest gun, as the land line does (balance::gun_sight)"
 
 [units.t3_spy_plane]
 health = "not derived yet: held, its health and body"
@@ -328,7 +328,7 @@ range = "not derived yet: kept inside [air.t3_fighter] range_over_interceptor, w
 speed = "rule: [air.t3_fighter] speed_over_strategic_bomber"
 turning = "not derived yet: held, its fuel and break-off; its turn is [air.t3_fighter] turn_over_interceptor, its least speed the design owner's quarter of its top, its height [air.heights] t3_air_superiority of the Spy Plane's"
 timing = "not derived yet: held, its reload; its 40-degree arc the design owner's, its shell [constants] fighter_gun_speed"
-sensors = "not derived yet: held, today's vision"
+sensors = "rule: it sees a little past its longest gun, as the land line does (balance::gun_sight)"
 
 [units.t3_strategic_bomber]
 health = "rule: [volleys] t2_cruiser.t3_strategic_bomber and [kill_times] sam_t3_strategic_bomber"
@@ -348,7 +348,7 @@ range = "rule: [model] aircraft_gun_over_anti_air, 0.7 of the Mobile Flak's, and
 speed = "not derived yet: an identity knob ([constants]), today's top speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn and fuel; its height is [air.heights] t3_heavy_gunship of the Spy Plane's, which is held"
 timing = "not derived yet: held, its reloads and spread; its gun's shell is balance::shell_speed, its anti-air's the [shells] anti_air_speed anchor"
-sensors = "not derived yet: held, today's vision"
+sensors = "rule: it sees a little past its longest gun, as the land line does (balance::gun_sight)"
 
 [units.t2_flak]
 health = "not derived yet: held, mostly health for its premium ([premiums] static_anti_air_over_mobile prices it)"
@@ -696,7 +696,7 @@ range = "not derived yet: the inspiration's"
 speed = "not derived yet: the inspiration's"
 turning = "not derived yet: the inspiration's"
 timing = "not derived yet: the inspiration's reload; its shell is balance::shell_speed, its turret's swivel balance::turret_swivel"
-sensors = "not derived yet: the inspiration's"
+sensors = "not derived yet: the inspiration's radar; its vision is a little past its longest gun, as the land line sees (balance::gun_sight)"
 economy = "not derived yet: the inspiration's"
 
 [units.t3_heavy_walker]
@@ -766,7 +766,7 @@ range = "rule: [model] aircraft_gun_over_anti_air, 0.7 of the Mobile Anti-Air's"
 speed = "not derived yet: an identity knob ([constants]), today's top speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn and fuel; its height is [air.heights] t2_transport of the Spy Plane's, which is held"
 timing = "not derived yet: held, its reload; its shell is balance::shell_speed"
-sensors = "not derived yet: held, today's vision"
+sensors = "rule: it sees a little past its longest gun, as the land line does (balance::gun_sight)"
 special = "not derived yet: the inspiration's cargo room"
 
 [units.t3_heavy_transport]
@@ -777,5 +777,5 @@ range = "rule: [model] aircraft_gun_over_anti_air, 0.7 of the Mobile Flak's, and
 speed = "not derived yet: an identity knob ([constants]), today's top speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn and fuel; its height is [air.heights] t3_heavy_transport of the Spy Plane's, which is held"
 timing = "not derived yet: held, its reloads; its gun's shell is balance::shell_speed, its anti-air's the [shells] anti_air_speed anchor"
-sensors = "not derived yet: held, today's vision"
+sensors = "rule: it sees a little past its longest gun, as the land line does (balance::gun_sight)"
 special = "not derived yet: held, its cargo room and its shield's size and regeneration"
