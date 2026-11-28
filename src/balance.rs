@@ -1255,13 +1255,14 @@ pub fn derive_t1_air(base: &BlueprintDb) -> BlueprintDb {
         unit.energy = Res::from_num(mass * anchor.energy / anchor.materiel);
         unit.build_time = Res::from_num((mass * build_per_mass).round());
     });
-    // The Interceptor: its size, √(health × damage a second), is what an equal cost of them
-    // clearing an equal cost of bombers in [air] interceptors_clear_bombers_seconds holds (checked
-    // by its fight, as every T1 air number scales with it); its health over its damage a second is
-    // the [model] time to kill in air-to-air fights at T1.
+    // The Interceptor: its size, √(health × damage a second), is the design owner's anchor for T1
+    // air's scale, [air] interceptor_size, since every T1 air number scales with it and no fight
+    // pins it (an equal cost of them clearing an equal cost of bombers in [air]
+    // interceptors_clear_bombers_seconds is checked by its fight). Its health over its damage a
+    // second is the [model] time to kill in air-to-air fights at T1.
     let interceptor_id = db.id("t1_interceptor");
     let interceptor = db.get(interceptor_id).weapon.expect("interceptors have a gun");
-    let size = (db.get(interceptor_id).health.to_num::<f64>() * damage_per_second(&interceptor)).sqrt();
+    let size = target_number("air", "interceptor_size");
     let air_to_air = model_time_to_kill(1, "air_to_air");
     let reload_seconds = f64::from(interceptor.reload_ticks.max(1)) / TICKS_PER_SECOND as f64 / f64::from(interceptor.shots_per_reload());
     db = db.with_unit(interceptor_id, |unit| {

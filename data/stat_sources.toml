@@ -254,9 +254,9 @@ turning = "not derived yet: an identity knob ([constants]), today's turn and fue
 sensors = "not derived yet: held, its vision, radar and sonar"
 
 [units.t1_interceptor]
-health = "not derived yet: kept inside [air] interceptors_clear_bombers_seconds, its size, the root of health times damage a second, which the band does not pin; [model] time_to_kill_domain air_to_air splits it (balance::derive_t1_air)"
+health = "anchor: [air] interceptor_size, the design owner's for T1 air's scale, the root of health times damage a second; [model] time_to_kill_domain air_to_air splits it (balance::derive_t1_air)"
 body = "not derived yet: held, today's radius"
-damage = "not derived yet: kept inside [air] interceptors_clear_bombers_seconds, its size, which the band does not pin; [model] time_to_kill_domain air_to_air splits it (balance::derive_t1_air)"
+damage = "anchor: [air] interceptor_size, the design owner's for T1 air's scale; [model] time_to_kill_domain air_to_air splits it (balance::derive_t1_air)"
 range = "not derived yet: held, its gun's reach"
 speed = "not derived yet: an identity knob ([constants]), today's top speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn rate, at least [air] fighter_turn_over_t1_bomber; its turn radius is [constants] fighter_turn_radius; its height [air.heights] t1_interceptor of the Spy Plane's, which is held"
