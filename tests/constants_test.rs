@@ -115,3 +115,28 @@ fn veterancy_and_wreckage_are_the_rules_written_down() {
     assert_eq!(wreckage["sunk_permille"].as_integer(), Some(WRECK_SUNK_PERMILLE));
     assert_eq!(wreckage["health_permille"].as_integer(), Some(WRECK_HEALTH_PERMILLE));
 }
+
+/// Every unit on the ground or at sea turns on its tier's line unit's circle (Pass 5, the design
+/// owner's pick, 2026-11-28): the line unit's turn rate times its speed over the line unit's, to a
+/// whole degree a second. The builders keep their own.
+#[test]
+fn hulls_turn_on_their_tiers_line_circle() {
+    let (constants, db) = (constants(), BlueprintDb::standard());
+    let table: toml::Table = TARGETS.parse().expect("data/balance_targets.toml is valid");
+    let holds: Vec<&str> = constants["hull_turning"]["holds"].as_array().expect("the builders").iter().map(|key| key.as_str().expect("a key")).collect();
+    let line = |domain: &str, tier: u8| db.get(db.id(table["price_list"]["line"][domain][usize::from(tier) - 1].as_str().expect("a line unit")));
+    let mut turned = 0;
+    for unit in db.iter().filter(|unit| unit.flight.is_none() && !unit.is_structure() && !holds.contains(&unit.key.as_str())) {
+        let Some(turn) = unit.turn_rate else { continue };
+        let domain = match domain_of(unit) {
+            Domain::Navy => "navy",
+            Domain::Land => "land",
+            Domain::Air => continue,
+        };
+        let anchor = line(domain, unit.tier.clamp(1, 3));
+        let wanted = (f64::from(anchor.turn_rate.expect("a line unit turns")) * unit.speed.to_num::<f64>() / anchor.speed.to_num::<f64>()).round();
+        assert_eq!(f64::from(turn), wanted, "{} turns at {turn}, its tier's line circle asks {wanted}", unit.key);
+        turned += 1;
+    }
+    assert!(turned >= 24, "{turned} hulls");
+}

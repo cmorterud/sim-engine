@@ -11,7 +11,7 @@ const BALANCE: &str = include_str!("../src/balance.rs");
 const PRICE_LIST: &str = include_str!("../src/price_list.rs");
 
 /// Unit families not derived yet. A pass that derives some lowers this; nothing raises it.
-const NOT_DERIVED_YET: usize = 339;
+const NOT_DERIVED_YET: usize = 335;
 
 fn targets() -> toml::Table {
     TARGETS.parse().expect("data/balance_targets.toml is valid")
