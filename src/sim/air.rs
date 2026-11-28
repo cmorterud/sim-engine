@@ -8,7 +8,7 @@ use super::config::GRAVITY_RAW;
 use super::spatial::GridEntry;
 use super::terrain::Terrain;
 use super::world::SimWorld;
-use crate::math::fp::{fp_int, mul_toward_zero, sqrt_wide, wide_mul, Fp, FpWide, Vec2Fp, Vec3Fp};
+use crate::math::fp::{FP_FRAC_BITS, fp_int, mul_toward_zero, sqrt_wide, wide_mul, Fp, FpWide, Vec2Fp, Vec3Fp};
 
 /// Bombs fall at the inspiration's gravity, 4.9 map units a second squared, which is ten times
 /// what shells use here.
@@ -128,6 +128,27 @@ fn inside_turn(facing: Vec2Fp, offset: Vec2Fp, radius: Fp) -> bool {
     wide_mul(along, along) + wide_mul(side, side) < wide_mul(radius, radius)
 }
 
+/// Ticks a hovering gunship drifts one way across its line to its target before it drifts back,
+/// and the share of its top speed it drifts at; and the same for its drift in and out along that
+/// line, slower and out of step, so that a group over its work is a loose, bobbing blob rather
+/// than a still knot (the design owner, 2026-11-27).
+pub const BOB_ACROSS_TICKS: u32 = 20;
+pub const BOB_ACROSS_SHARE: i32 = 8;
+pub const BOB_ALONG_TICKS: u32 = 30;
+pub const BOB_ALONG_SHARE: i32 = 16;
+
+/// How a gunship hovering since `since` drifts this tick, facing `facing` (towards its target):
+/// across, then along, each a half swing first, so that it rocks about where it stopped. It
+/// depends only on how long it has hovered and which way it faces, so mirror images drift in
+/// mirror image, and gunships that stopped on different ticks drift out of step.
+fn bob(since: u32, tick: u32, facing: Vec2Fp, top_speed: Fp) -> Vec2Fp {
+    let hovered = tick.wrapping_sub(since);
+    let sign = |period: u32| if ((hovered + period / 2) / period).is_multiple_of(2) { Fp::ONE } else { -Fp::ONE };
+    let across = Vec2Fp::new(-facing.y, facing.x).scaled(top_speed * sign(BOB_ACROSS_TICKS) / BOB_ACROSS_SHARE);
+    let along = facing.scaled(top_speed * sign(BOB_ALONG_TICKS) / BOB_ALONG_SHARE);
+    Vec2Fp::new(across.x + along.x, across.y + along.y)
+}
+
 /// Below this share of a full tank, a patrolling aircraft goes to refuel.
 const REFUEL_SHARE_PERCENT: u32 = 20;
 /// Ticks of fuel gained each tick on the ground, the inspiration's recharge rate of 5, and on an
@@ -241,6 +262,7 @@ impl SimWorld {
         let max = terrain.max_coordinate_raw();
         let outer = terrain.outer_margin_raw();
         let center = Vec2Fp::new(Fp::from_bits(max / 2), Fp::from_bits(max / 2));
+        let tick = self.current_tick;
         let locate = |target: SimId| -> Option<GridEntry> { units.binary_search_by_key(&target, |unit| unit.0).ok().map(|index| *grid.entry(index)) };
         // The spots aircraft have taken on the ground, to land on or resting on, so that no two
         // land on one another. Those taken this tick are added as they are.
@@ -359,13 +381,20 @@ impl SimWorld {
                 }
             }
 
-            // A gunship stops over what it attacks, well within range, and turns to face it.
+            // A gunship stops over what it attacks, well within range, turns to face it, and drifts
+            // back and forth there (`bob`).
             let hold = flight.hovers
                 && attacking
                 && heading_for.is_some_and(|point| {
                     let reach = combat.range * 3 / 4;
                     here.distance_squared(&point) <= wide_mul(reach, reach)
                 });
+            // It notes when it came to a stop over its work, which sets how it drifts there.
+            if !hold {
+                flight.hovering_since = u32::MAX;
+            } else if flight.hovering_since == u32::MAX {
+                flight.hovering_since = tick;
+            }
             // With nothing to do, it lands, if there is open ground below to land on. Patrols
             // and trips to refuel keep it in the air. It lands on the map, just inside the edge
             // if that is where it is: only where it is over the map and would still be once it
@@ -547,10 +576,94 @@ impl SimWorld {
                 (Some((_, distance)), Some(spot)) if speed >= distance => spot - here,
                 _ => turning.facing.scaled(speed),
             };
+            let step = if hold {
+                let drift = bob(flight.hovering_since, tick, turning.facing, top_speed);
+                Vec2Fp::new(step.x + drift.x, step.y + drift.y)
+            } else {
+                step
+            };
+            // It may fly on past the map's edge, as after a pass, and turns back of itself; the
+            // outer margin only stops a runaway. Kept a raw bit further in on the low side, so
+            // that the limits are mirror images: the map runs from 0 to a raw bit short of its
+            // size, and mirrored matches parted where one side was held a bit further out.
             let next = Vec2Fp::new(Fp::from_bits((here.x + step.x).to_bits().clamp(1 - outer, max + outer)), Fp::from_bits((here.y + step.y).to_bits().clamp(1 - outer, max + outer)));
             // Landed, it rests on the ground like any other unit.
             position.0 = Vec3Fp::new(next.x, next.y, flying_height(terrain, next, flight.altitude.max(stats.radius)));
             velocity.0 = Vec3Fp::new(step.x, step.y, Fp::ZERO);
+        }
+        self.separate_holding_gunships();
+    }
+
+    /// Gunships holding over their work keep a little apart, a loose blob rather than one on top
+    /// of another; no other aircraft does in flight (the design owner, 2026-11-27). Any two
+    /// closer than their radii and a margin are pushed apart, a third of the overlap a tick, so
+    /// that they spread without jittering. In order along x, so only near neighbors are compared.
+    /// Divisions round toward zero, so mirror-image pairs move in mirror image. Two exactly
+    /// together part side by side, the lower id to the right of the way it faces, which turns
+    /// with the map as a compass direction does not.
+    fn separate_holding_gunships(&mut self) {
+        const MARGIN_RAW: i64 = 4 << 12;
+        let mut flying: Vec<(i64, i64, i64, SimId, hecs::Entity, Vec2Fp)> = self
+            .aircraft
+            .iter()
+            .filter_map(|&(id, entity)| {
+                let flight = self.ecs.get::<&Flight>(entity).ok()?;
+                if flight.altitude <= Fp::ZERO || flight.hovering_since == u32::MAX {
+                    return None;
+                }
+                let position = self.ecs.get::<&Position>(entity).ok()?.0;
+                let radius = self.ecs.get::<&UnitStats>(entity).ok()?.radius;
+                let facing = self.ecs.get::<&Turning>(entity).ok()?.facing;
+                Some((i64::from(position.x.to_bits()), i64::from(position.y.to_bits()), i64::from(radius.to_bits()), id, entity, facing))
+            })
+            .collect();
+        if flying.len() < 2 {
+            return;
+        }
+        flying.sort_unstable_by_key(|&(x, _, _, id, _, _)| (x, id));
+        let widest = flying.iter().map(|aircraft| aircraft.2).max().unwrap_or(0);
+        let mut pushes = vec![(0_i64, 0_i64); flying.len()];
+        for first in 0..flying.len() {
+            let (x, y, radius, id, _, facing) = flying[first];
+            for second in first + 1..flying.len() {
+                let (other_x, other_y, other_radius, other_id, _, other_facing) = flying[second];
+                if other_x - x > radius + widest + MARGIN_RAW {
+                    break;
+                }
+                let contact = radius + other_radius + MARGIN_RAW;
+                let (dx, dy) = (x - other_x, y - other_y);
+                let distance_squared = dx * dx + dy * dy;
+                if distance_squared >= contact * contact {
+                    continue;
+                }
+                let distance = (distance_squared as u64).isqrt() as i64;
+                let overlap = contact - distance;
+                let (push_x, push_y) = if distance == 0 {
+                    // Exactly together: the lower id to the right of the way it faces.
+                    let (sign, facing) = if id < other_id { (1, facing) } else { (-1, other_facing) };
+                    let (fx, fy) = (i64::from(facing.x.to_bits()), i64::from(facing.y.to_bits()));
+                    let one = 1_i64 << FP_FRAC_BITS;
+                    (sign * fy * overlap / one / 6, -sign * fx * overlap / one / 6)
+                } else {
+                    (dx * overlap / distance / 6, dy * overlap / distance / 6)
+                };
+                pushes[first].0 += push_x;
+                pushes[first].1 += push_y;
+                pushes[second].0 -= push_x;
+                pushes[second].1 -= push_y;
+            }
+        }
+        let max = i64::from(self.terrain.max_coordinate_raw());
+        let outer = i64::from(self.terrain.outer_margin_raw());
+        for (index, &(_, _, _, _, entity, _)) in flying.iter().enumerate() {
+            let (push_x, push_y) = pushes[index];
+            if push_x == 0 && push_y == 0 {
+                continue;
+            }
+            let mut position = self.ecs.get::<&mut Position>(entity).expect("aircraft are live units");
+            let x = (i64::from(position.0.x.to_bits()) + push_x).clamp(1 - outer, max + outer) as i32;
+            let y = (i64::from(position.0.y.to_bits()) + push_y).clamp(1 - outer, max + outer) as i32;
+            position.0 = Vec3Fp::new(Fp::from_bits(x), Fp::from_bits(y), position.0.z);
         }
     }
 }
