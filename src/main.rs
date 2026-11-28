@@ -1306,7 +1306,7 @@ fn run_landscape(seed: u64, options: &Options, map_source: &MapSource, directory
     }
     let instances = InstanceBatches::default();
     for view in landscape_views(&map.heights, f64::from(map.water_level)) {
-        let mut camera = Camera::new(map.map_units, [f64::from(size.width), f64::from(size.height)]);
+        let mut camera = Camera::new(map.map_units, [f64::from(size.width.max(1)), f64::from(size.height.max(1))]);
         camera.look_at(view.focus[0], view.focus[1], view.altitude);
         if view.low_angle {
             camera.orbit(0.0, -90.0);
@@ -1412,7 +1412,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     if autotest.is_some() && options.capture_dir.is_none() {
         renderer.start_gpu_timing();
     }
-    let mut camera = Camera::new(map.map_units, [f64::from(size.width), f64::from(size.height)]);
+    let mut camera = Camera::new(map.map_units, [f64::from(size.width.max(1)), f64::from(size.height.max(1))]);
     if is_match {
         camera.set_min_altitude(SKIRMISH_MIN_ALTITUDE);
         camera.look_at(raw_to_world(player_start.x.to_bits()), raw_to_world(player_start.y.to_bits()), STARTING_ALTITUDE);
@@ -1511,8 +1511,14 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     // The stress test's units have no blueprints, and stay plain cubes.
     let looks = instances::unit_looks(&map.blueprints);
 
+    #[cfg(not(target_arch = "wasm32"))]
     event_loop.set_control_flow(ControlFlow::Poll);
+    #[cfg(target_arch = "wasm32")]
+    event_loop.set_control_flow(ControlFlow::Wait);
     let handle_event = move |event: Event<()>, target: &winit::event_loop::EventLoopWindowTarget<()>| match event {
+            #[cfg(target_arch = "wasm32")]
+            Event::NewEvents(winit::event::StartCause::Init) => window.request_redraw(),
+            #[cfg(not(target_arch = "wasm32"))]
             Event::AboutToWait => window.request_redraw(),
             Event::WindowEvent { event, .. } => {
                 let response = egui_state.on_window_event(&window, &event);
@@ -1530,6 +1536,8 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                     WindowEvent::Resized(new_size) => {
                         renderer.resize(new_size.width, new_size.height);
                         camera.set_viewport([f64::from(new_size.width.max(1)), f64::from(new_size.height.max(1))]);
+                        #[cfg(target_arch = "wasm32")]
+                        window.request_redraw();
                     }
                     WindowEvent::ModifiersChanged(modifiers) => {
                         alt_held = modifiers.state().alt_key();
@@ -1968,6 +1976,15 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                         }
                     }
                     WindowEvent::RedrawRequested => {
+                        let size = window.inner_size();
+                        if size.width == 0 || size.height == 0 {
+                            return;
+                        }
+                        if camera.viewport() != [f64::from(size.width), f64::from(size.height)] {
+                            renderer.resize(size.width, size.height);
+                            camera.set_viewport([f64::from(size.width), f64::from(size.height)]);
+                        }
+
                         let now = Instant::now();
                         let frame_time = now - last_frame;
                         last_frame = now;
@@ -2518,7 +2535,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                         // Builders' beams and adjacency wiring are in the world, and only up close:
                         // zoomed out to icons, they would be clutter.
                         if camera.altitude() < ICON_ALTITUDE {
-                            links::build_work_beam_instances(&links::from_tools(beams.clone(), &motion), beam_time, eye, &mut scene_instances);
+                            links::build_work_beam_instances(&links::from_tools(beams, &motion), beam_time, eye, &mut scene_instances);
                             links::build_wiring_instances(&snapshot.adjacency, &snapshot.units, beam_time, eye, &mut scene_instances);
                         }
                         let cell = f64::from(TERRAIN_CELL_UNITS);
@@ -2632,6 +2649,8 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                             title_timer = Instant::now();
                             title_frames = 0;
                         }
+                        #[cfg(target_arch = "wasm32")]
+                        window.request_redraw();
                     }
                     _ => {}
                 }
