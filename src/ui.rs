@@ -4981,8 +4981,9 @@ mod tests {
         assert!(generator.contains("Makes 20 energy a second"), "{generator}");
         let interceptor = item_details(&db, db.id("t1_interceptor"));
         assert!(interceptor.contains("at aircraft only"), "{interceptor}");
-        let height = db.get(db.id("t1_interceptor")).flight.expect("interceptors fly").elevation;
-        assert!(interceptor.contains(&format!("Speed 300 a second, flies at {height}")), "{interceptor}");
+        let plane = db.get(db.id("t1_interceptor"));
+        let (speed, height) = (plane.speed * 10, plane.flight.expect("interceptors fly").elevation);
+        assert!(interceptor.contains(&format!("Speed {speed} a second, flies at {height}")), "{interceptor}");
         let extractor = item_details(&db, db.id("mass_extractor"));
         assert!(extractor.contains("Built on a materiel deposit"), "{extractor}");
     }
