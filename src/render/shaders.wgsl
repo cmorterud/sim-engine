@@ -408,7 +408,14 @@ fn fs_unit(input: UnitOutput) -> @location(0) vec4<f32> {
     // Crowded corners lose most of the sky's light and some of the sun's, which sets parts
     // apart where they meet, as a stylized contact shadow.
     let open = input.openness;
-    var diffuse = input.albedo * (ambient * open + climate.sun.rgb * sun * mix(1.0, open, SUN_OCCLUSION));
+    let distance = length(input.relative);
+    // Deepen shaded faces at play distance, where small changes of material are hard to see.
+    // Keep the close model as it was and fade the adjustment as it becomes a strategic dot.
+    let play_contrast = smoothstep(100.0, 300.0, distance) * (1.0 - input.morph);
+    let diffuse = input.albedo * (
+        ambient * open * mix(1.0, 0.80, play_contrast)
+        + climate.sun.rgb * sun * mix(1.0, open, SUN_OCCLUSION) * mix(1.0, 1.06, play_contrast)
+    );
     // Metal shines sharply, paint softly.
     var shininess = 20.0;
     var strength = 0.18;
@@ -423,7 +430,7 @@ fn fs_unit(input: UnitOutput) -> @location(0) vec4<f32> {
     let shine = pow(max(dot(normal, halfway), 0.0), shininess) * strength * step(0.0, sun);
     // Edges facing away from the eye catch a little light, so that outlines show against the
     // ground: more from further out, where units are small and the ground busy around them.
-    let rim_strength = mix(RIM_NEAR, RIM_FAR, smoothstep(RIM_NEAR_DISTANCE, RIM_FAR_DISTANCE, length(input.relative)));
+    let rim_strength = mix(RIM_NEAR, RIM_FAR, smoothstep(RIM_NEAR_DISTANCE, RIM_FAR_DISTANCE, distance));
     let rim = pow(1.0 - max(dot(normal, to_eye), 0.0), 3.0) * rim_strength;
     let lit = diffuse + vec3<f32>(shine) + rim * mix(input.albedo, vec3<f32>(1.0), 0.5);
     return vec4<f32>(mix(tone(hazed(lit, input.relative)), on_screen(input.albedo), input.morph), 1.0);
@@ -1202,6 +1209,12 @@ fn shade_terrain(input: TerrainOutput, surface: vec4<f32>, height: f32) -> vec4<
     // How much close-up detail shows: all of it when a pixel covers well under a unit of
     // ground, none by the time it covers a unit and a half.
     let near = 1.0 - smoothstep(0.25, 1.5, footprint);
+    let above_water = height - globals.terrain_scale.w;
+    // Favor broad relief and color patches as the close detail fades. Ease out again
+    // in the strategic view, and keep the treatment inland so the surf stays distinct.
+    let play_contrast = smoothstep(0.25, 0.65, footprint)
+        * (1.0 - smoothstep(2.5, 6.0, footprint))
+        * smoothstep(5.0, 14.0, above_water);
     // Small bumps break up the light up close.
     let bumps = value_noise_slope(input.world / 4.0).yz / 4.0 * 1.4 + value_noise_slope(input.world / 1.3).yz / 1.3 * 0.2;
     let normal = normalize(smooth_normal + vec3<f32>(-bumps * near, 0.0));
@@ -1222,6 +1235,7 @@ fn shade_terrain(input: TerrainOutput, surface: vec4<f32>, height: f32) -> vec4<
     let t = clamp((height + 36.0) / 72.0, 0.0, 1.0);
     let patches = value_noise(input.world / 220.0) * 0.5 + value_noise(input.world / 61.0) * 0.3 + value_noise(input.world / 17.0) * 0.2;
     var base = mix(climate.grass_low.rgb, climate.grass_high.rgb, t) * (0.91 + 0.18 * patches);
+    base = base * (1.0 + (patches - 0.5) * 0.26 * play_contrast);
     // Damp ground is lusher and darker, and dry sunny slopes paler and yellower.
     let damp = land.b;
     base = mix(base, climate.grass_dry.rgb, smoothstep(0.55, 0.95, land.r * (1.0 - damp)) * smoothstep(0.35, 0.75, patches) * 0.35);
@@ -1254,7 +1268,6 @@ fn shade_terrain(input: TerrainOutput, surface: vec4<f32>, height: f32) -> vec4<
     let rock_tint = mix(climate.rock.rgb, climate.rock_warm.rgb, smoothstep(0.35, 0.65, patches));
     base = mix(base, rock_tint * layers * (1.0 - 0.22 * crack) * (0.9 + 0.2 * patches) * rock_detail, steep);
     // Sand along the shore, a little above the water, rippled by the wind.
-    let above_water = height - globals.terrain_scale.w;
     let sand_detail = 1.0 + detail.a * 0.45;
     base = mix(base, climate.sand.rgb * sand_detail, (1.0 - smoothstep(1.0, 5.0, above_water)) * (1.0 - steep));
 
@@ -1266,7 +1279,10 @@ fn shade_terrain(input: TerrainOutput, surface: vec4<f32>, height: f32) -> vec4<
     // Faint height contours give a sense of scale, on gentle ground only: on a cliff they crowd
     // together into stripes.
     let line = (1.0 - clamp(contour / contour_width, 0.0, 1.0)) * (1.0 - steep);
-    var color = base * light * hollows * (1.0 - 0.07 * line);
+    // Center the extra directional contrast on flat sunlit ground so it keeps its brightness.
+    let relief_light = max(dot(smooth_normal, LIGHT), 0.0) * land.r;
+    let relief_contrast = 1.0 + (relief_light - LIGHT.z) * 0.22 * play_contrast;
+    var color = base * light * hollows * relief_contrast * (1.0 - 0.07 * line);
     let time = globals.water.x;
     let depth = -above_water;
     if (depth > 0.0) {
