@@ -153,7 +153,7 @@ ground = "water"
 target = "domains.cells.fleet_without_anti_air_loses_to_torpedo_bombers"
 shows = "Destroyers with no cruisers or corvettes, against an equal cost of torpedo bombers. Their anti-torpedo charges stop only a few of the torpedoes a wing drops, and they have next to no anti-air: the bombers win easily. A fleet that skips anti-air loses to the air."
 try = "Attack-move in, and compare with the T2 fleet against twice its cost in torpedo bombers."
-blue = [{ unit = "t2_torpedo_bomber", count = 50, at = [1_200, 2_560], columns = 10 }]
+blue = [{ unit = "t2_torpedo_bomber", count = 57, at = [1_200, 2_560], columns = 10 }]
 red = [{ unit = "t2_destroyer", count = 8, at = [3_000, 2_560], columns = 4 }]
 
 [[scenario]]
@@ -259,8 +259,8 @@ target = "domains.cells.fleet_beats_air_force_t3"
 shows = "A massed T3 fleet, a Battleship and a Battlecruiser with cruisers, destroyers, and shield corvettes seven-tenths of its cost, against an equal cost of the T3 air force: air superiority fighters and heavy gunships. The escorts keep the air off the capital ships, and the fleet keeps nearly all of itself."
 try = "Attack-move in. Then send the heavy gunships at the cruisers, one at a time, before going for the battleship."
 blue = [
-    { unit = "t3_air_superiority", count = 21, at = [1_300, 2_560], columns = 7 },
-    { unit = "t3_heavy_gunship", count = 28, at = [1_220, 2_560], columns = 14 },
+    { unit = "t3_air_superiority", count = 24, at = [1_300, 2_560], columns = 8 },
+    { unit = "t3_heavy_gunship", count = 32, at = [1_220, 2_560], columns = 16 },
 ]
 red = [
     { unit = "t2_destroyer", count = 4, at = [3_000, 2_560], columns = 4 },
@@ -294,7 +294,7 @@ ground = "water"
 target = "domains.cells.battleship_heavy_fleet_breaks_to_torpedo_bombers_at_most"
 shows = "Battleships and battlecruisers with one each of the escorts for every pair, three-quarters of the fleet's cost in capital ships, against an equal cost of torpedo bombers. Without enough cruisers and destroyers, the capital ships are prey: the bombers break the fleet for far less than its cost. This is the counterplay to skimping on escorts."
 try = "Attack-move in, and compare with the massed fleet against twice its cost."
-blue = [{ unit = "t2_torpedo_bomber", count = 119, at = [1_200, 2_560], columns = 12 }]
+blue = [{ unit = "t2_torpedo_bomber", count = 140, at = [1_200, 2_560], columns = 14 }]
 red = [
     { unit = "t2_destroyer", count = 2, at = [3_000, 2_560], columns = 2 },
     { unit = "t2_cruiser", count = 2, at = [3_060, 2_560], columns = 2 },

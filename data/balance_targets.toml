@@ -740,14 +740,15 @@ tier_efficiency = [1.0, 1.0, 1.0, 1.0]
 # (balance::t1_air_base): 0.318, then 0.294 once the landed shares were measured again with turrets
 # that fire only once laid, then 0.315 once every sensor, the Bomber's radar too, was priced over
 # its domain base (2026-11-27), then 0.318 once aircraft flew on past the map's edge after a pass
-# rather than stop on it (2026-11-27). The Interceptor is priced at it. At T2 the escort rule sets the
+# rather than stop on it (2026-11-27), then 0.323 once aircraft stopped keeping apart in flight
+# (2026-11-27). The Interceptor is priced at it. At T2 the escort rule sets the
 # Mobile Flak's gun against the strike aircraft as they are. At T3 (2026-11-27), from the battle
 # line ([battle_line] t3_air): the base at which the Heavy Gunships are as good a buy against the
 # standard T3 army as the T2 strike aircraft against the T2 army, both standing in ranks; T2's
 # 0.902 until then.
 # With gunships hovering in a drifting blob (2026-11-27), re-derived: navy 0.709 to 0.744, air_t3
 # 1.005 to 0.972.
-domain_base = { land = 1.0, navy = 0.744, air_t1 = 0.318, air_t2 = 0.904, air_t3 = 0.972 }
+domain_base = { land = 1.0, navy = 0.670, air_t1 = 0.323, air_t2 = 0.904, air_t3 = 0.988 }
 # Reach past the line's: x = c (r / r_line - 1), price x h / (1 - x h), h about 1 for shells and
 # 0 for missiles. Short of it: -c (1 - r / r_line) (v_line / v). Speed: speed_share (1 - v_line / v).
 speed_share = 0.3
