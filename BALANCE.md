@@ -622,6 +622,34 @@ out close and why: evidence about the process, not a target.
   before, but 2 rather than 3 once its dome is down). Only the T2 Point Defense is repriced (637.9
   to 631.8, to the list); the domains, the battle line and the counters come out the same. 361
   unit families are not derived yet.
+* 2026-11-28: ship and land speeds by the role each plays (Pass 5, the design owner's pick). Every
+  ship and land unit with a role moves at that role's share of its domain's base, the land's
+  `[anchor] speed` 7.2 and the navy's `[model] speed_navy` 12.05 a tick, rounded to a tenth, as
+  the Destroyer and the Battleship already did: the Frigate, the Attack Submarine and the Torpedo
+  Boat (the sub hunter, at the assault role's 1.0) 12 to 12.1, the Escort Corvette (the T2 line)
+  10 to 10.4, the Cruiser (artillery, for its missiles) 9 to 9.6, the Missile Submarine
+  (artillery, T2's as T3 has none) 6.6 to 9.6, Mobile Anti-Air (the T1 line) 6.6 to 7.2, the
+  Mobile Shield and the Combat Engineer (the T2 line) 7 and 6 to 6.2, and Mobile Heavy Artillery
+  (artillery) 4.3 to 5.8; the Mobile Flak stays at 6.2. Five turrets re-derive by their rule (the
+  Frigate's 757 to 760, the Cruiser's 516 to 529, the Attack Submarine's deck gun 841 to 844, the
+  Combat Engineer's 835 to 844, Mobile Heavy Artillery's 28 to 30). Prices follow their rules:
+  the Cruiser 1,673 to 1,708 (the list), the Escort Corvette 946 to 956 (its dome over the
+  fleet), the Torpedo Bomber 139.6 to 145.4 (the massed T3 fleet fell to 1.90 times its cost in
+  torpedo bombers, under the 2.0 floor; 2.00 at 145.4), the Mobile Flak 158 to 154 and the Flak
+  Cannon and SAM 2.5% with it (Mobile Anti-Air's list price rose with its speed, so what it pays
+  over the list fell from 1.48 to 1.44), and the Mobile Shield 219 to 217 (its dome). Mobile
+  Anti-Air keeping up with the tanks it escorts brings the T1 Bomber's escort rule down from 247
+  to 231, and so the T1 air base 0.323 to 0.345: the Interceptor 159 to 149 and the Air Scout
+  61.8 to 56.3, both the list's. The Bomber's rule settles at 231 from any start between 226 and
+  238, but from 244 it gives 222 and from 222 it gives 240, as whole bombers make its fights jump.
+  The T2 strike aircraft now do a little worse against the T2 army (1.382 to 1.367), so the T3
+  air base re-derives 0.946 to 0.922 and the T3 aircraft cost 2.6% more (the Heavy Gunship 719 to
+  738, the T3 fighter 840 to 861, the Strategic Bomber 1,209 to 1,240, the Heavy Transport 2,027
+  to 2,043). The Strategic Bomber is the snipe price, so the enhancements that add only health or
+  shields fell to 8.2% under the list, past its 7%, and are repriced to it (Damage Control 451 to
+  491, the commander's Field Shield 4,249 to 4,629 and Area Shield 1,277 to 1,392, the Field Rig's
+  5,887 to 6,414 and 6,086 to 6,631). Every domains check still holds. 350 unit families are not
+  derived yet.
 
 ## Order of work
 
