@@ -291,16 +291,23 @@ fn spawn_team(world: &mut SimWorld, sides: &[Side], team: Team, x: i32, back: i3
 fn group_shape(world: &SimWorld, side: Side) -> (i32, i32) {
     let radius = world.blueprints.get(side.unit).radius.to_num::<i32>().max(4);
     let spacing = radius * if side.tactics == Tactics::Micro { 6 } else { 3 };
-    let columns = side.count.clamp(1, 5) as i32;
+    let columns = group_columns(side.count, spacing);
     let rows = (side.count as i32 + columns - 1) / columns;
     ((rows - 1) * spacing, spacing)
 }
 
-/// Spawns a group in a block of up to five abreast, facing the other group, centered on `x`.
+/// How many abreast a group stands: five, or as few more as keep it no deeper than half the map,
+/// so that a large group of cheap units still starts on it.
+fn group_columns(count: u32, spacing: i32) -> i32 {
+    let deepest = (MAP_UNITS / 2 / spacing.max(1)).max(1);
+    (count.max(1) as i32 + deepest - 1).div_euclid(deepest).max(count.clamp(1, 5) as i32)
+}
+
+/// Spawns a group in a block of five abreast (more for a very large group, `group_columns`), facing the other group, centered on `x`.
 /// `back` is the side away from the enemy, -1 for the west.
 fn spawn_group(world: &mut SimWorld, side: Side, team: Team, x: i32, back: i32, offset: i32) -> Vec<SimId> {
     let (_, spacing) = group_shape(world, side);
-    let columns = side.count.clamp(1, 5) as i32;
+    let columns = group_columns(side.count, spacing);
     let rows = (side.count as i32 + columns - 1) / columns;
     let middle = MAP_UNITS / 2 + offset;
     (0..side.count as i32)

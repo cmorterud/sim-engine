@@ -507,8 +507,9 @@ t3_battlecruiser = 0.45
 # the T3 air base from the battle line (2026-11-27).
 t2_gunship = 0.93
 # The torpedo bomber is a counter, its cost held by its cells (2026-11-26): this is its strength per
-# cost at 240, the price list's 131 only a check.
-t2_torpedo_bomber = 0.51
+# cost at 240, the price list's 131 only a check; 0.91 at 134 once it flew a bomber's runs and let
+# its torpedoes go along its heading (the design owner, 2026-11-27).
+t2_torpedo_bomber = 0.91
 t2_fighter_bomber = 0.31
 t3_heavy_gunship = 0.98
 t3_air_superiority = 0.88
@@ -920,7 +921,8 @@ t3_air_superiority = 1.0
 t1_bomber = 0.54
 t2_fighter_bomber = 0.92
 t3_strategic_bomber = 0.90
-t2_torpedo_bomber = 0.82
+# The torpedo bomber flying a bomber's runs, five torpedoes a pass (2026-11-27): 0.82 to 0.87.
+t2_torpedo_bomber = 0.87
 t2_gunship = 1.0
 t3_heavy_gunship = 1.0
 
