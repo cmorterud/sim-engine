@@ -525,6 +525,13 @@ out close and why: evidence about the process, not a target.
   data, some the first reading counted derived are not: the cruiser's hull and its missiles'
   reach, the Attack Submarine's torpedo and reach, which no `[model]` rule reproduces today; where
   the bombers let go; the Mobile Heavy Artillery's shell; and the domes, whose sizes are held.
+* 2026-11-28: what counts as derived where no fight sets a stat, the design owner's pick: a rule,
+  plus one named anchor per family that sets its scale, with the rest following by multiples; a
+  per-unit number written down is not derived. The Interceptor's size, √(health × damage a
+  second), is the anchor for T1 air's scale (`[air] interceptor_size` = 147.5, its size then),
+  since every T1 air number scales with it and no fight pins it: sizes a tenth either side clear
+  an equal cost of bombers in 8.0 to 9.2 s, jumping with whole units, so the 9 to 12 s band stays
+  a check. Nothing moves; 459 unit families are not derived yet.
 
 ## Order of work
 

@@ -379,13 +379,17 @@ anti_air_health_over_bomb = 1.5
 interceptor_seconds_per_bomber_t1 = 10
 # An equal cost of Interceptors clears an equal cost of T1 Bombers, check_materiel a side, in
 # about the time it takes (2026-11-27, the design owner's rule, at what it measured: 8.9 s, and
-# 10.3 s once guns fired only when laid on their target): the Interceptor's size,
-# √(health × damage a second), which every T1 air number above scales with. Its health over its
-# damage a second is the [model] time to kill in air-to-air fights. With the T1 air base pricing
-# the Bomber at its cost (0.294), the Interceptor costs 8% more and they take 11.2 s: the design
-# owner kept its size and took the dearer Interceptor (2026-11-27; 9 to 11 s until then). With
-# every sensor over the base (0.315), it costs 164.
+# 10.3 s once guns fired only when laid on their target). With the T1 air base pricing the Bomber
+# at its cost (0.294), the Interceptor cost 8% more and they took 11.2 s: the design owner kept
+# its size and took the dearer Interceptor (2026-11-27; 9 to 11 s until then). They take 9.2 s
+# today. A check, not what sets the size: sizes a tenth either side clear in 8.0 to 9.2 s,
+# jumping with whole units (2026-11-28).
 interceptors_clear_bombers_seconds = [9, 12]
+# The Interceptor's size, √(health × damage a second): the design owner's anchor for T1 air's
+# scale (2026-11-28, at its size then), since every T1 air number above scales with it and no
+# fight pins it. Its health over its damage a second is the [model] time to kill in air-to-air
+# fights, which splits it into 445 health and a gun of 48.9 a second.
+interceptor_size = 147.5
 # A land army this share anti-air, by materiel, comes out about even with an equal materiel of
 # bombers ([counters] even_margin): what sets the T1 Bomber's cost, with Mobile Anti-Air's gun set
 # by [kill_times] mobile_aa_t1_bomber (2026-11-27; until then this set the gun, against a bomber
