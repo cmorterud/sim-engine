@@ -1276,7 +1276,9 @@ pub fn derive_t1_air(base: &BlueprintDb) -> BlueprintDb {
     db = db.with_unit(bomber, |unit| unit.health = Fp::from_num(bomber_health));
     // Mobile Anti-Air's gun: one destroys a bomber in the middle of its [kill_times] time.
     let (least, most) = target_number_range("kill_times", "mobile_aa_t1_bomber");
-    let gun = (bomber_health / ((least + most) / 2.0) * 10.0).round() / 10.0;
+    let aa_gun = db.get(anti_air).weapon.expect("anti-air has a gun");
+    let aa_reload_seconds = f64::from(aa_gun.reload_ticks.max(1)) / TICKS_PER_SECOND as f64 / f64::from(aa_gun.shots_per_reload());
+    let gun = (bomber_health / ((least + most) / 2.0) * aa_reload_seconds * 10.0).round() / 10.0;
     db = db.with_unit(anti_air, |unit| unit.weapon.as_mut().expect("anti-air has a gun").damage = Fp::from_num(gun));
     // The bomber's cost: where an army a fifth anti-air and an equal materiel of bombers break
     // even. So many bombers, each costing the army's materiel over their number, break even where
@@ -1376,6 +1378,47 @@ pub fn turret_swivel(db: &BlueprintDb, unit: &Blueprint, weapon: &WeaponDef) -> 
     } else {
         turret_follow(db, unit, weapon)
     }
+}
+
+/// The speed a gun's shell flies at, in units a tick, by its family's rule (2026-11-28, the
+/// derivation plan's Pass 2), or None where something else sets it: a land role's own flight
+/// (`balance::t1_land_roles` and on), artillery, a lobbed broadside, a missile, a bomb, a laser.
+/// - A shell at the ground or the sea's surface from a ship flies at `[constants]
+///   ship_gun_speed`, and a torpedo at `[constants] torpedo_speed`.
+/// - Any other direct-fire gun at the ground reaches its full range in the anchor's flight time,
+///   `[anchor] range` over `[anchor] projectile_speed`, as a line weapon's shell does
+///   (`[micro] line_flight_seconds_max`).
+/// - A fighter's gun, fixed to its nose, flies at `[constants] fighter_gun_speed`; every other
+///   gun at aircraft at the `[shells] anti_air_speed` anchor, and a flak shell at the
+///   `[shells] flak_speed` anchor. Anti-air shells are anchored because the fights feel them:
+///   every one a quarter slower moved the T3 air base from 0.99 to 1.55.
+pub fn shell_speed(unit: &Blueprint, weapon: &WeaponDef) -> Option<f64> {
+    use crate::sim::blueprints::{Targets, WeaponKind};
+    let constant = |key: &str| target_number("constants", key);
+    let roles = [t1_land_roles(), t2_land_roles(), t3_land_roles()];
+    if roles.iter().flatten().any(|role| role.unit == unit.key) {
+        return None;
+    }
+    match weapon.kind {
+        WeaponKind::Flak => return Some(target_number("shells", "flak_speed")),
+        WeaponKind::Shell => {}
+        _ => return None,
+    }
+    if weapon.targets == Targets::Naval {
+        return Some(constant("torpedo_speed"));
+    }
+    if weapon.targets == Targets::Air {
+        let fighter = unit.flight.is_some() && weapon.arc.is_some();
+        return Some(if fighter { constant("fighter_gun_speed") } else { target_number("shells", "anti_air_speed") });
+    }
+    if weapon.artillery || weapon.lobbed {
+        return None;
+    }
+    if crate::price_list::domain_of(unit) == crate::price_list::Domain::Navy {
+        return Some(constant("ship_gun_speed"));
+    }
+    let anchor_flight_ticks = target_number("anchor", "range") / target_number("anchor", "projectile_speed");
+    Some((weapon.range.to_num::<f64>() / anchor_flight_ticks).round())
 }
 
 /// A copy with one unit's mass, energy and build time scaled together to a cost at a tier.

@@ -25,7 +25,7 @@ build_power = 10
 build_range = 200
 # Its fabrication packs (the enhancements below) unlock the T2 and T3 structures on its list.
 builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "radar", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "stealth_field_generator", "strategic_missile_launcher", "strategic_missile_defense", "rig_yard", "geothermal_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "naval_factory", "t1_aa_turret", "airfield", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "deep_scan_array", "land_factory_t3_support", "air_factory_t3_support", "t2_artillery", "t3_artillery", "naval_factory_t2_support", "naval_factory_t3_support", "t1_sonar", "t1_torpedo_launcher", "t2_sonar", "t2_torpedo_launcher", "wall", "t3_heavy_point_defense", "t3_heavy_shield"]
-weapon = { range = 440, reload_ticks = 7, projectile_speed = 50, damage = 70, turn_rate = 464 }
+weapon = { range = 440, reload_ticks = 7, projectile_speed = 80, damage = 70, turn_rate = 464 }
 # The inspiration's Discharge: 7,500 in store to fire; on landing, up to 90% of the store at 6 energy a point,
 # from 1,250 to 15,000 damage, as much as the toughest enemy there takes; 400 to commanders, 800
 # to structures, a blast of 50, and a look 54 round for the toughest.
@@ -213,14 +213,15 @@ class = "defense"
 tier = 1
 # Cost (2026-11-27): the most it can cost and still hold, three against half again their cost
 # in Medium Tanks ([premiums]), under the price list's 428, which prices its damage above what
-# the hold allows: 325 to 404, and 413 once every gun turned by the turret rule (2026-11-28).
-mass = 318
-energy = 2541
-build_time = 318
+# the hold allows: 325 to 404, 413 once every gun turned by the turret rule, and 404 once every
+# shell flew by the shell rule (2026-11-28).
+mass = 311
+energy = 2485
+build_time = 311
 health = 3900
 footprint = 1
 vision = 480
-weapon = { range = 496, reload_ticks = 3, projectile_speed = 70, damage = 150, turn_rate = 516 }
+weapon = { range = 496, reload_ticks = 3, projectile_speed = 91, damage = 150, turn_rate = 516 }
 
 # A dome that stops enemy shells from outside, while those under it fire out freely
 # (GAME_SPECIFICATION.md §8.1). Tier 2. Upkeep is energy per second while the dome is up.
@@ -237,11 +238,11 @@ class = "defense"
 tier = 2
 # Cost by the strength its dome adds to the three point defenses of the T2 position, as a
 # structure worth half again its cost ([price_list.shield_groups], 2026-11-27): 629 to 932, and
-# to 1,080 with the point defenses priced by their reach, and to 1,044 once every gun turned by
-# the turret rule (2026-11-28).
-mass = 996
-energy = 9964
-build_time = 1910
+# to 1,080 with the point defenses priced by their reach, to 1,044 once every gun turned by the
+# turret rule, and to 1,080 once every shell flew by the shell rule (2026-11-28).
+mass = 1031
+energy = 10313
+build_time = 1977
 health = 250
 footprint = 3
 vision = 400
@@ -512,7 +513,7 @@ build_power = 56
 build_range = 200
 builds = ["land_factory_t1", "mass_extractor", "power_generator", "mass_storage", "energy_storage", "t1_point_defense", "shield_generator", "tactical_missile_launcher", "tactical_missile_defense", "strategic_missile_launcher", "strategic_missile_defense", "radar", "stealth_field_generator", "rig_yard", "geothermal_plant", "mass_fabricator", "mass_fabricator_t3", "air_factory", "naval_factory", "t1_aa_turret", "airfield", "t2_flak", "t3_sam", "mass_extractor_t2", "power_generator_t2", "radar_t2", "t2_point_defense", "land_factory_t2_support", "air_factory_t2_support", "mass_extractor_t3", "power_generator_t3", "deep_scan_array", "land_factory_t3_support", "air_factory_t3_support", "t2_artillery", "t3_artillery", "naval_factory_t2_support", "naval_factory_t3_support", "t1_sonar", "t1_torpedo_launcher", "t2_sonar", "t2_torpedo_launcher", "wall", "t3_heavy_point_defense", "t3_heavy_shield"]
 # Three times the commander's fire: 300 a second for its 100, and a little farther.
-weapon = { range = 500, reload_ticks = 10, projectile_speed = 50, damage = 300, turn_rate = 539 }
+weapon = { range = 500, reload_ticks = 10, projectile_speed = 91, damage = 300, turn_rate = 539 }
 mass_income = 1
 energy_income = 20
 mass_storage = 275
@@ -799,7 +800,7 @@ speed = 27
 radius = 12
 vision = 640
 flight = { elevation = 198, turn_rate = 90, fuel = 400, hovers = true }
-weapon = { range = 448, reload_ticks = 3, projectile_speed = 160, damage = "22.6", spread = 4 }
+weapon = { range = 448, reload_ticks = 3, projectile_speed = 82, damage = "22.6", spread = 4 }
 
 [[unit]]
 id = "t3_spy_plane"
@@ -829,9 +830,10 @@ tier = 3
 # Cost by the ability price list (2026-11-26): 675 to 879 (reports/plans/2026-11-26-ability-price-list.md).
 # At the T3 air base from the battle line ([battle_line] t3_air, 2026-11-27): 879 to 790.
 # With hovering gunships that drift back and forth (2026-11-27), at the bases re-derived from the battle line.
-mass = 394
-energy = 44954
-build_time = 3771
+# With every shell flying by its family's rule (2026-11-28), at the T3 air base re-derived: 803 to 840.
+mass = 412
+energy = 46959
+build_time = 3939
 # T3 aircraft are tough and fast enough that T1 anti-air barely scratches them and flak mostly
 # misses them; it takes T3 anti-air, cruisers, or massed flak.
 health = 3520
@@ -859,9 +861,10 @@ tier = 3
 # Cost by the ability price list (2026-11-26): 3,381 to 1,254 (reports/plans/2026-11-26-ability-price-list.md).
 # At the T3 air base from the battle line ([battle_line] t3_air, 2026-11-27): 1,254 to 1,138.
 # With hovering gunships that drift back and forth (2026-11-27), at the bases re-derived from the battle line.
-mass = 599
-energy = 61562
-build_time = 4105
+# With every shell flying by its family's rule (2026-11-28), at the T3 air base re-derived: 1,157 to 1,209.
+mass = 626
+energy = 64298
+build_time = 4287
 # A little over four Gunships': four volleys of the cruiser's anti-air, and eight SAM missiles,
 # about 11 seconds of one SAM ([volleys], [kill_times], 2026-11-25).
 health = 6400
@@ -888,9 +891,10 @@ tier = 3
 # Cost by the ability price list (2026-11-26): 1,491 to 756 (reports/plans/2026-11-26-ability-price-list.md).
 # At the T3 air base from the battle line ([battle_line] t3_air, 2026-11-27): 756 to 678.
 # With hovering gunships that drift back and forth (2026-11-27), at the bases re-derived from the battle line.
-mass = 506
-energy = 21892
-build_time = 2438
+# With every shell flying by its family's rule (2026-11-28), at the T3 air base re-derived: 690 to 721.
+mass = 528
+energy = 22860
+build_time = 2546
 health = 9600
 speed = 20
 radius = 16
@@ -899,7 +903,7 @@ flight = { elevation = 198, turn_rate = 60, fuel = 800, hovers = true }
 # A T3 fighter destroys it in about 15 seconds (14, its fifteenth shot), so health 9,600, which is also the
 # cruiser's six volleys ([volleys]), and it destroys a commander with no
 # enhancements in about 50, so 360 a second (2026-11-26, the design owner's rules, [kill_times]).
-weapon = { range = 560, reload_ticks = 4, projectile_speed = 70, damage = 144, spread = 6 }
+weapon = { range = 560, reload_ticks = 4, projectile_speed = 102, damage = 144, spread = 6 }
 # Its railgun, two shots of 8 every 1.3 seconds, as one. It reaches its tier's fighter, the Air
 # Superiority Fighter's 600 ([model] aircraft_anti_air_at_fighter; 880 until 2026-11-27).
 extra_weapons = [{ range = 600, reload_ticks = 13, projectile_speed = 90, damage = "18.4", targets = "air" }]
@@ -1099,15 +1103,16 @@ name = "Point Defense (T2)"
 class = "defense"
 tier = 2
 # Cost by the price list, its reach priced at a structure's closing share ([price_list]
-# structure_closing_share, 2026-11-27): 550 to 638, and 617 once every gun turned by the turret
-# rule (2026-11-28).
-mass = 605
-energy = 4236
-build_time = 756
+# structure_closing_share, 2026-11-27): 550 to 638, 617 (the most it could cost and still hold)
+# once every gun turned by the turret rule, and 638 once every shell flew by the shell rule
+# (2026-11-28).
+mass = 626
+energy = 4380
+build_time = 782
 health = 2250
 footprint = 1
 vision = 560
-weapon = { range = 1095, reload_ticks = 17, projectile_speed = 70, damage = 210, splash_radius = 40, turn_rate = 516, spread = 2 }
+weapon = { range = 1095, reload_ticks = 17, projectile_speed = 200, damage = 210, splash_radius = 40, turn_rate = 516, spread = 2 }
 
 # Aircraft land on its four pads to refuel at 50 times the rate on the ground, and are repaired
 # for energy. A T2 aircraft takes two pads, and a T3 one all four.
@@ -1408,7 +1413,7 @@ extra_weapons = [
     { range = 1255, reload_ticks = 40, projectile_speed = 60, damage = 455, splash_radius = 20, turn_rate = 547, spread = 7 },
     # Its anti-air reaches 1.2 times its tier's static anti-air, the Flak Cannon's 1,000
     # ([model] ship_anti_air_over_static).
-    { range = 1200, reload_ticks = 14, projectile_speed = 120, damage = "15.6", targets = "air", turn_rate = 180 },
+    { range = 1200, reload_ticks = 14, projectile_speed = 90, damage = "15.6", targets = "air", turn_rate = 180 },
     # Its torpedo is a sub-hunting ability, so it reaches what its tier's sub hunter does: the
     # sub hunter's closing share of the navy's speed over its time to kill, 0.35 x 120.5 x 19.3
     # = 814, the Torpedo Boat's ([model] closing_share_role; 900 until 2026-11-27).
@@ -1522,7 +1527,7 @@ extra_weapons = [
     { range = 2990, reload_ticks = 135, projectile_speed = 110, damage = 4400, splash_radius = 40, turn_rate = 238, spread = 6, lobbed = true, mount = [0, -31], aft = true, broadside = true },
     # Its anti-air reaches 1.2 times its tier's static anti-air, the SAM's 1,200, as the frigate's
     # and the destroyer's do theirs ([model] ship_anti_air_over_static): 1,440 (1,200 until 2026-11-27).
-    { range = 1440, reload_ticks = 17, projectile_speed = 180, damage = 96, targets = "air", turn_rate = 180 },
+    { range = 1440, reload_ticks = 17, projectile_speed = 90, damage = 96, targets = "air", turn_rate = 180 },
 ]
 missile_defense = { kind = "tactical", range = 620, reload_ticks = 18, mounts = 2 }
 
@@ -2137,7 +2142,7 @@ upkeep = 15
 build_power = "17.5"
 build_range = 120
 # Builds forward defenses, artillery, and intel, and the T1 factories, and defends itself.
-weapon = { range = 360, reload_ticks = 5, projectile_speed = 120, damage = 15, turn_rate = 835 }
+weapon = { range = 360, reload_ticks = 5, projectile_speed = 66, damage = 15, turn_rate = 835 }
 builds = ["land_factory_t1", "air_factory", "naval_factory", "t1_point_defense", "t2_point_defense", "t1_aa_turret", "t2_flak", "shield_generator", "tactical_missile_defense", "t1_torpedo_launcher", "t2_torpedo_launcher", "t2_artillery", "tactical_missile_launcher", "radar", "radar_t2", "t1_sonar", "t2_sonar", "stealth_field_generator", "wall"]
 
 # The T3 line unit: three Heavy Tanks' cost, half again the anchor's range, and longer fights,
@@ -2224,16 +2229,17 @@ class = "defense"
 tier = 3
 # Cost by the price list, its reach priced at a structure's closing share, which this one sets:
 # the most it can cost and still hold ([price_list] structure_closing_share, 2026-11-27): 2,072
-# to 2,437, and 2,357 once every gun turned by the turret rule (2026-11-28).
-mass = 2275
-energy = 20018
-build_time = 2275
+# to 2,437, 2,357 once every gun turned by the turret rule, and 2,437 once every shell flew by
+# the shell rule (2026-11-28).
+mass = 2352
+energy = 20694
+build_time = 2352
 health = 6500
 footprint = 1
 vision = 480
 # A gatling cannon, about 626 damage a second. Its reach is the T3 defense window's: the Mobile
 # Heavy Artillery's divided by 1.2 (2026-11-26, reports/plans/2026-11-26-derived-stats.md).
-weapon = { range = 1313, reload_ticks = 7, projectile_speed = 64, damage = 438, splash_radius = 20, turn_rate = 516, spread = 4 }
+weapon = { range = 1313, reload_ticks = 7, projectile_speed = 240, damage = 438, splash_radius = 20, turn_rate = 516, spread = 4 }
 
 # The T3 dome: a little more regeneration a second than the T2 one, and far more health, so it
 # heals more slowly for its size, in about three minutes. One battleship, unassisted, wears it
@@ -2247,11 +2253,11 @@ class = "defense"
 tier = 3
 # Cost by the strength its dome adds to the three heavy point defenses of the T3 position, as a
 # structure worth half again its cost ([price_list.shield_groups], 2026-11-27): 3,667 to 3,104,
-# to 3,650 with the heavy point defenses priced by their reach, and to 3,531 once every gun
-# turned by the turret rule (2026-11-28).
-mass = 3177
-energy = 52963
-build_time = 4814
+# to 3,650 with the heavy point defenses priced by their reach, to 3,531 once every gun turned
+# by the turret rule, and to 3,650 once every shell flew by the shell rule (2026-11-28).
+mass = 3285
+energy = 54762
+build_time = 4978
 health = 500
 footprint = 3
 vision = 400
@@ -2310,7 +2316,7 @@ radius = 16
 vision = 640
 flight = { elevation = 198, turn_rate = 90, fuel = 600, hovers = true }
 transport = { small = 14, medium = 6, large = 3 }
-weapon = { range = 448, reload_ticks = 5, projectile_speed = 120, damage = "9.4" }
+weapon = { range = 448, reload_ticks = 5, projectile_speed = 82, damage = "9.4" }
 
 [[unit]]
 id = "t3_heavy_transport"
@@ -2323,9 +2329,10 @@ tier = 3
 # Its weapons at the T3 air base from the battle line ([battle_line] t3_air, 2026-11-27): 2,056
 # to 1,993.
 # With hovering gunships that drift back and forth (2026-11-27), at the bases re-derived from the battle line.
-mass = 1529
-energy = 57351
-build_time = 5734
+# With every shell flying by its family's rule (2026-11-28), at the T3 air base re-derived: 2,002 to 2,027.
+mass = 1548
+energy = 58068
+build_time = 5806
 # The T2 Flak Cannon destroys it in about 55 seconds, through its shield and the shield's
 # regeneration ([kill_times], the design owner's number, 2026-11-27): 4,500 to 9,800.
 health = 9800
@@ -2342,5 +2349,5 @@ shield = { radius = 85, health = 3000, regen = 30, recharge_seconds = 20, upkeep
 # Together they do a quarter of the Heavy Gunship's damage a second, 94, shared as before, 17 the
 # guns' and 77 the racks' (the design owner's rule, 2026-11-27: a transport's weapons are weak; 60
 # and 270 until then).
-weapon = { range = 560, reload_ticks = 5, projectile_speed = 120, damage = "8.5" }
-extra_weapons = [{ range = 600, reload_ticks = 1, projectile_speed = 120, damage = "7.7", targets = "air" }]
+weapon = { range = 560, reload_ticks = 5, projectile_speed = 102, damage = "8.5" }
+extra_weapons = [{ range = 600, reload_ticks = 1, projectile_speed = 90, damage = "7.7", targets = "air" }]
