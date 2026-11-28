@@ -28,6 +28,42 @@ fn every_unit_the_list_prices_costs_its_price_or_names_what_holds_it() {
     assert!(off.is_empty(), "{off:#?}");
 }
 
+/// Every unit names what sets its cost (2026-11-28): a rule (`price_list::cost_rule`), or a reason
+/// in `[price_list.unlisted]`, an anchor, the design owner's number, or "not derived yet" with the
+/// rule to come. A new unit fails here until it has one.
+#[test]
+fn every_unit_names_what_sets_its_cost() {
+    let db = BlueprintDb::standard();
+    let mut nothing = Vec::new();
+    let mut waiting = Vec::new();
+    for unit in db.iter() {
+        match price_list::cost_source(&db, &unit.key) {
+            None => nothing.push(unit.key.as_str()),
+            Some(source) => {
+                println!("{:28} {source}", unit.key);
+                if price_list::not_derived_yet(&db, &unit.key) {
+                    waiting.push(unit.key.as_str());
+                }
+            }
+        }
+    }
+    println!("{} not derived yet: {waiting:?}", waiting.len());
+    assert!(nothing.is_empty(), "nothing sets these units' costs; give each a rule or a reason in [price_list.unlisted]: {nothing:?}");
+}
+
+/// `[price_list.unlisted]` names only units no rule prices, so that a unit that gains a rule
+/// leaves it.
+#[test]
+fn every_unlisted_unit_is_one_no_rule_prices() {
+    let db = BlueprintDb::standard();
+    let table = targets();
+    let unlisted = table["price_list"]["unlisted"].as_table().expect("[price_list.unlisted]");
+    for key in unlisted.keys() {
+        assert!(db.find(key).is_some(), "[price_list.unlisted] names {key}, which is not a unit");
+        assert_eq!(price_list::cost_rule(&db, key), None, "{key} is in [price_list.unlisted], but a rule prices it");
+    }
+}
+
 #[test]
 fn every_held_unit_is_one_the_list_prices() {
     let db = BlueprintDb::standard();
@@ -205,7 +241,7 @@ fn every_factory_costs_its_build_power_hull_and_tech() {
         assert_eq!(pricing.tech > 0.0, unit.is_headquarters() || unit.key == "rig_yard", "{}'s tech price {}", unit.key, pricing.tech);
     }
     assert!(off.is_empty(), "{off:#?}");
-    assert_eq!(priced, 16, "the land, air and naval factories at every tier, and the Rig Yard");
+    assert_eq!(priced, 17, "the land, air and naval factories at every tier, the Rig Yard and the Tactical Missile Launcher");
     // A point of build power costs the same in a factory as in an engineer.
     let factory = price_list::factory_price(&db, "land_factory_t1").expect("priced");
     assert!((factory.build_power - 20.0 * price_list::build_power_rate(&db, "")).abs() < 1e-9);

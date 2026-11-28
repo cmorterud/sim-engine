@@ -194,9 +194,11 @@ siege_seconds_max = 60
 # Game-ending weapons have no fight to price them (2026-11-27). Tech costs scale with income
 # ([economy]), so they are priced in minutes of a standard T3 economy: this many T3 extractors'
 # income, 144 a second, at T3 prices. Today's costs, written down as the design owner's numbers;
-# the step 5 soaks may move them against [pace].
+# the step 5 soaks may move them against [pace]. The Heavy Artillery Installation, which reaches
+# across a map, and the Strategic Missile Defense, which answers the launcher, are priced the same
+# way (2026-11-28, the plan's pick: map-scale and game-ending numbers, today's written down).
 t3_economy_extractors = 8
-strategic_minutes = { strategic_missile = 2.98, strategic_missile_launcher = 2.27, strategic_interceptor = 0.79 }
+strategic_minutes = { strategic_missile = 2.98, strategic_missile_launcher = 2.27, strategic_interceptor = 0.79, t3_artillery = 9.95, strategic_missile_defense = 0.94 }
 # A missile defense costs a share of the missile it stops, today's: an interceptor about a quarter
 # of a strategic missile; a Tactical Missile Defense about one tactical missile.
 defense_over_missile = { strategic_interceptor = 0.267, tactical_missile_defense = 1.09 }
@@ -246,6 +248,9 @@ t3_sam = { t2_gunship = 2, t3_strategic_bomber = 8 }
 t3_mobile_artillery = { t3_mobile_artillery = 2, t1_medium_tank = 1 }
 # The T3 Artillery Installation destroys any T3 land unit with a direct hit, but its spread is
 # wide, so it is for base-sized targets; the T2 one, with a moderate spread, for small bases.
+# A Medium Tank breaks a Wall Section in 17 shots, about 17 seconds (2026-11-28, the plan's pick,
+# today's written down): a wall slows an attack; it does not stop one.
+t1_medium_tank = { wall = 17 }
 t3_artillery_kills_every_t3_land_unit = true
 t3_artillery_spread = [150, 200]
 t2_artillery_spread = [40, 60]
@@ -908,6 +913,32 @@ command_rig = "the design owner's cost: the commander is never built"
 # its vision (42 at the T3 air base). Its cost is the design owner's until a price for seeing
 # anywhere exists (2026-11-27, the plan's pick).
 t3_spy_plane = "the design owner's cost until a price for seeing anywhere exists"
+
+# What sets the cost of every unit no rule above prices (2026-11-28; tests/price_list_test.rs,
+# `--balance-derive sources`). An anchor is the design owner's number that a rule prices others
+# from, as the Medium Tank is for strength. "Not derived yet" names a unit whose rule is still to
+# come, and what it will be.
+[price_list.unlisted]
+wall = "an anchor: the hull price ([price_list.factories] hull), the design owner's; a Medium Tank breaks one in 17 shots ([kills])"
+radar = "an anchor: the sensor rule's radar, the cheapest building with one, the design owner's"
+t1_sonar = "an anchor: the sensor rule's sonar, the cheapest building with one, the design owner's"
+stealth_field_generator = "an anchor: the stealth price, the cheapest stealth field ([price_list.enhancements]), the design owner's"
+t1_light_transport = "an anchor: the cargo price, the cheapest unit that only carries, the design owner's"
+mass_storage = "the design owner's: storage and adjacency keep their tables (the plan's pick)"
+energy_storage = "the design owner's: storage and adjacency keep their tables (the plan's pick)"
+mass_fabricator = "the design owner's: at its tier's energy rate it makes nothing net ([economy])"
+mass_fabricator_t3 = "the design owner's: at its tier's energy rate it makes nothing net ([economy])"
+radar_t2 = "not derived yet: the sensor rule over the T1 Radar, with its upkeep counted"
+t2_sonar = "not derived yet: the sensor rule over the T1 Sonar, with its upkeep counted"
+deep_scan_array = "not derived yet: the sensor rule over the T1 Radar, with its upkeep counted; the deep scan anchor"
+airfield = "not derived yet: what its repair slots save"
+t1_torpedo_launcher = "not derived yet: the list at the navy base, under the hold rule ([premiums])"
+t2_torpedo_launcher = "not derived yet: the list at the navy base, under the hold rule ([premiums])"
+t1_aa_turret = "not derived yet: static over mobile anti-air ([premiums] static_anti_air_over_mobile)"
+t2_flak = "not derived yet: static over mobile anti-air ([premiums] static_anti_air_over_mobile), after the Mobile Flak's cost"
+t3_sam = "not derived yet: static over the Mobile Flak ([premiums] static_anti_air_over_mobile), after the Mobile Flak's cost"
+t2_artillery = "not derived yet: its reach is past what the list's closing share prices"
+tactical_missile = "not derived yet: its damage job, its reach free as a missile's is"
 
 # Aircraft pay for the damage they land, not their card's (2026-11-26): anti-air against a bomber
 # flying its run (the Strategic Bomber at T3, the T1 Bomber below), bombs, guns and torpedoes against
