@@ -173,6 +173,10 @@ point_defense_holds_against_line_units = 1.5
 # Measured by strength, since a mobile group is judged even and a position broken, which do not
 # compare as fights. Both were near 0.6 before, here and in the inspiration.
 static_anti_air_over_mobile = [1.5, 2.0]
+# Each static anti-air structure, and the mobile anti-air it is measured over (the Mobile Flak at
+# T3 prices for the SAM): each costs what puts it at the band's floor (2026-11-28, the design
+# owner's pick of the plan's 1.5).
+static_anti_air = { t1_aa_turret = "t1_mobile_aa", t2_flak = "t2_mobile_flak", t3_sam = "t2_mobile_flak" }
 # Amphibious: the hovercraft's strength per materiel over the Heavy Tank's on land, by break-even:
 # it pays for crossing water, as the inspiration's does, about three-quarters as strong for its
 # cost by the inspiration's ratios (0.71 against its line's 0.96). It was about even until today.
@@ -916,7 +920,7 @@ t2_assault_hovercraft = "the land solver's targets ([roles])"
 t3_heavy_walker = "the land solver's targets ([roles])"
 t3_siege_walker = "the land solver's targets ([roles])"
 t1_mobile_aa = "its health per mass is the anchor's ([air] anti_air_health_over_bomb)"
-t2_mobile_flak = "not derived yet: its cost is borrowed, its gun set by the escort rule"
+t2_mobile_flak = "ground anti-air: the list's price times what the Mobile Anti-Air pays over it, which its health per mass sets (1.48)"
 t3_mobile_artillery = "the T3 line's micro cell: the middle of the costs where it holds"
 t2_torpedo_bomber = "the duel it wins ([counters]): the least that needs twice the T2 fleet's cost, and the massed T3 fleet's, to break it"
 t2_torpedo_boat = "the duel it wins ([counters]): the most that keeps 0.70 against an equal cost of submarines"
@@ -947,9 +951,6 @@ radar_t2 = "not derived yet: the sensor rule over the T1 Radar, with its upkeep 
 t2_sonar = "not derived yet: the sensor rule over the T1 Sonar, with its upkeep counted"
 deep_scan_array = "an anchor: the sensor rule's deep scan, the only building with it, the design owner's"
 airfield = "the design owner's: its repair slots are a mechanic rule, which no fight prices"
-t1_aa_turret = "not derived yet: static over mobile anti-air ([premiums] static_anti_air_over_mobile)"
-t2_flak = "not derived yet: static over mobile anti-air ([premiums] static_anti_air_over_mobile), after the Mobile Flak's cost"
-t3_sam = "not derived yet: static over the Mobile Flak ([premiums] static_anti_air_over_mobile), after the Mobile Flak's cost"
 
 # Aircraft pay for the damage they land, not their card's (2026-11-26): anti-air against a bomber
 # flying its run (the Strategic Bomber at T3, the T1 Bomber below), bombs, guns and torpedoes against

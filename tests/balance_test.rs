@@ -524,14 +524,21 @@ fn premiums(key: &str) -> toml::Value {
 }
 
 /// `[premiums]` (2026-11-25): what cannot move is worth more for its cost, so static anti-air is
-/// half again as strong per cost against aircraft as the mobile anti-air of its tier.
+/// half again as strong per cost against aircraft as the mobile anti-air of its tier; and each
+/// costs what puts it at the band's floor (`static_anti_air`, 2026-11-28), the SAM over the Mobile
+/// Flak at T3 prices.
 #[test]
 fn static_anti_air_is_worth_more_for_its_cost_than_mobile() {
     let db = db();
     let band = premiums("static_anti_air_over_mobile").as_array().expect("a band").iter().map(number).collect::<Vec<f64>>();
-    for (tier, fixed, mobile) in [(1, "t1_aa_turret", "t1_mobile_aa"), (2, "t2_flak", "t2_mobile_flak")] {
+    let pairs = premiums("static_anti_air");
+    let pairs = pairs.as_table().expect("[premiums] static_anti_air");
+    assert_eq!(pairs.len(), 3, "the AA Turret, the Flak Cannon and the SAM");
+    for (fixed, mobile) in pairs {
+        let mobile = mobile.as_str().expect("a unit key");
+        let tier = db.get(db.id(fixed)).tier;
         let ratio = anti_air_strength(&db, fixed, tier) / anti_air_strength(&db, mobile, tier);
-        assert!((band[0]..=band[1]).contains(&ratio), "{fixed} is {ratio:.2} times as strong per cost against aircraft as {mobile}");
+        assert!((ratio / band[0] - 1.0).abs() < 0.01, "{fixed} is {ratio:.3} times as strong per cost against aircraft as {mobile}, not {}", band[0]);
     }
 }
 

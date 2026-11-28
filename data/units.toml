@@ -708,15 +708,17 @@ weapon = { kind = "bomb", range = 800, reload_ticks = 50, projectile_speed = 20,
 # Two shots a volley in the inspiration, one shot of twice the damage here.
 # Static anti-air is worth more for its cost than mobile ([premiums], 2026-11-25): half again as
 # strong per cost against aircraft, mostly in health (800 to 4,500; damage 46 to 69), so that it
-# holds the sky over a base while fast T3 aircraft still pass over it, as [kills] has it.
+# holds the sky over a base while fast T3 aircraft still pass over it, as [kills] has it. It costs
+# what puts it at exactly 1.5 times the Mobile Anti-Air's strength per cost ([premiums]
+# static_anti_air, 2026-11-28): 225 to 234.
 [[unit]]
 id = "t1_aa_turret"
 name = "Anti-Air Turret"
 class = "defense"
 tier = 1
-mass = 150
-energy = 1500
-build_time = 188
+mass = 156
+energy = 1559
+build_time = 195
 health = 4500
 footprint = 1
 vision = 480
@@ -904,16 +906,16 @@ extra_weapons = [{ range = 600, reload_ticks = 13, projectile_speed = 90, damage
 # Flak bursts on an aircraft and hits every enemy aircraft around it.
 # Static anti-air is worth more for its cost than mobile ([premiums], 2026-11-25): half again as
 # strong per cost against aircraft, mostly in health (2,590 to 11,600; damage 125 to 145). With the
-# Mobile Flak's shell set by the escort rule (58 to 45, 2026-11-27) it is 1.85 times as strong per
-# cost, still inside the band, and its shell stays as it is.
+# Mobile Flak's shell set by the escort rule (58 to 45, 2026-11-27) it was 1.85 times as strong per
+# cost; it costs what puts it at 1.5 ([premiums] static_anti_air, 2026-11-28): 419 to 516.
 [[unit]]
 id = "t2_flak"
 name = "Flak Cannon"
 class = "defense"
 tier = 2
-mass = 400
-energy = 4000
-build_time = 540
+mass = 492
+energy = 4922
+build_time = 664
 health = 11600
 footprint = 1
 vision = 480
@@ -921,15 +923,17 @@ vision = 480
 # catches slow aircraft and gunships, and fast T3 aircraft mostly outfly it.
 weapon = { kind = "flak", range = 1000, reload_ticks = 8, projectile_speed = 40, damage = 145, splash_radius = 70, targets = "air", turn_rate = 180, spread = 40 }
 
-# One missile of 850 every 1.4 seconds, set by [kill_times] and [kills] (2026-11-25).
+# One missile of 850 every 1.4 seconds, set by [kill_times] and [kills] (2026-11-25). It costs what
+# puts it at 1.5 times the Mobile Flak's strength per cost at T3 prices, as static anti-air is over
+# its tier's mobile ([premiums] static_anti_air, 2026-11-28): 838 to 620.
 [[unit]]
 id = "t3_sam"
 name = "SAM Launcher"
 class = "defense"
 tier = 3
-mass = 800
-energy = 8000
-build_time = 1400
+mass = 591
+energy = 5914
+build_time = 1035
 health = 5000
 footprint = 1
 vision = 560

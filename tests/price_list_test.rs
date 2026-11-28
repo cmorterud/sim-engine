@@ -64,6 +64,16 @@ fn every_unlisted_unit_is_one_no_rule_prices() {
     }
 }
 
+/// Ground anti-air (2026-11-28): the Mobile Flak costs its list price times what the Mobile
+/// Anti-Air, whose health per mass sets its cost, pays over its own.
+#[test]
+fn the_mobile_flak_pays_what_the_mobile_anti_air_pays_over_the_list() {
+    let db = BlueprintDb::standard();
+    let (aa, flak) = (price_list::price(&db, "t1_mobile_aa").expect("listed"), price_list::price(&db, "t2_mobile_flak").expect("listed"));
+    let premium = aa.actual / aa.list;
+    assert!((flak.actual / (flak.list * premium) - 1.0).abs() < 0.01, "the Mobile Flak costs {:.1}, not {:.1} ({:.1} at {premium:.3})", flak.actual, flak.list * premium, flak.list);
+}
+
 #[test]
 fn every_held_unit_is_one_the_list_prices() {
     let db = BlueprintDb::standard();

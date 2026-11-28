@@ -750,8 +750,9 @@ fn builds_tactical_missiles(unit: &Blueprint) -> bool {
 }
 
 /// What sets a unit's cost by a rule (2026-11-28): the list's price, or what holds it; a dome's
-/// group; the factory recipe; minutes of a T3 economy, for a game-ending weapon and what answers
-/// it; a share of the missile it stops; or its tier's payback, for an extractor or a generator.
+/// group; the factory recipe; static anti-air's premium over mobile; minutes of a T3 economy, for
+/// a game-ending weapon and what answers it; a share of the missile it stops; or its tier's
+/// payback, for an extractor or a generator.
 /// None for a unit no rule prices, which `[price_list.unlisted]` must name.
 pub fn cost_rule(db: &BlueprintDb, key: &str) -> Option<String> {
     let table = table();
@@ -765,6 +766,10 @@ pub fn cost_rule(db: &BlueprintDb, key: &str) -> Option<String> {
     }
     if let Some(pricing) = factory_price(db, key) {
         return Some(if pricing.tech > 0.0 { "its build power, hull and tech, as a factory".to_string() } else { "its build power and hull, as a factory".to_string() });
+    }
+    if let Some(mobile) = table["premiums"]["static_anti_air"].get(key).and_then(toml::Value::as_str) {
+        let floor = number(&table["premiums"]["static_anti_air_over_mobile"][0]);
+        return Some(format!("{floor} times the {mobile}'s strength per cost against aircraft ([premiums] static_anti_air)"));
     }
     let missiles = &table["missiles"];
     if let Some(minutes) = missiles["strategic_minutes"].get(key) {

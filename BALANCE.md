@@ -494,6 +494,15 @@ out close and why: evidence about the process, not a target.
   Tactical Missile 0.0946, which the Tactical Missile Defense is priced from. The Deep Scan Array
   is the deep scan anchor, the only building with it; the Airfield's cost stays the design
   owner's, its repair slots a mechanic rule. Nothing moves.
+* 2026-11-28: static anti-air priced at the floor of its premium over mobile (the design owner's
+  pick of the plan's 1.5; `[premiums] static_anti_air`): each costs what puts its strength per
+  cost against aircraft at 1.5 times its tier's mobile anti-air's, the SAM's over the Mobile Flak
+  at T3 prices. The AA Turret 225 to 234, the Flak Cannon 419 to 516 (it stood at 1.85), the SAM
+  838 to 620 (it stood at 1.11). The list, pricing them directly at the ground anti-air premium
+  below and over the immobile premium, agrees within 2%. Ground anti-air: the list prices the
+  Mobile Anti-Air, whose health per mass sets its cost, at 0.68 of that cost, and the Mobile Flak
+  at the same share of its own, so the Mobile Flak costs its list price times what the Mobile
+  Anti-Air pays over its own, 1.48: 160, as it was.
 
 ## Order of work
 
