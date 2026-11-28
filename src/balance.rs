@@ -2304,7 +2304,7 @@ pub fn derive_domains_report() {
             });
         }
         let band = premium("static_anti_air_over_mobile").as_array().expect("a band").iter().map(as_number).collect::<Vec<f64>>();
-        for (tier, fixed, mobile) in [(1u8, "t1_aa_turret", "t1_mobile_aa"), (2, "t2_flak", "t2_mobile_flak")] {
+        for (tier, fixed, mobile) in [(1u8, "t1_aa_turret", "t1_mobile_aa"), (2, "t2_flak", "t2_mobile_flak"), (3, "t3_sam", "t2_mobile_flak")] {
             let ratio = anti_air_strength(&db, fixed, tier) / anti_air_strength(&db, mobile, tier);
             cells.push(Cell {
                 name: format!("{}'s strength per cost against aircraft over the {}'s", db.get(db.id(fixed)).name, db.get(db.id(mobile)).name),

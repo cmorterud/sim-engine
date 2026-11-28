@@ -173,6 +173,10 @@ point_defense_holds_against_line_units = 1.5
 # Measured by strength, since a mobile group is judged even and a position broken, which do not
 # compare as fights. Both were near 0.6 before, here and in the inspiration.
 static_anti_air_over_mobile = [1.5, 2.0]
+# Each static anti-air structure, and the mobile anti-air it is measured over (the Mobile Flak at
+# T3 prices for the SAM): each costs what puts it at the band's floor (2026-11-28, the design
+# owner's pick of the plan's 1.5).
+static_anti_air = { t1_aa_turret = "t1_mobile_aa", t2_flak = "t2_mobile_flak", t3_sam = "t2_mobile_flak" }
 # Amphibious: the hovercraft's strength per materiel over the Heavy Tank's on land, by break-even:
 # it pays for crossing water, as the inspiration's does, about three-quarters as strong for its
 # cost by the inspiration's ratios (0.71 against its line's 0.96). It was about even until today.
@@ -200,6 +204,12 @@ siege_seconds_max = 60
 # way (2026-11-28, the plan's pick: map-scale and game-ending numbers, today's written down).
 t3_economy_extractors = 8
 strategic_minutes = { strategic_missile = 2.98, strategic_missile_launcher = 2.27, strategic_interceptor = 0.79, t3_artillery = 9.95, strategic_missile_defense = 0.94 }
+# T2's siege weapons the same way, in minutes of a standard T2 economy, as many T2 extractors as a
+# T3 one has T3 extractors, 48 a second, at T2 prices (2026-11-28, today's written down): the T2
+# Artillery Installation, whose reach is past what the list's closing share prices, and the
+# Tactical Missile, the snipe its launcher builds, which the Tactical Missile Defense is priced
+# from.
+t2_minutes = { t2_artillery = 0.673, tactical_missile = 0.0946 }
 # A missile defense costs a share of the missile it stops, today's: an interceptor about a quarter
 # of a strategic missile; a Tactical Missile Defense about one tactical missile.
 defense_over_missile = { strategic_interceptor = 0.267, tactical_missile_defense = 1.09 }
@@ -910,7 +920,7 @@ t2_assault_hovercraft = "the land solver's targets ([roles])"
 t3_heavy_walker = "the land solver's targets ([roles])"
 t3_siege_walker = "the land solver's targets ([roles])"
 t1_mobile_aa = "its health per mass is the anchor's ([air] anti_air_health_over_bomb)"
-t2_mobile_flak = "not derived yet: its cost is borrowed, its gun set by the escort rule"
+t2_mobile_flak = "ground anti-air: the list's price times what the Mobile Anti-Air pays over it, which its health per mass sets (1.48)"
 t3_mobile_artillery = "the T3 line's micro cell: the middle of the costs where it holds"
 t2_torpedo_bomber = "the duel it wins ([counters]): the least that needs twice the T2 fleet's cost, and the massed T3 fleet's, to break it"
 t2_torpedo_boat = "the duel it wins ([counters]): the most that keeps 0.70 against an equal cost of submarines"
@@ -937,15 +947,8 @@ mass_storage = "the design owner's: storage and adjacency keep their tables (the
 energy_storage = "the design owner's: storage and adjacency keep their tables (the plan's pick)"
 mass_fabricator = "the design owner's: at its tier's energy rate it makes nothing net ([economy])"
 mass_fabricator_t3 = "the design owner's: at its tier's energy rate it makes nothing net ([economy])"
-radar_t2 = "not derived yet: the sensor rule over the T1 Radar, with its upkeep counted"
-t2_sonar = "not derived yet: the sensor rule over the T1 Sonar, with its upkeep counted"
-deep_scan_array = "not derived yet: the sensor rule over the T1 Radar, with its upkeep counted; the deep scan anchor"
-airfield = "not derived yet: what its repair slots save"
-t1_aa_turret = "not derived yet: static over mobile anti-air ([premiums] static_anti_air_over_mobile)"
-t2_flak = "not derived yet: static over mobile anti-air ([premiums] static_anti_air_over_mobile), after the Mobile Flak's cost"
-t3_sam = "not derived yet: static over the Mobile Flak ([premiums] static_anti_air_over_mobile), after the Mobile Flak's cost"
-t2_artillery = "not derived yet: its reach is past what the list's closing share prices"
-tactical_missile = "not derived yet: its damage job, its reach free as a missile's is"
+deep_scan_array = "an anchor: the sensor rule's deep scan, the only building with it, the design owner's"
+airfield = "the design owner's: its repair slots are a mechanic rule, which no fight prices"
 
 # Aircraft pay for the damage they land, not their card's (2026-11-26): anti-air against a bomber
 # flying its run (the Strategic Bomber at T3, the T1 Bomber below), bombs, guns and torpedoes against

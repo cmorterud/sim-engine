@@ -64,6 +64,32 @@ fn every_unlisted_unit_is_one_no_rule_prices() {
     }
 }
 
+/// Ground anti-air (2026-11-28): the Mobile Flak costs its list price times what the Mobile
+/// Anti-Air, whose health per mass sets its cost, pays over its own.
+#[test]
+fn the_mobile_flak_pays_what_the_mobile_anti_air_pays_over_the_list() {
+    let db = BlueprintDb::standard();
+    let (aa, flak) = (price_list::price(&db, "t1_mobile_aa").expect("listed"), price_list::price(&db, "t2_mobile_flak").expect("listed"));
+    let premium = aa.actual / aa.list;
+    assert!((flak.actual / (flak.list * premium) - 1.0).abs() < 0.01, "the Mobile Flak costs {:.1}, not {:.1} ({:.1} at {premium:.3})", flak.actual, flak.list * premium, flak.list);
+}
+
+/// Sensor buildings (2026-11-28, the design owner's pick): each that is not the cheapest with one
+/// of its sensors costs what its sensors see past its vision at that cheapest building's price per
+/// area, within 1%.
+#[test]
+fn every_sensor_building_costs_its_cover() {
+    let db = BlueprintDb::standard();
+    let mut priced = Vec::new();
+    for unit in db.iter() {
+        let Some(price) = price_list::sensor_building_price(&db, &unit.key) else { continue };
+        let cost = sim_engine::balance::cost_at(unit, unit.tier);
+        assert!((cost / price - 1.0).abs() < 0.01, "{} costs {cost:.1}, its cover {price:.1}", unit.key);
+        priced.push(unit.key.as_str());
+    }
+    assert_eq!(priced, ["radar_t2", "t2_sonar"], "the T2 Radar and the T2 Sonar; the Radar, the Sonar and the Deep Scan Array are anchors");
+}
+
 #[test]
 fn every_held_unit_is_one_the_list_prices() {
     let db = BlueprintDb::standard();
@@ -135,8 +161,9 @@ fn transports_cost_their_cargo_and_weak_weapons() {
 }
 
 /// `[missiles] strategic_minutes` (2026-11-27): each game-ending weapon costs its minutes of a
-/// standard T3 economy's income, at T3 prices, and each missile defense its share of the missile
-/// it stops (`defense_over_missile`), within 1%.
+/// standard T3 economy's income, at T3 prices, T2's siege weapons theirs of a T2 economy
+/// (`t2_minutes`, 2026-11-28), and each missile defense its share of the missile it stops
+/// (`defense_over_missile`), within 1%.
 #[test]
 fn strategic_weapons_cost_their_minutes_of_a_t3_economy() {
     let targets: toml::Table = include_str!("../data/balance_targets.toml").parse().expect("valid targets");
@@ -148,6 +175,13 @@ fn strategic_weapons_cost_their_minutes_of_a_t3_economy() {
     for (key, minutes) in missiles["strategic_minutes"].as_table().expect("[missiles] strategic_minutes") {
         let wanted = number(minutes) * per_minute;
         assert!((cost(key) / wanted - 1.0).abs() < 0.01, "{key} costs {:.0}, {minutes} minutes of a T3 economy {wanted:.0}", cost(key));
+    }
+    // T2's siege weapons in minutes of a T2 economy, as many T2 extractors, at T2 prices.
+    let per_minute_t2 = number(&missiles["t3_economy_extractors"]) * db.get(db.id("mass_extractor_t2")).mass_income.to_num::<f64>() * sim_engine::sim::blueprints::TICKS_PER_SECOND as f64 * 60.0;
+    for (key, minutes) in missiles["t2_minutes"].as_table().expect("[missiles] t2_minutes") {
+        let wanted = number(minutes) * per_minute_t2;
+        let cost = sim_engine::balance::cost_at(db.get(db.id(key)), 2);
+        assert!((cost / wanted - 1.0).abs() < 0.01, "{key} costs {cost:.0}, {minutes} minutes of a T2 economy {wanted:.0}");
     }
     for (key, missile) in [("strategic_interceptor", "strategic_missile"), ("tactical_missile_defense", "tactical_missile")] {
         let share = number(&missiles["defense_over_missile"][key]);

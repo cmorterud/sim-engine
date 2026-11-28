@@ -488,6 +488,26 @@ out close and why: evidence about the process, not a target.
   health stay as first set, written down as hit counts (`[kills]`): a T1 launcher sinks a frigate
   in 7 volleys and a frigate breaks it in 26 shells; a T2 launcher sinks a destroyer in 49
   torpedoes and a destroyer breaks it in 27 shells.
+* 2026-11-28: T2's siege weapons in minutes of a standard T2 economy, as many T2 extractors as the
+  T3 one has T3 extractors, 48 a second (`[missiles] t2_minutes`), today's costs written down: the
+  T2 Artillery Installation 0.673, its reach past what the list's closing share prices; the
+  Tactical Missile 0.0946, which the Tactical Missile Defense is priced from. The Deep Scan Array
+  is the deep scan anchor, the only building with it; the Airfield's cost stays the design
+  owner's, its repair slots a mechanic rule. Nothing moves.
+* 2026-11-28: static anti-air priced at the floor of its premium over mobile (the design owner's
+  pick of the plan's 1.5; `[premiums] static_anti_air`): each costs what puts its strength per
+  cost against aircraft at 1.5 times its tier's mobile anti-air's, the SAM's over the Mobile Flak
+  at T3 prices. The AA Turret 225 to 234, the Flak Cannon 419 to 516 (it stood at 1.85), the SAM
+  838 to 620 (it stood at 1.11). The list, pricing them directly at the ground anti-air premium
+  below and over the immobile premium, agrees within 2%. Ground anti-air: the list prices the
+  Mobile Anti-Air, whose health per mass sets its cost, at 0.68 of that cost, and the Mobile Flak
+  at the same share of its own, so the Mobile Flak costs its list price times what the Mobile
+  Anti-Air pays over its own, 1.48: 160, as it was.
+* 2026-11-28: sensor buildings priced by the sensor rule every mobile sensor follows (the design
+  owner's pick; `price_list::sensor_building_price`): what each sensor sees past the building's
+  vision at the price per area of the cheapest building with it, not over a domain base, upkeep
+  left out as it is for a mobile sensor. The T2 Radar 206 to 328, the T2 Sonar 354 to 644. The
+  Radar, the Sonar and the Deep Scan Array are the anchors the rule prices from.
 
 ## Order of work
 
