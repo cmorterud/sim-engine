@@ -594,6 +594,25 @@ out close and why: evidence about the process, not a target.
   Battleship 6,542 to 6,605, the Battlecruiser 5,313 to 5,483), the T1 launcher 315 to 329, the
   T2 879 to 857, the Torpedo Boat 801 to 809 and the Torpedo Bomber 132.5 to 131. Every fleet,
   submarine and torpedo-bomber check holds. 427 unit families are not derived yet.
+* 2026-11-28: the air's and the land's sizes by hit counts (Pass 4, the air and land batches,
+  the design owner's picks), in `[kills]` and `[secondary_kills]`, each in the middle of what meets
+  it. Aircraft from the anti-air already set: a Mobile Anti-Air brings an Air Scout down in 2 (35
+  to 31), a SAM a Spy Plane in 3 (2,000 to 2,125), an Interceptor a Fighter-Bomber in 35 (1,696 to
+  1,687) and a Destroyer's anti-air a Torpedo Bomber in 81 (1,252 to 1,248). Their weapons from
+  what they strike: a Gunship breaks a Heavy Tank in 62 (22.6 to 22.5), a Fighter-Bomber's bombs
+  a commander in 15 (1,256 to 1,242.9), a Torpedo Bomber's torpedoes a Destroyer in 57 (189 to
+  187.6), and the Heavy Gunship's gun a commander in the middle of `[kill_times]` (126 shots, 144
+  to 143.4). The land's from the line unit of their tier: the engineers in 5, 4 and 12 shots (150
+  to 135, 400 to 360, 800 to 813), the Combat Engineer in 11 (1,040 to 1,080; its gun a Heavy Tank
+  in 93, 15 to 14.9), the Mobile Shield through its dome in 31 (its hull 150 to 138), the Mobile
+  Flak in 10 (1,000 to 978) and the Field Rig in 227 (16,000 to 16,013; its gun a Heavy Walker in
+  17 through its shield, 300 to 302.8); Mobile Heavy Artillery's shell breaks a Siege Walker in 13
+  (859.1 to 882.2, its reload 13.8 to 14.2 s by its time to kill). Measured together, the T3 air
+  base stays 0.946 and the navy base 0.664 (apart, each batch moved the T3 air base by 3 to 4%: the
+  battle line's measure moves that much with small changes). The Torpedo Bomber's duel is now the
+  mean over the battle line's fleet sizes (at two squadrons alone it swung from 1.6 to 2.7 as its
+  cost moved a few percent), which prices it 131.2 to 139.6. 410 unit families are not derived
+  yet.
 
 ## Order of work
 

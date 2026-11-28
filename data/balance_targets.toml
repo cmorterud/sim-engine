@@ -242,13 +242,14 @@ wide = ["t2_artillery", "t3_artillery", "t3_mobile_artillery", "t3_strategic_bom
 # A personal shield counts with the health it guards. These set damage and health where the duels
 # cannot: the strategic bomber is the T3 snipe weapon, fast, with one great bomb a pass, countered
 # by T3 fighters and SAMs; the tactical missile launcher snipes too, countered by missile defense.
-# The commander, tough against everything else, falls only to these.
+# The commander, tough against everything else, falls only to these two in a few hits. Since
+# 2026-11-28 (Pass 4) counts here also set the held sizes, each in the middle of what meets it.
 t1_bomber = { t1_medium_tank = 2, t1_mobile_aa = 2 }
 t3_strategic_bomber = { t3_heavy_walker = 1, t3_siege_walker = 3, t3_mobile_artillery = 1, t2_artillery = 2, command_rig = 4 }
 tactical_missile_launcher = { field_rig = 2, command_rig = 2 }
 # The T3 SAM: two missiles bring down a Gunship, and eight a Strategic Bomber (2026-11-25), which
 # [kill_times] times.
-t3_sam = { t2_gunship = 2, t3_strategic_bomber = 8 }
+t3_sam = { t2_gunship = 2, t3_strategic_bomber = 8, t3_spy_plane = 3 }
 # Mobile Heavy Artillery is a glass cannon: it survives one shell from another of its kind, but not
 # two, and one shell kills a Medium Tank. Its shell keeps the damage the arcs pass gave it, 859, and
 # its spread, 60, makes it inaccurate, as heavy artillery is in the inspiration, so that it is for
@@ -256,12 +257,12 @@ t3_sam = { t2_gunship = 2, t3_strategic_bomber = 8 }
 # blast wide, it wiped out Heavy Walkers at the lowest strength the search allows. Since 2026-11-24
 # it fires about half as often, to sit under the battleship's turrets, and a swarm of Medium Tanks
 # of its cost overruns it; it is not asked to win that fight.
-t3_mobile_artillery = { t3_mobile_artillery = 2, t1_medium_tank = 1 }
+t3_mobile_artillery = { t3_mobile_artillery = 2, t1_medium_tank = 1, t3_siege_walker = 13 }
 # The T3 Artillery Installation destroys any T3 land unit with a direct hit, but its spread is
 # wide, so it is for base-sized targets; the T2 one, with a moderate spread, for small bases.
 # A Medium Tank breaks a Wall Section in 17 shots, about 17 seconds (2026-11-28, the plan's pick,
 # today's written down): a wall slows an attack; it does not stop one.
-t1_medium_tank = { wall = 17 }
+t1_medium_tank = { wall = 17, t1_engineer = 5 }
 # The navy's sizes (2026-11-28, the design owner's targets, Pass 4 of the derivation plan): each
 # held size takes one hit count, and its number is set in the middle of what meets it, as the
 # transports' health is. From the Medium Tank: a frigate's gun breaks one in 4 shots, and a
@@ -274,6 +275,25 @@ t1_torpedo_launcher = { t1_frigate = 7 }
 t2_torpedo_launcher = { t2_destroyer = 49 }
 t1_frigate = { t1_torpedo_launcher = 26, t1_medium_tank = 4, t1_attack_sub = 11 }
 t2_destroyer = { t2_torpedo_launcher = 27, t2_cruiser = 11, t2_escort_corvette = 13 }
+# The air's sizes and the land's (2026-11-28, the design owner's targets, Pass 4), the same way.
+# Aircraft from the anti-air already set: a Mobile Anti-Air brings an Air Scout down in 2 shots,
+# an Interceptor a Fighter-Bomber in 35 (which downs an Interceptor in about 2 seconds), and a SAM
+# a Spy Plane in 3 (above). Their weapons from what they strike: a Gunship breaks a Heavy Tank in
+# 62 shots, a Fighter-Bomber's bombs a commander in 15, a Torpedo Bomber's torpedoes a Destroyer in
+# 57. The land's from the line unit of their tier: a Medium Tank destroys a T1 Engineer in 5 shots
+# (above); a Heavy Tank a T2 Engineer in 4, a Combat Engineer in 11, a Mobile Shield through its
+# dome in 31 and a Mobile Flak in 10; a Heavy Walker a T3 Engineer in 12 and a Field Rig in 227;
+# and they break a Heavy Tank with a Combat Engineer's gun in 93 shots, a Heavy Walker with a Field
+# Rig's in 17 through its shield, and a Siege Walker with Mobile Heavy Artillery's shells in 13 (above).
+t1_mobile_aa = { t1_air_scout = 2 }
+t1_interceptor = { t2_fighter_bomber = 35 }
+t2_gunship = { t2_heavy_tank = 62 }
+t2_fighter_bomber = { command_rig = 15 }
+t2_torpedo_bomber = { t2_destroyer = 57 }
+t2_heavy_tank = { t2_engineer = 4, t2_combat_engineer = 11, t2_mobile_shield = 31, t2_mobile_flak = 10 }
+t3_heavy_walker = { t3_engineer = 12, field_rig = 227 }
+t2_combat_engineer = { t2_heavy_tank = 93 }
+field_rig = { t3_heavy_walker = 17 }
 t3_artillery_kills_every_t3_land_unit = true
 t3_artillery_spread = [150, 200]
 t2_artillery_spread = [40, 60]
@@ -284,10 +304,11 @@ t2_artillery_spread = [40, 60]
 # Bomber in 32 (about 43 seconds, twice the frigate's) and its torpedoes sink a Missile Submarine
 # in 22; a battleship's anti-air brings down a Gunship in 17 (about 27 seconds); a
 # battlecruiser's torpedo sinks a submerged attack submarine in 7; and an attack submarine's deck
-# gun breaks a Medium Tank in 19 (tests/kills_test.rs).
+# gun breaks a Medium Tank in 19 (tests/kills_test.rs). A destroyer's anti-air brings down a
+# Torpedo Bomber in 81 (2026-11-28, with the air's sizes).
 [secondary_kills]
 t2_cruiser = { surface = { t2_heavy_tank = 7 } }
-t2_destroyer = { air = { t1_bomber = 32 }, naval = { t3_missile_sub = 22 } }
+t2_destroyer = { air = { t1_bomber = 32, t2_torpedo_bomber = 81 }, naval = { t3_missile_sub = 22 } }
 t3_battleship = { air = { t2_gunship = 17 } }
 t3_battlecruiser = { naval = { t1_attack_sub = 7 } }
 t1_attack_sub = { surface = { t1_medium_tank = 19 } }
@@ -380,6 +401,8 @@ mobile_aa_t1_bomber = [23, 25]
 t3_fighter_strategic_bomber = [8.5, 11]
 t3_fighter_t3_fighter = [4.5, 5.5]
 t3_fighter_heavy_gunship = [14, 16]
+# The heavy gunship's gun is set at the middle, 50 seconds (2026-11-28, Pass 4): 126 shots, at
+# 50.1 measured, and the damage in the middle of what takes 126.
 heavy_gunship_commander_on_land = [45, 55]
 fighter_bomber_interceptor = [1.5, 2.5]
 sam_t2_gunship = [1.5, 3.0]
@@ -523,7 +546,10 @@ artillery_counters_without_micro = ["artillery", "mobile_shield", "heavy", "bomb
 # these many squadrons of it: one size alone turns on how the submarines round, a step of a tenth
 # of the boat's cost. The Torpedo Bomber costs the least that keeps torpedo bombers needing twice
 # the T2 fleet's cost to break it ([domains.cells] torpedo_bombers_to_break_fleet_t2), and twice the
-# massed T3 fleet's (torpedo_bombers_to_break_fleet_t3, since its bomber's runs, 2026-11-27).
+# massed T3 fleet's (torpedo_bombers_to_break_fleet_t3, since its bomber's runs, 2026-11-27),
+# each the mean over the fleet sizes the battle line uses ([battle_line] squadrons, 2026-11-28, the
+# design owner's pick): at two squadrons alone it swung from 1.6 to 2.7 as the bomber's cost moved
+# a few percent, so its cost followed the noise.
 counter_squadrons = [4, 5, 6, 7]
 
 [strategy]
@@ -646,7 +672,8 @@ t3_strike_aircraft = { t3_heavy_gunship = 1 }
 fleet_beats_air_force_t2 = 0.40
 fleet_beats_air_force_t3 = 0.60
 # And it takes overwhelming torpedo bombers, this many times the fleet's cost, to break it: the
-# break-even's efficiency of the fleet against them. At least twice, for a T2 fleet and a massed,
+# break-even's efficiency of the fleet against them, the mean over the battle line's fleet sizes
+# (2026-11-28; the battleship-heavy fleet at two squadrons). At least twice, for a T2 fleet and a massed,
 # escorted T3 one (three times for T3 until 2026-11-24, when the escorts were chosen to carry it,
 # as in the inspiration). The upper ends only keep a wing of torpedo bombers from being worthless.
 torpedo_bombers_to_break_fleet_t2 = [2.0, 5.0]

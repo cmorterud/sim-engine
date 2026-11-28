@@ -35,7 +35,7 @@ economy = "not derived yet: held, its income, storage and build power"
 special = "anchor: the design owner's Discharge, at least [commander] discharge_kills_every_t1_land_unit; its reactor's blast is its own health"
 
 [units.t1_engineer]
-health = "not derived yet: held, its health and body"
+health = "rule: the middle of what a Medium Tank destroys in [kills] t1_medium_tank.t1_engineer"
 body = "not derived yet: held, today's radius"
 speed = "not derived yet: an identity knob ([constants]), today's top speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
@@ -156,7 +156,7 @@ sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's build power"
 
 [units.t2_engineer]
-health = "not derived yet: held, its health and body"
+health = "rule: the middle of what a Heavy Tank destroys in [kills] t2_heavy_tank.t2_engineer"
 body = "not derived yet: held, today's radius"
 speed = "not derived yet: an identity knob ([constants]), today's top speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
@@ -164,7 +164,7 @@ sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: held, today's build power and range"
 
 [units.t3_engineer]
-health = "not derived yet: held, its health and body"
+health = "rule: the middle of what a Heavy Walker destroys in [kills] t3_heavy_walker.t3_engineer"
 body = "not derived yet: held, today's radius"
 speed = "not derived yet: an identity knob ([constants]), today's top speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
@@ -197,9 +197,9 @@ sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's build power"
 
 [units.field_rig]
-health = "not derived yet: kept inside [kills] tactical_missile_launcher.field_rig, two missiles, which does not pin it"
+health = "rule: the middle of what a Heavy Walker destroys in [kills] t3_heavy_walker.field_rig, inside [kills] tactical_missile_launcher.field_rig"
 body = "not derived yet: held, today's radius"
-damage = "not derived yet: held, three times the commander's fire"
+damage = "rule: the middle of what breaks a Heavy Walker in [kills] field_rig.t3_heavy_walker"
 range = "not derived yet: held, a little past the commander's"
 speed = "not derived yet: the inspiration's"
 turning = "not derived yet: the inspiration's"
@@ -247,7 +247,7 @@ sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's build power"
 
 [units.t1_air_scout]
-health = "not derived yet: held, its health and body"
+health = "rule: the middle of what a Mobile Anti-Air brings down in [kills] t1_mobile_aa.t1_air_scout"
 body = "not derived yet: held, today's radius"
 speed = "not derived yet: an identity knob ([constants]), today's top speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn and fuel; its height is [air.heights] t1_air_scout of the Spy Plane's, which is held"
@@ -306,7 +306,7 @@ economy = "not derived yet: the inspiration's build power"
 [units.t2_gunship]
 health = "rule: [volleys] t2_cruiser.t2_gunship and [kills] t3_sam.t2_gunship"
 body = "not derived yet: held, today's radius"
-damage = "not derived yet: the inspiration's ratio to its T1 tank"
+damage = "rule: the middle of what breaks a Heavy Tank in [kills] t2_gunship.t2_heavy_tank"
 range = "rule: [model] aircraft_gun_over_anti_air, 0.7 of the Mobile Anti-Air's"
 speed = "not derived yet: an identity knob ([constants]), today's top speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn and fuel; its height is [air.heights] t2_gunship of the Spy Plane's, which is held"
@@ -314,7 +314,7 @@ timing = "not derived yet: held, its reload and spread; its shell is balance::sh
 sensors = "rule: it sees a little past its longest gun, as the land line does (balance::gun_sight)"
 
 [units.t3_spy_plane]
-health = "not derived yet: held, its health and body"
+health = "rule: the middle of what a SAM brings down in [kills] t3_sam.t3_spy_plane"
 body = "not derived yet: held, today's radius"
 speed = "not derived yet: an identity knob ([constants]), today's top speed"
 turning = "not derived yet: held, its height, the highest, which every aircraft's is a share of; an identity knob ([constants]), its turn and fuel"
@@ -343,7 +343,7 @@ sensors = "not derived yet: held, its vision and radar"
 [units.t3_heavy_gunship]
 health = "rule: [kill_times] t3_fighter_heavy_gunship and [volleys] t2_cruiser.t3_heavy_gunship"
 body = "not derived yet: held, today's radius"
-damage = "not derived yet: the inspiration's railgun; its gun is [kill_times] heavy_gunship_commander_on_land"
+damage = "not derived yet: the inspiration's railgun; its gun is the middle of what destroys a commander in [kill_times] heavy_gunship_commander_on_land's middle"
 range = "rule: [model] aircraft_gun_over_anti_air, 0.7 of the Mobile Flak's, and [model] aircraft_anti_air_at_fighter"
 speed = "not derived yet: an identity knob ([constants]), today's top speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn and fuel; its height is [air.heights] t3_heavy_gunship of the Spy Plane's, which is held"
@@ -367,7 +367,7 @@ timing = "not derived yet: held, its missile's blast; its missile flies at the [
 sensors = "not derived yet: held, today's vision"
 
 [units.t2_mobile_flak]
-health = "not derived yet: held, its health and body"
+health = "rule: the middle of what a Heavy Tank destroys in [kills] t2_heavy_tank.t2_mobile_flak"
 body = "not derived yet: held, today's radius"
 damage = "rule: [air] escort_forces, the T2 army and the T2 strike aircraft even (balance::derive_t2_flak)"
 range = "rule: [model] mobile_anti_air_over_line"
@@ -461,7 +461,7 @@ economy = "not derived yet: the inspiration's energy a shot"
 [units.t3_mobile_artillery]
 health = "rule: [kills] t3_mobile_artillery.t3_mobile_artillery, it survives one of its own shells and not two"
 body = "not derived yet: held, today's radius"
-damage = "not derived yet: held, the shell a retired rule gave it, kept inside [kills] t3_mobile_artillery.t1_medium_tank and t3_mobile_artillery.t3_mobile_artillery"
+damage = "rule: the middle of what breaks a Siege Walker in [kills] t3_mobile_artillery.t3_siege_walker, inside its counts for its own kind and a Medium Tank"
 range = "rule: [model] artillery_over_line, three times the T3 line's reach, a quarter of it its least range"
 speed = "not derived yet: an identity knob ([constants]), today's top speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
@@ -469,9 +469,9 @@ timing = "not derived yet: the inspiration's spread, with its shell speed, blast
 sensors = "not derived yet: held, today's vision"
 
 [units.t2_fighter_bomber]
-health = "not derived yet: the inspiration's ratio, inside [volleys] t2_cruiser.t2_fighter_bomber"
+health = "rule: the middle of what an Interceptor brings down in [kills] t1_interceptor.t2_fighter_bomber, inside [volleys] t2_cruiser.t2_fighter_bomber"
 body = "not derived yet: held, today's radius"
-damage = "not derived yet: the inspiration's ratio, its bomb; its railguns are [kill_times] fighter_bomber_interceptor"
+damage = "rule: its bomb the middle of what destroys a commander in [kills] t2_fighter_bomber.command_rig; its railguns [kill_times] fighter_bomber_interceptor"
 range = "not derived yet: held, its bomb's and its railguns' reach"
 speed = "not derived yet: an identity knob ([constants]), today's top speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn rate; its turn radius is [constants] fighter_turn_radius; its height [air.heights] t2_fighter_bomber of the Spy Plane's, which is held"
@@ -573,9 +573,9 @@ timing = "not derived yet: the inspiration's deck gun's reload; its deck gun's s
 sensors = "not derived yet: held, its vision and sonar"
 
 [units.t2_torpedo_bomber]
-health = "not derived yet: the inspiration's ratio to its T1 tank"
+health = "rule: the middle of what a destroyer's anti-air brings down in [secondary_kills] t2_destroyer.air"
 body = "not derived yet: held, today's radius"
-damage = "not derived yet: the inspiration's ratio to its T1 tank"
+damage = "rule: the middle of what sinks a destroyer in [kills] t2_torpedo_bomber.t2_destroyer"
 range = "not derived yet: held, where it lets its torpedoes go"
 speed = "not derived yet: an identity knob ([constants]), today's top speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn and fuel; its height is held"
@@ -681,7 +681,7 @@ timing = "rule: its reload, shell flight, blast and spread are its role's in bal
 sensors = "rule: its role's sight over its reach in balance::t2_land_roles"
 
 [units.t2_mobile_shield]
-health = "not derived yet: held, its health and body"
+health = "rule: the middle of what a Heavy Tank destroys, through its dome, in [kills] t2_heavy_tank.t2_mobile_shield"
 body = "not derived yet: held, today's radius"
 speed = "not derived yet: an identity knob ([constants]), today's top speed"
 turning = "not derived yet: an identity knob ([constants]), today's turn rate and radius"
@@ -689,9 +689,9 @@ sensors = "not derived yet: held, today's vision"
 special = "not derived yet: held, its dome's size, health and regeneration; its recharge is the design owner's 20 seconds"
 
 [units.t2_combat_engineer]
-health = "not derived yet: the inspiration's"
+health = "rule: the middle of what a Heavy Tank destroys in [kills] t2_heavy_tank.t2_combat_engineer"
 body = "not derived yet: held, today's radius"
-damage = "not derived yet: the inspiration's"
+damage = "rule: the middle of what breaks a Heavy Tank in [kills] t2_combat_engineer.t2_heavy_tank"
 range = "not derived yet: the inspiration's"
 speed = "not derived yet: the inspiration's"
 turning = "not derived yet: the inspiration's"
