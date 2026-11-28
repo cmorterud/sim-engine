@@ -262,7 +262,8 @@ t3_mobile_artillery = { t3_mobile_artillery = 2, t1_medium_tank = 1, t3_siege_wa
 # wide, so it is for base-sized targets; the T2 one, with a moderate spread, for small bases.
 # A Medium Tank breaks a Wall Section in 17 shots, about 17 seconds (2026-11-28, the plan's pick,
 # today's written down): a wall slows an attack; it does not stop one.
-t1_medium_tank = { wall = 17, t1_engineer = 5 }
+t1_medium_tank.wall = 17
+t1_medium_tank.t1_engineer = 5
 # The navy's sizes (2026-11-28, the design owner's targets, Pass 4 of the derivation plan): each
 # held size takes one hit count, and its number is set in the middle of what meets it, as the
 # transports' health is. From the Medium Tank: a frigate's gun breaks one in 4 shots, and a
@@ -290,10 +291,67 @@ t1_interceptor = { t2_fighter_bomber = 35 }
 t2_gunship = { t2_heavy_tank = 62 }
 t2_fighter_bomber = { command_rig = 15 }
 t2_torpedo_bomber = { t2_destroyer = 57 }
-t2_heavy_tank = { t2_engineer = 4, t2_combat_engineer = 11, t2_mobile_shield = 31, t2_mobile_flak = 10 }
-t3_heavy_walker = { t3_engineer = 12, field_rig = 227 }
+t2_heavy_tank.t2_engineer = 4
+t2_heavy_tank.t2_combat_engineer = 11
+t2_heavy_tank.t2_mobile_shield = 31
+t2_heavy_tank.t2_mobile_flak = 10
+t3_heavy_walker.t3_engineer = 12
+t3_heavy_walker.field_rig = 227
 t2_combat_engineer = { t2_heavy_tank = 93 }
 field_rig = { t3_heavy_walker = 17 }
+# Structures' health (2026-11-28, Pass 8 of the derivation plan), the same way: each structure
+# takes one hit count from the line unit of its tier, a Medium Tank at T1, a Heavy Tank at T2 and
+# a Heavy Walker at T3, today's count, and its health sits in the middle of what meets it. A
+# shield generator counts through its dome, as the Escort Corvette and the Mobile Shield do. The
+# Wall Section's 17 is above; the torpedo launchers' counts are with the navy's.
+t1_medium_tank.land_factory_t1 = 134
+t1_medium_tank.mass_extractor = 14
+t1_medium_tank.power_generator = 20
+t1_medium_tank.mass_storage = 27
+t1_medium_tank.t1_point_defense = 130
+t1_medium_tank.radar = 1
+t1_medium_tank.geothermal_plant = 60
+t1_medium_tank.air_factory = 134
+t1_medium_tank.t1_aa_turret = 150
+t1_medium_tank.energy_storage = 17
+t1_medium_tank.naval_factory = 150
+t1_medium_tank.t1_sonar = 14
+t2_heavy_tank.land_factory_t2 = 78
+t2_heavy_tank.shield_generator = 129
+t2_heavy_tank.tactical_missile_launcher = 9
+t2_heavy_tank.tactical_missile_defense = 10
+t2_heavy_tank.stealth_field_generator = 3
+t2_heavy_tank.mass_extractor_t2 = 20
+t2_heavy_tank.mass_fabricator = 4
+t2_heavy_tank.air_factory_t2 = 78
+t2_heavy_tank.t2_flak = 113
+t2_heavy_tank.land_factory_t2_support = 39
+t2_heavy_tank.air_factory_t2_support = 39
+t2_heavy_tank.power_generator_t2 = 25
+t2_heavy_tank.radar_t2 = 1
+t2_heavy_tank.t2_point_defense = 22
+t2_heavy_tank.airfield = 5
+t2_heavy_tank.t2_artillery = 69
+t2_heavy_tank.naval_factory_t2 = 156
+t2_heavy_tank.naval_factory_t2_support = 78
+t2_heavy_tank.t2_sonar = 8
+t3_heavy_walker.strategic_missile_launcher = 57
+t3_heavy_walker.strategic_missile_defense = 54
+t3_heavy_walker.land_factory_t3 = 227
+t3_heavy_walker.deep_scan_array = 2
+t3_heavy_walker.rig_yard = 142
+t3_heavy_walker.mass_extractor_t3 = 100
+t3_heavy_walker.mass_fabricator_t3 = 85
+t3_heavy_walker.air_factory_t3 = 227
+t3_heavy_walker.t3_sam = 71
+t3_heavy_walker.land_factory_t3_support = 114
+t3_heavy_walker.air_factory_t3_support = 114
+t3_heavy_walker.power_generator_t3 = 128
+t3_heavy_walker.t3_artillery = 213
+t3_heavy_walker.naval_factory_t3 = 368
+t3_heavy_walker.naval_factory_t3_support = 227
+t3_heavy_walker.t3_heavy_point_defense = 92
+t3_heavy_walker.t3_heavy_shield = 517
 t3_artillery_kills_every_t3_land_unit = true
 t3_artillery_spread = [150, 200]
 t2_artillery_spread = [40, 60]

@@ -295,7 +295,8 @@ fn a_nuclear_missile_flattens_everything_in_its_blast_once_per_order() {
     world.advance_tick(&[SimCommand::AttackGround { units: vec![silo], point: ground_zero() }]);
     assert!(run_until(&mut world, 500, |world| base.iter().all(|id| !alive(world, *id))).is_some(), "the inner ring should flatten the base");
     assert!(alive(&world, far), "1,370 away is outside the blast");
-    assert_eq!(health(&world, edge), fp_int(100), "the outer ring does 500");
+    let full = world.blueprints.get(world.blueprints.id("power_generator")).health;
+    assert_eq!(health(&world, edge), full - fp_int(500), "the outer ring does 500");
     let entity = world.unit_entity(silo).unwrap();
     assert_eq!(world.ecs.get::<&Launcher>(entity).unwrap().stock, 1, "one order, one missile");
     assert_eq!(world.ecs.get::<&Combat>(entity).unwrap().ground_target, None);

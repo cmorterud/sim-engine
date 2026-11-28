@@ -86,7 +86,7 @@ fn a_geothermal_plant_goes_only_over_a_vent_and_nothing_else_does() {
     world.advance_tick(&[]);
     let (_, energy) = one_tick(&mut world);
     assert!(near(energy, Res::from_num(10)), "100 energy a second: {energy}");
-    assert_eq!(world.unit_health(plant), Some(fp_int(1_800)));
+    assert_eq!(world.unit_health(plant), Some(world.blueprints.get(world.blueprints.id("geothermal_plant")).health));
 }
 
 #[test]

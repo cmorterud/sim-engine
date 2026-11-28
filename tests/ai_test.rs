@@ -874,6 +874,33 @@ fn in_sudden_death_a_commander_with_nothing_left_to_fight_with_goes_for_the_enem
 }
 
 #[test]
+fn in_sudden_death_with_nothing_left_one_commander_holds_and_the_other_comes_for_it() {
+    // On Twin Passes (seed 19, 2026-11-28) two mirror-image commanders, each with nothing left to
+    // fight with, crossed the lake between them together and passed each other on its bed, where
+    // neither can fire, for the last hour of the match. Now Blue's holds on even seeds and Red's on
+    // odd ones, and the other goes for it.
+    let goes = |team: Team, seed: u64| {
+        let mut world = scenario::skirmish(seed).world;
+        world.current_tick = 51 * 600;
+        let commander = world.commanders[team.index()].unwrap();
+        AiBrain::new(team, seed, world.starts).think(&world).iter().any(|command| matches!(command, SimCommand::AttackMove { units, .. } if units.contains(&commander)))
+    };
+    for seed in [41, 42] {
+        let blue_holds = seed % 2 == 0;
+        assert_eq!(goes(Team::Blue, seed), !blue_holds, "seed {seed}: Blue's commander goes only when Red's holds");
+        assert_eq!(goes(Team::Red, seed), blue_holds, "seed {seed}: Red's commander goes only when Blue's holds");
+    }
+    // One already on its way stops where it stands, on land.
+    let mut world = scenario::skirmish(42).world;
+    let blue = world.commanders[Team::Blue.index()].unwrap();
+    world.advance_tick(&[SimCommand::AttackMove { units: vec![blue], goal: Vec2Fp::new(fp_int(5_000), fp_int(5_000)) }]);
+    world.current_tick = 51 * 600;
+    let orders = AiBrain::new(Team::Blue, 42, world.starts).think(&world);
+    assert!(orders.iter().any(|command| matches!(command, SimCommand::Stop { units } if units == &vec![blue])), "the holding commander stops: {orders:?}");
+    assert!(!orders.iter().any(|command| matches!(command, SimCommand::AttackMove { units, .. } if units.contains(&blue))), "and is not sent on again");
+}
+
+#[test]
 fn once_the_nearest_enemy_player_is_out_the_waves_go_for_the_nearest_one_left() {
     // On Scattered Isles (4v4, seed 1, 2026-11-27) the last player of each side kept sending its
     // aircraft and fleet at the empty base of an enemy wiped out at minute 45, until the time ran

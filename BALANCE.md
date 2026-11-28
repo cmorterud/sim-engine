@@ -613,6 +613,15 @@ out close and why: evidence about the process, not a target.
   mean over the battle line's fleet sizes (at two squadrons alone it swung from 1.6 to 2.7 as its
   cost moved a few percent), which prices it 131.2 to 139.6. 410 unit families are not derived
   yet.
+* 2026-11-28: structures' health by hit counts (Pass 8). Each of the 49 structures takes today's
+  hit count from the line unit of its tier in `[kills]`, a Medium Tank at T1, a Heavy Tank at T2
+  and a Heavy Walker at T3, and its health sits in the middle of what meets it; a shield generator
+  counts through its dome. No count changes. Most move under 3%; the most are the Radar (10 to
+  15, one shot either way), the Stealth Field Generator (225 to 257, three), the Airfield (500 to
+  463, five) and the Shield Generator's hull (250 to 203: 129 shots through its 13,020 dome, as
+  before, but 2 rather than 3 once its dome is down). Only the T2 Point Defense is repriced (637.9
+  to 631.8, to the list); the domains, the battle line and the counters come out the same. 361
+  unit families are not derived yet.
 
 ## Order of work
 
