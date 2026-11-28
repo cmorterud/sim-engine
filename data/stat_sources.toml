@@ -259,7 +259,7 @@ body = "not derived yet: held, today's radius"
 damage = "anchor: [air] interceptor_size, the design owner's for T1 air's scale; [model] time_to_kill_domain air_to_air splits it (balance::derive_t1_air)"
 range = "not derived yet: held, its gun's reach"
 speed = "rule: a fighter, [air.t3_fighter] speed_over_strategic_bomber times the T1 strike speed ([air] strike_speed_thirds)"
-turning = "not derived yet: an identity knob ([constants]), today's turn rate, at least [air] fighter_turn_over_t1_bomber; its turn radius is [constants] fighter_turn_radius; its height [air.heights] t1_interceptor of the Spy Plane's, which is held"
+turning = "not derived yet: an identity knob ([constants]), today's turn rate, at least [air] fighter_turn_over_t1_bomber, so it turns inside [constants] fighter_turn_radius since its speed fell (2026-11-28); its height [air.heights] t1_interceptor of the Spy Plane's, which is held"
 timing = "not derived yet: held, its reload and its 30-degree arc; its shell speed is [constants] fighter_gun_speed"
 sensors = "rule: it sees a little past its longest gun, as the land line does (balance::gun_sight)"
 

@@ -1146,8 +1146,9 @@ tactical_missile_speed = { structure = 28, ship = 32, vehicle = 40 }
 strategic_missile_speed = 25
 # A fighter's gun: the T1 Interceptor's, the T3 fighter's, and the Fighter-Bomber's anti-air.
 fighter_gun_speed = 180
-# The T1 Interceptor, the T1 Bomber and the Fighter-Bomber turn on one radius, in units, each at
-# its own speed.
+# The T1 Bomber and the Fighter-Bomber turn on one radius, in units, each at its own speed. The
+# Interceptor did too until it flew at 26 (2026-11-28, [air] strike_speed_thirds): it keeps its
+# turn rate, as [air] fighter_turn_over_t1_bomber asks, and so turns tighter, on 55.
 fighter_turn_radius = 64
 #
 # Identity knobs, the design owner's, kept in data/units.toml: each hull's turn rate and turn
