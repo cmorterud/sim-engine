@@ -807,8 +807,30 @@ impl Effects {
         // struck, if the snapshot says, or else where it last was. It is drawn flying on to that
         // point (build_projectile_instances), so it bursts as the snapshot after it would be due.
         let arrival = (f64::from(current.tick) / crate::sim::blueprints::TICKS_PER_SECOND as f64).max(time);
+        for hit in &current.shield_impacts {
+            let at = raw_point(hit.point[0], hit.point[1], hit.point[2]);
+            let radial = glam::Vec3::from(std::array::from_fn(|axis| {
+                ((f64::from(hit.point[axis]) - f64::from(hit.center[axis])) * RAW_TO_WORLD) as f32
+            }));
+            let direction = radial.try_normalize().unwrap_or(glam::Vec3::Z).to_array();
+            let color = match hit.dome_team {
+                crate::sim::components::Team::Blue => [0.76, 0.90, 1.0],
+                crate::sim::components::Team::Red => [1.0, 0.80, 0.80],
+            };
+            let splash = (f64::from(hit.splash) * RAW_TO_WORLD) as f32;
+            self.add_flash(Flash {
+                at,
+                direction,
+                length: 7.0 + (0.12 * splash).min(8.0),
+                width: 18.0 + (0.55 * splash).min(24.0),
+                born: arrival,
+                life: 0.30,
+                color,
+            });
+        }
         merge_by_id(&current.projectiles, &previous.projectiles, |projectile| projectile.id, |still_there, last_seen| {
-            if still_there.is_some() {
+            // The surface flare replaces the shell's ordinary explosion and ground scar.
+            if still_there.is_some() || current.shield_impacts.binary_search_by_key(&last_seen.id, |hit| hit.projectile).is_ok() {
                 return;
             }
             let struck = current.landed.binary_search_by_key(&last_seen.id, |landed| landed.id).ok().map(|index| &current.landed[index]);
@@ -1408,6 +1430,35 @@ mod tests {
         let mut out = InstanceBatches::default();
         effects.build(time, [0.0; 3], &mut out);
         out.shape(shape).len()
+    }
+
+    #[test]
+    fn a_shield_contact_flashes_once_at_the_surface() {
+        let mut before = snapshot(1);
+        let shell = shell(5, ProjectileKind::Shell);
+        before.projectiles.push(shell);
+        let mut after = snapshot(2);
+        let point = [shell.x + 55 * 4096, shell.y, shell.z];
+        after.shield_impacts.push(crate::sim::world::ShieldImpactView {
+            projectile: shell.id,
+            team: Team::Blue,
+            dome_team: Team::Red,
+            point,
+            center: [0; 3],
+            splash: 0,
+        });
+
+        let mut effects = Effects::new();
+        for _ in 0..2 {
+            effects.note_events(&before, &after, 0.1, &|_, _| 5.0, None, &[]);
+        }
+        assert_eq!(effects.flashes.len(), 1);
+        assert_eq!(effects.flashes[0].at, [155.0, 0.0, 5.0]);
+        assert_eq!(count(&mut effects, 0.15, Shape::MuzzleFlash), 0);
+        assert_eq!(count(&mut effects, 0.21, Shape::MuzzleFlash), 1);
+        assert_eq!(count(&mut effects, 0.21, Shape::Fireball), 0);
+        assert!(effects.scars.is_empty());
+        assert_eq!(count(&mut effects, 0.51, Shape::MuzzleFlash), 0);
     }
 
     /// A shell's last position is a tick's flight short of what it hits: its burst used to be

@@ -738,7 +738,7 @@ fn fs_smoke(input: SmokeOutput) -> @location(0) vec4<f32> {
 // clear where it is seen face on, faint hexagon lines, and a thin bright rim.
 const HEX_ACROSS: f32 = 16.0;
 const DOME_FACE: f32 = 0.04;
-const DOME_HEX: f32 = 0.3;
+const DOME_HEX: f32 = 0.10;
 const DOME_RIM: f32 = 1.5;
 const DOME_RIM_SHARPNESS: f32 = 6.0;
 // A dome fades out as the camera comes close, from this many radii from its center to this many.
@@ -755,8 +755,8 @@ const DOME_GLINTS_LOW: u32 = 3u;
 const DOME_GLINT_SHORTEST: f32 = 2.0;
 const DOME_GLINT_LONGEST: f32 = 4.0;
 const DOME_GLINT_TIGHTNESS: f32 = 40.0;
-const DOME_GLINT: f32 = 0.5;
-const DOME_GLINT_HEX: f32 = 3.0;
+const DOME_GLINT: f32 = 0.18;
+const DOME_GLINT_HEX: f32 = 1.5;
 const DOME_GLINT_WORN: f32 = 1.8;
 const DOME_DRIFT: f32 = 0.25;
 
