@@ -1879,6 +1879,16 @@ pub fn torpedo_bombers_to_break_t2_fleet(db: &Arc<BlueprintDb>) -> f64 {
     break_even_forces(db, Field::new(Ground::Water, 2), &fleet, &bombers).efficiency
 }
 
+/// The torpedo bombers it takes to break the massed T3 fleet (two squadrons of it), as a multiple
+/// of its cost, as `torpedo_bombers_to_break_t2_fleet` has it at T2.
+pub fn torpedo_bombers_to_break_t3_fleet(db: &Arc<BlueprintDb>) -> f64 {
+    let fleet = domain_force(db, "t3_fleet");
+    let one = force_materiel(db, &squadrons(db, &fleet, 0.0, 3, Tactics::AttackMove), 3);
+    let fleet = squadrons(db, &fleet, one * 2.0, 3, Tactics::AttackMove);
+    let bombers = squadrons(db, &domain_force(db, "t2_torpedo_bombers"), force_materiel(db, &fleet, 3), 3, Tactics::AttackMove);
+    break_even_forces(db, Field::new(Ground::Water, 3), &fleet, &bombers).efficiency
+}
+
 /// Bisects a unit's cost at T2, between a fifth under and a fifth over what it costs, for the
 /// edge where `meets` turns: the last cost that meets it when `meets_below` (it holds at low cost),
 /// else the first. Returns the copy at that cost and the measure there.
@@ -1924,10 +1934,25 @@ pub fn derive_torpedo_boat(base: &BlueprintDb) -> (BlueprintDb, f64) {
 }
 
 /// The Torpedo Bomber's cost from the duel it wins: the least it can cost and still need the
-/// least of `[domains.cells] torpedo_bombers_to_break_fleet_t2` times the T2 fleet's cost to break it.
+/// least of `[domains.cells] torpedo_bombers_to_break_fleet_t2` times the T2 fleet's cost to break it,
+/// and the least of `torpedo_bombers_to_break_fleet_t3` times the massed T3 fleet's. The T2 fleet
+/// sets the edge; from there it costs a step of a two-hundredth more at a time until the T3 fleet
+/// holds too (2026-11-27: flying a bomber's runs, the T3 fleet's multiple hardly moves with its
+/// cost and sat a little under its floor at the T2 edge). Returns the T2 measure there.
 pub fn derive_torpedo_bomber(base: &BlueprintDb) -> (BlueprintDb, f64) {
-    let least = domain_cell("torpedo_bombers_to_break_fleet_t2").as_array().expect("a band").iter().map(as_number).fold(f64::MAX, f64::min);
-    bisect_cost(base, "t2_torpedo_bomber", false, torpedo_bombers_to_break_t2_fleet, |multiple| multiple >= least)
+    let least = |cell: &str| domain_cell(cell).as_array().expect("a band").iter().map(as_number).fold(f64::MAX, f64::min);
+    let (t2, t3) = (least("torpedo_bombers_to_break_fleet_t2"), least("torpedo_bombers_to_break_fleet_t3"));
+    let (edge, measure) = bisect_cost(base, "t2_torpedo_bomber", false, torpedo_bombers_to_break_t2_fleet, |multiple| multiple >= t2);
+    let id = edge.id("t2_torpedo_bomber");
+    let from = cost_at(edge.get(id), 2);
+    for step in 0..=40 {
+        let db = Arc::new(scaled_to(&edge, id, 2, from * (1.0 + f64::from(step) / 200.0)));
+        if torpedo_bombers_to_break_t3_fleet(&db) >= t3 && (step == 0 || torpedo_bombers_to_break_t2_fleet(&db) >= t2) {
+            let measure = if step == 0 { measure } else { torpedo_bombers_to_break_t2_fleet(&db) };
+            return (Arc::try_unwrap(db).unwrap_or_else(|db| (*db).clone()), measure);
+        }
+    }
+    panic!("t2_torpedo_bomber: no cost within a fifth over the T2 fleet's edge, {from:.0}, keeps the massed T3 fleet at {t3} times its cost");
 }
 
 /// The `--balance-derive counters` report: the counters' costs from the duels they win.
