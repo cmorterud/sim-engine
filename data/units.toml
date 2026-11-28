@@ -1286,10 +1286,11 @@ tier = 1
 # At the navy base from the battle line ([battle_line] navy, 2026-11-27): 392 to 386.
 # At the navy base with every sensor over it (2026-11-27, 0.709): 386 to 389.
 # With hovering gunships that drift back and forth (2026-11-27), at the bases re-derived from the battle line.
-mass = 275
-energy = 2736
-build_time = 1530
-health = 2949
+# Its size by hit counts (2026-11-28, [kills] t1_frigate): its gun breaks a Medium Tank in 4, 119 to 122.5 a shell, its health 2,949 to 3,027 by the navy time to kill; 411 to 424.
+mass = 283
+energy = 2820
+build_time = 1578
+health = 3027
 speed = 12
 turn_rate = 60
 turn_radius = 40
@@ -1298,7 +1299,7 @@ vision = 640
 radar = 1600
 sonar = 320
 movement = "naval"
-weapon = { range = 607, reload_ticks = 17, projectile_speed = 60, damage = 119, splash_radius = 20, turn_rate = 757, spread = 4 }
+weapon = { range = 607, reload_ticks = 17, projectile_speed = 60, damage = "122.5", splash_radius = 20, turn_rate = 757, spread = 4 }
 # Its anti-air reaches 1.2 times its tier's static anti-air, the turret's 800 ([model]
 # ship_anti_air_over_static).
 extra_weapons = [{ range = 960, reload_ticks = 10, projectile_speed = 90, damage = "23.8", targets = "air", turn_rate = 180 }]
@@ -1399,10 +1400,11 @@ tier = 2
 # 1,579.
 # At the navy base with every sensor over it (2026-11-27, 0.709): 1,579 to 1,563.
 # With hovering gunships that drift back and forth (2026-11-27), at the bases re-derived from the battle line.
-mass = 1629
-energy = 10860
-build_time = 8099
-health = 10990
+# Its size by hit counts (2026-11-28): its guns destroy a commander in the middle of [kill_times] destroyer_guns_commander_on_land, 455 to 439 a shell, its health 10,990 to 10,600; its anti-air [secondary_kills], 15.6 to 15.5; 1,655 to 1,623.
+mass = 1598
+energy = 10657
+build_time = 7947
+health = 10600
 speed = "10.4"
 turn_rate = 55
 turn_radius = 60
@@ -1414,12 +1416,12 @@ sonar = 720
 # 10 seconds (once a second from 2026-11-24 to 2026-11-25, when destroyers were to beat submarines).
 torpedo_defense = { range = 600, reload_ticks = 100 }
 movement = "naval"
-weapon = { range = 1255, reload_ticks = 40, projectile_speed = 60, damage = 455, splash_radius = 20, turn_rate = 547, spread = 7 }
+weapon = { range = 1255, reload_ticks = 40, projectile_speed = 60, damage = 439, splash_radius = 20, turn_rate = 547, spread = 7 }
 extra_weapons = [
-    { range = 1255, reload_ticks = 40, projectile_speed = 60, damage = 455, splash_radius = 20, turn_rate = 547, spread = 7 },
+    { range = 1255, reload_ticks = 40, projectile_speed = 60, damage = 439, splash_radius = 20, turn_rate = 547, spread = 7 },
     # Its anti-air reaches 1.2 times its tier's static anti-air, the Flak Cannon's 1,000
     # ([model] ship_anti_air_over_static).
-    { range = 1200, reload_ticks = 14, projectile_speed = 90, damage = "15.6", targets = "air", turn_rate = 180 },
+    { range = 1200, reload_ticks = 14, projectile_speed = 90, damage = "15.5", targets = "air", turn_rate = 180 },
     # Its torpedo is a sub-hunting ability, so it reaches what its tier's sub hunter does: the
     # sub hunter's closing share of the navy's speed over its time to kill, 0.35 x 120.5 x 19.3
     # = 814, the Torpedo Boat's ([model] closing_share_role; 900 until 2026-11-27).
@@ -1445,10 +1447,11 @@ tier = 2
 # At the navy base from the battle line ([battle_line] navy, 2026-11-27): 1,608 to 1,529.
 # At the navy base with every sensor over it (2026-11-27, 0.709): 1,529 to 1,536.
 # With hovering gunships that drift back and forth (2026-11-27), at the bases re-derived from the battle line.
-mass = 1567
-energy = 14096
-build_time = 7007
-health = 4404
+# Its size by hit counts (2026-11-28): a destroyer sinks it in 11 shells ([kills]), health 4,404 to 4,610; its gun breaks a Heavy Tank in 7 ([secondary_kills]), 226 to 213.7; 1,627 to 1,673.
+mass = 1612
+energy = 14502
+build_time = 7209
+health = 4610
 speed = 9
 turn_rate = 40
 turn_radius = 60
@@ -1466,7 +1469,7 @@ weapon = { kind = "tactical_missile", automatic = true, artillery = true, min_ra
 extra_weapons = [
     # Its gun reaches its tier's navy line, the destroyer's 1,255 ([model] support_gun_at_line;
     # 1,200 until 2026-11-27).
-    { range = 1255, reload_ticks = 40, projectile_speed = 60, damage = 226, splash_radius = 40, turn_rate = 516, spread = 10 },
+    { range = 1255, reload_ticks = 40, projectile_speed = 60, damage = "213.7", splash_radius = 40, turn_rate = 516, spread = 10 },
     # The fleet's anti-air missiles, which steer themselves: eight a volley over its first
     # second, a volley every two, set by how many volleys each aircraft takes ([volleys] in
     # data/balance_targets.toml, 2026-11-25): one for every T1 aircraft, the Torpedo Bomber and
@@ -1510,9 +1513,10 @@ tier = 3
 # 6,244.
 # At the navy base with every sensor over it (2026-11-27, 0.709): 6,244 to 6,180.
 # With hovering gunships that drift back and forth (2026-11-27), at the bases re-derived from the battle line.
-mass = 6468
-energy = 40108
-build_time = 23091
+# Its anti-air by hit count (2026-11-28, [secondary_kills]): a Gunship in 17, 96 to 96.5; 6,542 to 6,605 at the navy base.
+mass = 6530
+energy = 40489
+build_time = 23310
 health = 90314
 speed = "7.2"
 turn_rate = 27
@@ -1533,7 +1537,7 @@ extra_weapons = [
     { range = 2990, reload_ticks = 135, projectile_speed = 110, damage = 4400, splash_radius = 40, turn_rate = 238, spread = 6, lobbed = true, mount = [0, -31], aft = true, broadside = true },
     # Its anti-air reaches 1.2 times its tier's static anti-air, the SAM's 1,200, as the frigate's
     # and the destroyer's do theirs ([model] ship_anti_air_over_static): 1,440 (1,200 until 2026-11-27).
-    { range = 1440, reload_ticks = 17, projectile_speed = 90, damage = 96, targets = "air", turn_rate = 180 },
+    { range = 1440, reload_ticks = 17, projectile_speed = 90, damage = "96.5", targets = "air", turn_rate = 180 },
 ]
 missile_defense = { kind = "tactical", range = 620, reload_ticks = 18, mounts = 2 }
 
@@ -1555,10 +1559,11 @@ tier = 3
 # had drifted 6% under: 4,987 to 5,070.
 # At the navy base with every sensor over it (2026-11-27, 0.709): 5,070 to 5,018.
 # With hovering gunships that drift back and forth (2026-11-27), at the bases re-derived from the battle line.
-mass = 5138
-energy = 44031
-build_time = 20713
-health = 31516
+# Its size by hit counts (2026-11-28): three broadsides sink it ([broadsides]), health 31,516 to 33,000; its torpedo sinks an attack submarine in 7 ([secondary_kills]), 200 to 199; 5,313 to 5,483.
+mass = 5303
+energy = 45449
+build_time = 21380
+health = 33000
 speed = "10.8"
 turn_rate = 35
 turn_radius = 80
@@ -1581,7 +1586,7 @@ extra_weapons = [
     { kind = "laser", range = 1586, reload_ticks = 20, damage = 1304, turn_rate = 314, mount = [0, -31], aft = true },
     # Its torpedo reaches what a T3 sub hunter would: 0.35 x 120.5 x 21.8 = 921 ([model]
     # closing_share_role, the destroyer's rule a tier up; 1,200 until 2026-11-27).
-    { range = 921, reload_ticks = 100, projectile_speed = 30, damage = 200, targets = "naval" },
+    { range = 921, reload_ticks = 100, projectile_speed = 30, damage = 199, targets = "naval" },
 ]
 missile_defense = { kind = "tactical", range = 620, reload_ticks = 18 }
 
@@ -1606,10 +1611,11 @@ tier = 1
 # At the navy base from the battle line ([battle_line] navy, 2026-11-27): 402 to 379.
 # At the navy base with every sensor over it (2026-11-27, 0.709): 379 to 383.
 # With hovering gunships that drift back and forth (2026-11-27), at the bases re-derived from the battle line.
-mass = 312
-energy = 2497
-build_time = 1396
-health = 1279
+# Its size by hit counts (2026-11-28): a frigate sinks it surfaced in 11 ([kills]), health 1,279 to 1,286; its deck gun breaks a Medium Tank in 19 ([secondary_kills]), 23 to 22.7; 406 to 410.
+mass = 315
+energy = 2523
+build_time = 1410
+health = 1286
 speed = 12
 turn_rate = 80
 turn_radius = 30
@@ -1619,7 +1625,7 @@ sonar = 1200
 movement = "submarine"
 weapon = { range = 404, reload_ticks = 40, projectile_speed = 30, damage = 214, targets = "naval" }
 # The inspiration's deck gun, 25 a second out to 640, which fires only on the surface.
-extra_weapons = [{ range = 404, reload_ticks = 10, projectile_speed = 60, damage = 23, turn_rate = 841 }]
+extra_weapons = [{ range = 404, reload_ticks = 10, projectile_speed = 60, damage = "22.7", turn_rate = 841 }]
 
 # Five torpedoes a run, every 10 seconds: the inspiration's unit database counts its 3 projectiles a fire once,
 # not three times, so 15 a run was three times too many. Cost, build time, health, and damage set
@@ -1641,9 +1647,10 @@ tier = 2
 # one ship, but its long passes leave fleets needing over four times their cost of it, so re-solved
 # by its cells, 229 to 132, the least that keeps both the T2 fleet and the massed T3 fleet
 # needing twice their cost of it (the design owner's OK to that shift); the price list's check says 131.
-mass = 108
-energy = 3115
-build_time = 697
+# Re-solved with the navy's sizes set by hit counts (2026-11-28): 132.5 to 131.
+mass = 107
+energy = 3076
+build_time = 688
 health = 1252
 speed = 30
 radius = 12
@@ -1697,10 +1704,11 @@ id = "t1_torpedo_launcher"
 name = "Torpedo Launcher"
 class = "defense"
 tier = 1
-mass = 242
-energy = 1937
-build_time = 271
-health = 3000
+# Its counts, now the design owner's (2026-11-28, [kills]), against the frigate resized: 454 to 468 a volley, health 3,000 to 3,124; 315 to 329.
+mass = 253
+energy = 2025
+build_time = 283
+health = 3124
 footprint = 1
 on_water = true
 vision = 240
@@ -1708,7 +1716,7 @@ sonar = 720
 # It reaches the defense window's floor, 1.15 times its tier's navy direct fire (the frigate's
 # 607), as the T2 launcher does the destroyer's ([model] point_defense_over_direct_fire_min):
 # 698 (1,000 until 2026-11-27).
-weapon = { range = 698, reload_ticks = 40, projectile_speed = 30, damage = 454, targets = "naval" }
+weapon = { range = 698, reload_ticks = 40, projectile_speed = 30, damage = 468, targets = "naval" }
 
 # Four torpedoes a volley, each its own, so that a ship's anti-torpedo charge must stop every one:
 # fired as one, a destroyer's charge stopped them all. Damage and health as first set against the
@@ -1723,15 +1731,16 @@ id = "t2_torpedo_launcher"
 name = "Torpedo Launcher (T2)"
 class = "defense"
 tier = 2
-mass = 852
-energy = 7100
-build_time = 1276
-health = 12000
+# Its counts, now the design owner's (2026-11-28, [kills]), against the destroyer resized: 227 to 218.6 a torpedo, health 12,000 to 11,634; 879 to 857.
+mass = 831
+energy = 6922
+build_time = 1244
+health = 11634
 footprint = 2
 on_water = true
 vision = 400
 sonar = 720
-weapon = { range = 1443, reload_ticks = 10, projectile_speed = 30, damage = 227, targets = "naval" }
+weapon = { range = 1443, reload_ticks = 10, projectile_speed = 30, damage = "218.6", targets = "naval" }
 
 # Assault: tough, fast, and amphibious, it hovers over land and water alike at the anchor's speed,
 # with the Heavy Tank's range and twice its time to kill. It pays for crossing water: about
@@ -1772,10 +1781,11 @@ tier = 2
 # Its group cheaper at the navy base from the battle line (2026-11-27): 913 to 882.
 # Its group at the navy base with every sensor over it (2026-11-27): 882 to 880.
 # With hovering gunships that drift back and forth (2026-11-27), at the bases re-derived from the battle line.
-mass = 889
-energy = 8899
-build_time = 3815
-health = 1500
+# Its hull by hit count (2026-11-28, [kills] t2_destroyer): a destroyer sinks it through its dome in 13, 1,500 to 1,488; 931 to 946 with the fleet it covers repriced.
+mass = 903
+energy = 9034
+build_time = 3873
+health = 1488
 speed = 10
 turn_rate = 45
 turn_radius = 40
@@ -1799,10 +1809,11 @@ tier = 3
 # 12,964; its cruise missiles, fired from under the water, with the submerged price, 750; and its
 # sonar, 37: 10,495 to 13,751, mass, energy and build time together.
 # With hovering gunships that drift back and forth (2026-11-27), at the bases re-derived from the battle line.
-mass = 12488
-energy = 199825
-build_time = 26292
-health = 4000
+# Its health by hit count (2026-11-28, [secondary_kills] t2_destroyer): a destroyer's torpedoes sink it in 22, 4,000 to 4,085; 13,796 to 13,813.
+mass = 12503
+energy = 200054
+build_time = 26322
+health = 4085
 speed = "6.6"
 turn_rate = 50
 turn_radius = 50
@@ -2203,9 +2214,10 @@ tier = 2
 # its domain base made the Attack Submarine dearer (2026-11-27): 748 to 758.
 # Re-solved with the ships at the navy base re-derived for hovering gunships that drift (2026-11-27).
 # Re-solved once aircraft stopped keeping apart in flight moved the navy base (2026-11-28): 722 to 779.
-mass = 779
-energy = 6239
-build_time = 3495
+# Re-solved with the navy's sizes set by hit counts (2026-11-28): 801 to 809.
+mass = 786
+energy = 6297
+build_time = 3528
 health = 3040
 speed = 12
 turn_rate = 100

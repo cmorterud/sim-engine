@@ -577,6 +577,23 @@ out close and why: evidence about the process, not a target.
   Destroyer, the Battleship, the defenses and the artillery see 1.5 to 3 times farther in fog
   games, where they lean on radar and the Cruiser to spot past their sight; their sight is left
   for the radar and sonar pass. 443 unit families are not derived yet.
+* 2026-11-28: the navy's sizes by hit counts (Pass 4, the navy batch). Each held size takes one
+  count of hits, `[kills]`, `[secondary_kills]` or `[broadsides]`, and its number is set in the
+  middle of what meets it, from what is already set: the Medium Tank sets the Frigate's gun (4
+  shells, 119 to 122.5) and the Frigate's gun the Attack Submarine's health (11, 1,279 to 1,286);
+  the commander sets the Destroyer's guns (the middle of `[kill_times]`
+  destroyer_guns_commander_on_land, 455 to 439), which set the Cruiser's health (11, 4,404 to
+  4,610), the Escort Corvette's hull (13 through its dome, 1,500 to 1,488) and the torpedo
+  launchers'; the Battleship's broadside sets the Battlecruiser's health (3, 31,516 to 33,000).
+  The secondary weapons: the Cruiser's gun (a Heavy Tank in 7, 226 to 213.7), the Destroyer's
+  anti-air (a T1 Bomber in 32, 15.6 to 15.5) and torpedoes (a Missile Submarine in 22, its health
+  4,000 to 4,085), the Battleship's anti-air (a Gunship in 17, 96 to 96.5), the Battlecruiser's
+  torpedo (an Attack Submarine in 7, 200 to 199) and the Attack Submarine's deck gun (a Medium
+  Tank in 19, 23 to 22.7). The navy base re-solves 0.670 to 0.664; the ships reprice by 3.3% or
+  less (the Frigate 411 to 424, the Destroyer 1,655 to 1,623, the Cruiser 1,627 to 1,673, the
+  Battleship 6,542 to 6,605, the Battlecruiser 5,313 to 5,483), the T1 launcher 315 to 329, the
+  T2 879 to 857, the Torpedo Boat 801 to 809 and the Torpedo Bomber 132.5 to 131. Every fleet,
+  submarine and torpedo-bomber check holds. 427 unit families are not derived yet.
 
 ## Order of work
 

@@ -262,17 +262,35 @@ t3_mobile_artillery = { t3_mobile_artillery = 2, t1_medium_tank = 1 }
 # A Medium Tank breaks a Wall Section in 17 shots, about 17 seconds (2026-11-28, the plan's pick,
 # today's written down): a wall slows an attack; it does not stop one.
 t1_medium_tank = { wall = 17 }
-# The torpedo launchers and the line ships they answer, their damage and health as first set
-# (2026-11-24), written down (2026-11-28, the plan's pick: today's hit counts): a T1 launcher's
-# volley sinks a frigate in 7, a T2 launcher's torpedo a destroyer in 49; a frigate's gun breaks a
-# T1 launcher in 26 shells, a destroyer's a T2 launcher in 27.
+# The navy's sizes (2026-11-28, the design owner's targets, Pass 4 of the derivation plan): each
+# held size takes one hit count, and its number is set in the middle of what meets it, as the
+# transports' health is. From the Medium Tank: a frigate's gun breaks one in 4 shots, and a
+# surfaced attack submarine in 11. From the commander ([kill_times]
+# destroyer_guns_commander_on_land): a destroyer's guns sink a cruiser in 11 shots and an escort
+# corvette, through its dome, in 13. The torpedo launchers and the line ships they answer: a T1 launcher's volley
+# sinks a frigate in 7, a T2 launcher's torpedo a destroyer in 49; a frigate's gun breaks a T1
+# launcher in 26 shells, a destroyer's a T2 launcher in 27 (their counts since 2026-11-24).
 t1_torpedo_launcher = { t1_frigate = 7 }
 t2_torpedo_launcher = { t2_destroyer = 49 }
-t1_frigate = { t1_torpedo_launcher = 26 }
-t2_destroyer = { t2_torpedo_launcher = 27 }
+t1_frigate = { t1_torpedo_launcher = 26, t1_medium_tank = 4, t1_attack_sub = 11 }
+t2_destroyer = { t2_torpedo_launcher = 27, t2_cruiser = 11, t2_escort_corvette = 13 }
 t3_artillery_kills_every_t3_land_unit = true
 t3_artillery_spread = [150, 200]
 t2_artillery_spread = [40, 60]
+
+# The same for a ship's other weapons (2026-11-28, Pass 4): hits for the weapon with that job, at
+# the surface, at aircraft, or under water, that is not the unit's first weapon and not a
+# missile: a cruiser's gun breaks a Heavy Tank in 7; a destroyer's anti-air brings down a T1
+# Bomber in 32 (about 43 seconds, twice the frigate's) and its torpedoes sink a Missile Submarine
+# in 22; a battleship's anti-air brings down a Gunship in 17 (about 27 seconds); a
+# battlecruiser's torpedo sinks a submerged attack submarine in 7; and an attack submarine's deck
+# gun breaks a Medium Tank in 19 (tests/kills_test.rs).
+[secondary_kills]
+t2_cruiser = { surface = { t2_heavy_tank = 7 } }
+t2_destroyer = { air = { t1_bomber = 32 }, naval = { t3_missile_sub = 22 } }
+t3_battleship = { air = { t2_gunship = 17 } }
+t3_battlecruiser = { naval = { t1_attack_sub = 7 } }
+t1_attack_sub = { surface = { t1_medium_tank = 19 } }
 
 [volleys]
 # Volleys of a unit's anti-air, all its shots at one aircraft, to destroy each aircraft at its base
@@ -288,8 +306,9 @@ t2_cruiser = { t1_air_scout = 1, t1_interceptor = 1, t1_bomber = 1, t1_light_tra
 # Broadsides of a battleship, every shell of the volley landing, to destroy each target at its base
 # health, with no veterancy (2026-11-25, the design owner's numbers): a T3 extractor in one, and a
 # commander with no enhancements in two. And one takes down a T2 Shield Generator's dome, exactly:
-# the dome falls to the volley's last shell, and not before (tests/kill_times_test.rs).
-t3_battleship = { mass_extractor_t3 = 1, command_rig = 2 }
+# the dome falls to the volley's last shell, and not before (tests/kill_times_test.rs). Three sink a
+# battlecruiser, which sets its health (2026-11-28, Pass 4).
+t3_battleship = { mass_extractor_t3 = 1, command_rig = 2, t3_battlecruiser = 3 }
 
 [turrets]
 # The design owner's turret rule (2026-11-27): every gun that turns to its target turns fast enough
@@ -321,6 +340,8 @@ flak_speed = 40
 # enhancements, on land or walking the seabed; a submerged T1 Attack Submarine; and aircraft
 # hanging in the air. Each is "about" its number: a reload's width either side.
 cruiser_missiles_commander_on_land = [95, 105]
+# The destroyer's guns are set at the middle, 80 seconds (2026-11-28, Pass 4): 21 volleys, at 81.3
+# measured, and the damage in the middle of what takes 21.
 destroyer_guns_commander_on_land = [75, 85]
 five_destroyers_torpedoes_commander_under_water = [75, 85]
 destroyer_torpedoes_t1_sub_submerged = [22, 28]
@@ -808,8 +829,9 @@ tier_efficiency = [1.0, 1.0, 1.0, 1.0]
 # 0.902 until then.
 # With gunships hovering in a drifting blob (2026-11-27), re-derived: navy 0.709 to 0.744, air_t3
 # 1.005 to 0.972. With every shell flying by its family's rule ([shells], 2026-11-28), air_t3 0.988
-# to 0.946: the gunships' guns slower, the point defenses dearer.
-domain_base = { land = 1.0, navy = 0.670, air_t1 = 0.323, air_t2 = 0.904, air_t3 = 0.946 }
+# to 0.946: the gunships' guns slower, the point defenses dearer. With the navy's sizes set by hit
+# counts ([kills], 2026-11-28), navy 0.670 to 0.664.
+domain_base = { land = 1.0, navy = 0.664, air_t1 = 0.323, air_t2 = 0.904, air_t3 = 0.946 }
 # Reach past the line's: x = c (r / r_line - 1), price x h / (1 - x h), h about 1 for shells and
 # 0 for missiles. Short of it: -c (1 - r / r_line) (v_line / v). Speed: speed_share (1 - v_line / v).
 speed_share = 0.3
