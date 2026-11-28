@@ -390,7 +390,7 @@ fn upgrade_halts_production_then_improves_the_factory() {
     run(&mut world, 60);
     let power = world.ecs.get::<&Factory>(entity(&world, factory)).unwrap().power;
     assert_eq!(power, fp_int(40));
-    assert_eq!(world.ecs.get::<&Health>(entity(&world, factory)).unwrap().max, fp_int(8_000));
+    assert_eq!(world.ecs.get::<&Health>(entity(&world, factory)).unwrap().max, world.blueprints.get(t2).health, "it takes the T2 factory's health");
     run(&mut world, 30);
     assert_eq!(world.units.len(), 2, "the queued bot should follow at the new build power");
     world.advance_tick(&[SimCommand::QueueUnit { factory, blueprint: tank, count: 1 }]);

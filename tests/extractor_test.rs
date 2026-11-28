@@ -46,7 +46,7 @@ fn a_t1_extractor_makes_two_mass_a_second_for_two_energy() {
     let mex = extractor(&mut world, 50, 50);
     world.advance_tick(&[]);
     assert_eq!(one_tick(&mut world), (Res::from_num(2) / 10, -Res::from_num(2) / 10));
-    assert_eq!(world.unit_health(mex), Some(fp_int(400)));
+    assert_eq!(world.unit_health(mex), Some(world.blueprints.get(world.blueprints.id("mass_extractor")).health));
 }
 
 #[test]
@@ -74,7 +74,7 @@ fn an_extractor_upgrades_to_t2_and_then_t3_while_it_keeps_working() {
     assert!(took.is_some_and(|took| (ticks - 10..=ticks + 5).contains(&took)), "{took:?}, not about {ticks}");
     world.advance_tick(&[]);
     assert_eq!(one_tick(&mut world), (Res::from_num(6) / 10, -Res::from_num(9) / 10), "6 materiel a second, for 9 energy");
-    assert_eq!(world.unit_health(mex), Some(fp_int(2_000)), "full health kept at the same share");
+    assert_eq!(world.unit_health(mex), Some(world.blueprints.get(world.blueprints.id("mass_extractor_t2")).health), "full health kept at the same share");
 
     // And on to T3: 2,807 build time at the T2's 15 build power, about 187 seconds.
     let (seconds, _) = upgrade(&world, "mass_extractor_t2", "mass_extractor_t3");

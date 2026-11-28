@@ -73,37 +73,37 @@ timing = "rule: its reload, shell flight, blast and spread are its role's in bal
 sensors = "rule: its role's sight over its reach in balance::t2_land_roles"
 
 [units.land_factory_t1]
-health = "not derived yet: the inspiration's hull"
+health = "rule: the middle of what a Medium Tank destroys in [kills] t1_medium_tank.land_factory_t1"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's build power"
 
 [units.land_factory_t2]
-health = "not derived yet: the inspiration's hull"
+health = "rule: the middle of what a Heavy Tank destroys in [kills] t2_heavy_tank.land_factory_t2"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's build power"
 
 [units.mass_extractor]
-health = "not derived yet: the inspiration's"
+health = "rule: the middle of what a Medium Tank destroys in [kills] t1_medium_tank.mass_extractor"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's income, storage, upkeep and adjacency"
 
 [units.power_generator]
-health = "not derived yet: the inspiration's"
+health = "rule: the middle of what a Medium Tank destroys in [kills] t1_medium_tank.power_generator"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's income, storage, upkeep and adjacency"
 
 [units.mass_storage]
-health = "not derived yet: the inspiration's"
+health = "rule: the middle of what a Medium Tank destroys in [kills] t1_medium_tank.mass_storage"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's income, storage, upkeep and adjacency"
 
 [units.t1_point_defense]
-health = "not derived yet: held, three times its earlier ([premiums] point_defense_holds_against_line_units prices it)"
+health = "rule: the middle of what a Medium Tank destroys in [kills] t1_medium_tank.t1_point_defense"
 body = "not derived yet: held, its footprint"
 damage = "not derived yet: held, three times its earlier ([premiums] point_defense_holds_against_line_units prices it)"
 range = "rule: [model] point_defense_under_artillery, a fifth inside T1 artillery's"
@@ -111,13 +111,13 @@ timing = "not derived yet: held, its reload; its shell is balance::shell_speed, 
 sensors = "not derived yet: held, today's vision"
 
 [units.shield_generator]
-health = "not derived yet: held, its generator's health and footprint"
+health = "rule: the middle of what a Heavy Tank destroys, through its dome, in [kills] t2_heavy_tank.shield_generator"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 special = "not derived yet: held, its dome's size and upkeep; its health and regeneration are the design owner's, one cruiser held and two break it, one broadside takes it down ([broadsides] t3_battleship)"
 
 [units.tactical_missile_launcher]
-health = "not derived yet: held, its health and footprint"
+health = "rule: the middle of what a Heavy Tank destroys in [kills] t2_heavy_tank.tactical_missile_launcher"
 body = "not derived yet: held, its footprint"
 damage = "not derived yet: the inspiration's missile, inside [kills] tactical_missile_launcher, two to a commander or a field rig"
 range = "not derived yet: the inspiration's"
@@ -127,13 +127,13 @@ economy = "not derived yet: held, its build power"
 special = "not derived yet: the inspiration's stock"
 
 [units.tactical_missile_defense]
-health = "not derived yet: held, its health and footprint"
+health = "rule: the middle of what a Heavy Tank destroys in [kills] t2_heavy_tank.tactical_missile_defense"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 special = "not derived yet: held, a mount's reach and reload, the same wherever it is carried"
 
 [units.strategic_missile_launcher]
-health = "not derived yet: held, its health and footprint"
+health = "rule: the middle of what a Heavy Walker destroys in [kills] t3_heavy_walker.strategic_missile_launcher"
 body = "not derived yet: held, its footprint"
 damage = "not derived yet: the inspiration's two rings"
 range = "not derived yet: the inspiration's"
@@ -143,14 +143,14 @@ economy = "not derived yet: held, its build power"
 special = "not derived yet: the inspiration's stock"
 
 [units.strategic_missile_defense]
-health = "not derived yet: held, its health and footprint"
+health = "rule: the middle of what a Heavy Walker destroys in [kills] t3_heavy_walker.strategic_missile_defense"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: held, its build power"
 special = "not derived yet: the inspiration's reach and stock"
 
 [units.land_factory_t3]
-health = "not derived yet: the inspiration's hull"
+health = "rule: the middle of what a Heavy Walker destroys in [kills] t3_heavy_walker.land_factory_t3"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's build power"
@@ -172,26 +172,26 @@ sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: held, today's build power and range"
 
 [units.radar]
-health = "not derived yet: held, its health and footprint"
+health = "rule: the middle of what a Medium Tank destroys in [kills] t1_medium_tank.radar"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, its sensors' reach"
 economy = "not derived yet: held, its upkeep and the build power that drives its upgrade"
 
 [units.deep_scan_array]
-health = "not derived yet: held, its health and footprint"
+health = "rule: the middle of what a Heavy Walker destroys in [kills] t3_heavy_walker.deep_scan_array"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, its sensors' reach"
 economy = "not derived yet: held, its upkeep"
 
 [units.stealth_field_generator]
-health = "not derived yet: held, its health and footprint"
+health = "rule: the middle of what a Heavy Tank destroys in [kills] t2_heavy_tank.stealth_field_generator"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: held, its upkeep"
 special = "not derived yet: held, its stealth field and decoys"
 
 [units.rig_yard]
-health = "not derived yet: the inspiration's hull"
+health = "rule: the middle of what a Heavy Walker destroys in [kills] t3_heavy_walker.rig_yard"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's build power"
@@ -209,39 +209,39 @@ economy = "not derived yet: the inspiration's"
 special = "not derived yet: held, its blast on death"
 
 [units.mass_extractor_t2]
-health = "not derived yet: the inspiration's"
+health = "rule: the middle of what a Heavy Tank destroys in [kills] t2_heavy_tank.mass_extractor_t2"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's income, storage, upkeep and adjacency"
 
 [units.mass_extractor_t3]
-health = "not derived yet: the inspiration's"
+health = "rule: the middle of what a Heavy Walker destroys in [kills] t3_heavy_walker.mass_extractor_t3, inside [broadsides] t3_battleship.mass_extractor_t3, one broadside"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's income, storage, upkeep and adjacency"
 
 [units.geothermal_plant]
-health = "not derived yet: the inspiration's"
+health = "rule: the middle of what a Medium Tank destroys in [kills] t1_medium_tank.geothermal_plant"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's income, storage, upkeep and adjacency"
 
 [units.mass_fabricator]
-health = "not derived yet: the inspiration's"
+health = "rule: the middle of what a Heavy Tank destroys in [kills] t2_heavy_tank.mass_fabricator"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's adjacency; its rate is [economy] energy_per_materiel, its tier's"
 special = "not derived yet: held, its blast on death while running"
 
 [units.mass_fabricator_t3]
-health = "not derived yet: the inspiration's"
+health = "rule: the middle of what a Heavy Walker destroys in [kills] t3_heavy_walker.mass_fabricator_t3"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's adjacency; its rate is [economy] energy_per_materiel, its tier's"
 special = "not derived yet: held, its blast on death while running"
 
 [units.air_factory]
-health = "not derived yet: the inspiration's hull"
+health = "rule: the middle of what a Medium Tank destroys in [kills] t1_medium_tank.air_factory"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's build power"
@@ -274,7 +274,7 @@ timing = "not derived yet: held, its reload and bomb speed; its blast is inside 
 sensors = "not derived yet: held, its vision and radar"
 
 [units.t1_aa_turret]
-health = "not derived yet: held, mostly health for its premium ([premiums] static_anti_air_over_mobile prices it)"
+health = "rule: the middle of what a Medium Tank destroys in [kills] t1_medium_tank.t1_aa_turret"
 body = "not derived yet: held, its footprint"
 damage = "not derived yet: held, the inspiration's two shots as one"
 range = "rule: [model] static_anti_air_over_mobile"
@@ -292,13 +292,13 @@ timing = "not derived yet: held, its reload; its shell is the [shells] anti_air_
 sensors = "not derived yet: held, today's vision"
 
 [units.air_factory_t2]
-health = "not derived yet: the inspiration's hull"
+health = "rule: the middle of what a Heavy Tank destroys in [kills] t2_heavy_tank.air_factory_t2"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's build power"
 
 [units.air_factory_t3]
-health = "not derived yet: the inspiration's hull"
+health = "rule: the middle of what a Heavy Walker destroys in [kills] t3_heavy_walker.air_factory_t3"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's build power"
@@ -351,7 +351,7 @@ timing = "not derived yet: held, its reloads and spread; its gun's shell is bala
 sensors = "rule: it sees a little past its longest gun, as the land line does (balance::gun_sight)"
 
 [units.t2_flak]
-health = "not derived yet: held, mostly health for its premium ([premiums] static_anti_air_over_mobile prices it)"
+health = "rule: the middle of what a Heavy Tank destroys in [kills] t2_heavy_tank.t2_flak"
 body = "not derived yet: held, its footprint"
 damage = "not derived yet: held, its shell"
 range = "rule: [model] static_anti_air_over_mobile"
@@ -359,7 +359,7 @@ timing = "not derived yet: held, its reload, blast and spread; its shell is the 
 sensors = "not derived yet: held, today's vision"
 
 [units.t3_sam]
-health = "not derived yet: held, its health and footprint"
+health = "rule: the middle of what a Heavy Walker destroys in [kills] t3_heavy_walker.t3_sam"
 body = "not derived yet: held, its footprint"
 damage = "rule: [kills] t3_sam.t2_gunship and t3_sam.t3_strategic_bomber"
 range = "rule: [model] static_anti_air_over_mobile, over what T3's mobile anti-air would reach"
@@ -377,51 +377,51 @@ timing = "not derived yet: the inspiration's blast and spread; its shell is the 
 sensors = "not derived yet: held, today's vision"
 
 [units.land_factory_t2_support]
-health = "not derived yet: the inspiration's hull"
+health = "rule: the middle of what a Heavy Tank destroys in [kills] t2_heavy_tank.land_factory_t2_support"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's build power"
 
 [units.land_factory_t3_support]
-health = "not derived yet: the inspiration's hull"
+health = "rule: the middle of what a Heavy Walker destroys in [kills] t3_heavy_walker.land_factory_t3_support"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's build power"
 
 [units.air_factory_t2_support]
-health = "not derived yet: the inspiration's hull"
+health = "rule: the middle of what a Heavy Tank destroys in [kills] t2_heavy_tank.air_factory_t2_support"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's build power"
 
 [units.air_factory_t3_support]
-health = "not derived yet: the inspiration's hull"
+health = "rule: the middle of what a Heavy Walker destroys in [kills] t3_heavy_walker.air_factory_t3_support"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's build power"
 
 [units.power_generator_t2]
-health = "not derived yet: the inspiration's"
+health = "rule: the middle of what a Heavy Tank destroys in [kills] t2_heavy_tank.power_generator_t2"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's income, storage, upkeep and adjacency"
 special = "not derived yet: held, its blast on death"
 
 [units.power_generator_t3]
-health = "not derived yet: the inspiration's"
+health = "rule: the middle of what a Heavy Walker destroys in [kills] t3_heavy_walker.power_generator_t3"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's income, storage, upkeep and adjacency"
 special = "not derived yet: held, its blast on death"
 
 [units.radar_t2]
-health = "not derived yet: held, its health and footprint"
+health = "rule: the middle of what a Heavy Tank destroys in [kills] t2_heavy_tank.radar_t2"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, its sensors' reach"
 economy = "not derived yet: held, its upkeep and the build power that drives its upgrade"
 
 [units.t2_point_defense]
-health = "not derived yet: the inspiration's"
+health = "rule: the middle of what a Heavy Tank destroys in [kills] t2_heavy_tank.t2_point_defense"
 body = "not derived yet: held, its footprint"
 damage = "not derived yet: the inspiration's volley as one shot"
 range = "rule: [model] point_defense_under_artillery, a fifth inside T2 artillery's"
@@ -429,19 +429,19 @@ timing = "not derived yet: the inspiration's reload, blast and spread; its shell
 sensors = "not derived yet: held, today's vision"
 
 [units.airfield]
-health = "not derived yet: held, its health and footprint"
+health = "rule: the middle of what a Heavy Tank destroys in [kills] t2_heavy_tank.airfield"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 special = "anchor: the design owner's pads and repair, a mechanic rule ([price_list.unlisted] airfield)"
 
 [units.energy_storage]
-health = "not derived yet: the inspiration's"
+health = "rule: the middle of what a Medium Tank destroys in [kills] t1_medium_tank.energy_storage"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's income, storage, upkeep and adjacency"
 
 [units.t2_artillery]
-health = "not derived yet: the inspiration's, inside [kills] t3_strategic_bomber.t2_artillery, two bombs"
+health = "rule: the middle of what a Heavy Tank destroys in [kills] t2_heavy_tank.t2_artillery, inside [kills] t3_strategic_bomber.t2_artillery, two bombs"
 body = "not derived yet: held, its footprint"
 damage = "not derived yet: the inspiration's"
 range = "not derived yet: held, past what the list's closing share prices ([domains.cells] battleship_over_t2_artillery_reach measures the battleship against it)"
@@ -450,7 +450,7 @@ sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's energy a shot"
 
 [units.t3_artillery]
-health = "not derived yet: held, its health and footprint"
+health = "rule: the middle of what a Heavy Walker destroys in [kills] t3_heavy_walker.t3_artillery"
 body = "not derived yet: held, its footprint"
 damage = "not derived yet: kept at least [kills] t3_artillery_kills_every_t3_land_unit, which does not pin it"
 range = "not derived yet: the inspiration's, across a map"
@@ -479,7 +479,7 @@ timing = "not derived yet: held, its reloads and its 35-degree arc; its railguns
 sensors = "not derived yet: held, its vision and radar"
 
 [units.naval_factory]
-health = "not derived yet: the inspiration's hull"
+health = "rule: the middle of what a Medium Tank destroys in [kills] t1_medium_tank.naval_factory"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's build power"
@@ -495,25 +495,25 @@ timing = "not derived yet: held, its reloads and blast; its gun's shell speed is
 sensors = "not derived yet: held, its vision, radar and sonar"
 
 [units.naval_factory_t2]
-health = "not derived yet: the inspiration's hull"
+health = "rule: the middle of what a Heavy Tank destroys in [kills] t2_heavy_tank.naval_factory_t2"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's build power"
 
 [units.naval_factory_t3]
-health = "not derived yet: the inspiration's hull"
+health = "rule: the middle of what a Heavy Walker destroys in [kills] t3_heavy_walker.naval_factory_t3"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's build power"
 
 [units.naval_factory_t2_support]
-health = "not derived yet: the inspiration's hull"
+health = "rule: the middle of what a Heavy Tank destroys in [kills] t2_heavy_tank.naval_factory_t2_support"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's build power"
 
 [units.naval_factory_t3_support]
-health = "not derived yet: the inspiration's hull"
+health = "rule: the middle of what a Heavy Walker destroys in [kills] t3_heavy_walker.naval_factory_t3_support"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 economy = "not derived yet: the inspiration's build power"
@@ -583,13 +583,13 @@ timing = "not derived yet: the inspiration's run every 10 seconds; its five torp
 sensors = "not derived yet: held, its vision and sonar"
 
 [units.t1_sonar]
-health = "not derived yet: held, its health and footprint"
+health = "rule: the middle of what a Medium Tank destroys in [kills] t1_medium_tank.t1_sonar"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, its sensors' reach"
 economy = "not derived yet: held, its upkeep and the build power that drives its upgrade"
 
 [units.t2_sonar]
-health = "not derived yet: held, its health and footprint"
+health = "rule: the middle of what a Heavy Tank destroys in [kills] t2_heavy_tank.t2_sonar"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, its sensors' reach"
 economy = "not derived yet: held, its upkeep"
@@ -732,7 +732,7 @@ sensors = "not derived yet: held, its vision and sonar"
 special = "rule: its decoys three times as often as the destroyer's, as its torpedoes do three times its damage a second ([price_list] decoy_share)"
 
 [units.t3_heavy_point_defense]
-health = "not derived yet: the inspiration's"
+health = "rule: the middle of what a Heavy Walker destroys in [kills] t3_heavy_walker.t3_heavy_point_defense"
 body = "not derived yet: held, its footprint"
 damage = "not derived yet: held, two and a half times its earlier ([premiums] point_defense_holds_against_line_units prices it)"
 range = "rule: [model] point_defense_under_artillery, a fifth inside the Mobile Heavy Artillery's"
@@ -740,13 +740,13 @@ timing = "not derived yet: the inspiration's reload, blast and spread; its shell
 sensors = "not derived yet: held, today's vision"
 
 [units.t3_heavy_shield]
-health = "not derived yet: held, its generator's health and footprint"
+health = "rule: the middle of what a Heavy Walker destroys, through its dome, in [kills] t3_heavy_walker.t3_heavy_shield"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 special = "not derived yet: held, its dome's size and upkeep; its health and regeneration [kill_times] battleship_breaks_t3_shield"
 
 [units.wall]
-health = "not derived yet: today's value written down, [kills] t1_medium_tank.wall, a Medium Tank's 17 shots"
+health = "rule: the middle of what a Medium Tank destroys in [kills] t1_medium_tank.wall"
 body = "not derived yet: held, its footprint"
 sensors = "not derived yet: held, today's vision"
 
