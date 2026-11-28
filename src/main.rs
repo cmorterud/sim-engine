@@ -1361,6 +1361,7 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
     let is_match = !battle;
     let autotest_seconds = options.autotest_seconds;
     let fast_forward = options.fast_forward;
+    let testing_scenario = autotest_seconds.is_some() && scenario_start.is_some();
     // The playtest sandbox is played against a turtle unless asked otherwise.
     let playtest = matches!(map_source, MapSource::Playtest);
     let difficulty = options.difficulty.unwrap_or(if playtest { Difficulty::Normal } else { Difficulty::Easy });
@@ -1373,16 +1374,16 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
 
     let mut autotest = autotest_seconds.map(|seconds| Autotest::new(seconds, options.capture_dir.clone(), options.look_at));
     let source = match (autotest_seconds, battle) {
+        // Playtest captures use the same opening orders as interactive play.
+        (_, false) if scenario_start.is_some() => CommandSource::Player,
         (Some(seconds), true) => CommandSource::Script { seed, ticks: fast_forward + seconds * 10 },
         (Some(seconds), false) => CommandSource::AiVsAi { seed, ticks: fast_forward + seconds * 10 },
         (None, true) => CommandSource::Player,
         (None, false) if watching => watch_source(seed, map_source.per_team(), map_source.map_units()),
-        // In a playtest scenario Red only follows its opening orders.
-        (None, false) if scenario_start.is_some() => CommandSource::Player,
         (None, false) => CommandSource::PlayerVsAi { seed, difficulty, strategy },
     };
     let viewer = if watching { watch_view } else { is_match.then_some(PLAYER_TEAM) };
-    let mut driver_options = DriverOptions { viewer, fast_forward_ticks: fast_forward, start_paused: false, linger: watching && autotest_seconds.is_none() };
+    let mut driver_options = DriverOptions { viewer, fast_forward_ticks: fast_forward, start_paused: testing_scenario, linger: watching && autotest_seconds.is_none() };
     let mut session = Session::start(scenario, source, driver_options);
 
     let event_loop = EventLoop::new().expect("event loop starts");
@@ -2010,6 +2011,11 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                         // so that screenshots show the build menu.
                         let mut progress = None;
                         if let Some(test) = autotest.as_mut() {
+                            if testing_scenario && test.started.is_none() {
+                                if let Some(driver) = &session.driver {
+                                    driver.set_paused(false);
+                                }
+                            }
                             let started = *test.started.get_or_insert(now);
                             let fraction = ((now - started).as_secs_f64() / test.duration.as_secs_f64()).min(1.0);
                             if test.look_at.is_none() {
@@ -2598,7 +2604,8 @@ async fn run_windowed(mut seed: u64, options: Options, map_source: MapSource) {
                             }
                             test.peak_projectiles = test.peak_projectiles.max(session.current.projectiles.len());
                             test.peak_instances = test.peak_instances.max(drawn_units_and_shells);
-                            if session.driver.as_ref().is_some_and(SimDriver::is_finished) {
+                            let scenario_test_done = testing_scenario && progress.is_some_and(|fraction| fraction >= 1.0);
+                            if scenario_test_done || session.driver.as_ref().is_some_and(SimDriver::is_finished) {
                                 let result = session.driver.take().expect("driver is present").finish();
                                 test.report(result);
                                 match renderer.gpu_timing() {

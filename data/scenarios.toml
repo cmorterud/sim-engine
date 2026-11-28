@@ -593,3 +593,28 @@ red = [
     { unit = "t3_heavy_walker", count = 13, at = [3_200, 2_560], columns = 7 },
     { unit = "t2_mobile_flak", count = 8, at = [3_300, 2_560], columns = 4 },
 ]
+
+[[scenario]]
+id = "coastal_base_under_attack"
+title = "Coastal base under attack"
+ground = "shore"
+shows = "A coastal factory and power station come under fire from ships and strike aircraft. Shore batteries, flak, and a shield cover the approach."
+try = "Watch the opening attack over the shoreline, or send the tanks and walkers to reinforce the shore batteries."
+blue = [
+    { unit = "t1_medium_tank", count = 9, at = [2_390, 2_560], columns = 3 },
+    { unit = "t3_heavy_walker", count = 3, at = [2_400, 2_690], columns = 3 },
+    { unit = "land_factory_t3", cell = [124, 131] },
+    { unit = "power_generator_t3", cell = [126, 122] },
+    { unit = "air_factory_t2", cell = [131, 128] },
+    { unit = "t3_heavy_shield", cell = [123, 126] },
+    { unit = "t2_point_defense", cell = [115, 122] },
+    { unit = "t2_point_defense", cell = [116, 131] },
+    { unit = "t2_flak", cell = [117, 125] },
+    { unit = "t2_flak", cell = [122, 134] },
+]
+red = [
+    { unit = "t3_battleship", at = [2_050, 2_550], order = "attack" },
+    { unit = "t2_cruiser", count = 2, at = [2_120, 2_410], columns = 2, order = "attack" },
+    { unit = "t2_fighter_bomber", count = 8, at = [1_820, 2_540], columns = 4, order = "attack" },
+    { unit = "t2_gunship", count = 5, at = [1_940, 2_750], columns = 5, order = "attack" },
+]
