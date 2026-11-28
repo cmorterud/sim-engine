@@ -11,7 +11,7 @@ const BALANCE: &str = include_str!("../src/balance.rs");
 const PRICE_LIST: &str = include_str!("../src/price_list.rs");
 
 /// Unit families not derived yet. A pass that derives some lowers this; nothing raises it.
-const NOT_DERIVED_YET: usize = 350;
+const NOT_DERIVED_YET: usize = 339;
 
 fn targets() -> toml::Table {
     TARGETS.parse().expect("data/balance_targets.toml is valid")
@@ -260,6 +260,35 @@ fn the_model_rules_the_table_claims_hold() {
     for (key, base, multiple) in by_role {
         let wanted = (base * multiple).round();
         assert!((speed(key) - wanted).abs() < 0.01, "{key} moves at {}, its role's share of its domain's base is {wanted}", speed(key));
+        assert!(derived(key, Family::Speed), "{key}'s speed cites its rule");
+    }
+
+    // Aircraft move by role on the bombers' tiers (Pass 5, 2026-11-28): strike aircraft at
+    // air_speed's thirds by tier, fighters 1.3 times their tier's strike speed, scouts that again
+    // over their tier's fighter, the Gunship at the T2 line's share of it, transports at it. The
+    // Heavy Gunship keeps today's speed.
+    let air = &targets()["air"];
+    let thirds: Vec<f64> = air["strike_speed_thirds"].as_array().expect("thirds by tier").iter().map(number).collect();
+    let strike = |tier: usize| number(&targets()["price_list"]["air_speed"]) * thirds[tier - 1] / 3.0;
+    let over = number(&targets()["air"]["t3_fighter"]["speed_over_strategic_bomber"]);
+    let tenth = |value: f64| (value * 10.0).round() / 10.0;
+    let gunship = |key: &str, roles: &[Role]| share(roles, air["gunship_roles"][key].as_str().expect("a gunship's role"));
+    let by_air_role = [
+        ("t1_bomber", strike(1)),
+        ("t2_fighter_bomber", strike(2)),
+        ("t2_torpedo_bomber", strike(2)),
+        ("t3_strategic_bomber", strike(3)),
+        ("t1_interceptor", over * strike(1)),
+        ("t1_air_scout", over * tenth(over * strike(1))),
+        ("t3_spy_plane", over * tenth(over * strike(3))),
+        ("t2_gunship", strike(2) * gunship("t2_gunship", &t2)),
+        ("t1_light_transport", strike(1)),
+        ("t2_transport", strike(2)),
+        ("t3_heavy_transport", strike(3)),
+    ];
+    for (key, wanted) in by_air_role {
+        let wanted = tenth(wanted) * 10.0;
+        assert!((speed(key) - wanted).abs() < 0.01, "{key} flies at {}, its role's speed is {wanted}", speed(key));
         assert!(derived(key, Family::Speed), "{key}'s speed cites its rule");
     }
 

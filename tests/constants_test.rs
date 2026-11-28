@@ -71,8 +71,9 @@ fn missiles_fly_at_their_familys_speed() {
     }
 }
 
-/// The fighters' guns fly at one speed, and the fighters and tactical bombers turn on one
-/// radius, each at its own speed.
+/// The fighters' guns fly at one speed, and the T1 Bomber and the Fighter-Bomber turn on one
+/// radius, each at its own speed. The Interceptor, slower since 2026-11-28, keeps the turn rate
+/// that out-turns the bomber ([air] fighter_turn_over_t1_bomber), so it turns tighter.
 #[test]
 fn fighters_shoot_and_turn_as_their_family() {
     let (constants, db) = (constants(), BlueprintDb::standard());
@@ -82,12 +83,15 @@ fn fighters_shoot_and_turn_as_their_family() {
         let anti_air = weapons(unit).find(|weapon| weapon.targets == Targets::Air).expect("a fighter's gun");
         assert_eq!(speed(anti_air), gun, "{key}'s gun");
     }
-    for key in ["t1_interceptor", "t1_bomber", "t2_fighter_bomber"] {
+    let turns_on = |key: &str| {
         let unit = db.get(db.id(key));
         let turn = f64::from(unit.flight.expect("an aircraft").turn_rate).to_radians();
-        let turns_on = unit.speed.to_num::<f64>() * TICKS_PER_SECOND as f64 / turn;
-        assert!((turns_on - radius).abs() < 1.0, "{key} turns on {turns_on:.1}, not {radius}");
+        unit.speed.to_num::<f64>() * TICKS_PER_SECOND as f64 / turn
+    };
+    for key in ["t1_bomber", "t2_fighter_bomber"] {
+        assert!((turns_on(key) - radius).abs() < 1.0, "{key} turns on {:.1}, not {radius}", turns_on(key));
     }
+    assert!(turns_on("t1_interceptor") < radius, "the Interceptor turns on {:.1}", turns_on("t1_interceptor"));
 }
 
 /// The veterancy and wreckage rules the simulation keeps are the ones written down.
