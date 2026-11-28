@@ -83,7 +83,7 @@ impl Camera {
         let center = map_units / 2.0;
         Self {
             map_units,
-            viewport,
+            viewport: [viewport[0].max(1.0), viewport[1].max(1.0)],
             focus: [center, center],
             ground: 0.0,
             altitude: 400.0,
@@ -126,7 +126,7 @@ impl Camera {
     }
 
     pub fn set_viewport(&mut self, viewport: [f64; 2]) {
-        self.viewport = viewport;
+        self.viewport = [viewport[0].max(1.0), viewport[1].max(1.0)];
     }
 
     pub const fn pixels_per_point(&self) -> f64 {
@@ -433,5 +433,18 @@ mod tests {
         }
         let after = camera.world_to_screen([anchor[0], anchor[1], 0.0]).unwrap();
         assert!((after[0] - before[0]).abs() < 8.0, "x moved from {} to {}", before[0], after[0]);
+    }
+
+    /// A canvas before layout or when minimized can give a 0x0 viewport; the camera stays valid
+    /// and view projection does not panic on a zero aspect ratio.
+    #[test]
+    fn zero_viewport_clamps_to_one_pixel_and_does_not_panic_view_projection() {
+        let mut camera = Camera::new(10_240.0, [0.0, 0.0]);
+        assert_eq!(camera.viewport(), [1.0, 1.0]);
+        assert!(camera.view_projection().is_finite());
+
+        camera.set_viewport([0.0, 0.0]);
+        assert_eq!(camera.viewport(), [1.0, 1.0]);
+        assert!(camera.view_projection().is_finite());
     }
 }
