@@ -1236,7 +1236,7 @@ pub fn unit_look(key: &str) -> UnitLook {
         "air_factory_t2_support" => look(Shape::AirFactoryT2Support, Some([0.66, 0.60, 0.46]), 0.58),
         "air_factory_t3_support" => look(Shape::AirFactoryT3Support, Some([0.52, 0.46, 0.34]), 0.72),
         "power_generator_t2" => look(Shape::GeneratorT2, Some([1.00, 0.88, 0.62]), 1.0),
-        "power_generator_t3" => look(Shape::GeneratorT3, Some([1.00, 0.80, 0.50]), 0.9),
+        "power_generator_t3" => look(Shape::GeneratorT3, Some([1.00, 0.69, 0.33]), 1.25),
         "radar_t2" => look(Shape::RadarT2, Some([0.50, 0.95, 0.75]), 1.45),
         "t2_point_defense" => UnitLook { base: Some(Shape::PointDefenseBaseT2), ..look(Shape::PointDefenseT2, Some([0.85, 0.30, 0.65]), 1.0) },
         "air_factory_t2" => look(Shape::AirFactoryT2, Some([0.30, 0.45, 0.65]), 0.65),
